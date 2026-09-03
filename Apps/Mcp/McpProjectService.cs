@@ -427,7 +427,7 @@ internal sealed class McpProjectService(
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: file '{path}' is not in the effective project selection. " +
-				"Adjust the profile or patterns and call get_tree first.");
+				"Repeat the selection arguments of the call that listed it, or retrieve it with pack_context and read_pack.");
 		}
 		return physical;
 	}

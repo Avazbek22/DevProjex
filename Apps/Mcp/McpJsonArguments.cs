@@ -177,10 +177,12 @@ internal sealed class McpJsonArguments(
 		if (unexpected.Length == 0)
 			return;
 
+		var guidance = _allowed.Count == 0
+			? "This tool takes no arguments."
+			: $"Valid arguments: {string.Join(", ", _allowed.OrderBy(static name => name, StringComparer.Ordinal))}.";
 		throw new McpToolException(
 			McpErrorCodes.InvalidArguments,
-			$"{McpErrorCodes.InvalidArguments}: unknown argument(s): {string.Join(", ", unexpected)}. " +
-			$"Valid arguments: {string.Join(", ", _allowed.OrderBy(static name => name, StringComparer.Ordinal))}.");
+			$"{McpErrorCodes.InvalidArguments}: unknown argument(s): {string.Join(", ", unexpected)}. {guidance}");
 	}
 
 	private static McpToolException Invalid(string name, string expected) =>

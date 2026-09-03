@@ -19,7 +19,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
 			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions), openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput, openWorld: allowRemote)
+			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote)
 		];
 	}
 
@@ -142,7 +142,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		      "maxItems": 8,
 		      "uniqueItems": true,
 		      "items": { "type": "string", "enum": [{{tokens}}] },
-		      "description": "Full desired set of built-in exclusion toggles; an empty array turns all of them off. Replaces the server baseline and profile exclusions for this call."
+		      "description": "Full desired set of built-in exclusion toggles; an empty array turns all of them off. Overrides the server baseline and any profile exclusions for this call. Tokens match case-insensitively; duplicates are rejected."
 		    }
 		""";
 	}
@@ -322,12 +322,12 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static readonly string GetFileInput = $$"""
+	private static string GetFileInput(bool agentExclusions) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
-	    {{BranchProperty}},
+	    {{BranchProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection." },
 	    "start_line": { "description": "First 1-based line; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "end_line": { "description": "Last 1-based line, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }

@@ -17,6 +17,7 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumStoredTrustedNoticeCharacters = 2_000;
 	private const int MaximumPageLines = 1_000;
 	private const int MaximumPageCharacters = 50_000;
+	private const int MaximumExclusionTokenLength = 32;
 	private const int MaximumSearchContentCharacters = 49_000;
 	private const string StoredTreePreviewTruncationNotice =
 		"[Tree preview truncated to fit the stored-pack response limit. Use read_pack for the complete pack.]";
@@ -52,7 +53,7 @@ internal sealed class DevProjexMcpTools(
 			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles }));
 		});
 
-	[Description("Return the effective project tree after built-in, gitignore, profile, and optional agent glob filters.")]
+	[Description("Return the effective project tree after built-in, gitignore, server-baseline, and optional agent filters.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -479,11 +480,14 @@ internal sealed class DevProjexMcpTools(
 		{
 			var arguments = McpJsonArguments.Create(
 				request.Params,
-				"project",
-				"branch",
-				"path",
-				"start_line",
-				"end_line");
+				WithAgentArguments(
+					"project",
+					"branch",
+					"path",
+					"start_line",
+					"end_line"));
+			// get_file honors the delegated set too: a file revealed by get_tree or
+			// search_project under a per-call exclusions value must stay readable.
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
@@ -495,7 +499,8 @@ internal sealed class DevProjexMcpTools(
 				gitScope: null,
 				maximumFileBytes: null,
 				cancellationToken,
-				includeOutputMetrics: false).ConfigureAwait(false);
+				includeOutputMetrics: false,
+				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			var file = Projects.ResolveFile(plan, arguments.RequiredString("path", allowWhitespace: true));
 			await using var prepared = await Projects.PrepareAsync(plan with { IncludedFiles = [file] }, cancellationToken)
 				.ConfigureAwait(false);
@@ -572,13 +577,26 @@ internal sealed class DevProjexMcpTools(
 		if (!agentExclusions)
 			return null;
 
-		var tokens = arguments.OptionalStringArray("exclusions", maximumItems: 8);
+		var tokens = arguments.OptionalStringArray(
+			"exclusions",
+			maximumItems: 8,
+			maximumItemScalarValues: MaximumExclusionTokenLength);
 		if (tokens is null)
 			return null;
 
-		var parsed = new List<ProjectExclusion>(tokens.Count);
+		// The published schema declares uniqueItems, so the runtime enforces it too;
+		// case-variant repeats count as duplicates because tokens parse case-insensitively.
+		var parsed = new HashSet<ProjectExclusion>();
 		foreach (var token in tokens)
-			parsed.Add(ParseExclusionToken(token));
+		{
+			if (!parsed.Add(ParseExclusionToken(token)))
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: exclusions must not contain duplicate tokens.");
+			}
+		}
+
 		return ProjectSelectionTokens.OrderExclusions(parsed);
 	}
 

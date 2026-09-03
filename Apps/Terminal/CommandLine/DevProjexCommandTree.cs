@@ -171,7 +171,7 @@ public sealed class DevProjexCommandTree
 
 	private Option<CliExclusionValue[]> CreateMcpExcludeOption()
 	{
-		var option = new Option<CliExclusionValue[]>("--exclude", "-x")
+		var option = new Option<CliExclusionValue[]>("--exclude")
 		{
 			Description = L("Terminal.Option.McpExclude"),
 			HelpName = "NAME",
