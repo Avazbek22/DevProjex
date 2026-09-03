@@ -38,7 +38,11 @@ The baseline exclusion set follows the same pattern with `--exclude <NAME>`
 `--exclude none` starts the server with every toggle off. The listed names
 replace the standard set, and like the Git baseline this applies only when a
 tool does not name an explicit profile. Redaction toggles are not exclusions
-and are rejected at startup.
+and are rejected at startup. The `hidden-folders` and `hidden-files` toggles
+follow the platform hidden attribute (the Windows Hidden attribute or macOS
+`UF_HIDDEN`); on Unix-like systems dot-named entries belong to the
+`dot-folders` and `dot-files` toggles instead — see the dot-name ownership
+note in [SmartIgnore.md](SmartIgnore.md).
 
 Per-call exclusion control by the agent is a separate startup opt-in:
 
@@ -46,12 +50,16 @@ Per-call exclusion control by the agent is a separate startup opt-in:
 devprojex mcp --root /absolute/path/to/project --agent-exclusions
 ```
 
-With the flag, the selection tools `get_tree`, `analyze`, `pack_context`, and
-`search_project` gain an `exclusions` array parameter that carries the full
-desired toggle set for that call; an empty array turns every toggle off, and
-the value outranks both the server baseline and profile exclusions. Without the
-flag the parameter does not exist in any schema and is rejected as an unknown
-argument, so a default server keeps today's narrowing-only contract unchanged.
+With the flag, the selection tools `get_tree`, `analyze`, `pack_context`,
+`search_project`, and `get_file` gain an `exclusions` array parameter that
+carries the full desired toggle set for that call; an empty array turns every
+toggle off, and the value outranks both the server baseline and profile
+exclusions. Tokens match case-insensitively and duplicates are rejected.
+Without the flag the parameter does not exist in any schema and is rejected as
+an unknown argument, so a default server keeps today's narrowing-only contract
+unchanged. Turning toggles off widens the per-call scan to trees the standard
+set skips (subject to the Git baseline), so enable this delegation only for
+agents you trust with full-project walks.
 
 The recommended tool sequence is:
 
@@ -150,8 +158,9 @@ open-world.
 | `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
 
 On a server started with `--agent-exclusions`, `get_tree`, `analyze`,
-`pack_context`, and `search_project` additionally accept the `exclusions` array
-parameter described in the startup section.
+`pack_context`, `search_project`, and `get_file` additionally accept the
+`exclusions` array parameter described in the startup section, so a file
+revealed by a per-call value stays readable through the same value.
 
 For `analyze` and `pack_context`, `paths` accepts at most 256 entries and each
 entry is limited to 4,096 Unicode scalar values. Lexically equivalent entries are
@@ -166,7 +175,10 @@ authoritative result is the complete object in `structuredContent`; the first
 text block in `content` is a JSON serialization of that same object.
 `analyze` results include an `exclusions` array that echoes the exclusion
 tokens effective for the call, so the agent and a human reading the transcript
-always see which toggles shaped the measurement.
+always see which toggles shaped the measurement. This field is new in v5.2 and
+required on every server, including servers started without the exclusion
+flags; consumers that pinned the earlier `analyze` output schema must refresh
+it.
 When selection produces warnings, `analyze` appends separate human-readable
 trusted warning text blocks without changing its structured schema. Warning
 messages contain stable codes and safe counts or retry guidance, never diagnostic
@@ -258,6 +270,8 @@ Defaults:
 - `analyze.top_files`: `10` (`1..1000`)
 - `tracked_only`: `false`
 - `git_scope`: absent
+- `exclusions`: absent — the server baseline or profile set applies (parameter
+  exists only on `--agent-exclusions` servers)
 - `search_project.context_lines`: `2`
 - `search_project.ignore_case`: `true`
 - `search_project.max_results`: `50`

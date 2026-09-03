@@ -195,12 +195,12 @@ Exclusion tokens:
 
 ```text
 smart-ignore
+empty-folders
+empty-files
 hidden-folders
 hidden-files
 dot-folders
 dot-files
-empty-folders
-empty-files
 extensionless-files
 none
 ```
