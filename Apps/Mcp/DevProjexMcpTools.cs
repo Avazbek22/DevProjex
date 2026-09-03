@@ -171,12 +171,19 @@ internal sealed class DevProjexMcpTools(
 				path = McpProjectService.ToRelative(plan.SourceRoot, item.Path),
 				tokens = item.Tokens
 			});
+			// Echo the effective exclusion state so both the agent and a human reading the
+			// transcript always see which toggles shaped this measurement.
+			var activeExclusions = ProjectSelectionTokens
+				.OrderExclusions(plan.Selection.Exclusions ?? [])
+				.Select(ProjectSelectionTokens.ToToken)
+				.ToArray();
 			var envelope = new
 			{
 				files = plan.IncludedFiles.Count,
 				characters = metrics.Chars,
 				tokens = metrics.Tokens,
 				detail = effectiveDetail.Token,
+				exclusions = activeExclusions,
 				topFiles = top
 			};
 			await operationProgress.CompleteAsync(100, "building analysis").ConfigureAwait(false);

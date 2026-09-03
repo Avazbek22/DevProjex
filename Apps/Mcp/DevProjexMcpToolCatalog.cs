@@ -380,6 +380,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "characters": { "type": "integer" },
 	    "tokens": { "type": "integer" },
 	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"] },
+	    "exclusions": { "type": "array", "items": { "type": "string" } },
 	    "topFiles": {
 	      "type": "array",
 	      "items": {
@@ -393,7 +394,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      }
 	    }
 	  },
-	  "required": ["files", "characters", "tokens", "detail", "topFiles"],
+	  "required": ["files", "characters", "tokens", "detail", "exclusions", "topFiles"],
 	  "additionalProperties": false
 	}
 	""";

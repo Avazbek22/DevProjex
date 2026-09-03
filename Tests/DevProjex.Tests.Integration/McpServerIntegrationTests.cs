@@ -99,6 +99,11 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Visible.cs", Text(standardTree), StringComparison.Ordinal);
 		Assert.DoesNotContain(".dotted.cs", Text(standardTree), StringComparison.Ordinal);
 		Assert.DoesNotContain("Empty.cs", Text(standardTree), StringComparison.Ordinal);
+		var standardAnalysis = await standardServer.CallAsync("analyze");
+		Assert.Equal(
+			["smart-ignore", "empty-folders", "empty-files", "hidden-folders", "hidden-files", "dot-folders", "dot-files", "extensionless-files"],
+			standardAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
 
 		// The baseline is a full replacement of the standard set, not an addition to it:
 		// keeping only dot-files re-admits the empty file the standard set would hide.
@@ -236,6 +241,18 @@ public sealed class McpServerIntegrationTests
 				["exclusions"] = Array.Empty<string>()
 			});
 		Assert.Contains("dotted-delegated", Text(delegatedPack), StringComparison.Ordinal);
+
+		// analyze echoes the effective exclusion state for the agent and the transcript reader.
+		var baselineAnalysis = await delegatedServer.CallAsync("analyze");
+		Assert.Equal(
+			["dot-files"],
+			baselineAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+		var openAnalysis = await delegatedServer.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+		Assert.Empty(
+			openAnalysis.StructuredContent!.Value.GetProperty("exclusions").EnumerateArray());
 
 		var invalid = await delegatedServer.CallAsync(
 			"get_tree",
