@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <resheader name="resmimetype">
     <value>text/microsoft-resx</value>
@@ -19,6 +19,6 @@
     <value>Stark Industries Dev</value>
   </data>
   <data name="AppDescription" xml:space="preserve">
-    <value>Turns folders and Git repositories into clean, AI-ready context for AI assistants and coding agents. Local, read-only, with secret masking.</value>
+    <value>將資料夾與 Git 儲存庫轉換為適用於 AI 助手與程式碼代理的乾淨、可直接用於 AI 的內容。本機執行、唯讀，支援機密資訊遮罩。</value>
   </data>
 </root>

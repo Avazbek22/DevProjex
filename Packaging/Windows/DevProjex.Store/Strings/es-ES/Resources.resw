@@ -19,6 +19,6 @@
     <value>Stark Industries Dev</value>
   </data>
   <data name="AppDescription" xml:space="preserve">
-    <value>Herramienta de solo lectura para inspeccionar la estructura de proyectos y carpetas, incluidos los repositorios Git.</value>
+    <value>Convierte carpetas y repositorios Git en contexto limpio y listo para IA, para asistentes de IA y agentes de código. Local, de solo lectura, con enmascaramiento de secretos.</value>
   </data>
 </root>

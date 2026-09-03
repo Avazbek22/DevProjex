@@ -10,6 +10,11 @@
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
   </Dependencies>
+  <!-- Must list every UI language from the AppLanguage enum (Kernel/Models/AppLanguage.cs),
+       each with a matching Strings/<locale>/Resources.resw folder. Partner Center builds the
+       Store "Supported languages" section from these entries; a language missing here is
+       demoted to an "additional Store listing language" without a localized package name and
+       description. Enforced by StorePackagingLocalizationContractTests. -->
   <Resources>
     <Resource Language="en-us" />
     <Resource Language="ru-ru" />
@@ -22,6 +27,15 @@
     <Resource Language="tg-Cyrl-TJ" />
     <Resource Language="uz-Latn-UZ" />
     <Resource Language="kk-kz" />
+    <Resource Language="pl-pl" />
+    <Resource Language="tr-tr" />
+    <Resource Language="uk-ua" />
+    <Resource Language="ja-jp" />
+    <Resource Language="ko-kr" />
+    <Resource Language="zh-cn" />
+    <Resource Language="zh-tw" />
+    <Resource Language="vi-vn" />
+    <Resource Language="id-id" />
   </Resources>
   <Applications>
     <Application Id="App" Executable="DevProjex.Avalonia.exe" EntryPoint="Windows.FullTrustApplication">

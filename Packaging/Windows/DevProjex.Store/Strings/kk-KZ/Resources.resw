@@ -19,6 +19,6 @@
     <value>Stark Industries Dev</value>
   </data>
   <data name="AppDescription" xml:space="preserve">
-    <value>Read-only tool for inspecting project and folder structure, including Git repositories.</value>
+    <value>Қалталар мен Git репозиторийлерін ЖИ-ассистенттер мен код агенттеріне арналған таза, ЖИ-ге дайын контекстке айналдырады. Жергілікті, тек оқу, құпияларды бүркемелеумен.</value>
   </data>
 </root>
