@@ -111,9 +111,9 @@ public sealed class LocalizationLanguageCoverageIntegrationTests
         Assert.Contains("es-es", languages);
         Assert.Contains("pt-br", languages);
         Assert.Contains("pt-pt", languages);
-        AssertStoreResource(packageRoot, "es-ES", "Herramienta de solo lectura");
-        AssertStoreResource(packageRoot, "pt-BR", "Ferramenta somente leitura");
-        AssertStoreResource(packageRoot, "pt-PT", "Ferramenta só de leitura");
+        AssertStoreResource(packageRoot, "es-ES", "de solo lectura, con enmascaramiento de secretos");
+        AssertStoreResource(packageRoot, "pt-BR", "somente leitura, com mascaramento de segredos");
+        AssertStoreResource(packageRoot, "pt-PT", "só de leitura, com mascaramento de segredos");
     }
 
     [Fact]
