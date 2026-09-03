@@ -190,6 +190,70 @@ public sealed class McpServerIntegrationTests
 			});
 		Assert.Contains(".dotted.cs", Text(scoped), StringComparison.Ordinal);
 		Assert.DoesNotContain("Tracked.cs", Text(scoped), StringComparison.Ordinal);
+
+		// The size filter still runs after the widened selection resolves.
+		File.WriteAllText(Path.Combine(project, ".big.cs"), new string('b', 400) + "\n");
+		var sized = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["exclusions"] = Array.Empty<string>(),
+				["max_file_bytes"] = 100
+			});
+		Assert.DoesNotContain(".big.cs", Text(sized), StringComparison.Ordinal);
+		Assert.Contains(".untracked.cs", Text(sized), StringComparison.Ordinal);
+
+		// A paths entry that the effective exclusion set hides yields an empty
+		// selection, not an error; the same entry counts once the set admits it.
+		var pathHidden = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { ".untracked.cs" } });
+		Assert.NotEqual(true, pathHidden.IsError);
+		Assert.Equal(0, pathHidden.StructuredContent?.GetProperty("files").GetInt32());
+		var pathRevealed = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { ".untracked.cs" },
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Equal(1, pathRevealed.StructuredContent?.GetProperty("files").GetInt32());
+	}
+
+	[Fact]
+	public async Task ProfileValidationErrorsSurfaceAsActionableInvalidArguments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-profile-error\n");
+		const string profileName = "broken-profile.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = (string[]?)null,
+					selectedPaths = (string[]?)null,
+					gitMode = "none",
+					exclusions = new[] { "bogus-token" },
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = profileName });
+
+		Assert.True(result.IsError);
+		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(result), StringComparison.Ordinal);
+		Assert.Contains("DPX-CLI-PROFILE-INVALID", Text(result), StringComparison.Ordinal);
+		Assert.Contains("unknown exclusion", Text(result), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -306,7 +370,9 @@ public sealed class McpServerIntegrationTests
 			Assert.Equal(
 				["smart-ignore", "empty-folders", "empty-files", "hidden-folders", "hidden-files", "dot-folders", "dot-files", "extensionless-files"],
 				published.GetProperty("items").GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
-			Assert.Equal(8, published.GetProperty("maxItems").GetInt32());
+			Assert.Equal(
+				ProjectSelectionTokens.Exclusions.Count,
+				published.GetProperty("maxItems").GetInt32());
 			Assert.True(published.GetProperty("uniqueItems").GetBoolean());
 			var propertyNames = schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name).ToArray();
 			var globAnchor = Array.IndexOf(propertyNames, "exclude_patterns");

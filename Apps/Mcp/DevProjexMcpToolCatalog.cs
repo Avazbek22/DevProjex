@@ -139,10 +139,10 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		,
 		    "exclusions": {
 		      "type": "array",
-		      "maxItems": 8,
+		      "maxItems": {{ProjectSelectionTokens.Exclusions.Count}},
 		      "uniqueItems": true,
 		      "items": { "type": "string", "enum": [{{tokens}}] },
-		      "description": "Full desired set of built-in exclusion toggles; an empty array turns all of them off. Overrides the server baseline and any profile exclusions for this call. Tokens match case-insensitively; duplicates are rejected."
+		      "description": "Full desired set of built-in exclusion toggles. An empty array turns every toggle off (widest scan); omit the parameter to keep the server baseline — analyze echoes the effective set. Overrides the server baseline and any profile exclusions for this call. Tokens match case-insensitively; duplicates are rejected. hidden-* follow the platform hidden attribute; on Unix-like systems dot-named entries belong to the dot-* toggles."
 		    }
 		""";
 	}
@@ -380,7 +380,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "characters": { "type": "integer" },
 	    "tokens": { "type": "integer" },
 	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"] },
-	    "exclusions": { "type": "array", "items": { "type": "string" } },
+	    "exclusions": { "type": "array", "items": { "type": "string" }, "description": "Effective exclusion tokens for this call, in catalog order; the same vocabulary as the exclusions parameter." },
 	    "topFiles": {
 	      "type": "array",
 	      "items": {

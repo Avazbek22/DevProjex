@@ -579,8 +579,10 @@ internal sealed class DevProjexMcpTools(
 
 		var tokens = arguments.OptionalStringArray(
 			"exclusions",
-			maximumItems: 8,
-			maximumItemScalarValues: MaximumExclusionTokenLength);
+			maximumItems: ProjectSelectionTokens.Exclusions.Count,
+			maximumItemScalarValues: MaximumExclusionTokenLength,
+			tooManyItemsHint: "remove duplicate or extra tokens and retry",
+			overLengthHint: "use the published exclusion tokens");
 		if (tokens is null)
 			return null;
 
@@ -614,7 +616,8 @@ internal sealed class DevProjexMcpTools(
 		throw new McpToolException(
 			McpErrorCodes.InvalidArguments,
 			$"{McpErrorCodes.InvalidArguments}: exclusions accepts only: " +
-			$"{string.Join(", ", ProjectSelectionTokens.Exclusions)}.");
+			$"{string.Join(", ", ProjectSelectionTokens.Exclusions)}. " +
+			"Path globs belong in exclude_patterns; an empty array turns every toggle off.");
 	}
 
 	private Task<CallToolResult> RunProjectAsync(
@@ -631,6 +634,20 @@ internal sealed class DevProjexMcpTools(
 		catch (McpToolException exception)
 		{
 			return McpToolResults.Error(exception);
+		}
+		catch (PortableProjectProfileException exception)
+		{
+			// Profile validation carries curated user-facing text; surfacing it beats the
+			// opaque operation-failed fallback when an agent names a broken profile.
+			return McpToolResults.Error(new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: {exception.Code}: {exception.Message}"));
+		}
+		catch (ProjectContextValidationException exception)
+		{
+			return McpToolResults.Error(new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: {exception.Code}: {exception.Message}"));
 		}
 		catch (OperationCanceledException)
 		{
