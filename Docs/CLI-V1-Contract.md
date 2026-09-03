@@ -821,6 +821,8 @@ that prevents an accepted option from becoming a no-op.
 | `mcp` | `--hide-private-data` | off | enables private-data redaction for the entire server process | startup-only; tool schemas and profiles cannot alter it; secret redaction remains mandatory | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
 | `mcp` | `--allow-remote` | off | permits project tools to resolve Git URL sources through RepoCache | startup-only; local roots and `list_projects` remain unchanged; `branch` is URL-only | stdout remains JSON-RPC-only; tool failures use stable `DPX-MCP-*` results | parser, MCP schema, integration |
 | `mcp` | `--git-mode` | standard-profile mode | selects the server baseline from `none`, `gitignore`, or `tracked` when no explicit profile is requested; accepts `off` as an input alias for `none` | startup-only; momentary modes are rejected | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
+| `mcp` | `--exclude` | standard-profile exclusions | selects the server baseline path-exclusion set from the shared exclusion tokens when no explicit profile is requested; `none` starts with every toggle off | startup-only; repeatable; `none` conflicts with other values; redaction toggles are rejected as unknown | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
+| `mcp` | `--agent-exclusions` | off | publishes an `exclusions` array parameter on the four selection tools so the agent may set the exclusion toggles per call; the value outranks the server baseline and profile exclusions | startup-only; without the flag the parameter is absent from every schema and rejected as an unknown argument; redaction toggles never appear in the vocabulary | stdout remains JSON-RPC-only; invalid tokens are `DPX-MCP-INVALID-ARGUMENTS` | parser, MCP schema, integration |
 | MCP `get_tree` | `format` | `markdown` | selects compact Markdown, drawing-character text, JSON, or XML tree output | values are `markdown`, `text`, `json`, `xml`; JSON/XML over 2,000 lines fail instead of returning a partial document | text payload remains spotlight-wrapped; invalid value is `DPX-MCP-INVALID-ARGUMENTS`, structured overflow is `DPX-MCP-PAYLOAD-TRUNCATED` | MCP schema, tree serializer, integration |
 | MCP get_tree/analyze/pack_context/search_project | `git_scope` | absent | narrows the effective selection with `staged`, `changes`, or `diff:<REF>..<REF>` | cannot weaken the profile/server baseline; input is limited to 4,096 characters; non-Git projects and invalid refs fail | tool error is `DPX-MCP-PROJECT-UNAVAILABLE` for unavailable Git state or `DPX-MCP-INVALID-ARGUMENTS` for invalid input | MCP schema, integration |
 | analyze/context/project/open/profile-save | `--compress-code` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | `true|false|on|off`; conflicts with `--no-compress-code` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
@@ -1147,6 +1149,17 @@ the momentary `staged`, `changes`, and `diff:<REF>..<REF>` tokens. MCP adds the
 persistent server baseline `--git-mode` and the narrowing `git_scope` parameter
 on its four selection tools. Profile schemas remain unchanged and reject
 momentary values.
+
+MCP exclusions are an additive v5.2 extension. `devprojex mcp --exclude`
+selects the persistent server baseline from the shared exclusion tokens and
+applies only when a tool does not name an explicit profile.
+`devprojex mcp --agent-exclusions` additionally publishes an `exclusions` array
+parameter on `get_tree`, `analyze`, `pack_context`, and `search_project`; the
+value is the full desired toggle set, an empty array disables every toggle, and
+it outranks the server baseline and profile exclusions. Without the flag the
+parameter does not exist in any schema. Redaction toggles are not part of the
+vocabulary on either surface, and `analyze` results echo the effective set in
+an additive `exclusions` array.
 
 MCP `get_tree.format` is an additive input with `markdown` as its compact default.
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;

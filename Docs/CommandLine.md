@@ -77,12 +77,17 @@ devprojex
 `dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
 diagnostic workflows.
 
-`devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--hide-private-data] [--allow-remote]`
+`devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--exclude NAME ...] [--agent-exclusions] [--hide-private-data] [--allow-remote]`
 starts the local read-only MCP stdio server. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
 tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
 enables RepoCache-backed clone/acquire for MCP project tools without changing
 the local roots returned by `list_projects`.
+`--exclude` sets the server baseline exclusion set from the shared exclusion
+tokens (`none` disables all toggles) and applies only when a tool does not name
+an explicit profile. `--agent-exclusions` opts in to per-call agent control by
+publishing an `exclusions` array parameter on the selection tools; redaction
+toggles are never part of that vocabulary.
 Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then
 `CLAUDE_PROJECT_DIR`, then the current directory. See
 [McpServer.md](McpServer.md) for its security model, tools, and client
