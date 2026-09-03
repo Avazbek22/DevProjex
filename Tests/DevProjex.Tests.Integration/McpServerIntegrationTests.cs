@@ -221,6 +221,219 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task RemoteCheckoutHonorsExclusionBaselineAndDelegation()
+	{
+		if (!IsGitAvailable())
+			Assert.Skip("Git is not available in this test environment.");
+
+		using var workspace = new TemporaryDirectory();
+		var localProject = workspace.CreateDirectory("local-project");
+		var source = workspace.CreateDirectory("source");
+		RunGit(source, "init", "--quiet");
+		RunGit(source, "config", "user.name", "DevProjex Tests");
+		RunGit(source, "config", "user.email", "devprojex@example.invalid");
+		File.WriteAllText(Path.Combine(source, "Visible.cs"), "remote-visible-marker\n");
+		File.WriteAllText(Path.Combine(source, ".dotted.cs"), "remote-dotted-marker\n");
+		RunGit(source, "add", "--", "Visible.cs", ".dotted.cs");
+		RunGit(source, "commit", "--quiet", "-m", "remote fixture");
+		var origin = Path.Combine(localProject, "origin.git");
+		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
+		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
+		var cachePath = Path.Combine(workspace.Path, "repo-cache");
+		await using var server = await McpTestServer.StartAsync(
+			localProject,
+			workspace.Path,
+			allowRemote: true,
+			remoteServicesFactory: () => new McpRemoteProjectServices(
+				new RepoCacheService(cachePath),
+				new GitRepositoryService()),
+			exclusions: [ProjectExclusion.DotFiles],
+			agentExclusions: true);
+
+		// The startup baseline shapes the pinned remote checkout like a local root.
+		var baselineTree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = repositoryUrl });
+		Assert.Contains("Visible.cs", Text(baselineTree), StringComparison.Ordinal);
+		Assert.DoesNotContain(".dotted.cs", Text(baselineTree), StringComparison.Ordinal);
+
+		// The delegated per-call set applies to the same checkout, end to end into get_file.
+		var openTree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = repositoryUrl,
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Contains(".dotted.cs", Text(openTree), StringComparison.Ordinal);
+		var file = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["project"] = repositoryUrl,
+				["path"] = ".dotted.cs",
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.NotEqual(true, file.IsError);
+		Assert.Contains("remote-dotted-marker", Text(file), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LocalProfileExclusionsFlowThroughDelegationAndEcho()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Visible.cs"), "local-profile-visible\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "local-profile-dotted\n");
+		var appData = Path.Combine(workspace.Path, "app-data");
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
+		new ProjectProfileStore(() => appData).SaveProfile(
+			physicalProject,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.DotFiles],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.SmartIgnore] = false,
+					[IgnoreOptionId.EmptyFolders] = false,
+					[IgnoreOptionId.EmptyFiles] = false,
+					[IgnoreOptionId.HiddenFolders] = false,
+					[IgnoreOptionId.HiddenFiles] = false,
+					[IgnoreOptionId.DotFolders] = false,
+					[IgnoreOptionId.DotFiles] = true,
+					[IgnoreOptionId.ExtensionlessFiles] = false
+				}));
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		var profiled = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = "local" });
+		Assert.Equal(1, profiled.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Equal(
+			["dot-files"],
+			profiled.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+
+		var delegated = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["profile"] = "local",
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Equal(2, delegated.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Empty(
+			delegated.StructuredContent!.Value.GetProperty("exclusions").EnumerateArray());
+	}
+
+	[Fact]
+	public async Task ExclusionArgumentBoundsAndTokenParsersRejectMalformedInput()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-bounds\n");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		// Nine items exceed the catalog-sized cap with the exclusions-specific hint.
+		var overflow = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["exclusions"] = new[]
+				{
+					"smart-ignore", "empty-folders", "empty-files", "hidden-folders",
+					"hidden-files", "dot-folders", "dot-files", "extensionless-files",
+					"smart-ignore"
+				}
+			});
+		Assert.True(overflow.IsError);
+		Assert.Contains("remove duplicate or extra tokens", Text(overflow), StringComparison.Ordinal);
+
+		var oversized = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["exclusions"] = new[] { new string('a', 64) }
+			});
+		Assert.True(oversized.IsError);
+		Assert.Contains("use the published exclusion tokens", Text(oversized), StringComparison.Ordinal);
+
+		var invalidView = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["view"] = "sideways" });
+		Assert.True(invalidView.IsError);
+		Assert.Contains("tree, content, tree-content", Text(invalidView), StringComparison.Ordinal);
+
+		var invalidFormat = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["format"] = "yaml" });
+		Assert.True(invalidFormat.IsError);
+		Assert.Contains("text, markdown, json, xml", Text(invalidFormat), StringComparison.Ordinal);
+
+		var invalidTreeFormat = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "yaml" });
+		Assert.True(invalidTreeFormat.IsError);
+		Assert.Contains("markdown, text, json, xml", Text(invalidTreeFormat), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileRejectsDirectoriesAndUnreadableBinaryContent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "Src"));
+		File.WriteAllText(Path.Combine(project, "Src", "Anchor.cs"), "anchor-get-file\n");
+		File.WriteAllBytes(Path.Combine(project, "Blob.bin"), [0x00, 0x01, 0x02, 0xFF, 0x00, 0x10]);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var directory = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Src" });
+		Assert.True(directory.IsError);
+		Assert.Contains("is a directory", Text(directory), StringComparison.Ordinal);
+
+		var binary = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Blob.bin" });
+		Assert.True(binary.IsError);
+		Assert.Contains("DPX-MCP-PAYLOAD-TRUNCATED", Text(binary), StringComparison.Ordinal);
+		Assert.Contains("binary", Text(binary), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GitConstraintsOnNonGitProjectsNameEveryRequestedConstraint()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-non-git\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var trackedOnly = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["tracked_only"] = "true" });
+		Assert.True(trackedOnly.IsError);
+		Assert.Contains("omit tracked_only", Text(trackedOnly), StringComparison.Ordinal);
+
+		var both = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["tracked_only"] = "true",
+				["git_scope"] = "staged"
+			});
+		Assert.True(both.IsError);
+		Assert.Contains("tracked_only and git_scope", Text(both), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task ProfileValidationErrorsSurfaceAsActionableInvalidArguments()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -254,6 +467,38 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(result), StringComparison.Ordinal);
 		Assert.Contains("DPX-CLI-PROFILE-INVALID", Text(result), StringComparison.Ordinal);
 		Assert.Contains("unknown exclusion", Text(result), StringComparison.Ordinal);
+
+		// A missing local profile surfaces through the same actionable mapping.
+		var missingLocal = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = "local" });
+		Assert.True(missingLocal.IsError);
+		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(missingLocal), StringComparison.Ordinal);
+		Assert.Contains("DPX-CLI-PROFILE-NOT-FOUND", Text(missingLocal), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ExclusionsArgumentRejectsNonArrayShapes()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-shapes\n");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		var scalar = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = "dot-files" });
+		Assert.True(scalar.IsError);
+		Assert.Contains("an array of strings", Text(scalar), StringComparison.Ordinal);
+
+		var numericItem = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = new object[] { 7 } });
+		Assert.True(numericItem.IsError);
+		Assert.Contains("an array of non-empty strings", Text(numericItem), StringComparison.Ordinal);
 	}
 
 	[Fact]
