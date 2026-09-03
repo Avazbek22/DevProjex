@@ -66,6 +66,71 @@ public sealed class McpServerProcessTests
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
+	public async Task RealProcessPublishesTheExclusionsParameterOnlyWhenDelegated(bool agentExclusions)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Anchor.cs", "anchor-process-marker\n");
+		workspace.WriteFile("project/.dotted.cs", "dotted-process-marker\n");
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		if (agentExclusions)
+			startInfo.ArgumentList.Add("--agent-exclusions");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			TestContext.Current.CancellationToken))
+		{
+			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
+			var tree = tools.Single(static tool => tool.Name == "get_tree");
+			Assert.Equal(
+				agentExclusions,
+				tree.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("exclusions", out _));
+
+			if (agentExclusions)
+			{
+				var opened = await client.CallToolAsync(
+					"get_tree",
+					new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() },
+					progress: null,
+					options: null,
+					TestContext.Current.CancellationToken);
+				Assert.NotEqual(true, opened.IsError);
+				Assert.Contains(
+					".dotted.cs",
+					Assert.IsType<TextContentBlock>(Assert.Single(opened.Content)).Text,
+					StringComparison.Ordinal);
+			}
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
 	public async Task RealProcessAppliesServerRedactionPolicyAndStopsOnStandardInputEof(
 		bool hidePrivateData)
 	{

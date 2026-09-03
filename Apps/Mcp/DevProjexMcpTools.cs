@@ -6,7 +6,8 @@ namespace DevProjex.Mcp;
 internal sealed class DevProjexMcpTools(
 	McpRootRegistry roots,
 	Lazy<McpProjectService> projectService,
-	McpPackRegistry packs)
+	McpPackRegistry packs,
+	bool agentExclusions = false)
 {
 	private const int MaximumTreeLines = 2_000;
 	private const int MaximumInlinePackCharacters = 50_000;
@@ -59,15 +60,16 @@ internal sealed class DevProjexMcpTools(
 		{
 			var arguments = McpJsonArguments.Create(
 				request.Params,
-				"project",
-				"branch",
-				"include_patterns",
-				"exclude_patterns",
-				"max_depth",
-				"tracked_only",
-				"git_scope",
-				"max_file_bytes",
-				"format");
+				WithAgentArguments(
+					"project",
+					"branch",
+					"include_patterns",
+					"exclude_patterns",
+					"max_depth",
+					"tracked_only",
+					"git_scope",
+					"max_file_bytes",
+					"format"));
 			var format = ParseTreeFormat(arguments.OptionalString("format") ?? "markdown");
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
@@ -80,7 +82,8 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalString("git_scope"),
 				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 				cancellationToken,
-				includeOutputMetrics: false).ConfigureAwait(false);
+				includeOutputMetrics: false,
+				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
 			var renderedTree = depth is null
 				? plan.ProjectedTree
@@ -194,19 +197,20 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(1, "selecting files");
 			var arguments = McpJsonArguments.Create(
 				request.Params,
-				"project",
-				"branch",
-				"paths",
-				"include_patterns",
-				"exclude_patterns",
-				"profile",
-				"view",
-				"format",
-				"detail",
-				"tracked_only",
-				"git_scope",
-				"max_tokens",
-				"max_file_bytes");
+				WithAgentArguments(
+					"project",
+					"branch",
+					"paths",
+					"include_patterns",
+					"exclude_patterns",
+					"profile",
+					"view",
+					"format",
+					"detail",
+					"tracked_only",
+					"git_scope",
+					"max_tokens",
+					"max_file_bytes"));
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
 			var maximumEstimatedTokens = arguments.OptionalInt64("max_tokens", 1, long.MaxValue);
 			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
@@ -377,17 +381,18 @@ internal sealed class DevProjexMcpTools(
 		{
 			var arguments = McpJsonArguments.Create(
 				request.Params,
-				"project",
-				"branch",
-				"pattern",
-				"include_patterns",
-				"exclude_patterns",
-				"context_lines",
-				"ignore_case",
-				"max_results",
-				"tracked_only",
-				"git_scope",
-				"max_file_bytes");
+				WithAgentArguments(
+					"project",
+					"branch",
+					"pattern",
+					"include_patterns",
+					"exclude_patterns",
+					"context_lines",
+					"ignore_case",
+					"max_results",
+					"tracked_only",
+					"git_scope",
+					"max_file_bytes"));
 			var pattern = arguments.RequiredString("pattern", allowWhitespace: true);
 			var contextLines = arguments.OptionalInteger("context_lines", 0, 20) ?? 2;
 			var ignoreCase = arguments.OptionalBoolean("ignore_case", true);
@@ -405,7 +410,8 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalString("git_scope"),
 				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 				cancellationToken,
-				includeOutputMetrics: false).ConfigureAwait(false);
+				includeOutputMetrics: false,
+				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			await using var prepared = await Projects.PrepareAsync(plan, cancellationToken).ConfigureAwait(false);
 			var analyzer = Projects.CreatePreparedAnalyzer(prepared);
 			var output = new StringBuilder();
@@ -513,17 +519,18 @@ internal sealed class DevProjexMcpTools(
 	private McpJsonArguments SelectionArguments(CallToolRequestParams request) =>
 		McpJsonArguments.Create(
 			request,
-			"project",
-			"branch",
-			"paths",
-			"include_patterns",
-			"exclude_patterns",
-			"profile",
-			"detail",
-			"tracked_only",
-			"git_scope",
-			"top_files",
-			"max_file_bytes");
+			WithAgentArguments(
+				"project",
+				"branch",
+				"paths",
+				"include_patterns",
+				"exclude_patterns",
+				"profile",
+				"detail",
+				"tracked_only",
+				"git_scope",
+				"top_files",
+				"max_file_bytes"));
 
 	private Task<ProjectContextPlan> BuildSelectionAsync(
 		McpJsonArguments arguments,
@@ -544,7 +551,46 @@ internal sealed class DevProjexMcpTools(
 			arguments.OptionalString("git_scope"),
 			arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 			cancellationToken,
-			includeOutputMetrics);
+			includeOutputMetrics,
+			exclusions: ParseExclusionsArgument(arguments));
+
+	// The exclusions argument exists only on servers started with --agent-exclusions;
+	// everywhere else the allowlist rejects it, so a default server keeps the
+	// narrowing-only contract byte for byte.
+	private string[] WithAgentArguments(params string[] names) =>
+		agentExclusions ? [.. names, "exclusions"] : names;
+
+	private IReadOnlyList<ProjectExclusion>? ParseExclusionsArgument(McpJsonArguments arguments)
+	{
+		if (!agentExclusions)
+			return null;
+
+		var tokens = arguments.OptionalStringArray("exclusions", maximumItems: 8);
+		if (tokens is null)
+			return null;
+
+		var parsed = new List<ProjectExclusion>(tokens.Count);
+		foreach (var token in tokens)
+			parsed.Add(ParseExclusionToken(token));
+		return ProjectSelectionTokens.OrderExclusions(parsed);
+	}
+
+	private static ProjectExclusion ParseExclusionToken(string token)
+	{
+		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
+		{
+			if (string.Equals(descriptor.Token, token, StringComparison.OrdinalIgnoreCase) &&
+			    descriptor.Id is { } exclusion)
+			{
+				return exclusion;
+			}
+		}
+
+		throw new McpToolException(
+			McpErrorCodes.InvalidArguments,
+			$"{McpErrorCodes.InvalidArguments}: exclusions accepts only: " +
+			$"{string.Join(", ", ProjectSelectionTokens.Exclusions)}.");
+	}
 
 	private Task<CallToolResult> RunProjectAsync(
 		Func<Task<CallToolResult>> operation,

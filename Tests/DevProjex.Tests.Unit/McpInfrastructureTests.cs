@@ -41,6 +41,7 @@ public sealed class McpInfrastructureTests
 				typeof(bool),
 				typeof(GitFilteringMode?),
 				typeof(IReadOnlyCollection<ProjectExclusion>),
+				typeof(bool),
 				typeof(CancellationToken)
 			],
 			method.GetParameters().Select(static parameter => parameter.ParameterType));

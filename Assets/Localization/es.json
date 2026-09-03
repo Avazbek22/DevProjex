@@ -488,6 +488,7 @@
     "Terminal.Option.GitMode": "Modo de filtrado Git: none, gitignore, tracked, staged, changes o diff:<ref>..<ref>.",
     "Terminal.Option.McpGitMode": "Modo base de filtrado Git: none, gitignore o tracked.",
     "Terminal.Option.McpExclude": "Conjunto de exclusiones base del servidor: nombres de exclusiones o none (repetible).",
+    "Terminal.Option.McpAgentExclusions": "Permite al agente definir las exclusiones en cada llamada (añade un parámetro exclusions a las herramientas de selección).",
     "Terminal.Validation.GitMode": "Use none, gitignore, tracked, staged, changes o diff:<ref>..<ref>.",
     "Terminal.Validation.DesktopGitMode": "Desktop admite none, gitignore, tracked, staged y changes; use tree, analyze, export context, TUI o MCP para ámbitos diff.",
     "Terminal.Error.ProfileTransientGitMode": "Los modos Git momentáneos no se pueden guardar en perfiles; use none, gitignore o tracked.",

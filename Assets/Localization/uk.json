@@ -488,6 +488,7 @@
   "Terminal.Option.GitMode": "Режим фільтрації Git: none, gitignore, tracked, staged, changes або diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Базовий режим фільтрації Git: none, gitignore або tracked.",
   "Terminal.Option.McpExclude": "Базовий набір виключень сервера: імена виключень або none (можна повторювати).",
+  "Terminal.Option.McpAgentExclusions": "Дозволяє агенту задавати виключення на кожен виклик (додає параметр exclusions до інструментів вибору).",
   "Terminal.Validation.GitMode": "Використайте none, gitignore, tracked, staged, changes або diff:<ref>..<ref>.",
   "Terminal.Validation.DesktopGitMode": "Desktop підтримує none, gitignore, tracked, staged і changes; для діапазонів diff використовуйте tree, analyze, export context, TUI або MCP.",
   "Terminal.Error.ProfileTransientGitMode": "Миттєві режими Git не можна зберігати у профілях; використайте none, gitignore або tracked.",

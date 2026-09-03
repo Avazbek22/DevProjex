@@ -476,6 +476,7 @@
   "Terminal.Option.GitMode": "Git filtrlash rejimi: none, gitignore, tracked, staged, changes yoki diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Asosiy Git filtrlash rejimi: none, gitignore yoki tracked.",
   "Terminal.Option.McpExclude": "Server uchun asosiy istisnolar to‘plami: istisno nomlari yoki none (takrorlash mumkin).",
+  "Terminal.Option.McpAgentExclusions": "Agentga har bir chaqiruvda istisnolarni belgilashga ruxsat beradi (tanlov vositalariga exclusions parametrini qo‘shadi).",
   "Terminal.Validation.GitMode": "none, gitignore, tracked, staged, changes yoki diff:<ref>..<ref> dan foydalaning.",
   "Terminal.Validation.DesktopGitMode": "Desktop none, gitignore, tracked, staged va changes rejimlarini qo‘llaydi; diff oraliqlari uchun tree, analyze, export context, TUI yoki MCP dan foydalaning.",
   "Terminal.Error.ProfileTransientGitMode": "Vaqtinchalik Git rejimlarini profilda saqlab bo‘lmaydi; none, gitignore yoki tracked dan foydalaning.",

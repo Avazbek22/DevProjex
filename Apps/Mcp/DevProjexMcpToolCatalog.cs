@@ -8,17 +8,17 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string MaximumResultSizeKey = "anthropic/maxResultSizeChars";
 	private readonly IReadOnlyList<McpServerTool> _tools;
 
-	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote)
+	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote, bool agentExclusions = false)
 	{
 		ArgumentNullException.ThrowIfNull(target);
 		_tools =
 		[
 			Create(target, nameof(DevProjexMcpTools.ListProjects), "list_projects", "List projects", ListProjectsInput, ListProjectsOutput),
-			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput, openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.Analyze), "analyze", "Analyze project", AnalyzeInput, AnalyzeOutput, openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput, largeResult: true, idempotent: false, openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput(agentExclusions), openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.Analyze), "analyze", "Analyze project", AnalyzeInput(agentExclusions), AnalyzeOutput, openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
-			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput, openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions), openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput, openWorld: allowRemote)
 		];
 	}
@@ -128,6 +128,25 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	// Published only when the server was started with --agent-exclusions. Content redaction
+	// toggles are never part of this vocabulary; the enum is the shared exclusion catalog.
+	private static string ExclusionsPropertyFragment()
+	{
+		var tokens = string.Join(
+			", ",
+			ProjectSelectionTokens.Exclusions.Select(static token => $"\"{token}\""));
+		return $$"""
+		,
+		    "exclusions": {
+		      "type": "array",
+		      "maxItems": 8,
+		      "uniqueItems": true,
+		      "items": { "type": "string", "enum": [{{tokens}}] },
+		      "description": "Full desired set of built-in exclusion toggles; an empty array turns all of them off. Replaces the server baseline and profile exclusions for this call."
+		    }
+		""";
+	}
+
 	private const string PathsProperty = """
 	"paths": {
 	  "type": "array",
@@ -206,14 +225,14 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private static readonly string ListProjectsInput = EmptyInput;
 
-	private static readonly string GetTreeInput = $$"""
+	private static string GetTreeInput(bool agentExclusions) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
 	    {{BranchProperty}},
 	    {{IncludeProperty}},
-	    {{ExcludeProperty}},
+	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
 	    {{MaxFileBytesProperty}},
@@ -227,7 +246,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static readonly string AnalyzeInput = $$"""
+	private static string AnalyzeInput(bool agentExclusions) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
@@ -235,7 +254,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{BranchProperty}},
 	    {{PathsProperty}},
 	    {{IncludeProperty}},
-	    {{ExcludeProperty}},
+	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
 	    {{TrackedOnlyProperty}},
@@ -247,7 +266,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static readonly string PackContextInput = $$"""
+	private static string PackContextInput(bool agentExclusions) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
@@ -255,7 +274,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{BranchProperty}},
 	    {{PathsProperty}},
 	    {{IncludeProperty}},
-	    {{ExcludeProperty}},
+	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
 	    {{TrackedOnlyProperty}},
@@ -282,7 +301,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static readonly string SearchInput = $$"""
+	private static string SearchInput(bool agentExclusions) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
@@ -290,7 +309,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{BranchProperty}},
 	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression evaluated against redacted text with a 2-second timeout." },
 	    {{IncludeProperty}},
-	    {{ExcludeProperty}},
+	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
 	    {{MaxFileBytesProperty}},

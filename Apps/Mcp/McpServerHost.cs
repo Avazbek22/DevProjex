@@ -17,6 +17,7 @@ public static class McpServerHost
 		bool allowRemote = false,
 		GitFilteringMode? gitMode = null,
 		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
+		bool agentExclusions = false,
 		CancellationToken cancellationToken = default) =>
 		RunWithStandardStreamsAsync(
 			roots,
@@ -24,6 +25,7 @@ public static class McpServerHost
 			allowRemote,
 			gitMode,
 			exclusions,
+			agentExclusions,
 			appDataPathProvider: null,
 			cancellationToken);
 
@@ -33,6 +35,7 @@ public static class McpServerHost
 		bool allowRemote,
 		GitFilteringMode? gitMode,
 		IReadOnlyCollection<ProjectExclusion>? exclusions,
+		bool agentExclusions,
 		Func<string>? appDataPathProvider,
 		CancellationToken cancellationToken)
 	{
@@ -47,7 +50,8 @@ public static class McpServerHost
 			appDataPathProvider,
 			allowRemote: allowRemote,
 			gitMode: gitMode,
-			exclusions: exclusions);
+			exclusions: exclusions,
+			agentExclusions: agentExclusions);
 	}
 
 	internal static async Task RunWithStreamsAsync(
@@ -62,7 +66,8 @@ public static class McpServerHost
 		bool allowRemote = false,
 		Func<McpRemoteProjectServices>? remoteServicesFactory = null,
 		GitFilteringMode? gitMode = null,
-		IReadOnlyCollection<ProjectExclusion>? exclusions = null)
+		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
+		bool agentExclusions = false)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
@@ -90,8 +95,8 @@ public static class McpServerHost
 				gitMode,
 				exclusions),
 			LazyThreadSafetyMode.ExecutionAndPublication);
-		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
-		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote);
+		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs, agentExclusions);
+		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions);
 
 		var builder = Host.CreateApplicationBuilder([]);
 		builder.Logging.ClearProviders();

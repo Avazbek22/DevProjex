@@ -39,6 +39,7 @@ public sealed class McpCommandContractTests
 		Assert.Contains("--allow-remote", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--git-mode", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--exclude", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--agent-exclusions", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Run the local read-only MCP stdio server.", environment.StandardOutput, StringComparison.Ordinal);
 	}
 
@@ -134,6 +135,7 @@ public sealed class McpCommandContractTests
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpRoot").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpGitMode").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpExclude").GetString()));
+			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpAgentExclusions").GetString()));
 		});
 
 		var solution = File.ReadAllText(Path.Combine(repository, "DevProjex.sln"));

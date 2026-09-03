@@ -112,6 +112,10 @@ public sealed class DevProjexCommandTree
 		};
 		var gitMode = CreateMcpGitModeOption();
 		var exclude = CreateMcpExcludeOption();
+		var agentExclusions = new Option<bool>("--agent-exclusions")
+		{
+			Description = L("Terminal.Option.McpAgentExclusions")
+		};
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
@@ -121,13 +125,15 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(allowRemote);
 		command.Options.Add(gitMode);
 		command.Options.Add(exclude);
+		command.Options.Add(agentExclusions);
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
 			"devprojex mcp --root . --root ../shared",
 			"devprojex mcp --root . --hide-private-data",
 			"devprojex mcp --root . --git-mode tracked",
-			"devprojex mcp --root . --exclude smart-ignore --exclude dot-folders");
+			"devprojex mcp --root . --exclude smart-ignore --exclude dot-folders",
+			"devprojex mcp --root . --agent-exclusions");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];
@@ -147,6 +153,7 @@ public sealed class DevProjexCommandTree
 						parseResult.GetValue(allowRemote),
 						parseResult.GetValue(gitMode),
 						baselineExclusions,
+						parseResult.GetValue(agentExclusions),
 						_serviceFactory.AppDataPathProvider,
 						cancellationToken)
 					.ConfigureAwait(false);

@@ -130,6 +130,122 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task AgentExclusionsFlagPublishesTheExclusionsParameterOnSelectionTools()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor\n");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project"];
+		foreach (var tool in tools)
+		{
+			var schema = tool.ProtocolTool.InputSchema;
+			var hasParameter = schema.GetProperty("properties").TryGetProperty("exclusions", out var published);
+			Assert.Equal(delegated.Contains(tool.Name), hasParameter);
+			if (!hasParameter)
+				continue;
+
+			// The delegated vocabulary is exactly the eight shared path exclusion tokens;
+			// redaction toggles must never surface here in any spelling.
+			Assert.Equal(
+				["smart-ignore", "empty-folders", "empty-files", "hidden-folders", "hidden-files", "dot-folders", "dot-files", "extensionless-files"],
+				published.GetProperty("items").GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
+			Assert.Equal(8, published.GetProperty("maxItems").GetInt32());
+			Assert.True(published.GetProperty("uniqueItems").GetBoolean());
+			var propertyNames = schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name).ToArray();
+			Assert.Equal(
+				Array.IndexOf(propertyNames, "exclude_patterns") + 1,
+				Array.IndexOf(propertyNames, "exclusions"));
+			var required = schema.TryGetProperty("required", out var requiredElement)
+				? requiredElement.EnumerateArray().Select(static item => item.GetString()).ToArray()
+				: [];
+			Assert.DoesNotContain("exclusions", required);
+			Assert.DoesNotContain("hide_secrets", schema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide-secrets", schema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide_private", schema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide-private", schema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+		}
+	}
+
+	[Fact]
+	public async Task AgentExclusionsParameterControlsSelectionOnlyWhenDelegated()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Visible.cs"), "visible-delegated\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-delegated\n");
+		const string profileName = "delegated-profile.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = new[] { ".cs" },
+					selectedPaths = (string[]?)null,
+					gitMode = "none",
+					exclusions = new[] { "dot-files" },
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+
+		// A default server does not know the argument at all: the narrowing-only contract holds.
+		await using var defaultServer = await McpTestServer.StartAsync(project, workspace.Path);
+		var rejected = await defaultServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+		Assert.True(rejected.IsError);
+		Assert.Contains("exclusions", Text(rejected), StringComparison.Ordinal);
+
+		await using var delegatedServer = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles],
+			agentExclusions: true);
+
+		// Absent parameter keeps the server baseline; an empty set overrides it per call.
+		var baselineTree = await delegatedServer.CallAsync("get_tree");
+		Assert.DoesNotContain(".dotted.cs", Text(baselineTree), StringComparison.Ordinal);
+		var openTree = await delegatedServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+		Assert.Contains(".dotted.cs", Text(openTree), StringComparison.Ordinal);
+		var narrowedTree = await delegatedServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = new[] { "dot-files" } });
+		Assert.DoesNotContain(".dotted.cs", Text(narrowedTree), StringComparison.Ordinal);
+
+		// The human sanctioned the delegation, so a per-call set also outranks a profile.
+		var delegatedPack = await delegatedServer.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Contains("dotted-delegated", Text(delegatedPack), StringComparison.Ordinal);
+
+		var invalid = await delegatedServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = new[] { "hide-secrets" } });
+		Assert.True(invalid.IsError);
+		Assert.Contains("extensionless-files", Text(invalid), StringComparison.Ordinal);
+		Assert.DoesNotContain("hide-secrets, ", Text(invalid), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task TreeAndAnalyzeAvoidUnusedPlanningContentPasses()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -278,6 +394,8 @@ public sealed class McpServerIntegrationTests
 			Assert.Equal(JsonValueKind.False, protocol.InputSchema.GetProperty("additionalProperties").ValueKind);
 			Assert.DoesNotContain("hide_secrets", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
 			Assert.DoesNotContain("hide_private", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide-secrets", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide-private", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
 		});
 		Assert.Equal(
 			["list_projects", "analyze"],
@@ -4179,7 +4297,8 @@ public sealed class McpServerIntegrationTests
 			bool allowRemote = false,
 			Func<McpRemoteProjectServices>? remoteServicesFactory = null,
 			GitFilteringMode? gitMode = null,
-			IReadOnlyCollection<ProjectExclusion>? exclusions = null)
+			IReadOnlyCollection<ProjectExclusion>? exclusions = null,
+			bool agentExclusions = false)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -4201,7 +4320,8 @@ public sealed class McpServerIntegrationTests
 				allowRemote,
 				remoteServicesFactory,
 				gitMode,
-				exclusions);
+				exclusions,
+				agentExclusions);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

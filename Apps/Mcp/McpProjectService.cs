@@ -22,7 +22,8 @@ internal sealed class McpProjectService(
 		string? gitScope,
 		long? maximumFileBytes,
 		CancellationToken cancellationToken,
-		bool includeOutputMetrics = true)
+		bool includeOutputMetrics = true,
+		IReadOnlyList<ProjectExclusion>? exclusions = null)
 	{
 		var parsedScope = ParseGitScope(gitScope);
 		var hasSelectionFilters =
@@ -41,8 +42,10 @@ internal sealed class McpProjectService(
 				? serverGitMode
 				: null;
 		// The startup exclusion baseline follows the --git-mode precedent: an explicit
-		// profile carries its own exclusion state, so the baseline yields to it.
-		var baselineExclusions = string.IsNullOrEmpty(profile) ? serverExclusions : null;
+		// profile carries its own exclusion state, so the baseline yields to it. A delegated
+		// per-call set outranks both — the human enabled that delegation at startup.
+		IReadOnlyCollection<ProjectExclusion>? baselineExclusions =
+			exclusions ?? (string.IsNullOrEmpty(profile) ? serverExclusions : null);
 		var selection = await services.SelectionResolver
 			.ResolveAsync(
 				projectRoot,
