@@ -1141,12 +1141,12 @@ public sealed class McpServerIntegrationTests
 		var aliasRead = await server.CallAsync(
 			"get_file",
 			new Dictionary<string, object?>(widest) { ["path"] = "linked-alias/inner.txt" });
-		Assert.NotEqual(true, aliasRead.IsError);
+		Assert.True(aliasRead.IsError != true, Text(aliasRead));
 		Assert.Contains("alias-invariant-content", Text(aliasRead), StringComparison.Ordinal);
 		var directRead = await server.CallAsync(
 			"get_file",
 			new Dictionary<string, object?>(widest) { ["path"] = "target/inner.txt" });
-		Assert.NotEqual(true, directRead.IsError);
+		Assert.True(directRead.IsError != true, Text(directRead));
 		Assert.Contains("alias-invariant-content", Text(directRead), StringComparison.Ordinal);
 	}
 
