@@ -371,6 +371,25 @@ function Assert-StoreExecutionAliasManifestContract(
     }
 }
 
+function Assert-StorePackageCarriesGrammarPayload(
+    [string]$packageRoot,
+    [string]$artifactPath
+) {
+    # A packaged app refuses runtime-materialized grammar libraries, so the payload must ship as
+    # signed package content. An application package without it silently loses code compression,
+    # comment stripping, and blank-line stripping for every Store user.
+    $applicationDirectory = Split-Path -Path $script:StoreUiPackageExecutable -Parent
+    $grammarDirectory = Join-Path (Join-Path $packageRoot $applicationDirectory) "grammars"
+    Assert-Condition (Test-Path $grammarDirectory) "Store package '$artifactPath' does not contain the grammar content directory '$applicationDirectory\grammars'. The build must run with DevProjexGrammarDelivery=Content."
+
+    $grammarLibraries = @(Get-ChildItem -Path $grammarDirectory -File -Filter "tree-sitter-*.dll" -ErrorAction SilentlyContinue)
+    Assert-Condition ($grammarLibraries.Count -ge 20) "Store package '$artifactPath' carries only $($grammarLibraries.Count) grammar libraries; at least 20 are expected."
+
+    foreach ($sentinel in @("tree-sitter-c-sharp.dll", "tree-sitter-kotlin.dll")) {
+        Assert-Condition (Test-Path (Join-Path $grammarDirectory $sentinel)) "Store package '$artifactPath' is missing the grammar library '$sentinel'."
+    }
+}
+
 function Expand-ZipContainer(
     [string]$archivePath,
     [string]$destinationPath
@@ -406,6 +425,7 @@ function Assert-StoreArtifactContainsExecutionAliasCore(
         }
 
         Assert-StoreExecutionAliasManifestContract -manifestPath $manifestPath -RequirePackagedApplicationExecutable -packageRoot $extractionPath
+        Assert-StorePackageCarriesGrammarPayload -packageRoot $extractionPath -artifactPath $artifactPath
         return 1
     }
 

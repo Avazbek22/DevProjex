@@ -20,5 +20,9 @@
   <PropertyGroup Condition="'$(Configuration)'=='ReleaseStore'">
     <DefineConstants>$(DefineConstants);DEVPROJEX_STORE</DefineConstants>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <!-- A packaged app loads grammars only from signed package content: under package identity
+         CodeCompressionFactory refuses runtime-materialized libraries, so embedded delivery leaves
+         every Store user without compression. Content delivery is mandatory here. -->
+    <DevProjexGrammarDelivery>Content</DevProjexGrammarDelivery>
   </PropertyGroup>
 </Project>
