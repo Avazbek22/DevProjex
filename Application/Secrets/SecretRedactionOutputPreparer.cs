@@ -1869,7 +1869,8 @@ public sealed record PreparedSecretFile(
 	{
 		if (classification is not (FileContentClassification.TooLarge or
 		    FileContentClassification.Unreadable or
-		    FileContentClassification.UnsupportedEncoding))
+		    FileContentClassification.UnsupportedEncoding or
+		    FileContentClassification.AccessDenied))
 		{
 			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
 		}

@@ -276,6 +276,7 @@ public sealed class ProjectCopyExportService(
 	{
 		FileContentClassification.TooLarge => noticeText.TooLargeReason,
 		FileContentClassification.Unreadable => noticeText.UnreadableReason,
+		FileContentClassification.AccessDenied => noticeText.UnreadableReason,
 		FileContentClassification.UnsupportedEncoding => noticeText.UnsupportedEncodingReason,
 		_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
 	};
