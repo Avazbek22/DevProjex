@@ -872,7 +872,12 @@ public sealed class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "dot-marker\n");
 		if (!OperatingSystem.IsWindows())
 			File.WriteAllText(Path.Combine(project, "trap.cs."), "trap-marker\n");
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		// The trailing-dot fixture parses as extensionless, so the standard baseline would
+		// hide it; an empty exclusion baseline keeps the probe about name rules only.
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: []);
 
 		var dotAlias = await server.CallAsync(
 			"get_file",
