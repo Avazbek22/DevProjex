@@ -554,7 +554,10 @@ public sealed class McpServerProcessTests
 		for (var index = 0; index < messageCount; index++)
 		{
 			var line = lines[index];
-			var message = line.EndsWith('\r') ? line[..^1] : line;
+			Assert.False(
+			line.EndsWith('\r'),
+			"MCP stdout used CRLF framing; the stdio transport must emit LF-only bytes on every OS.");
+		var message = line;
 			Assert.False(
 				string.IsNullOrWhiteSpace(message),
 				$"MCP stdout contained an empty non-protocol line at index {index}.");

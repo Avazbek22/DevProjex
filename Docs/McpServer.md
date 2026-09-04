@@ -42,7 +42,11 @@ and are rejected at startup. The `hidden-folders` and `hidden-files` toggles
 follow the platform hidden attribute (the Windows Hidden attribute or macOS
 `UF_HIDDEN`); on Unix-like systems dot-named entries belong to the
 `dot-folders` and `dot-files` toggles instead — see the dot-name ownership
-note in [SmartIgnore.md](SmartIgnore.md).
+note in [SmartIgnore.md](SmartIgnore.md). Linux has no separate hidden
+attribute, so on Linux the hidden toggles on their own exclude nothing.
+A selected file the process cannot read (for example, permission-denied)
+degrades per file like other uninspectable content: it is withheld with an
+uninspected-content notice instead of failing the whole call.
 
 Per-call exclusion control by the agent is a separate startup opt-in:
 

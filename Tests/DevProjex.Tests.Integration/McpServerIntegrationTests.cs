@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Xml.Linq;
 using DevProjex.Application.Context;
@@ -557,6 +558,10 @@ public sealed class McpServerIntegrationTests
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(Path.Combine(project, "Visible.cs"), "visible-hidden-probe\n");
 		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-hidden-probe\n");
+		Directory.CreateDirectory(Path.Combine(project, ".dotdir"));
+		File.WriteAllText(Path.Combine(project, ".dotdir", "Nested.cs"), "dotdir-hidden-probe\n");
+		Directory.CreateDirectory(Path.Combine(project, "plain"));
+		File.WriteAllText(Path.Combine(project, "plain", "Inner.cs"), "plain-hidden-probe\n");
 		await using var server = await McpTestServer.StartAsync(
 			project,
 			workspace.Path,
@@ -574,17 +579,589 @@ public sealed class McpServerIntegrationTests
 			var hiddenPath = Path.Combine(project, "Attributed.cs");
 			File.WriteAllText(hiddenPath, "attributed-hidden-probe\n");
 			File.SetAttributes(hiddenPath, File.GetAttributes(hiddenPath) | FileAttributes.Hidden);
+			// A dot-named entry carrying the real attribute is owned by the hidden toggle
+			// on Windows even while the dot toggle is off.
+			var overlapPath = Path.Combine(project, ".hidDot.cs");
+			File.WriteAllText(overlapPath, "overlap-hidden-probe\n");
+			File.SetAttributes(overlapPath, File.GetAttributes(overlapPath) | FileAttributes.Hidden);
 
 			var attributed = await server.CallAsync(
 				"get_tree",
 				new Dictionary<string, object?> { ["exclusions"] = new[] { "hidden-files" } });
 			Assert.DoesNotContain("Attributed.cs", Text(attributed), StringComparison.Ordinal);
+			Assert.DoesNotContain(".hidDot.cs", Text(attributed), StringComparison.Ordinal);
 			var open = await server.CallAsync(
 				"get_tree",
 				new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
 			Assert.Contains("Attributed.cs", Text(open), StringComparison.Ordinal);
+			Assert.Contains(".hidDot.cs", Text(open), StringComparison.Ordinal);
+		}
+		else if (OperatingSystem.IsMacOS())
+		{
+			// The documented macOS half of the platform-attribute contract: UF_HIDDEN set
+			// by the OS's own tool, read back through the enumeration pipeline.
+			var flaggedFilePath = Path.Combine(project, "Flagged.cs");
+			File.WriteAllText(flaggedFilePath, "flagged-hidden-probe\n");
+			var flaggedFolderPath = Path.Combine(project, "FlaggedFolder");
+			Directory.CreateDirectory(flaggedFolderPath);
+			File.WriteAllText(Path.Combine(flaggedFolderPath, "Probe.cs"), "flagged-folder-probe\n");
+
+			if (!TrySetMacHiddenFlag(flaggedFilePath) || !TrySetMacHiddenFlag(flaggedFolderPath))
+				Assert.Skip("This filesystem does not support the macOS UF_HIDDEN flag.");
+
+			var hiddenFiles = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { "hidden-files" } });
+			Assert.DoesNotContain("Flagged.cs", Text(hiddenFiles), StringComparison.Ordinal);
+			Assert.Contains("Probe.cs", Text(hiddenFiles), StringComparison.Ordinal);
+
+			var hiddenFolders = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { "hidden-folders" } });
+			Assert.DoesNotContain("FlaggedFolder", Text(hiddenFolders), StringComparison.Ordinal);
+			Assert.DoesNotContain("Probe.cs", Text(hiddenFolders), StringComparison.Ordinal);
+			Assert.Contains("Flagged.cs", Text(hiddenFolders), StringComparison.Ordinal);
+
+			var open = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+			Assert.Contains("Flagged.cs", Text(open), StringComparison.Ordinal);
+			Assert.Contains("Probe.cs", Text(open), StringComparison.Ordinal);
+		}
+		else if (OperatingSystem.IsLinux())
+		{
+			// Linux has no hidden mechanism besides dot-names, and dot-names belong to the
+			// dot toggles; hidden-files + hidden-folders together must therefore exclude
+			// nothing at all — the tree is identical to the no-exclusions tree.
+			var hiddenBoth = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { "hidden-files", "hidden-folders" } });
+			var open = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+			var hiddenBody = ExtractSpotlightBody(Text(hiddenBoth));
+			var openBody = ExtractSpotlightBody(Text(open));
+			Assert.Contains(".dotted.cs", hiddenBody, StringComparison.Ordinal);
+			Assert.Contains(".dotdir", hiddenBody, StringComparison.Ordinal);
+			Assert.Contains("plain", hiddenBody, StringComparison.Ordinal);
+			Assert.Equal(openBody, hiddenBody);
 		}
 	}
+
+	[Fact]
+	public async Task DefaultServerHiddenAttributeFollowsThePlatformContract()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Visible.cs"), "visible-default-hidden-probe\n");
+		var probePath = Path.Combine(project, "Probe.cs");
+		File.WriteAllText(probePath, "probe-default-hidden\n");
+		if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+		{
+			// On macOS File.SetAttributes maps to the UF_HIDDEN flag the docs promise.
+			File.SetAttributes(probePath, File.GetAttributes(probePath) | FileAttributes.Hidden);
+			Assert.True(File.GetAttributes(probePath).HasFlag(FileAttributes.Hidden));
+		}
+		else
+		{
+			Assert.False(File.GetAttributes(probePath).HasFlag(FileAttributes.Hidden));
+		}
+
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var tree = await server.CallAsync("get_tree");
+		Assert.Contains("Visible.cs", Text(tree), StringComparison.Ordinal);
+		if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+		{
+			Assert.DoesNotContain("Probe.cs", Text(tree), StringComparison.Ordinal);
+			var denied = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "Probe.cs" });
+			Assert.True(denied.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(denied), StringComparison.Ordinal);
+		}
+		else
+		{
+			// A non-dot file can never be attribute-hidden on Linux, so it stays served.
+			Assert.Contains("Probe.cs", Text(tree), StringComparison.Ordinal);
+			var served = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "Probe.cs" });
+			Assert.NotEqual(true, served.IsError);
+			Assert.Contains("probe-default-hidden", Text(served), StringComparison.Ordinal);
+		}
+
+		var sibling = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Visible.cs" });
+		Assert.NotEqual(true, sibling.IsError);
+		Assert.Contains("visible-default-hidden-probe", Text(sibling), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileWrongCaseDiagnosticsFollowThePlatformCaseSemantics()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-wrong-case\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var wrongCase = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "anchor.CS" });
+
+		// Convergent contract: wrong-case input fails with the same code on every OS.
+		Assert.True(wrongCase.IsError);
+		Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(wrongCase), StringComparison.Ordinal);
+
+		// Divergent diagnostic contract, pinned deliberately until casing canonicalization
+		// is decided: a case-insensitive volume resolves the physical file in the caller's
+		// casing, so the ordinal IncludedFiles check reports a selection miss; a
+		// case-sensitive volume fails earlier during physical resolution.
+		var caseInsensitiveVolume = File.Exists(Path.Combine(project, "ANCHOR.CS"));
+		if (OperatingSystem.IsWindows())
+			Assert.True(caseInsensitiveVolume);
+		if (OperatingSystem.IsLinux())
+			Assert.False(caseInsensitiveVolume);
+		if (caseInsensitiveVolume)
+		{
+			Assert.Contains("is not in the effective project selection", Text(wrongCase), StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.Contains("does not exist inside project", Text(wrongCase), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task WrongCasePathsArgumentsFollowTheVolumeCasingContract()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-marker\n");
+		var caseInsensitiveVolume = File.Exists(Path.Combine(project, "ANCHOR.CS"));
+		if (OperatingSystem.IsWindows())
+			Assert.True(caseInsensitiveVolume);
+		if (OperatingSystem.IsLinux())
+			Assert.False(caseInsensitiveVolume);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { "anchor.CS" } });
+
+		if (caseInsensitiveVolume)
+		{
+			// Pinned contract: existence follows filesystem semantics but the selection
+			// frontier compares Ordinal, so a wrong-case path resolves yet matches
+			// nothing — the tool succeeds with an empty selection instead of erroring.
+			Assert.NotEqual(true, result.IsError);
+			Assert.Equal(0, result.StructuredContent?.GetProperty("files").GetInt32());
+		}
+		else
+		{
+			Assert.True(result.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(result), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task WrongCaseProjectArgumentFollowsThePlatformCaseSemantics()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "wrong-case-project-probe\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// Invert only the leaf segment so parent segments stay valid on case-sensitive filesystems.
+		var invertedPath = Path.Combine(workspace.Path, "PROJECT");
+		var result = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = invertedPath });
+
+		// Project selection follows the filesystem's case semantics: this probe is the same
+		// existence gate the physical resolver applies before canonicalization.
+		if (Directory.Exists(invertedPath))
+		{
+			Assert.NotEqual(true, result.IsError);
+			Assert.Contains("Anchor.cs", Text(result), StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.True(result.IsError);
+			Assert.Contains("DPX-MCP-UNKNOWN-PROJECT", Text(result), StringComparison.Ordinal);
+		}
+
+		if (OperatingSystem.IsWindows())
+			Assert.True(Directory.Exists(invertedPath));
+		if (OperatingSystem.IsLinux())
+			Assert.False(Directory.Exists(invertedPath));
+	}
+
+	[Fact]
+	public async Task BackslashPathArgumentsFollowTheHostPlatformSeparatorContract()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "Src"));
+		File.WriteAllText(Path.Combine(project, "Src", "File.cs"), "backslash-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var file = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Src\\File.cs" });
+		var analysis = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { "Src\\File.cs" } });
+		var portable = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Src/File.cs" });
+
+		// '/' is the portable spelling on every OS for both path arguments and globs.
+		Assert.NotEqual(true, portable.IsError);
+		Assert.Contains("backslash-marker", Text(portable), StringComparison.Ordinal);
+
+		// Path arguments follow host-OS path semantics: '\' is a separator only on
+		// Windows; on POSIX it is an ordinary filename character.
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.NotEqual(true, file.IsError);
+			Assert.Contains("backslash-marker", Text(file), StringComparison.Ordinal);
+			Assert.NotEqual(true, analysis.IsError);
+			Assert.Equal(1, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		}
+		else
+		{
+			Assert.True(file.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(file), StringComparison.Ordinal);
+			Assert.True(analysis.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(analysis), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task GlobMatchingIsCaseSensitiveOnEveryPlatform()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "Src"));
+		File.WriteAllText(Path.Combine(project, "Src", "Case.cs"), "case-sensitive-glob\n");
+		File.WriteAllText(Path.Combine(project, "Src", "Anchor.md"), "anchor\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// MCP globs are Ordinal case-sensitive on every OS — including Windows/macOS whose
+		// filesystems are case-insensitive — so identical calls select identical files on
+		// all platforms. Do not add IgnoreCase or migrate to a globber with per-OS casing.
+		var upper = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "**/*.CS", "**/*.md" } });
+		Assert.Contains("Anchor.md", Text(upper), StringComparison.Ordinal);
+		Assert.DoesNotContain("Case.cs", Text(upper), StringComparison.Ordinal);
+
+		var lower = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "**/*.cs", "**/*.md" } });
+		Assert.Contains("Case.cs", Text(lower), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task TrailingDotAndSpacePathArgumentsFollowThePlatformNameRules()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "dot-marker\n");
+		if (!OperatingSystem.IsWindows())
+			File.WriteAllText(Path.Combine(project, "trap.cs."), "trap-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var dotAlias = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Anchor.cs." });
+		var spaceAlias = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Anchor.cs " });
+
+		if (OperatingSystem.IsWindows())
+		{
+			// Win32 path normalization strips trailing dots and spaces, so alias
+			// spellings resolve to the same physical file — the platform's name model.
+			Assert.NotEqual(true, dotAlias.IsError);
+			Assert.Contains("dot-marker", Text(dotAlias), StringComparison.Ordinal);
+			Assert.NotEqual(true, spaceAlias.IsError);
+			Assert.Contains("dot-marker", Text(spaceAlias), StringComparison.Ordinal);
+		}
+		else
+		{
+			// POSIX treats the alias spellings as distinct legal names, so they miss.
+			Assert.True(dotAlias.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(dotAlias), StringComparison.Ordinal);
+			Assert.True(spaceAlias.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(spaceAlias), StringComparison.Ordinal);
+
+			// Exact unix names with a trailing dot stay addressable end to end.
+			var tree = await server.CallAsync("get_tree");
+			Assert.Contains("trap.cs.", Text(tree), StringComparison.Ordinal);
+			var trap = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "trap.cs." });
+			Assert.NotEqual(true, trap.IsError);
+			Assert.Contains("trap-marker", Text(trap), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task UnicodeNormalizationFormsFollowThePlatformLookupContract()
+	{
+		// MCP path arguments are matched byte-for-byte (Ordinal) after lexical resolution
+		// with no Unicode normalization anywhere in the pipeline; on macOS a wrong-form
+		// argument passes the APFS lookup but misses every selection set, while
+		// Linux/Windows reject it as not-found. If argument-boundary normalization is
+		// ever added, this test is the contract to update deliberately.
+		const string NfcName = "Caf\u00E9.txt";
+		const string NfdName = "Cafe\u0301.txt";
+		Assert.NotEqual(NfcName, NfdName);
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, NfcName), "nfc-marker\n");
+		var storedName = Path.GetFileName(Assert.Single(Directory.EnumerateFiles(project)));
+		if (!string.Equals(storedName, NfcName, StringComparison.Ordinal))
+			Assert.Skip("The volume rewrote the stored name to a different normalization form.");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var nfcFile = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = NfcName });
+		var nfdFile = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = NfdName });
+		var nfdAnalysis = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { NfdName } });
+
+		Assert.NotEqual(true, nfcFile.IsError);
+		Assert.Contains("nfc-marker", Text(nfcFile), StringComparison.Ordinal);
+		Assert.True(nfdFile.IsError);
+		Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(nfdFile), StringComparison.Ordinal);
+		if (OperatingSystem.IsMacOS())
+		{
+			// APFS resolves the wrong-form lookup, but every Ordinal membership check
+			// downstream misses: get_file reports the selection variant; analyze
+			// silently reprojects to zero files.
+			Assert.Contains("is not in the effective project selection", Text(nfdFile), StringComparison.Ordinal);
+			Assert.NotEqual(true, nfdAnalysis.IsError);
+			Assert.Equal(0, nfdAnalysis.StructuredContent?.GetProperty("files").GetInt32());
+		}
+		else
+		{
+			Assert.Contains("does not exist inside project", Text(nfdFile), StringComparison.Ordinal);
+			Assert.True(nfdAnalysis.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(nfdAnalysis), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task UnreadableDirectoryYieldsPartialResultsWithTrustedPartialAccessWarning()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			// On Windows the deny trigger is an ACL, not mode bits; the recovery pipeline
+			// past the throw is platform-neutral and is pinned by the two Unix runners.
+			Assert.Skip("Unix mode bits are not an access-control mechanism on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/open/inner.txt", "open-marker\n");
+		workspace.CreateFile("project/blocked/secret.txt", "blocked-marker\n");
+		var blockedDirectory = Path.Combine(project, "blocked");
+		var originalMode = File.GetUnixFileMode(blockedDirectory);
+		try
+		{
+			File.SetUnixFileMode(blockedDirectory, UnixFileMode.None);
+			try
+			{
+				_ = Directory.EnumerateFileSystemEntries(blockedDirectory).Any();
+				Assert.Skip("The test process can bypass Unix mode bits; access cannot be denied reliably.");
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
+
+			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+			var tree = await server.CallAsync("get_tree");
+			var treeText = Text(tree);
+			Assert.NotEqual(true, tree.IsError);
+			Assert.Contains("inner.txt", treeText, StringComparison.Ordinal);
+			Assert.DoesNotContain("secret.txt", treeText, StringComparison.Ordinal);
+			Assert.Contains("[Warning DPX-PROJECT-PARTIAL-ACCESS]", treeText, StringComparison.Ordinal);
+			Assert.True(
+				treeText.IndexOf("[Warning DPX-PROJECT-PARTIAL-ACCESS]", StringComparison.Ordinal) >
+				treeText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal));
+
+			var search = await server.CallAsync(
+				"search_project",
+				new Dictionary<string, object?>
+				{
+					["pattern"] = "open-marker|blocked-marker",
+					["ignore_case"] = false
+				});
+			var searchText = Text(search);
+			Assert.NotEqual(true, search.IsError);
+			Assert.Contains("inner.txt:1:open-marker", searchText, StringComparison.Ordinal);
+			Assert.DoesNotContain("blocked-marker", searchText, StringComparison.Ordinal);
+			Assert.Contains("[Warning DPX-PROJECT-PARTIAL-ACCESS]", searchText, StringComparison.Ordinal);
+		}
+		finally
+		{
+			File.SetUnixFileMode(blockedDirectory, originalMode);
+		}
+	}
+
+	[Fact]
+	public async Task UnixAccessDeniedFileDegradesPerFileAcrossContentTools()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix mode bits are not an access-control mechanism on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Readable.txt"), "readable-marker\n");
+		var blockedPath = Path.Combine(project, "Blocked.txt");
+		File.WriteAllText(blockedPath, "blocked-marker\n");
+		var originalMode = File.GetUnixFileMode(blockedPath);
+		try
+		{
+			File.SetUnixFileMode(blockedPath, UnixFileMode.None);
+			try
+			{
+				using var probe = File.OpenRead(blockedPath);
+				Assert.Skip("The test process can bypass Unix mode bits; access cannot be denied reliably.");
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
+
+			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+			var search = await server.CallAsync(
+				"search_project",
+				new Dictionary<string, object?>
+				{
+					["pattern"] = "readable-marker|blocked-marker",
+					["context_lines"] = 0,
+					["ignore_case"] = false
+				});
+			var searchText = Text(search);
+			Assert.NotEqual(true, search.IsError);
+			Assert.Contains("Readable.txt:1:readable-marker", searchText, StringComparison.Ordinal);
+			Assert.DoesNotContain("blocked-marker", searchText, StringComparison.Ordinal);
+			Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", searchText, StringComparison.Ordinal);
+			Assert.Contains("could not fully inspect 1 selected file.", searchText, StringComparison.Ordinal);
+
+			var pack = await server.CallAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["paths"] = new[] { "Readable.txt", "Blocked.txt" },
+					["view"] = "content",
+					["format"] = "text"
+				});
+			var packText = Text(pack);
+			Assert.NotEqual(true, pack.IsError);
+			Assert.Contains("readable-marker", packText, StringComparison.Ordinal);
+			Assert.DoesNotContain("blocked-marker", packText, StringComparison.Ordinal);
+			Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", packText, StringComparison.Ordinal);
+			Assert.Contains("Uninspected content was withheld from the pack.", packText, StringComparison.Ordinal);
+
+			var analysis = await server.CallAsync("analyze");
+			Assert.NotEqual(true, analysis.IsError);
+			Assert.Equal(2, analysis.StructuredContent?.GetProperty("files").GetInt32());
+
+			var deniedFile = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "Blocked.txt" });
+			Assert.True(deniedFile.IsError);
+			Assert.Contains(McpErrorCodes.PayloadTruncated, Text(deniedFile), StringComparison.Ordinal);
+			Assert.DoesNotContain("DPX-MCP-OPERATION-FAILED", Text(deniedFile), StringComparison.Ordinal);
+			var readableFile = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "Readable.txt" });
+			Assert.NotEqual(true, readableFile.IsError);
+			Assert.Contains("readable-marker", Text(readableFile), StringComparison.Ordinal);
+		}
+		finally
+		{
+			File.SetUnixFileMode(blockedPath, originalMode);
+		}
+	}
+
+	[Fact]
+	public async Task InsideRootDirectoryAliasStaysInvisibleYetAliasReadableUnderWidestDelegatedScope()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "target"));
+		File.WriteAllText(Path.Combine(project, "target", "inner.txt"), "alias-invariant-content\n");
+		CreateDirectoryAliasOrSkip(Path.Combine(project, "linked-alias"), Path.Combine(project, "target"));
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+		var widest = new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() };
+
+		// Reparse points are outside the exclusions vocabulary: even the widest delegated
+		// scope never lists, packs, or searches a link — while a direct read through the
+		// alias resolves to the canonical inside-root target and succeeds.
+		var tree = await server.CallAsync("get_tree", widest);
+		Assert.Contains("inner.txt", Text(tree), StringComparison.Ordinal);
+		Assert.Contains("target", Text(tree), StringComparison.Ordinal);
+		Assert.DoesNotContain("linked-alias", Text(tree), StringComparison.Ordinal);
+
+		var pack = await server.CallAsync("pack_context", widest);
+		Assert.Contains("alias-invariant-content", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain("linked-alias", Text(pack), StringComparison.Ordinal);
+
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(widest) { ["pattern"] = "alias-invariant-content" });
+		Assert.Contains("inner.txt", Text(search), StringComparison.Ordinal);
+		Assert.DoesNotContain("linked-alias", Text(search), StringComparison.Ordinal);
+
+		var aliasRead = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>(widest) { ["path"] = "linked-alias/inner.txt" });
+		Assert.NotEqual(true, aliasRead.IsError);
+		Assert.Contains("alias-invariant-content", Text(aliasRead), StringComparison.Ordinal);
+		var directRead = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>(widest) { ["path"] = "target/inner.txt" });
+		Assert.NotEqual(true, directRead.IsError);
+		Assert.Contains("alias-invariant-content", Text(directRead), StringComparison.Ordinal);
+	}
+
+	private static bool TrySetMacHiddenFlag(string path)
+	{
+		var startInfo = new ProcessStartInfo("chflags")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+		startInfo.ArgumentList.Add("hidden");
+		startInfo.ArgumentList.Add(path);
+		using var process = Process.Start(startInfo);
+		if (process is null)
+			return false;
+		process.WaitForExit();
+		return process.ExitCode == 0 &&
+		       File.GetAttributes(path).HasFlag(FileAttributes.Hidden);
+	}
+
 
 	[Fact]
 	public async Task AgentExclusionsFlagPublishesTheExclusionsParameterOnSelectionTools()
