@@ -193,7 +193,7 @@ The server enforces hard security boundaries on top of DevProjex's read-only des
 * **Secret redaction is always on in MCP mode and has no off switch** — not in the server flags, not in the tool schemas, so neither a config mistake nor the agent itself can turn it off
 * **Optional private-data masking** via `devprojex mcp --hide-private-data`, mirroring the CLI flag
 * **Root jail** — local access is pinned to startup roots; opt-in remote Git URL checkouts are pinned on first use; symlink and junction escapes are rejected
-* Smart Ignore and the selected Git baseline or scope stay active; agent paths and globs can only narrow the selection. Exclusion toggles change only on your terms: a `--exclude` startup baseline, or per-call agent control behind the opt-in `--agent-exclusions` flag
+* Smart Ignore and the selected Git baseline or scope stay active; agent paths and globs can only narrow the selection. Exclusion toggles change only on your terms: a `--exclude` startup baseline, the widest-baseline `--unrestricted` preset, or per-call agent control behind the opt-in `--allow-agent-exclusions` flag
 * Returned file contents are wrapped in untrusted-data markers to resist prompt injection
 
 The missing off switch is a control guarantee, not a detection guarantee. DevProjex

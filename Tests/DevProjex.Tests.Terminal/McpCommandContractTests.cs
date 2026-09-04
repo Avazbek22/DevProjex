@@ -39,7 +39,8 @@ public sealed class McpCommandContractTests
 		Assert.Contains("--allow-remote", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--git-mode", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--exclude", environment.StandardOutput, StringComparison.Ordinal);
-		Assert.Contains("--agent-exclusions", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--unrestricted", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--allow-agent-exclusions", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Run the local read-only MCP stdio server.", environment.StandardOutput, StringComparison.Ordinal);
 	}
 
@@ -72,6 +73,23 @@ public sealed class McpCommandContractTests
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Empty(environment.StandardOutput);
 		Assert.Contains("cannot be combined", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("--exclude", "dot-files")]
+	[InlineData("--exclude", "none")]
+	[InlineData("--git-mode", "tracked")]
+	public async Task McpServerRejectsUnrestrictedCombinedWithBaselineFlags(string flag, string value)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--unrestricted", flag, value, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("--unrestricted cannot be combined", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -149,7 +167,9 @@ public sealed class McpCommandContractTests
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpRoot").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpGitMode").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpExclude").GetString()));
+			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpUnrestricted").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpAgentExclusions").GetString()));
+			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Validation.UnrestrictedConflict").GetString()));
 		});
 
 		var solution = File.ReadAllText(Path.Combine(repository, "DevProjex.sln"));

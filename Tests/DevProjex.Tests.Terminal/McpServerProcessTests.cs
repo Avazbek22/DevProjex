@@ -86,7 +86,7 @@ public sealed class McpServerProcessTests
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		if (agentExclusions)
-			startInfo.ArgumentList.Add("--agent-exclusions");
+			startInfo.ArgumentList.Add("--allow-agent-exclusions");
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
 
 		using var process = Process.Start(startInfo) ??
@@ -185,6 +185,75 @@ public sealed class McpServerProcessTests
 			// re-admit the empty file the standard baseline would hide.
 			Assert.Equal(dotFileVisible, text.Contains(".dotted.cs", StringComparison.Ordinal));
 			Assert.Contains("Empty.cs", text, StringComparison.Ordinal);
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task RealProcessUnrestrictedOpensBothFilterAxesThroughTheCli(bool unrestricted)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Anchor.cs", "anchor-unrestricted-marker\n");
+		workspace.WriteFile("project/.dotted.cs", "dotted-unrestricted-marker\n");
+		workspace.WriteFile("project/.gitignore", "ignored.cs\n");
+		workspace.WriteFile("project/ignored.cs", "ignored-unrestricted-marker\n");
+		RunGit(project, "init", "--quiet", "--initial-branch=main");
+		RunGit(project, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(project, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(project, "add", "Anchor.cs", ".gitignore");
+		RunGit(project, "commit", "--quiet", "-m", "baseline");
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		if (unrestricted)
+			startInfo.ArgumentList.Add("--unrestricted");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var clientPhase = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		clientPhase.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			clientPhase.Token))
+		{
+			var tree = await client.CallToolAsync(
+				"get_tree",
+				new Dictionary<string, object?>(),
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.NotEqual(true, tree.IsError);
+			var text = Assert.IsType<TextContentBlock>(Assert.Single(tree.Content)).Text;
+
+			// One flag opens both axes: the dotted file held back by the standard
+			// exclusion set and the gitignored file held back by the Git baseline.
+			Assert.Contains("Anchor.cs", text, StringComparison.Ordinal);
+			Assert.Equal(unrestricted, text.Contains(".dotted.cs", StringComparison.Ordinal));
+			Assert.Equal(unrestricted, text.Contains("ignored.cs", StringComparison.Ordinal));
 		}
 
 		process.StandardInput.Close();
@@ -638,6 +707,24 @@ public sealed class McpServerProcessTests
 			lock (_sync)
 				_values.Add(value);
 		}
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.True(
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: {result.StandardOutput}{result.StandardError}");
 	}
 
 	private sealed class RecordingReadStream : Stream

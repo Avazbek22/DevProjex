@@ -48,10 +48,22 @@ A selected file the process cannot read (for example, permission-denied)
 degrades per file like other uninspectable content: it is withheld with an
 uninspected-content notice instead of failing the whole call.
 
+The widest baseline has a one-flag preset:
+
+```shell
+devprojex mcp --root /absolute/path/to/project --unrestricted
+```
+
+`--unrestricted` starts the server with every exclusion toggle off and the Git
+baseline set to `none` — equivalent to `--exclude none --git-mode none`, and
+rejected in combination with either flag. It widens visibility only: secret
+redaction still applies to every response, and per-call arguments and profiles
+behave exactly as they do for the spelled-out form.
+
 Per-call exclusion control by the agent is a separate startup opt-in:
 
 ```shell
-devprojex mcp --root /absolute/path/to/project --agent-exclusions
+devprojex mcp --root /absolute/path/to/project --allow-agent-exclusions
 ```
 
 With the flag, the selection tools `get_tree`, `analyze`, `pack_context`,
@@ -132,7 +144,7 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 - Product exclusions, including built-in rules and `.gitignore`, remain active.
   Agent paths and globs can only narrow the effective selection. The exclusion
   toggles themselves stay under human control: agents can change them only on a
-  server deliberately started with `--agent-exclusions`, or by naming a profile
+  server deliberately started with `--allow-agent-exclusions`, or by naming a profile
   that already exists inside the project root — treat committed profile files
   as part of the selection surface you publish. Delegation covers file
   visibility only, never the redaction pass.
@@ -174,7 +186,7 @@ open-world.
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
 | `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
 
-On a server started with `--agent-exclusions`, `get_tree`, `analyze`,
+On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, and `get_file` additionally accept the
 `exclusions` array parameter described in the startup section, so a file
 revealed by a per-call value stays readable through the same value.
@@ -288,7 +300,7 @@ Defaults:
 - `tracked_only`: `false`
 - `git_scope`: absent
 - `exclusions`: absent — the server baseline or profile set applies (parameter
-  exists only on `--agent-exclusions` servers)
+  exists only on `--allow-agent-exclusions` servers)
 - `search_project.context_lines`: `2`
 - `search_project.ignore_case`: `true`
 - `search_project.max_results`: `50`

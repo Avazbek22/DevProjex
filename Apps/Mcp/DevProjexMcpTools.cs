@@ -566,7 +566,7 @@ internal sealed class DevProjexMcpTools(
 			includeOutputMetrics,
 			exclusions: ParseExclusionsArgument(arguments));
 
-	// The exclusions argument exists only on servers started with --agent-exclusions;
+	// The exclusions argument exists only on servers started with --allow-agent-exclusions;
 	// everywhere else the allowlist rejects it, so a default server keeps the
 	// narrowing-only contract byte for byte.
 	private string[] WithAgentArguments(params string[] names) =>

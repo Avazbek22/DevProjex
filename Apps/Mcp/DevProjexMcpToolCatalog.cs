@@ -128,7 +128,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	// Published only when the server was started with --agent-exclusions. Content redaction
+	// Published only when the server was started with --allow-agent-exclusions. Content redaction
 	// toggles are never part of this vocabulary; the enum is the shared exclusion catalog.
 	private static string ExclusionsPropertyFragment()
 	{

@@ -112,7 +112,11 @@ public sealed class DevProjexCommandTree
 		};
 		var gitMode = CreateMcpGitModeOption();
 		var exclude = CreateMcpExcludeOption();
-		var agentExclusions = new Option<bool>("--agent-exclusions")
+		var unrestricted = new Option<bool>("--unrestricted")
+		{
+			Description = L("Terminal.Option.McpUnrestricted")
+		};
+		var allowAgentExclusions = new Option<bool>("--allow-agent-exclusions")
 		{
 			Description = L("Terminal.Option.McpAgentExclusions")
 		};
@@ -125,7 +129,16 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(allowRemote);
 		command.Options.Add(gitMode);
 		command.Options.Add(exclude);
-		command.Options.Add(agentExclusions);
+		command.Options.Add(unrestricted);
+		command.Options.Add(allowAgentExclusions);
+		CompletionConflictRegistry.RegisterMutual(unrestricted, exclude);
+		CompletionConflictRegistry.RegisterMutual(unrestricted, gitMode);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(unrestricted) &&
+			    (result.GetResult(exclude) is not null || result.GetResult(gitMode) is not null))
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.UnrestrictedConflict")));
+		});
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
@@ -133,7 +146,8 @@ public sealed class DevProjexCommandTree
 			"devprojex mcp --root . --hide-private-data",
 			"devprojex mcp --root . --git-mode tracked",
 			"devprojex mcp --root . --exclude smart-ignore --exclude dot-folders",
-			"devprojex mcp --root . --agent-exclusions");
+			"devprojex mcp --root . --unrestricted",
+			"devprojex mcp --root . --allow-agent-exclusions");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];
@@ -142,18 +156,30 @@ public sealed class DevProjexCommandTree
 				environment.Variables,
 				Directory.GetCurrentDirectory());
 			var excludeValues = parseResult.GetValue(exclude);
-			var baselineExclusions = excludeValues is { Length: > 0 }
-				? SelectionOptions.ParseExclusions(excludeValues)
-				: null;
+			IReadOnlyCollection<ProjectExclusion>? baselineExclusions;
+			GitFilteringMode? gitModeValue;
+			if (parseResult.GetValue(unrestricted))
+			{
+				baselineExclusions = [];
+				gitModeValue = GitFilteringMode.None;
+			}
+			else
+			{
+				baselineExclusions = excludeValues is { Length: > 0 }
+					? SelectionOptions.ParseExclusions(excludeValues)
+					: null;
+				gitModeValue = parseResult.GetValue(gitMode);
+			}
+
 			try
 			{
 				await McpServerHost.RunWithStandardStreamsAsync(
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
-						parseResult.GetValue(gitMode),
+						gitModeValue,
 						baselineExclusions,
-						parseResult.GetValue(agentExclusions),
+						parseResult.GetValue(allowAgentExclusions),
 						_serviceFactory.AppDataPathProvider,
 						cancellationToken)
 					.ConfigureAwait(false);
