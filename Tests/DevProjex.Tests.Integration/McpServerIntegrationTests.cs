@@ -1113,7 +1113,11 @@ public sealed class McpServerIntegrationTests
 		var project = workspace.CreateDirectory("project");
 		Directory.CreateDirectory(Path.Combine(project, "target"));
 		File.WriteAllText(Path.Combine(project, "target", "inner.txt"), "alias-invariant-content\n");
-		CreateDirectoryAliasOrSkip(Path.Combine(project, "linked-alias"), Path.Combine(project, "target"));
+		// POSIX links use a relative target: an absolute spelling through a system alias
+		// (macOS /var -> /private/var) fails the ordinal jail check closed by design.
+		CreateDirectoryAliasOrSkip(
+			Path.Combine(project, "linked-alias"),
+			OperatingSystem.IsWindows() ? Path.Combine(project, "target") : "target");
 		await using var server = await McpTestServer.StartAsync(
 			project,
 			workspace.Path,
