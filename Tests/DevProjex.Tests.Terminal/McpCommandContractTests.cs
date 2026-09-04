@@ -131,6 +131,42 @@ public sealed class McpCommandContractTests
 	}
 
 	[Fact]
+	public async Task McpUnrestrictedComposesWithAgentDelegationAtParseTime()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var environment = new TestTerminalEnvironment();
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		// A canceled exit (not a usage error) proves the flag pair parses:
+		// the documented full-reach recipe must never become a conflict.
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--root", project, "--unrestricted", "--allow-agent-exclusions", "--language", "en"],
+			cancellation.Token);
+
+		Assert.Equal(CommandLineExitCodes.Canceled, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-CANCELED", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task McpUnrestrictedRejectsAnExplicitValueGracefully()
+	{
+		var environment = new TestTerminalEnvironment();
+
+		// --unrestricted is a value-less switch; a stray value must surface as a
+		// normal parse error, never as an unhandled exception.
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--unrestricted", "true", "--unrestricted", "false", "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.NotEmpty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task McpCancellationUsesTheCliCanceledExitContract()
 	{
 		using var workspace = new TemporaryDirectory();

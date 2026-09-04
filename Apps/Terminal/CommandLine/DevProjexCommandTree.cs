@@ -112,9 +112,13 @@ public sealed class DevProjexCommandTree
 		};
 		var gitMode = CreateMcpGitModeOption();
 		var exclude = CreateMcpExcludeOption();
+		// Arity is pinned to zero: command validators run before arity validation in
+		// System.CommandLine, and GetValue on an over-arity result throws instead of
+		// reporting a parse error. A value-less switch keeps every spelling graceful.
 		var unrestricted = new Option<bool>("--unrestricted")
 		{
-			Description = L("Terminal.Option.McpUnrestricted")
+			Description = L("Terminal.Option.McpUnrestricted"),
+			Arity = ArgumentArity.Zero
 		};
 		var allowAgentExclusions = new Option<bool>("--allow-agent-exclusions")
 		{
@@ -147,7 +151,8 @@ public sealed class DevProjexCommandTree
 			"devprojex mcp --root . --git-mode tracked",
 			"devprojex mcp --root . --exclude smart-ignore --exclude dot-folders",
 			"devprojex mcp --root . --unrestricted",
-			"devprojex mcp --root . --allow-agent-exclusions");
+			"devprojex mcp --root . --allow-agent-exclusions",
+			"devprojex mcp --root . --unrestricted --allow-agent-exclusions");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];

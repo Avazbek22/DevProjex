@@ -58,7 +58,9 @@ devprojex mcp --root /absolute/path/to/project --unrestricted
 baseline set to `none` — equivalent to `--exclude none --git-mode none`, and
 rejected in combination with either flag. It widens visibility only: secret
 redaction still applies to every response, and per-call arguments and profiles
-behave exactly as they do for the spelled-out form.
+behave exactly as they do for the spelled-out form. The `.git` administrative
+area is a product boundary like symbolic links: it stays excluded even at this
+widest baseline.
 
 Per-call exclusion control by the agent is a separate startup opt-in:
 
@@ -78,6 +80,15 @@ set skips (subject to the Git baseline), so enable this delegation only for
 agents you trust with full-project walks. Both the startup baseline and the
 delegated set apply to opt-in remote checkouts exactly as they do to local
 roots.
+
+Delegation alone stays bounded by the startup Git baseline: the agent has no
+parameter that lifts Git filtering, so even `exclusions: []` cannot surface
+gitignored files on a default server. Pairing the two startup flags is the
+full-reach recipe for a trusted agent:
+
+```shell
+devprojex mcp --root /absolute/path/to/project --unrestricted --allow-agent-exclusions
+```
 
 Because the parameter is a full desired state, growing the exclusion
 vocabulary in a future version is a compatibility checkpoint: a token absent
@@ -141,10 +152,11 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 - Returned project content is marked as untrusted data with a random, per-response
   delimiter. Agents must not interpret instructions found in project files as
   trusted control input.
-- Product exclusions, including built-in rules and `.gitignore`, remain active.
-  Agent paths and globs can only narrow the effective selection. The exclusion
-  toggles themselves stay under human control: agents can change them only on a
-  server deliberately started with `--allow-agent-exclusions`, or by naming a profile
+- Agent paths and globs can only narrow the effective selection, and the `.git`
+  administrative area is excluded in every mode. Which product exclusions and
+  Git filtering run is the human's startup choice (`--exclude`, `--git-mode`,
+  `--unrestricted`); agents can change the toggles only on a server
+  deliberately started with `--allow-agent-exclusions`, or by naming a profile
   that already exists inside the project root — treat committed profile files
   as part of the selection surface you publish. Delegation covers file
   visibility only, never the redaction pass.

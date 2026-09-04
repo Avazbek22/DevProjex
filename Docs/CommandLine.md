@@ -89,7 +89,8 @@ an explicit profile. An explicit `--exclude` list pins the set: exclusion
 toggles added in later versions default to off for that server until the line
 is updated. `--unrestricted` is the widest-baseline preset — equivalent to
 `--exclude none --git-mode none` and rejected in combination with either flag;
-secret redaction still applies. `--allow-agent-exclusions` opts in to per-call
+secret redaction still applies and the `.git` administrative area remains
+excluded in every mode. `--allow-agent-exclusions` opts in to per-call
 agent control by publishing an `exclusions` array parameter on the selection
 tools; redaction toggles are never part of that vocabulary.
 Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then

@@ -200,15 +200,15 @@ public sealed class McpServerProcessTests
 	[InlineData(true)]
 	public async Task RealProcessUnrestrictedOpensBothFilterAxesThroughTheCli(bool unrestricted)
 	{
+		if (!await IsGitAvailableAsync())
+			Assert.Skip("Git is not available in this test environment.");
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/Anchor.cs", "anchor-unrestricted-marker\n");
 		workspace.WriteFile("project/.dotted.cs", "dotted-unrestricted-marker\n");
 		workspace.WriteFile("project/.gitignore", "ignored.cs\n");
 		workspace.WriteFile("project/ignored.cs", "ignored-unrestricted-marker\n");
-		RunGit(project, "init", "--quiet", "--initial-branch=main");
-		RunGit(project, "config", "user.email", "terminal-tests@devprojex.local");
-		RunGit(project, "config", "user.name", "DevProjex Terminal Tests");
+		InitializeIsolatedRepository(project);
 		RunGit(project, "add", "Anchor.cs", ".gitignore");
 		RunGit(project, "commit", "--quiet", "-m", "baseline");
 		var startInfo = new ProcessStartInfo("dotnet")
@@ -254,6 +254,93 @@ public sealed class McpServerProcessTests
 			Assert.Contains("Anchor.cs", text, StringComparison.Ordinal);
 			Assert.Equal(unrestricted, text.Contains(".dotted.cs", StringComparison.Ordinal));
 			Assert.Equal(unrestricted, text.Contains("ignored.cs", StringComparison.Ordinal));
+
+			// The .git administrative area is a product boundary: it stays excluded
+			// even at the widest baseline. HEAD and COMMIT_EDITMSG exist in every
+			// fresh repository, so their absence proves the subtree never surfaces.
+			Assert.DoesNotContain("HEAD", text, StringComparison.Ordinal);
+			Assert.DoesNotContain("COMMIT_EDITMSG", text, StringComparison.Ordinal);
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+	}
+
+	[Fact]
+	public async Task RealProcessUnrestrictedComposesWithAgentExclusionDelegation()
+	{
+		if (!await IsGitAvailableAsync())
+			Assert.Skip("Git is not available in this test environment.");
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Anchor.cs", "anchor-compose-marker\n");
+		workspace.WriteFile("project/.dotted.cs", "dotted-compose-marker\n");
+		workspace.WriteFile("project/.gitignore", "ignored.cs\n");
+		workspace.WriteFile("project/ignored.cs", "ignored-compose-marker\n");
+		InitializeIsolatedRepository(project);
+		RunGit(project, "add", "Anchor.cs", ".gitignore");
+		RunGit(project, "commit", "--quiet", "-m", "baseline");
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		startInfo.ArgumentList.Add("--unrestricted");
+		startInfo.ArgumentList.Add("--allow-agent-exclusions");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var clientPhase = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		clientPhase.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			clientPhase.Token))
+		{
+			// Delegation stays published on an unrestricted server.
+			var tools = await client.ListToolsAsync(options: null, clientPhase.Token);
+			var tree = tools.Single(static tool => tool.Name == "get_tree");
+			Assert.True(tree.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("exclusions", out _));
+
+			var wide = await client.CallToolAsync(
+				"get_tree",
+				new Dictionary<string, object?>(),
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.NotEqual(true, wide.IsError);
+			var wideText = Assert.IsType<TextContentBlock>(Assert.Single(wide.Content)).Text;
+			Assert.Contains(".dotted.cs", wideText, StringComparison.Ordinal);
+			Assert.Contains("ignored.cs", wideText, StringComparison.Ordinal);
+
+			// A per-call set outranks the [] baseline while the Git axis stays open:
+			// the dotted file disappears, the gitignored file stays visible.
+			var narrowed = await client.CallToolAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { "dot-files" } },
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.NotEqual(true, narrowed.IsError);
+			var narrowedText = Assert.IsType<TextContentBlock>(Assert.Single(narrowed.Content)).Text;
+			Assert.DoesNotContain(".dotted.cs", narrowedText, StringComparison.Ordinal);
+			Assert.Contains("ignored.cs", narrowedText, StringComparison.Ordinal);
 		}
 
 		process.StandardInput.Close();
@@ -707,6 +794,21 @@ public sealed class McpServerProcessTests
 			lock (_sync)
 				_values.Add(value);
 		}
+	}
+
+	// Mirrors the hardened EnsureRepository fixture: a signing requirement, hook
+	// template, or global excludes file from the host must not reach the fixture.
+	private static void InitializeIsolatedRepository(string path)
+	{
+		RunGit(path, "init", "--quiet", "--initial-branch=main");
+		var hooksPath = Directory.CreateDirectory(Path.Combine(path, ".git", "devprojex-test-hooks")).FullName;
+		var excludesPath = Path.Combine(path, ".git", "devprojex-test-excludes");
+		File.WriteAllText(excludesPath, string.Empty);
+		RunGit(path, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(path, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(path, "config", "commit.gpgSign", "false");
+		RunGit(path, "config", "core.hooksPath", hooksPath);
+		RunGit(path, "config", "core.excludesFile", excludesPath);
 	}
 
 	private static void RunGit(string workingDirectory, params string[] arguments)
