@@ -5084,8 +5084,11 @@ public sealed class McpServerIntegrationTests
 			_firstValue.TrySetResult();
 		}
 
+		// Generous on purpose: the assertions cover ordering and token scoping, not
+		// latency, and cold CI runners have needed more than ten seconds to emit
+		// the first notification.
 		public Task WaitForValueAsync(CancellationToken cancellationToken) =>
-			_firstValue.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+			_firstValue.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
 	}
 
 	private static void AssertSpotlighted(CallToolResult result)
