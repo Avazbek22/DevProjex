@@ -109,7 +109,7 @@ The `.gitignore` implementation supports nested rule scopes, negations, and ance
 The following boundaries are intentional:
 
 - an absent `.gitignore` is an active empty rule set, not a fallback to `none`;
-- the administrative entry named exactly `.git` remains excluded while Git filtering is active;
+- the administrative entry named exactly `.git` remains excluded in every Git filtering mode, including `none`;
 - names such as `.github` and `.git-owned` are ordinary paths;
 - `.git/info/exclude` and global Git excludes are not read;
 - a symbolic link named `.gitignore` is not followed;

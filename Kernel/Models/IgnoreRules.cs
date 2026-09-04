@@ -241,6 +241,11 @@ public sealed record IgnoreRules(
 
 	public GitIgnoreEvaluation EvaluateGitIgnore(string fullPath, bool isDirectory, string name)
 	{
+		// The .git administrative area is a product boundary, not working-tree content:
+		// it stays excluded even when every Git filtering mode is off.
+		if (IsGitAdministrativeEntry(name))
+			return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
+
 		if (!IsGitIgnoreTraversalEnabled)
 			return GitIgnoreEvaluation.NotIgnored;
 
@@ -256,8 +261,9 @@ public sealed record IgnoreRules(
 		string name,
 		bool useCandidates)
 	{
-		// Git administrative entries are outside the working tree and must never be traversed as ignore-pattern content.
-		if ((useCandidates || UseGitIgnore || UseTrackedGitFilesOnly) && IsGitAdministrativeEntry(name))
+		// Git administrative entries are outside the working tree and must never be traversed
+		// as ignore-pattern content; the boundary holds in every Git filtering mode.
+		if (IsGitAdministrativeEntry(name))
 			return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 
 		var scopedMatchersSource = GetScopedGitIgnoreMatchers(useCandidates);
@@ -1136,10 +1142,12 @@ public sealed record IgnoreRules(
 			bool isDirectory,
 			string name)
 		{
+			// The .git boundary precedes the traversal short-circuit so it also holds
+			// when every Git filtering mode is off.
+			if (IsGitAdministrativeEntry(name))
+				return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 			if (!_useCandidates && !_rules.IsGitIgnoreTraversalEnabled)
 				return GitIgnoreEvaluation.NotIgnored;
-			if (IsGitAdministrativeEntryForActiveScope(fullPath, name))
-				return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 
 			if (!_useCandidates && _rules.UseTrackedGitFilesOnly)
 				return EvaluateTrackedFilesOnly(fullPath, isDirectory);
@@ -1248,18 +1256,6 @@ public sealed record IgnoreRules(
 			return trackedPath.Index.HasDescendantNormalizedRelativePath(trackedPath.RelativePath)
 				? new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: true)
 				: evaluation;
-		}
-
-		private bool IsGitAdministrativeEntryForActiveScope(string fullPath, string name)
-		{
-			if (!IsGitAdministrativeEntry(name))
-				return false;
-
-			if (_useCandidates || _rules.UseGitIgnore || _rules.UseTrackedGitFilesOnly)
-				return true;
-
-			var parentPath = Path.GetDirectoryName(fullPath);
-			return !string.IsNullOrWhiteSpace(parentPath) && ContainsScope(parentPath);
 		}
 
 		private GitIgnoreMatcher.IgnoreEvaluation EvaluateRulesOnly(
