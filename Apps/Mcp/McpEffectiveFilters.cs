@@ -1,4 +1,10 @@
+using System.Globalization;
+
 namespace DevProjex.Mcp;
+
+internal readonly record struct McpSelectionNoticeContext(
+	bool HasPaths,
+	bool HasPatterns);
 
 /// <summary>
 /// Trusted, path-free descriptions of the filters that shaped a selection. They let an agent
@@ -8,15 +14,23 @@ internal static class McpEffectiveFilters
 {
 	public const string StartupFlags = "--exclude, --unrestricted, --allow-agent-exclusions";
 
-	public const string EmptySelectionNotice =
+	private const string PatternSelectionEmptyNotice =
 		"[Empty selection] No file passed the effective filters and the request arguments. " +
 		"Patterns match the whole project-relative path: '*' stays inside one segment, '**/' spans any depth; " +
 		"paths the filters hide never match.";
+	private const string PathSelectionEmptyNotice =
+		"[Empty selection] None of the requested paths is in the effective selection; paths the filters hide never match.";
+	private const string ProjectSelectionEmptyNotice =
+		"[Empty selection] The effective filters leave no file in this project.";
 
 	public static string Describe(ProjectContextPlan plan)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
-		return $"git: {ProjectSelectionTokens.ToToken(plan.Selection)}; exclusions: {DescribeExclusions(plan.Selection.Exclusions)}";
+		var description =
+			$"git: {ProjectSelectionTokens.ToToken(plan.Selection)}; exclusions: {DescribeExclusions(plan.Selection.Exclusions)}";
+		return plan.FileSizeFilter is null
+			? description
+			: $"{description}; max_file_bytes: {plan.FileSizeFilter.MaximumFileBytes.ToString(CultureInfo.InvariantCulture)}";
 	}
 
 	public static string DescribeExclusions(IEnumerable<ProjectExclusion>? exclusions)
@@ -42,16 +56,42 @@ internal static class McpEffectiveFilters
 
 	/// <summary>
 	/// The footer plus the empty-selection explanation when nothing survived the filters;
-	/// <see langword="null"/> when the footer is not wanted and the selection is not empty.
+	/// <see langword="null"/> when no requested diagnostic applies and the selection is not empty.
 	/// </summary>
-	public static string? SelectionNotices(ProjectContextPlan plan, bool agentExclusions, bool includeFilters)
+	public static string? SelectionNotices(
+		ProjectContextPlan plan,
+		bool agentExclusions,
+		bool includeFilters,
+		McpSelectionNoticeContext request)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var isEmpty = plan.IncludedFiles.Count == 0;
-		if (!includeFilters && !isEmpty)
+		if (!includeFilters && !isEmpty && plan.FileSizeFilter is null)
 			return null;
 
 		var notice = Notice(plan, agentExclusions);
-		return isEmpty ? notice + "\n" + EmptySelectionNotice : notice;
+		return isEmpty ? notice + "\n" + EmptySelectionNotice(plan, request) : notice;
+	}
+
+	private static string EmptySelectionNotice(
+		ProjectContextPlan plan,
+		McpSelectionNoticeContext request)
+	{
+		if (request.HasPatterns)
+			return PatternSelectionEmptyNotice;
+
+		var gitMode = plan.Selection.GitMode ?? GitFilteringMode.None;
+		var isGitNarrowing = gitMode is GitFilteringMode.TrackedFilesOnly or
+			GitFilteringMode.Staged or
+			GitFilteringMode.Changes or
+			GitFilteringMode.Diff;
+		if (request.HasPaths && !isGitNarrowing)
+			return PathSelectionEmptyNotice;
+		if (isGitNarrowing)
+		{
+			return $"[Empty selection] Git reports no files for this scope (git: {ProjectSelectionTokens.ToToken(plan.Selection)}).";
+		}
+
+		return ProjectSelectionEmptyNotice;
 	}
 }

@@ -25,6 +25,9 @@ internal sealed class DevProjexMcpTools(
 		"[Token budget file list truncated to fit the stored-pack response limit.]";
 	private const string StoredTrustedNoticeTruncationNotice =
 		"[Additional trusted diagnostics truncated to fit the stored-pack response limit.]";
+	private const string RedactionDescription =
+		" Secrets are replaced with DEVPROJEX_REDACTED[<category>#<n>] placeholders before text is returned or searched; " +
+		"known examples such as documentation domains, 555 numbers, EXAMPLE keys, and reserved IP ranges are intentionally preserved.";
 	private readonly McpProjectOperationGate _projectOperation = new();
 	private McpProjectService Projects => projectService.Value;
 
@@ -84,12 +87,14 @@ internal sealed class DevProjexMcpTools(
 					"max_file_bytes",
 					"format"));
 			var format = ParseTreeFormat(arguments.OptionalString("format") ?? "markdown");
+			var includePatterns = arguments.OptionalStringArray("include_patterns");
+			var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
 				paths: null,
-				arguments.OptionalStringArray("include_patterns"),
-				arguments.OptionalStringArray("exclude_patterns"),
+				includePatterns,
+				excludePatterns,
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
 				arguments.OptionalString("git_scope"),
@@ -128,16 +133,22 @@ internal sealed class DevProjexMcpTools(
 				}
 			}
 
-			var body = treeWriter.Text;
-			if (treeWriter.IsTruncated)
-				body += "\n[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]";
+			var treeTruncationNotice = treeWriter.IsTruncated
+				? "[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]"
+				: null;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
-				McpSpotlight.Wrap(body),
+				McpSpotlight.Wrap(treeWriter.Text),
+				treeTruncationNotice,
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
-				SelectionNotices(plan, includeFilters: true)));
+				SelectionNotices(
+					plan,
+					includeFilters: true,
+					new McpSelectionNoticeContext(
+						HasPaths: false,
+						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
 		}, cancellationToken);
 
-	[Description("Measure a redacted project selection and list its largest text files by estimated tokens.")]
+	[Description("Measure a redacted project selection and list its largest text files by estimated tokens." + RedactionDescription)]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -148,10 +159,11 @@ internal sealed class DevProjexMcpTools(
 			var arguments = SelectionArguments(request.Params);
 			var topFileCount = arguments.OptionalInteger("top_files", 1, 1_000) ?? 10;
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
-			var plan = await BuildSelectionAsync(
+			var selection = await BuildSelectionAsync(
 				arguments,
 				cancellationToken,
 				includeOutputMetrics: false).ConfigureAwait(false);
+			var plan = selection.Plan;
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
@@ -208,10 +220,13 @@ internal sealed class DevProjexMcpTools(
 				CombineTrustedNotices(
 					FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
-					SelectionNotices(plan, includeFilters: false)));
+					SelectionNotices(plan, includeFilters: false, selection.NoticeContext)));
 		}, cancellationToken);
 
-	[Description("Build an exact redacted DevProjex context export. A stored pack id remains valid until this server process exits; after restart, call pack_context again.")]
+	[Description(
+		"Build an exact redacted DevProjex context export. Results through 50,000 characters are returned inline; larger results are stored and return a pack_id for read_pack. " +
+		"A stored pack id remains valid until this server process exits; after restart, call pack_context again." +
+		RedactionDescription)]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -239,18 +254,19 @@ internal sealed class DevProjexMcpTools(
 			var maximumEstimatedTokens = arguments.OptionalInt64("max_tokens", 1, long.MaxValue);
 			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
 			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
-			var plan = await BuildSelectionAsync(
+			var selection = await BuildSelectionAsync(
 					arguments,
 					cancellationToken,
 					includeOutputMetrics:
 						view == ProjectContextView.Tree &&
 						format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 				.ConfigureAwait(false);
+			var plan = selection.Plan;
 			// A pack is the answer many agents read instead of get_tree, so it carries the same
 			// effective-filters footer next to its tree.
 			var trustedPlanWarnings = CombineTrustedNotices(
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
-				SelectionNotices(plan, includeFilters: true));
+				SelectionNotices(plan, includeFilters: true, selection.NoticeContext));
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
@@ -388,20 +404,19 @@ internal sealed class DevProjexMcpTools(
 					end,
 					cancellationToken)
 				.ConfigureAwait(false);
-			var text = page.Text;
-			if (page.IsTruncated)
-			{
-				text += $"\n[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; " +
-				        $"continue with start_line={page.EndLine + 1}.]";
-			}
-			if (page.CharacterLimitReached)
-				text += "\n[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]";
+			var continuationNotice = page.IsTruncated
+				? $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; " +
+				  $"continue with start_line={page.EndLine + 1}.]"
+				: null;
+			var characterLimitNotice = page.CharacterLimitReached
+				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
+				: null;
 			return McpToolResults.TextSuccess(
-				McpSpotlight.Wrap(text),
+				AppendTrustedNotices(McpSpotlight.Wrap(page.Text), continuationNotice, characterLimitNotice),
 				advertiseLargeResult: true);
 		});
 
-	[Description("Search already-redacted project text with a timeout-bounded .NET regular expression.")]
+	[Description("Search already-redacted project text with a timeout-bounded .NET regular expression." + RedactionDescription)]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -426,13 +441,15 @@ internal sealed class DevProjexMcpTools(
 			var ignoreCase = arguments.OptionalBoolean("ignore_case", true);
 			var maximumResults = arguments.OptionalInteger("max_results", 1, 200) ?? 50;
 			var regex = new McpSearchRegex(pattern, ignoreCase);
+			var includePatterns = arguments.OptionalStringArray("include_patterns");
+			var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
 
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
 				paths: null,
-				arguments.OptionalStringArray("include_patterns"),
-				arguments.OptionalStringArray("exclude_patterns"),
+				includePatterns,
+				excludePatterns,
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
 				arguments.OptionalString("git_scope"),
@@ -480,12 +497,9 @@ internal sealed class DevProjexMcpTools(
 					}
 				}
 			}
-			if (totalMatches > shownMatches)
-			{
-				if (output.Length > 0 && output[^1] is not ('\r' or '\n'))
-					output.AppendLine();
-				output.AppendLine($"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]");
-			}
+			var additionalMatchesNotice = totalMatches > shownMatches
+				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
+				: null;
 			// An empty search result must say whether nothing matched or nothing was searched;
 			// the count is trusted data, the file names never are.
 			var noMatches = totalMatches == 0 && plan.IncludedFiles.Count > 0
@@ -496,10 +510,16 @@ internal sealed class DevProjexMcpTools(
 				FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Search),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
-				SelectionNotices(plan, includeFilters: false)));
+				additionalMatchesNotice,
+				SelectionNotices(
+					plan,
+					includeFilters: false,
+					new McpSelectionNoticeContext(
+						HasPaths: false,
+						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
 		}, cancellationToken);
 
-	[Description("Read redacted text from one effective project file using an optional 1-based line range.")]
+	[Description("Read redacted text from one effective project file using an optional 1-based line range." + RedactionDescription)]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -547,12 +567,16 @@ internal sealed class DevProjexMcpTools(
 				MaximumPageLines,
 				MaximumPageCharacters,
 				cancellationToken);
-			var text = page.Text;
-			if (page.IsTruncated)
-				text += $"\n[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; continue with start_line={page.EndLine + 1}.]";
-			if (page.CharacterLimitReached)
-				text += "\n[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]";
-			return McpToolResults.TextSuccess(McpSpotlight.Wrap(text));
+			var continuationNotice = page.IsTruncated
+				? $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; continue with start_line={page.EndLine + 1}.]"
+				: null;
+			var characterLimitNotice = page.CharacterLimitReached
+				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
+				: null;
+			return McpToolResults.TextSuccess(AppendTrustedNotices(
+				McpSpotlight.Wrap(page.Text),
+				continuationNotice,
+				characterLimitNotice));
 		}, cancellationToken);
 
 	private McpJsonArguments SelectionArguments(CallToolRequestParams request) =>
@@ -571,30 +595,45 @@ internal sealed class DevProjexMcpTools(
 				"top_files",
 				"max_file_bytes"));
 
-	private Task<ProjectContextPlan> BuildSelectionAsync(
+	private async Task<McpSelectionResult> BuildSelectionAsync(
 		McpJsonArguments arguments,
 		CancellationToken cancellationToken,
-		bool includeOutputMetrics = true) =>
-		Projects.BuildPlanAsync(
+		bool includeOutputMetrics = true)
+	{
+		var paths = arguments.OptionalStringArray(
+			"paths",
+			allowWhitespace: true,
+			maximumItems: McpProjectService.MaximumRequestedPaths,
+			maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength);
+		var includePatterns = arguments.OptionalStringArray("include_patterns");
+		var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
+		var plan = await Projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
 			arguments.OptionalString("branch"),
-			arguments.OptionalStringArray(
-				"paths",
-				allowWhitespace: true,
-				maximumItems: McpProjectService.MaximumRequestedPaths,
-				maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength),
-			arguments.OptionalStringArray("include_patterns"),
-			arguments.OptionalStringArray("exclude_patterns"),
+			paths,
+			includePatterns,
+			excludePatterns,
 			arguments.OptionalString("profile"),
 			arguments.OptionalBoolean("tracked_only", false),
 			arguments.OptionalString("git_scope"),
 			arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 			cancellationToken,
 			includeOutputMetrics,
-			exclusions: ParseExclusionsArgument(arguments));
+			exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
+		return new McpSelectionResult(
+			plan,
+			new McpSelectionNoticeContext(
+				HasPaths: HasItems(paths),
+				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)));
+	}
 
-	private string? SelectionNotices(ProjectContextPlan plan, bool includeFilters) =>
-		McpEffectiveFilters.SelectionNotices(plan, agentExclusions, includeFilters);
+	private string? SelectionNotices(
+		ProjectContextPlan plan,
+		bool includeFilters,
+		McpSelectionNoticeContext request) =>
+		McpEffectiveFilters.SelectionNotices(plan, agentExclusions, includeFilters, request);
+
+	private static bool HasItems<T>(IReadOnlyCollection<T>? items) => items is { Count: > 0 };
 
 	// The exclusions argument exists only on servers started with --allow-agent-exclusions;
 	// everywhere else the allowlist rejects it, so a default server keeps the
@@ -668,16 +707,16 @@ internal sealed class DevProjexMcpTools(
 		catch (PortableProjectProfileException exception)
 		{
 			// Profile validation carries curated user-facing text; surfacing it beats the
-			// opaque operation-failed fallback when an agent names a broken profile.
+			// opaque operation-failed fallback, but CLI error codes do not cross the MCP boundary.
 			return McpToolResults.Error(new McpToolException(
 				McpErrorCodes.InvalidArguments,
-				$"{McpErrorCodes.InvalidArguments}: {exception.Code}: {exception.Message}"));
+				$"{McpErrorCodes.InvalidArguments}: {exception.Message}"));
 		}
 		catch (ProjectContextValidationException exception)
 		{
 			return McpToolResults.Error(new McpToolException(
 				McpErrorCodes.InvalidArguments,
-				$"{McpErrorCodes.InvalidArguments}: {exception.Code}: {exception.Message}"));
+				$"{McpErrorCodes.InvalidArguments}: {exception.Message}"));
 		}
 		catch (OperationCanceledException)
 		{
@@ -746,13 +785,10 @@ internal sealed class DevProjexMcpTools(
 		string? unscannableNotice,
 		string? planWarnings)
 	{
-		var header = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
+		var header = $"Pack stored as '{pack.Id}' ({pack.Characters} characters, {pack.Lines} lines). " +
 		             "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n";
-		var treePreview = LimitResponseSegment(
-			tree,
-			MaximumStoredTreePreviewCharacters,
-			StoredTreePreviewTruncationNotice,
-			treeWasTruncated);
+		var treePreview = TakeCompleteScalarPrefix(tree, MaximumStoredTreePreviewCharacters);
+		var treePreviewWasTruncated = treeWasTruncated || treePreview.Length < tree.Length;
 		var budgetReport = report is null
 			? null
 			: LimitResponseSegment(
@@ -773,6 +809,7 @@ internal sealed class DevProjexMcpTools(
 		string Compose() => AppendTrustedNotices(
 			header + McpSpotlight.Wrap(treePreview) +
 			(budgetReport is null ? string.Empty : "\n\n" + McpSpotlight.Wrap(budgetReport)),
+			treePreviewWasTruncated ? StoredTreePreviewTruncationNotice : null,
 			trustedNotices);
 
 		var message = Compose();
@@ -780,14 +817,9 @@ internal sealed class DevProjexMcpTools(
 			return message;
 
 		var overflow = message.Length - MaximumStoredPackResponseCharacters;
-		var reducedTreeLimit = Math.Max(
-			StoredTreePreviewTruncationNotice.Length,
-			treePreview.Length - overflow);
-		treePreview = LimitResponseSegment(
-			treePreview,
-			reducedTreeLimit,
-			StoredTreePreviewTruncationNotice,
-			forceMarker: true);
+		var reducedTreeLimit = Math.Max(0, treePreview.Length - overflow);
+		treePreview = TakeCompleteScalarPrefix(treePreview, reducedTreeLimit);
+		treePreviewWasTruncated = true;
 		message = Compose();
 		if (message.Length <= MaximumStoredPackResponseCharacters)
 			return message;
@@ -925,10 +957,17 @@ internal sealed class DevProjexMcpTools(
 			}
 		}
 
-		output.Append(
-			"Tip: use detail=compact or detail=signatures, narrow the selection, or increase max_tokens.");
-		return output.ToString();
+		if (report.SkippedFileCount > 0)
+		{
+			output.Append(
+				"Tip: use detail=compact or detail=signatures, narrow the selection, or increase max_tokens.");
+		}
+		return output.ToString().TrimEnd('\r', '\n');
 	}
+
+	private sealed record McpSelectionResult(
+		ProjectContextPlan Plan,
+		McpSelectionNoticeContext NoticeContext);
 
 	private enum UnscannableResultKind
 	{
