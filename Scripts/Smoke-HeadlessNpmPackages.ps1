@@ -175,6 +175,10 @@ log: { type: stdout, format: pretty, level: warn }
         Pop-Location
     }
 
+    # The omitted-optional probe intentionally launches Node and expects exit 1.
+    # Reset the native status only after every assertion passed so pwsh hosts that
+    # forward $LASTEXITCODE do not turn the successful smoke script into a failure.
+    $global:LASTEXITCODE = 0
     Write-Host "Headless npm smoke passed through Verdaccio for $Version."
 }
 catch {
