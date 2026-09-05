@@ -350,10 +350,10 @@ internal static class ProjectTreeInventoryScanner
 				gitIgnoreLoadSession,
 				cancellationToken,
 				out var gitIgnoreReadFailed);
-			if (gitIgnoreContexts.Primary.IsOpaqueRepository(parent.FullPath) && !gitIgnoreReadFailed)
+			if (gitIgnoreContexts.Enabled && gitIgnoreContexts.Primary.IsOpaqueRepository(parent.FullPath) && !gitIgnoreReadFailed)
 				continue;
 			if (!string.IsNullOrWhiteSpace(gitControlPaths.GitMetadataPath) &&
-			    !gitIgnoreContexts.Secondary.IsOpaqueRepository(parent.FullPath))
+			    (!gitIgnoreContexts.Enabled || !gitIgnoreContexts.Secondary.IsOpaqueRepository(parent.FullPath)))
 				discoveredGitRepositoryRoots.Add(parent.FullPath);
 			if (gitIgnoreReadFailed)
 			{

@@ -4788,6 +4788,8 @@ public sealed class McpServerIntegrationTests
 		var outer = workspace.CreateDirectory("outer");
 		File.WriteAllText(Path.Combine(outer, "Outer.txt"), "outer\n");
 		InitializeCommittedRepository(outer);
+		// Keep the explicit-path scope contract on a declared repository; embedded clones are now opaque.
+		File.WriteAllText(Path.Combine(outer, ".gitmodules"), "[submodule \"nested\"]\n path = nested\n");
 		var nested = workspace.CreateDirectory("outer/nested");
 		File.WriteAllText(Path.Combine(nested, "App.cs"), "v1\n");
 		InitializeCommittedRepository(nested);
