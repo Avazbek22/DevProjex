@@ -1179,6 +1179,17 @@ effective filters. Glob patterns gain `{a,b}` alternatives; `!` negation and
 `[...]` classes, previously matched as literal characters, are rejected with
 `DPX-MCP-INVALID-PATTERN`.
 
+MCP diagnostics are also refined in v5.2. An unknown `profile` now returns
+`DPX-MCP-INVALID-ARGUMENTS` rather than `DPX-MCP-PATH-NOT-FOUND`, and MCP
+messages no longer expose internal `DPX-CLI-*` codes. Stored responses start
+with `Pack stored as '<id>' (<N> characters, <M> lines)`. Continuation and
+truncation trailers are trusted text outside the untrusted-data block.
+`get_file.path` and the `paths` accepted by `analyze` and `pack_context`
+recognize Markdown-escaped names copied from the default tree format;
+`max_file_bytes` appears in effective-filter diagnostics when supplied; and
+wrong-case path diagnostics are platform-independent and name the spelling
+listed by `get_tree`.
+
 MCP `get_tree.format` is an additive input with `markdown` as its compact default.
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;
 structured output that cannot fit the 2,000-line response limit fails with an
