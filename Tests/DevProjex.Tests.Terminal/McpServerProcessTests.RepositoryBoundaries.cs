@@ -25,6 +25,11 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("project/libs/SomeLib/Embedded.cs", "embedded");
 		RunGit(embedded, "init", "--quiet");
 		RunGit(embedded, "add", "Embedded.cs");
+		workspace.WriteFile("project/libs/SomeLib/.gitmodules", "[submodule \"nested\"]\n path = nested\n");
+		var nested = workspace.CreateDirectory("project/libs/SomeLib/nested");
+		workspace.WriteFile("project/libs/SomeLib/nested/DeepEmbedded.cs", "deep embedded");
+		RunGit(nested, "init", "--quiet");
+		RunGit(nested, "add", "DeepEmbedded.cs");
 		workspace.WriteFile("project/.git/info/exclude", "local/\n");
 		workspace.WriteFile("project/local/Excluded.cs", "excluded");
 
@@ -42,6 +47,7 @@ public sealed partial class McpServerProcessTests
 			var output = await outputTask;
 			Assert.True(process.ExitCode == 0, await errorTask);
 			Assert.Equal(embeddedVisible, output.Contains("Embedded.cs", StringComparison.Ordinal));
+			Assert.Equal(embeddedVisible, output.Contains("DeepEmbedded.cs", StringComparison.Ordinal));
 			Assert.Contains("Anchor.cs", output, StringComparison.Ordinal);
 		}
 
@@ -72,6 +78,7 @@ public sealed partial class McpServerProcessTests
 			Assert.NotEqual(true, response.IsError);
 			var output = string.Join("\n", response.Content.OfType<TextContentBlock>().Select(block => block.Text));
 			Assert.Equal(embeddedVisible, output.Contains("Embedded.cs", StringComparison.Ordinal));
+			Assert.Equal(embeddedVisible, output.Contains("DeepEmbedded.cs", StringComparison.Ordinal));
 			Assert.Contains("Anchor.cs", output, StringComparison.Ordinal);
 			Assert.Contains("[Effective filters]", output, StringComparison.Ordinal);
 			Assert.Equal(mode is "none" or "unrestricted" && !changes,

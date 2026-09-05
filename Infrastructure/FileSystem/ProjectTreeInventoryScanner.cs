@@ -717,7 +717,7 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 		out bool gitIgnoreReadFailed)
 	{
 		gitIgnoreReadFailed = false;
-		if (!Enabled)
+		if (!Enabled || Secondary.IsOpaqueRepository(directoryPath))
 			return this;
 
 		var primaryContext = Primary;

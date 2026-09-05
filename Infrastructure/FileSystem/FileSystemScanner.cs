@@ -3852,6 +3852,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		GitIgnoreMatcherLoadSession? loadSession = null)
 	{
 		loadSession ??= new GitIgnoreMatcherLoadSession();
+		if (candidateContext.IsOpaqueRepository(directoryPath))
+			return (activeContext, candidateContext, GitIgnoreMatcherLoadStatus.NotFound);
 		var loadResult = loadSession.LoadScope(directoryPath, gitIgnorePath, gitMetadataPath,
 			gitMetadataPath is null ? null : activeContext.GetOwningRepository(directoryPath), cancellationToken);
 		var scopedMatcher = loadResult.Matcher;
