@@ -1037,36 +1037,27 @@ public sealed class McpServerIntegrationTests
 		}
 	}
 
-	[Fact]
-	public async Task WrongCasePathsArgumentsFollowTheVolumeCasingContract()
+	[Theory]
+	[InlineData("analyze")]
+	[InlineData("pack_context")]
+	public async Task WrongCasePathsArgumentsNameTheListedSpellingAcrossPlatforms(string toolName)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-marker\n");
-		var caseInsensitiveVolume = File.Exists(Path.Combine(project, "ANCHOR.CS"));
-		if (OperatingSystem.IsWindows())
-			Assert.True(caseInsensitiveVolume);
-		if (OperatingSystem.IsLinux())
-			Assert.False(caseInsensitiveVolume);
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync(
-			"analyze",
+			toolName,
 			new Dictionary<string, object?> { ["paths"] = new[] { "anchor.CS" } });
 
-		if (caseInsensitiveVolume)
-		{
-			// Pinned contract: existence follows filesystem semantics but the selection
-			// frontier compares Ordinal, so a wrong-case path resolves yet matches
-			// nothing — the tool succeeds with an empty selection instead of erroring.
-			Assert.NotEqual(true, result.IsError);
-			Assert.Equal(0, result.StructuredContent?.GetProperty("files").GetInt32());
-		}
-		else
-		{
-			Assert.True(result.IsError);
-			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(result), StringComparison.Ordinal);
-		}
+		// Selection diagnostics intentionally use the spelling already exposed by get_tree,
+		// so a copied request behaves consistently on case-sensitive and insensitive volumes.
+		Assert.True(result.IsError);
+		Assert.Contains(
+			"file 'anchor.CS' differs only in letter case from the listed path 'Anchor.cs'",
+			Text(result),
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

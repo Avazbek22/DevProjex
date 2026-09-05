@@ -130,6 +130,7 @@ internal sealed class McpProjectService(
 			globs,
 			hasSelectionFilters,
 			cancellationToken);
+		ValidateRequestedPathCasing(plan, requested);
 		if (parsedScope is { } scope)
 		{
 			string? resolvedDiffRange = null;
@@ -506,20 +507,54 @@ internal sealed class McpProjectService(
 		var seen = new HashSet<string>(StringComparer.Ordinal);
 		var resolved = new HashSet<string>(StringComparer.Ordinal);
 		var directories = new HashSet<string>(StringComparer.Ordinal);
+		var tokens = new List<RequestedPathToken>(paths.Count);
 		foreach (var path in paths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (!seen.Add(NormalizeRequestedPathToken(projectRoot, path)))
 				continue;
 
-			var fullPath = ResolveExistingInputPath(projectRoot, path);
+			string fullPath;
+			try
+			{
+				fullPath = ResolveExistingInputPath(projectRoot, path);
+			}
+			catch (McpToolException exception) when (exception.Code == McpErrorCodes.PathNotFound)
+			{
+				tokens.Add(new RequestedPathToken(path, null, IsDirectory: false, exception));
+				continue;
+			}
+
+			var isDirectory = Directory.Exists(fullPath);
+			tokens.Add(new RequestedPathToken(path, fullPath, isDirectory, ResolutionError: null));
 			if (!resolved.Add(fullPath))
 				continue;
-			if (Directory.Exists(fullPath))
+			if (isDirectory)
 				directories.Add(fullPath);
 		}
 
-		return new RequestedPathSelection(resolved, directories);
+		return new RequestedPathSelection(resolved, directories, tokens);
+	}
+
+	private static void ValidateRequestedPathCasing(
+		ProjectContextPlan plan,
+		RequestedPathSelection requested)
+	{
+		foreach (var token in requested.Tokens)
+		{
+			var matchesExactly = token.ResolvedPath is { } resolvedPath &&
+				(token.IsDirectory
+					? plan.IncludedFolders.Contains(resolvedPath, StringComparer.Ordinal)
+					: plan.IncludedFiles.Contains(resolvedPath, StringComparer.Ordinal));
+			if (matchesExactly)
+				continue;
+
+			var caseMismatch = ResolveCaseMismatch(plan, token.Value);
+			if (caseMismatch is not null)
+				throw caseMismatch;
+			if (token.ResolutionError is not null)
+				throw token.ResolutionError;
+		}
 	}
 
 	internal static IReadOnlyList<string> NormalizeRequestedPathTokens(
@@ -680,12 +715,20 @@ internal sealed class McpProjectService(
 
 	private sealed record RequestedPathSelection(
 		IReadOnlySet<string> Paths,
-		IReadOnlySet<string> Directories)
+		IReadOnlySet<string> Directories,
+		IReadOnlyList<RequestedPathToken> Tokens)
 	{
 		public static RequestedPathSelection Empty { get; } = new(
 			new HashSet<string>(StringComparer.Ordinal),
-			new HashSet<string>(StringComparer.Ordinal));
+			new HashSet<string>(StringComparer.Ordinal),
+			[]);
 	}
+
+	private sealed record RequestedPathToken(
+		string Value,
+		string? ResolvedPath,
+		bool IsDirectory,
+		McpToolException? ResolutionError);
 
 	internal static string ToRelative(string root, string path) =>
 		PathUtility.GetPortableRelativePath(root, path);

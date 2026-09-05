@@ -267,6 +267,24 @@ public sealed class McpServerProcessTests
 				StringComparison.Ordinal);
 			Assert.DoesNotContain("effective filters", wrongCaseText, StringComparison.Ordinal);
 
+			foreach (var toolName in new[] { "analyze", "pack_context" })
+			{
+				var wrongCaseSelection = await client.CallToolAsync(
+					toolName,
+					new Dictionary<string, object?> { ["paths"] = new[] { "wpfapp2/mainwindow.xaml.cs" } },
+					progress: null,
+					options: null,
+					clientPhase.Token);
+				var wrongCaseSelectionText = Assert.IsType<TextContentBlock>(
+					Assert.Single(wrongCaseSelection.Content)).Text;
+				Assert.True(wrongCaseSelection.IsError);
+				Assert.Null(wrongCaseSelection.StructuredContent);
+				Assert.Contains(
+					"differs only in letter case from the listed path 'WpfApp2/MainWindow.xaml.cs'",
+					wrongCaseSelectionText,
+					StringComparison.Ordinal);
+			}
+
 			var markdownPath = await client.CallToolAsync(
 				"get_file",
 				new Dictionary<string, object?> { ["path"] = @"image\_58500.txt" },
