@@ -558,7 +558,7 @@ internal sealed class McpProjectService(
 			{
 				throw new McpToolException(
 					McpErrorCodes.PathNotFound,
-					$"{exception.Message} the path contains markdown escaping from get_tree ('\\{escapedPunctuation}'); " +
+					$"{exception.Message} The path contains markdown escaping from get_tree ('\\{escapedPunctuation}'); " +
 					"use the unescaped spelling or get_tree with format=text.");
 			}
 		}

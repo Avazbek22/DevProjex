@@ -328,7 +328,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    {{ProjectProperty}},
 	    {{BranchProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection. Paths copied from any get_tree format are accepted, including markdown-escaped names." },
+	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
 	    "start_line": { "description": "First 1-based line; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "end_line": { "description": "Last 1-based line, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },

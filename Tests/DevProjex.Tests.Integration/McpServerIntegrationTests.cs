@@ -1021,7 +1021,7 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?> { ["path"] = @"missing\_image.txt" });
 		Assert.True(missing.IsError);
 		Assert.Contains(
-			"the path contains markdown escaping from get_tree ('\\_'); use the unescaped spelling or get_tree with format=text",
+			"The path contains markdown escaping from get_tree ('\\_'); use the unescaped spelling or get_tree with format=text",
 			Text(missing),
 			StringComparison.Ordinal);
 
@@ -1941,7 +1941,8 @@ public sealed class McpServerIntegrationTests
 			StringComparison.Ordinal);
 		var filePath = tools.Single(static tool => tool.Name == "get_file")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("path");
-		Assert.Contains("any get_tree format", filePath.GetProperty("description").GetString(), StringComparison.Ordinal);
+		Assert.Contains("default get_tree format", filePath.GetProperty("description").GetString(), StringComparison.Ordinal);
+		Assert.Contains("format=text", filePath.GetProperty("description").GetString(), StringComparison.Ordinal);
 		var treeFormat = tools.Single(static tool => tool.Name == "get_tree")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("format");
 		Assert.Equal("markdown", treeFormat.GetProperty("default").GetString());
