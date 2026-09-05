@@ -282,6 +282,7 @@
   "Msg.InfoTitle": "Info",
   "Msg.NewWindowLaunchFailed": "Failed to open a new window:\n{0}",
   "Msg.PathNotFound": "Folder not found:\n{0}",
+  "Msg.RootIsReparsePoint": "This folder is a junction or symbolic link. Open the target folder instead.",
   "Msg.NoCheckedTree": "No checked files or folders (use checkboxes in the tree).",
   "Msg.NoCheckedFiles": "No checked files (checkboxes must be on files).",
   "Msg.NoCheckedFilesShort": "No files selected.",

@@ -282,6 +282,7 @@
   "Msg.InfoTitle": "資訊",
   "Msg.NewWindowLaunchFailed": "無法開啟新視窗：\n{0}",
   "Msg.PathNotFound": "找不到資料夾：\n{0}",
+  "Msg.RootIsReparsePoint": "此資料夾是目錄連接或符號連結。請改為開啟目標資料夾。",
   "Msg.NoCheckedTree": "沒有選取的檔案或資料夾（使用樹中的複選框）。",
   "Msg.NoCheckedFiles": "沒有選取的檔案（複選框必須位於檔案上）。",
   "Msg.NoCheckedFilesShort": "未選擇任何文件。",

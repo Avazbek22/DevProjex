@@ -282,6 +282,7 @@
   "Msg.InfoTitle": "Informasi",
   "Msg.NewWindowLaunchFailed": "Gagal membuka jendela baru:\n{0}",
   "Msg.PathNotFound": "Folder tidak ditemukan:\n{0}",
+  "Msg.RootIsReparsePoint": "Folder ini adalah junction atau tautan simbolis. Buka folder target sebagai gantinya.",
   "Msg.NoCheckedTree": "Tidak ada file atau folder yang dicentang (gunakan kotak centang di pohon).",
   "Msg.NoCheckedFiles": "Tidak ada file yang dicentang (kotak centang harus ada pada file).",
   "Msg.NoCheckedFilesShort": "Tidak ada file yang dipilih.",

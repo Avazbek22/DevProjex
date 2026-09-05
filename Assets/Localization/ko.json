@@ -282,6 +282,7 @@
   "Msg.InfoTitle": "정보",
   "Msg.NewWindowLaunchFailed": "새 창을 열지 못했습니다:\n{0}",
   "Msg.PathNotFound": "폴더를 찾을 수 없습니다:\n{0}",
+  "Msg.RootIsReparsePoint": "이 폴더는 정션 또는 기호 링크입니다. 대신 대상 폴더를 여세요.",
   "Msg.NoCheckedTree": "선택한 파일이나 폴더가 없습니다(트리의 확인란 사용).",
   "Msg.NoCheckedFiles": "선택된 파일이 없습니다(체크박스는 파일에 있어야 합니다).",
   "Msg.NoCheckedFilesShort": "선택한 파일이 없습니다.",

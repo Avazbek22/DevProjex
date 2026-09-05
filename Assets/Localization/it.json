@@ -283,6 +283,7 @@
   "Msg.InfoTitle": "Info",
   "Msg.NewWindowLaunchFailed": "Impossibile aprire una nuova finestra:\n{0}",
   "Msg.PathNotFound": "Cartella non trovata:\n{0}",
+  "Msg.RootIsReparsePoint": "Questa cartella è una giunzione o un collegamento simbolico. Apri invece la cartella di destinazione.",
   "Msg.NoCheckedTree": "Nessun file/cartella selezionato (usa le checkbox nell’albero).",
   "Msg.NoCheckedFiles": "Nessun file selezionato (le checkbox devono essere sui file).",
   "Msg.NoCheckedFilesShort": "Nessun file selezionato.",

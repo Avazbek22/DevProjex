@@ -83,7 +83,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
     bool IRefreshTreePipelineHost.TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result) =>
         result.RootAccessDenied &&
         PathComparer.Default.Equals(_currentPath, input.CurrentPath) &&
-        TryElevateAndRestart(input.CurrentPath);
+        HandleBackgroundRootAccessDenied(input.CurrentPath);
 
 	void IRefreshTreePipelineHost.ReportIncompleteTreeScan() =>
 		_toastService.Show(_localization["Scan.Error.Incomplete"]);

@@ -282,6 +282,7 @@
   "Msg.InfoTitle": "Thông tin",
   "Msg.NewWindowLaunchFailed": "Không mở được cửa sổ mới:\n{0}",
   "Msg.PathNotFound": "Không tìm thấy thư mục:\n{0}",
+  "Msg.RootIsReparsePoint": "Thư mục này là điểm nối hoặc liên kết tượng trưng. Hãy mở thư mục đích thay thế.",
   "Msg.NoCheckedTree": "Không có tập tin hoặc thư mục nào được kiểm tra (sử dụng các hộp kiểm trong cây).",
   "Msg.NoCheckedFiles": "Không có tệp nào được chọn (hộp kiểm phải có trên tệp).",
   "Msg.NoCheckedFilesShort": "Không có tập tin nào được chọn.",

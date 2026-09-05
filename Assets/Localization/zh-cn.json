@@ -282,6 +282,7 @@
   "Msg.InfoTitle": "信息",
   "Msg.NewWindowLaunchFailed": "无法打开新窗口：\n{0}",
   "Msg.PathNotFound": "找不到文件夹：\n{0}",
+  "Msg.RootIsReparsePoint": "此文件夹是目录联接或符号链接。请改为打开目标文件夹。",
   "Msg.NoCheckedTree": "没有选中的文件或文件夹（使用树中的复选框）。",
   "Msg.NoCheckedFiles": "没有选中的文件（复选框必须位于文件上）。",
   "Msg.NoCheckedFilesShort": "未选择任何文件。",

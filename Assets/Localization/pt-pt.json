@@ -282,6 +282,7 @@
     "Msg.InfoTitle":  "Informações",
     "Msg.NewWindowLaunchFailed":  "Falha ao abrir uma nova janela:\n{0}",
     "Msg.PathNotFound":  "Pasta não encontrada:\n{0}",
+    "Msg.RootIsReparsePoint":  "Esta pasta é uma junção ou ligação simbólica. Abra antes a pasta de destino.",
     "Msg.NoCheckedTree":  "Nenhum ficheiro ou pasta marcado (utilizar caixas de selecção na árvore).",
     "Msg.NoCheckedFiles":  "Sem ficheiro marcado (as caixas de seleção devem estar nos ficheiros).",
     "Msg.NoCheckedFilesShort":  "Nenhum ficheiro selecionado.",

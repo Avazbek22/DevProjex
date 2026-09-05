@@ -282,6 +282,7 @@
     "Msg.InfoTitle":  "Información",
     "Msg.NewWindowLaunchFailed":  "No se pudo abrir una nueva ventana:\n{0}",
     "Msg.PathNotFound":  "Carpeta no encontrada:\n{0}",
+    "Msg.RootIsReparsePoint":  "Esta carpeta es una unión de directorio o un enlace simbólico. Abra la carpeta de destino en su lugar.",
     "Msg.NoCheckedTree":  "No hay archivos ni carpetas marcados (use las casillas de verificación en el árbol).",
     "Msg.NoCheckedFiles":  "No hay archivos marcados (las casillas de verificación deben estar en los archivos).",
     "Msg.NoCheckedFilesShort":  "No hay archivos seleccionados.",

@@ -283,6 +283,7 @@
   "Msg.InfoTitle": "Info",
   "Msg.NewWindowLaunchFailed": "Impossible d'ouvrir une nouvelle fenêtre :\n{0}",
   "Msg.PathNotFound": "Dossier introuvable :\n{0}",
+  "Msg.RootIsReparsePoint": "Ce dossier est une jonction ou un lien symbolique. Ouvrez plutôt le dossier cible.",
   "Msg.NoCheckedTree": "Aucun fichier/dossier coché (utilisez les cases dans l’arborescence).",
   "Msg.NoCheckedFiles": "Aucun fichier coché (les cases doivent être sur des fichiers).",
   "Msg.NoCheckedFilesShort": "Aucun fichier sélectionné.",

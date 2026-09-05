@@ -282,6 +282,7 @@
   "Msg.InfoTitle": "Bilgi",
   "Msg.NewWindowLaunchFailed": "Yeni bir pencere açılamadı:\n{0}",
   "Msg.PathNotFound": "Klasör bulunamadı:\n{0}",
+  "Msg.RootIsReparsePoint": "Bu klasör bir bağlantı noktası veya sembolik bağlantıdır. Bunun yerine hedef klasörü açın.",
   "Msg.NoCheckedTree": "İşaretli dosya veya klasör yok (ağaçtaki onay kutularını kullanın).",
   "Msg.NoCheckedFiles": "İşaretli dosya yok (dosyalarda onay kutuları olmalıdır).",
   "Msg.NoCheckedFilesShort": "Hiçbir dosya seçilmedi.",

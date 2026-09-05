@@ -282,6 +282,7 @@
   "Msg.InfoTitle": "情報",
   "Msg.NewWindowLaunchFailed": "新しいウィンドウを開けませんでした:\n{0}",
   "Msg.PathNotFound": "フォルダーが見つかりません:\n{0}",
+  "Msg.RootIsReparsePoint": "このフォルダーはジャンクションまたはシンボリック リンクです。代わりにリンク先のフォルダーを開いてください。",
   "Msg.NoCheckedTree": "チェックされたファイルまたはフォルダーはありません (ツリー内のチェックボックスを使用してください)。",
   "Msg.NoCheckedFiles": "チェックされたファイルはありません (ファイルにはチェックボックスが必要です)。",
   "Msg.NoCheckedFilesShort": "ファイルが選択されていません。",

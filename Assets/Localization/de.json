@@ -283,6 +283,7 @@
   "Msg.InfoTitle": "Info",
   "Msg.NewWindowLaunchFailed": "Neues Fenster konnte nicht geöffnet werden:\n{0}",
   "Msg.PathNotFound": "Ordner nicht gefunden:\n{0}",
+  "Msg.RootIsReparsePoint": "Dieser Ordner ist eine Verzeichnisverknüpfung oder ein symbolischer Link. Öffnen Sie stattdessen den Zielordner.",
   "Msg.NoCheckedTree": "Keine markierten Dateien/Ordner (Checkboxen im Baum verwenden).",
   "Msg.NoCheckedFiles": "Keine markierten Dateien (Checkboxen müssen auf Dateien sein).",
   "Msg.NoCheckedFilesShort": "Keine Dateien ausgewählt.",

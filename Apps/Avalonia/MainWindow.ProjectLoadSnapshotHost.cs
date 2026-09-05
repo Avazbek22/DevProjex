@@ -15,7 +15,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         SelectionRefreshSnapshot snapshot) =>
         snapshot.RootAccessDenied &&
         PathComparer.Default.Equals(_currentPath, currentPath) &&
-        TryElevateAndRestart(currentPath);
+        HandleBackgroundRootAccessDenied(currentPath);
 
     TreeRefreshInput IProjectLoadSnapshotPipelineHost.CreateTreeRefreshInput(
         string currentPath,
@@ -91,7 +91,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         BuildTreeResult result) =>
         result.RootAccessDenied &&
         PathComparer.Default.Equals(_currentPath, input.CurrentPath) &&
-        TryElevateAndRestart(input.CurrentPath);
+        HandleBackgroundRootAccessDenied(input.CurrentPath);
 
 	void IProjectLoadSnapshotPipelineHost.ReportIncompleteTreeScan() =>
 		_toastService.Show(_localization["Scan.Error.Incomplete"]);

@@ -282,6 +282,7 @@
   "Msg.InfoTitle": "Informacje",
   "Msg.NewWindowLaunchFailed": "Nie udało się otworzyć nowego okna:\n{0}",
   "Msg.PathNotFound": "Nie znaleziono folderu:\n{0}",
+  "Msg.RootIsReparsePoint": "Ten folder jest punktem połączenia lub dowiązaniem symbolicznym. Zamiast niego otwórz folder docelowy.",
   "Msg.NoCheckedTree": "Brak zaznaczonych plików i folderów (użyj pól wyboru w drzewie).",
   "Msg.NoCheckedFiles": "Brak zaznaczonych plików (pola wyboru muszą znajdować się przy plikach).",
   "Msg.NoCheckedFilesShort": "Nie wybrano plików.",

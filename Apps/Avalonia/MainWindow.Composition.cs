@@ -1083,7 +1083,7 @@ public partial class MainWindow
             _ignoreOptionsService,
             BuildIgnoreRules,
             GetIgnoreOptionsAvailability,
-            TryElevateAndRestart,
+            HandleBackgroundRootAccessDenied,
             () => _currentPath,
             _statusOperations,
             ApplyProgrammaticContentTransformationSelectionChange,
