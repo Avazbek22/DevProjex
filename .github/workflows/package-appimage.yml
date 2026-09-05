@@ -59,7 +59,7 @@ jobs:
             version="${PUBLISHED_RELEASE_TAG#v}"
             release_tag="${PUBLISHED_RELEASE_TAG}"
           elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            version="$(sed -n 's:.*<DevProjexVersion>\([^<]*\)</DevProjexVersion>.*:\1:p' Directory.Build.props)"
+            version="$(sed -n 's:.*<DevProjexVersion[^>]*>\([^<]*\)</DevProjexVersion>.*:\1:p' Directory.Build.props)"
             release_tag=""
           else
             version="${DISPATCH_VERSION}"
