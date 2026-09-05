@@ -6,12 +6,12 @@ internal sealed class McpProjectService(
 	McpServices services,
 	bool hidePrivateData,
 	GitFilteringMode? serverGitMode,
-	IReadOnlyCollection<ProjectExclusion>? serverExclusions = null)
+	IReadOnlyCollection<ProjectExclusion>? serverExclusions = null,
+	bool agentExclusions = false)
 {
 	internal const int MaximumRequestedPaths = 256;
 	internal const int MaximumRequestedPathLength = 4096;
 
-	public async Task<ProjectContextPlan> BuildPlanAsync(
 	/// <summary>The Git baseline every call starts from when it names no profile.</summary>
 	public GitFilteringMode ServerGitMode => serverGitMode ?? McpServerBaseline.DefaultGitMode;
 
@@ -19,6 +19,7 @@ internal sealed class McpProjectService(
 	public IReadOnlyCollection<ProjectExclusion> ServerExclusions =>
 		serverExclusions ?? McpServerBaseline.DefaultExclusions;
 
+	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
 		string? branch,
 		IReadOnlyList<string>? paths,
@@ -433,10 +434,15 @@ internal sealed class McpProjectService(
 		}
 		if (!plan.IncludedFiles.Contains(physical, StringComparer.Ordinal))
 		{
+			// Name the filters and who can widen them. A remedy that cannot work on this
+			// server — the old "repeat the selection arguments" — sends an agent in circles.
+			var remedy = agentExclusions
+				? "Pass the exclusions value of the call that listed it, or exclusions: [] to turn every toggle off; Git filtering is set on the server startup line."
+				: $"Per-call arguments cannot widen these filters; only the server startup line can ({McpEffectiveFilters.StartupFlags}).";
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: file '{path}' is not in the effective project selection. " +
-				"Repeat the selection arguments of the call that listed it, or retrieve it with pack_context and read_pack.");
+				$"{McpErrorCodes.PathNotFound}: file '{path}' is not in the effective project selection " +
+				$"(effective filters: {McpEffectiveFilters.Describe(plan)}). {remedy}");
 		}
 		return physical;
 	}

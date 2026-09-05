@@ -68,6 +68,154 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task DefaultServerShowsTheRepositoryFilesTheDesktopStandardSetHides()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, ".github", "workflows"));
+		Directory.CreateDirectory(Path.Combine(project, "pkg"));
+		Directory.CreateDirectory(Path.Combine(project, "hollow"));
+		File.WriteAllText(Path.Combine(project, ".github", "workflows", "ci.yml"), "name: ci\n");
+		File.WriteAllText(Path.Combine(project, ".env.example"), "DATABASE_URL=postgres://localhost/db\n");
+		File.WriteAllText(Path.Combine(project, "Dockerfile"), "FROM scratch\n");
+		File.WriteAllText(Path.Combine(project, "LICENSE"), "MIT\n");
+		File.WriteAllText(Path.Combine(project, "pkg", "__init__.py"), string.Empty);
+		File.WriteAllText(Path.Combine(project, "App.cs"), "class App {}\n");
+
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// The agent-facing default keeps only the toggles that remove noise no agent wants;
+		// every deliberate repository file — dot-named, extensionless, or empty — is visible.
+		var listed = await server.CallAsync("list_projects");
+		var baseline = listed.StructuredContent!.Value.GetProperty("baseline");
+		Assert.Equal("gitignore", baseline.GetProperty("git").GetString());
+		Assert.Equal(
+			["smart-ignore", "empty-folders"],
+			baseline.GetProperty("exclusions").EnumerateArray().Select(static item => item.GetString()));
+		Assert.False(baseline.GetProperty("agentExclusions").GetBoolean());
+
+		var tree = Text(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" }));
+		foreach (var visible in new[] { "ci.yml", ".env.example", "Dockerfile", "LICENSE", "__init__.py", "App.cs" })
+			Assert.Contains(visible, tree, StringComparison.Ordinal);
+		Assert.DoesNotContain("hollow", tree, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders. Paths they hide are absent from every tool; only the server startup line widens them (--exclude, --unrestricted, --allow-agent-exclusions).",
+			tree,
+			StringComparison.Ordinal);
+
+		var analysis = await server.CallAsync("analyze");
+		Assert.Equal(6, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Equal(
+			["smart-ignore", "empty-folders"],
+			analysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+
+		var dockerfile = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Dockerfile" });
+		Assert.NotEqual(true, dockerfile.IsError);
+		Assert.Contains("FROM scratch", Text(dockerfile), StringComparison.Ordinal);
+
+		var pack = Text(await server.CallAsync("pack_context"));
+		Assert.Contains("DATABASE_URL", pack, StringComparison.Ordinal);
+		Assert.Contains("[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.", pack, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PathNotFoundNamesTheEffectiveFiltersAndTheRemedyTheServerActuallyOffers()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor\n");
+		File.WriteAllText(Path.Combine(project, ".hidden.cs"), "hidden\n");
+
+		await using var pinned = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles]);
+		var hidden = await pinned.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = ".hidden.cs" });
+		var missing = await pinned.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Missing.cs" });
+
+		// A filtered file names the filters and the only party able to widen them on this
+		// server; the old advice to repeat selection arguments could never work here.
+		Assert.True(hidden.IsError);
+		Assert.Contains("is not in the effective project selection (effective filters: git: gitignore; exclusions: dot-files)", Text(hidden), StringComparison.Ordinal);
+		Assert.Contains("only the server startup line can (--exclude, --unrestricted, --allow-agent-exclusions)", Text(hidden), StringComparison.Ordinal);
+		Assert.DoesNotContain("pack_context", Text(hidden), StringComparison.Ordinal);
+		Assert.True(missing.IsError);
+		Assert.StartsWith("DPX-MCP-PATH-NOT-FOUND: path 'Missing.cs' does not exist", Text(missing), StringComparison.Ordinal);
+		Assert.DoesNotContain("effective filters", Text(missing), StringComparison.Ordinal);
+
+		await using var delegated = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles],
+			agentExclusions: true);
+		var delegatedHidden = await delegated.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = ".hidden.cs" });
+		Assert.True(delegatedHidden.IsError);
+		Assert.Contains("Pass the exclusions value of the call that listed it, or exclusions: [] to turn every toggle off", Text(delegatedHidden), StringComparison.Ordinal);
+		var delegatedTree = Text(await delegated.CallAsync("get_tree"));
+		Assert.Contains("[Effective filters] git: gitignore; exclusions: dot-files. Paths the exclusions hide stay absent until a call passes exclusions", delegatedTree, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task EmptySelectionsAndEmptySearchesExplainThemselves()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		File.WriteAllText(Path.Combine(project, "src", "Nested.cs"), "nested-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// '*' stays inside one segment, so a root-level pattern misses a nested file: the
+		// empty result carries the rule instead of reading as "no C# files here".
+		var rootOnly = new Dictionary<string, object?> { ["include_patterns"] = new[] { "*.cs" } };
+		var tree = Text(await server.CallAsync("get_tree", rootOnly));
+		Assert.DoesNotContain("Nested.cs", tree, StringComparison.Ordinal);
+		Assert.Contains("[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.", tree, StringComparison.Ordinal);
+		Assert.Contains("[Empty selection] No file passed the effective filters and the request arguments. Patterns match the whole project-relative path: '*' stays inside one segment, '**/' spans any depth; paths the filters hide never match.", tree, StringComparison.Ordinal);
+
+		var analysis = await server.CallAsync("analyze", rootOnly);
+		Assert.Equal(0, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Equal(2, analysis.Content.Count);
+		Assert.Contains("[Effective filters]", AllText(analysis), StringComparison.Ordinal);
+		Assert.Contains("[Empty selection]", AllText(analysis), StringComparison.Ordinal);
+
+		var populated = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "**/*.cs" } });
+		Assert.Equal(1, populated.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Single(populated.Content);
+
+		var emptySearch = Text(await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(rootOnly) { ["pattern"] = "nested" }));
+		Assert.Contains("[Empty selection]", emptySearch, StringComparison.Ordinal);
+		Assert.DoesNotContain("[No matches]", emptySearch, StringComparison.Ordinal);
+
+		var noMatches = Text(await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "absent-marker" }));
+		Assert.Contains("[No matches] The pattern matched nothing in 1 selected file(s) (git: gitignore; exclusions: smart-ignore, empty-folders).", noMatches, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Empty selection]", noMatches, StringComparison.Ordinal);
+
+		var matched = Text(await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "nested-marker" }));
+		Assert.Contains("Nested.cs:1:", matched, StringComparison.Ordinal);
+		Assert.DoesNotContain("[No matches]", matched, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Effective filters]", matched, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GlobBraceAlternativesExpandAndUnsupportedSyntaxIsRejectedNotMatchedLiterally()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -5085,6 +5233,11 @@ public sealed class McpServerIntegrationTests
 				Assert.True(
 					value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out _),
 					$"{path} must be an integer.");
+				break;
+			case "boolean":
+				Assert.True(
+					value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+					$"{path} must be a boolean.");
 				break;
 			default:
 				throw new Xunit.Sdk.XunitException($"Unsupported contract schema type '{expectedType}' at {path}.");

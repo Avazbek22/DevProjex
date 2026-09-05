@@ -206,7 +206,7 @@ open-world.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
-| `list_projects` | none | Allowed local roots with path, name, type, and available local profiles. Remote projects are addressed by URL and are not added to this list. |
+| `list_projects` | none | Allowed local roots with path, name, type, and available local profiles, plus the server `baseline` (`git` mode, `exclusions`, and whether `agentExclusions` is enabled). Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Markdown is the compact, token-efficient default. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
@@ -232,10 +232,22 @@ authoritative result is the complete object in `structuredContent`; the first
 text block in `content` is a JSON serialization of that same object.
 `analyze` results include an `exclusions` array that echoes the exclusion
 tokens effective for the call, so the agent and a human reading the transcript
-always see which toggles shaped the measurement. This field is new in v5.2 and
-required on every server, including servers started without the exclusion
-flags; consumers that pinned the earlier `analyze` output schema must refresh
-it.
+always see which toggles shaped the measurement. `list_projects` results
+include a `baseline` object with the server `git` mode token, the baseline
+`exclusions` tokens, and an `agentExclusions` flag. Both fields are new in v5.2
+and required on every server, including servers started without the exclusion
+flags; consumers that pinned the earlier output schemas must refresh them.
+
+Filters are never silent. `get_tree` and `pack_context` end with a trusted
+`[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
+exclusion toggles that shaped the tree and who can widen them: the server
+startup line, or a per-call `exclusions` value on a delegation server. Every
+selection tool adds an `[Empty selection]` line when no file survived the
+filters and the request arguments, `search_project` adds a `[No matches]` line
+with the searched-file count when the pattern matched nothing, and a
+`DPX-MCP-PATH-NOT-FOUND` error for a filtered file names the effective filters
+and the party able to widen them — the startup line, or a per-call `exclusions`
+value on a delegation server. None of these lines carries a path.
 When selection produces warnings, `analyze` appends separate human-readable
 trusted warning text blocks without changing its structured schema. Warning
 messages contain stable codes and safe counts or retry guidance, never diagnostic

@@ -365,9 +365,20 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "required": ["project", "name"],
 	        "additionalProperties": false
 	      }
+	    },
+	    "baseline": {
+	      "type": "object",
+	      "description": "The selection baseline every call starts from unless it names a profile: the Git filtering mode, the active exclusion toggles, and whether calls may pass their own exclusions.",
+	      "properties": {
+	        "git": { "type": "string", "enum": ["none", "gitignore", "tracked"] },
+	        "exclusions": { "type": "array", "items": { "type": "string" } },
+	        "agentExclusions": { "type": "boolean" }
+	      },
+	      "required": ["git", "exclusions", "agentExclusions"],
+	      "additionalProperties": false
 	    }
 	  },
-	  "required": ["projects", "profiles"],
+	  "required": ["projects", "profiles", "baseline"],
 	  "additionalProperties": false
 	}
 	""";

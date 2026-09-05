@@ -93,7 +93,8 @@ public static class McpServerHost
 				services.Value,
 				hidePrivateData,
 				gitMode,
-				exclusions),
+				exclusions,
+				agentExclusions),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs, agentExclusions);
 		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions);

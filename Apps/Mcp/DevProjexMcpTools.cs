@@ -28,7 +28,7 @@ internal sealed class DevProjexMcpTools(
 	private readonly McpProjectOperationGate _projectOperation = new();
 	private McpProjectService Projects => projectService.Value;
 
-	[Description("List the project roots this server is allowed to read and their saved local profiles.")]
+	[Description("List the project roots this server is allowed to read, their saved local profiles, and the selection baseline every call starts from.")]
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -50,7 +50,19 @@ internal sealed class DevProjexMcpTools(
 				.Where(Projects.HasLocalProfile)
 				.Select(root => new { project = root, name = "local" })
 				.ToArray();
-			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles }));
+			// The baseline is server-wide, so the first call in the recommended sequence is
+			// where an agent learns which filters shape every later answer and whether it
+			// may change the exclusion toggles itself.
+			var baseline = new
+			{
+				git = ProjectSelectionTokens.ToToken(Projects.ServerGitMode),
+				exclusions = ProjectSelectionTokens
+					.OrderExclusions(Projects.ServerExclusions)
+					.Select(ProjectSelectionTokens.ToToken)
+					.ToArray(),
+				agentExclusions
+			};
+			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles, baseline }));
 		});
 
 	[Description("Return the effective project tree after built-in, gitignore, server-baseline, and optional agent filters.")]
@@ -119,7 +131,10 @@ internal sealed class DevProjexMcpTools(
 			var body = treeWriter.Text;
 			if (treeWriter.IsTruncated)
 				body += "\n[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]";
-			return McpToolResults.TextSuccess(AppendPlanWarnings(McpSpotlight.Wrap(body), plan));
+			return McpToolResults.TextSuccess(AppendTrustedNotices(
+				McpSpotlight.Wrap(body),
+				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
+				SelectionNotices(plan, includeFilters: true)));
 		}, cancellationToken);
 
 	[Description("Measure a redacted project selection and list its largest text files by estimated tokens.")]
@@ -192,7 +207,8 @@ internal sealed class DevProjexMcpTools(
 				envelope,
 				CombineTrustedNotices(
 					FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
-					McpTrustedDiagnosticFormatter.FormatWarnings(plan)));
+					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
+					SelectionNotices(plan, includeFilters: false)));
 		}, cancellationToken);
 
 	[Description("Build an exact redacted DevProjex context export. A stored pack id remains valid until this server process exits; after restart, call pack_context again.")]
@@ -230,7 +246,11 @@ internal sealed class DevProjexMcpTools(
 						view == ProjectContextView.Tree &&
 						format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 				.ConfigureAwait(false);
-			var trustedPlanWarnings = McpTrustedDiagnosticFormatter.FormatWarnings(plan);
+			// A pack is the answer many agents read instead of get_tree, so it carries the same
+			// effective-filters footer next to its tree.
+			var trustedPlanWarnings = CombineTrustedNotices(
+				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
+				SelectionNotices(plan, includeFilters: true));
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
@@ -466,10 +486,17 @@ internal sealed class DevProjexMcpTools(
 					output.AppendLine();
 				output.AppendLine($"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]");
 			}
+			// An empty search result must say whether nothing matched or nothing was searched;
+			// the count is trusted data, the file names never are.
+			var noMatches = totalMatches == 0 && plan.IncludedFiles.Count > 0
+				? $"[No matches] The pattern matched nothing in {plan.IncludedFiles.Count} selected file(s) ({McpEffectiveFilters.Describe(plan)})."
+				: null;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(output.ToString().TrimEnd()),
 				FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Search),
-				McpTrustedDiagnosticFormatter.FormatWarnings(plan)));
+				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
+				noMatches,
+				SelectionNotices(plan, includeFilters: false)));
 		}, cancellationToken);
 
 	[Description("Read redacted text from one effective project file using an optional 1-based line range.")]
@@ -565,6 +592,9 @@ internal sealed class DevProjexMcpTools(
 			cancellationToken,
 			includeOutputMetrics,
 			exclusions: ParseExclusionsArgument(arguments));
+
+	private string? SelectionNotices(ProjectContextPlan plan, bool includeFilters) =>
+		McpEffectiveFilters.SelectionNotices(plan, agentExclusions, includeFilters);
 
 	// The exclusions argument exists only on servers started with --allow-agent-exclusions;
 	// everywhere else the allowlist rejects it, so a default server keeps the
@@ -847,9 +877,6 @@ internal sealed class DevProjexMcpTools(
 		       $"{consequence} Results are partial. Set max_file_bytes={SecretRedactionOutputPreparer.MaximumScannableFileBytes} " +
 		       "or lower, exclude oversized or unsupported files, and retry.";
 	}
-
-	private static string AppendPlanWarnings(string content, ProjectContextPlan plan) =>
-		AppendTrustedNotices(content, McpTrustedDiagnosticFormatter.FormatWarnings(plan));
 
 	private static ProjectContextPlan WithoutWarningDiagnostics(ProjectContextPlan plan)
 	{

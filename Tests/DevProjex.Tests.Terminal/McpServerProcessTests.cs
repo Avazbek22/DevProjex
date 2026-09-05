@@ -191,6 +191,19 @@ public sealed class McpServerProcessTests
 			// default set never hides empty files, so Empty.cs is visible on every line here.
 			Assert.Equal(dotFileVisible, text.Contains(".dotted.cs", StringComparison.Ordinal));
 			Assert.Contains("Empty.cs", text, StringComparison.Ordinal);
+
+			// The footer states the set the line produced: 'default' contributes smart-ignore
+			// and empty-folders, a bare name list stands alone.
+			var expectedExclusions = exclusions.Any(static value => value.Equals("none", StringComparison.OrdinalIgnoreCase))
+				? "none"
+				: string.Join(
+					", ",
+					new[] { "smart-ignore", "empty-folders", "dot-files" }
+						.Where(token =>
+							token == "dot-files"
+								? exclusions.Any(static value => value.Equals("dot-files", StringComparison.OrdinalIgnoreCase))
+								: exclusions.Any(static value => value.Equals("default", StringComparison.OrdinalIgnoreCase))));
+			Assert.Contains($"[Effective filters] git: gitignore; exclusions: {expectedExclusions}.", text, StringComparison.Ordinal);
 		}
 
 		process.StandardInput.Close();
@@ -214,6 +227,7 @@ public sealed class McpServerProcessTests
 		workspace.WriteFile("project/.dotted.cs", "dotted-unrestricted-marker\n");
 		workspace.WriteFile("project/.gitignore", "ignored.cs\n");
 		workspace.WriteFile("project/ignored.cs", "ignored-unrestricted-marker\n");
+		workspace.CreateDirectory("project/hollow");
 		InitializeIsolatedRepository(project);
 		RunGit(project, "add", "Anchor.cs", ".gitignore");
 		RunGit(project, "commit", "--quiet", "-m", "baseline");
@@ -227,7 +241,6 @@ public sealed class McpServerProcessTests
 			WorkingDirectory = project
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
-		workspace.CreateDirectory("project/hollow");
 		startInfo.ArgumentList.Add("mcp");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
@@ -263,6 +276,12 @@ public sealed class McpServerProcessTests
 			Assert.Contains(".dotted.cs", text, StringComparison.Ordinal);
 			Assert.Equal(unrestricted, text.Contains("hollow", StringComparison.Ordinal));
 			Assert.Equal(unrestricted, text.Contains("ignored.cs", StringComparison.Ordinal));
+			Assert.Contains(
+				unrestricted
+					? "[Effective filters] git: none; exclusions: none."
+					: "[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.",
+				text,
+				StringComparison.Ordinal);
 
 			// The .git administrative area is a product boundary: it stays excluded
 			// even at the widest baseline. HEAD and COMMIT_EDITMSG exist in every
