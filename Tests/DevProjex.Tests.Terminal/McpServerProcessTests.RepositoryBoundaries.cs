@@ -6,6 +6,69 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed partial class McpServerProcessTests
 {
+	[Fact]
+	public async Task RealProcessDevProjexRepositoryFileCountsMatchGitAcrossCliAndMcp()
+	{
+		if (!await IsGitAvailableAsync())
+			Assert.Skip("Git is not available.");
+		var repository = PublishedApplicationLocator.FindRepositoryRoot();
+		using var state = new TemporaryDirectory();
+		var git = CreateBoundaryProcess(repository, state.CreateDirectory("git-state"));
+		git.FileName = "git";
+		foreach (var argument in new[] { "ls-files", "--cached", "--others", "--exclude-standard", "-z" })
+			git.ArgumentList.Add(argument);
+		var expected = (await ReadBoundaryProcessOutput(git)).Split('\0', StringSplitOptions.RemoveEmptyEntries);
+		Assert.NotEmpty(expected);
+		Assert.DoesNotContain(expected, path => path.StartsWith(".claude/worktrees/", StringComparison.Ordinal));
+
+		var cli = CreateBoundaryProcess(repository, state.CreateDirectory("cli-state"));
+		foreach (var argument in new[] { "analyze", repository, "--git-mode", "gitignore",
+		         "--exclude", "smart-ignore", "--exclude", "empty-folders", "--format", "json" })
+			cli.ArgumentList.Add(argument);
+		using var report = JsonDocument.Parse(await ReadBoundaryProcessOutput(cli));
+		Assert.Equal(expected.Length, report.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+
+		var server = CreateBoundaryProcess(repository, state.CreateDirectory("mcp-state"));
+		foreach (var argument in new[] { "mcp", "--root", repository })
+			server.ArgumentList.Add(argument);
+		using var process = Process.Start(server) ?? throw new InvalidOperationException("MCP did not start.");
+		var errors = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(new StreamClientTransport(
+			process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null, loggerFactory: null, timeout.Token))
+		{
+			var response = await client.CallToolAsync("analyze", new Dictionary<string, object?>(),
+				progress: null, options: null, timeout.Token);
+			Assert.NotEqual(true, response.IsError);
+			Assert.Equal(expected.Length, response.StructuredContent!.Value.GetProperty("files").GetInt32());
+		}
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(timeout.Token);
+		Assert.True(process.ExitCode == 0, await errors);
+	}
+
+	private static async Task<string> ReadBoundaryProcessOutput(ProcessStartInfo start)
+	{
+		using var process = Process.Start(start) ?? throw new InvalidOperationException("Process did not start.");
+		try
+		{
+			process.StandardInput.Close();
+			var output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+			var errors = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+			await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromMinutes(2), TestContext.Current.CancellationToken);
+			Assert.True(process.ExitCode == 0, await errors);
+			return await output;
+		}
+		finally
+		{
+			if (!process.HasExited)
+				process.Kill(entireProcessTree: true);
+		}
+	}
+
 	[Theory]
 	[InlineData("gitignore", false, false)]
 	[InlineData("tracked", false, false)]
