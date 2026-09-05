@@ -160,7 +160,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	"profile": {
 	  "type": "string",
 	  "minLength": 1,
-	  "description": "Selection profile: 'standard', 'local', or a portable profile JSON path inside the project root."
+	  "description": "Selection profile. 'standard' uses the desktop set of all eight exclusion toggles with gitignore and is stricter than the server default. 'local' uses the profile saved by the desktop app for this project and listed by list_projects.profiles. Otherwise use a portable profile JSON path inside the project root."
 	}
 	""";
 
@@ -190,7 +190,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private const string GitScopeProperty = """
 	"git_scope": {
-	  "description": "Further restrict results to staged files, all current changes, or files changed between two Git refs.",
+	  "description": "Further restrict selected paths to staged files, all current changes (including untracked files), or files changed between two Git refs. This selects paths only; file content is always read from the current working tree.",
 	  "maxLength": 4096,
 	  "oneOf": [
 	    { "type": "string", "enum": ["staged", "changes"] },
@@ -281,8 +281,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{GitScopeProperty}},
 	    {{MaximumTokensProperty}},
 	    {{MaxFileBytesProperty}},
-	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content" },
-	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown" }
+	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Choose whether the pack contains only the tree, only selected file content, or both." },
+	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown", "description": "Pack representation. Markdown is the readable default; text is plain human-readable output, while JSON and XML are structured machine-readable forms." }
 	  },
 	  "additionalProperties": false
 	}
@@ -307,7 +307,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    {{ProjectProperty}},
 	    {{BranchProperty}},
-	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression evaluated against redacted text with a 2-second timeout." },
+	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression evaluated with a 2-second timeout after secrets are replaced with DEVPROJEX_REDACTED[<category>#<n>] placeholders." },
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{TrackedOnlyProperty}},
@@ -328,7 +328,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    {{ProjectProperty}},
 	    {{BranchProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection." },
+	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection. Paths copied from any get_tree format are accepted, including markdown-escaped names." },
 	    "start_line": { "description": "First 1-based line; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "end_line": { "description": "Last 1-based line, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
@@ -391,7 +391,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "characters": { "type": "integer" },
 	    "tokens": { "type": "integer" },
 	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"] },
-	    "exclusions": { "type": "array", "items": { "type": "string" }, "description": "Effective exclusion tokens for this call, in catalog order; the same vocabulary as the exclusions parameter." },
+	    "exclusions": { "type": "array", "items": { "type": "string" }, "description": "Effective exclusion tokens for this call, in catalog order; the same tokens the mcp --exclude flag and the optional exclusions parameter use." },
 	    "topFiles": {
 	      "type": "array",
 	      "items": {
