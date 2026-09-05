@@ -1,16 +1,29 @@
 using System.Diagnostics;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Execution;
 
 namespace DevProjex.Terminal.DesktopControl;
 
 public sealed record DesktopLaunchResult(int ProcessId, string RequestPath);
 
-public sealed class DesktopProcessLauncher
+public sealed class DesktopProcessLauncher(
+	TerminalHostCapabilities? hostCapabilities = null)
 {
+	private readonly TerminalHostCapabilities _hostCapabilities =
+		hostCapabilities ?? TerminalHostCapabilities.Desktop;
+
 	public async Task<DesktopLaunchResult> LaunchAsync(
 		DesktopOpenRequest request,
 		CancellationToken cancellationToken = default)
 	{
+		if (!_hostCapabilities.HasDesktopApplication)
+		{
+			throw new DesktopControlException(
+				"DPX-DESKTOP-NOT-INCLUDED",
+				"This distribution has no desktop app; install DevProjex Desktop from " +
+				"https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.");
+		}
+
 		var requestPath = await DesktopLaunchRequestStore
 			.CreateAsync(request, cancellationToken)
 			.ConfigureAwait(false);

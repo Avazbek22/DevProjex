@@ -549,6 +549,7 @@
   "Terminal.Error.DesktopTimeout": "Masaüstü isteği zaman aşımına uğradı.",
   "Terminal.Error.DesktopProtocolMismatch": "Masaüstü örneği uyumsuz bir kontrol protokolü kullanıyor.",
   "Terminal.Error.DesktopPayloadTooLarge": "Masaüstü kontrol mesajı güvenli boyut sınırını aşıyor.",
+  "Terminal.Error.DesktopNotIncluded": "Bu dağıtımda masaüstü uygulaması yoktur; DevProjex Desktop’ı https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md adresinden yükleyin.",
   "Terminal.Error.DesktopRequestFailed": "Masaüstü isteği tamamlanamadı.",
   "Terminal.Error.CommandInvalid": "Komut isteği geçersiz.",
   "Terminal.Hint.DidYouMean": "ipucu: ' {0} ' mı demek istediniz?",

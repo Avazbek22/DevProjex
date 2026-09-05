@@ -549,6 +549,7 @@
   "Terminal.Error.DesktopTimeout": "Waktu permintaan desktop habis.",
   "Terminal.Error.DesktopProtocolMismatch": "Mesin virtual desktop menggunakan protokol kontrol yang tidak kompatibel.",
   "Terminal.Error.DesktopPayloadTooLarge": "Pesan kontrol desktop melebihi batas ukuran aman.",
+  "Terminal.Error.DesktopNotIncluded": "Distribusi ini tidak memiliki aplikasi desktop; instal DevProjex Desktop dari https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
   "Terminal.Error.DesktopRequestFailed": "Permintaan desktop tidak dapat diselesaikan.",
   "Terminal.Error.CommandInvalid": "Permintaan perintah tidak valid.",
   "Terminal.Hint.DidYouMean": "petunjuk: Apakah maksud Anda ' {0} '?",

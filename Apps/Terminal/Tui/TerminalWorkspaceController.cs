@@ -1,5 +1,6 @@
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.DesktopControl;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Selection;
@@ -1190,7 +1191,10 @@ public sealed class TerminalWorkspaceController(
 	public Task<int> OpenDesktopAsync(
 		TerminalWorkspaceState state,
 		CancellationToken cancellationToken) =>
-		new DesktopCommandHandler(environment, writeOutput: false).OpenAsync(
+		new DesktopCommandHandler(
+			environment,
+			launcher: new DesktopProcessLauncher(services.HostCapabilities),
+			writeOutput: false).OpenAsync(
 			new DesktopOpenRequest(
 				ProjectPath: state.Plan.SourceRoot,
 				NewWindow: false,

@@ -555,6 +555,7 @@
   "Terminal.Error.DesktopTimeout": "The desktop request timed out.",
   "Terminal.Error.DesktopProtocolMismatch": "The desktop instance uses an incompatible control protocol.",
   "Terminal.Error.DesktopPayloadTooLarge": "The desktop control message exceeds the safe size limit.",
+  "Terminal.Error.DesktopNotIncluded": "This distribution has no desktop app; install DevProjex Desktop from https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
   "Terminal.Error.DesktopRequestFailed": "The desktop request could not be completed.",
   "Terminal.Error.CommandInvalid": "The command request is invalid.",
   "Terminal.Hint.DidYouMean": "hint: Did you mean '{0}'?",

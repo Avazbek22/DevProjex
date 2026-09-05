@@ -555,6 +555,7 @@
   "Terminal.Error.DesktopTimeout": "La requête Desktop a expiré.",
   "Terminal.Error.DesktopProtocolMismatch": "L’instance Desktop utilise un protocole de contrôle incompatible.",
   "Terminal.Error.DesktopPayloadTooLarge": "Le message de contrôle Desktop dépasse la taille sûre.",
+  "Terminal.Error.DesktopNotIncluded": "Cette distribution ne contient pas l’application de bureau ; installez DevProjex Desktop depuis https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
   "Terminal.Error.DesktopRequestFailed": "La requête Desktop n’a pas pu être exécutée.",
   "Terminal.Error.CommandInvalid": "La demande de commande est invalide.",
   "Terminal.Hint.DidYouMean": "conseil : Vouliez-vous dire « {0} » ?",

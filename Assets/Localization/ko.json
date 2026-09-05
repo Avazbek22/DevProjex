@@ -549,6 +549,7 @@
   "Terminal.Error.DesktopTimeout": "데스크톱 요청 시간이 초과되었습니다.",
   "Terminal.Error.DesktopProtocolMismatch": "데스크톱 인스턴스가 호환되지 않는 제어 프로토콜을 사용합니다.",
   "Terminal.Error.DesktopPayloadTooLarge": "데스크탑 제어 메시지가 안전 크기 제한을 초과했습니다.",
+  "Terminal.Error.DesktopNotIncluded": "이 배포판에는 데스크톱 앱이 없습니다. https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md 에서 DevProjex Desktop을 설치하세요.",
   "Terminal.Error.DesktopRequestFailed": "데스크톱 요청을 완료할 수 없습니다.",
   "Terminal.Error.CommandInvalid": "명령 요청이 잘못되었습니다.",
   "Terminal.Hint.DidYouMean": "힌트: ' {0} '을(를) 의미하셨나요?",

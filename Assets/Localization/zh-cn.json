@@ -549,6 +549,7 @@
   "Terminal.Error.DesktopTimeout": "桌面请求超时。",
   "Terminal.Error.DesktopProtocolMismatch": "桌面实例使用不兼容的控制协议。",
   "Terminal.Error.DesktopPayloadTooLarge": "桌面控制消息超出安全大小限制。",
+  "Terminal.Error.DesktopNotIncluded": "此发行版不包含桌面应用；请从 https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md 安装 DevProjex Desktop。",
   "Terminal.Error.DesktopRequestFailed": "无法完成桌面请求。",
   "Terminal.Error.CommandInvalid": "命令请求无效。",
   "Terminal.Hint.DidYouMean": "提示：您的意思是“ {0} ”吗？",

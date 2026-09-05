@@ -531,6 +531,7 @@
     "Terminal.Error.DesktopTimeout": "O pedido ao Desktop excedeu o tempo limite.",
     "Terminal.Error.DesktopProtocolMismatch": "A instância Desktop utiliza um protocolo de controlo incompatível.",
     "Terminal.Error.DesktopPayloadTooLarge": "A mensagem de controlo do Desktop excede o limite de tamanho seguro.",
+    "Terminal.Error.DesktopNotIncluded": "Esta distribuição não inclui a aplicação de ambiente de trabalho; instale o DevProjex Desktop a partir de https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
     "Terminal.Error.DesktopRequestFailed": "Não foi possível concluir o pedido ao Desktop.",
     "Terminal.Error.CommandInvalid": "O pedido do comando não é válido.",
     "Terminal.Hint.DidYouMean": "sugestão: Quis dizer “{0}”?",

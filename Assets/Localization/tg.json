@@ -537,6 +537,7 @@
   "Terminal.Error.DesktopTimeout": "Муҳлати интизории дархости Desktop ба анҷом расид.",
   "Terminal.Error.DesktopProtocolMismatch": "Намунаи Desktop протоколи идоракунии номувофиқро истифода мебарад.",
   "Terminal.Error.DesktopPayloadTooLarge": "Паёми идоракунии Desktop аз ҳадди бехатари андоза калонтар аст.",
+  "Terminal.Error.DesktopNotIncluded": "Дар ин дистрибутив барномаи Desktop нест; DevProjex Desktop-ро аз рӯи https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md насб кунед.",
   "Terminal.Error.DesktopRequestFailed": "Дархости Desktop анҷом дода нашуд.",
   "Terminal.Error.CommandInvalid": "Дархости фармон нодуруст аст.",
   "Terminal.Hint.DidYouMean": "маслиҳат: Шояд «{0}»-ро дар назар доштед?",

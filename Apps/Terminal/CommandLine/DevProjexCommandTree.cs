@@ -874,7 +874,9 @@ public sealed class DevProjexCommandTree
 					TreeTextFormat? treeFormatValue = parseResult.GetValue(format) is { } requestedTreeFormat
 						? ParseTreeFormat(requestedTreeFormat)
 						: null;
-					return await new DesktopCommandHandler(environment)
+					return await new DesktopCommandHandler(
+							environment,
+							launcher: new DesktopProcessLauncher(_serviceFactory.HostCapabilities))
 						.OpenAsync(
 							DesktopOpenRequestFactory.Create(
 								projectPath,

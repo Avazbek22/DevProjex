@@ -24,6 +24,11 @@
     <ProjectReference
       Include="..\..\Apps\Avalonia\DevProjex.Avalonia.csproj"
       ReferenceOutputAssembly="false" />
+    <ProjectReference
+      Include="..\..\Apps\TerminalHost\DevProjex.TerminalHost.csproj"
+      AdditionalProperties="SelfContained=false"
+      SkipGetTargetFrameworkProperties="true"
+      ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Apps\Terminal\DevProjex.Terminal.csproj" />
     <ProjectReference
       Include="..\DevProjex.Tests.Terminal.ProgressHost\DevProjex.Tests.Terminal.ProgressHost.csproj"

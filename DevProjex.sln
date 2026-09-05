@@ -20,6 +20,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DevProjex.Tests.UI", "Tests
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DevProjex.Terminal", "Apps\Terminal\DevProjex.Terminal.csproj", "{C8B7BC49-A38B-4A41-B834-3229C61876A8}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DevProjex.TerminalHost", "Apps\TerminalHost\DevProjex.TerminalHost.csproj", "{E42D1025-F67C-4C74-9DB0-70E5EB71E452}"
+EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DevProjex.Mcp", "Apps\Mcp\DevProjex.Mcp.csproj", "{12D25954-87B4-4A45-894F-05E534CB995A}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DevProjex.Tests.Terminal", "Tests\DevProjex.Tests.Terminal\DevProjex.Tests.Terminal.csproj", "{C756E09C-055C-4A69-B7A3-F314DB39AC27}"
@@ -74,6 +76,10 @@ Global
 		{C8B7BC49-A38B-4A41-B834-3229C61876A8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C8B7BC49-A38B-4A41-B834-3229C61876A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C8B7BC49-A38B-4A41-B834-3229C61876A8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E42D1025-F67C-4C74-9DB0-70E5EB71E452}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E42D1025-F67C-4C74-9DB0-70E5EB71E452}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E42D1025-F67C-4C74-9DB0-70E5EB71E452}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E42D1025-F67C-4C74-9DB0-70E5EB71E452}.Release|Any CPU.Build.0 = Release|Any CPU
 		{12D25954-87B4-4A45-894F-05E534CB995A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{12D25954-87B4-4A45-894F-05E534CB995A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{12D25954-87B4-4A45-894F-05E534CB995A}.Release|Any CPU.ActiveCfg = Release|Any CPU
