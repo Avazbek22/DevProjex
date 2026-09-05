@@ -126,7 +126,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			    StringComparison.Ordinal))
 		{
 			Assert.Skip(
-				"Interactive TUI PTY journeys are disabled in CI while the TUI is pending removal.");
+				"Interactive TUI PTY journeys are disabled in broad CI jobs; Release Validation runs the curated PTY matrix.");
 		}
 
 		var binary = useProgressCheckpointHost

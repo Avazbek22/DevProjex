@@ -1596,8 +1596,8 @@ jobs:
 
           Write-Host "Portable launcher smoke passed for ${{ matrix.rid }}."
 
-      - name: Portable Launcher ConPTY TUI Smoke (Windows x64)
-        if: ${{ matrix.rid == 'win-x64' }}
+      - name: Portable Launcher ConPTY TUI Smoke (Windows)
+        if: ${{ startsWith(matrix.rid, 'win-') }}
         env:
           DEVPROJEX_SKIP_TUI_PTY_TESTS: 0
         shell: pwsh
