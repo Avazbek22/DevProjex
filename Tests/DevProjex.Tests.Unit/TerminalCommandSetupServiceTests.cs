@@ -1387,6 +1387,36 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public async Task ValidateLauncher_WindowsCommandIgnoresSameNamedLauncherOnPath()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var commandPath = Path.GetFullPath(temp.CreateFile(
+			"working/devprojex.cmd",
+			"@echo off\r\necho working-launcher\r\nexit /b 0\r\n"));
+		var fakePath = temp.CreateFolder("fake-path");
+		File.WriteAllText(
+			Path.Combine(fakePath, "devprojex.cmd"),
+			"@echo off\r\necho path-launcher\r\nexit /b 17\r\n");
+		var startInfo = TerminalCommandSetupService.CreateLauncherValidationStartInfo(commandPath);
+		startInfo.Environment["NoDefaultCurrentDirectoryInExePath"] = "1";
+		startInfo.Environment["PATH"] = fakePath;
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("Launcher validation process did not start.");
+		var standardOutput = await process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var standardError = await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, process.ExitCode);
+		Assert.Contains("working-launcher", standardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("path-launcher", standardOutput, StringComparison.Ordinal);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), standardError);
+	}
+
+	[Fact]
 	public void ValidateLauncher_UnixWrapperWithExecutableTarget_CompletesVersionCheck()
 	{
 		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())

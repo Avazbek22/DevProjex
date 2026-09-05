@@ -1848,7 +1848,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			var fullCommandPath = Path.GetFullPath(commandPath);
 			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
 			startInfo.WorkingDirectory = Path.GetDirectoryName(fullCommandPath)!;
-			startInfo.Arguments = $"/d /s /c \"\"{Path.GetFileName(fullCommandPath)}\" --version\"";
+			startInfo.Arguments = $"/d /s /c \"\".\\{Path.GetFileName(fullCommandPath)}\" --version\"";
 		}
 		else
 		{
