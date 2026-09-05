@@ -40,6 +40,21 @@ Choose what you need in an interactive file tree, check the result in a live pre
 
 All install options per OS are covered in [Docs/Installation.md](Docs/Installation.md).
 
+### Run without installing
+
+These headless channels are available from release v5.2. Until the v5.2 packages
+have completed their first publication, use the direct GitHub release binary.
+
+```shell
+npx devprojex tree .
+dnx devprojex tree .
+./DevProjex tree .
+```
+
+The npm and NuGet packages contain the CLI, TUI, and MCP server, but not the
+desktop application. See [Docs/Installation.md](Docs/Installation.md) for the
+Node/.NET requirements and supported platforms.
+
 ---
 
 ## Why DevProjex? 💡
@@ -121,9 +136,9 @@ Works with any language, repository, or project structure.
 | CI secret pre-flight gate (fail build on findings) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Run with no install (npx / uvx / browser) | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Run with no install (npx / dnx / direct binary) | ✅ (v5.2+) | ✅ | ✅ | ❌ | ❌ | ✅ |
 
-<sub>Based on publicly documented features, last verified September 2026.</sub>
+<sub>Based on publicly documented features, last verified September 2026. DevProjex no-install package channels are available from v5.2.</sub>
 
 ---
 

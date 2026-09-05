@@ -539,5 +539,65 @@ Add to `.vscode/mcp.json`:
 }
 ```
 
+### Headless package launch (from v5.2)
+
+The v5.2 package channels run the same MCP server without installing the desktop
+application. They are published separately; until their first publication, keep
+using the installed/direct `devprojex` command above. Node 20+ clients can use
+`npx -y`, while machines with .NET SDK 10.0.100+ can use `dnx`.
+
+For Claude Code, choose either command:
+
+```shell
+claude mcp add devprojex-npx -- npx -y devprojex mcp --root /absolute/path/to/project
+claude mcp add devprojex-dnx -- dnx devprojex mcp --root /absolute/path/to/project
+```
+
+For Claude Desktop or Cursor, add one of these entries to `mcpServers`:
+
+```json
+{
+  "devprojex-npx": {
+    "command": "npx",
+    "args": ["-y", "devprojex", "mcp", "--root", "/absolute/path/to/project"]
+  },
+  "devprojex-dnx": {
+    "command": "dnx",
+    "args": ["devprojex", "mcp", "--root", "/absolute/path/to/project"]
+  }
+}
+```
+
+For OpenAI Codex, add one of these TOML entries:
+
+```toml
+[mcp_servers.devprojex_npx]
+command = "npx"
+args = ["-y", "devprojex", "mcp", "--root", "/absolute/path/to/project"]
+
+[mcp_servers.devprojex_dnx]
+command = "dnx"
+args = ["devprojex", "mcp", "--root", "/absolute/path/to/project"]
+```
+
+For Visual Studio Code, use the same commands in `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "devprojex-npx": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "devprojex", "mcp", "--root", "${workspaceFolder}"]
+    },
+    "devprojex-dnx": {
+      "type": "stdio",
+      "command": "dnx",
+      "args": ["devprojex", "mcp", "--root", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
 MCP traffic uses stdout exclusively. If startup fails, diagnostics are written
 to stderr. Closing the client's stdin terminates the server process.

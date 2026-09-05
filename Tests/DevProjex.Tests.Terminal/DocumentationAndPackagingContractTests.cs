@@ -19,7 +19,8 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Profiles.md",
 		"Desktop-Control.md",
 		"SmartIgnore.md",
-		"HideSecrets.md"
+		"HideSecrets.md",
+		"Release-Channels.md"
 	];
 
 	[Fact]
@@ -180,6 +181,71 @@ public sealed class DocumentationAndPackagingContractTests
 			["Infrastructure.csproj", "DevProjex.Mcp.csproj"]);
 		AssertRidPropertyDoesNotFlowPastInfrastructure(mcpProject, ["Infrastructure.csproj"]);
 		AssertRidPropertyDoesNotFlowPastInfrastructure(infrastructureProject, excludedProjects: null);
+	}
+
+	[Fact]
+	public void HeadlessPackagesStayRidSpecificAndFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var hostPath = Path.Combine(rootPath, "Apps", "TerminalHost", "DevProjex.TerminalHost.csproj");
+		var host = XDocument.Load(hostPath);
+		string Property(string name) => host.Descendants(name).Single().Value;
+
+		Assert.Equal("Exe", Property("OutputType"));
+		Assert.Equal("devprojex", Property("AssemblyName"));
+		Assert.Equal("devprojex", Property("PackageId"));
+		Assert.Equal("devprojex", Property("ToolCommandName"));
+		Assert.Equal("true", Property("PackAsTool"));
+		Assert.Equal("true", Property("SelfContained"));
+		Assert.Equal("false", Property("PublishAot"));
+		Assert.Equal("false", Property("PublishTrimmed"));
+		Assert.DoesNotContain(
+			host.Descendants("ProjectReference"),
+			element => (element.Attribute("Include")?.Value ?? string.Empty)
+				.Contains("Avalonia", StringComparison.OrdinalIgnoreCase));
+		var rids = Property("RuntimeIdentifiers").Split(';');
+		Assert.Equal(
+			["win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64"],
+			rids);
+		Assert.DoesNotContain("any", rids);
+
+		using var manifestDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Headless",
+			"payload-manifest.json")));
+		var manifestGrammars = manifestDocument.RootElement.GetProperty("grammars")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var infrastructure = XDocument.Load(Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var projectGrammars = infrastructure.Descendants()
+			.Where(static element => element.Name.LocalName is "DevProjexGrammar" or "DevProjexVendoredGrammar")
+			.Select(static element => element.Attribute("Include")?.Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(projectGrammars, manifestGrammars);
+		Assert.Contains("tree-sitter-c-sharp", manifestGrammars);
+		Assert.Contains("tree-sitter-kotlin", manifestGrammars);
+
+		var launcherTemplate = File.ReadAllText(Path.Combine(
+			rootPath, "Packaging", "Npm", "devprojex", "package.json.template"));
+		Assert.DoesNotContain("\"dependencies\"", launcherTemplate, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"scripts\"", launcherTemplate, StringComparison.Ordinal);
+		Assert.Contains("\"optionalDependencies\"", launcherTemplate, StringComparison.Ordinal);
+		Assert.Contains("\"node\": \">=20\"", launcherTemplate, StringComparison.Ordinal);
+
+		var workflow = File.ReadAllText(Path.Combine(
+			rootPath, ".github", "workflows", "publish-packages.yml"));
+		Assert.Contains("Test-HeadlessPackages.ps1", workflow, StringComparison.Ordinal);
+		Assert.Contains("Test-HeadlessPackageGateMutation.ps1", workflow, StringComparison.Ordinal);
+		Assert.Contains("windows-latest", workflow, StringComparison.Ordinal);
+		Assert.Contains("ubuntu-latest", workflow, StringComparison.Ordinal);
+		Assert.Contains("macos-latest", workflow, StringComparison.Ordinal);
+		Assert.Contains("NuGet/login@v1", workflow, StringComparison.Ordinal);
+		Assert.Contains("inputs.dry_run == false", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("--skip-duplicate", workflow, StringComparison.Ordinal);
 	}
 
 	[Fact]
