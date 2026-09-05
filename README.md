@@ -36,6 +36,8 @@ Choose what you need in an interactive file tree, check the result in a live pre
 **Latest GitHub release:**
 👉 [https://github.com/Avazbek22/DevProjex/releases/latest](https://github.com/Avazbek22/DevProjex/releases/latest)
 
+**Linux AppImage (x86_64 and aarch64):** [download it from GitHub Releases](https://github.com/Avazbek22/DevProjex/releases/latest)
+
 **Install via WinGet (Windows):** `winget install OlimoffDev.DevProjex`
 
 All install options per OS are covered in [Docs/Installation.md](Docs/Installation.md).

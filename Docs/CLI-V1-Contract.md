@@ -64,6 +64,8 @@ direct-command startup when that default is writable or when a private writable
 `DOTNET_BUNDLE_EXTRACT_BASE_DIR` is supplied. An unset or read-only Unix home, or
 an unusable Windows temporary directory, therefore requires the explicit
 extraction base. The v1 contract does not promise extraction-free startup.
+When DevProjex resolves a path for launching or registering itself, an existing
+file named by `APPIMAGE` takes precedence over the temporary mounted process path.
 
 ## Public Command Tree
 
