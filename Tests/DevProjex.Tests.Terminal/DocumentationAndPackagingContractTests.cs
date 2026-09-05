@@ -569,7 +569,7 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Published Broken Pipe Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Startup Smoke (macOS)", workflow, StringComparison.Ordinal);
-		Assert.Contains("branches: [ \"master\", \"v5.1\" ]", workflow, StringComparison.Ordinal);
+		Assert.Contains("branches: [ \"master\", \"v5.1\", \"v5.2\" ]", workflow, StringComparison.Ordinal);
 		Assert.Contains("Smart Secrets context contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"Password=DEVPROJEX_REDACTED[connection-password#1]",
@@ -667,7 +667,11 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.DoesNotContain("\"--report\"", workflow, StringComparison.Ordinal);
 
 		var desktopEntry = File.ReadAllText(
-			Path.Combine(rootPath, "Packaging", "Linux", "devprojex.desktop"));
+			Path.Combine(
+				rootPath,
+				"Packaging",
+				"Linux",
+				"io.github.Avazbek22.DevProjex.desktop"));
 		Assert.Contains("Exec=devprojex open %f", desktopEntry, StringComparison.Ordinal);
 		Assert.DoesNotContain("Exec=devprojex %F", desktopEntry, StringComparison.Ordinal);
 
@@ -882,6 +886,48 @@ public sealed class DocumentationAndPackagingContractTests
 					stack.Push((child, [.. path, child.Name]));
 			}
 		}
+	}
+
+	[Fact]
+	public void AppImageWorkflowAndDocumentationKeepTheReleaseContractFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"package-appimage.yml"));
+		var installation = File.ReadAllText(Path.Combine(
+			rootPath,
+			"Docs",
+			"Installation.md"));
+		var linuxPackaging = File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Linux",
+			"README.md"));
+
+		Assert.Contains("workflow_dispatch:", workflow, StringComparison.Ordinal);
+		Assert.Contains("types: [published]", workflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04", workflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04-arm", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishSingleFile=true", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:IncludeNativeLibrariesForSelfExtract=true", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishReadyToRun=true", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishTrimmed=false", workflow, StringComparison.Ordinal);
+		Assert.Contains("appstreamcli validate --strict --explain", workflow, StringComparison.Ordinal);
+		Assert.Contains("desktop-file-validate", workflow, StringComparison.Ordinal);
+		Assert.Contains("appdir-lint.sh", workflow, StringComparison.Ordinal);
+		Assert.Contains("Verify packaged binary identity", workflow, StringComparison.Ordinal);
+		Assert.Contains("needs: [prepare, package]", workflow, StringComparison.Ordinal);
+		Assert.Contains("gh release upload", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("--updateinformation", workflow, StringComparison.Ordinal);
+		Assert.Contains("output_path}.zsync", workflow, StringComparison.Ordinal);
+		Assert.Contains("DevProjex-<version>-x86_64.AppImage", installation, StringComparison.Ordinal);
+		Assert.Contains("--appimage-extract-and-run", installation, StringComparison.Ordinal);
+		Assert.Contains("Open Anyway", installation, StringComparison.Ordinal);
+		Assert.Contains("data/DevProjex", linuxPackaging, StringComparison.Ordinal);
+		Assert.Contains("https://github.com/Avazbek22/DevProjex", linuxPackaging, StringComparison.Ordinal);
 	}
 
 	private static string FindRepositoryRoot()
