@@ -38,6 +38,19 @@ public sealed class GitIgnoreMatcherLoadSessionTests
 		Assert.True(GitSubmoduleManifest.Read(temp.Path, TestContext.Current.CancellationToken).ReadFailed);
 	}
 
+	[Theory]
+	[InlineData("[submodule\t\"name]\"]", "\" nested \"", " nested ")]
+	[InlineData("[submodule \"name\"] # comment ]", "libs/x # comment", "libs/x")]
+	[InlineData("[submodule \"name\"]", "\"libs/#x\"", "libs/#x")]
+	public void SubmoduleDeclarationsPreserveQuotedPathsAndSectionNames(string section, string value, string expected)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitmodules", $"{section}\n path = {value}\n url = ignored\n branch = ignored\n");
+		var manifest = GitSubmoduleManifest.Read(temp.Path, TestContext.Current.CancellationToken);
+		Assert.False(manifest.ReadFailed);
+		Assert.Equal(expected, Assert.Single(manifest.Paths));
+	}
+
 	[Fact]
 	public async Task Load_ConcurrentRequestsForOneSource_ExecutesLoaderOnce()
 	{

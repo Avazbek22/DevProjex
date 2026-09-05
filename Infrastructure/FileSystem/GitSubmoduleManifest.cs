@@ -23,13 +23,8 @@ internal sealed record GitSubmoduleManifest(IReadOnlySet<string> Paths, bool Rea
 					continue;
 				if (line[0] == '[')
 				{
-					var end = line.IndexOf(']');
-					if (end < 0)
+					if (!TryReadSection(line, out inSubmodule))
 						return new(paths, true);
-					var section = line[1..end].Trim();
-					inSubmodule = section.StartsWith("submodule ", StringComparison.OrdinalIgnoreCase) &&
-					              section[10..].Trim() is var name && name.Length >= 2 &&
-					              name[0] == '"' && name[^1] == '"';
 					continue;
 				}
 				if (!inSubmodule)
@@ -56,10 +51,41 @@ internal sealed record GitSubmoduleManifest(IReadOnlySet<string> Paths, bool Rea
 		}
 	}
 
+	private static bool TryReadSection(string line, out bool isSubmodule)
+	{
+		isSubmodule = false;
+		var quoted = false;
+		for (var index = 1; index < line.Length; index++)
+		{
+			if (line[index] == '\\' && quoted)
+			{
+				index++;
+				continue;
+			}
+			if (line[index] == '"')
+				quoted = !quoted;
+			if (line[index] != ']' || quoted)
+				continue;
+			var trailing = line[(index + 1)..].TrimStart();
+			if (trailing.Length > 0 && trailing[0] is not ('#' or ';'))
+				return false;
+			var section = line[1..index].Trim();
+			var separator = section.IndexOfAny([' ', '\t']);
+			if (separator < 0 || !section[..separator].Equals("submodule", StringComparison.OrdinalIgnoreCase))
+				return true;
+			var name = section[(separator + 1)..].Trim();
+			isSubmodule = name.Length >= 2 && name[0] == '"' && name[^1] == '"';
+			return isSubmodule;
+		}
+		return false;
+	}
+
 	private static bool TryReadPath(string value, out string path)
 	{
+		value = value.TrimStart();
 		var result = new System.Text.StringBuilder();
 		var quoted = false;
+		var significantLength = 0;
 		for (var index = 0; index < value.Length; index++)
 		{
 			var character = value[index];
@@ -80,8 +106,10 @@ internal sealed record GitSubmoduleManifest(IReadOnlySet<string> Paths, bool Rea
 				character = value[index];
 			}
 			result.Append(character);
+			if (quoted || !char.IsWhiteSpace(character))
+				significantLength = result.Length;
 		}
-		path = result.ToString().Trim();
+		path = result.ToString(0, significantLength);
 		return !quoted && path.Length > 0 && !Path.IsPathRooted(path) &&
 		       !path.Contains('\\') && !path.Contains(':') && !path.Any(char.IsControl) &&
 		       path.Split('/').All(static segment => segment.Length > 0 && segment is not ("." or ".."));
