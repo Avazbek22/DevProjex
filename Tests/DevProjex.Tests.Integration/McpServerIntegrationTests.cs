@@ -3398,12 +3398,24 @@ public sealed class McpServerIntegrationTests
 		foreach (var testCase in cases)
 		{
 			var progress = new InlineProgress<ProgressNotificationValue>();
+			var progressToken = new ProgressToken(Guid.NewGuid().ToString("N"));
+			// SDK notification dispatch may finish after the response. Keep the handler alive
+			// through observation instead of letting CallToolAsync dispose it with the request.
+			await using var registration = server.Client.RegisterNotificationHandler(
+				NotificationMethods.ProgressNotification,
+				(notification, _) =>
+				{
+					if (notification.Params?.Deserialize<ProgressNotificationParams>() is { } value &&
+					    value.ProgressToken == progressToken)
+						progress.Report(value.Progress);
+					return ValueTask.CompletedTask;
+				});
 			var firstMessage = server.WireMessageCount;
 			var firstInputMessage = server.InputWireMessageCount;
 			var callTask = server.CallAsync(
 				testCase.ToolName,
 				testCase.Arguments,
-				progress);
+				options: new RequestOptions { ProgressToken = progressToken });
 			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
 			var result = await callTask;
 
