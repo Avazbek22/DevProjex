@@ -31,13 +31,29 @@ an explicit profile. Momentary Git state belongs to request-level `git_scope`
 and is intentionally rejected at server startup. `off` is accepted as an input
 alias for the canonical `none` token.
 
-The baseline exclusion set follows the same pattern with `--exclude <NAME>`
+Without a Git flag the baseline is `gitignore`, the standard profile's mode.
+
+The exclusion baseline is deliberately narrower than the desktop standard set.
+A server started without exclusion flags runs with `smart-ignore` and
+`empty-folders` only, so the agent sees the repository the way Git sees it:
+dependency and build trees are gone, while dot-files, dot-folders,
+extensionless files, hidden entries, and empty files stay visible. Those
+toggles exist for a person who can see what a checkbox hides; an agent cannot,
+and a hidden `Dockerfile`, `.github/` workflow, `.env.example`, or empty
+`__init__.py` becomes a confident wrong answer about the project. `list_projects`
+reports this baseline, and `analyze` echoes the effective set on every call.
+
+The baseline exclusion set is selected at startup with `--exclude <NAME>`
 (repeatable). The names are the exclusion tokens the CLI and TUI already speak:
 `smart-ignore`, `empty-folders`, `empty-files`, `hidden-folders`,
-`hidden-files`, `dot-folders`, `dot-files`, and `extensionless-files`;
-`--exclude none` starts the server with every toggle off. The listed names
-replace the standard set, and like the Git baseline this applies only when a
-tool does not name an explicit profile. Redaction toggles are not exclusions
+`hidden-files`, `dot-folders`, `dot-files`, and `extensionless-files`, plus two
+MCP-only tokens: `none` starts the server with every toggle off, and `default`
+expands to the server default set so a line can extend it instead of re-listing
+it — `--exclude default --exclude dot-folders` is the default set plus
+`dot-folders`. Any list without `default` replaces the default set, the same
+rule the CLI `--exclude` follows; `none` cannot be combined with another token.
+Like the Git baseline this applies only when a tool does not name an explicit
+profile. Redaction toggles are not exclusions
 and are rejected at startup. The `hidden-folders` and `hidden-files` toggles
 follow the platform hidden attribute (the Windows Hidden attribute or macOS
 `UF_HIDDEN`); on Unix-like systems dot-named entries belong to the
@@ -75,8 +91,8 @@ toggle off, and the value outranks both the server baseline and profile
 exclusions. Tokens match case-insensitively and duplicates are rejected.
 Without the flag the parameter does not exist in any schema and is rejected as
 an unknown argument, so a default server keeps today's narrowing-only contract
-unchanged. Turning toggles off widens the per-call scan to trees the standard
-set skips (subject to the Git baseline), so enable this delegation only for
+unchanged. Turning toggles off widens the per-call scan to trees the baseline
+skips (subject to the Git baseline), so enable this delegation only for
 agents you trust with full-project walks. Both the startup baseline and the
 delegated set apply to opt-in remote checkouts exactly as they do to local
 roots.

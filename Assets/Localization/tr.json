@@ -487,7 +487,7 @@
   "Terminal.Option.Select": "Göreli bir dosya veya dizin yolu ekleyin.",
   "Terminal.Option.GitMode": "Git filtreleme modu: none, gitignore, tracked, staged, changes veya diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Temel Git filtreleme modu: none, gitignore veya tracked.",
-  "Terminal.Option.McpExclude": "Sunucunun temel hariç tutma kümesi: hariç tutma adları veya none.",
+  "Terminal.Option.McpExclude": "Sunucunun temel hariç tutma kümesi: hariç tutma adları, default veya none. Adlar varsayılan kümenin yerini alır; genişletmek için default belirtin.",
   "Terminal.Option.McpUnrestricted": "Her şeyi göster: tüm hariç tutmaları ve Git filtrelemesini kapatır. Gizli değerlerin maskelenmesi açık kalır.",
   "Terminal.Option.McpAgentExclusions": "Ajanın her çağrıda hariç tutmaları ayarlamasına izin verir (seçim araçlarına exclusions parametresi ekler).",
   "Terminal.Validation.GitMode": "none, gitignore, tracked, staged, changes veya diff:<ref>..<ref> kullanın.",

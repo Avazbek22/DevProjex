@@ -487,7 +487,7 @@
   "Terminal.Option.Select": "Bao gồm đường dẫn tệp hoặc thư mục tương đối.",
   "Terminal.Option.GitMode": "Chế độ lọc Git: none, gitignore, tracked, staged, changes hoặc diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Chế độ lọc Git cơ sở: none, gitignore hoặc tracked.",
-  "Terminal.Option.McpExclude": "Tập loại trừ cơ sở của máy chủ: tên các mục loại trừ hoặc none.",
+  "Terminal.Option.McpExclude": "Tập loại trừ cơ sở của máy chủ: tên các mục loại trừ, default hoặc none. Tên sẽ thay thế tập mặc định; thêm default để mở rộng tập đó.",
   "Terminal.Option.McpUnrestricted": "Hiển thị tất cả: tắt mọi mục loại trừ và bộ lọc Git. Việc che các giá trị bí mật vẫn được bật.",
   "Terminal.Option.McpAgentExclusions": "Cho phép tác nhân đặt các mục loại trừ trong từng lần gọi (thêm tham số exclusions vào các công cụ chọn).",
   "Terminal.Validation.GitMode": "Dùng none, gitignore, tracked, staged, changes hoặc diff:<ref>..<ref>.",

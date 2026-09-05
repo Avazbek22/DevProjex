@@ -493,7 +493,7 @@
   "Terminal.Option.Select": "Включить относительный путь файла или каталога.",
   "Terminal.Option.GitMode": "Режим Git-фильтрации: none, gitignore, tracked, staged, changes или diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Базовый режим Git-фильтрации: none, gitignore или tracked.",
-  "Terminal.Option.McpExclude": "Базовый набор исключений сервера: имена исключений или none.",
+  "Terminal.Option.McpExclude": "Базовый набор исключений сервера: имена исключений, default или none. Имена заменяют набор по умолчанию; укажите default, чтобы дополнить его.",
   "Terminal.Option.McpUnrestricted": "Показать всё: отключает все исключения и Git-фильтрацию. Скрытие секретов остаётся включённым.",
   "Terminal.Option.McpAgentExclusions": "Разрешить агенту задавать исключения на каждый вызов (добавляет параметр exclusions в инструменты выбора).",
   "Terminal.Validation.GitMode": "Укажите none, gitignore, tracked, staged, changes или diff:<ref>..<ref>.",

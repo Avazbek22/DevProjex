@@ -487,7 +487,7 @@
   "Terminal.Option.Select": "包括相對檔案或目錄路徑。",
   "Terminal.Option.GitMode": "Git過濾模式：none、gitignore、tracked、staged、changes或diff:<ref>..<ref>。",
   "Terminal.Option.McpGitMode": "基礎Git過濾模式：none、gitignore或tracked。",
-  "Terminal.Option.McpExclude": "伺服器的基準排除集合：排除項名稱或 none。",
+  "Terminal.Option.McpExclude": "伺服器的基準排除集合：排除項名稱、default 或 none。名稱會取代預設集合；如需在預設集合上擴充，請加入 default。",
   "Terminal.Option.McpUnrestricted": "顯示全部：關閉所有排除項並停用Git過濾。機密遮蔽保持開啟。",
   "Terminal.Option.McpAgentExclusions": "允許代理在每次呼叫時設定排除項（為選擇工具加入 exclusions 參數）。",
   "Terminal.Validation.GitMode": "請使用none、gitignore、tracked、staged、changes或diff:<ref>..<ref>。",

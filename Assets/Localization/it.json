@@ -493,7 +493,7 @@
   "Terminal.Option.Select": "Include un percorso relativo di file o cartella.",
   "Terminal.Option.GitMode": "Modalità filtro Git: none, gitignore, tracked, staged, changes o diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Modalità filtro Git di base: none, gitignore o tracked.",
-  "Terminal.Option.McpExclude": "Set di esclusioni di base del server: nomi delle esclusioni o none.",
+  "Terminal.Option.McpExclude": "Set di esclusioni di base del server: nomi delle esclusioni, default o none. I nomi sostituiscono il set predefinito; indicare default per estenderlo.",
   "Terminal.Option.McpUnrestricted": "Mostra tutto: disattiva tutte le esclusioni e il filtro Git. L'oscuramento dei segreti resta attivo.",
   "Terminal.Option.McpAgentExclusions": "Consente all'agente di impostare le esclusioni a ogni chiamata (aggiunge un parametro exclusions agli strumenti di selezione).",
   "Terminal.Validation.GitMode": "Usare none, gitignore, tracked, staged, changes o diff:<ref>..<ref>.",

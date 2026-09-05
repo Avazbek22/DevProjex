@@ -493,7 +493,7 @@
   "Terminal.Option.Select": "Relativen Datei- oder Verzeichnispfad einschließen.",
   "Terminal.Option.GitMode": "Git-Filtermodus: none, gitignore, tracked, staged, changes oder diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Basis-Git-Filtermodus: none, gitignore oder tracked.",
-  "Terminal.Option.McpExclude": "Basis-Ausschlussmenge des Servers: Ausschlussnamen oder none.",
+  "Terminal.Option.McpExclude": "Basis-Ausschlussmenge des Servers: Ausschlussnamen, default oder none. Namen ersetzen die Standardmenge; default angeben, um sie zu erweitern.",
   "Terminal.Option.McpUnrestricted": "Alles anzeigen: schaltet alle Ausschlüsse und die Git-Filterung ab. Die Schwärzung von Geheimnissen bleibt aktiv.",
   "Terminal.Option.McpAgentExclusions": "Erlaubt dem Agenten, die Ausschlüsse pro Aufruf zu setzen (fügt den Auswahl-Tools einen exclusions-Parameter hinzu).",
   "Terminal.Validation.GitMode": "Verwenden Sie none, gitignore, tracked, staged, changes oder diff:<ref>..<ref>.",

@@ -149,7 +149,7 @@ public sealed class DevProjexCommandTree
 			"devprojex mcp --root . --root ../shared",
 			"devprojex mcp --root . --hide-private-data",
 			"devprojex mcp --root . --git-mode tracked",
-			"devprojex mcp --root . --exclude smart-ignore --exclude dot-folders",
+			"devprojex mcp --root . --exclude default --exclude dot-folders",
 			"devprojex mcp --root . --unrestricted",
 			"devprojex mcp --root . --allow-agent-exclusions",
 			"devprojex mcp --root . --unrestricted --allow-agent-exclusions");
@@ -213,6 +213,16 @@ public sealed class DevProjexCommandTree
 				var values = new List<CliExclusionValue>(result.Tokens.Count);
 				foreach (var token in result.Tokens)
 				{
+					// 'default' expands to the server default set, so a startup line extends it
+					// ("--exclude default --exclude dot-folders") instead of re-listing it. Any
+					// other name list replaces the default set — the CLI --exclude rule.
+					if (string.Equals(token.Value, McpServerBaseline.DefaultExclusionsToken, StringComparison.OrdinalIgnoreCase))
+					{
+						foreach (var exclusion in McpServerBaseline.DefaultExclusions)
+							values.Add(new CliExclusionValue(exclusion));
+						continue;
+					}
+
 					// The hidden legacy hide-secrets alias stays out of the server baseline:
 					// redaction is not an exclusion the MCP surface may reason about.
 					if (CliChoiceSets.Exclusion.TryParse(token.Value, out var value) &&
@@ -237,7 +247,7 @@ public sealed class DevProjexCommandTree
 				return values.ToArray();
 			}
 		};
-		option.CompletionSources.Add(CliChoiceSets.Exclusion.Tokens.ToArray());
+		option.CompletionSources.Add([.. CliChoiceSets.Exclusion.Tokens, McpServerBaseline.DefaultExclusionsToken]);
 		return option;
 	}
 

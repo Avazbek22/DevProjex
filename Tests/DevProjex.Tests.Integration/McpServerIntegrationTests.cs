@@ -102,7 +102,7 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task ServerExclusionBaselineReplacesTheStandardSetAndYieldsToProfiles()
+	public async Task ServerExclusionBaselineReplacesTheDefaultSetAndYieldsToProfiles()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -129,7 +129,30 @@ public sealed class McpServerIntegrationTests
 				}
 			}));
 
-		await using var standardServer = await McpTestServer.StartAsync(project, workspace.Path);
+		// The default server keeps dot-named and empty files visible; the desktop standard
+		// set is a startup choice, spelled out in full.
+		await using var defaultServer = await McpTestServer.StartAsync(project, workspace.Path);
+		var defaultTree = await defaultServer.CallAsync("get_tree");
+		Assert.Contains("Visible.cs", Text(defaultTree), StringComparison.Ordinal);
+		Assert.Contains(".dotted.cs", Text(defaultTree), StringComparison.Ordinal);
+		Assert.Contains("Empty.cs", Text(defaultTree), StringComparison.Ordinal);
+		var defaultAnalysis = await defaultServer.CallAsync("analyze");
+		Assert.Equal(
+			["smart-ignore", "empty-folders"],
+			defaultAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+		var profiledDefaultAnalysis = await defaultServer.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = profileName });
+		Assert.Equal(
+			["dot-files"],
+			profiledDefaultAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+
+		await using var standardServer = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: ProjectSelectionSpec.StandardExclusions);
 		var standardTree = await standardServer.CallAsync("get_tree");
 		Assert.Contains("Visible.cs", Text(standardTree), StringComparison.Ordinal);
 		Assert.DoesNotContain(".dotted.cs", Text(standardTree), StringComparison.Ordinal);
@@ -139,16 +162,9 @@ public sealed class McpServerIntegrationTests
 			["smart-ignore", "empty-folders", "empty-files", "hidden-folders", "hidden-files", "dot-folders", "dot-files", "extensionless-files"],
 			standardAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
 				.Select(static item => item.GetString()));
-		var profiledStandardAnalysis = await standardServer.CallAsync(
-			"analyze",
-			new Dictionary<string, object?> { ["profile"] = profileName });
-		Assert.Equal(
-			["dot-files"],
-			profiledStandardAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
-				.Select(static item => item.GetString()));
 
-		// The baseline is a full replacement of the standard set, not an addition to it:
-		// keeping only dot-files re-admits the empty file the standard set would hide.
+		// The baseline is a full replacement of the default set, not an addition to it:
+		// keeping only dot-files drops smart-ignore and empty-folders from the echo.
 		await using var narrowedServer = await McpTestServer.StartAsync(
 			project,
 			workspace.Path,
@@ -156,6 +172,11 @@ public sealed class McpServerIntegrationTests
 		var narrowedTree = await narrowedServer.CallAsync("get_tree");
 		Assert.Contains("Empty.cs", Text(narrowedTree), StringComparison.Ordinal);
 		Assert.DoesNotContain(".dotted.cs", Text(narrowedTree), StringComparison.Ordinal);
+		var narrowedAnalysis = await narrowedServer.CallAsync("analyze");
+		Assert.Equal(
+			["dot-files"],
+			narrowedAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
 
 		await using var openServer = await McpTestServer.StartAsync(
 			project,
@@ -187,9 +208,12 @@ public sealed class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(project, ".untracked.cs"), "untracked-compose\n");
 		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-compose-changed\n");
 
+		// The desktop standard set is pinned so the dotted fixtures start hidden and the
+		// per-call [] value has something to widen.
 		await using var server = await McpTestServer.StartAsync(
 			project,
 			workspace.Path,
+			exclusions: ProjectSelectionSpec.StandardExclusions,
 			agentExclusions: true);
 
 		// Agent globs still narrow after delegation: exclusions cannot re-admit what the
@@ -683,7 +707,7 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task DefaultServerHiddenAttributeFollowsThePlatformContract()
+	public async Task HiddenAttributeTogglesFollowThePlatformContract()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -701,7 +725,13 @@ public sealed class McpServerIntegrationTests
 			Assert.False(File.GetAttributes(probePath).HasFlag(FileAttributes.Hidden));
 		}
 
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		// The hidden toggles are off on a default server, so the probe pins the desktop
+		// standard set: the question is what the toggles mean per platform, not whether
+		// they run.
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: ProjectSelectionSpec.StandardExclusions);
 
 		var tree = await server.CallAsync("get_tree");
 		Assert.Contains("Visible.cs", Text(tree), StringComparison.Ordinal);
@@ -3883,7 +3913,12 @@ public sealed class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(repository, "Baseline.cs"), "ordinary-baseline\n");
 		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-baseline\n");
 		InitializeCommittedRepository(repository);
-		await using var server = await McpTestServer.StartAsync(repository, workspace.Path);
+		// The desktop standard set is pinned explicitly: the probe is about a hidden
+		// committed baseline never leaking through a staged scope.
+		await using var server = await McpTestServer.StartAsync(
+			repository,
+			workspace.Path,
+			exclusions: ProjectSelectionSpec.StandardExclusions);
 		var scope = new Dictionary<string, object?> { ["git_scope"] = "staged" };
 
 		var cleanTree = await server.CallAsync("get_tree", scope);

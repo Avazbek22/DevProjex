@@ -61,13 +61,15 @@ public sealed class McpCommandContractTests
 		Assert.Contains("Unknown exclusion", environment.StandardError, StringComparison.Ordinal);
 	}
 
-	[Fact]
-	public async Task McpServerBaselineRejectsNoneCombinedWithAnotherExclusion()
+	[Theory]
+	[InlineData("dot-files")]
+	[InlineData("default")]
+	public async Task McpServerBaselineRejectsNoneCombinedWithAnotherExclusion(string other)
 	{
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await new TerminalApplication(environment).RunAsync(
-			["mcp", "--exclude", "none", "--exclude", "dot-files", "--language", "en"],
+			["mcp", "--exclude", "none", "--exclude", other, "--language", "en"],
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);

@@ -475,7 +475,7 @@
   "Terminal.Option.Select": "Fayl yoki papkaning nisbiy yo'lini qo'shadi.",
   "Terminal.Option.GitMode": "Git filtrlash rejimi: none, gitignore, tracked, staged, changes yoki diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Asosiy Git filtrlash rejimi: none, gitignore yoki tracked.",
-  "Terminal.Option.McpExclude": "Server uchun asosiy istisnolar to‘plami: istisno nomlari yoki none.",
+  "Terminal.Option.McpExclude": "Server uchun asosiy istisnolar to‘plami: istisno nomlari, default yoki none. Nomlar standart to‘plamni almashtiradi; uni kengaytirish uchun default ni ko‘rsating.",
   "Terminal.Option.McpUnrestricted": "Hammasini ko‘rsatish: barcha istisnolarni va Git filtrlashni o‘chiradi. Maxfiy qiymatlarni yashirish yoqilgan holda qoladi.",
   "Terminal.Option.McpAgentExclusions": "Agentga har bir chaqiruvda istisnolarni belgilashga ruxsat beradi (tanlov vositalariga exclusions parametrini qo‘shadi).",
   "Terminal.Validation.GitMode": "none, gitignore, tracked, staged, changes yoki diff:<ref>..<ref> dan foydalaning.",

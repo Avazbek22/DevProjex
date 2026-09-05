@@ -12,6 +12,13 @@ internal sealed class McpProjectService(
 	internal const int MaximumRequestedPathLength = 4096;
 
 	public async Task<ProjectContextPlan> BuildPlanAsync(
+	/// <summary>The Git baseline every call starts from when it names no profile.</summary>
+	public GitFilteringMode ServerGitMode => serverGitMode ?? McpServerBaseline.DefaultGitMode;
+
+	/// <summary>The exclusion baseline every call starts from when it names no profile.</summary>
+	public IReadOnlyCollection<ProjectExclusion> ServerExclusions =>
+		serverExclusions ?? McpServerBaseline.DefaultExclusions;
+
 		string? project,
 		string? branch,
 		IReadOnlyList<string>? paths,
@@ -43,9 +50,11 @@ internal sealed class McpProjectService(
 				: null;
 		// The startup exclusion baseline follows the --git-mode precedent: an explicit
 		// profile carries its own exclusion state, so the baseline yields to it. A delegated
-		// per-call set outranks both — the human enabled that delegation at startup.
+		// per-call set outranks both — the human enabled that delegation at startup. Without
+		// a startup line the server default applies, never the desktop standard set: that set
+		// was designed for a person who can see what a checkbox hides.
 		IReadOnlyCollection<ProjectExclusion>? baselineExclusions =
-			exclusions ?? (string.IsNullOrEmpty(profile) ? serverExclusions : null);
+			exclusions ?? (string.IsNullOrEmpty(profile) ? ServerExclusions : null);
 		var selection = await services.SelectionResolver
 			.ResolveAsync(
 				projectRoot,

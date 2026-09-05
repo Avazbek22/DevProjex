@@ -487,7 +487,7 @@
   "Terminal.Option.Select": "相対ファイルまたはディレクトリ パスを含めます。",
   "Terminal.Option.GitMode": "Gitフィルタリングモード：none、gitignore、tracked、staged、changes、またはdiff:<ref>..<ref>。",
   "Terminal.Option.McpGitMode": "基本Gitフィルタリングモード：none、gitignore、またはtracked。",
-  "Terminal.Option.McpExclude": "サーバーの基本除外セット：除外名または none。",
+  "Terminal.Option.McpExclude": "サーバーの基本除外セット：除外名、default、または none。名前は既定セットを置き換えます。既定セットに追加するには default を含めてください。",
   "Terminal.Option.McpUnrestricted": "すべて表示：すべての除外とGitフィルタリングを無効にします。秘密情報の秘匿化は有効のままです。",
   "Terminal.Option.McpAgentExclusions": "エージェントが呼び出しごとに除外を設定できるようにします（選択ツールに exclusions パラメーターを追加）。",
   "Terminal.Validation.GitMode": "none、gitignore、tracked、staged、changes、またはdiff:<ref>..<ref>を指定してください。",

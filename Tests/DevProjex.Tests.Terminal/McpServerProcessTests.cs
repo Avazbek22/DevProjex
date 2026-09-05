@@ -132,10 +132,13 @@ public sealed class McpServerProcessTests
 	}
 
 	[Theory]
-	[InlineData("none", true)]
-	[InlineData("dot-files", false)]
+	[InlineData(new[] { "none" }, true)]
+	[InlineData(new[] { "dot-files" }, false)]
+	[InlineData(new[] { "default" }, true)]
+	[InlineData(new[] { "default", "dot-files" }, false)]
+	[InlineData(new[] { "DEFAULT", "Dot-Files" }, false)]
 	public async Task RealProcessAppliesTheExclusionBaselineThroughTheCli(
-		string exclusion,
+		string[] exclusions,
 		bool dotFileVisible)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -156,8 +159,11 @@ public sealed class McpServerProcessTests
 		startInfo.ArgumentList.Add("mcp");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
-		startInfo.ArgumentList.Add("--exclude");
-		startInfo.ArgumentList.Add(exclusion);
+		foreach (var exclusion in exclusions)
+		{
+			startInfo.ArgumentList.Add("--exclude");
+			startInfo.ArgumentList.Add(exclusion);
+		}
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
 
 		using var process = Process.Start(startInfo) ??
@@ -181,8 +187,8 @@ public sealed class McpServerProcessTests
 			Assert.NotEqual(true, tree.IsError);
 			var text = Assert.IsType<TextContentBlock>(Assert.Single(tree.Content)).Text;
 
-			// The supplied names replace the standard set: keeping only dot-files must
-			// re-admit the empty file the standard baseline would hide.
+			// The supplied names replace the default set unless 'default' is listed, and the
+			// default set never hides empty files, so Empty.cs is visible on every line here.
 			Assert.Equal(dotFileVisible, text.Contains(".dotted.cs", StringComparison.Ordinal));
 			Assert.Contains("Empty.cs", text, StringComparison.Ordinal);
 		}
@@ -221,6 +227,7 @@ public sealed class McpServerProcessTests
 			WorkingDirectory = project
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		workspace.CreateDirectory("project/hollow");
 		startInfo.ArgumentList.Add("mcp");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
@@ -249,10 +256,12 @@ public sealed class McpServerProcessTests
 			Assert.NotEqual(true, tree.IsError);
 			var text = Assert.IsType<TextContentBlock>(Assert.Single(tree.Content)).Text;
 
-			// One flag opens both axes: the dotted file held back by the standard
-			// exclusion set and the gitignored file held back by the Git baseline.
+			// One flag opens both axes: the empty folder held back by the default
+			// exclusion set and the gitignored file held back by the Git baseline. The
+			// dotted file is visible on both lines — the default set never hides it.
 			Assert.Contains("Anchor.cs", text, StringComparison.Ordinal);
-			Assert.Equal(unrestricted, text.Contains(".dotted.cs", StringComparison.Ordinal));
+			Assert.Contains(".dotted.cs", text, StringComparison.Ordinal);
+			Assert.Equal(unrestricted, text.Contains("hollow", StringComparison.Ordinal));
 			Assert.Equal(unrestricted, text.Contains("ignored.cs", StringComparison.Ordinal));
 
 			// The .git administrative area is a product boundary: it stays excluded

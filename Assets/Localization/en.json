@@ -493,7 +493,7 @@
   "Terminal.Option.Select": "Include a relative file or directory path.",
   "Terminal.Option.GitMode": "Git filtering mode: none, gitignore, tracked, staged, changes, or diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Baseline Git filtering mode: none, gitignore, or tracked.",
-  "Terminal.Option.McpExclude": "Baseline exclusion set for the server: exclusion names or none.",
+  "Terminal.Option.McpExclude": "Baseline exclusion set for the server: exclusion names, default, or none. Names replace the default set; list default to extend it.",
   "Terminal.Option.McpUnrestricted": "Show everything: turn every exclusion off and disable Git filtering. Secret redaction stays on.",
   "Terminal.Option.McpAgentExclusions": "Let the agent set the exclusion toggles per call (adds an exclusions parameter to selection tools).",
   "Terminal.Validation.GitMode": "Use none, gitignore, tracked, staged, changes, or diff:<ref>..<ref>.",

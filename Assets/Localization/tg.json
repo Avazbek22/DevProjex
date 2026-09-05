@@ -475,7 +475,7 @@
   "Terminal.Option.Select": "Роҳи нисбии файл ё ҷузвдонро дохил мекунад.",
   "Terminal.Option.GitMode": "Реҷаи филтркунии Git: none, gitignore, tracked, staged, changes ё diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Реҷаи асосии филтркунии Git: none, gitignore ё tracked.",
-  "Terminal.Option.McpExclude": "Маҷмӯи истисноҳои асосии сервер: номҳои истисноҳо ё none.",
+  "Terminal.Option.McpExclude": "Маҷмӯи истисноҳои асосии сервер: номҳои истисноҳо, default ё none. Номҳо маҷмӯи пешфарзро иваз мекунанд; барои васеъ кардани он default-ро нишон диҳед.",
   "Terminal.Option.McpUnrestricted": "Ҳамаро нишон додан: ҳамаи истисноҳо ва филтркунии Git-ро хомӯш мекунад. Пинҳонкунии қиматҳои махфӣ фаъол мемонад.",
   "Terminal.Option.McpAgentExclusions": "Ба агент иҷозат медиҳад, ки истисноҳоро дар ҳар даъват таъин кунад (ба абзорҳои интихоб параметри exclusions илова мекунад).",
   "Terminal.Validation.GitMode": "none, gitignore, tracked, staged, changes ё diff:<ref>..<ref>-ро истифода баред.",

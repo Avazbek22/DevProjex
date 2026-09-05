@@ -83,11 +83,16 @@ redaction is enabled only by the server startup flag and cannot be controlled by
 tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
 enables RepoCache-backed clone/acquire for MCP project tools without changing
 the local roots returned by `list_projects`.
+Without exclusion flags the server runs with `smart-ignore` and `empty-folders`
+only — narrower than the desktop standard set, so an agent sees dot-files,
+extensionless files, hidden entries, and empty files the way Git does.
 `--exclude` sets the server baseline exclusion set from the shared exclusion
-tokens (`none` disables all toggles) and applies only when a tool does not name
-an explicit profile. An explicit `--exclude` list pins the set: exclusion
-toggles added in later versions default to off for that server until the line
-is updated. `--unrestricted` is the widest-baseline preset — equivalent to
+tokens plus two MCP-only tokens: `none` disables all toggles and `default`
+expands to the server default set, so `--exclude default --exclude dot-folders`
+extends it while a list without `default` replaces it. The baseline applies
+only when a tool does not name an explicit profile. An explicit `--exclude`
+list pins the set: exclusion toggles added in later versions default to off for
+that server until the line is updated. `--unrestricted` is the widest-baseline preset — equivalent to
 `--exclude none --git-mode none` and rejected in combination with either flag;
 secret redaction still applies and the `.git` administrative area remains
 excluded in every mode. `--allow-agent-exclusions` opts in to per-call
