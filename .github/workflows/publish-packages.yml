@@ -1,6 +1,21 @@
 name: Publish Headless Packages
 
 on:
+  pull_request:
+    branches:
+      - v5.2
+    paths:
+      - '.github/workflows/publish-packages.yml'
+      - 'Apps/Terminal/**'
+      - 'Apps/TerminalHost/**'
+      - 'Assets/Localization/**'
+      - 'Infrastructure/**'
+      - 'Packaging/Headless/**'
+      - 'Packaging/Npm/**'
+      - 'Scripts/*Headless*'
+      - 'Tests/DevProjex.Tests.Terminal/**'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
   workflow_dispatch:
     inputs:
       version:
@@ -36,6 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
+      display_version: ${{ steps.version.outputs.display_version }}
       package_version: ${{ steps.version.outputs.package_version }}
     steps:
       - uses: actions/checkout@v4
@@ -54,21 +70,26 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $version = '${{ inputs.version }}'
-          if ($version -match '^(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
-            $version = "$version.0"
+          $displayVersion = '${{ inputs.version }}'
+          if ([string]::IsNullOrWhiteSpace($displayVersion)) {
+            $displayVersion = '5.2'
           }
-          if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)([-+].+)?$') {
+          $packageVersion = $displayVersion
+          if ($packageVersion -match '^(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            $packageVersion = "$packageVersion.0"
+          }
+          if ($packageVersion -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)([-+].+)?$') {
             throw "Version '${{ inputs.version }}' is not a supported semantic version."
           }
-          "package_version=$version" >> $env:GITHUB_OUTPUT
+          "display_version=$displayVersion" >> $env:GITHUB_OUTPUT
+          "package_version=$packageVersion" >> $env:GITHUB_OUTPUT
 
       - name: Test npm launcher contract
         run: node --test Packaging/Npm/test/*.test.js
 
       - name: Build packages through the release entry point
         shell: pwsh
-        run: ./Scripts/build-headless-packages.ps1 -Version '${{ inputs.version }}' -DryRun
+        run: ./Scripts/build-headless-packages.ps1 -Version '${{ steps.version.outputs.display_version }}' -DryRun
 
       - name: Upload headless packages
         uses: actions/upload-artifact@v4
@@ -157,8 +178,8 @@ jobs:
           $toolRoot = if ($IsWindows) { Join-Path $env:USERPROFILE '.dotnet/tools' } else { Join-Path $HOME '.dotnet/tools' }
           $binary = Join-Path $toolRoot $(if ($IsWindows) { 'devprojex.cmd' } else { 'devprojex' })
           $actualVersion = (& $binary --version).Trim()
-          if ($actualVersion -ne '${{ inputs.version }}') {
-            throw "NuGet tool version mismatch: expected '${{ inputs.version }}', got '$actualVersion'."
+          if ($actualVersion -ne '${{ needs.build.outputs.display_version }}') {
+            throw "NuGet tool version mismatch: expected '${{ needs.build.outputs.display_version }}', got '$actualVersion'."
           }
 
           $sample = Join-Path $env:RUNNER_TEMP 'devprojex-headless-sample'
@@ -207,7 +228,7 @@ jobs:
           ./Scripts/Smoke-HeadlessNpmPackages.ps1
           -ArtifactsRoot artifacts/headless
           -Version $env:VERSION
-          -ExpectedDisplayVersion '${{ inputs.version }}'
+          -ExpectedDisplayVersion '${{ needs.build.outputs.display_version }}'
 
   publish-nuget:
     name: Publish NuGet packages
@@ -215,7 +236,7 @@ jobs:
       - build
       - gate-static
       - smoke
-    if: ${{ inputs.dry_run == false && (inputs.channels == 'nuget' || inputs.channels == 'both') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false && (inputs.channels == 'nuget' || inputs.channels == 'both') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: nuget
@@ -260,7 +281,7 @@ jobs:
       - build
       - gate-static
       - smoke
-    if: ${{ inputs.dry_run == false && (inputs.channels == 'npm' || inputs.channels == 'both') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false && (inputs.channels == 'npm' || inputs.channels == 'both') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: npm
