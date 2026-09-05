@@ -1866,21 +1866,29 @@ public sealed class McpServerIntegrationTests
 			200_000,
 			tools.Single(static tool => tool.Name == "pack_context")
 				.ProtocolTool.Meta!["anthropic/maxResultSizeChars"]!.GetValue<int>());
+		// The old contract repeated the full redaction policy in four descriptions.
+		// Tool-search descriptions now keep only behavior that distinguishes each tool.
 		Assert.Contains(
-			"stored pack id remains valid until this server process exits; after restart, call pack_context again",
+			"pack_id for read_pack until server exit",
 			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"Results through 50,000 characters are returned inline; larger results are stored and return a pack_id for read_pack",
+			"Over 50,000 characters",
 			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
 			StringComparison.Ordinal);
-		foreach (var toolName in new[] { "analyze", "pack_context", "search_project", "get_file" })
+		foreach (var toolName in new[] { "search_project", "get_file" })
 		{
 			var description = tools.Single(tool => tool.Name == toolName).ProtocolTool.Description;
 			Assert.Contains("DEVPROJEX_REDACTED[<category>#<n>]", description, StringComparison.Ordinal);
-			Assert.Contains("documentation domains", description, StringComparison.Ordinal);
-			Assert.Contains("reserved IP ranges", description, StringComparison.Ordinal);
 		}
+		Assert.DoesNotContain(
+			"DEVPROJEX_REDACTED",
+			tools.Single(static tool => tool.Name == "analyze").ProtocolTool.Description,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"DEVPROJEX_REDACTED",
+			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
+			StringComparison.Ordinal);
 		Assert.Equal(
 			200_000,
 			tools.Single(static tool => tool.Name == "read_pack")
@@ -1990,6 +1998,28 @@ public sealed class McpServerIntegrationTests
 			"the mcp --exclude flag and the optional exclusions parameter",
 			outputExclusions.GetProperty("description").GetString(),
 			StringComparison.Ordinal);
+		var listOutput = tools.Single(static tool => tool.Name == "list_projects")
+			.ProtocolTool.OutputSchema!.Value.GetProperty("properties");
+		Assert.All(
+			new[] { "projects", "profiles", "baseline" },
+			name => Assert.False(string.IsNullOrWhiteSpace(
+				listOutput.GetProperty(name).GetProperty("description").GetString())));
+		var baselineOutput = listOutput.GetProperty("baseline").GetProperty("properties");
+		Assert.All(
+			new[] { "git", "exclusions", "agentExclusions" },
+			name => Assert.False(string.IsNullOrWhiteSpace(
+				baselineOutput.GetProperty(name).GetProperty("description").GetString())));
+		var analyzeOutput = tools.Single(static tool => tool.Name == "analyze")
+			.ProtocolTool.OutputSchema!.Value.GetProperty("properties");
+		Assert.All(
+			new[] { "files", "characters", "tokens", "detail", "topFiles" },
+			name => Assert.False(string.IsNullOrWhiteSpace(
+				analyzeOutput.GetProperty(name).GetProperty("description").GetString())));
+		var topFileOutput = analyzeOutput.GetProperty("topFiles").GetProperty("items").GetProperty("properties");
+		Assert.All(
+			new[] { "path", "tokens", "uninspected" },
+			name => Assert.False(string.IsNullOrWhiteSpace(
+				topFileOutput.GetProperty(name).GetProperty("description").GetString())));
 		var positiveNumericStrings = new (string Tool, string Property)[]
 		{
 			("get_tree", "max_file_bytes"),
@@ -2240,6 +2270,18 @@ public sealed class McpServerIntegrationTests
 			Assert.Contains("pass max_depth: 2 for a complete document", Text(structured), StringComparison.Ordinal);
 			Assert.DoesNotContain("<untrusted-data-", Text(structured), StringComparison.Ordinal);
 		}
+
+		var fittingJson = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json", ["max_depth"] = 2 });
+		var fittingXml = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "xml", ["max_depth"] = 2 });
+		Assert.NotEqual(true, fittingJson.IsError);
+		Assert.NotEqual(true, fittingXml.IsError);
+		using var jsonDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(fittingJson)));
+		_ = XDocument.Parse(ExtractSpotlightBody(Text(fittingXml)));
+		Assert.Equal(JsonValueKind.Object, jsonDocument.RootElement.ValueKind);
 	}
 
 	[Fact]

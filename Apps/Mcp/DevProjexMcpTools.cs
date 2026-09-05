@@ -25,13 +25,12 @@ internal sealed class DevProjexMcpTools(
 		"[Token budget file list truncated to fit the stored-pack response limit.]";
 	private const string StoredTrustedNoticeTruncationNotice =
 		"[Additional trusted diagnostics truncated to fit the stored-pack response limit.]";
-	private const string RedactionDescription =
-		" Secrets are replaced with DEVPROJEX_REDACTED[<category>#<n>] placeholders before text is returned or searched; " +
-		"known examples such as documentation domains, 555 numbers, EXAMPLE keys, and reserved IP ranges are intentionally preserved.";
 	private readonly McpProjectOperationGate _projectOperation = new();
 	private McpProjectService Projects => projectService.Value;
 
-	[Description("List the project roots this server is allowed to read, their saved local profiles, and the selection baseline every call starts from.")]
+	[Description(
+		"Lists local roots, saved profiles, and the Git/exclusion base for all calls. Use it to get a project value for other tools; " +
+		"use get_tree to view one. Returns all as data. Remote Git URLs do not appear as valid roots.")]
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -68,7 +67,9 @@ internal sealed class DevProjexMcpTools(
 			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles, baseline }));
 		});
 
-	[Description("Return the effective project tree after built-in, gitignore, server-baseline, and optional agent filters.")]
+	[Description(
+		"Shows the filtered tree with globs, Git scope, and depth. Use it before reading; use analyze for metrics or get_file for content. " +
+		"It applies Smart Ignore, Git, and server exclusions; large default trees stop at the deepest complete depth within 2,000 lines.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -163,7 +164,9 @@ internal sealed class DevProjexMcpTools(
 						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
 		}, cancellationToken);
 
-	[Description("Measure a redacted project selection and list its largest text files by estimated tokens." + RedactionDescription)]
+	[Description(
+		"Reports file, character, token, detail, and top-file metrics, not content. Use it before pack_context to size a set or find large files; " +
+		"use get_tree for structure. Results mark uninspected estimates, use one token base, and cap top_files at 1,000 entries.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -261,9 +264,8 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Build an exact redacted DevProjex context export. Results through 50,000 characters are returned inline; larger results are stored and return a pack_id for read_pack. " +
-		"A stored pack id remains valid until this server process exits; after restart, call pack_context again." +
-		RedactionDescription)]
+		"Builds one context with tree, files, or both in Markdown, text, JSON, or XML, plus detail and token limits. Use it for many files; " +
+		"use get_file for one or search_project to find code. Over 50,000 characters, it returns a pack_id for read_pack until server exit.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -424,7 +426,9 @@ internal sealed class DevProjexMcpTools(
 			}
 		}, cancellationToken);
 
-	[Description("Read a 1-based line range from a pack created by this server session.")]
+	[Description(
+		"Reads a line range from a pack made by pack_context in this process. Use it to page stored output; use pack_context again for an old pack_id. " +
+		"Returns up to 1,000 lines or 50,000 characters per call, plus trusted next-page or range-clamp notes.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -450,7 +454,9 @@ internal sealed class DevProjexMcpTools(
 				advertiseLargeResult: true);
 		});
 
-	[Description("Search already-redacted project text with a timeout-bounded .NET regular expression." + RedactionDescription)]
+	[Description(
+		"Searches selected files with a timed .NET regex after redaction; DEVPROJEX_REDACTED[<category>#<n>] cannot match. Use it to find code; " +
+		"use get_file for a full file. Returns line context, counts extra hits without showing them, and caps max_results at 200 per call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -553,7 +559,9 @@ internal sealed class DevProjexMcpTools(
 						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
 		}, cancellationToken);
 
-	[Description("Read redacted text from one effective project file using an optional 1-based line range." + RedactionDescription)]
+	[Description(
+		"Reads one selected file or line range after secrets become DEVPROJEX_REDACTED[<category>#<n>]. Use it after get_tree or search_project; " +
+		"use pack_context for many files. Returns up to 1,000 lines or 50,000 characters; files excluded by effective filters stay unreadable in this tool.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
