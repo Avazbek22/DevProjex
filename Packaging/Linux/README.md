@@ -9,8 +9,8 @@ future Flatpak and Snap packaging.
 - `io.github.Avazbek22.DevProjex.metainfo.xml` is the canonical AppStream metadata.
 - PNG icons are in `Assets/AppIcon/Linux/png/`.
 
-The 27 MB `Assets/AppIcon/Linux/appicon-master.svg` source asset is not included
-in AppImages.
+There is no scalable SVG icon. The 128, 256, and 512 px PNGs are the only icon
+sources, and AppImages ship those PNGs only.
 
 ## Release asset names
 
