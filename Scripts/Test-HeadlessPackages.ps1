@@ -106,7 +106,12 @@ $pointerZip = Open-Zip $pointerPackage
 try {
     $nuspecEntry = @($pointerZip.Entries | Where-Object { $_.FullName -like "*.nuspec" })
     Assert-Artifact ($nuspecEntry.Count -eq 1) $pointerName "one nuspec"
-    $settingsEntry = @($pointerZip.Entries | Where-Object { $_.FullName -ceq "tools/net10.0/any/DotnetToolSettings.xml" })
+    # .NET 10.0.400 made RID-pointer settings TFM-agnostic and moved this entry
+    # from tools/net10.0/any to tools/any/any. Both layouts are produced by
+    # supported .NET 10 SDKs; the parsed RID links below are the stable contract.
+    $settingsEntry = @($pointerZip.Entries | Where-Object {
+        $_.FullName -cmatch '^tools/(?:net10\.0|any)/any/DotnetToolSettings\.xml$'
+    })
     Assert-Artifact ($settingsEntry.Count -eq 1) $pointerName "RID pointer settings"
     $settingsText = [System.Text.Encoding]::UTF8.GetString((Get-ZipEntryBytes $settingsEntry[0])).TrimStart([char]0xFEFF)
     [xml] $settings = $settingsText
