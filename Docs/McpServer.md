@@ -32,6 +32,12 @@ and is intentionally rejected at server startup. `off` is accepted as an input
 alias for the canonical `none` token.
 
 Without a Git flag the baseline is `gitignore`, the standard profile's mode.
+It includes repository-local `info/exclude` and treats undeclared embedded
+repositories as opaque; initialized declared submodules own their rules
+recursively. Worktrees resolve the shared exclude file through `commondir`.
+These rule sources are read as files without starting Git. Global excludes
+remain outside the contract. See [SmartIgnore.md](SmartIgnore.md) for the full
+specification; `--unrestricted` restores embedded-repository visibility.
 
 The exclusion baseline is deliberately narrower than the desktop standard set.
 A server started without exclusion flags runs with `smart-ignore` and
