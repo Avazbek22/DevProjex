@@ -214,6 +214,111 @@ public sealed class McpServerProcessTests
 		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
 	}
 
+	[Fact]
+	public async Task RealProcessReportsListedCaseAndKeepsReadPackContinuationTrusted()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/WpfApp2/MainWindow.xaml.cs", "case-process-marker\n");
+		workspace.WriteFile("project/image_58500.txt", "markdown-process-marker\n");
+		workspace.WriteFile(
+			"project/Large.txt",
+			string.Join('\n', Enumerable.Range(1, 1_500).Select(static line =>
+				$"process-pack-line-{line:D4}-{new string('x', 20)}")));
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var clientPhase = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		clientPhase.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			clientPhase.Token))
+		{
+			var wrongCase = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "wpfapp2/mainwindow.xaml.cs" },
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			var wrongCaseText = Assert.IsType<TextContentBlock>(Assert.Single(wrongCase.Content)).Text;
+			Assert.True(wrongCase.IsError);
+			Assert.Null(wrongCase.StructuredContent);
+			Assert.Contains(
+				"differs only in letter case from the listed path 'WpfApp2/MainWindow.xaml.cs'",
+				wrongCaseText,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain("effective filters", wrongCaseText, StringComparison.Ordinal);
+
+			var markdownPath = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = @"image\_58500.txt" },
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.NotEqual(true, markdownPath.IsError);
+			Assert.Null(markdownPath.StructuredContent);
+			Assert.Contains(
+				"markdown-process-marker",
+				Assert.IsType<TextContentBlock>(Assert.Single(markdownPath.Content)).Text,
+				StringComparison.Ordinal);
+
+			var stored = await client.CallToolAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["paths"] = new[] { "Large.txt" },
+					["view"] = "content",
+					["format"] = "text"
+				},
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			var storedText = Assert.IsType<TextContentBlock>(Assert.Single(stored.Content)).Text;
+			Assert.NotEqual(true, stored.IsError);
+			Assert.Null(stored.StructuredContent);
+
+			var page = await client.CallToolAsync(
+				"read_pack",
+				new Dictionary<string, object?> { ["pack_id"] = ExtractPackId(storedText) },
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			var pageText = Assert.IsType<TextContentBlock>(Assert.Single(page.Content)).Text;
+			var closingIndex = pageText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+			var continuationIndex = pageText.IndexOf("[Showing lines 1-1000 of ", StringComparison.Ordinal);
+			Assert.NotEqual(true, page.IsError);
+			Assert.Null(page.StructuredContent);
+			Assert.True(closingIndex >= 0, pageText);
+			Assert.True(continuationIndex > closingIndex, pageText);
+			Assert.Contains("continue with start_line=1001", pageText, StringComparison.Ordinal);
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
@@ -660,6 +765,17 @@ public sealed class McpServerProcessTests
 		Assert.True(process.ExitCode == 0, $"Unexpected exit code {process.ExitCode}. stderr: {standardError}");
 
 		Assert.NotEmpty(ParseJsonRpcMessages(recordingOutput.GetRecordedText()));
+	}
+
+	private static string ExtractPackId(string text)
+	{
+		const string prefix = "Pack stored as '";
+		var start = text.IndexOf(prefix, StringComparison.Ordinal);
+		Assert.True(start >= 0, text);
+		start += prefix.Length;
+		var end = text.IndexOf('\'', start);
+		Assert.True(end > start, text);
+		return text[start..end];
 	}
 
 	private static string GetPublishedSingleFileOrSkip()

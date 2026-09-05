@@ -201,6 +201,21 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("[Empty selection]", emptySearch, StringComparison.Ordinal);
 		Assert.DoesNotContain("[No matches]", emptySearch, StringComparison.Ordinal);
 
+		var hiddenProject = workspace.CreateDirectory("hidden-project");
+		File.WriteAllText(Path.Combine(hiddenProject, ".hidden.cs"), "hidden\n");
+		await using var pathServer = await McpTestServer.StartAsync(
+			hiddenProject,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles]);
+		var pathSelection = await pathServer.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { ".hidden.cs" } });
+		Assert.Equal(0, pathSelection.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Contains(
+			"[Empty selection] None of the requested paths is in the effective selection; paths the filters hide never match.",
+			AllText(pathSelection),
+			StringComparison.Ordinal);
+
 		var noMatches = Text(await server.CallAsync(
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "absent-marker" }));
@@ -213,6 +228,26 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Nested.cs:1:", matched, StringComparison.Ordinal);
 		Assert.DoesNotContain("[No matches]", matched, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Effective filters]", matched, StringComparison.Ordinal);
+
+		var gitProject = workspace.CreateDirectory("git-project");
+		File.WriteAllText(Path.Combine(gitProject, "Untracked.cs"), "untracked\n");
+		InitializeEmptyRepository(gitProject);
+		await using var gitServer = await McpTestServer.StartAsync(gitProject, workspace.Path);
+		var gitSelection = Text(await gitServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["tracked_only"] = true }));
+		Assert.Contains(
+			"[Empty selection] Git reports no files for this scope (git: tracked).",
+			gitSelection,
+			StringComparison.Ordinal);
+
+		var emptyProject = workspace.CreateDirectory("empty-project");
+		await using var emptyServer = await McpTestServer.StartAsync(emptyProject, workspace.Path);
+		var projectSelection = Text(await emptyServer.CallAsync("get_tree"));
+		Assert.Contains(
+			"[Empty selection] The effective filters leave no file in this project.",
+			projectSelection,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -672,7 +707,9 @@ public sealed class McpServerIntegrationTests
 
 		Assert.True(result.IsError);
 		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(result), StringComparison.Ordinal);
-		Assert.Contains("DPX-CLI-PROFILE-INVALID", Text(result), StringComparison.Ordinal);
+		// Profile diagnostics keep their actionable text, but transport-specific CLI codes
+		// must not leak through the MCP error contract.
+		Assert.DoesNotContain("DPX-CLI-", Text(result), StringComparison.Ordinal);
 		Assert.Contains("unknown exclusion", Text(result), StringComparison.Ordinal);
 
 		// A missing local profile surfaces through the same actionable mapping.
@@ -681,7 +718,19 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?> { ["profile"] = "local" });
 		Assert.True(missingLocal.IsError);
 		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(missingLocal), StringComparison.Ordinal);
-		Assert.Contains("DPX-CLI-PROFILE-NOT-FOUND", Text(missingLocal), StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-CLI-", Text(missingLocal), StringComparison.Ordinal);
+		Assert.Contains("No local profile exists for this project.", Text(missingLocal), StringComparison.Ordinal);
+
+		var unknown = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = "bogus" });
+		Assert.True(unknown.IsError);
+		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(unknown), StringComparison.Ordinal);
+		Assert.Contains(
+			"unknown profile 'bogus'; use 'standard', 'local', or a profile JSON path inside the project root",
+			Text(unknown),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("path 'bogus' does not exist", Text(unknown), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -911,37 +960,80 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task GetFileWrongCaseDiagnosticsFollowThePlatformCaseSemantics()
+	public async Task GetFileWrongCaseDiagnosticsConvergeOnTheListedSpellingAcrossPlatforms()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-wrong-case\n");
+		Directory.CreateDirectory(Path.Combine(project, "WpfApp2"));
+		File.WriteAllText(Path.Combine(project, "WpfApp2", "MainWindow.xaml.cs"), "anchor-wrong-case\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var wrongCase = await server.CallAsync(
 			"get_file",
-			new Dictionary<string, object?> { ["path"] = "anchor.CS" });
+			new Dictionary<string, object?> { ["path"] = "wpfapp2/mainwindow.xaml.cs" });
 
-		// Convergent contract: wrong-case input fails with the same code on every OS.
+		// This deliberately replaces the former platform-divergent assertion: MCP paths now
+		// use one case-sensitive spelling contract even when the host volume does not.
 		Assert.True(wrongCase.IsError);
-		Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(wrongCase), StringComparison.Ordinal);
+		Assert.Contains(
+			"DPX-MCP-PATH-NOT-FOUND: file 'wpfapp2/mainwindow.xaml.cs' differs only in letter case from the listed path 'WpfApp2/MainWindow.xaml.cs'; paths are case-sensitive on every platform — retry with the listed spelling.",
+			Text(wrongCase),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("effective filters", Text(wrongCase), StringComparison.Ordinal);
+		Assert.DoesNotContain("server startup line", Text(wrongCase), StringComparison.Ordinal);
+	}
 
-		// Divergent diagnostic contract, pinned deliberately until casing canonicalization
-		// is decided: a case-insensitive volume resolves the physical file in the caller's
-		// casing, so the ordinal IncludedFiles check reports a selection miss; a
-		// case-sensitive volume fails earlier during physical resolution.
-		var caseInsensitiveVolume = File.Exists(Path.Combine(project, "ANCHOR.CS"));
+	[Fact]
+	public async Task MarkdownEscapedTreePathsAreAcceptedByFileAndSelectionTools()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "image_58500.txt"), "markdown-path-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		const string escapedPath = @"image\_58500.txt";
+
+		var tree = Text(await server.CallAsync("get_tree"));
+		Assert.Contains(escapedPath, ExtractSpotlightBody(tree), StringComparison.Ordinal);
+
+		var file = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = escapedPath });
+		var analysis = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { escapedPath } });
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { escapedPath },
+				["view"] = "content",
+				["format"] = "text"
+			});
+
+		Assert.NotEqual(true, file.IsError);
+		Assert.Contains("markdown-path-marker", Text(file), StringComparison.Ordinal);
+		Assert.Equal(1, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.NotEqual(true, pack.IsError);
+		Assert.Contains("markdown-path-marker", Text(pack), StringComparison.Ordinal);
+
+		var missing = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = @"missing\_image.txt" });
+		Assert.True(missing.IsError);
+		Assert.Contains(
+			"the path contains markdown escaping from get_tree ('\\_'); use the unescaped spelling or get_tree with format=text",
+			Text(missing),
+			StringComparison.Ordinal);
+
 		if (OperatingSystem.IsWindows())
-			Assert.True(caseInsensitiveVolume);
-		if (OperatingSystem.IsLinux())
-			Assert.False(caseInsensitiveVolume);
-		if (caseInsensitiveVolume)
 		{
-			Assert.Contains("is not in the effective project selection", Text(wrongCase), StringComparison.Ordinal);
-		}
-		else
-		{
-			Assert.Contains("does not exist inside project", Text(wrongCase), StringComparison.Ordinal);
+			Directory.CreateDirectory(Path.Combine(project, "image"));
+			File.WriteAllText(Path.Combine(project, "image", "_58500.txt"), "literal-path-marker\n");
+			var literal = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = escapedPath });
+			Assert.Contains("literal-path-marker", Text(literal), StringComparison.Ordinal);
+			Assert.DoesNotContain("markdown-path-marker", Text(literal), StringComparison.Ordinal);
 		}
 	}
 
@@ -1787,6 +1879,17 @@ public sealed class McpServerIntegrationTests
 			"stored pack id remains valid until this server process exits; after restart, call pack_context again",
 			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
 			StringComparison.Ordinal);
+		Assert.Contains(
+			"Results through 50,000 characters are returned inline; larger results are stored and return a pack_id for read_pack",
+			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
+			StringComparison.Ordinal);
+		foreach (var toolName in new[] { "analyze", "pack_context", "search_project", "get_file" })
+		{
+			var description = tools.Single(tool => tool.Name == toolName).ProtocolTool.Description;
+			Assert.Contains("DEVPROJEX_REDACTED[<category>#<n>]", description, StringComparison.Ordinal);
+			Assert.Contains("documentation domains", description, StringComparison.Ordinal);
+			Assert.Contains("reserved IP ranges", description, StringComparison.Ordinal);
+		}
 		Assert.Equal(
 			200_000,
 			tools.Single(static tool => tool.Name == "read_pack")
@@ -1832,6 +1935,13 @@ public sealed class McpServerIntegrationTests
 		var searchPattern = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("pattern");
 		Assert.Equal(4096, searchPattern.GetProperty("maxLength").GetInt32());
+		Assert.Contains(
+			"DEVPROJEX_REDACTED[<category>#<n>]",
+			searchPattern.GetProperty("description").GetString(),
+			StringComparison.Ordinal);
+		var filePath = tools.Single(static tool => tool.Name == "get_file")
+			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("path");
+		Assert.Contains("any get_tree format", filePath.GetProperty("description").GetString(), StringComparison.Ordinal);
 		var treeFormat = tools.Single(static tool => tool.Name == "get_tree")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("format");
 		Assert.Equal("markdown", treeFormat.GetProperty("default").GetString());
@@ -1857,6 +1967,8 @@ public sealed class McpServerIntegrationTests
 		}
 		var gitScope = tools.Single(static tool => tool.Name == "get_tree")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
+		Assert.Contains("including untracked files", gitScope.GetProperty("description").GetString(), StringComparison.Ordinal);
+		Assert.Contains("current working tree", gitScope.GetProperty("description").GetString(), StringComparison.Ordinal);
 		var diffPattern = gitScope.GetProperty("oneOf")[1].GetProperty("pattern").GetString();
 		Assert.NotNull(diffPattern);
 		Assert.Matches(diffPattern, "diff:main..feature");
@@ -1868,6 +1980,24 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(1, maximumTokens.GetProperty("oneOf")[0].GetProperty("minimum").GetInt32());
 		const string positiveNumericStringPattern = "^0*[1-9][0-9]*$";
 		Assert.Equal(positiveNumericStringPattern, maximumTokens.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
+		var packProperties = tools.Single(static tool => tool.Name == "pack_context")
+			.ProtocolTool.InputSchema.GetProperty("properties");
+		Assert.False(string.IsNullOrWhiteSpace(packProperties.GetProperty("view").GetProperty("description").GetString()));
+		Assert.False(string.IsNullOrWhiteSpace(packProperties.GetProperty("format").GetProperty("description").GetString()));
+		Assert.Contains(
+			"all eight exclusion toggles",
+			packProperties.GetProperty("profile").GetProperty("description").GetString(),
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"listed by list_projects.profiles",
+			packProperties.GetProperty("profile").GetProperty("description").GetString(),
+			StringComparison.Ordinal);
+		var outputExclusions = tools.Single(static tool => tool.Name == "analyze")
+			.ProtocolTool.OutputSchema!.Value.GetProperty("properties").GetProperty("exclusions");
+		Assert.Contains(
+			"the mcp --exclude flag and the optional exclusions parameter",
+			outputExclusions.GetProperty("description").GetString(),
+			StringComparison.Ordinal);
 		var positiveNumericStrings = new (string Tool, string Property)[]
 		{
 			("get_tree", "max_file_bytes"),
@@ -2042,6 +2172,9 @@ public sealed class McpServerIntegrationTests
 		var truncatedXml = await server.CallAsync(
 			"get_tree",
 			new Dictionary<string, object?> { ["format"] = "xml" });
+		var truncatedText = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" });
 
 		Assert.True(invalid.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(invalid), StringComparison.Ordinal);
@@ -2054,6 +2187,10 @@ public sealed class McpServerIntegrationTests
 			Assert.Contains("include_patterns", Text(truncated), StringComparison.Ordinal);
 			Assert.DoesNotContain("<untrusted-data-", Text(truncated), StringComparison.Ordinal);
 		});
+		Assert.NotEqual(true, truncatedText.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			truncatedText,
+			"[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]");
 	}
 
 	[Fact]
@@ -2676,6 +2813,9 @@ public sealed class McpServerIntegrationTests
 		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
 		Assert.Contains("\n[1 additional matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
 		Assert.Contains("narrow the pattern or filters", text, StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(
+			result,
+			"[1 additional matches not shown; narrow the pattern or filters.]");
 	}
 
 	[Fact]
@@ -2695,6 +2835,9 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("50000-character response cap", text, StringComparison.Ordinal);
 		Assert.Contains("narrow the source", text, StringComparison.Ordinal);
 		AssertSpotlighted(result);
+		AssertTrustedTrailerOutsideSpotlight(
+			result,
+			"[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]");
 	}
 
 	[Fact]
@@ -2754,6 +2897,9 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain("continue with start_line=", continuationText, StringComparison.Ordinal);
 		AssertSpotlighted(firstPage);
 		AssertSpotlighted(continuation);
+		AssertTrustedTrailerOutsideSpotlight(
+			firstPage,
+			"[Showing lines 1-1000 of 1005; continue with start_line=1001.]");
 	}
 
 	[Fact]
@@ -2800,6 +2946,7 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain("continue with start_line=", continuationText, StringComparison.Ordinal);
 		AssertSpotlighted(firstPage);
 		AssertSpotlighted(continuation);
+		AssertTrustedTrailerOutsideSpotlight(firstPage, "[Showing lines 1-1000 of ");
 	}
 
 	[Fact]
@@ -2831,6 +2978,9 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("[Tree preview truncated to fit the stored-pack response limit.", response, StringComparison.Ordinal);
 		AssertSpotlighted(stored);
 		AssertBalancedSpotlights(response);
+		AssertTrustedTrailerOutsideSpotlight(
+			stored,
+			"[Tree preview truncated to fit the stored-pack response limit. Use read_pack for the complete pack.]");
 
 		var page = await server.CallAsync(
 			"read_pack",
@@ -3416,6 +3566,7 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Included: 2 files (2 estimated tokens).", firstText, StringComparison.Ordinal);
 		Assert.Contains("Skipped: 1 file", firstText, StringComparison.Ordinal);
 		Assert.Contains("A-large.txt", firstText, StringComparison.Ordinal);
+		Assert.Contains("Tip: use detail=compact", firstText, StringComparison.Ordinal);
 		Assert.Equal(ExtractSpotlightBody(firstText), ExtractSpotlightBody(Text(second)));
 
 		var empty = await server.CallAsync(
@@ -3440,6 +3591,7 @@ public sealed class McpServerIntegrationTests
 			});
 		Assert.Contains("Included: 3 files", Text(all), StringComparison.Ordinal);
 		Assert.Contains("Skipped: 0 files (0 estimated tokens).", Text(all), StringComparison.Ordinal);
+		Assert.DoesNotContain("Tip:", Text(all), StringComparison.Ordinal);
 
 		var longBudget = await server.CallAsync(
 			"pack_context",
@@ -3840,6 +3992,7 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Exact.txt", Text(tree), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(tree), StringComparison.Ordinal);
 		Assert.Equal(2, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Contains("max_file_bytes: 64", AllText(analysis), StringComparison.Ordinal);
 		Assert.Contains("small-marker", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Exact.txt", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(pack), StringComparison.Ordinal);
@@ -3847,6 +4000,9 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Skipped: 0 files", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Small.txt:1:", Text(search), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(search), StringComparison.Ordinal);
+		Assert.All(
+			new[] { Text(tree), Text(pack), Text(search) },
+			text => Assert.Contains("max_file_bytes: 64", text, StringComparison.Ordinal));
 		Assert.True(invalid.IsError);
 		Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
 		Assert.Equal(0, allExcluded.StructuredContent?.GetProperty("files").GetInt32());
@@ -5078,7 +5234,7 @@ public sealed class McpServerIntegrationTests
 	{
 		var match = Regex.Match(
 			text,
-			"Pack stored as '([^']+)' \\(\\d+ characters\\)\\.",
+			"Pack stored as '([^']+)' \\(\\d+ characters, \\d+ lines\\)\\.",
 			RegexOptions.CultureInvariant);
 		Assert.True(match.Success, $"Stored pack response did not contain a pack id: {text}");
 		return match.Groups[1].Value;
@@ -5334,6 +5490,18 @@ public sealed class McpServerIntegrationTests
 			$"Trusted warning {warningCode} must be outside the spotlight block.");
 	}
 
+	private static void AssertTrustedTrailerOutsideSpotlight(CallToolResult result, string trailer)
+	{
+		var text = AllText(result);
+		var trailerIndex = text.IndexOf(trailer, StringComparison.Ordinal);
+		var closingIndex = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+		Assert.True(trailerIndex >= 0, $"Expected trusted trailer '{trailer}' in MCP result.");
+		Assert.True(closingIndex >= 0, "Expected spotlight delimiters before the trusted trailer.");
+		Assert.True(
+			trailerIndex > closingIndex,
+			$"Trusted trailer '{trailer}' must be outside every spotlight block.");
+	}
+
 	private static void AssertBalancedSpotlights(string text)
 	{
 		var openings = Regex.Matches(text, "<untrusted-data-([0-9a-f]{24})>");
@@ -5379,6 +5547,18 @@ public sealed class McpServerIntegrationTests
 		{
 			RunGit(repository, "init", "--quiet");
 			RunGit(repository, ["add", "-f", "--", .. trackedPaths]);
+		}
+		catch (System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip("Git is not available in this test environment.");
+		}
+	}
+
+	private static void InitializeEmptyRepository(string repository)
+	{
+		try
+		{
+			RunGit(repository, "init", "--quiet");
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
