@@ -336,8 +336,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	internal static string? GetCurrentExecutablePath()
 	{
-		if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
-			return Environment.ProcessPath;
+		var selfLaunchPath = ProcessEntryPointResolver.ResolveSelfLaunchPath();
+		if (!string.IsNullOrWhiteSpace(selfLaunchPath))
+			return selfLaunchPath;
 
 		using var process = Process.GetCurrentProcess();
 		return process.MainModule?.FileName;
