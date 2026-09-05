@@ -533,9 +533,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				if (PathComparer.Default.Equals(dirName, rules.ExcludedRootFolderName))
 					continue;
 
-				var directoryGitIgnore = useGitIgnore
-					? gitIgnoreContext.Evaluate(dir.FullPath, dir.RelativePath, isDirectory: true, dirName)
-					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				var directoryGitIgnore = gitIgnoreContext.Evaluate(dir.FullPath, dir.RelativePath, isDirectory: true, dirName);
 				if (ShouldSkipDirectoryByName(dirName, dir.FullPath, dir.IsHidden, rules, directoryGitIgnore))
 					continue;
 
@@ -613,9 +611,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
 	{
-		var gitIgnoreEvaluation = rules.IsGitIgnoreTraversalEnabled
-			? gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: true, name)
-			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+		var gitIgnoreEvaluation = gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: true, name);
 		var gitIgnoreCandidateEvaluation = rules.GitIgnoreCandidateMatchesActiveRules
 			? gitIgnoreEvaluation
 			: gitIgnoreCandidateContext.Evaluate(fullPath, relativePath, isDirectory: true, name);
@@ -649,8 +645,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	{
 		var isExtensionless = IsExtensionlessFileName(name);
 		var extensionStart = GetExtensionStart(name);
-		var gitIgnored = rules.IsGitIgnoreTraversalEnabled &&
-		                 gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: false, name).IsIgnored;
+		var gitIgnored = gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: false, name).IsIgnored;
 		var gitIgnoredCandidate = rules.GitIgnoreCandidateMatchesActiveRules
 			? gitIgnored
 			: gitIgnoreCandidateContext
@@ -1046,9 +1041,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		var normalizedRootPath = rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 		var rootName = Path.GetFileName(normalizedRootPath);
-		var rootGitIgnore = useGitIgnore
-			? gitIgnoreContext.Evaluate(rootPath, string.Empty, isDirectory: true, rootName)
-			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+		var rootGitIgnore = gitIgnoreContext.Evaluate(rootPath, string.Empty, isDirectory: true, rootName);
 
 		// Selected root folders must obey the same directory-level rules as the tree itself.
 		// Otherwise a stale root selection (for example a dot-folder discovered before the
@@ -1159,9 +1152,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					if (collectIgnoreOptionCounts)
 						AccumulateDirectoryIgnoreOptionCounts(sd, ref directoryCounts);
 
-					var directoryGitIgnore = useGitIgnore
-						? directoryGitIgnoreContext.Evaluate(sd.FullPath, sd.RelativePath, isDirectory: true, sd.Name)
-						: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+					var directoryGitIgnore = directoryGitIgnoreContext.Evaluate(sd.FullPath, sd.RelativePath, isDirectory: true, sd.Name);
 					var directoryGitIgnoreCandidate = rules.GitIgnoreCandidateMatchesActiveRules
 						? directoryGitIgnore
 						: directoryGitIgnoreCandidateContext.Evaluate(
@@ -1254,9 +1245,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 							if (collectIgnoreOptionCounts)
 								AccumulateFileIgnoreOptionCounts(file, ref localState.Counts);
 
-							var fileGitIgnore = useGitIgnore
-								? directoryGitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
-								: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+							var fileGitIgnore = directoryGitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name);
 							var fileGitIgnoreCandidate = rules.GitIgnoreCandidateMatchesActiveRules
 								? fileGitIgnore.IsIgnored
 								: directoryGitIgnoreCandidateContext
@@ -1440,9 +1429,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				if (collectIgnoreOptionCounts)
 					AccumulateFileIgnoreOptionCounts(file, ref counts);
 
-				var fileGitIgnore = useGitIgnore
-					? gitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
-					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				var fileGitIgnore = gitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name);
 				if (ShouldSkipFileByName(
 					    file.Name,
 					    file.FullPath,

@@ -43,7 +43,9 @@ internal sealed class McpJsonArguments(
 		string name,
 		bool allowWhitespace = false,
 		int? maximumItems = null,
-		int? maximumItemScalarValues = null)
+		int? maximumItemScalarValues = null,
+		string? tooManyItemsHint = null,
+		string? overLengthHint = null)
 	{
 		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
 			return null;
@@ -53,7 +55,8 @@ internal sealed class McpJsonArguments(
 		{
 			throw Invalid(
 				name,
-				$"an array with at most {maximumItems.Value} items; narrow the selection and retry");
+				$"an array with at most {maximumItems.Value} items; " +
+				$"{tooManyItemsHint ?? "narrow the selection and retry"}");
 		}
 
 		var result = new List<string>(value.GetArrayLength());
@@ -69,7 +72,8 @@ internal sealed class McpJsonArguments(
 			{
 				throw Invalid(
 					name,
-					$"an array whose items contain at most {maximumItemScalarValues.Value} characters; shorten the paths and retry");
+					$"an array whose items contain at most {maximumItemScalarValues.Value} characters; " +
+					$"{overLengthHint ?? "shorten the paths and retry"}");
 			}
 			result.Add(itemValue);
 		}
@@ -177,10 +181,12 @@ internal sealed class McpJsonArguments(
 		if (unexpected.Length == 0)
 			return;
 
+		var guidance = _allowed.Count == 0
+			? "This tool takes no arguments."
+			: $"Valid arguments: {string.Join(", ", _allowed.OrderBy(static name => name, StringComparer.Ordinal))}.";
 		throw new McpToolException(
 			McpErrorCodes.InvalidArguments,
-			$"{McpErrorCodes.InvalidArguments}: unknown argument(s): {string.Join(", ", unexpected)}. " +
-			$"Valid arguments: {string.Join(", ", _allowed.OrderBy(static name => name, StringComparer.Ordinal))}.");
+			$"{McpErrorCodes.InvalidArguments}: unknown argument(s): {string.Join(", ", unexpected)}. {guidance}");
 	}
 
 	private static McpToolException Invalid(string name, string expected) =>

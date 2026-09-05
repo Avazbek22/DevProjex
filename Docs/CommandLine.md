@@ -77,12 +77,27 @@ devprojex
 `dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
 diagnostic workflows.
 
-`devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--hide-private-data] [--allow-remote]`
+`devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--exclude NAME ...] [--unrestricted] [--allow-agent-exclusions] [--hide-private-data] [--allow-remote]`
 starts the local read-only MCP stdio server. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
 tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
 enables RepoCache-backed clone/acquire for MCP project tools without changing
 the local roots returned by `list_projects`.
+Without exclusion flags the server runs with `smart-ignore` and `empty-folders`
+only — narrower than the desktop standard set, so an agent sees dot-files,
+extensionless files, hidden entries, and empty files the way Git does.
+`--exclude` sets the server baseline exclusion set from the shared exclusion
+tokens plus two MCP-only tokens: `none` disables all toggles and `default`
+expands to the server default set, so `--exclude default --exclude dot-folders`
+extends it while a list without `default` replaces it. The baseline applies
+only when a tool does not name an explicit profile. An explicit `--exclude`
+list pins the set: exclusion toggles added in later versions default to off for
+that server until the line is updated. `--unrestricted` is the widest-baseline preset — equivalent to
+`--exclude none --git-mode none` and rejected in combination with either flag;
+secret redaction still applies and the `.git` administrative area remains
+excluded in every mode. `--allow-agent-exclusions` opts in to per-call
+agent control by publishing an `exclusions` array parameter on the selection
+tools; redaction toggles are never part of that vocabulary.
 Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then
 `CLAUDE_PROJECT_DIR`, then the current directory. See
 [McpServer.md](McpServer.md) for its security model, tools, and client
@@ -190,12 +205,12 @@ Exclusion tokens:
 
 ```text
 smart-ignore
+empty-folders
+empty-files
 hidden-folders
 hidden-files
 dot-folders
 dot-files
-empty-folders
-empty-files
 extensionless-files
 none
 ```

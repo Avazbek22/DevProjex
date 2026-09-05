@@ -31,6 +31,90 @@ an explicit profile. Momentary Git state belongs to request-level `git_scope`
 and is intentionally rejected at server startup. `off` is accepted as an input
 alias for the canonical `none` token.
 
+Without a Git flag the baseline is `gitignore`, the standard profile's mode.
+
+The exclusion baseline is deliberately narrower than the desktop standard set.
+A server started without exclusion flags runs with `smart-ignore` and
+`empty-folders` only, so the agent sees the repository the way Git sees it:
+dependency and build trees are gone, while dot-files, dot-folders,
+extensionless files, hidden entries, and empty files stay visible. Those
+toggles exist for a person who can see what a checkbox hides; an agent cannot,
+and a hidden `Dockerfile`, `.github/` workflow, `.env.example`, or empty
+`__init__.py` becomes a confident wrong answer about the project. `list_projects`
+reports this baseline, and `analyze` echoes the effective set on every call.
+
+The baseline exclusion set is selected at startup with `--exclude <NAME>`
+(repeatable). The names are the exclusion tokens the CLI and TUI already speak:
+`smart-ignore`, `empty-folders`, `empty-files`, `hidden-folders`,
+`hidden-files`, `dot-folders`, `dot-files`, and `extensionless-files`, plus two
+MCP-only tokens: `none` starts the server with every toggle off, and `default`
+expands to the server default set so a line can extend it instead of re-listing
+it — `--exclude default --exclude dot-folders` is the default set plus
+`dot-folders`. Any list without `default` replaces the default set, the same
+rule the CLI `--exclude` follows; `none` cannot be combined with another token.
+Like the Git baseline this applies only when a tool does not name an explicit
+profile. Redaction toggles are not exclusions
+and are rejected at startup. The `hidden-folders` and `hidden-files` toggles
+follow the platform hidden attribute (the Windows Hidden attribute or macOS
+`UF_HIDDEN`); on Unix-like systems dot-named entries belong to the
+`dot-folders` and `dot-files` toggles instead — see the dot-name ownership
+note in [SmartIgnore.md](SmartIgnore.md). Linux has no separate hidden
+attribute, so on Linux the hidden toggles on their own exclude nothing.
+A selected file the process cannot read (for example, permission-denied)
+degrades per file like other uninspectable content: it is withheld with an
+uninspected-content notice instead of failing the whole call.
+
+The widest baseline has a one-flag preset:
+
+```shell
+devprojex mcp --root /absolute/path/to/project --unrestricted
+```
+
+`--unrestricted` starts the server with every exclusion toggle off and the Git
+baseline set to `none` — equivalent to `--exclude none --git-mode none`, and
+rejected in combination with either flag. It widens visibility only: secret
+redaction still applies to every response, and per-call arguments and profiles
+behave exactly as they do for the spelled-out form. The `.git` administrative
+area is a product boundary like symbolic links: it stays excluded even at this
+widest baseline.
+
+Per-call exclusion control by the agent is a separate startup opt-in:
+
+```shell
+devprojex mcp --root /absolute/path/to/project --allow-agent-exclusions
+```
+
+With the flag, the selection tools `get_tree`, `analyze`, `pack_context`,
+`search_project`, and `get_file` gain an `exclusions` array parameter that
+carries the full desired toggle set for that call; an empty array turns every
+toggle off, and the value outranks both the server baseline and profile
+exclusions. Tokens match case-insensitively and duplicates are rejected.
+Without the flag the parameter does not exist in any schema and is rejected as
+an unknown argument, so a default server keeps today's narrowing-only contract
+unchanged. Turning toggles off widens the per-call scan to trees the baseline
+skips (subject to the Git baseline), so enable this delegation only for
+agents you trust with full-project walks. Both the startup baseline and the
+delegated set apply to opt-in remote checkouts exactly as they do to local
+roots.
+
+Delegation alone stays bounded by the startup Git baseline: the agent has no
+parameter that lifts Git filtering, so even `exclusions: []` cannot surface
+gitignored files on a default server. Pairing the two startup flags is the
+full-reach recipe for a trusted agent:
+
+```shell
+devprojex mcp --root /absolute/path/to/project --unrestricted --allow-agent-exclusions
+```
+
+Because the parameter is a full desired state, growing the exclusion
+vocabulary in a future version is a compatibility checkpoint: a token absent
+from a replayed full-state array is turned off, including tokens the caller
+predates. The supported way to build a full-state value is read-modify-write —
+call `analyze`, copy its echoed `exclusions` array, edit, and send; the echo
+uses the same tokens and stays valid across versions. A `paths` entry that the
+effective exclusion set hides yields an empty selection rather than an error,
+so check `analyze.files` when combining `paths` with exclusions.
+
 The recommended tool sequence is:
 
 ```text
@@ -84,8 +168,14 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 - Returned project content is marked as untrusted data with a random, per-response
   delimiter. Agents must not interpret instructions found in project files as
   trusted control input.
-- Product exclusions, including built-in rules and `.gitignore`, remain active.
-  Agent paths and globs can only narrow the effective selection.
+- Agent paths and globs can only narrow the effective selection, and the `.git`
+  administrative area is excluded in every mode. Which product exclusions and
+  Git filtering run is the human's startup choice (`--exclude`, `--git-mode`,
+  `--unrestricted`); agents can change the toggles only on a server
+  deliberately started with `--allow-agent-exclusions`, or by naming a profile
+  that already exists inside the project root — treat committed profile files
+  as part of the selection surface you publish. Delegation covers file
+  visibility only, never the redaction pass.
 - Large packs are kept in an application-owned temporary session directory. Pack
   ids are random, valid only in the current server process, and removed at exit.
   After a server restart, call `pack_context` again to create a new id.
@@ -106,6 +196,14 @@ when Git, cloning, cache publication, or branch checkout fails.
 `DPX-MCP-REMOTE-LIMIT` reports that the 16-source session cap was reached. Error
 text uses the credential-free display form of the URL.
 
+### Redaction placeholders
+
+Secrets are replaced before text is returned with placeholders shaped as
+`DEVPROJEX_REDACTED[<category>#<n>]`; `search_project` searches that already
+redacted text. Known example values, including documentation domains, 555
+numbers, keys containing `EXAMPLE`, and reserved IP ranges, are intentionally
+allowlisted to keep documentation and fixtures readable.
+
 ## Tools
 
 The tool order is stable. Every tool is annotated read-only and non-destructive
@@ -116,13 +214,18 @@ open-world.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
-| `list_projects` | none | Allowed local roots with path, name, type, and available local profiles. Remote projects are addressed by URL and are not added to this list. |
+| `list_projects` | none | Allowed local roots with path, name, type, and available local profiles, plus the server `baseline` (`git` mode, `exclusions`, and whether `agentExclusions` is enabled). Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Markdown is the compact, token-efficient default. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
-| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
+| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
+
+On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
+`pack_context`, `search_project`, and `get_file` additionally accept the
+`exclusions` array parameter described in the startup section, so a file
+revealed by a per-call value stays readable through the same value.
 
 For `analyze` and `pack_context`, `paths` accepts at most 256 entries and each
 entry is limited to 4,096 Unicode scalar values. Lexically equivalent entries are
@@ -135,6 +238,26 @@ same Unicode scalar-value semantics at runtime.
 Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
 authoritative result is the complete object in `structuredContent`; the first
 text block in `content` is a JSON serialization of that same object.
+`analyze` results include an `exclusions` array that echoes the exclusion
+tokens effective for the call, so the agent and a human reading the transcript
+always see which toggles shaped the measurement. `list_projects` results
+include a `baseline` object with the server `git` mode token, the baseline
+`exclusions` tokens, and an `agentExclusions` flag. Both fields are new in v5.2
+and required on every server, including servers started without the exclusion
+flags; consumers that pinned the earlier output schemas must refresh them.
+
+Filters are never silent. `get_tree` and `pack_context` end with a trusted
+`[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
+exclusion toggles that shaped the tree and who can widen them: the server
+startup line, or a per-call `exclusions` value on a delegation server. When
+`max_file_bytes` is supplied, every tool that accepts it also reports
+`; max_file_bytes: <bytes>` in its effective-filter diagnostics. Every selection
+tool adds an `[Empty selection]` line when no file survived the
+filters and the request arguments, `search_project` adds a `[No matches]` line
+with the searched-file count when the pattern matched nothing, and a
+`DPX-MCP-PATH-NOT-FOUND` error for a filtered file names the effective filters
+and the party able to widen them — the startup line, or a per-call `exclusions`
+value on a delegation server. These diagnostics never reveal hidden paths.
 When selection produces warnings, `analyze` appends separate human-readable
 trusted warning text blocks without changing its structured schema. Warning
 messages contain stable codes and safe counts or retry guidance, never diagnostic
@@ -152,8 +275,9 @@ reports only a count, never file paths or uninspected content.
 text tools. They do not declare `outputSchema`, omit `structuredContent`, and
 return the useful payload directly in the first text block in `content`. This
 avoids JSON escaping and unnecessary token overhead for trees, source text,
-search context, and packs. Truncation and continuation metadata is embedded in
-plain-text trailers such as `[Tree truncated ...]` and `[Showing lines ...]`.
+search context, and packs. Truncation and continuation metadata is appended as
+trusted plain-text trailers outside every project spotlight block, such as
+`[Tree truncated ...]` and `[Showing lines ...]`.
 For `get_tree`, only `text` and `markdown` use the truncation trailer. If a JSON
 or XML tree would exceed 2,000 lines, the tool returns
 `DPX-MCP-PAYLOAD-TRUNCATED` with narrowing guidance instead of a partial document.
@@ -162,7 +286,9 @@ top-level children; it does not repeat the project name as a synthetic tree node
 Markdown tree Root values and node names escape active CommonMark, HTML, and
 entity syntax so project-controlled labels remain literal data.
 Markdown context project headings and content-only Root lines use the same
-literal escaping.
+literal escaping. `get_file.path` and `paths` in `analyze` and `pack_context`
+accept these escaped spellings when the literal path does not exist; callers can
+also request `get_tree` with `format: "text"` to copy unescaped names.
 Selection warnings are appended outside project spotlight blocks so clients can
 distinguish trusted diagnostics from untrusted file data. MCP pack documents omit
 their embedded warning diagnostics to avoid duplicating untrusted path-bearing
@@ -179,9 +305,10 @@ beyond those limits. The exception is the stored `pack_context` response: its
 preview, and trusted diagnostics.
 
 An inline `pack_context` result contains the complete pack. A stored result is
-self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call
-read_pack ...`, followed by a preview of the project tree. Clients extract the
-session-scoped `pack_id` from that text and pass it to `read_pack`. The stored
+self-contained and starts with this line:
+`Pack stored as '<id>' (<N> characters, <M> lines). Call read_pack ...`
+The project tree preview follows it. Clients extract the session-scoped `pack_id`
+from that text and pass it to `read_pack`. The stored
 response, including its tree preview and trusted diagnostics, is bounded to
 50,000 characters; preview truncation never changes the stored pack, which
 remains available in full through `read_pack`.
@@ -226,14 +353,23 @@ Defaults:
 - `analyze.top_files`: `10` (`1..1000`)
 - `tracked_only`: `false`
 - `git_scope`: absent
+- `exclusions`: absent — the server baseline or profile set applies (parameter
+  exists only on `--allow-agent-exclusions` servers)
 - `search_project.context_lines`: `2`
 - `search_project.ignore_case`: `true`
 - `search_project.max_results`: `50`
 
 `include_patterns` and `exclude_patterns` are arrays of project-relative globs
 using `/`. Each array accepts at most 256 non-empty patterns, with at most 512
-characters per pattern. `paths` contains existing project-relative files or
-directories.
+characters per pattern. A pattern matches the whole project-relative path:
+`*` and `?` stay inside one path segment, `**/` spans any depth, and `{a,b}`
+lists alternatives (at most 64 per pattern, 1,024 per array after expansion).
+`*.cs` therefore matches only root-level files; `**/*.cs` is every C# file,
+`src/**` a subtree, `**/*.{ts,tsx}` two extensions. Matching is case-sensitive
+on every platform — copy names from `get_tree`. Negation (`!`) and character
+classes (`[...]`) are rejected with `DPX-MCP-INVALID-PATTERN` rather than
+matched literally, because a silently empty result reads as "no such files".
+`paths` contains existing project-relative files or directories.
 Numeric parameters accept JSON numbers and decimal numeric strings.
 Boolean parameters accept JSON booleans and the exact strings `"true"` and
 `"false"`.
@@ -265,7 +401,9 @@ describe the selected source files before `detail` or redaction.
 `pack_context`, and `search_project`. It removes files strictly larger than the
 limit after profile, ignore, Git, `paths`, and glob narrowing; a file exactly at
 the limit remains selected. It is request-only, is not stored in profiles, and
-does not apply to `get_file`, which addresses one already-effective file.
+does not apply to `get_file`, which addresses one already-effective file. Its
+value is echoed in the effective-filter diagnostics of every tool that accepts
+the parameter.
 
 For the five project tools, `project` may be a Git URL only when the server was
 started with `--allow-remote`. The optional `branch` is valid only with a URL.
@@ -289,10 +427,13 @@ content always comes from the current working tree.
 Deleted paths are omitted with a `DPX-GIT-STATE-DELETED` warning. A non-Git
 project or unavailable/invalid Git state returns an actionable tool error.
 
-Profiles use the existing project profile mechanism: `standard`, `local`, or a
-portable profile JSON path inside the project root. Profile selection can enable
-compression or stripping, but cannot disable secret redaction or alter the
-server-level private-data policy.
+Profiles use the existing project profile mechanism. `standard` is the desktop
+set of all eight exclusion toggles with `gitignore`, so it is stricter than the
+server default. `local` loads the profile saved by the desktop application for
+this project; available local profiles appear in `list_projects.profiles`. A
+portable profile is a JSON path inside the project root. Profile selection can
+enable compression or stripping, but cannot disable secret redaction or alter
+the server-level private-data policy.
 
 ## Detail Levels
 

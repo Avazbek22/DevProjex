@@ -171,6 +171,7 @@ public sealed class SecretRedactionOutputPreparer
 						case FileContentClassification.TooLarge:
 						case FileContentClassification.Unreadable:
 						case FileContentClassification.UnsupportedEncoding:
+						case FileContentClassification.AccessDenied:
 							// A per-file inspection limitation degrades that file, not the whole run.
 							// Redaction cannot promise anything about text it never decoded or fully read,
 							// so every output withholds the content and reports the exact reason.
@@ -1160,6 +1161,7 @@ public sealed class SecretRedactionOutputPreparer
 				case FileContentClassification.TooLarge:
 				case FileContentClassification.Unreadable:
 				case FileContentClassification.UnsupportedEncoding:
+				case FileContentClassification.AccessDenied:
 					redactionScope.AnalyzeUnscannable(
 						prepared.SourcePath,
 						prepared.Metadata,
@@ -1285,6 +1287,7 @@ public sealed class SecretRedactionOutputPreparer
 					case FileContentClassification.TooLarge:
 					case FileContentClassification.Unreadable:
 					case FileContentClassification.UnsupportedEncoding:
+					case FileContentClassification.AccessDenied:
 						redactionScope.AnalyzeUnscannable(
 							prepared.SourcePath,
 							prepared.Metadata,
@@ -1562,6 +1565,7 @@ public sealed class SecretRedactionOutputPreparer
 			case FileContentClassification.TooLarge:
 			case FileContentClassification.Unreadable:
 			case FileContentClassification.UnsupportedEncoding:
+			case FileContentClassification.AccessDenied:
 				// This scan only feeds the count on the checkbox. One file it may not read is a
 				// reason to leave that file out of the count, never to refuse the whole project -
 				// the user asked how many secrets are here, not for a guarantee about output.
@@ -1865,7 +1869,8 @@ public sealed record PreparedSecretFile(
 	{
 		if (classification is not (FileContentClassification.TooLarge or
 		    FileContentClassification.Unreadable or
-		    FileContentClassification.UnsupportedEncoding))
+		    FileContentClassification.UnsupportedEncoding or
+		    FileContentClassification.AccessDenied))
 		{
 			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
 		}

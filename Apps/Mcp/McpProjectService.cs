@@ -5,10 +5,19 @@ internal sealed class McpProjectService(
 	McpProjectRootJail roots,
 	McpServices services,
 	bool hidePrivateData,
-	GitFilteringMode? serverGitMode)
+	GitFilteringMode? serverGitMode,
+	IReadOnlyCollection<ProjectExclusion>? serverExclusions = null,
+	bool agentExclusions = false)
 {
 	internal const int MaximumRequestedPaths = 256;
 	internal const int MaximumRequestedPathLength = 4096;
+
+	/// <summary>The Git baseline every call starts from when it names no profile.</summary>
+	public GitFilteringMode ServerGitMode => serverGitMode ?? McpServerBaseline.DefaultGitMode;
+
+	/// <summary>The exclusion baseline every call starts from when it names no profile.</summary>
+	public IReadOnlyCollection<ProjectExclusion> ServerExclusions =>
+		serverExclusions ?? McpServerBaseline.DefaultExclusions;
 
 	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
@@ -21,7 +30,8 @@ internal sealed class McpProjectService(
 		string? gitScope,
 		long? maximumFileBytes,
 		CancellationToken cancellationToken,
-		bool includeOutputMetrics = true)
+		bool includeOutputMetrics = true,
+		IReadOnlyList<ProjectExclusion>? exclusions = null)
 	{
 		var parsedScope = ParseGitScope(gitScope);
 		var hasSelectionFilters =
@@ -39,12 +49,20 @@ internal sealed class McpProjectService(
 			: string.IsNullOrEmpty(profile)
 				? serverGitMode
 				: null;
+		// The startup exclusion baseline follows the --git-mode precedent: an explicit
+		// profile carries its own exclusion state, so the baseline yields to it. A delegated
+		// per-call set outranks both — the human enabled that delegation at startup. Without
+		// a startup line the server default applies, never the desktop standard set: that set
+		// was designed for a person who can see what a checkbox hides.
+		IReadOnlyCollection<ProjectExclusion>? baselineExclusions =
+			exclusions ?? (string.IsNullOrEmpty(profile) ? ServerExclusions : null);
 		var selection = await services.SelectionResolver
 			.ResolveAsync(
 				projectRoot,
 				profileReference,
 				new ProjectSelectionSpec(
 					GitMode: baselineGitMode,
+					Exclusions: baselineExclusions,
 					HideSecrets: true,
 					HidePrivateData: hidePrivateData),
 				cancellationToken)
@@ -407,7 +425,15 @@ internal sealed class McpProjectService(
 
 	public string ResolveFile(ProjectContextPlan plan, string path)
 	{
-		var physical = roots.ResolveExistingPath(plan.SourceRoot, path);
+		string physical;
+		try
+		{
+			physical = ResolveExistingInputPath(plan.SourceRoot, path);
+		}
+		catch (McpToolException exception) when (exception.Code == McpErrorCodes.PathNotFound)
+		{
+			throw ResolveCaseMismatch(plan, path) ?? exception;
+		}
 		if (Directory.Exists(physical))
 		{
 			throw new McpToolException(
@@ -416,10 +442,19 @@ internal sealed class McpProjectService(
 		}
 		if (!plan.IncludedFiles.Contains(physical, StringComparer.Ordinal))
 		{
+			var caseMismatch = ResolveCaseMismatch(plan, path);
+			if (caseMismatch is not null)
+				throw caseMismatch;
+
+			// Name the filters and who can widen them. A remedy that cannot work on this
+			// server — the old "repeat the selection arguments" — sends an agent in circles.
+			var remedy = agentExclusions
+				? "Pass the exclusions value of the call that listed it, or exclusions: [] to turn every toggle off; Git filtering is set on the server startup line."
+				: $"Per-call arguments cannot widen these filters; only the server startup line can ({McpEffectiveFilters.StartupFlags}).";
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: file '{path}' is not in the effective project selection. " +
-				"Adjust the profile or patterns and call get_tree first.");
+				$"{McpErrorCodes.PathNotFound}: file '{path}' is not in the effective project selection " +
+				$"(effective filters: {McpEffectiveFilters.Describe(plan)}). {remedy}");
 		}
 		return physical;
 	}
@@ -439,7 +474,18 @@ internal sealed class McpProjectService(
 		if (profile.Equals("local", StringComparison.Ordinal))
 			return ProjectProfileReference.Local;
 
-		var path = roots.ResolveExistingPath(projectRoot, profile);
+		string path;
+		try
+		{
+			path = roots.ResolveExistingPath(projectRoot, profile);
+		}
+		catch (McpToolException exception) when (exception.Code == McpErrorCodes.PathNotFound)
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: unknown profile '{McpTextEscaping.EscapeSingleLine(profile)}'; " +
+				"use 'standard', 'local', or a profile JSON path inside the project root.");
+		}
 		if (Directory.Exists(path))
 		{
 			throw new McpToolException(
@@ -457,13 +503,16 @@ internal sealed class McpProjectService(
 		if (paths is null || paths.Count == 0)
 			return RequestedPathSelection.Empty;
 
-		var distinctTokens = NormalizeRequestedPathTokens(projectRoot, paths);
+		var seen = new HashSet<string>(StringComparer.Ordinal);
 		var resolved = new HashSet<string>(StringComparer.Ordinal);
 		var directories = new HashSet<string>(StringComparer.Ordinal);
-		foreach (var path in distinctTokens)
+		foreach (var path in paths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var fullPath = roots.ResolveExistingPath(projectRoot, path);
+			if (!seen.Add(NormalizeRequestedPathToken(projectRoot, path)))
+				continue;
+
+			var fullPath = ResolveExistingInputPath(projectRoot, path);
 			if (!resolved.Add(fullPath))
 				continue;
 			if (Directory.Exists(fullPath))
@@ -483,27 +532,123 @@ internal sealed class McpProjectService(
 		var normalized = new List<string>(paths.Count);
 		foreach (var path in paths)
 		{
-			try
-			{
-				var fullPath = Path.IsPathFullyQualified(path)
-					? Path.GetFullPath(path)
-					: Path.GetFullPath(path, projectRoot);
-				var normalizedPath = Path.TrimEndingDirectorySeparator(PathUtility.Normalize(fullPath));
-				if (seen.Add(normalizedPath))
-					normalized.Add(normalizedPath);
-			}
-			catch (Exception exception) when (
-				exception is ArgumentException or NotSupportedException or PathTooLongException)
-			{
-				throw new McpToolException(
-					McpErrorCodes.InvalidArguments,
-					$"{McpErrorCodes.InvalidArguments}: 'paths' contains an invalid path. " +
-					"Use existing project-relative files or directories returned by get_tree.");
-			}
+			var normalizedPath = NormalizeRequestedPathToken(projectRoot, path);
+			if (seen.Add(normalizedPath))
+				normalized.Add(normalizedPath);
 		}
 
 		return normalized;
 	}
+
+	private string ResolveExistingInputPath(string projectRoot, string path)
+	{
+		try
+		{
+			return roots.ResolveExistingPath(projectRoot, path);
+		}
+		catch (McpToolException exception) when (
+			exception.Code == McpErrorCodes.PathNotFound &&
+			TryUnescapeMarkdownPath(path, out var unescapedPath, out var escapedPunctuation))
+		{
+			try
+			{
+				return roots.ResolveExistingPath(projectRoot, unescapedPath);
+			}
+			catch (McpToolException retryException) when (retryException.Code == McpErrorCodes.PathNotFound)
+			{
+				throw new McpToolException(
+					McpErrorCodes.PathNotFound,
+					$"{exception.Message} The path contains markdown escaping from get_tree ('\\{escapedPunctuation}'); " +
+					"use the unescaped spelling or get_tree with format=text.");
+			}
+		}
+	}
+
+	private static McpToolException? ResolveCaseMismatch(ProjectContextPlan plan, string requestedPath)
+	{
+		string requestedRelative;
+		try
+		{
+			var requestedFullPath = Path.IsPathFullyQualified(requestedPath)
+				? Path.GetFullPath(requestedPath)
+				: Path.GetFullPath(requestedPath, plan.SourceRoot);
+			requestedRelative = PathUtility.GetPortableRelativePath(plan.SourceRoot, requestedFullPath);
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return null;
+		}
+
+		var matches = plan.IncludedFiles
+			.Select(file => PathUtility.GetPortableRelativePath(plan.SourceRoot, file))
+			.Where(path => path.Equals(requestedRelative, StringComparison.OrdinalIgnoreCase))
+			.Distinct(StringComparer.Ordinal)
+			.Take(2)
+			.ToArray();
+		if (matches.Length != 1 || matches[0].Equals(requestedRelative, StringComparison.Ordinal))
+			return null;
+
+		return new McpToolException(
+			McpErrorCodes.PathNotFound,
+			$"{McpErrorCodes.PathNotFound}: file '{McpTextEscaping.EscapeSingleLine(requestedPath)}' differs only in letter case " +
+			$"from the listed path '{McpTextEscaping.EscapeSingleLine(matches[0])}'; paths are case-sensitive on every platform — " +
+			"retry with the listed spelling.");
+	}
+
+	private static string NormalizeRequestedPathToken(string projectRoot, string path)
+	{
+		try
+		{
+			var fullPath = Path.IsPathFullyQualified(path)
+				? Path.GetFullPath(path)
+				: Path.GetFullPath(path, projectRoot);
+			return Path.TrimEndingDirectorySeparator(PathUtility.Normalize(fullPath));
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: 'paths' contains an invalid path. " +
+				"Use existing project-relative files or directories returned by get_tree.");
+		}
+	}
+
+	private static bool TryUnescapeMarkdownPath(
+		string path,
+		out string unescapedPath,
+		out char escapedPunctuation)
+	{
+		StringBuilder? output = null;
+		escapedPunctuation = default;
+		for (var index = 0; index < path.Length - 1; index++)
+		{
+			if (path[index] != '\\' || !IsAsciiPunctuation(path[index + 1]))
+				continue;
+
+			escapedPunctuation = path[index + 1];
+			output = new StringBuilder(path.Length - 1);
+			output.Append(path.AsSpan(0, index));
+			for (; index < path.Length; index++)
+			{
+				if (path[index] == '\\' &&
+				    index + 1 < path.Length &&
+				    IsAsciiPunctuation(path[index + 1]))
+				{
+					continue;
+				}
+				output.Append(path[index]);
+			}
+			break;
+		}
+
+		unescapedPath = output?.ToString() ?? path;
+		return output is not null;
+	}
+
+	private static bool IsAsciiPunctuation(char value) =>
+		value is >= '!' and <= '/' or >= ':' and <= '@' or >= '[' and <= '`' or >= '{' and <= '~';
 
 	private sealed record McpGitScope(GitFilteringMode Mode, string? DiffRange);
 

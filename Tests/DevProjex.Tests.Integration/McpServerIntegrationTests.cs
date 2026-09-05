@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Xml.Linq;
 using DevProjex.Application.Context;
@@ -51,6 +52,1666 @@ public sealed class McpServerIntegrationTests
 		{
 			Assert.Throws<ArgumentOutOfRangeException>(() => McpServerHost.ValidateGitMode(mode));
 		}
+	}
+
+	[Fact]
+	public void McpHostAcceptsOnlyPathExclusionsInTheBaseline()
+	{
+		McpServerHost.ValidateExclusions(null);
+		McpServerHost.ValidateExclusions([]);
+		McpServerHost.ValidateExclusions(ProjectSelectionSpec.StandardExclusions);
+
+		Assert.Throws<ArgumentOutOfRangeException>(() =>
+			McpServerHost.ValidateExclusions([ProjectExclusion.HideSecrets]));
+		Assert.Throws<ArgumentOutOfRangeException>(() =>
+			McpServerHost.ValidateExclusions([ProjectExclusion.SmartIgnore, (ProjectExclusion)int.MaxValue]));
+	}
+
+	[Fact]
+	public async Task DefaultServerShowsTheRepositoryFilesTheDesktopStandardSetHides()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, ".github", "workflows"));
+		Directory.CreateDirectory(Path.Combine(project, "pkg"));
+		Directory.CreateDirectory(Path.Combine(project, "hollow"));
+		File.WriteAllText(Path.Combine(project, ".github", "workflows", "ci.yml"), "name: ci\n");
+		File.WriteAllText(Path.Combine(project, ".env.example"), "DATABASE_URL=postgres://localhost/db\n");
+		File.WriteAllText(Path.Combine(project, "Dockerfile"), "FROM scratch\n");
+		File.WriteAllText(Path.Combine(project, "LICENSE"), "MIT\n");
+		File.WriteAllText(Path.Combine(project, "pkg", "__init__.py"), string.Empty);
+		File.WriteAllText(Path.Combine(project, "App.cs"), "class App {}\n");
+
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// The agent-facing default keeps only the toggles that remove noise no agent wants;
+		// every deliberate repository file — dot-named, extensionless, or empty — is visible.
+		var listed = await server.CallAsync("list_projects");
+		var baseline = listed.StructuredContent!.Value.GetProperty("baseline");
+		Assert.Equal("gitignore", baseline.GetProperty("git").GetString());
+		Assert.Equal(
+			["smart-ignore", "empty-folders"],
+			baseline.GetProperty("exclusions").EnumerateArray().Select(static item => item.GetString()));
+		Assert.False(baseline.GetProperty("agentExclusions").GetBoolean());
+
+		var tree = Text(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" }));
+		foreach (var visible in new[] { "ci.yml", ".env.example", "Dockerfile", "LICENSE", "__init__.py", "App.cs" })
+			Assert.Contains(visible, tree, StringComparison.Ordinal);
+		Assert.DoesNotContain("hollow", tree, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders. Paths they hide are absent from every tool; only the server startup line widens them (--exclude, --unrestricted, --allow-agent-exclusions).",
+			tree,
+			StringComparison.Ordinal);
+
+		var analysis = await server.CallAsync("analyze");
+		Assert.Equal(6, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Equal(
+			["smart-ignore", "empty-folders"],
+			analysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+
+		var dockerfile = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Dockerfile" });
+		Assert.NotEqual(true, dockerfile.IsError);
+		Assert.Contains("FROM scratch", Text(dockerfile), StringComparison.Ordinal);
+
+		var pack = Text(await server.CallAsync("pack_context"));
+		Assert.Contains("DATABASE_URL", pack, StringComparison.Ordinal);
+		Assert.Contains("[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.", pack, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PathNotFoundNamesTheEffectiveFiltersAndTheRemedyTheServerActuallyOffers()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor\n");
+		File.WriteAllText(Path.Combine(project, ".hidden.cs"), "hidden\n");
+
+		await using var pinned = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles]);
+		var hidden = await pinned.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = ".hidden.cs" });
+		var missing = await pinned.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Missing.cs" });
+
+		// A filtered file names the filters and the only party able to widen them on this
+		// server; the old advice to repeat selection arguments could never work here.
+		Assert.True(hidden.IsError);
+		Assert.Contains("is not in the effective project selection (effective filters: git: gitignore; exclusions: dot-files)", Text(hidden), StringComparison.Ordinal);
+		Assert.Contains("only the server startup line can (--exclude, --unrestricted, --allow-agent-exclusions)", Text(hidden), StringComparison.Ordinal);
+		Assert.DoesNotContain("pack_context", Text(hidden), StringComparison.Ordinal);
+		Assert.True(missing.IsError);
+		Assert.StartsWith("DPX-MCP-PATH-NOT-FOUND: path 'Missing.cs' does not exist", Text(missing), StringComparison.Ordinal);
+		Assert.DoesNotContain("effective filters", Text(missing), StringComparison.Ordinal);
+
+		await using var delegated = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles],
+			agentExclusions: true);
+		var delegatedHidden = await delegated.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = ".hidden.cs" });
+		Assert.True(delegatedHidden.IsError);
+		Assert.Contains("Pass the exclusions value of the call that listed it, or exclusions: [] to turn every toggle off", Text(delegatedHidden), StringComparison.Ordinal);
+		var delegatedTree = Text(await delegated.CallAsync("get_tree"));
+		Assert.Contains("[Effective filters] git: gitignore; exclusions: dot-files. Paths the exclusions hide stay absent until a call passes exclusions", delegatedTree, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task EmptySelectionsAndEmptySearchesExplainThemselves()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		File.WriteAllText(Path.Combine(project, "src", "Nested.cs"), "nested-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// '*' stays inside one segment, so a root-level pattern misses a nested file: the
+		// empty result carries the rule instead of reading as "no C# files here".
+		var rootOnly = new Dictionary<string, object?> { ["include_patterns"] = new[] { "*.cs" } };
+		var tree = Text(await server.CallAsync("get_tree", rootOnly));
+		Assert.DoesNotContain("Nested.cs", tree, StringComparison.Ordinal);
+		Assert.Contains("[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.", tree, StringComparison.Ordinal);
+		Assert.Contains("[Empty selection] No file passed the effective filters and the request arguments. Patterns match the whole project-relative path: '*' stays inside one segment, '**/' spans any depth; paths the filters hide never match.", tree, StringComparison.Ordinal);
+
+		var analysis = await server.CallAsync("analyze", rootOnly);
+		Assert.Equal(0, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Equal(2, analysis.Content.Count);
+		Assert.Contains("[Effective filters]", AllText(analysis), StringComparison.Ordinal);
+		Assert.Contains("[Empty selection]", AllText(analysis), StringComparison.Ordinal);
+
+		var populated = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "**/*.cs" } });
+		Assert.Equal(1, populated.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Single(populated.Content);
+
+		var emptySearch = Text(await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(rootOnly) { ["pattern"] = "nested" }));
+		Assert.Contains("[Empty selection]", emptySearch, StringComparison.Ordinal);
+		Assert.DoesNotContain("[No matches]", emptySearch, StringComparison.Ordinal);
+
+		var hiddenProject = workspace.CreateDirectory("hidden-project");
+		File.WriteAllText(Path.Combine(hiddenProject, ".hidden.cs"), "hidden\n");
+		await using var pathServer = await McpTestServer.StartAsync(
+			hiddenProject,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles]);
+		var pathSelection = await pathServer.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { ".hidden.cs" } });
+		Assert.Equal(0, pathSelection.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Contains(
+			"[Empty selection] None of the requested paths is in the effective selection; paths the filters hide never match.",
+			AllText(pathSelection),
+			StringComparison.Ordinal);
+
+		var noMatches = Text(await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "absent-marker" }));
+		Assert.Contains("[No matches] The pattern matched nothing in 1 selected file(s) (git: gitignore; exclusions: smart-ignore, empty-folders).", noMatches, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Empty selection]", noMatches, StringComparison.Ordinal);
+
+		var matched = Text(await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "nested-marker" }));
+		Assert.Contains("Nested.cs:1:", matched, StringComparison.Ordinal);
+		Assert.DoesNotContain("[No matches]", matched, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Effective filters]", matched, StringComparison.Ordinal);
+
+		var gitProject = workspace.CreateDirectory("git-project");
+		File.WriteAllText(Path.Combine(gitProject, "Untracked.cs"), "untracked\n");
+		InitializeEmptyRepository(gitProject);
+		await using var gitServer = await McpTestServer.StartAsync(gitProject, workspace.Path);
+		var gitSelection = Text(await gitServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["tracked_only"] = true }));
+		Assert.Contains(
+			"[Empty selection] Git reports no files for this scope (git: tracked).",
+			gitSelection,
+			StringComparison.Ordinal);
+
+		var emptyProject = workspace.CreateDirectory("empty-project");
+		await using var emptyServer = await McpTestServer.StartAsync(emptyProject, workspace.Path);
+		var projectSelection = Text(await emptyServer.CallAsync("get_tree"));
+		Assert.Contains(
+			"[Empty selection] The effective filters leave no file in this project.",
+			projectSelection,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GlobBraceAlternativesExpandAndUnsupportedSyntaxIsRejectedNotMatchedLiterally()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "app\n");
+		File.WriteAllText(Path.Combine(project, "src", "Guide.md"), "guide\n");
+		File.WriteAllText(Path.Combine(project, "src", "Notes.txt"), "notes\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var braces = Text(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "**/*.{cs,md}" } }));
+		Assert.Contains("App.cs", braces, StringComparison.Ordinal);
+		Assert.Contains("Guide.md", braces, StringComparison.Ordinal);
+		Assert.DoesNotContain("Notes.txt", braces, StringComparison.Ordinal);
+
+		foreach (var (pattern, reason) in new[]
+		         {
+			         ("!src/**", "negation ('!') is not supported"),
+			         ("[Ss]rc/**", "character classes ('[...]') are not supported"),
+			         ("**/*.{cs,md", "unbalanced '{'")
+		         })
+		{
+			var rejected = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["include_patterns"] = new[] { pattern } });
+			Assert.True(rejected.IsError);
+			Assert.StartsWith("DPX-MCP-INVALID-PATTERN", Text(rejected), StringComparison.Ordinal);
+			Assert.Contains(reason, Text(rejected), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task ServerExclusionBaselineReplacesTheDefaultSetAndYieldsToProfiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "Src"));
+		File.WriteAllText(Path.Combine(project, "Src", "Visible.cs"), "visible-baseline\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-baseline\n");
+		File.WriteAllText(Path.Combine(project, "Empty.cs"), string.Empty);
+		const string profileName = "baseline-profile.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = new[] { ".cs" },
+					selectedPaths = (string[]?)null,
+					gitMode = "none",
+					exclusions = new[] { "dot-files" },
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+
+		// The default server keeps dot-named and empty files visible; the desktop standard
+		// set is a startup choice, spelled out in full.
+		await using var defaultServer = await McpTestServer.StartAsync(project, workspace.Path);
+		var defaultTree = await defaultServer.CallAsync("get_tree");
+		Assert.Contains("Visible.cs", Text(defaultTree), StringComparison.Ordinal);
+		Assert.Contains(".dotted.cs", Text(defaultTree), StringComparison.Ordinal);
+		Assert.Contains("Empty.cs", Text(defaultTree), StringComparison.Ordinal);
+		var defaultAnalysis = await defaultServer.CallAsync("analyze");
+		Assert.Equal(
+			["smart-ignore", "empty-folders"],
+			defaultAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+		var profiledDefaultAnalysis = await defaultServer.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = profileName });
+		Assert.Equal(
+			["dot-files"],
+			profiledDefaultAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+
+		await using var standardServer = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: ProjectSelectionSpec.StandardExclusions);
+		var standardTree = await standardServer.CallAsync("get_tree");
+		Assert.Contains("Visible.cs", Text(standardTree), StringComparison.Ordinal);
+		Assert.DoesNotContain(".dotted.cs", Text(standardTree), StringComparison.Ordinal);
+		Assert.DoesNotContain("Empty.cs", Text(standardTree), StringComparison.Ordinal);
+		var standardAnalysis = await standardServer.CallAsync("analyze");
+		Assert.Equal(
+			["smart-ignore", "empty-folders", "empty-files", "hidden-folders", "hidden-files", "dot-folders", "dot-files", "extensionless-files"],
+			standardAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+
+		// The baseline is a full replacement of the default set, not an addition to it:
+		// keeping only dot-files drops smart-ignore and empty-folders from the echo.
+		await using var narrowedServer = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles]);
+		var narrowedTree = await narrowedServer.CallAsync("get_tree");
+		Assert.Contains("Empty.cs", Text(narrowedTree), StringComparison.Ordinal);
+		Assert.DoesNotContain(".dotted.cs", Text(narrowedTree), StringComparison.Ordinal);
+		var narrowedAnalysis = await narrowedServer.CallAsync("analyze");
+		Assert.Equal(
+			["dot-files"],
+			narrowedAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+
+		await using var openServer = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: []);
+		var openTree = await openServer.CallAsync("get_tree");
+		Assert.Contains(".dotted.cs", Text(openTree), StringComparison.Ordinal);
+		Assert.Contains("Empty.cs", Text(openTree), StringComparison.Ordinal);
+
+		var openPack = await openServer.CallAsync("pack_context");
+		Assert.Contains("dotted-baseline", Text(openPack), StringComparison.Ordinal);
+
+		// An explicit profile carries its own exclusion state, so the startup baseline yields.
+		var profiledPack = await openServer.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["profile"] = profileName });
+		Assert.Contains("visible-baseline", Text(profiledPack), StringComparison.Ordinal);
+		Assert.DoesNotContain("dotted-baseline", Text(profiledPack), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task DelegatedExclusionsComposeWithNarrowingConstraints()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Tracked.cs"), "tracked-compose\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-compose\n");
+		InitializeCommittedRepository(project);
+		File.WriteAllText(Path.Combine(project, ".untracked.cs"), "untracked-compose\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-compose-changed\n");
+
+		// The desktop standard set is pinned so the dotted fixtures start hidden and the
+		// per-call [] value has something to widen.
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: ProjectSelectionSpec.StandardExclusions,
+			agentExclusions: true);
+
+		// Agent globs still narrow after delegation: exclusions cannot re-admit what the
+		// agent's own exclude_patterns removed.
+		var globbed = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["exclusions"] = Array.Empty<string>(),
+				["exclude_patterns"] = new[] { "**/.dotted.cs" }
+			});
+		Assert.DoesNotContain(".dotted.cs", Text(globbed), StringComparison.Ordinal);
+		Assert.Contains(".untracked.cs", Text(globbed), StringComparison.Ordinal);
+
+		// tracked_only keeps its Git meaning while the per-call exclusion set applies.
+		var tracked = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["exclusions"] = Array.Empty<string>(),
+				["tracked_only"] = "true"
+			});
+		Assert.Contains(".dotted.cs", Text(tracked), StringComparison.Ordinal);
+		Assert.DoesNotContain(".untracked.cs", Text(tracked), StringComparison.Ordinal);
+
+		// git_scope narrows the widened selection to momentary Git state.
+		var scoped = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["exclusions"] = Array.Empty<string>(),
+				["git_scope"] = "changes"
+			});
+		Assert.Contains(".dotted.cs", Text(scoped), StringComparison.Ordinal);
+		Assert.DoesNotContain("Tracked.cs", Text(scoped), StringComparison.Ordinal);
+
+		// The size filter still runs after the widened selection resolves.
+		File.WriteAllText(Path.Combine(project, ".big.cs"), new string('b', 400) + "\n");
+		var sized = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["exclusions"] = Array.Empty<string>(),
+				["max_file_bytes"] = 100
+			});
+		Assert.DoesNotContain(".big.cs", Text(sized), StringComparison.Ordinal);
+		Assert.Contains(".untracked.cs", Text(sized), StringComparison.Ordinal);
+
+		// A paths entry that the effective exclusion set hides yields an empty
+		// selection, not an error; the same entry counts once the set admits it.
+		var pathHidden = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { ".untracked.cs" } });
+		Assert.NotEqual(true, pathHidden.IsError);
+		Assert.Equal(0, pathHidden.StructuredContent?.GetProperty("files").GetInt32());
+		var pathRevealed = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { ".untracked.cs" },
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Equal(1, pathRevealed.StructuredContent?.GetProperty("files").GetInt32());
+	}
+
+	[Fact]
+	public async Task RemoteCheckoutHonorsExclusionBaselineAndDelegation()
+	{
+		if (!IsGitAvailable())
+			Assert.Skip("Git is not available in this test environment.");
+
+		using var workspace = new TemporaryDirectory();
+		var localProject = workspace.CreateDirectory("local-project");
+		var source = workspace.CreateDirectory("source");
+		RunGit(source, "init", "--quiet");
+		RunGit(source, "config", "user.name", "DevProjex Tests");
+		RunGit(source, "config", "user.email", "devprojex@example.invalid");
+		File.WriteAllText(Path.Combine(source, "Visible.cs"), "remote-visible-marker\n");
+		File.WriteAllText(Path.Combine(source, ".dotted.cs"), "remote-dotted-marker\n");
+		RunGit(source, "add", "--", "Visible.cs", ".dotted.cs");
+		RunGit(source, "commit", "--quiet", "-m", "remote fixture");
+		var origin = Path.Combine(localProject, "origin.git");
+		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
+		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
+		var cachePath = Path.Combine(workspace.Path, "repo-cache");
+		await using var server = await McpTestServer.StartAsync(
+			localProject,
+			workspace.Path,
+			allowRemote: true,
+			remoteServicesFactory: () => new McpRemoteProjectServices(
+				new RepoCacheService(cachePath),
+				new GitRepositoryService()),
+			exclusions: [ProjectExclusion.DotFiles],
+			agentExclusions: true);
+
+		// The startup baseline shapes the pinned remote checkout like a local root.
+		var baselineTree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = repositoryUrl });
+		Assert.Contains("Visible.cs", Text(baselineTree), StringComparison.Ordinal);
+		Assert.DoesNotContain(".dotted.cs", Text(baselineTree), StringComparison.Ordinal);
+
+		// The delegated per-call set applies to the same checkout, end to end into get_file.
+		var openTree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = repositoryUrl,
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Contains(".dotted.cs", Text(openTree), StringComparison.Ordinal);
+		var file = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["project"] = repositoryUrl,
+				["path"] = ".dotted.cs",
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.NotEqual(true, file.IsError);
+		Assert.Contains("remote-dotted-marker", Text(file), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LocalProfileExclusionsFlowThroughDelegationAndEcho()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Visible.cs"), "local-profile-visible\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "local-profile-dotted\n");
+		var appData = Path.Combine(workspace.Path, "app-data");
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
+		new ProjectProfileStore(() => appData).SaveProfile(
+			physicalProject,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.DotFiles],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.SmartIgnore] = false,
+					[IgnoreOptionId.EmptyFolders] = false,
+					[IgnoreOptionId.EmptyFiles] = false,
+					[IgnoreOptionId.HiddenFolders] = false,
+					[IgnoreOptionId.HiddenFiles] = false,
+					[IgnoreOptionId.DotFolders] = false,
+					[IgnoreOptionId.DotFiles] = true,
+					[IgnoreOptionId.ExtensionlessFiles] = false
+				}));
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		var profiled = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = "local" });
+		Assert.Equal(1, profiled.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Equal(
+			["dot-files"],
+			profiled.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+
+		var delegated = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["profile"] = "local",
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Equal(2, delegated.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Empty(
+			delegated.StructuredContent!.Value.GetProperty("exclusions").EnumerateArray());
+	}
+
+	[Fact]
+	public async Task ExclusionArgumentBoundsAndTokenParsersRejectMalformedInput()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-bounds\n");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		// Nine items exceed the catalog-sized cap with the exclusions-specific hint.
+		var overflow = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["exclusions"] = new[]
+				{
+					"smart-ignore", "empty-folders", "empty-files", "hidden-folders",
+					"hidden-files", "dot-folders", "dot-files", "extensionless-files",
+					"smart-ignore"
+				}
+			});
+		Assert.True(overflow.IsError);
+		Assert.Contains("remove duplicate or extra tokens", Text(overflow), StringComparison.Ordinal);
+
+		var oversized = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["exclusions"] = new[] { new string('a', 64) }
+			});
+		Assert.True(oversized.IsError);
+		Assert.Contains("use the published exclusion tokens", Text(oversized), StringComparison.Ordinal);
+
+		var invalidView = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["view"] = "sideways" });
+		Assert.True(invalidView.IsError);
+		Assert.Contains("tree, content, tree-content", Text(invalidView), StringComparison.Ordinal);
+
+		var invalidFormat = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["format"] = "yaml" });
+		Assert.True(invalidFormat.IsError);
+		Assert.Contains("text, markdown, json, xml", Text(invalidFormat), StringComparison.Ordinal);
+
+		var invalidTreeFormat = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "yaml" });
+		Assert.True(invalidTreeFormat.IsError);
+		Assert.Contains("markdown, text, json, xml", Text(invalidTreeFormat), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileRejectsDirectoriesAndUnreadableBinaryContent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "Src"));
+		File.WriteAllText(Path.Combine(project, "Src", "Anchor.cs"), "anchor-get-file\n");
+		File.WriteAllBytes(Path.Combine(project, "Blob.bin"), [0x00, 0x01, 0x02, 0xFF, 0x00, 0x10]);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var directory = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Src" });
+		Assert.True(directory.IsError);
+		Assert.Contains("is a directory", Text(directory), StringComparison.Ordinal);
+
+		var binary = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Blob.bin" });
+		Assert.True(binary.IsError);
+		Assert.Contains("DPX-MCP-PAYLOAD-TRUNCATED", Text(binary), StringComparison.Ordinal);
+		Assert.Contains("binary", Text(binary), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GitConstraintsOnNonGitProjectsNameEveryRequestedConstraint()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-non-git\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var trackedOnly = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["tracked_only"] = "true" });
+		Assert.True(trackedOnly.IsError);
+		Assert.Contains("omit tracked_only", Text(trackedOnly), StringComparison.Ordinal);
+
+		var both = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["tracked_only"] = "true",
+				["git_scope"] = "staged"
+			});
+		Assert.True(both.IsError);
+		Assert.Contains("tracked_only and git_scope", Text(both), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ProfileValidationErrorsSurfaceAsActionableInvalidArguments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-profile-error\n");
+		const string profileName = "broken-profile.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = (string[]?)null,
+					selectedPaths = (string[]?)null,
+					gitMode = "none",
+					exclusions = new[] { "bogus-token" },
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = profileName });
+
+		Assert.True(result.IsError);
+		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(result), StringComparison.Ordinal);
+		// Profile diagnostics keep their actionable text, but transport-specific CLI codes
+		// must not leak through the MCP error contract.
+		Assert.DoesNotContain("DPX-CLI-", Text(result), StringComparison.Ordinal);
+		Assert.Contains("unknown exclusion", Text(result), StringComparison.Ordinal);
+
+		// A missing local profile surfaces through the same actionable mapping.
+		var missingLocal = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = "local" });
+		Assert.True(missingLocal.IsError);
+		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(missingLocal), StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-CLI-", Text(missingLocal), StringComparison.Ordinal);
+		Assert.Contains("No local profile exists for this project.", Text(missingLocal), StringComparison.Ordinal);
+
+		var unknown = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = "bogus" });
+		Assert.True(unknown.IsError);
+		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(unknown), StringComparison.Ordinal);
+		Assert.Contains(
+			"unknown profile 'bogus'; use 'standard', 'local', or a profile JSON path inside the project root",
+			Text(unknown),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("path 'bogus' does not exist", Text(unknown), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ExclusionsArgumentRejectsNonArrayShapes()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-shapes\n");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		var scalar = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = "dot-files" });
+		Assert.True(scalar.IsError);
+		Assert.Contains("an array of strings", Text(scalar), StringComparison.Ordinal);
+
+		var numericItem = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = new object[] { 7 } });
+		Assert.True(numericItem.IsError);
+		Assert.Contains("an array of non-empty strings", Text(numericItem), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GitModeAndExclusionBaselinesComposeAndYieldToOneProfileTogether()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-compose\n");
+		File.WriteAllText(Path.Combine(project, "Ignored.cs"), "ignored-compose\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-compose\n");
+		File.WriteAllText(Path.Combine(project, ".gitignore"), "Ignored.cs\n");
+		const string profileName = "compose-profile.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = new[] { ".cs" },
+					selectedPaths = (string[]?)null,
+					gitMode = "gitignore",
+					exclusions = new[] { "dot-files" },
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+		InitializeCommittedRepository(project);
+
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			gitMode: GitFilteringMode.None,
+			exclusions: []);
+
+		// Neither startup baseline clobbers the other.
+		var tree = await server.CallAsync("get_tree");
+		Assert.Contains("Ignored.cs", Text(tree), StringComparison.Ordinal);
+		Assert.Contains(".dotted.cs", Text(tree), StringComparison.Ordinal);
+
+		// One explicit profile displaces both baselines in the same call.
+		var profiledPack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["profile"] = profileName });
+		Assert.Contains("anchor-compose", Text(profiledPack), StringComparison.Ordinal);
+		Assert.DoesNotContain("ignored-compose", Text(profiledPack), StringComparison.Ordinal);
+		Assert.DoesNotContain("dotted-compose", Text(profiledPack), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task HiddenFileExclusionFollowsThePlatformAttributeUnderDelegation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Visible.cs"), "visible-hidden-probe\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-hidden-probe\n");
+		Directory.CreateDirectory(Path.Combine(project, ".dotdir"));
+		File.WriteAllText(Path.Combine(project, ".dotdir", "Nested.cs"), "dotdir-hidden-probe\n");
+		Directory.CreateDirectory(Path.Combine(project, "plain"));
+		File.WriteAllText(Path.Combine(project, "plain", "Inner.cs"), "plain-hidden-probe\n");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		// Dot-named entries belong to the dot toggles on every platform, so the
+		// hidden-files toggle alone must not exclude them anywhere.
+		var hiddenOnly = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = new[] { "hidden-files" } });
+		Assert.Contains(".dotted.cs", Text(hiddenOnly), StringComparison.Ordinal);
+
+		if (OperatingSystem.IsWindows())
+		{
+			var hiddenPath = Path.Combine(project, "Attributed.cs");
+			File.WriteAllText(hiddenPath, "attributed-hidden-probe\n");
+			File.SetAttributes(hiddenPath, File.GetAttributes(hiddenPath) | FileAttributes.Hidden);
+			// A dot-named entry carrying the real attribute is owned by the hidden toggle
+			// on Windows even while the dot toggle is off.
+			var overlapPath = Path.Combine(project, ".hidDot.cs");
+			File.WriteAllText(overlapPath, "overlap-hidden-probe\n");
+			File.SetAttributes(overlapPath, File.GetAttributes(overlapPath) | FileAttributes.Hidden);
+
+			var attributed = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { "hidden-files" } });
+			Assert.DoesNotContain("Attributed.cs", Text(attributed), StringComparison.Ordinal);
+			Assert.DoesNotContain(".hidDot.cs", Text(attributed), StringComparison.Ordinal);
+			var open = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+			Assert.Contains("Attributed.cs", Text(open), StringComparison.Ordinal);
+			Assert.Contains(".hidDot.cs", Text(open), StringComparison.Ordinal);
+		}
+		else if (OperatingSystem.IsMacOS())
+		{
+			// The documented macOS half of the platform-attribute contract: UF_HIDDEN set
+			// by the OS's own tool, read back through the enumeration pipeline.
+			var flaggedFilePath = Path.Combine(project, "Flagged.cs");
+			File.WriteAllText(flaggedFilePath, "flagged-hidden-probe\n");
+			var flaggedFolderPath = Path.Combine(project, "FlaggedFolder");
+			Directory.CreateDirectory(flaggedFolderPath);
+			File.WriteAllText(Path.Combine(flaggedFolderPath, "Probe.cs"), "flagged-folder-probe\n");
+
+			if (!TrySetMacHiddenFlag(flaggedFilePath) || !TrySetMacHiddenFlag(flaggedFolderPath))
+				Assert.Skip("This filesystem does not support the macOS UF_HIDDEN flag.");
+
+			var hiddenFiles = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { "hidden-files" } });
+			Assert.DoesNotContain("Flagged.cs", Text(hiddenFiles), StringComparison.Ordinal);
+			Assert.Contains("Probe.cs", Text(hiddenFiles), StringComparison.Ordinal);
+
+			var hiddenFolders = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { "hidden-folders" } });
+			Assert.DoesNotContain("FlaggedFolder", Text(hiddenFolders), StringComparison.Ordinal);
+			Assert.DoesNotContain("Probe.cs", Text(hiddenFolders), StringComparison.Ordinal);
+			Assert.Contains("Flagged.cs", Text(hiddenFolders), StringComparison.Ordinal);
+
+			var open = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+			Assert.Contains("Flagged.cs", Text(open), StringComparison.Ordinal);
+			Assert.Contains("Probe.cs", Text(open), StringComparison.Ordinal);
+		}
+		else if (OperatingSystem.IsLinux())
+		{
+			// Linux has no hidden mechanism besides dot-names, and dot-names belong to the
+			// dot toggles; hidden-files + hidden-folders together must therefore exclude
+			// nothing at all — the tree is identical to the no-exclusions tree.
+			var hiddenBoth = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { "hidden-files", "hidden-folders" } });
+			var open = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+			var hiddenBody = ExtractSpotlightBody(Text(hiddenBoth));
+			var openBody = ExtractSpotlightBody(Text(open));
+			Assert.Contains(".dotted.cs", hiddenBody, StringComparison.Ordinal);
+			Assert.Contains(".dotdir", hiddenBody, StringComparison.Ordinal);
+			Assert.Contains("plain", hiddenBody, StringComparison.Ordinal);
+			Assert.Equal(openBody, hiddenBody);
+		}
+	}
+
+	[Fact]
+	public async Task HiddenAttributeTogglesFollowThePlatformContract()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Visible.cs"), "visible-default-hidden-probe\n");
+		var probePath = Path.Combine(project, "Probe.cs");
+		File.WriteAllText(probePath, "probe-default-hidden\n");
+		if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+		{
+			// On macOS File.SetAttributes maps to the UF_HIDDEN flag the docs promise.
+			File.SetAttributes(probePath, File.GetAttributes(probePath) | FileAttributes.Hidden);
+			Assert.True(File.GetAttributes(probePath).HasFlag(FileAttributes.Hidden));
+		}
+		else
+		{
+			Assert.False(File.GetAttributes(probePath).HasFlag(FileAttributes.Hidden));
+		}
+
+		// The hidden toggles are off on a default server, so the probe pins the desktop
+		// standard set: the question is what the toggles mean per platform, not whether
+		// they run.
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: ProjectSelectionSpec.StandardExclusions);
+
+		var tree = await server.CallAsync("get_tree");
+		Assert.Contains("Visible.cs", Text(tree), StringComparison.Ordinal);
+		if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+		{
+			Assert.DoesNotContain("Probe.cs", Text(tree), StringComparison.Ordinal);
+			var denied = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "Probe.cs" });
+			Assert.True(denied.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(denied), StringComparison.Ordinal);
+		}
+		else
+		{
+			// A non-dot file can never be attribute-hidden on Linux, so it stays served.
+			Assert.Contains("Probe.cs", Text(tree), StringComparison.Ordinal);
+			var served = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "Probe.cs" });
+			Assert.NotEqual(true, served.IsError);
+			Assert.Contains("probe-default-hidden", Text(served), StringComparison.Ordinal);
+		}
+
+		var sibling = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Visible.cs" });
+		Assert.NotEqual(true, sibling.IsError);
+		Assert.Contains("visible-default-hidden-probe", Text(sibling), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileWrongCaseDiagnosticsConvergeOnTheListedSpellingAcrossPlatforms()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "WpfApp2"));
+		File.WriteAllText(Path.Combine(project, "WpfApp2", "MainWindow.xaml.cs"), "anchor-wrong-case\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var wrongCase = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "wpfapp2/mainwindow.xaml.cs" });
+
+		// This deliberately replaces the former platform-divergent assertion: MCP paths now
+		// use one case-sensitive spelling contract even when the host volume does not.
+		Assert.True(wrongCase.IsError);
+		Assert.Contains(
+			"DPX-MCP-PATH-NOT-FOUND: file 'wpfapp2/mainwindow.xaml.cs' differs only in letter case from the listed path 'WpfApp2/MainWindow.xaml.cs'; paths are case-sensitive on every platform — retry with the listed spelling.",
+			Text(wrongCase),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("effective filters", Text(wrongCase), StringComparison.Ordinal);
+		Assert.DoesNotContain("server startup line", Text(wrongCase), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task MarkdownEscapedTreePathsAreAcceptedByFileAndSelectionTools()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "image_58500.txt"), "markdown-path-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		const string escapedPath = @"image\_58500.txt";
+
+		var tree = Text(await server.CallAsync("get_tree"));
+		Assert.Contains(escapedPath, ExtractSpotlightBody(tree), StringComparison.Ordinal);
+
+		var file = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = escapedPath });
+		var analysis = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { escapedPath } });
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { escapedPath },
+				["view"] = "content",
+				["format"] = "text"
+			});
+
+		Assert.NotEqual(true, file.IsError);
+		Assert.Contains("markdown-path-marker", Text(file), StringComparison.Ordinal);
+		Assert.Equal(1, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.NotEqual(true, pack.IsError);
+		Assert.Contains("markdown-path-marker", Text(pack), StringComparison.Ordinal);
+
+		var missing = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = @"missing\_image.txt" });
+		Assert.True(missing.IsError);
+		Assert.Contains(
+			"The path contains markdown escaping from get_tree ('\\_'); use the unescaped spelling or get_tree with format=text",
+			Text(missing),
+			StringComparison.Ordinal);
+
+		if (OperatingSystem.IsWindows())
+		{
+			Directory.CreateDirectory(Path.Combine(project, "image"));
+			File.WriteAllText(Path.Combine(project, "image", "_58500.txt"), "literal-path-marker\n");
+			var literal = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = escapedPath });
+			Assert.Contains("literal-path-marker", Text(literal), StringComparison.Ordinal);
+			Assert.DoesNotContain("markdown-path-marker", Text(literal), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task WrongCasePathsArgumentsFollowTheVolumeCasingContract()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor-marker\n");
+		var caseInsensitiveVolume = File.Exists(Path.Combine(project, "ANCHOR.CS"));
+		if (OperatingSystem.IsWindows())
+			Assert.True(caseInsensitiveVolume);
+		if (OperatingSystem.IsLinux())
+			Assert.False(caseInsensitiveVolume);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { "anchor.CS" } });
+
+		if (caseInsensitiveVolume)
+		{
+			// Pinned contract: existence follows filesystem semantics but the selection
+			// frontier compares Ordinal, so a wrong-case path resolves yet matches
+			// nothing — the tool succeeds with an empty selection instead of erroring.
+			Assert.NotEqual(true, result.IsError);
+			Assert.Equal(0, result.StructuredContent?.GetProperty("files").GetInt32());
+		}
+		else
+		{
+			Assert.True(result.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(result), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task WrongCaseProjectArgumentFollowsThePlatformCaseSemantics()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "wrong-case-project-probe\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// Invert only the leaf segment so parent segments stay valid on case-sensitive filesystems.
+		var invertedPath = Path.Combine(workspace.Path, "PROJECT");
+		var result = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = invertedPath });
+
+		// Project selection follows the filesystem's case semantics: this probe is the same
+		// existence gate the physical resolver applies before canonicalization.
+		if (Directory.Exists(invertedPath))
+		{
+			Assert.NotEqual(true, result.IsError);
+			Assert.Contains("Anchor.cs", Text(result), StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.True(result.IsError);
+			Assert.Contains("DPX-MCP-UNKNOWN-PROJECT", Text(result), StringComparison.Ordinal);
+		}
+
+		if (OperatingSystem.IsWindows())
+			Assert.True(Directory.Exists(invertedPath));
+		if (OperatingSystem.IsLinux())
+			Assert.False(Directory.Exists(invertedPath));
+	}
+
+	[Fact]
+	public async Task BackslashPathArgumentsFollowTheHostPlatformSeparatorContract()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "Src"));
+		File.WriteAllText(Path.Combine(project, "Src", "File.cs"), "backslash-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var file = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Src\\File.cs" });
+		var analysis = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { "Src\\File.cs" } });
+		var portable = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Src/File.cs" });
+
+		// '/' is the portable spelling on every OS for both path arguments and globs.
+		Assert.NotEqual(true, portable.IsError);
+		Assert.Contains("backslash-marker", Text(portable), StringComparison.Ordinal);
+
+		// Path arguments follow host-OS path semantics: '\' is a separator only on
+		// Windows; on POSIX it is an ordinary filename character.
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.NotEqual(true, file.IsError);
+			Assert.Contains("backslash-marker", Text(file), StringComparison.Ordinal);
+			Assert.NotEqual(true, analysis.IsError);
+			Assert.Equal(1, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		}
+		else
+		{
+			Assert.True(file.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(file), StringComparison.Ordinal);
+			Assert.True(analysis.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(analysis), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task GlobMatchingIsCaseSensitiveOnEveryPlatform()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "Src"));
+		File.WriteAllText(Path.Combine(project, "Src", "Case.cs"), "case-sensitive-glob\n");
+		File.WriteAllText(Path.Combine(project, "Src", "Anchor.md"), "anchor\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// MCP globs are Ordinal case-sensitive on every OS — including Windows/macOS whose
+		// filesystems are case-insensitive — so identical calls select identical files on
+		// all platforms. Do not add IgnoreCase or migrate to a globber with per-OS casing.
+		var upper = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "**/*.CS", "**/*.md" } });
+		Assert.Contains("Anchor.md", Text(upper), StringComparison.Ordinal);
+		Assert.DoesNotContain("Case.cs", Text(upper), StringComparison.Ordinal);
+
+		var lower = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "**/*.cs", "**/*.md" } });
+		Assert.Contains("Case.cs", Text(lower), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task TrailingDotAndSpacePathArgumentsFollowThePlatformNameRules()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "dot-marker\n");
+		if (!OperatingSystem.IsWindows())
+			File.WriteAllText(Path.Combine(project, "trap.cs."), "trap-marker\n");
+		// The trailing-dot fixture parses as extensionless, so the standard baseline would
+		// hide it; an empty exclusion baseline keeps the probe about name rules only.
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: []);
+
+		var dotAlias = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Anchor.cs." });
+		var spaceAlias = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Anchor.cs " });
+
+		if (OperatingSystem.IsWindows())
+		{
+			// Win32 path normalization strips trailing dots and spaces, so alias
+			// spellings resolve to the same physical file — the platform's name model.
+			Assert.NotEqual(true, dotAlias.IsError);
+			Assert.Contains("dot-marker", Text(dotAlias), StringComparison.Ordinal);
+			Assert.NotEqual(true, spaceAlias.IsError);
+			Assert.Contains("dot-marker", Text(spaceAlias), StringComparison.Ordinal);
+		}
+		else
+		{
+			// POSIX treats the alias spellings as distinct legal names, so they miss.
+			Assert.True(dotAlias.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(dotAlias), StringComparison.Ordinal);
+			Assert.True(spaceAlias.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(spaceAlias), StringComparison.Ordinal);
+
+			// Exact unix names with a trailing dot stay addressable end to end.
+			var tree = await server.CallAsync("get_tree");
+			Assert.Contains("trap.cs.", Text(tree), StringComparison.Ordinal);
+			var trap = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "trap.cs." });
+			Assert.NotEqual(true, trap.IsError);
+			Assert.Contains("trap-marker", Text(trap), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task UnicodeNormalizationFormsFollowThePlatformLookupContract()
+	{
+		// MCP path arguments are matched byte-for-byte (Ordinal) after lexical resolution
+		// with no Unicode normalization anywhere in the pipeline; on macOS a wrong-form
+		// argument passes the APFS lookup but misses every selection set, while
+		// Linux/Windows reject it as not-found. If argument-boundary normalization is
+		// ever added, this test is the contract to update deliberately.
+		const string NfcName = "Caf\u00E9.txt";
+		const string NfdName = "Cafe\u0301.txt";
+		Assert.NotEqual(NfcName, NfdName);
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, NfcName), "nfc-marker\n");
+		var storedName = Path.GetFileName(Assert.Single(Directory.EnumerateFiles(project)));
+		if (!string.Equals(storedName, NfcName, StringComparison.Ordinal))
+			Assert.Skip("The volume rewrote the stored name to a different normalization form.");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var nfcFile = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = NfcName });
+		var nfdFile = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = NfdName });
+		var nfdAnalysis = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { NfdName } });
+
+		Assert.NotEqual(true, nfcFile.IsError);
+		Assert.Contains("nfc-marker", Text(nfcFile), StringComparison.Ordinal);
+		Assert.True(nfdFile.IsError);
+		Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(nfdFile), StringComparison.Ordinal);
+		if (OperatingSystem.IsMacOS())
+		{
+			// APFS resolves the wrong-form lookup, but every Ordinal membership check
+			// downstream misses: get_file reports the selection variant; analyze
+			// silently reprojects to zero files.
+			Assert.Contains("is not in the effective project selection", Text(nfdFile), StringComparison.Ordinal);
+			Assert.NotEqual(true, nfdAnalysis.IsError);
+			Assert.Equal(0, nfdAnalysis.StructuredContent?.GetProperty("files").GetInt32());
+		}
+		else
+		{
+			Assert.Contains("does not exist inside project", Text(nfdFile), StringComparison.Ordinal);
+			Assert.True(nfdAnalysis.IsError);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(nfdAnalysis), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task UnreadableDirectoryYieldsPartialResultsWithTrustedPartialAccessWarning()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			// On Windows the deny trigger is an ACL, not mode bits; the recovery pipeline
+			// past the throw is platform-neutral and is pinned by the two Unix runners.
+			Assert.Skip("Unix mode bits are not an access-control mechanism on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/open/inner.txt", "open-marker\n");
+		workspace.CreateFile("project/blocked/secret.txt", "blocked-marker\n");
+		var blockedDirectory = Path.Combine(project, "blocked");
+		var originalMode = File.GetUnixFileMode(blockedDirectory);
+		try
+		{
+			File.SetUnixFileMode(blockedDirectory, UnixFileMode.None);
+			try
+			{
+				_ = Directory.EnumerateFileSystemEntries(blockedDirectory).Any();
+				Assert.Skip("The test process can bypass Unix mode bits; access cannot be denied reliably.");
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
+
+			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+			var tree = await server.CallAsync("get_tree");
+			var treeText = Text(tree);
+			Assert.NotEqual(true, tree.IsError);
+			Assert.Contains("inner.txt", treeText, StringComparison.Ordinal);
+			Assert.DoesNotContain("secret.txt", treeText, StringComparison.Ordinal);
+			Assert.Contains("[Warning DPX-PROJECT-PARTIAL-ACCESS]", treeText, StringComparison.Ordinal);
+			Assert.True(
+				treeText.IndexOf("[Warning DPX-PROJECT-PARTIAL-ACCESS]", StringComparison.Ordinal) >
+				treeText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal));
+
+			var search = await server.CallAsync(
+				"search_project",
+				new Dictionary<string, object?>
+				{
+					["pattern"] = "open-marker|blocked-marker",
+					["ignore_case"] = false
+				});
+			var searchText = Text(search);
+			Assert.NotEqual(true, search.IsError);
+			Assert.Contains("inner.txt:1:open-marker", searchText, StringComparison.Ordinal);
+			Assert.DoesNotContain("blocked-marker", searchText, StringComparison.Ordinal);
+			Assert.Contains("[Warning DPX-PROJECT-PARTIAL-ACCESS]", searchText, StringComparison.Ordinal);
+		}
+		finally
+		{
+			File.SetUnixFileMode(blockedDirectory, originalMode);
+		}
+	}
+
+	[Fact]
+	public async Task UnixAccessDeniedFileDegradesPerFileAcrossContentTools()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix mode bits are not an access-control mechanism on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Readable.txt"), "readable-marker\n");
+		var blockedPath = Path.Combine(project, "Blocked.txt");
+		File.WriteAllText(blockedPath, "blocked-marker\n");
+		var originalMode = File.GetUnixFileMode(blockedPath);
+		try
+		{
+			File.SetUnixFileMode(blockedPath, UnixFileMode.None);
+			try
+			{
+				using var probe = File.OpenRead(blockedPath);
+				Assert.Skip("The test process can bypass Unix mode bits; access cannot be denied reliably.");
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
+
+			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+			var search = await server.CallAsync(
+				"search_project",
+				new Dictionary<string, object?>
+				{
+					["pattern"] = "readable-marker|blocked-marker",
+					["context_lines"] = 0,
+					["ignore_case"] = false
+				});
+			var searchText = Text(search);
+			Assert.NotEqual(true, search.IsError);
+			Assert.Contains("Readable.txt:1:readable-marker", searchText, StringComparison.Ordinal);
+			Assert.DoesNotContain("blocked-marker", searchText, StringComparison.Ordinal);
+			Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", searchText, StringComparison.Ordinal);
+			Assert.Contains("could not fully inspect 1 selected file.", searchText, StringComparison.Ordinal);
+
+			var pack = await server.CallAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["paths"] = new[] { "Readable.txt", "Blocked.txt" },
+					["view"] = "content",
+					["format"] = "text"
+				});
+			var packText = Text(pack);
+			Assert.NotEqual(true, pack.IsError);
+			Assert.Contains("readable-marker", packText, StringComparison.Ordinal);
+			Assert.DoesNotContain("blocked-marker", packText, StringComparison.Ordinal);
+			Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", packText, StringComparison.Ordinal);
+			Assert.Contains("Uninspected content was withheld from the pack.", packText, StringComparison.Ordinal);
+
+			var analysis = await server.CallAsync("analyze");
+			Assert.NotEqual(true, analysis.IsError);
+			Assert.Equal(2, analysis.StructuredContent?.GetProperty("files").GetInt32());
+
+			var deniedFile = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "Blocked.txt" });
+			Assert.True(deniedFile.IsError);
+			Assert.Contains(McpErrorCodes.PayloadTruncated, Text(deniedFile), StringComparison.Ordinal);
+			Assert.DoesNotContain("DPX-MCP-OPERATION-FAILED", Text(deniedFile), StringComparison.Ordinal);
+			var readableFile = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "Readable.txt" });
+			Assert.NotEqual(true, readableFile.IsError);
+			Assert.Contains("readable-marker", Text(readableFile), StringComparison.Ordinal);
+		}
+		finally
+		{
+			File.SetUnixFileMode(blockedPath, originalMode);
+		}
+	}
+
+	[Fact]
+	public async Task InsideRootDirectoryAliasStaysInvisibleYetAliasReadableUnderWidestDelegatedScope()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "target"));
+		File.WriteAllText(Path.Combine(project, "target", "inner.txt"), "alias-invariant-content\n");
+		// POSIX links use a relative target: an absolute spelling through a system alias
+		// (macOS /var -> /private/var) fails the ordinal jail check closed by design.
+		CreateDirectoryAliasOrSkip(
+			Path.Combine(project, "linked-alias"),
+			OperatingSystem.IsWindows() ? Path.Combine(project, "target") : "target");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+		var widest = new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() };
+
+		// Reparse points are outside the exclusions vocabulary: even the widest delegated
+		// scope never lists, packs, or searches a link — while a direct read through the
+		// alias resolves to the canonical inside-root target and succeeds.
+		var tree = await server.CallAsync("get_tree", widest);
+		Assert.Contains("inner.txt", Text(tree), StringComparison.Ordinal);
+		Assert.Contains("target", Text(tree), StringComparison.Ordinal);
+		Assert.DoesNotContain("linked-alias", Text(tree), StringComparison.Ordinal);
+
+		var pack = await server.CallAsync("pack_context", widest);
+		Assert.Contains("alias-invariant-content", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain("linked-alias", Text(pack), StringComparison.Ordinal);
+
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(widest) { ["pattern"] = "alias-invariant-content" });
+		Assert.Contains("inner.txt", Text(search), StringComparison.Ordinal);
+		Assert.DoesNotContain("linked-alias", Text(search), StringComparison.Ordinal);
+
+		var aliasRead = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>(widest) { ["path"] = "linked-alias/inner.txt" });
+		Assert.True(aliasRead.IsError != true, Text(aliasRead));
+		Assert.Contains("alias-invariant-content", Text(aliasRead), StringComparison.Ordinal);
+		var directRead = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>(widest) { ["path"] = "target/inner.txt" });
+		Assert.True(directRead.IsError != true, Text(directRead));
+		Assert.Contains("alias-invariant-content", Text(directRead), StringComparison.Ordinal);
+	}
+
+	private static bool TrySetMacHiddenFlag(string path)
+	{
+		var startInfo = new ProcessStartInfo("chflags")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+		startInfo.ArgumentList.Add("hidden");
+		startInfo.ArgumentList.Add(path);
+		using var process = Process.Start(startInfo);
+		if (process is null)
+			return false;
+		process.WaitForExit();
+		return process.ExitCode == 0 &&
+		       File.GetAttributes(path).HasFlag(FileAttributes.Hidden);
+	}
+
+
+	[Fact]
+	public async Task AgentExclusionsFlagPublishesTheExclusionsParameterOnSelectionTools()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Anchor.cs"), "anchor\n");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project", "get_file"];
+		foreach (var tool in tools)
+		{
+			var schema = tool.ProtocolTool.InputSchema;
+			var hasParameter = schema.GetProperty("properties").TryGetProperty("exclusions", out var published);
+			Assert.Equal(delegated.Contains(tool.Name), hasParameter);
+			if (!hasParameter)
+				continue;
+
+			// The delegated vocabulary is exactly the eight shared path exclusion tokens;
+			// redaction toggles must never surface here in any spelling.
+			Assert.Equal(
+				["smart-ignore", "empty-folders", "empty-files", "hidden-folders", "hidden-files", "dot-folders", "dot-files", "extensionless-files"],
+				published.GetProperty("items").GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
+			Assert.Equal(
+				ProjectSelectionTokens.Exclusions.Count,
+				published.GetProperty("maxItems").GetInt32());
+			Assert.True(published.GetProperty("uniqueItems").GetBoolean());
+			var propertyNames = schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name).ToArray();
+			var globAnchor = Array.IndexOf(propertyNames, "exclude_patterns");
+			Assert.Equal(
+				globAnchor >= 0 ? globAnchor + 1 : Array.IndexOf(propertyNames, "branch") + 1,
+				Array.IndexOf(propertyNames, "exclusions"));
+			var required = schema.TryGetProperty("required", out var requiredElement)
+				? requiredElement.EnumerateArray().Select(static item => item.GetString()).ToArray()
+				: [];
+			Assert.DoesNotContain("exclusions", required);
+			Assert.DoesNotContain("hide_secrets", schema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide-secrets", schema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide_private", schema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide-private", schema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+		}
+	}
+
+	[Fact]
+	public async Task AgentExclusionsParameterControlsSelectionOnlyWhenDelegated()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Visible.cs"), "visible-delegated\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-delegated\n");
+		const string profileName = "delegated-profile.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = new[] { ".cs" },
+					selectedPaths = (string[]?)null,
+					gitMode = "none",
+					exclusions = new[] { "dot-files" },
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+
+		// A default server does not know the argument at all: the narrowing-only contract holds.
+		await using var defaultServer = await McpTestServer.StartAsync(project, workspace.Path);
+		var rejected = await defaultServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+		Assert.True(rejected.IsError);
+		Assert.Contains("exclusions", Text(rejected), StringComparison.Ordinal);
+
+		await using var delegatedServer = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles],
+			agentExclusions: true);
+
+		// Absent parameter keeps the server baseline; an empty set overrides it per call.
+		var baselineTree = await delegatedServer.CallAsync("get_tree");
+		Assert.DoesNotContain(".dotted.cs", Text(baselineTree), StringComparison.Ordinal);
+		var openTree = await delegatedServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+		Assert.Contains(".dotted.cs", Text(openTree), StringComparison.Ordinal);
+		var narrowedTree = await delegatedServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = new[] { "dot-files" } });
+		Assert.DoesNotContain(".dotted.cs", Text(narrowedTree), StringComparison.Ordinal);
+
+		// The human sanctioned the delegation, so a per-call set also outranks a profile.
+		var delegatedPack = await delegatedServer.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Contains("dotted-delegated", Text(delegatedPack), StringComparison.Ordinal);
+
+		// analyze echoes the effective exclusion state for the agent and the transcript reader.
+		var baselineAnalysis = await delegatedServer.CallAsync("analyze");
+		Assert.Equal(
+			["dot-files"],
+			baselineAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+		var openAnalysis = await delegatedServer.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+		Assert.Empty(
+			openAnalysis.StructuredContent!.Value.GetProperty("exclusions").EnumerateArray());
+
+		// Both red-line spellings and the CLI-only "none" token are rejected with a
+		// message that lists only the eight path tokens.
+		foreach (var forbidden in new[] { "hide-secrets", "hide-private-data", "none" })
+		{
+			var invalid = await delegatedServer.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { forbidden } });
+			Assert.True(invalid.IsError);
+			Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", Text(invalid), StringComparison.Ordinal);
+			Assert.Contains("extensionless-files", Text(invalid), StringComparison.Ordinal);
+			Assert.DoesNotContain("hide-secrets, ", Text(invalid), StringComparison.Ordinal);
+			Assert.DoesNotContain("hide-private", Text(invalid), StringComparison.Ordinal);
+		}
+
+		// Delegation never leaks onto tools that perform no selection.
+		foreach (var tool in new[] { "list_projects", "read_pack" })
+		{
+			var leaked = await delegatedServer.CallAsync(
+				tool,
+				new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+			Assert.True(leaked.IsError);
+			Assert.Contains("exclusions", Text(leaked), StringComparison.Ordinal);
+		}
+
+		// The published schema declares uniqueItems, and case-variant repeats count too.
+		var duplicated = await delegatedServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = new[] { "dot-files", "DOT-FILES" } });
+		Assert.True(duplicated.IsError);
+		Assert.Contains("duplicate", Text(duplicated), StringComparison.Ordinal);
+
+		// Tokens themselves parse case-insensitively and echo in canonical form.
+		var uppercaseTree = await delegatedServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclusions"] = new[] { "DOT-FILES" } });
+		Assert.DoesNotContain(".dotted.cs", Text(uppercaseTree), StringComparison.Ordinal);
+		var uppercaseAnalysis = await delegatedServer.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["exclusions"] = new[] { "DOT-FILES" } });
+		Assert.Equal(
+			["dot-files"],
+			uppercaseAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+
+		// The echo follows the same precedence as file visibility: the profile's set when
+		// no per-call value is given, the per-call set when it is.
+		var profiledAnalysis = await delegatedServer.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["profile"] = profileName });
+		Assert.Equal(
+			["dot-files"],
+			profiledAnalysis.StructuredContent?.GetProperty("exclusions").EnumerateArray()
+				.Select(static item => item.GetString()));
+		var profiledOpenAnalysis = await delegatedServer.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Empty(
+			profiledOpenAnalysis.StructuredContent!.Value.GetProperty("exclusions").EnumerateArray());
+
+		// get_file participates in the delegation: what a per-call value reveals in the
+		// tree stays readable through the same value, and only through it.
+		var unreadable = await delegatedServer.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = ".dotted.cs" });
+		Assert.True(unreadable.IsError);
+		Assert.Contains("DPX-MCP-PATH-NOT-FOUND", Text(unreadable), StringComparison.Ordinal);
+		var readable = await delegatedServer.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["path"] = ".dotted.cs",
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.NotEqual(true, readable.IsError);
+		Assert.Contains("dotted-delegated", Text(readable), StringComparison.Ordinal);
+
+		// pack_context honors the per-call set without a profile in both directions.
+		var openPackNoProfile = await delegatedServer.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() });
+		Assert.Contains("dotted-delegated", Text(openPackNoProfile), StringComparison.Ordinal);
+		var narrowedPack = await delegatedServer.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["exclusions"] = new[] { "dot-files" } });
+		Assert.Contains("visible-delegated", Text(narrowedPack), StringComparison.Ordinal);
+		Assert.DoesNotContain("dotted-delegated", Text(narrowedPack), StringComparison.Ordinal);
+
+		// search_project carries its own allowlist and plan wiring for the parameter.
+		var searchRejected = await defaultServer.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "dotted-delegated",
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.True(searchRejected.IsError);
+		Assert.Contains("exclusions", Text(searchRejected), StringComparison.Ordinal);
+		var searchBaseline = await delegatedServer.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "dotted-delegated" });
+		Assert.DoesNotContain(".dotted.cs", Text(searchBaseline), StringComparison.Ordinal);
+		var searchOpen = await delegatedServer.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "dotted-delegated",
+				["exclusions"] = Array.Empty<string>()
+			});
+		Assert.Contains(".dotted.cs", Text(searchOpen), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -202,6 +1863,8 @@ public sealed class McpServerIntegrationTests
 			Assert.Equal(JsonValueKind.False, protocol.InputSchema.GetProperty("additionalProperties").ValueKind);
 			Assert.DoesNotContain("hide_secrets", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
 			Assert.DoesNotContain("hide_private", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide-secrets", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.DoesNotContain("hide-private", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
 		});
 		Assert.Equal(
 			["list_projects", "analyze"],
@@ -216,6 +1879,17 @@ public sealed class McpServerIntegrationTests
 			"stored pack id remains valid until this server process exits; after restart, call pack_context again",
 			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
 			StringComparison.Ordinal);
+		Assert.Contains(
+			"Results through 50,000 characters are returned inline; larger results are stored and return a pack_id for read_pack",
+			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
+			StringComparison.Ordinal);
+		foreach (var toolName in new[] { "analyze", "pack_context", "search_project", "get_file" })
+		{
+			var description = tools.Single(tool => tool.Name == toolName).ProtocolTool.Description;
+			Assert.Contains("DEVPROJEX_REDACTED[<category>#<n>]", description, StringComparison.Ordinal);
+			Assert.Contains("documentation domains", description, StringComparison.Ordinal);
+			Assert.Contains("reserved IP ranges", description, StringComparison.Ordinal);
+		}
 		Assert.Equal(
 			200_000,
 			tools.Single(static tool => tool.Name == "read_pack")
@@ -261,6 +1935,14 @@ public sealed class McpServerIntegrationTests
 		var searchPattern = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("pattern");
 		Assert.Equal(4096, searchPattern.GetProperty("maxLength").GetInt32());
+		Assert.Contains(
+			"DEVPROJEX_REDACTED[<category>#<n>]",
+			searchPattern.GetProperty("description").GetString(),
+			StringComparison.Ordinal);
+		var filePath = tools.Single(static tool => tool.Name == "get_file")
+			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("path");
+		Assert.Contains("default get_tree format", filePath.GetProperty("description").GetString(), StringComparison.Ordinal);
+		Assert.Contains("format=text", filePath.GetProperty("description").GetString(), StringComparison.Ordinal);
 		var treeFormat = tools.Single(static tool => tool.Name == "get_tree")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("format");
 		Assert.Equal("markdown", treeFormat.GetProperty("default").GetString());
@@ -286,6 +1968,8 @@ public sealed class McpServerIntegrationTests
 		}
 		var gitScope = tools.Single(static tool => tool.Name == "get_tree")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
+		Assert.Contains("including untracked files", gitScope.GetProperty("description").GetString(), StringComparison.Ordinal);
+		Assert.Contains("current working tree", gitScope.GetProperty("description").GetString(), StringComparison.Ordinal);
 		var diffPattern = gitScope.GetProperty("oneOf")[1].GetProperty("pattern").GetString();
 		Assert.NotNull(diffPattern);
 		Assert.Matches(diffPattern, "diff:main..feature");
@@ -297,6 +1981,24 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(1, maximumTokens.GetProperty("oneOf")[0].GetProperty("minimum").GetInt32());
 		const string positiveNumericStringPattern = "^0*[1-9][0-9]*$";
 		Assert.Equal(positiveNumericStringPattern, maximumTokens.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
+		var packProperties = tools.Single(static tool => tool.Name == "pack_context")
+			.ProtocolTool.InputSchema.GetProperty("properties");
+		Assert.False(string.IsNullOrWhiteSpace(packProperties.GetProperty("view").GetProperty("description").GetString()));
+		Assert.False(string.IsNullOrWhiteSpace(packProperties.GetProperty("format").GetProperty("description").GetString()));
+		Assert.Contains(
+			"all eight exclusion toggles",
+			packProperties.GetProperty("profile").GetProperty("description").GetString(),
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"listed by list_projects.profiles",
+			packProperties.GetProperty("profile").GetProperty("description").GetString(),
+			StringComparison.Ordinal);
+		var outputExclusions = tools.Single(static tool => tool.Name == "analyze")
+			.ProtocolTool.OutputSchema!.Value.GetProperty("properties").GetProperty("exclusions");
+		Assert.Contains(
+			"the mcp --exclude flag and the optional exclusions parameter",
+			outputExclusions.GetProperty("description").GetString(),
+			StringComparison.Ordinal);
 		var positiveNumericStrings = new (string Tool, string Property)[]
 		{
 			("get_tree", "max_file_bytes"),
@@ -471,6 +2173,9 @@ public sealed class McpServerIntegrationTests
 		var truncatedXml = await server.CallAsync(
 			"get_tree",
 			new Dictionary<string, object?> { ["format"] = "xml" });
+		var truncatedText = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" });
 
 		Assert.True(invalid.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(invalid), StringComparison.Ordinal);
@@ -483,6 +2188,10 @@ public sealed class McpServerIntegrationTests
 			Assert.Contains("include_patterns", Text(truncated), StringComparison.Ordinal);
 			Assert.DoesNotContain("<untrusted-data-", Text(truncated), StringComparison.Ordinal);
 		});
+		Assert.NotEqual(true, truncatedText.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			truncatedText,
+			"[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]");
 	}
 
 	[Fact]
@@ -1105,6 +2814,9 @@ public sealed class McpServerIntegrationTests
 		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
 		Assert.Contains("\n[1 additional matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
 		Assert.Contains("narrow the pattern or filters", text, StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(
+			result,
+			"[1 additional matches not shown; narrow the pattern or filters.]");
 	}
 
 	[Fact]
@@ -1124,6 +2836,9 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("50000-character response cap", text, StringComparison.Ordinal);
 		Assert.Contains("narrow the source", text, StringComparison.Ordinal);
 		AssertSpotlighted(result);
+		AssertTrustedTrailerOutsideSpotlight(
+			result,
+			"[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]");
 	}
 
 	[Fact]
@@ -1183,6 +2898,9 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain("continue with start_line=", continuationText, StringComparison.Ordinal);
 		AssertSpotlighted(firstPage);
 		AssertSpotlighted(continuation);
+		AssertTrustedTrailerOutsideSpotlight(
+			firstPage,
+			"[Showing lines 1-1000 of 1005; continue with start_line=1001.]");
 	}
 
 	[Fact]
@@ -1229,6 +2947,7 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain("continue with start_line=", continuationText, StringComparison.Ordinal);
 		AssertSpotlighted(firstPage);
 		AssertSpotlighted(continuation);
+		AssertTrustedTrailerOutsideSpotlight(firstPage, "[Showing lines 1-1000 of ");
 	}
 
 	[Fact]
@@ -1260,6 +2979,9 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("[Tree preview truncated to fit the stored-pack response limit.", response, StringComparison.Ordinal);
 		AssertSpotlighted(stored);
 		AssertBalancedSpotlights(response);
+		AssertTrustedTrailerOutsideSpotlight(
+			stored,
+			"[Tree preview truncated to fit the stored-pack response limit. Use read_pack for the complete pack.]");
 
 		var page = await server.CallAsync(
 			"read_pack",
@@ -1845,6 +3567,7 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Included: 2 files (2 estimated tokens).", firstText, StringComparison.Ordinal);
 		Assert.Contains("Skipped: 1 file", firstText, StringComparison.Ordinal);
 		Assert.Contains("A-large.txt", firstText, StringComparison.Ordinal);
+		Assert.Contains("Tip: use detail=compact", firstText, StringComparison.Ordinal);
 		Assert.Equal(ExtractSpotlightBody(firstText), ExtractSpotlightBody(Text(second)));
 
 		var empty = await server.CallAsync(
@@ -1869,6 +3592,7 @@ public sealed class McpServerIntegrationTests
 			});
 		Assert.Contains("Included: 3 files", Text(all), StringComparison.Ordinal);
 		Assert.Contains("Skipped: 0 files (0 estimated tokens).", Text(all), StringComparison.Ordinal);
+		Assert.DoesNotContain("Tip:", Text(all), StringComparison.Ordinal);
 
 		var longBudget = await server.CallAsync(
 			"pack_context",
@@ -2269,6 +3993,7 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Exact.txt", Text(tree), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(tree), StringComparison.Ordinal);
 		Assert.Equal(2, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Contains("max_file_bytes: 64", AllText(analysis), StringComparison.Ordinal);
 		Assert.Contains("small-marker", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Exact.txt", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(pack), StringComparison.Ordinal);
@@ -2276,6 +4001,9 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Skipped: 0 files", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Small.txt:1:", Text(search), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(search), StringComparison.Ordinal);
+		Assert.All(
+			new[] { Text(tree), Text(pack), Text(search) },
+			text => Assert.Contains("max_file_bytes: 64", text, StringComparison.Ordinal));
 		Assert.True(invalid.IsError);
 		Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
 		Assert.Equal(0, allExcluded.StructuredContent?.GetProperty("files").GetInt32());
@@ -2490,7 +4218,12 @@ public sealed class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(repository, "Baseline.cs"), "ordinary-baseline\n");
 		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-baseline\n");
 		InitializeCommittedRepository(repository);
-		await using var server = await McpTestServer.StartAsync(repository, workspace.Path);
+		// The desktop standard set is pinned explicitly: the probe is about a hidden
+		// committed baseline never leaking through a staged scope.
+		await using var server = await McpTestServer.StartAsync(
+			repository,
+			workspace.Path,
+			exclusions: ProjectSelectionSpec.StandardExclusions);
 		var scope = new Dictionary<string, object?> { ["git_scope"] = "staged" };
 
 		var cleanTree = await server.CallAsync("get_tree", scope);
@@ -3502,7 +5235,7 @@ public sealed class McpServerIntegrationTests
 	{
 		var match = Regex.Match(
 			text,
-			"Pack stored as '([^']+)' \\(\\d+ characters\\)\\.",
+			"Pack stored as '([^']+)' \\(\\d+ characters, \\d+ lines\\)\\.",
 			RegexOptions.CultureInvariant);
 		Assert.True(match.Success, $"Stored pack response did not contain a pack id: {text}");
 		return match.Groups[1].Value;
@@ -3658,6 +5391,11 @@ public sealed class McpServerIntegrationTests
 					value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out _),
 					$"{path} must be an integer.");
 				break;
+			case "boolean":
+				Assert.True(
+					value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+					$"{path} must be a boolean.");
+				break;
 			default:
 				throw new Xunit.Sdk.XunitException($"Unsupported contract schema type '{expectedType}' at {path}.");
 		}
@@ -3725,8 +5463,11 @@ public sealed class McpServerIntegrationTests
 			_firstValue.TrySetResult();
 		}
 
+		// Generous on purpose: the assertions cover ordering and token scoping, not
+		// latency, and cold CI runners have needed more than ten seconds to emit
+		// the first notification.
 		public Task WaitForValueAsync(CancellationToken cancellationToken) =>
-			_firstValue.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+			_firstValue.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
 	}
 
 	private static void AssertSpotlighted(CallToolResult result)
@@ -3748,6 +5489,18 @@ public sealed class McpServerIntegrationTests
 		Assert.True(
 			warningIndex > closingIndex,
 			$"Trusted warning {warningCode} must be outside the spotlight block.");
+	}
+
+	private static void AssertTrustedTrailerOutsideSpotlight(CallToolResult result, string trailer)
+	{
+		var text = AllText(result);
+		var trailerIndex = text.IndexOf(trailer, StringComparison.Ordinal);
+		var closingIndex = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+		Assert.True(trailerIndex >= 0, $"Expected trusted trailer '{trailer}' in MCP result.");
+		Assert.True(closingIndex >= 0, "Expected spotlight delimiters before the trusted trailer.");
+		Assert.True(
+			trailerIndex > closingIndex,
+			$"Trusted trailer '{trailer}' must be outside every spotlight block.");
 	}
 
 	private static void AssertBalancedSpotlights(string text)
@@ -3795,6 +5548,18 @@ public sealed class McpServerIntegrationTests
 		{
 			RunGit(repository, "init", "--quiet");
 			RunGit(repository, ["add", "-f", "--", .. trackedPaths]);
+		}
+		catch (System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip("Git is not available in this test environment.");
+		}
+	}
+
+	private static void InitializeEmptyRepository(string repository)
+	{
+		try
+		{
+			RunGit(repository, "init", "--quiet");
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
@@ -4102,7 +5867,9 @@ public sealed class McpServerIntegrationTests
 			Action? servicesCreated = null,
 			bool allowRemote = false,
 			Func<McpRemoteProjectServices>? remoteServicesFactory = null,
-			GitFilteringMode? gitMode = null)
+			GitFilteringMode? gitMode = null,
+			IReadOnlyCollection<ProjectExclusion>? exclusions = null,
+			bool agentExclusions = false)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -4123,7 +5890,9 @@ public sealed class McpServerIntegrationTests
 				},
 				allowRemote,
 				remoteServicesFactory,
-				gitMode);
+				gitMode,
+				exclusions,
+				agentExclusions);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(
