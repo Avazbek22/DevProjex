@@ -196,6 +196,14 @@ when Git, cloning, cache publication, or branch checkout fails.
 `DPX-MCP-REMOTE-LIMIT` reports that the 16-source session cap was reached. Error
 text uses the credential-free display form of the URL.
 
+### Redaction placeholders
+
+Secrets are replaced before text is returned with placeholders shaped as
+`DEVPROJEX_REDACTED[<category>#<n>]`; `search_project` searches that already
+redacted text. Known example values, including documentation domains, 555
+numbers, keys containing `EXAMPLE`, and reserved IP ranges, are intentionally
+allowlisted to keep documentation and fixtures readable.
+
 ## Tools
 
 The tool order is stable. Every tool is annotated read-only and non-destructive
@@ -212,7 +220,7 @@ open-world.
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
-| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
+| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. Paths copied from any `get_tree` format are accepted. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, and `get_file` additionally accept the
@@ -241,13 +249,15 @@ flags; consumers that pinned the earlier output schemas must refresh them.
 Filters are never silent. `get_tree` and `pack_context` end with a trusted
 `[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
 exclusion toggles that shaped the tree and who can widen them: the server
-startup line, or a per-call `exclusions` value on a delegation server. Every
-selection tool adds an `[Empty selection]` line when no file survived the
+startup line, or a per-call `exclusions` value on a delegation server. When
+`max_file_bytes` is supplied, every tool that accepts it also reports
+`; max_file_bytes: <bytes>` in its effective-filter diagnostics. Every selection
+tool adds an `[Empty selection]` line when no file survived the
 filters and the request arguments, `search_project` adds a `[No matches]` line
 with the searched-file count when the pattern matched nothing, and a
 `DPX-MCP-PATH-NOT-FOUND` error for a filtered file names the effective filters
 and the party able to widen them — the startup line, or a per-call `exclusions`
-value on a delegation server. None of these lines carries a path.
+value on a delegation server. These diagnostics never reveal hidden paths.
 When selection produces warnings, `analyze` appends separate human-readable
 trusted warning text blocks without changing its structured schema. Warning
 messages contain stable codes and safe counts or retry guidance, never diagnostic
@@ -265,8 +275,9 @@ reports only a count, never file paths or uninspected content.
 text tools. They do not declare `outputSchema`, omit `structuredContent`, and
 return the useful payload directly in the first text block in `content`. This
 avoids JSON escaping and unnecessary token overhead for trees, source text,
-search context, and packs. Truncation and continuation metadata is embedded in
-plain-text trailers such as `[Tree truncated ...]` and `[Showing lines ...]`.
+search context, and packs. Truncation and continuation metadata is appended as
+trusted plain-text trailers outside every project spotlight block, such as
+`[Tree truncated ...]` and `[Showing lines ...]`.
 For `get_tree`, only `text` and `markdown` use the truncation trailer. If a JSON
 or XML tree would exceed 2,000 lines, the tool returns
 `DPX-MCP-PAYLOAD-TRUNCATED` with narrowing guidance instead of a partial document.
@@ -275,7 +286,9 @@ top-level children; it does not repeat the project name as a synthetic tree node
 Markdown tree Root values and node names escape active CommonMark, HTML, and
 entity syntax so project-controlled labels remain literal data.
 Markdown context project headings and content-only Root lines use the same
-literal escaping.
+literal escaping. `get_file.path` and `paths` in `analyze` and `pack_context`
+accept these escaped spellings when the literal path does not exist; callers can
+also request `get_tree` with `format: "text"` to copy unescaped names.
 Selection warnings are appended outside project spotlight blocks so clients can
 distinguish trusted diagnostics from untrusted file data. MCP pack documents omit
 their embedded warning diagnostics to avoid duplicating untrusted path-bearing
@@ -292,9 +305,10 @@ beyond those limits. The exception is the stored `pack_context` response: its
 preview, and trusted diagnostics.
 
 An inline `pack_context` result contains the complete pack. A stored result is
-self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call
-read_pack ...`, followed by a preview of the project tree. Clients extract the
-session-scoped `pack_id` from that text and pass it to `read_pack`. The stored
+self-contained and starts with this line:
+`Pack stored as '<id>' (<N> characters, <M> lines). Call read_pack ...`
+The project tree preview follows it. Clients extract the session-scoped `pack_id`
+from that text and pass it to `read_pack`. The stored
 response, including its tree preview and trusted diagnostics, is bounded to
 50,000 characters; preview truncation never changes the stored pack, which
 remains available in full through `read_pack`.
@@ -387,7 +401,9 @@ describe the selected source files before `detail` or redaction.
 `pack_context`, and `search_project`. It removes files strictly larger than the
 limit after profile, ignore, Git, `paths`, and glob narrowing; a file exactly at
 the limit remains selected. It is request-only, is not stored in profiles, and
-does not apply to `get_file`, which addresses one already-effective file.
+does not apply to `get_file`, which addresses one already-effective file. Its
+value is echoed in the effective-filter diagnostics of every tool that accepts
+the parameter.
 
 For the five project tools, `project` may be a Git URL only when the server was
 started with `--allow-remote`. The optional `branch` is valid only with a URL.
@@ -411,10 +427,13 @@ content always comes from the current working tree.
 Deleted paths are omitted with a `DPX-GIT-STATE-DELETED` warning. A non-Git
 project or unavailable/invalid Git state returns an actionable tool error.
 
-Profiles use the existing project profile mechanism: `standard`, `local`, or a
-portable profile JSON path inside the project root. Profile selection can enable
-compression or stripping, but cannot disable secret redaction or alter the
-server-level private-data policy.
+Profiles use the existing project profile mechanism. `standard` is the desktop
+set of all eight exclusion toggles with `gitignore`, so it is stricter than the
+server default. `local` loads the profile saved by the desktop application for
+this project; available local profiles appear in `list_projects.profiles`. A
+portable profile is a JSON path inside the project root. Profile selection can
+enable compression or stripping, but cannot disable secret redaction or alter
+the server-level private-data policy.
 
 ## Detail Levels
 
