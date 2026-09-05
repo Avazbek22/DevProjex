@@ -1,0 +1,297 @@
+name: Publish Headless Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: DevProjex display version (for example 5.2 or 5.2.0)
+        required: true
+        default: '5.2'
+        type: string
+      channels:
+        description: Channels to publish after every gate passes
+        required: true
+        default: both
+        type: choice
+        options:
+          - nuget
+          - npm
+          - both
+      dry_run:
+        description: Build and gate without publishing
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build headless packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      package_version: ${{ steps.version.outputs.package_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Resolve package version
+        id: version
+        shell: pwsh
+        run: |
+          $version = '${{ inputs.version }}'
+          if ($version -match '^(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            $version = "$version.0"
+          }
+          if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)([-+].+)?$') {
+            throw "Version '${{ inputs.version }}' is not a supported semantic version."
+          }
+          "package_version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Test npm launcher contract
+        run: node --test Packaging/Npm/test/*.test.js
+
+      - name: Build packages through the release entry point
+        shell: pwsh
+        run: ./Scripts/build-headless-packages.ps1 -Version '${{ inputs.version }}' -DryRun
+
+      - name: Upload headless packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: headless-packages
+          path: |
+            artifacts/headless/nuget/*.nupkg
+            artifacts/headless/npm/*.tgz
+            artifacts/headless/package-sizes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  gate-static:
+    name: Static completeness gate
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: headless-packages
+          path: artifacts/headless
+
+      - name: Validate every package payload
+        shell: pwsh
+        run: >
+          ./Scripts/Test-HeadlessPackages.ps1
+          -ArtifactsRoot artifacts/headless
+          -Version '${{ needs.build.outputs.package_version }}'
+
+      - name: Prove the gate fails after one grammar is removed
+        shell: pwsh
+        run: >
+          ./Scripts/Test-HeadlessPackageGateMutation.ps1
+          -ArtifactsRoot artifacts/headless
+          -Version '${{ needs.build.outputs.package_version }}'
+
+  smoke:
+    name: Artifact smoke (${{ matrix.os }})
+    needs:
+      - build
+      - gate-static
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: headless-packages
+          path: artifacts/headless
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Verdaccio
+        run: npm install --global verdaccio@6
+
+      - name: Smoke the installed NuGet tool
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.build.outputs.package_version }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          dotnet tool install --global devprojex `
+            --version $env:VERSION `
+            --add-source (Resolve-Path artifacts/headless/nuget) `
+            --ignore-failed-sources
+          if ($LASTEXITCODE -ne 0) { throw "dotnet tool install failed." }
+          $toolRoot = if ($IsWindows) { Join-Path $env:USERPROFILE '.dotnet/tools' } else { Join-Path $HOME '.dotnet/tools' }
+          $binary = Join-Path $toolRoot $(if ($IsWindows) { 'devprojex.cmd' } else { 'devprojex' })
+          $actualVersion = (& $binary --version).Trim()
+          if ($actualVersion -ne '${{ inputs.version }}') {
+            throw "NuGet tool version mismatch: expected '${{ inputs.version }}', got '$actualVersion'."
+          }
+
+          $sample = Join-Path $env:RUNNER_TEMP 'devprojex-headless-sample'
+          New-Item -ItemType Directory -Path $sample -Force | Out-Null
+          @'
+          namespace Sample;
+          public static class Program {
+              public static int Compute(int value) {
+                  var implementationMustDisappear = value * 2;
+                  return implementationMustDisappear;
+              }
+          }
+          '@ | Set-Content -LiteralPath (Join-Path $sample 'Program.cs') -Encoding utf8NoBOM
+          ('token=' + 'ghp_123456789012345678901234567890123456') |
+            Set-Content -LiteralPath (Join-Path $sample 'settings.txt') -Encoding utf8NoBOM
+
+          $tree = & $binary tree $sample --git-mode none --exclude none
+          $treeText = $tree -join [Environment]::NewLine
+          if ($LASTEXITCODE -ne 0 -or -not $treeText.Contains('Program.cs', [System.StringComparison]::Ordinal)) {
+            throw 'NuGet tree smoke failed.'
+          }
+          $full = & $binary analyze $sample --format json --git-mode none --exclude none -o - | ConvertFrom-Json
+          $compressed = & $binary analyze $sample --format json --git-mode none --exclude none --compress-code -o - | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $compressed.metrics.content.chars -ge $full.metrics.content.chars) {
+            throw 'NuGet compression smoke did not change the artifact output.'
+          }
+          $findings = & $binary analyze $sample --format json --git-mode none --exclude none --findings --fail-on-findings -o -
+          $findingsText = $findings -join [Environment]::NewLine
+          if ($LASTEXITCODE -ne 3 -or -not $findingsText.Contains('findingCount', [System.StringComparison]::Ordinal)) {
+            throw 'NuGet secret gate smoke failed.'
+          }
+          $mcpBinary = $binary
+          if ($IsWindows) {
+            $installedPayloads = @(Get-ChildItem (Join-Path $toolRoot '.store') -Filter 'devprojex.exe' -File -Recurse)
+            if ($installedPayloads.Count -ne 1) { throw "Expected one installed Windows payload, found $($installedPayloads.Count)." }
+            $mcpBinary = $installedPayloads[0].FullName
+          }
+          node Scripts/smoke-headless-mcp.mjs $mcpBinary $sample
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet MCP initialize smoke failed.' }
+
+      - name: Smoke npx through a local registry
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.build.outputs.package_version }}
+        run: >
+          ./Scripts/Smoke-HeadlessNpmPackages.ps1
+          -ArtifactsRoot artifacts/headless
+          -Version $env:VERSION
+          -ExpectedDisplayVersion '${{ inputs.version }}'
+
+  publish-nuget:
+    name: Publish NuGet packages
+    needs:
+      - build
+      - gate-static
+      - smoke
+    if: ${{ inputs.dry_run == false && (inputs.channels == 'nuget' || inputs.channels == 'both') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: nuget
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: headless-packages
+          path: artifacts/headless
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Exchange OIDC token for a temporary NuGet key
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish RID packages, then pointer
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+          VERSION: ${{ needs.build.outputs.package_version }}
+        run: |
+          Get-ChildItem artifacts/headless/nuget/devprojex.*-*.$env:VERSION.nupkg | Sort-Object Name | ForEach-Object {
+            dotnet nuget push $_.FullName --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
+            if ($LASTEXITCODE -ne 0) { throw "NuGet push failed for $($_.Name)." }
+          }
+          dotnet nuget push "artifacts/headless/nuget/devprojex.$env:VERSION.nupkg" `
+            --api-key $env:NUGET_API_KEY `
+            --source https://api.nuget.org/v3/index.json
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet pointer push failed.' }
+
+  publish-npm:
+    name: Publish npm packages
+    needs:
+      - build
+      - gate-static
+      - smoke
+    if: ${{ inputs.dry_run == false && (inputs.channels == 'npm' || inputs.channels == 'both') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: headless-packages
+          path: artifacts/headless
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install trusted-publishing npm CLI
+        run: npm install --global npm@latest
+
+      - name: Publish platform packages, then launcher
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.build.outputs.package_version }}
+        run: |
+          $npmVersion = [version]((npm --version).Trim())
+          if ($npmVersion -lt [version]'11.5.1') { throw "npm $npmVersion does not support trusted publishing." }
+          Get-ChildItem artifacts/headless/npm/devprojex-cli-*.tgz | Sort-Object Name | ForEach-Object {
+            npm publish $_.FullName --access public
+            if ($LASTEXITCODE -ne 0) { throw "npm publish failed for $($_.Name)." }
+          }
+          npm publish "artifacts/headless/npm/devprojex-$env:VERSION.tgz" --access public
+          if ($LASTEXITCODE -ne 0) { throw 'npm launcher publish failed.' }
