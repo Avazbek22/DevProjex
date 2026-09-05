@@ -343,12 +343,13 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    "projects": {
 	      "type": "array",
+	      "description": "Local roots available to project tools.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
-	          "path": { "type": "string" },
-	          "name": { "type": "string" },
-	          "type": { "type": "string", "enum": ["git-repository", "local-folder"] }
+	          "path": { "type": "string", "description": "Absolute value accepted by the project parameter." },
+	          "name": { "type": "string", "description": "Display name derived from the root." },
+	          "type": { "type": "string", "enum": ["git-repository", "local-folder"], "description": "Detected local root kind." }
 	        },
 	        "required": ["path", "name", "type"],
 	        "additionalProperties": false
@@ -356,11 +357,12 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    },
 	    "profiles": {
 	      "type": "array",
+	      "description": "Saved local profiles available for listed roots.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
-	          "project": { "type": "string" },
-	          "name": { "type": "string" }
+	          "project": { "type": "string", "description": "Root path that owns the profile." },
+	          "name": { "type": "string", "description": "Profile token accepted by selection tools." }
 	        },
 	        "required": ["project", "name"],
 	        "additionalProperties": false
@@ -370,9 +372,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "type": "object",
 	      "description": "The selection baseline every call starts from unless it names a profile: the Git filtering mode, the active exclusion toggles, and whether calls may pass their own exclusions.",
 	      "properties": {
-	        "git": { "type": "string", "enum": ["none", "gitignore", "tracked"] },
-	        "exclusions": { "type": "array", "items": { "type": "string" } },
-	        "agentExclusions": { "type": "boolean" }
+	        "git": { "type": "string", "enum": ["none", "gitignore", "tracked"], "description": "Server Git filtering mode." },
+	        "exclusions": { "type": "array", "items": { "type": "string" }, "description": "Server exclusion tokens in catalog order." },
+	        "agentExclusions": { "type": "boolean", "description": "Whether calls may replace the server exclusion set." }
 	      },
 	      "required": ["git", "exclusions", "agentExclusions"],
 	      "additionalProperties": false
@@ -387,18 +389,20 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    "files": { "type": "integer" },
-	    "characters": { "type": "integer" },
-	    "tokens": { "type": "integer" },
-	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"] },
+	    "files": { "type": "integer", "description": "Number of files in the effective selection." },
+	    "characters": { "type": "integer", "description": "Rendered characters, including estimates for uninspected text files." },
+	    "tokens": { "type": "integer", "description": "Estimated tokens for the same character total." },
+	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective content-detail level used for measurement." },
 	    "exclusions": { "type": "array", "items": { "type": "string" }, "description": "Effective exclusion tokens for this call, in catalog order; the same tokens the mcp --exclude flag and the optional exclusions parameter use." },
 	    "topFiles": {
 	      "type": "array",
+	      "description": "Largest selected text files ordered by estimated tokens, then path.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
-	          "path": { "type": "string" },
-	          "tokens": { "type": "integer" }
+	          "path": { "type": "string", "description": "Project-relative file path." },
+	          "tokens": { "type": "integer", "description": "Estimated tokens for this file." },
+	          "uninspected": { "type": "boolean", "description": "True when bounded secret inspection could not read this file and its metrics are estimated." }
 	        },
 	        "required": ["path", "tokens"],
 	        "additionalProperties": false

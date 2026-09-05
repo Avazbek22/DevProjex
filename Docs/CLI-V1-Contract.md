@@ -1209,6 +1209,23 @@ The existing `text`, `json`, and `xml` tree serializers are available explicitly
 structured output that cannot fit the 2,000-line response limit fails with an
 actionable tool error rather than returning invalid syntax.
 
+MCP agent ergonomics changes four v5.2 behaviors without adding inputs or error
+codes. First, `get_file` and `read_pack` clamp an `end_line` past EOF and append
+a trusted range notice; `start_line` past EOF and reversed ranges keep
+`DPX-MCP-INVALID-RANGE`. A caller that requires a prevalidated end must first
+learn the line count and send `end_line <= N`; there is no strict-range switch.
+Second, when `max_depth` is omitted and a complete human-readable tree exceeds
+2,000 lines, `get_tree` returns the deepest complete depth that fits. Passing an
+explicit `max_depth` restores caller-selected depth and the prior line-truncation
+behavior; JSON/XML still fail rather than return partial syntax and now suggest
+a fitting depth. Third, uninspected entries in MCP `analyze.topFiles` gain the
+optional `uninspected: true` field, and their estimates use the same character
+base as aggregate `characters` and `tokens`. Fourth, `initialize.instructions`
+now carries workflow, trust-boundary, redaction, limit, and glob guidance, while
+all seven tool descriptions are self-contained for tool search. Cached MCP
+schemas must be refreshed for the additive `topFiles` field and new field
+descriptions.
+
 Before the v5.1 output freeze, human-readable content and text-tree presentation
 was aligned across Desktop, Terminal Workspace, CLI, and MCP. Content-only text
 and Markdown now declare the root once and use relative file headings; text trees

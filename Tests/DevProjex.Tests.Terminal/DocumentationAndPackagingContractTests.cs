@@ -52,6 +52,29 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void McpAgentErgonomicsAreSpecifiedInServerAndVersionContracts()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var version = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedVersion = Regex.Replace(version, @"\s+", " ");
+
+		Assert.Contains("end_line B exceeded the file", server, StringComparison.Ordinal);
+		Assert.Contains("start_line=B+1", server, StringComparison.Ordinal);
+		Assert.Contains("Tree limited to depth D of N", server, StringComparison.Ordinal);
+		Assert.Contains("An explicit `max_depth` is the caller's choice", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("JSON and XML never return partial syntax", server, StringComparison.Ordinal);
+		Assert.Contains("analyze.topFiles[].uninspected", server, StringComparison.Ordinal);
+		Assert.Contains("initialize` result", server, StringComparison.Ordinal);
+
+		Assert.Contains("MCP agent ergonomics changes four v5.2 behaviors", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("there is no strict-range switch", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("Passing an explicit `max_depth` restores", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("Cached MCP", normalizedVersion, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void McpReadmeNetworkBoundaryMatchesRemoteOptIn()
 	{
 		var rootPath = FindRepositoryRoot();
