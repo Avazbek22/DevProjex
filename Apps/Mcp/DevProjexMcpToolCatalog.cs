@@ -387,18 +387,19 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    "files": { "type": "integer" },
-	    "characters": { "type": "integer" },
-	    "tokens": { "type": "integer" },
-	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"] },
+	    "files": { "type": "integer", "description": "Number of files in the effective selection." },
+	    "characters": { "type": "integer", "description": "Rendered characters, including estimates for uninspected text files." },
+	    "tokens": { "type": "integer", "description": "Estimated tokens for the same character total." },
+	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective content-detail level used for measurement." },
 	    "exclusions": { "type": "array", "items": { "type": "string" }, "description": "Effective exclusion tokens for this call, in catalog order; the same tokens the mcp --exclude flag and the optional exclusions parameter use." },
 	    "topFiles": {
 	      "type": "array",
 	      "items": {
 	        "type": "object",
 	        "properties": {
-	          "path": { "type": "string" },
-	          "tokens": { "type": "integer" }
+	          "path": { "type": "string", "description": "Project-relative file path." },
+	          "tokens": { "type": "integer", "description": "Estimated tokens for this file." },
+	          "uninspected": { "type": "boolean", "description": "True when bounded secret inspection could not read this file and its metrics are estimated." }
 	        },
 	        "required": ["path", "tokens"],
 	        "additionalProperties": false

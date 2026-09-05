@@ -2805,6 +2805,46 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task AnalyzeMarksUninspectedTopFilesAndUsesOneTokenBasis()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Small.txt"), "measured text\n");
+		File.WriteAllText(
+			Path.Combine(project, "Oversized.txt"),
+			new string('x', checked(16 * 1024 * 1024 + 1)));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		var result = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["top_files"] = 2 });
+		Assert.NotEqual(true, result.IsError);
+		var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+		AssertMatchesSchema(
+			structured,
+			Assert.IsType<JsonElement>(tools.Single(static tool => tool.Name == "analyze").ProtocolTool.OutputSchema));
+		Assert.True(JsonElement.DeepEquals(
+			structured,
+			server.GetLastToolCallWireResult().GetProperty("structuredContent")));
+		var totalTokens = structured.GetProperty("tokens").GetInt64();
+		var topFiles = structured.GetProperty("topFiles").EnumerateArray().ToArray();
+		var oversized = Assert.Single(
+			topFiles,
+			static file => file.GetProperty("path").GetString() == "Oversized.txt");
+		var measured = Assert.Single(
+			topFiles,
+			static file => file.GetProperty("path").GetString() == "Small.txt");
+
+		Assert.True(oversized.GetProperty("uninspected").GetBoolean());
+		Assert.False(measured.TryGetProperty("uninspected", out _));
+		Assert.All(topFiles, file => Assert.True(file.GetProperty("tokens").GetInt64() <= totalTokens));
+		Assert.Contains(McpErrorCodes.PayloadTruncated, AllText(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SearchProjectRejectsPatternsLongerThanTheSchemaLimitAtRuntime()
 	{
 		using var workspace = new TemporaryDirectory();

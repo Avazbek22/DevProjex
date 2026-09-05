@@ -196,24 +196,46 @@ internal sealed class DevProjexMcpTools(
 			var analyzer = Projects.CreatePreparedAnalyzer(prepared);
 			operationProgress.Milestone(61, $"analyzing content 0/{plan.IncludedFiles.Count}");
 			var largest = new TopFileRanking(topFileCount);
+			var uninspectedPaths = prepared.UnscannablePaths.ToHashSet(
+				ProjectTreePathIdentity.CanonicalComparer);
+			long estimatedContentCharacters = 0;
 			var metrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(
 					analyzer,
 					plan.IncludedFiles,
-					fileMetrics => largest.Add(
-						fileMetrics.Path,
-						CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount)),
+					fileMetrics =>
+					{
+						largest.Add(
+							fileMetrics.Path,
+							CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount));
+						if (fileMetrics.IsEstimated)
+						{
+							estimatedContentCharacters =
+								estimatedContentCharacters > long.MaxValue - fileMetrics.CharCount
+									? long.MaxValue
+									: estimatedContentCharacters + fileMetrics.CharCount;
+						}
+					},
 					operationProgress.Measure("analyzing content", 62, 98),
 					cancellationToken)
 				.ConfigureAwait(false);
 			operationProgress.Milestone(
 				99,
 				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var top = largest.Project(item => new
+			var top = largest.Project(item =>
 			{
-				path = McpProjectService.ToRelative(plan.SourceRoot, item.Path),
-				tokens = item.Tokens
+				var topFile = new Dictionary<string, object>(3, StringComparer.Ordinal)
+				{
+					["path"] = McpProjectService.ToRelative(plan.SourceRoot, item.Path),
+					["tokens"] = item.Tokens
+				};
+				if (uninspectedPaths.Contains(item.Path))
+					topFile["uninspected"] = true;
+				return topFile;
 			});
+			var totalCharacters = metrics.Chars > long.MaxValue - estimatedContentCharacters
+				? long.MaxValue
+				: metrics.Chars + estimatedContentCharacters;
 			// Echo the effective exclusion state so both the agent and a human reading the
 			// transcript always see which toggles shaped this measurement.
 			var activeExclusions = ProjectSelectionTokens
@@ -223,8 +245,8 @@ internal sealed class DevProjexMcpTools(
 			var envelope = new
 			{
 				files = plan.IncludedFiles.Count,
-				characters = metrics.Chars,
-				tokens = metrics.Tokens,
+				characters = totalCharacters,
+				tokens = CodeCompressionSnapshot.EstimateTokens(totalCharacters),
 				detail = effectiveDetail.Token,
 				exclusions = activeExclusions,
 				topFiles = top
