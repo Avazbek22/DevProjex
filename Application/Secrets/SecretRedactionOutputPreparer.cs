@@ -1798,9 +1798,24 @@ public sealed record PreparedSecretFile(
 	/// The file could not be decoded or fully read under the scanner's bounded contract, so no
 	/// redaction was ever planned for it. Its source content must not be served by prepared outputs.
 	/// </summary>
-	public bool IsUnscannable => Classification is FileContentClassification.TooLarge or
-		FileContentClassification.Unreadable or
-		FileContentClassification.UnsupportedEncoding;
+	public bool IsUnscannable => IsUnscannableClassification(Classification);
+
+	internal static bool IsUnscannableClassification(FileContentClassification classification) =>
+		classification switch
+		{
+			FileContentClassification.Text => false,
+			FileContentClassification.Binary => false,
+			FileContentClassification.TooLarge => true,
+			FileContentClassification.Unreadable => true,
+			FileContentClassification.AccessDenied => true,
+			FileContentClassification.Missing => false,
+			FileContentClassification.UnsupportedEncoding => true,
+			_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
+		};
+
+	internal static bool IsRedactionOutputSafeClassification(FileContentClassification classification) =>
+		classification is FileContentClassification.Text or FileContentClassification.Binary ||
+		IsUnscannableClassification(classification);
 
 	public int RedactedCount => Redactions.Count;
 	public IReadOnlyList<EffectiveRedactionFinding> Findings => EffectiveFindings ?? [];

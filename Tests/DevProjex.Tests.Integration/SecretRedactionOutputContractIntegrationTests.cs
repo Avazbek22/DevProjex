@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Globalization;
+using System.Runtime.Versioning;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diagnostics;
@@ -1182,6 +1183,197 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			"DEVPROJEX_REDACTED[",
 			ReadZipText(archive, Path.GetFileName(normalPath)),
 			StringComparison.Ordinal);
+	}
+
+	public static IEnumerable<object[]> FileContentClassifications() =>
+		Enum.GetValues<FileContentClassification>().Select(static classification => new object[] { classification });
+
+	[Theory]
+	[MemberData(nameof(FileContentClassifications))]
+	public async Task EveryContentClassificationIsHandledExplicitlyAcrossRedactedOutputConsumers(
+		FileContentClassification classification)
+	{
+		const string sourceMarker = "classification-content-must-not-leak-when-unscannable";
+		const string sourceContent = sourceMarker + "\n";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("classification-project");
+		var sourcePath = PathUtility.Normalize(
+			temporary.CreateFile("classification-project/probe.txt", sourceContent));
+		var exportRoot = temporary.CreateDirectory("classification-exports");
+		var analyzer = new ClassifiedPathContentAnalyzer(
+			new FileContentAnalyzer(),
+			sourcePath,
+			classification);
+		using var session = new SecretRedactionSession(new NoFindingsDetector());
+		var redaction = new SecretRedactionContext(sourceRoot, session);
+		var transformation = new ContentTransformationContext(null, redaction);
+		var preparer = new SecretRedactionOutputPreparer(analyzer);
+
+		var expectedUnscannable = classification switch
+		{
+			FileContentClassification.Text => false,
+			FileContentClassification.Binary => false,
+			FileContentClassification.TooLarge => true,
+			FileContentClassification.Unreadable => true,
+			FileContentClassification.AccessDenied => true,
+			FileContentClassification.Missing => false,
+			FileContentClassification.UnsupportedEncoding => true,
+			_ => throw new InvalidOperationException($"Unhandled test classification: {classification}.")
+		};
+
+		if (classification == FileContentClassification.Missing)
+		{
+			await Assert.ThrowsAsync<SecretDetectionException>(async () =>
+			{
+				await using var ignored = await preparer.PrepareAsync(
+					transformation,
+					[sourcePath],
+					TestContext.Current.CancellationToken);
+			});
+			await Assert.ThrowsAsync<SecretDetectionException>(async () =>
+			{
+				using var ignored = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+					[sourcePath],
+					TestContext.Current.CancellationToken,
+					displayPathMapper: null,
+					includeOmissionMarkers: true,
+					transformationContext: redaction,
+					projectRoot: sourceRoot);
+			});
+			await Assert.ThrowsAsync<SecretDetectionException>(() =>
+				new SelectedContentExportService(analyzer).BuildAsync(
+					[sourcePath],
+					TestContext.Current.CancellationToken,
+					displayPathMapper: null,
+					transformationContext: redaction));
+			var copyException = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				ExportClassifiedProjectAsync(
+					sourceRoot,
+					sourcePath,
+					analyzer,
+					Path.Combine(exportRoot, "missing")));
+			Assert.Equal(ProjectCopyExportError.SecretDetectionFailed, copyException.Error);
+			return;
+		}
+
+		await using (var prepared = await preparer.PrepareAsync(
+			             transformation,
+			             [sourcePath],
+			             TestContext.Current.CancellationToken))
+		{
+			Assert.Equal(expectedUnscannable, prepared.GetFile(sourcePath).IsUnscannable);
+			Assert.Equal(
+				expectedUnscannable,
+				prepared.UnscannableFiles.Any(file => file.Classification == classification));
+		}
+
+		using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+			[sourcePath],
+			TestContext.Current.CancellationToken,
+			displayPathMapper: null,
+			includeOmissionMarkers: true,
+			transformationContext: redaction,
+			projectRoot: sourceRoot);
+		var previewText = preview!.GetLineRangeText(1, preview.LineCount);
+		var selectedText = await new SelectedContentExportService(analyzer).BuildAsync(
+			[sourcePath],
+			TestContext.Current.CancellationToken,
+			displayPathMapper: null,
+			transformationContext: redaction);
+		var readsBeforeCopy = analyzer.ReadFactCount;
+		var forcedReadsBeforeCopy = analyzer.ForcedReadFactCount;
+		var copy = await ExportClassifiedProjectAsync(
+			sourceRoot,
+			sourcePath,
+			analyzer,
+			Path.Combine(exportRoot, classification.ToString()));
+		Assert.True(
+			analyzer.ReadFactCount > readsBeforeCopy,
+			$"Copy preparation did not read the classified file; last read: {analyzer.LastReadFactPath ?? "<none>"}.");
+		if (classification != FileContentClassification.Text)
+		{
+			Assert.True(
+				analyzer.ForcedReadFactCount > forcedReadsBeforeCopy,
+				$"Copy preparation read '{analyzer.LastReadFactPath ?? "<none>"}' instead of '{sourcePath}'.");
+		}
+
+		if (classification == FileContentClassification.AccessDenied)
+		{
+			Assert.Contains("[Access denied while reading file]", previewText, StringComparison.Ordinal);
+			Assert.DoesNotContain(sourceMarker, previewText, StringComparison.Ordinal);
+			Assert.DoesNotContain(sourceMarker, selectedText, StringComparison.Ordinal);
+			Assert.Equal(
+				FileContentClassification.AccessDenied,
+				Assert.Single(copy.UnscannableFiles!).Classification);
+			Assert.False(File.Exists(Path.Combine(copy.DestinationPath, Path.GetFileName(sourcePath))));
+			var notice = await File.ReadAllTextAsync(
+				Path.Combine(copy.DestinationPath, ProjectCopyExportService.TransformationNoticeFileName),
+				TestContext.Current.CancellationToken);
+			Assert.Contains("probe.txt - access denied", notice, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	[UnsupportedOSPlatform("windows")]
+	public async Task ReadProtectedFileDegradesPerFileAcrossRedactedOutputConsumers()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Unix file modes provide the deterministic read-denial fixture for this test.");
+
+		const string sourceMarker = "protected-content-must-not-leak";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("protected-project");
+		var sourcePath = PathUtility.Normalize(
+			temporary.CreateFile("protected-project/probe.txt", sourceMarker + "\n"));
+		var exportRoot = temporary.CreateDirectory("protected-exports");
+		var originalMode = File.GetUnixFileMode(sourcePath);
+
+		try
+		{
+			File.SetUnixFileMode(sourcePath, UnixFileMode.None);
+			try
+			{
+				using var ignored = File.OpenRead(sourcePath);
+				Assert.Skip("The current account can still read a mode-000 file.");
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
+
+			var analyzer = new FileContentAnalyzer();
+			using var session = new SecretRedactionSession(new NoFindingsDetector());
+			var redaction = new SecretRedactionContext(sourceRoot, session);
+			using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+				[sourcePath],
+				TestContext.Current.CancellationToken,
+				displayPathMapper: null,
+				includeOmissionMarkers: true,
+				transformationContext: redaction,
+				projectRoot: sourceRoot);
+			var previewText = preview!.GetLineRangeText(1, preview.LineCount);
+			var selectedText = await new SelectedContentExportService(analyzer).BuildAsync(
+				[sourcePath],
+				TestContext.Current.CancellationToken,
+				displayPathMapper: null,
+				transformationContext: redaction);
+			var copy = await ExportClassifiedProjectAsync(
+				sourceRoot,
+				sourcePath,
+				analyzer,
+				Path.Combine(exportRoot, "copy"));
+
+			Assert.Contains("[Access denied while reading file]", previewText, StringComparison.Ordinal);
+			Assert.DoesNotContain(sourceMarker, previewText, StringComparison.Ordinal);
+			Assert.DoesNotContain(sourceMarker, selectedText, StringComparison.Ordinal);
+			Assert.Equal(
+				FileContentClassification.AccessDenied,
+				Assert.Single(copy.UnscannableFiles!).Classification);
+			Assert.False(File.Exists(Path.Combine(copy.DestinationPath, Path.GetFileName(sourcePath))));
+		}
+		finally
+		{
+			File.SetUnixFileMode(sourcePath, originalMode);
+		}
 	}
 
 	[Fact]
@@ -2416,6 +2608,44 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				cancellationToken: TestContext.Current.CancellationToken);
 	}
 
+	private static async Task<ProjectCopyExportResult> ExportClassifiedProjectAsync(
+		string sourceRoot,
+		string sourcePath,
+		IFileContentAnalyzer analyzer,
+		string destination)
+	{
+		using var session = new SecretRedactionSession(new NoFindingsDetector());
+		var tree = new TreeNodeDescriptor(
+			Path.GetFileName(sourceRoot),
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor(Path.GetFileName(sourcePath), sourcePath, false, false, "file", [])]);
+		return await new ProjectCopyExportService(
+				new ProjectCopyExportPlanBuilder(),
+				analyzer,
+				session)
+			.ExportAsync(
+				new ProjectCopyExportRequest(
+					sourceRoot,
+					"project",
+					tree,
+					new HashSet<string>(PathComparer.Default),
+					destination,
+					ProjectCopyExportFormat.Folder,
+					ProjectCopyDestinationMode.Exact,
+					RedactSecrets: true,
+					NoticeText: new ProjectCopyNoticeText(
+						"redaction applied",
+						"compression applied",
+						"files excluded",
+						"too large",
+						"unsupported encoding",
+						"access denied")),
+				cancellationToken: TestContext.Current.CancellationToken);
+	}
+
 	private static void AssertNoOutputLegends(IEnumerable<string> outputs)
 	{
 		Assert.All(outputs, output =>
@@ -2778,6 +3008,78 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		{
 			Interlocked.Increment(ref _contentReadCount);
 			return inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+		}
+	}
+
+	private sealed class ClassifiedPathContentAnalyzer(
+		IFileContentAnalyzer inner,
+		string classifiedPath,
+		FileContentClassification classification) : IFileContentAnalyzer
+	{
+		private int _forcedReadFactCount;
+		private int _readFactCount;
+		private string? _lastReadFactPath;
+
+		public int ForcedReadFactCount => Volatile.Read(ref _forcedReadFactCount);
+		public int ReadFactCount => Volatile.Read(ref _readFactCount);
+		public string? LastReadFactPath => Volatile.Read(ref _lastReadFactPath);
+
+		private bool IsClassifiedPath(string path) => PathComparer.Default.Equals(path, classifiedPath);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? classification
+				: inner.ClassifyWithoutReading(path);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult(classification == FileContentClassification.TooLarge)
+				: inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult<TextFileMetrics?>(null)
+				: inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult<TextFileContent?>(null)
+				: inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult<TextFileContent?>(null)
+				: inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult(new FileContentReadResult(classification))
+				: inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _readFactCount);
+			Volatile.Write(ref _lastReadFactPath, path);
+			if (!IsClassifiedPath(path) || classification == FileContentClassification.Text)
+				return inner.ReadFactAsync(path, maxSizeForFullRead, cancellationToken);
+
+			Interlocked.Increment(ref _forcedReadFactCount);
+			return ValueTask.FromResult(new ContentReadFact(null, classification, null, null));
 		}
 	}
 
