@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=DevProjex
+GenericName=Project Context Builder
+Comment=Build clean AI context from folders and repositories
+Exec=devprojex open %f
+Icon=io.github.Avazbek22.DevProjex
+Terminal=false
+Categories=Development;
+Keywords=project;tree;directory;structure;viewer;export;
+StartupNotify=true
+StartupWMClass=DevProjex.Avalonia
+MimeType=inode/directory;
