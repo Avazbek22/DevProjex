@@ -1125,7 +1125,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					directoryGitIgnoreCandidateContext,
 					cancellationToken,
 					loadSession: gitIgnoreLoadSession);
-				if (directoryGitIgnoreCandidateContext.IsOpaqueRepository(dir))
+				if (directoryGitIgnoreCandidateContext.IsOpaqueRepository(dir) &&
+				    PathComparer.Default.Equals(directoryGitIgnoreCandidateContext.GetOwningRepository(dir), dir))
 					gitIgnoreImpactCount++;
 				if (directoryGitIgnoreContext.IsOpaqueRepository(dir) && gitIgnoreLoadStatus != GitIgnoreMatcherLoadStatus.ReadFailure)
 					continue;
@@ -1165,7 +1166,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 							sd.RelativePath,
 							isDirectory: true,
 							sd.Name);
-					if (directoryGitIgnoreCandidate.IsIgnored)
+					if (directoryGitIgnoreCandidate.IsIgnored && !directoryGitIgnoreCandidateContext.IsOpaqueRepository(dir))
 						gitIgnoreImpactCount++;
 					if (ShouldSkipDirectoryByName(sd.Name, sd.FullPath, sd.IsHidden, rules, directoryGitIgnore))
 						continue;
@@ -1256,7 +1257,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 								: directoryGitIgnoreCandidateContext
 									.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
 									.IsIgnored;
-							if (fileGitIgnoreCandidate)
+							if (fileGitIgnoreCandidate && !directoryGitIgnoreCandidateContext.IsOpaqueRepository(dir))
 								localState.GitIgnoreImpactCount++;
 							if (ShouldSkipFileByName(
 								    file.Name,
@@ -2843,7 +2844,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
 					}
 					if (gitIgnoreCandidateContext.IsOpaqueRepository(facts.FullPath))
-						directControllerImpactCounts = new IgnoreControllerImpactCounts(GitIgnore: 1);
+						directControllerImpactCounts = PathComparer.Default.Equals(
+							gitIgnoreCandidateContext.GetOwningRepository(facts.FullPath), facts.FullPath)
+							? new IgnoreControllerImpactCounts(GitIgnore: 1)
+							: IgnoreControllerImpactCounts.Empty;
 					if (gitIgnoreContext.IsOpaqueRepository(facts.FullPath))
 					{
 						directoryFiles = [];
@@ -3267,6 +3271,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			if (visibilityState.BaseFinalVisible != visibilityState.EmptyFoldersFinalVisible)
 				effectiveCounts.EmptyFolders++;
 
+			// An opaque repository contributes its boundary once, even when the disabled
+			// GitIgnore filter lets the inventory enumerate its descendants.
+			if (node.GitIgnoreCandidateContext.IsOpaqueRepository(node.Path))
+			{
+				if (PathComparer.Default.Equals(node.GitIgnoreCandidateContext.GetOwningRepository(node.Path), node.Path))
+					controllerImpactCounts = controllerImpactCounts.Add(new IgnoreControllerImpactCounts(GitIgnore: 1));
+				continue;
+			}
 			controllerImpactCounts = controllerImpactCounts.Add(node.DirectControllerImpactCounts);
 			var smartIgnoreBaselineFiles = effectiveRules.IsGitIgnoreTraversalEnabled
 				? metrics.GitIgnoreVisibleFiles

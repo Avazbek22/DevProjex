@@ -131,8 +131,10 @@ public sealed partial class DeepGitWorkspaceEvidenceIntegrationTests
 		Assert.DoesNotContain(plan.IncludedFiles, path => path.EndsWith("hidden.local", StringComparison.Ordinal));
 	}
 
-	[Fact]
-	public void RepositoryBoundaries_EmbeddedDirectoryContributesOneGitIgnoreControllerImpact()
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void RepositoryBoundaries_EmbeddedDirectoryContributesOneGitIgnoreControllerImpact(bool enabled)
 	{
 		EnsureGitAvailable();
 		using var temp = new TemporaryDirectory();
@@ -141,15 +143,23 @@ public sealed partial class DeepGitWorkspaceEvidenceIntegrationTests
 		var scanner = new FileSystemScanner();
 		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>())
 		{
-			UseGitIgnore = true, EnableGitIgnoreTraversal = true, GitIgnoreCandidateMatchesActiveRules = true
+			UseGitIgnore = enabled, EnableGitIgnoreTraversal = enabled, GitIgnoreCandidateMatchesActiveRules = enabled
 		};
 		var before = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, rules, TestContext.Current.CancellationToken);
+		var beforeBatch = scanner.GetIgnoreSectionSnapshot(temp.Path, rules, rules,
+			effectiveAllowedExtensions: null, TestContext.Current.CancellationToken);
 		var embedded = temp.CreateDirectory("libs/SomeLib");
 		temp.CreateFile("libs/SomeLib/a.cs", "a");
 		temp.CreateFile("libs/SomeLib/deep/b.cs", "b");
 		InitializeIndex(embedded, "a.cs");
 		var after = scanner.GetExtensionsWithIgnoreOptionCounts(temp.Path, rules, TestContext.Current.CancellationToken);
 		Assert.Equal(before.Value.ControllerImpactCounts.GitIgnore + 1, after.Value.ControllerImpactCounts.GitIgnore);
+		var afterBatch = scanner.GetIgnoreSectionSnapshot(temp.Path, rules, rules,
+			effectiveAllowedExtensions: null, TestContext.Current.CancellationToken);
+		Assert.Equal(beforeBatch.Value.ControllerImpactCounts.GitIgnore + 1, afterBatch.Value.ControllerImpactCounts.GitIgnore);
+		var selectedRoots = scanner.GetProjectWorkspaceSnapshotForRootSelection(temp.Path, ["libs"], rules, rules,
+			effectiveExtensionPolicy: null, cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Equal(1, selectedRoots.Value.IgnoreSection.ControllerImpactCounts.GitIgnore);
 	}
 
 	[Theory]
