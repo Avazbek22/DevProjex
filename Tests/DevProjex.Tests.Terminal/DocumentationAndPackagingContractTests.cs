@@ -908,6 +908,9 @@ public sealed class DocumentationAndPackagingContractTests
 			"README.md"));
 
 		Assert.Contains("workflow_dispatch:", workflow, StringComparison.Ordinal);
+		Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
+		Assert.Contains("- Packaging/Linux/**", workflow, StringComparison.Ordinal);
+		Assert.Contains("- Kernel/ProcessEntryPointResolver.cs", workflow, StringComparison.Ordinal);
 		Assert.Contains("types: [published]", workflow, StringComparison.Ordinal);
 		Assert.Contains("runner: ubuntu-22.04", workflow, StringComparison.Ordinal);
 		Assert.Contains("runner: ubuntu-22.04-arm", workflow, StringComparison.Ordinal);
@@ -924,6 +927,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("appdir-lint.sh", workflow, StringComparison.Ordinal);
 		Assert.Contains("Verify packaged binary identity", workflow, StringComparison.Ordinal);
 		Assert.Contains("needs: [prepare, package]", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"if: ${{ needs.prepare.outputs.upload_release == 'true' }}",
+			workflow,
+			StringComparison.Ordinal);
 		Assert.Contains("gh release upload", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("--updateinformation", workflow, StringComparison.Ordinal);
 		Assert.Contains("output_path}.zsync", workflow, StringComparison.Ordinal);
