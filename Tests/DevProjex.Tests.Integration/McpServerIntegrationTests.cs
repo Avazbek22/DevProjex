@@ -2186,6 +2186,63 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetTreeUsesTheDeepestCompleteImplicitDepthAndSuggestsItForStructuredFormats()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var first = 0; first < 4; first++)
+		{
+			for (var second = 0; second < 4; second++)
+			{
+				var directory = workspace.CreateDirectory($"project/L1-{first:D2}/L2-{first:D2}-{second:D2}");
+				for (var file = 0; file < 130; file++)
+					File.WriteAllText(Path.Combine(directory, $"File-{file:D3}.txt"), string.Empty);
+			}
+		}
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var automatic = await server.CallAsync("get_tree");
+		var explicitDepth = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text", ["max_depth"] = 5 });
+		var json = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json" });
+		var xml = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "xml" });
+
+		Assert.NotEqual(true, automatic.IsError);
+		for (var first = 0; first < 4; first++)
+		{
+			Assert.Contains($"L1-{first:D2}/", Text(automatic), StringComparison.Ordinal);
+			for (var second = 0; second < 4; second++)
+			{
+				Assert.Contains(
+					$"L2-{first:D2}-{second:D2}/",
+					Text(automatic),
+					StringComparison.Ordinal);
+			}
+		}
+		Assert.DoesNotContain("File-000.txt", Text(automatic), StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(
+			automatic,
+			"[Tree limited to depth 2 of 3 to fit 2000 lines; pass max_depth or include_patterns for a subtree.]");
+
+		Assert.NotEqual(true, explicitDepth.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			explicitDepth,
+			"[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]");
+		foreach (var structured in new[] { json, xml })
+		{
+			Assert.True(structured.IsError);
+			Assert.Contains(McpErrorCodes.PayloadTruncated, Text(structured), StringComparison.Ordinal);
+			Assert.Contains("pass max_depth: 2 for a complete document", Text(structured), StringComparison.Ordinal);
+			Assert.DoesNotContain("<untrusted-data-", Text(structured), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public async Task RemoteProjectIsRejectedWithoutOptInBeforeRemoteServicesAreCreated()
 	{
 		using var workspace = new TemporaryDirectory();

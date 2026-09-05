@@ -103,11 +103,23 @@ internal sealed class DevProjexMcpTools(
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
-			var renderedTree = depth is null
+			var depthFit = CalculateTreeDepthFit(
+				plan.ProjectedTree,
+				format,
+				MaximumTreeLines,
+				cancellationToken);
+			int? automaticDepth = depth is null &&
+			                     format is TreeTextFormat.Ascii or TreeTextFormat.Markdown &&
+			                     !depthFit.FullTreeFits &&
+			                     depthFit.DeepestCompleteDepth >= 1
+				? depthFit.DeepestCompleteDepth
+				: null;
+			var effectiveDepth = depth ?? automaticDepth;
+			var renderedTree = effectiveDepth is null
 				? plan.ProjectedTree
 				: PruneToDepthWithCancellation(
 					plan.ProjectedTree,
-					depth.Value,
+					effectiveDepth.Value,
 					cancellationToken);
 			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
 			try
@@ -128,14 +140,17 @@ internal sealed class DevProjexMcpTools(
 					throw new McpToolException(
 						McpErrorCodes.PayloadTruncated,
 						$"{McpErrorCodes.PayloadTruncated}: the {format.ToString().ToLowerInvariant()} tree exceeds " +
-						$"the {MaximumTreeLines}-line result limit. Reduce max_depth or narrow include_patterns " +
-						"and exclude_patterns, then retry.");
+						$"the {MaximumTreeLines}-line result limit; pass max_depth: {depthFit.DeepestCompleteDepth} " +
+						"for a complete document, or narrow include_patterns and exclude_patterns, then retry.");
 				}
 			}
 
 			var treeTruncationNotice = treeWriter.IsTruncated
 				? "[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]"
-				: null;
+				: automaticDepth is { } selectedDepth
+					? $"[Tree limited to depth {selectedDepth} of {depthFit.FullDepth} to fit {MaximumTreeLines} lines; " +
+					  "pass max_depth or include_patterns for a subtree.]"
+					: null;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.Text),
 				treeTruncationNotice,
@@ -990,6 +1005,92 @@ internal sealed class DevProjexMcpTools(
 	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
 		PruneToDepthWithCancellation(node, remainingDepth, CancellationToken.None);
 
+	internal static McpTreeDepthFit CalculateTreeDepthFit(
+		TreeNodeDescriptor root,
+		TreeTextFormat format,
+		int maximumLines,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(root);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumLines);
+		cancellationToken.ThrowIfCancellationRequested();
+
+		var nodeDeltas = new List<long> { 0 };
+		var jsonDeltas = new List<long> { 0 };
+		var xmlDeltas = new List<long> { 0 };
+		var directories = new Stack<(TreeNodeDescriptor Node, int Depth)>();
+		directories.Push((root, 0));
+		var fullDepth = 0;
+		while (directories.TryPop(out var current))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!current.Node.IsDirectory || current.Node.Children.Count == 0)
+				continue;
+
+			var childDepth = checked(current.Depth + 1);
+			while (nodeDeltas.Count <= childDepth)
+			{
+				nodeDeltas.Add(0);
+				jsonDeltas.Add(0);
+				xmlDeltas.Add(0);
+			}
+
+			var directoryCount = 0;
+			var fileCount = 0;
+			foreach (var child in current.Node.Children)
+			{
+				if (child.IsDirectory)
+				{
+					directoryCount++;
+					directories.Push((child, childDepth));
+				}
+				else
+				{
+					fileCount++;
+				}
+			}
+
+			var childCount = checked(directoryCount + fileCount);
+			nodeDeltas[childDepth] += childCount;
+			fullDepth = Math.Max(fullDepth, childDepth);
+			if (current.Depth == 0)
+			{
+				jsonDeltas[childDepth] += 1L + directoryCount + fileCount + (fileCount > 0 ? 2 : 0);
+				xmlDeltas[childDepth] += 1L + directoryCount + fileCount;
+			}
+			else
+			{
+				jsonDeltas[childDepth] += 1L + directoryCount + fileCount +
+				                          (directoryCount > 0 && fileCount > 0 ? 2 : 0);
+				xmlDeltas[childDepth] += 1L + directoryCount + fileCount;
+			}
+		}
+
+		long lineCount = format switch
+		{
+			TreeTextFormat.Ascii => 1,
+			TreeTextFormat.Markdown => 2,
+			TreeTextFormat.Json => 4,
+			TreeTextFormat.Xml => 1,
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+		};
+		var deepestCompleteDepth = lineCount <= maximumLines ? 0 : -1;
+		for (var depth = 1; depth <= fullDepth; depth++)
+		{
+			lineCount += format switch
+			{
+				TreeTextFormat.Ascii or TreeTextFormat.Markdown => nodeDeltas[depth],
+				TreeTextFormat.Json => jsonDeltas[depth],
+				TreeTextFormat.Xml => xmlDeltas[depth],
+				_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+			};
+			if (lineCount <= maximumLines)
+				deepestCompleteDepth = depth;
+		}
+
+		return new McpTreeDepthFit(fullDepth, deepestCompleteDepth);
+	}
+
 	internal static TreeNodeDescriptor PruneToDepthWithCancellation(
 		TreeNodeDescriptor node,
 		int remainingDepth,
@@ -1037,6 +1138,11 @@ internal sealed class DevProjexMcpTools(
 			remainingDepth == 0 ? [] : new TreeNodeDescriptor[node.Children.Count];
 		public int NextChildIndex { get; set; }
 		public int NextProjectedChildIndex { get; set; }
+	}
+
+	internal readonly record struct McpTreeDepthFit(int FullDepth, int DeepestCompleteDepth)
+	{
+		public bool FullTreeFits => DeepestCompleteDepth == FullDepth;
 	}
 
 	private static async Task<McpTextPage> ReadFilePageAsync(
