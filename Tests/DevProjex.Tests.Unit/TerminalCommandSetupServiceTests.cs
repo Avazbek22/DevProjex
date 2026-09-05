@@ -6,6 +6,7 @@ using System.Diagnostics;
 namespace DevProjex.Tests.Unit;
 
 [Trait("Category", "TerminalCommand")]
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class TerminalCommandSetupServiceTests
 {
 	[Fact]
@@ -831,6 +832,43 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.False(snapshot.CanRepair);
 		Assert.True(snapshot.UserBinDirectoryIsInPath);
 		Assert.Equal(Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand), snapshot.CommandPath);
+	}
+
+	[Fact]
+	public void InstallOrRepair_LinuxAppImage_WrapperTargetsOriginalImage()
+	{
+		using var temp = new TemporaryDirectory();
+		var appImagePath = temp.CreateFile(
+			"downloads/DevProjex-5.2-x86_64.AppImage",
+			"appimage fixture");
+		var userBin = Path.Combine(temp.Path, ".local", "bin");
+		var previous = Environment.GetEnvironmentVariable("APPIMAGE");
+		try
+		{
+			Environment.SetEnvironmentVariable("APPIMAGE", appImagePath);
+			var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+			{
+				Platform = TerminalCommandHostPlatform.Linux,
+				HomeDirectoryProvider = () => temp.Path,
+				PathVariableProvider = () => userBin,
+				LauncherValidator = (_, _) => new TerminalCommandValidationResult(true),
+				PathListSeparator = Path.PathSeparator
+			});
+
+			var result = service.InstallOrRepair();
+			var wrapperPath = Path.Combine(
+				userBin,
+				CommandLineExecutableAliases.UnixCommand);
+			var wrapper = File.ReadAllText(wrapperPath);
+
+			Assert.True(result.Success, result.ErrorMessage);
+			Assert.Contains("# target: " + appImagePath, wrapper, StringComparison.Ordinal);
+			Assert.Contains("exec '" + appImagePath + "' \"$@\"", wrapper, StringComparison.Ordinal);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("APPIMAGE", previous);
+		}
 	}
 
 	[Fact]

@@ -255,7 +255,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 
 	private static CommandLineBenchmarkProcessRequest BuildColdProcessRequest(string targetPath)
 	{
-		var processPath = Environment.ProcessPath;
+		var processPath = ProcessEntryPointResolver.ResolveSelfLaunchPath();
 		var assemblyPath = ProcessEntryPointResolver.ResolveManagedAssemblyPath();
 		var arguments = new List<string>();
 		var fileName = processPath;
