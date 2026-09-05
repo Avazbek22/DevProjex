@@ -251,7 +251,7 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
 
 | Mode | What it shows |
 |---|---|
-| `.gitignore` mode | Tracked files, plus untracked files not excluded by `.gitignore` (with nested rules and negations) |
+| `.gitignore` mode | Tracked files and untracked files allowed by repository-local `.gitignore` and `info/exclude`, with opaque embedded repositories and independent declared submodules, following `git status` |
 | Tracked-files-only | Only files currently recorded in the Git index |
 | Staged | Files with staged changes |
 | Changes | Staged, unstaged, and non-ignored untracked files |

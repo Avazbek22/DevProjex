@@ -8,7 +8,7 @@ using ModelContextProtocol.Protocol;
 
 namespace DevProjex.Tests.Terminal;
 
-public sealed class McpServerProcessTests
+public sealed partial class McpServerProcessTests
 {
 	private static readonly string[] ExpectedTools =
 	[

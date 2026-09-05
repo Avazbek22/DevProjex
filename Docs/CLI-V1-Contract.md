@@ -310,7 +310,9 @@ exports fail with `DPX-EXPORT-RESERVED-NAME` rather than overwrite or duplicate 
 `gitignore` mode reads regular `.gitignore` files reachable in the selected working
 tree. When the selected path is below its owning repository/worktree root, the
 ancestor rule chain from that root through the selected path is applied before
-rules discovered below it. It does not read `.git/info/exclude`, global Git excludes, or symbolic links
+rules discovered below it. Repository-local `info/exclude` is read with lower
+precedence than the root `.gitignore`, resolving `gitdir:` and `commondir` for
+worktrees and submodules. It does not read global Git excludes or symbolic links
 named `.gitignore`; Git itself does not follow a symbolic link when accessing that
 control file. If no regular `.gitignore` exists, the selected mode remains
 `gitignore` with an empty pattern set; the administrative entry named exactly `.git`
@@ -322,6 +324,18 @@ instead of silently including files without complete rule evaluation. Skipping a
 `.gitignore` symbolic link is normal Git-compatible behavior and is not an access
 diagnostic. The reader strips an initial UTF-8 BOM and otherwise decodes as UTF-8;
 UTF-16/UTF-32 BOMs are not auto-detected and reinterpreted as valid rules.
+
+In v5.2 the existing Git modes gain an intentional behavior change: `gitignore`
+reads `info/exclude`, and both `gitignore` and `tracked` treat undeclared embedded
+repositories as opaque directories. Declared initialized submodules own their
+rules and nested declarations recursively; parent rules do not leak inside.
+Without a repository above the scan root, the first repository in each subtree
+becomes an independent owner. A gitlink without a declaration remains embedded;
+a declaration without a boundary remains an ordinary directory. The complete
+source-resolution and ownership specification is in [SmartIgnore.md](SmartIgnore.md).
+To recover the previous embedded-repository visibility, use `--git-mode none`
+(or MCP `--unrestricted` to also disable ordinary exclusions). No new flag,
+checkbox, token, diagnostic code, localization key, or MCP schema is introduced.
 
 Git pattern and tracked-index path comparison use the effective repository
 `core.ignoreCase` value. On macOS, canonical Unicode comparison also follows

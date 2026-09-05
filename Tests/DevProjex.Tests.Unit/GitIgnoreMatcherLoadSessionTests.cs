@@ -6,6 +6,52 @@ namespace DevProjex.Tests.Unit;
 public sealed class GitIgnoreMatcherLoadSessionTests
 {
 	[Fact]
+	public void SubmoduleDeclarationsAreStableWithinOneScanAndRevalidatedByTheNext()
+	{
+		using var temp = new TemporaryDirectory();
+		var first = Path.Combine(temp.Path, "first");
+		var second = Path.Combine(temp.Path, "second");
+		Directory.CreateDirectory(Path.Combine(first, ".git"));
+		Directory.CreateDirectory(Path.Combine(second, ".git"));
+		var manifest = temp.CreateFile(".gitmodules", "[submodule \"one\"]\n path = first\n[submodule \"two\"]\n path = second\n");
+		var session = new GitIgnoreMatcherLoadSession();
+		var firstResult = session.LoadScope(first, null, Path.Combine(first, ".git"), temp.Path, TestContext.Current.CancellationToken);
+		Assert.False(firstResult.Matcher!.IsOpaqueRepository);
+		File.WriteAllText(manifest, "");
+		var cached = session.LoadScope(second, null, Path.Combine(second, ".git"), temp.Path, TestContext.Current.CancellationToken);
+		Assert.False(cached.Matcher!.IsOpaqueRepository);
+		var refreshed = new GitIgnoreMatcherLoadSession().LoadScope(second, null, Path.Combine(second, ".git"), temp.Path,
+			TestContext.Current.CancellationToken);
+		Assert.True(refreshed.Matcher!.IsOpaqueRepository);
+	}
+
+	[Theory]
+	[InlineData("../outside")]
+	[InlineData("/outside")]
+	[InlineData("a//b")]
+	[InlineData("a/./b")]
+	[InlineData("C:/outside")]
+	public void UnsafeSubmodulePathsFailClosed(string path)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitmodules", $"[submodule \"nested\"]\n path = {path}\n");
+		Assert.True(GitSubmoduleManifest.Read(temp.Path, TestContext.Current.CancellationToken).ReadFailed);
+	}
+
+	[Theory]
+	[InlineData("[submodule\t\"name]\"]", "\" nested \"", " nested ")]
+	[InlineData("[submodule \"name\"] # comment ]", "libs/x # comment", "libs/x")]
+	[InlineData("[submodule \"name\"]", "\"libs/#x\"", "libs/#x")]
+	public void SubmoduleDeclarationsPreserveQuotedPathsAndSectionNames(string section, string value, string expected)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitmodules", $"{section}\n path = {value}\n url = ignored\n branch = ignored\n");
+		var manifest = GitSubmoduleManifest.Read(temp.Path, TestContext.Current.CancellationToken);
+		Assert.False(manifest.ReadFailed);
+		Assert.Equal(expected, Assert.Single(manifest.Paths));
+	}
+
+	[Fact]
 	public async Task Load_ConcurrentRequestsForOneSource_ExecutesLoaderOnce()
 	{
 		using var loaderEntered = new ManualResetEventSlim();

@@ -17,6 +17,8 @@ public sealed class GitIgnoreMatcher
     private readonly bool _ignoreAsciiCase;
     private readonly bool _normalizeUnicode;
     private readonly bool _hasNegationRules;
+    private GitIgnoreMatcher? _lowerPrioritySource;
+    private GitIgnoreMatcher? _higherPrioritySource;
 
     // Pre-compiled search values for SIMD-optimized character lookup
     private static readonly SearchValues<char> GlobSpecialChars = SearchValues.Create("*?[");
@@ -45,6 +47,30 @@ public sealed class GitIgnoreMatcher
     }
 
     public bool HasNegationRules => _hasNegationRules;
+
+    public static GitIgnoreMatcher Combine(GitIgnoreMatcher lowerPriority, GitIgnoreMatcher higherPriority)
+    {
+        if (lowerPriority._rules.Count == 0)
+            return higherPriority;
+        if (ReferenceEquals(higherPriority, Empty))
+            return lowerPriority;
+        if (lowerPriority._normalizedRootPath != higherPriority._normalizedRootPath ||
+            lowerPriority._ignoreAsciiCase != higherPriority._ignoreAsciiCase ||
+            lowerPriority._normalizeUnicode != higherPriority._normalizeUnicode)
+            throw new ArgumentException("Rule sources must share a scope and comparison semantics.");
+        if (lowerPriority._rules.Count + higherPriority._rules.Count > MaximumEffectiveRuleCount)
+            throw new InvalidDataException("The combined ignore scope exceeds the rule limit.");
+
+        return new GitIgnoreMatcher(
+            higherPriority._normalizedRootPath,
+            [.. lowerPriority._rules, .. higherPriority._rules],
+            lowerPriority.HasNegationRules || higherPriority.HasNegationRules,
+            new GitPathComparisonSemantics(higherPriority._ignoreAsciiCase, higherPriority._normalizeUnicode))
+        {
+            _lowerPrioritySource = lowerPriority,
+            _higherPrioritySource = higherPriority
+        };
+    }
 
     public bool IsRootPath(string path)
     {
@@ -339,6 +365,11 @@ public sealed class GitIgnoreMatcher
 
     private IgnoreEvaluation EvaluateRelativeCore(ReadOnlySpan<char> relativePath, bool isDirectory, string name)
     {
+        if (_higherPrioritySource is { } higher && _lowerPrioritySource is { } lower)
+        {
+            var higherEvaluation = higher.EvaluateRelativeCore(relativePath, isDirectory, name);
+            return higherEvaluation.HasMatch ? higherEvaluation : lower.EvaluateRelativeCore(relativePath, isDirectory, name);
+        }
         var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath).ToString() : name;
         var evaluation = EvaluateRules(relativePath, isDirectory, normalizedName);
         var ignored = evaluation.IsIgnored;
@@ -384,6 +415,16 @@ public sealed class GitIgnoreMatcher
         bool isDirectory,
         string normalizedName)
     {
+        if (_higherPrioritySource is { } higher && _lowerPrioritySource is { } lower)
+        {
+            var higherEvaluation = higher.EvaluateRules(relativePath, isDirectory, normalizedName);
+            if (higherEvaluation.HasMatch)
+                return higherEvaluation;
+            // A root rule source can reopen descendants hidden only by info/exclude.
+            if (isDirectory && higher.ShouldTraverseIgnoredDirectoryRelativeCore(relativePath, normalizedName))
+                return default;
+            return lower.EvaluateRules(relativePath, isDirectory, normalizedName);
+        }
         normalizedName = GitPathTextNormalizer.NormalizeObservedPath(
             normalizedName,
             _normalizeUnicode,

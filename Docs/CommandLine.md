@@ -170,7 +170,7 @@ Git modes:
 | Token | Behavior |
 |---|---|
 | `none` | No Git-based filtering |
-| `gitignore` | Respect applicable hierarchical `.gitignore` rules |
+| `gitignore` | Respect hierarchical `.gitignore` and repository-local `info/exclude`, with opaque embedded repositories and independent declared submodules |
 | `tracked` | Include only paths returned from applicable indexes by the installed Git CLI; no readable index fails closed with exit `3` |
 | `staged` | Include files with staged changes |
 | `changes` | Include staged, unstaged, and untracked files; ignored untracked files remain excluded |
@@ -198,6 +198,15 @@ loads but a nested index does not, that nested scope is excluded and reported wi
 `DPX-GIT-TRACKED-INDEX-PARTIAL`. If none load, commands report
 `DPX-GIT-TRACKED-INDEX-UNAVAILABLE`; they never reinterpret `tracked` as `gitignore`.
 An absent `.gitignore` is an active empty rule set, not a fallback to `none`.
+Repository-local `info/exclude` has lower priority than the root `.gitignore`;
+worktrees resolve it through `gitdir:` and `commondir`. Global excludes are not
+read. In `gitignore` and `tracked`, a nested repository is opaque unless its
+path is declared in its owner's `.gitmodules`; initialized declared submodules
+use their own rules, recursively. Without an owning repository, the first
+repository in each subtree is independent. See [SmartIgnore.md](SmartIgnore.md)
+for the complete ownership, source-resolution, and fail-closed specification.
+This changes v5.2 visibility without adding options: use `--git-mode none` to
+traverse embedded repositories and ignore local exclusion rules.
 The administrative path named exactly `.git` remains excluded; `.github` and other
 `.git*` names are not treated as Git metadata.
 
