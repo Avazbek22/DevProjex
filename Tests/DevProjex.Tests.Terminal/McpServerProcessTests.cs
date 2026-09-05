@@ -219,7 +219,10 @@ public sealed partial class McpServerProcessTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		workspace.WriteFile("project/WpfApp2/MainWindow.xaml.cs", "case-process-marker\n");
+		workspace.WriteFile(
+			"project/WpfApp2/MainWindow.xaml.cs",
+			string.Join('\n', Enumerable.Range(1, 44).Select(static line =>
+				line == 1 ? "case-process-marker" : $"process-file-line-{line:D2}")));
 		workspace.WriteFile("project/image_58500.txt", "markdown-process-marker\n");
 		workspace.WriteFile(
 			"project/Large.txt",
@@ -266,6 +269,26 @@ public sealed partial class McpServerProcessTests
 				wrongCaseText,
 				StringComparison.Ordinal);
 			Assert.DoesNotContain("effective filters", wrongCaseText, StringComparison.Ordinal);
+
+			var clampedRange = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?>
+				{
+					["path"] = "WpfApp2/MainWindow.xaml.cs",
+					["start_line"] = 1,
+					["end_line"] = 60
+				},
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			var clampedText = Assert.IsType<TextContentBlock>(Assert.Single(clampedRange.Content)).Text;
+			var clampedClosingIndex = clampedText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+			var clampedNoticeIndex = clampedText.IndexOf(
+				"[Showing lines 1-44 of 44; end_line 60 exceeded the file.]",
+				StringComparison.Ordinal);
+			Assert.NotEqual(true, clampedRange.IsError);
+			Assert.Contains("process-file-line-44", clampedText, StringComparison.Ordinal);
+			Assert.True(clampedNoticeIndex > clampedClosingIndex, clampedText);
 
 			foreach (var toolName in new[] { "analyze", "pack_context" })
 			{

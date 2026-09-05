@@ -404,15 +404,12 @@ internal sealed class DevProjexMcpTools(
 					end,
 					cancellationToken)
 				.ConfigureAwait(false);
-			var continuationNotice = page.IsTruncated
-				? $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; " +
-				  $"continue with start_line={page.EndLine + 1}.]"
-				: null;
+			var rangeNotice = FormatLineRangeNotice(page, end);
 			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			return McpToolResults.TextSuccess(
-				AppendTrustedNotices(McpSpotlight.Wrap(page.Text), continuationNotice, characterLimitNotice),
+				AppendTrustedNotices(McpSpotlight.Wrap(page.Text), rangeNotice, characterLimitNotice),
 				advertiseLargeResult: true);
 		});
 
@@ -560,24 +557,38 @@ internal sealed class DevProjexMcpTools(
 					McpErrorCodes.PayloadTruncated,
 					$"{McpErrorCodes.PayloadTruncated}: file content is binary, unsupported, or exceeds the redaction scan limit and cannot be returned safely.");
 			}
+			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
+			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var page = McpTextRanges.Slice(
 				content.Content,
-				arguments.OptionalInteger("start_line", 1, int.MaxValue),
-				arguments.OptionalInteger("end_line", 1, int.MaxValue),
+				start,
+				end,
 				MaximumPageLines,
 				MaximumPageCharacters,
 				cancellationToken);
-			var continuationNotice = page.IsTruncated
-				? $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; continue with start_line={page.EndLine + 1}.]"
-				: null;
+			var rangeNotice = FormatLineRangeNotice(page, end);
 			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(page.Text),
-				continuationNotice,
+				rangeNotice,
 				characterLimitNotice));
 		}, cancellationToken);
+
+	private static string? FormatLineRangeNotice(McpTextPage page, int? requestedEnd)
+	{
+		if (page.IsTruncated)
+		{
+			return $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; " +
+			       $"continue with start_line={page.EndLine + 1}.]";
+		}
+
+		return requestedEnd > page.TotalLines
+			? $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; " +
+			  $"end_line {requestedEnd} exceeded the file.]"
+			: null;
+	}
 
 	private McpJsonArguments SelectionArguments(CallToolRequestParams request) =>
 		McpJsonArguments.Create(

@@ -2942,6 +2942,98 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task FileAndPackRangesClampPastTheEndButKeepOtherRangeErrors()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "FortyFour.txt"),
+			string.Join('\n', Enumerable.Range(1, 44).Select(static line => $"line-{line:D2}")));
+		File.WriteAllText(
+			Path.Combine(project, "Large.txt"),
+			string.Join('\n', Enumerable.Range(1, 1_500).Select(static line =>
+				$"pack-range-line-{line:D4}-{new string('x', 24)}")));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var clampedFile = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["path"] = "FortyFour.txt",
+				["start_line"] = 1,
+				["end_line"] = 60
+			});
+		const string fileNotice = "[Showing lines 1-44 of 44; end_line 60 exceeded the file.]";
+		Assert.NotEqual(true, clampedFile.IsError);
+		Assert.Contains("line-44", Text(clampedFile), StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(clampedFile, fileNotice);
+
+		var invalidFileStart = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "FortyFour.txt", ["start_line"] = 45 });
+		var invalidFileOrdering = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["path"] = "FortyFour.txt",
+				["start_line"] = 20,
+				["end_line"] = 10
+			});
+		foreach (var invalid in new[] { invalidFileStart, invalidFileOrdering })
+		{
+			Assert.True(invalid.IsError);
+			Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
+			Assert.Contains("Valid lines are 1-44", Text(invalid), StringComparison.Ordinal);
+		}
+
+		var stored = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Large.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var packId = ExtractPackId(Text(stored));
+		var clampedPack = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?>
+			{
+				["pack_id"] = packId,
+				["start_line"] = 1_001,
+				["end_line"] = 5_000
+			});
+		var packText = Text(clampedPack);
+		var packNotice = Regex.Match(
+			packText,
+			@"\[Showing lines 1001-(?<total>\d+) of \k<total>; end_line 5000 exceeded the file\.\]");
+		Assert.NotEqual(true, clampedPack.IsError);
+		Assert.True(packNotice.Success, packText);
+		AssertTrustedTrailerOutsideSpotlight(clampedPack, packNotice.Value);
+
+		var totalLines = int.Parse(
+			packNotice.Groups["total"].Value,
+			System.Globalization.CultureInfo.InvariantCulture);
+		var invalidPackStart = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId, ["start_line"] = totalLines + 1 });
+		var invalidPackOrdering = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?>
+			{
+				["pack_id"] = packId,
+				["start_line"] = 20,
+				["end_line"] = 10
+			});
+		foreach (var invalid in new[] { invalidPackStart, invalidPackOrdering })
+		{
+			Assert.True(invalid.IsError);
+			Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
+			Assert.Contains($"Valid lines are 1-{totalLines}", Text(invalid), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public async Task StoredPackResponseBoundsLongTreePreviewWithoutChangingThePack()
 	{
 		using var workspace = new TemporaryDirectory();
