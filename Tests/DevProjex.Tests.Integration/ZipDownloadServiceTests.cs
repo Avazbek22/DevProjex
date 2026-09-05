@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net;
+using System.Net.Sockets;
 
 namespace DevProjex.Tests.Integration;
 
@@ -610,12 +611,26 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     [Fact]
     public async Task DownloadAndExtractAsync_RespectsTimeout()
     {
-        // The deterministic response must complete within the production timeout.
+        await using var server = new SilentHttpServer();
+        using var service = new ZipDownloadService(
+            new MetadataThenArchiveHandler(server.Url),
+            ZipResourceLimits.Default,
+            TimeSpan.FromMilliseconds(500));
         var targetDir = Path.Combine(_tempDir!, "timeout-test");
+        using var callerCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
-        var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: callerCancellation.Token);
 
-        Assert.True(result.Success, result.ErrorMessage);
+        await server.Accepted.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+        Assert.False(callerCancellation.IsCancellationRequested);
+        Assert.True(
+            !Directory.Exists(targetDir) || !Directory.EnumerateFileSystemEntries(targetDir).Any(),
+            "A timed-out download must not publish partial output.");
     }
 
     #endregion
@@ -1045,6 +1060,69 @@ public class ZipDownloadServiceTests : IAsyncLifetime
             var entry = archive.CreateEntry(path, CompressionLevel.Fastest);
             using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
             writer.Write(content);
+        }
+    }
+
+    private sealed class MetadataThenArchiveHandler(Uri archiveUrl)
+        : DelegatingHandler(new SocketsHttpHandler())
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"default_branch\":\"main\"}")
+                });
+            }
+
+            request.RequestUri = archiveUrl;
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+
+    private sealed class SilentHttpServer : IAsyncDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource _shutdown = new();
+        private readonly Task _serveTask;
+
+        public SilentHttpServer()
+        {
+            _listener.Start();
+            var endpoint = (IPEndPoint)_listener.LocalEndpoint;
+            Url = new Uri($"http://127.0.0.1:{endpoint.Port}/archive.zip");
+            _serveTask = ServeAsync();
+        }
+
+        public Uri Url { get; }
+        public TaskCompletionSource Accepted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private async Task ServeAsync()
+        {
+            try
+            {
+                using var client = await _listener.AcceptTcpClientAsync(_shutdown.Token);
+                Accepted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, _shutdown.Token);
+            }
+            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+            {
+            }
+            catch (ObjectDisposedException) when (_shutdown.IsCancellationRequested)
+            {
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            _shutdown.Cancel();
+            _listener.Stop();
+            await _serveTask;
+            _shutdown.Dispose();
         }
     }
 

@@ -14,6 +14,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
     private const int StreamBufferSize = 81920;
     private const int ExtractionProgressReportInterval = 50;
 	private const long MaximumRepositoryMetadataBytes = 64 * 1024;
+    private static readonly TimeSpan DefaultHttpTimeout = TimeSpan.FromMinutes(10);
 
     private readonly HttpClient _httpClient;
     private readonly ZipResourceLimits _limits;
@@ -21,17 +22,25 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
     private bool _disposed;
 
     public ZipDownloadService()
-        : this(new HttpClient(), ZipResourceLimits.Default, static entry => entry.Open())
+        : this(new HttpClient(), ZipResourceLimits.Default, static entry => entry.Open(), DefaultHttpTimeout)
     {
     }
 
     internal ZipDownloadService(HttpMessageHandler handler)
-        : this(CreateHttpClient(handler), ZipResourceLimits.Default, static entry => entry.Open())
+        : this(CreateHttpClient(handler), ZipResourceLimits.Default, static entry => entry.Open(), DefaultHttpTimeout)
     {
     }
 
     internal ZipDownloadService(HttpMessageHandler handler, ZipResourceLimits limits)
-        : this(CreateHttpClient(handler), limits, static entry => entry.Open())
+        : this(CreateHttpClient(handler), limits, static entry => entry.Open(), DefaultHttpTimeout)
+    {
+    }
+
+    internal ZipDownloadService(
+        HttpMessageHandler handler,
+        ZipResourceLimits limits,
+        TimeSpan httpTimeout)
+        : this(CreateHttpClient(handler), limits, static entry => entry.Open(), httpTimeout)
     {
     }
 
@@ -39,20 +48,21 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
         HttpMessageHandler handler,
         ZipResourceLimits limits,
         Func<ZipArchiveEntry, Stream> openEntryStream)
-        : this(CreateHttpClient(handler), limits, openEntryStream)
+        : this(CreateHttpClient(handler), limits, openEntryStream, DefaultHttpTimeout)
     {
     }
 
     private ZipDownloadService(
         HttpClient httpClient,
         ZipResourceLimits limits,
-        Func<ZipArchiveEntry, Stream> openEntryStream)
+        Func<ZipArchiveEntry, Stream> openEntryStream,
+        TimeSpan httpTimeout)
     {
         _httpClient = httpClient;
         _limits = limits ?? throw new ArgumentNullException(nameof(limits));
         _openEntryStream = openEntryStream ?? throw new ArgumentNullException(nameof(openEntryStream));
         _limits.Validate();
-        _httpClient.Timeout = TimeSpan.FromMinutes(10);
+        _httpClient.Timeout = httpTimeout;
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("DevProjex/1.0");
     }
 
@@ -184,7 +194,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                 RepositoryUrl: resultRepositoryUrl,
                 ErrorMessage: null);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
