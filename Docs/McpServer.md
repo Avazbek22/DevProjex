@@ -127,6 +127,13 @@ The recommended tool sequence is:
 list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> read_pack
 ```
 
+The MCP `initialize` result publishes the same workflow in `instructions`, along
+with the redaction placeholder grammar and allowlisted example classes, the
+trusted/untrusted boundary, response limits, and the segment-aware glob rules.
+Tool descriptions remain self-contained because some clients do not display
+server instructions; each description states the tool's purpose, when to use a
+named alternative, its result, and its key limit.
+
 ## Security Model
 
 - Every local project is pinned when the process starts. With `--allow-remote`, a
@@ -221,12 +228,12 @@ open-world.
 | Tool | Parameters | Result and limits |
 |---|---|---|
 | `list_projects` | none | Allowed local roots with path, name, type, and available local profiles, plus the server `baseline` (`git` mode, `exclusions`, and whether `agentExclusions` is enabled). Remote projects are addressed by URL and are not added to this list. |
-| `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Markdown is the compact, token-efficient default. |
-| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level. |
+| `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
+| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
-| `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
+| `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
-| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
+| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, and `get_file` additionally accept the
@@ -244,13 +251,19 @@ same Unicode scalar-value semantics at runtime.
 Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
 authoritative result is the complete object in `structuredContent`; the first
 text block in `content` is a JSON serialization of that same object.
-`analyze` results include an `exclusions` array that echoes the exclusion
+Every field in these two output schemas has a short description. `analyze`
+results include an `exclusions` array that echoes the exclusion
 tokens effective for the call, so the agent and a human reading the transcript
 always see which toggles shaped the measurement. `list_projects` results
 include a `baseline` object with the server `git` mode token, the baseline
 `exclusions` tokens, and an `agentExclusions` flag. Both fields are new in v5.2
 and required on every server, including servers started without the exclusion
-flags; consumers that pinned the earlier output schemas must refresh them.
+flags; consumers that pinned an earlier output schema must refresh it.
+`analyze.topFiles[].uninspected` is an optional v5.2 addition: it is present and
+`true` only when mandatory bounded inspection could not read that file and its
+size-based metrics are estimates. The aggregate `characters` and `tokens` use
+the same estimated character base, so a ranked file's token estimate cannot
+exceed the response total merely because its content was withheld.
 
 Filters are never silent. `get_tree` and `pack_context` end with a trusted
 `[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
@@ -284,9 +297,25 @@ avoids JSON escaping and unnecessary token overhead for trees, source text,
 search context, and packs. Truncation and continuation metadata is appended as
 trusted plain-text trailers outside every project spotlight block, such as
 `[Tree truncated ...]` and `[Showing lines ...]`.
-For `get_tree`, only `text` and `markdown` use the truncation trailer. If a JSON
-or XML tree would exceed 2,000 lines, the tool returns
-`DPX-MCP-PAYLOAD-TRUNCATED` with narrowing guidance instead of a partial document.
+For `get_file` and `read_pack`, a requested `end_line` past EOF returns every
+available line and appends
+`[Showing lines A-N of N; end_line B exceeded the file.]`. A `start_line` past
+EOF or `end_line < start_line` remains `DPX-MCP-INVALID-RANGE` with the valid
+`1-N` interval. If the 1,000-line or 50,000-character page limit is reached
+before EOF, the existing
+`[Showing lines A-B of N; continue with start_line=B+1.]` trailer takes priority.
+
+For `get_tree`, omitted `max_depth` on an oversized `text` or `markdown` result
+selects the deepest depth whose complete tree fits the 2,000-line limit and
+appends `[Tree limited to depth D of N to fit 2000 lines; pass max_depth or
+include_patterns for a subtree.]`. Node and format-header line counts are
+computed from the selected tree before rendering, so the response never stops
+mid-tree. If depth 1 itself cannot fit, the original first-2,000-line response
+and `[Tree truncated at 2000 lines ...]` trailer remain. An explicit
+`max_depth` is the caller's choice and retains that same truncation behavior.
+JSON and XML never return partial syntax: overflow remains
+`DPX-MCP-PAYLOAD-TRUNCATED`, and the error names the largest `max_depth` that
+would produce a complete document before offering pattern narrowing.
 The `text` tree writes its project address once, followed directly by the real
 top-level children; it does not repeat the project name as a synthetic tree node.
 Markdown tree Root values and node names escape active CommonMark, HTML, and

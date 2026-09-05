@@ -323,20 +323,44 @@ public sealed class AppInstancePackagingContractTests
     }
 
     [Fact]
-    public void LinuxPackaging_DocumentsDevprojexPathCommandAndDesktopEntryUsesIt()
+    public void LinuxPackaging_UsesCanonicalAppIdMetadataAndDesktopEntry()
     {
         var repositoryRoot = ResolveRepositoryRoot();
         var readmePath = Path.Combine(repositoryRoot, "Packaging", "Linux", "README.md");
-        var desktopEntryPath = Path.Combine(repositoryRoot, "Packaging", "Linux", "devprojex.desktop");
+        var desktopEntryPath = Path.Combine(
+            repositoryRoot,
+            "Packaging",
+            "Linux",
+            "io.github.Avazbek22.DevProjex.desktop");
+        var metainfoPath = Path.Combine(
+            repositoryRoot,
+            "Packaging",
+            "Linux",
+            "io.github.Avazbek22.DevProjex.metainfo.xml");
 
         var readme = File.ReadAllText(readmePath);
         var desktopEntry = File.ReadAllText(desktopEntryPath);
+        var metainfo = XDocument.Load(metainfoPath);
 
         Assert.Contains($"/usr/local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"~/.local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"Exec={CommandLineExecutableAliases.UnixCommand} open %f", desktopEntry, StringComparison.Ordinal);
-        Assert.Contains($"Icon={CommandLineExecutableAliases.UnixCommand}", desktopEntry, StringComparison.Ordinal);
-        Assert.Contains("always open DevProjex Desktop", readme, StringComparison.Ordinal);
+        Assert.Contains("Icon=io.github.Avazbek22.DevProjex", desktopEntry, StringComparison.Ordinal);
+        Assert.Contains("graphical launcher opens", readme, StringComparison.Ordinal);
+        Assert.Contains("selected folder in DevProjex Desktop", readme, StringComparison.Ordinal);
+        Assert.Equal("io.github.Avazbek22.DevProjex", metainfo.Root?.Element("id")?.Value);
+        Assert.Equal(
+            "io.github.Avazbek22.DevProjex.desktop",
+            metainfo.Root?.Element("launchable")?.Value);
+        Assert.Equal(
+            CommandLineExecutableAliases.UnixCommand,
+            metainfo.Root?.Element("provides")?.Element("binary")?.Value);
+        Assert.InRange(metainfo.Root?.Element("summary")?.Value.Length ?? int.MaxValue, 1, 35);
+        Assert.False(File.Exists(Path.Combine(
+            repositoryRoot,
+            "Packaging",
+            "Linux",
+            "devprojex.desktop")));
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsPortableExecutable, readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, desktopEntry, StringComparison.Ordinal);
     }

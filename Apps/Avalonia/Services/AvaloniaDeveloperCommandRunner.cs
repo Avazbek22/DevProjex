@@ -108,7 +108,7 @@ internal static class DesktopDiagnosticProcessRequestFactory
 		string outputPath,
 		string scenario)
 	{
-		var processPath = Environment.ProcessPath;
+		var processPath = ProcessEntryPointResolver.ResolveSelfLaunchPath();
 		var assemblyPath = ProcessEntryPointResolver.ResolveManagedAssemblyPath();
 		var arguments = new List<string>();
 		var fileName = processPath;

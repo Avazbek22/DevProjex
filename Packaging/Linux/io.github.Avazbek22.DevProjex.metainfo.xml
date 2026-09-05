@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.Avazbek22.DevProjex</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>DevProjex</name>
+  <summary>Build AI context from codebases</summary>
+  <description>
+    <p>DevProjex turns a folder or Git repository into clean, ready-to-use context for AI chats, code review, and documentation. Choose files in an interactive tree, inspect the result, and export the project structure and content.</p>
+    <p>The same engine is available through a graphical desktop app, a terminal interface, direct command-line commands, and a built-in MCP server.</p>
+    <p>Opened source projects stay read-only and processing remains local. Secret redaction can mask detected credentials, while optional private-data redaction covers personal traces such as email addresses and local user paths.</p>
+  </description>
+  <developer id="io.github.avazbek22">
+    <name>Avazbek Olimov</name>
+  </developer>
+  <launchable type="desktop-id">io.github.Avazbek22.DevProjex.desktop</launchable>
+  <provides>
+    <binary>devprojex</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <keywords>
+    <keyword>project</keyword>
+    <keyword>tree</keyword>
+    <keyword>directory</keyword>
+    <keyword>structure</keyword>
+    <keyword>viewer</keyword>
+    <keyword>export</keyword>
+  </keywords>
+  <url type="homepage">https://github.com/Avazbek22/DevProjex</url>
+  <url type="bugtracker">https://github.com/Avazbek22/DevProjex/issues</url>
+  <url type="vcs-browser">https://github.com/Avazbek22/DevProjex</url>
+  <url type="help">https://github.com/Avazbek22/DevProjex/tree/master/Docs</url>
+  <branding>
+    <color type="primary" scheme_preference="light">#1B3856</color>
+    <color type="primary" scheme_preference="dark">#2DCEE5</color>
+  </branding>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/1_Main/EN.png</image>
+      <caption>DevProjex Desktop ready to open a project</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/2_Loaded_Project/EN.png</image>
+      <caption>A loaded project with its selectable file tree</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/6_Terminal_Workspace/EN.png</image>
+      <caption>The keyboard-first Terminal Workspace</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Docs/Media/terminal-workspace/format-json.png</image>
+      <caption>Structured JSON output in the terminal</caption>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="5.1" date="2026-09-02" />
+  </releases>
+  <content_rating type="oars-1.1" />
+</component>

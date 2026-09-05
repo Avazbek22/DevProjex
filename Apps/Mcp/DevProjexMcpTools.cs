@@ -25,13 +25,12 @@ internal sealed class DevProjexMcpTools(
 		"[Token budget file list truncated to fit the stored-pack response limit.]";
 	private const string StoredTrustedNoticeTruncationNotice =
 		"[Additional trusted diagnostics truncated to fit the stored-pack response limit.]";
-	private const string RedactionDescription =
-		" Secrets are replaced with DEVPROJEX_REDACTED[<category>#<n>] placeholders before text is returned or searched; " +
-		"known examples such as documentation domains, 555 numbers, EXAMPLE keys, and reserved IP ranges are intentionally preserved.";
 	private readonly McpProjectOperationGate _projectOperation = new();
 	private McpProjectService Projects => projectService.Value;
 
-	[Description("List the project roots this server is allowed to read, their saved local profiles, and the selection baseline every call starts from.")]
+	[Description(
+		"Lists local roots, saved profiles, and the Git/exclusion base for all calls. Use it to get a project value for other tools; " +
+		"use get_tree to view one. Returns all as data. Remote Git URLs do not appear as valid roots.")]
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -68,7 +67,9 @@ internal sealed class DevProjexMcpTools(
 			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles, baseline }));
 		});
 
-	[Description("Return the effective project tree after built-in, gitignore, server-baseline, and optional agent filters.")]
+	[Description(
+		"Shows the filtered tree with globs, Git scope, and depth. Use it before reading; use analyze for metrics or get_file for content. " +
+		"It applies Smart Ignore, Git, and server exclusions; large default trees stop at the deepest complete depth within 2,000 lines.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -103,11 +104,23 @@ internal sealed class DevProjexMcpTools(
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
-			var renderedTree = depth is null
+			var depthFit = CalculateTreeDepthFit(
+				plan.ProjectedTree,
+				format,
+				MaximumTreeLines,
+				cancellationToken);
+			int? automaticDepth = depth is null &&
+			                     format is TreeTextFormat.Ascii or TreeTextFormat.Markdown &&
+			                     !depthFit.FullTreeFits &&
+			                     depthFit.DeepestCompleteDepth >= 1
+				? depthFit.DeepestCompleteDepth
+				: null;
+			var effectiveDepth = depth ?? automaticDepth;
+			var renderedTree = effectiveDepth is null
 				? plan.ProjectedTree
 				: PruneToDepthWithCancellation(
 					plan.ProjectedTree,
-					depth.Value,
+					effectiveDepth.Value,
 					cancellationToken);
 			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
 			try
@@ -128,14 +141,17 @@ internal sealed class DevProjexMcpTools(
 					throw new McpToolException(
 						McpErrorCodes.PayloadTruncated,
 						$"{McpErrorCodes.PayloadTruncated}: the {format.ToString().ToLowerInvariant()} tree exceeds " +
-						$"the {MaximumTreeLines}-line result limit. Reduce max_depth or narrow include_patterns " +
-						"and exclude_patterns, then retry.");
+						$"the {MaximumTreeLines}-line result limit; pass max_depth: {depthFit.DeepestCompleteDepth} " +
+						"for a complete document, or narrow include_patterns and exclude_patterns, then retry.");
 				}
 			}
 
 			var treeTruncationNotice = treeWriter.IsTruncated
 				? "[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]"
-				: null;
+				: automaticDepth is { } selectedDepth
+					? $"[Tree limited to depth {selectedDepth} of {depthFit.FullDepth} to fit {MaximumTreeLines} lines; " +
+					  "pass max_depth or include_patterns for a subtree.]"
+					: null;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.Text),
 				treeTruncationNotice,
@@ -148,7 +164,9 @@ internal sealed class DevProjexMcpTools(
 						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
 		}, cancellationToken);
 
-	[Description("Measure a redacted project selection and list its largest text files by estimated tokens." + RedactionDescription)]
+	[Description(
+		"Reports file, character, token, detail, and top-file metrics, not content. Use it before pack_context to size a set or find large files; " +
+		"use get_tree for structure. Results mark uninspected estimates, use one token base, and cap top_files at 1,000 entries.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -181,24 +199,46 @@ internal sealed class DevProjexMcpTools(
 			var analyzer = Projects.CreatePreparedAnalyzer(prepared);
 			operationProgress.Milestone(61, $"analyzing content 0/{plan.IncludedFiles.Count}");
 			var largest = new TopFileRanking(topFileCount);
+			var uninspectedPaths = prepared.UnscannablePaths.ToHashSet(
+				ProjectTreePathIdentity.CanonicalComparer);
+			long estimatedContentCharacters = 0;
 			var metrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(
 					analyzer,
 					plan.IncludedFiles,
-					fileMetrics => largest.Add(
-						fileMetrics.Path,
-						CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount)),
+					fileMetrics =>
+					{
+						largest.Add(
+							fileMetrics.Path,
+							CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount));
+						if (fileMetrics.IsEstimated)
+						{
+							estimatedContentCharacters =
+								estimatedContentCharacters > long.MaxValue - fileMetrics.CharCount
+									? long.MaxValue
+									: estimatedContentCharacters + fileMetrics.CharCount;
+						}
+					},
 					operationProgress.Measure("analyzing content", 62, 98),
 					cancellationToken)
 				.ConfigureAwait(false);
 			operationProgress.Milestone(
 				99,
 				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var top = largest.Project(item => new
+			var top = largest.Project(item =>
 			{
-				path = McpProjectService.ToRelative(plan.SourceRoot, item.Path),
-				tokens = item.Tokens
+				var topFile = new Dictionary<string, object>(3, StringComparer.Ordinal)
+				{
+					["path"] = McpProjectService.ToRelative(plan.SourceRoot, item.Path),
+					["tokens"] = item.Tokens
+				};
+				if (uninspectedPaths.Contains(item.Path))
+					topFile["uninspected"] = true;
+				return topFile;
 			});
+			var totalCharacters = metrics.Chars > long.MaxValue - estimatedContentCharacters
+				? long.MaxValue
+				: metrics.Chars + estimatedContentCharacters;
 			// Echo the effective exclusion state so both the agent and a human reading the
 			// transcript always see which toggles shaped this measurement.
 			var activeExclusions = ProjectSelectionTokens
@@ -208,8 +248,8 @@ internal sealed class DevProjexMcpTools(
 			var envelope = new
 			{
 				files = plan.IncludedFiles.Count,
-				characters = metrics.Chars,
-				tokens = metrics.Tokens,
+				characters = totalCharacters,
+				tokens = CodeCompressionSnapshot.EstimateTokens(totalCharacters),
 				detail = effectiveDetail.Token,
 				exclusions = activeExclusions,
 				topFiles = top
@@ -224,9 +264,8 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Build an exact redacted DevProjex context export. Results through 50,000 characters are returned inline; larger results are stored and return a pack_id for read_pack. " +
-		"A stored pack id remains valid until this server process exits; after restart, call pack_context again." +
-		RedactionDescription)]
+		"Builds one context with tree, files, or both in Markdown, text, JSON, or XML, plus detail and token limits. Use it for many files; " +
+		"use get_file for one or search_project to find code. Over 50,000 characters, it returns a pack_id for read_pack until server exit.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -387,7 +426,9 @@ internal sealed class DevProjexMcpTools(
 			}
 		}, cancellationToken);
 
-	[Description("Read a 1-based line range from a pack created by this server session.")]
+	[Description(
+		"Reads a line range from a pack made by pack_context in this process. Use it to page stored output; use pack_context again for an old pack_id. " +
+		"Returns up to 1,000 lines or 50,000 characters per call, plus trusted next-page or range-clamp notes.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -404,19 +445,18 @@ internal sealed class DevProjexMcpTools(
 					end,
 					cancellationToken)
 				.ConfigureAwait(false);
-			var continuationNotice = page.IsTruncated
-				? $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; " +
-				  $"continue with start_line={page.EndLine + 1}.]"
-				: null;
+			var rangeNotice = FormatLineRangeNotice(page, end);
 			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			return McpToolResults.TextSuccess(
-				AppendTrustedNotices(McpSpotlight.Wrap(page.Text), continuationNotice, characterLimitNotice),
+				AppendTrustedNotices(McpSpotlight.Wrap(page.Text), rangeNotice, characterLimitNotice),
 				advertiseLargeResult: true);
 		});
 
-	[Description("Search already-redacted project text with a timeout-bounded .NET regular expression." + RedactionDescription)]
+	[Description(
+		"Searches selected files with a timed .NET regex after redaction; DEVPROJEX_REDACTED[<category>#<n>] cannot match. Use it to find code; " +
+		"use get_file for a full file. Returns line context, counts extra hits without showing them, and caps max_results at 200 per call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -519,7 +559,9 @@ internal sealed class DevProjexMcpTools(
 						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
 		}, cancellationToken);
 
-	[Description("Read redacted text from one effective project file using an optional 1-based line range." + RedactionDescription)]
+	[Description(
+		"Reads one selected file or line range after secrets become DEVPROJEX_REDACTED[<category>#<n>]. Use it after get_tree or search_project; " +
+		"use pack_context for many files. Returns up to 1,000 lines or 50,000 characters; files excluded by effective filters stay unreadable in this tool.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -560,24 +602,38 @@ internal sealed class DevProjexMcpTools(
 					McpErrorCodes.PayloadTruncated,
 					$"{McpErrorCodes.PayloadTruncated}: file content is binary, unsupported, or exceeds the redaction scan limit and cannot be returned safely.");
 			}
+			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
+			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var page = McpTextRanges.Slice(
 				content.Content,
-				arguments.OptionalInteger("start_line", 1, int.MaxValue),
-				arguments.OptionalInteger("end_line", 1, int.MaxValue),
+				start,
+				end,
 				MaximumPageLines,
 				MaximumPageCharacters,
 				cancellationToken);
-			var continuationNotice = page.IsTruncated
-				? $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; continue with start_line={page.EndLine + 1}.]"
-				: null;
+			var rangeNotice = FormatLineRangeNotice(page, end);
 			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(page.Text),
-				continuationNotice,
+				rangeNotice,
 				characterLimitNotice));
 		}, cancellationToken);
+
+	private static string? FormatLineRangeNotice(McpTextPage page, int? requestedEnd)
+	{
+		if (page.IsTruncated)
+		{
+			return $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; " +
+			       $"continue with start_line={page.EndLine + 1}.]";
+		}
+
+		return requestedEnd > page.TotalLines
+			? $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; " +
+			  $"end_line {requestedEnd} exceeded the file.]"
+			: null;
+	}
 
 	private McpJsonArguments SelectionArguments(CallToolRequestParams request) =>
 		McpJsonArguments.Create(
@@ -979,6 +1035,92 @@ internal sealed class DevProjexMcpTools(
 	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
 		PruneToDepthWithCancellation(node, remainingDepth, CancellationToken.None);
 
+	internal static McpTreeDepthFit CalculateTreeDepthFit(
+		TreeNodeDescriptor root,
+		TreeTextFormat format,
+		int maximumLines,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(root);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumLines);
+		cancellationToken.ThrowIfCancellationRequested();
+
+		var nodeDeltas = new List<long> { 0 };
+		var jsonDeltas = new List<long> { 0 };
+		var xmlDeltas = new List<long> { 0 };
+		var directories = new Stack<(TreeNodeDescriptor Node, int Depth)>();
+		directories.Push((root, 0));
+		var fullDepth = 0;
+		while (directories.TryPop(out var current))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!current.Node.IsDirectory || current.Node.Children.Count == 0)
+				continue;
+
+			var childDepth = checked(current.Depth + 1);
+			while (nodeDeltas.Count <= childDepth)
+			{
+				nodeDeltas.Add(0);
+				jsonDeltas.Add(0);
+				xmlDeltas.Add(0);
+			}
+
+			var directoryCount = 0;
+			var fileCount = 0;
+			foreach (var child in current.Node.Children)
+			{
+				if (child.IsDirectory)
+				{
+					directoryCount++;
+					directories.Push((child, childDepth));
+				}
+				else
+				{
+					fileCount++;
+				}
+			}
+
+			var childCount = checked(directoryCount + fileCount);
+			nodeDeltas[childDepth] += childCount;
+			fullDepth = Math.Max(fullDepth, childDepth);
+			if (current.Depth == 0)
+			{
+				jsonDeltas[childDepth] += 1L + directoryCount + fileCount + (fileCount > 0 ? 2 : 0);
+				xmlDeltas[childDepth] += 1L + directoryCount + fileCount;
+			}
+			else
+			{
+				jsonDeltas[childDepth] += 1L + directoryCount + fileCount +
+				                          (directoryCount > 0 && fileCount > 0 ? 2 : 0);
+				xmlDeltas[childDepth] += 1L + directoryCount + fileCount;
+			}
+		}
+
+		long lineCount = format switch
+		{
+			TreeTextFormat.Ascii => 1,
+			TreeTextFormat.Markdown => 2,
+			TreeTextFormat.Json => 4,
+			TreeTextFormat.Xml => 1,
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+		};
+		var deepestCompleteDepth = lineCount <= maximumLines ? 0 : -1;
+		for (var depth = 1; depth <= fullDepth; depth++)
+		{
+			lineCount += format switch
+			{
+				TreeTextFormat.Ascii or TreeTextFormat.Markdown => nodeDeltas[depth],
+				TreeTextFormat.Json => jsonDeltas[depth],
+				TreeTextFormat.Xml => xmlDeltas[depth],
+				_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+			};
+			if (lineCount <= maximumLines)
+				deepestCompleteDepth = depth;
+		}
+
+		return new McpTreeDepthFit(fullDepth, deepestCompleteDepth);
+	}
+
 	internal static TreeNodeDescriptor PruneToDepthWithCancellation(
 		TreeNodeDescriptor node,
 		int remainingDepth,
@@ -1026,6 +1168,11 @@ internal sealed class DevProjexMcpTools(
 			remainingDepth == 0 ? [] : new TreeNodeDescriptor[node.Children.Count];
 		public int NextChildIndex { get; set; }
 		public int NextProjectedChildIndex { get; set; }
+	}
+
+	internal readonly record struct McpTreeDepthFit(int FullDepth, int DeepestCompleteDepth)
+	{
+		public bool FullTreeFits => DeepestCompleteDepth == FullDepth;
 	}
 
 	private static async Task<McpTextPage> ReadFilePageAsync(

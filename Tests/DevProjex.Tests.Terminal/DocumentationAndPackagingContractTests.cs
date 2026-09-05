@@ -53,6 +53,29 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void McpAgentErgonomicsAreSpecifiedInServerAndVersionContracts()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var version = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedVersion = Regex.Replace(version, @"\s+", " ");
+
+		Assert.Contains("end_line B exceeded the file", server, StringComparison.Ordinal);
+		Assert.Contains("start_line=B+1", server, StringComparison.Ordinal);
+		Assert.Contains("Tree limited to depth D of N", server, StringComparison.Ordinal);
+		Assert.Contains("An explicit `max_depth` is the caller's choice", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("JSON and XML never return partial syntax", server, StringComparison.Ordinal);
+		Assert.Contains("analyze.topFiles[].uninspected", server, StringComparison.Ordinal);
+		Assert.Contains("initialize` result", server, StringComparison.Ordinal);
+
+		Assert.Contains("MCP agent ergonomics changes four v5.2 behaviors", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("there is no strict-range switch", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("Passing an explicit `max_depth` restores", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("Cached MCP", normalizedVersion, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void McpReadmeNetworkBoundaryMatchesRemoteOptIn()
 	{
 		var rootPath = FindRepositoryRoot();
@@ -733,7 +756,11 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.DoesNotContain("\"--report\"", workflow, StringComparison.Ordinal);
 
 		var desktopEntry = File.ReadAllText(
-			Path.Combine(rootPath, "Packaging", "Linux", "devprojex.desktop"));
+			Path.Combine(
+				rootPath,
+				"Packaging",
+				"Linux",
+				"io.github.Avazbek22.DevProjex.desktop"));
 		Assert.Contains("Exec=devprojex open %f", desktopEntry, StringComparison.Ordinal);
 		Assert.DoesNotContain("Exec=devprojex %F", desktopEntry, StringComparison.Ordinal);
 
@@ -948,6 +975,59 @@ public sealed class DocumentationAndPackagingContractTests
 					stack.Push((child, [.. path, child.Name]));
 			}
 		}
+	}
+
+	[Fact]
+	public void AppImageWorkflowAndDocumentationKeepTheReleaseContractFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"package-appimage.yml"));
+		var installation = File.ReadAllText(Path.Combine(
+			rootPath,
+			"Docs",
+			"Installation.md"));
+		var linuxPackaging = File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Linux",
+			"README.md"));
+
+		Assert.Contains("workflow_dispatch:", workflow, StringComparison.Ordinal);
+		Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
+		Assert.Contains("- Packaging/Linux/**", workflow, StringComparison.Ordinal);
+		Assert.Contains("- Kernel/ProcessEntryPointResolver.cs", workflow, StringComparison.Ordinal);
+		Assert.Contains("types: [published]", workflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04", workflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04-arm", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishSingleFile=true", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:IncludeNativeLibrariesForSelfExtract=true", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishReadyToRun=true", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishTrimmed=false", workflow, StringComparison.Ordinal);
+		Assert.Contains("appstreamcli validate --strict --explain", workflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_VERSION: 0.16.4", workflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_SHA256:", workflow, StringComparison.Ordinal);
+		Assert.Contains("LIBXMLB_SHA256:", workflow, StringComparison.Ordinal);
+		Assert.Contains("MESON_SHA256:", workflow, StringComparison.Ordinal);
+		Assert.Contains("desktop-file-validate", workflow, StringComparison.Ordinal);
+		Assert.Contains("appdir-lint.sh", workflow, StringComparison.Ordinal);
+		Assert.Contains("Verify packaged binary identity", workflow, StringComparison.Ordinal);
+		Assert.Contains("needs: [prepare, package]", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"if: ${{ needs.prepare.outputs.upload_release == 'true' }}",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains("gh release upload", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("--updateinformation", workflow, StringComparison.Ordinal);
+		Assert.Contains("output_path}.zsync", workflow, StringComparison.Ordinal);
+		Assert.Contains("DevProjex-<version>-x86_64.AppImage", installation, StringComparison.Ordinal);
+		Assert.Contains("--appimage-extract-and-run", installation, StringComparison.Ordinal);
+		Assert.Contains("Open Anyway", installation, StringComparison.Ordinal);
+		Assert.Contains("data/DevProjex", linuxPackaging, StringComparison.Ordinal);
+		Assert.Contains("https://github.com/Avazbek22/DevProjex", linuxPackaging, StringComparison.Ordinal);
 	}
 
 	private static string FindRepositoryRoot()

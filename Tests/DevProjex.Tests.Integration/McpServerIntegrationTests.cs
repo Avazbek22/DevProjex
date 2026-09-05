@@ -1866,21 +1866,29 @@ public sealed class McpServerIntegrationTests
 			200_000,
 			tools.Single(static tool => tool.Name == "pack_context")
 				.ProtocolTool.Meta!["anthropic/maxResultSizeChars"]!.GetValue<int>());
+		// The old contract repeated the full redaction policy in four descriptions.
+		// Tool-search descriptions now keep only behavior that distinguishes each tool.
 		Assert.Contains(
-			"stored pack id remains valid until this server process exits; after restart, call pack_context again",
+			"pack_id for read_pack until server exit",
 			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"Results through 50,000 characters are returned inline; larger results are stored and return a pack_id for read_pack",
+			"Over 50,000 characters",
 			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
 			StringComparison.Ordinal);
-		foreach (var toolName in new[] { "analyze", "pack_context", "search_project", "get_file" })
+		foreach (var toolName in new[] { "search_project", "get_file" })
 		{
 			var description = tools.Single(tool => tool.Name == toolName).ProtocolTool.Description;
 			Assert.Contains("DEVPROJEX_REDACTED[<category>#<n>]", description, StringComparison.Ordinal);
-			Assert.Contains("documentation domains", description, StringComparison.Ordinal);
-			Assert.Contains("reserved IP ranges", description, StringComparison.Ordinal);
 		}
+		Assert.DoesNotContain(
+			"DEVPROJEX_REDACTED",
+			tools.Single(static tool => tool.Name == "analyze").ProtocolTool.Description,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"DEVPROJEX_REDACTED",
+			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
+			StringComparison.Ordinal);
 		Assert.Equal(
 			200_000,
 			tools.Single(static tool => tool.Name == "read_pack")
@@ -1990,6 +1998,28 @@ public sealed class McpServerIntegrationTests
 			"the mcp --exclude flag and the optional exclusions parameter",
 			outputExclusions.GetProperty("description").GetString(),
 			StringComparison.Ordinal);
+		var listOutput = tools.Single(static tool => tool.Name == "list_projects")
+			.ProtocolTool.OutputSchema!.Value.GetProperty("properties");
+		Assert.All(
+			new[] { "projects", "profiles", "baseline" },
+			name => Assert.False(string.IsNullOrWhiteSpace(
+				listOutput.GetProperty(name).GetProperty("description").GetString())));
+		var baselineOutput = listOutput.GetProperty("baseline").GetProperty("properties");
+		Assert.All(
+			new[] { "git", "exclusions", "agentExclusions" },
+			name => Assert.False(string.IsNullOrWhiteSpace(
+				baselineOutput.GetProperty(name).GetProperty("description").GetString())));
+		var analyzeOutput = tools.Single(static tool => tool.Name == "analyze")
+			.ProtocolTool.OutputSchema!.Value.GetProperty("properties");
+		Assert.All(
+			new[] { "files", "characters", "tokens", "detail", "topFiles" },
+			name => Assert.False(string.IsNullOrWhiteSpace(
+				analyzeOutput.GetProperty(name).GetProperty("description").GetString())));
+		var topFileOutput = analyzeOutput.GetProperty("topFiles").GetProperty("items").GetProperty("properties");
+		Assert.All(
+			new[] { "path", "tokens", "uninspected" },
+			name => Assert.False(string.IsNullOrWhiteSpace(
+				topFileOutput.GetProperty(name).GetProperty("description").GetString())));
 		var positiveNumericStrings = new (string Tool, string Property)[]
 		{
 			("get_tree", "max_file_bytes"),
@@ -2183,6 +2213,75 @@ public sealed class McpServerIntegrationTests
 		AssertTrustedTrailerOutsideSpotlight(
 			truncatedText,
 			"[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]");
+	}
+
+	[Fact]
+	public async Task GetTreeUsesTheDeepestCompleteImplicitDepthAndSuggestsItForStructuredFormats()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var first = 0; first < 4; first++)
+		{
+			for (var second = 0; second < 4; second++)
+			{
+				var directory = workspace.CreateDirectory($"project/L1-{first:D2}/L2-{first:D2}-{second:D2}");
+				for (var file = 0; file < 130; file++)
+					File.WriteAllText(Path.Combine(directory, $"File-{file:D3}.txt"), string.Empty);
+			}
+		}
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var automatic = await server.CallAsync("get_tree");
+		var explicitDepth = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text", ["max_depth"] = 5 });
+		var json = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json" });
+		var xml = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "xml" });
+
+		Assert.NotEqual(true, automatic.IsError);
+		for (var first = 0; first < 4; first++)
+		{
+			Assert.Contains($"L1-{first:D2}/", Text(automatic), StringComparison.Ordinal);
+			for (var second = 0; second < 4; second++)
+			{
+				Assert.Contains(
+					$"L2-{first:D2}-{second:D2}/",
+					Text(automatic),
+					StringComparison.Ordinal);
+			}
+		}
+		Assert.DoesNotContain("File-000.txt", Text(automatic), StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(
+			automatic,
+			"[Tree limited to depth 2 of 3 to fit 2000 lines; pass max_depth or include_patterns for a subtree.]");
+
+		Assert.NotEqual(true, explicitDepth.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			explicitDepth,
+			"[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]");
+		foreach (var structured in new[] { json, xml })
+		{
+			Assert.True(structured.IsError);
+			Assert.Contains(McpErrorCodes.PayloadTruncated, Text(structured), StringComparison.Ordinal);
+			Assert.Contains("pass max_depth: 2 for a complete document", Text(structured), StringComparison.Ordinal);
+			Assert.DoesNotContain("<untrusted-data-", Text(structured), StringComparison.Ordinal);
+		}
+
+		var fittingJson = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json", ["max_depth"] = 2 });
+		var fittingXml = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "xml", ["max_depth"] = 2 });
+		Assert.NotEqual(true, fittingJson.IsError);
+		Assert.NotEqual(true, fittingXml.IsError);
+		using var jsonDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(fittingJson)));
+		_ = XDocument.Parse(ExtractSpotlightBody(Text(fittingXml)));
+		Assert.Equal(JsonValueKind.Object, jsonDocument.RootElement.ValueKind);
 	}
 
 	[Fact]
@@ -2748,6 +2847,46 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task AnalyzeMarksUninspectedTopFilesAndUsesOneTokenBasis()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Small.txt"), "measured text\n");
+		File.WriteAllText(
+			Path.Combine(project, "Oversized.txt"),
+			new string('x', checked(16 * 1024 * 1024 + 1)));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		var result = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["top_files"] = 2 });
+		Assert.NotEqual(true, result.IsError);
+		var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+		AssertMatchesSchema(
+			structured,
+			Assert.IsType<JsonElement>(tools.Single(static tool => tool.Name == "analyze").ProtocolTool.OutputSchema));
+		Assert.True(JsonElement.DeepEquals(
+			structured,
+			server.GetLastToolCallWireResult().GetProperty("structuredContent")));
+		var totalTokens = structured.GetProperty("tokens").GetInt64();
+		var topFiles = structured.GetProperty("topFiles").EnumerateArray().ToArray();
+		var oversized = Assert.Single(
+			topFiles,
+			static file => file.GetProperty("path").GetString() == "Oversized.txt");
+		var measured = Assert.Single(
+			topFiles,
+			static file => file.GetProperty("path").GetString() == "Small.txt");
+
+		Assert.True(oversized.GetProperty("uninspected").GetBoolean());
+		Assert.False(measured.TryGetProperty("uninspected", out _));
+		Assert.All(topFiles, file => Assert.True(file.GetProperty("tokens").GetInt64() <= totalTokens));
+		Assert.Contains(McpErrorCodes.PayloadTruncated, AllText(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SearchProjectRejectsPatternsLongerThanTheSchemaLimitAtRuntime()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -2939,6 +3078,98 @@ public sealed class McpServerIntegrationTests
 		AssertSpotlighted(firstPage);
 		AssertSpotlighted(continuation);
 		AssertTrustedTrailerOutsideSpotlight(firstPage, "[Showing lines 1-1000 of ");
+	}
+
+	[Fact]
+	public async Task FileAndPackRangesClampPastTheEndButKeepOtherRangeErrors()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "FortyFour.txt"),
+			string.Join('\n', Enumerable.Range(1, 44).Select(static line => $"line-{line:D2}")));
+		File.WriteAllText(
+			Path.Combine(project, "Large.txt"),
+			string.Join('\n', Enumerable.Range(1, 1_500).Select(static line =>
+				$"pack-range-line-{line:D4}-{new string('x', 24)}")));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var clampedFile = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["path"] = "FortyFour.txt",
+				["start_line"] = 1,
+				["end_line"] = 60
+			});
+		const string fileNotice = "[Showing lines 1-44 of 44; end_line 60 exceeded the file.]";
+		Assert.NotEqual(true, clampedFile.IsError);
+		Assert.Contains("line-44", Text(clampedFile), StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(clampedFile, fileNotice);
+
+		var invalidFileStart = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "FortyFour.txt", ["start_line"] = 45 });
+		var invalidFileOrdering = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["path"] = "FortyFour.txt",
+				["start_line"] = 20,
+				["end_line"] = 10
+			});
+		foreach (var invalid in new[] { invalidFileStart, invalidFileOrdering })
+		{
+			Assert.True(invalid.IsError);
+			Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
+			Assert.Contains("Valid lines are 1-44", Text(invalid), StringComparison.Ordinal);
+		}
+
+		var stored = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Large.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var packId = ExtractPackId(Text(stored));
+		var clampedPack = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?>
+			{
+				["pack_id"] = packId,
+				["start_line"] = 1_001,
+				["end_line"] = 5_000
+			});
+		var packText = Text(clampedPack);
+		var packNotice = Regex.Match(
+			packText,
+			@"\[Showing lines 1001-(?<total>\d+) of \k<total>; end_line 5000 exceeded the file\.\]");
+		Assert.NotEqual(true, clampedPack.IsError);
+		Assert.True(packNotice.Success, packText);
+		AssertTrustedTrailerOutsideSpotlight(clampedPack, packNotice.Value);
+
+		var totalLines = int.Parse(
+			packNotice.Groups["total"].Value,
+			System.Globalization.CultureInfo.InvariantCulture);
+		var invalidPackStart = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId, ["start_line"] = totalLines + 1 });
+		var invalidPackOrdering = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?>
+			{
+				["pack_id"] = packId,
+				["start_line"] = 20,
+				["end_line"] = 10
+			});
+		foreach (var invalid in new[] { invalidPackStart, invalidPackOrdering })
+		{
+			Assert.True(invalid.IsError);
+			Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
+			Assert.Contains($"Valid lines are 1-{totalLines}", Text(invalid), StringComparison.Ordinal);
+		}
 	}
 
 	[Fact]

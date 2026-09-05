@@ -1092,6 +1092,38 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public void DesktopProcessLauncher_AppImageChildUsesOriginalImagePath()
+	{
+		using var temp = new TemporaryDirectory();
+		var appImagePath = temp.WriteFile(
+			"DevProjex-5.2-x86_64.AppImage",
+			"appimage fixture");
+		var previous = Environment.GetEnvironmentVariable("APPIMAGE");
+		try
+		{
+			Environment.SetEnvironmentVariable("APPIMAGE", appImagePath);
+
+			var startInfo = OperatingSystem.IsWindows()
+				? DesktopProcessLauncher.CreateStartInfo(
+					"desktop-request.json",
+					ProcessEntryPointResolver.ResolveSelfLaunchPath()!,
+					ProcessEntryPointResolver.ResolveManagedAssemblyPath(),
+					ProcessEntryPointResolver.ResolveCurrentAppHostPath(),
+					isWindows: false)
+				: DesktopProcessLauncher.CreateStartInfo(
+					"desktop-request.json");
+
+			Assert.True(
+				startInfo.ArgumentList.Contains(appImagePath),
+				$"Desktop launch did not target APPIMAGE. FileName={startInfo.FileName}; Arguments={string.Join(' ', startInfo.ArgumentList)}");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("APPIMAGE", previous);
+		}
+	}
+
+	[Fact]
 	public void WindowsFrameworkDependentDesktopLaunchPrefersGuiAppHost()
 	{
 		var startInfo = DesktopProcessLauncher.CreateStartInfo(

@@ -49,7 +49,7 @@ public sealed class DesktopProcessLauncher(
 
 	internal static ProcessStartInfo CreateStartInfo(string requestPath)
 	{
-		var executable = Environment.ProcessPath;
+		var executable = ProcessEntryPointResolver.ResolveSelfLaunchPath();
 		if (string.IsNullOrWhiteSpace(executable))
 		{
 			throw new DesktopControlException(
