@@ -101,6 +101,30 @@ public sealed partial class DeepGitWorkspaceEvidenceIntegrationTests
 	}
 
 	[Fact]
+	public async Task RepositoryBoundaries_SharedWorktreeExcludesRemainRelativeToEachOwner()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repository = temp.CreateDirectory("repository");
+		temp.CreateFile("repository/anchor.cs", "anchor");
+		InitializeIndex(repository, "anchor.cs");
+		RunGit(repository, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "Initial");
+		var worktree = Path.Combine(temp.Path, "worktree");
+		RunGit(repository, "worktree", "add", "--detach", worktree);
+		temp.CreateFile("repository/.git/info/exclude", "*.local\n");
+		temp.CreateFile("repository/hidden.local", "hidden");
+		temp.CreateFile("worktree/hidden.local", "hidden");
+		temp.CreateFile("repository/.gitignore", ".gitignore\n");
+		temp.CreateFile("worktree/.gitignore", ".gitignore\n");
+		foreach (var root in new[] { repository, worktree, temp.Path, repository })
+		{
+			var plan = await BuildBoundaryPlan(root, GitFilteringMode.RespectGitIgnore);
+			Assert.Equal(root == temp.Path ? 2 : 1, plan.IncludedFiles.Count);
+			Assert.All(plan.IncludedFiles, path => Assert.EndsWith("anchor.cs", path));
+		}
+	}
+
+	[Fact]
 	public async Task RepositoryBoundaries_DeclaredUninitializedSubmoduleIsAnOrdinaryEmptyDirectory()
 	{
 		EnsureGitAvailable();

@@ -114,9 +114,11 @@ internal sealed class GitIgnoreMatcherLoadSession
 			if (matcher.IsRepositoryBoundary)
 				continue;
 			string sourcePath;
+			string cacheKey;
 			try
 			{
 				sourcePath = Path.GetFullPath(Path.Combine(matcher.ScopeRootPath, ".gitignore"));
+				cacheKey = GitIgnoreMatcherFileCache.CreateCacheKey(matcher.ScopeRootPath, sourcePath);
 			}
 			catch (Exception exception) when (exception is
 			       NotSupportedException or
@@ -126,14 +128,14 @@ internal sealed class GitIgnoreMatcherLoadSession
 				continue;
 			}
 
-			if (_loads.ContainsKey(sourcePath))
+			if (_loads.ContainsKey(cacheKey))
 				continue;
 
 			// Rules created for this operation already own the parsed matcher. Seeding keeps
 			// later traversal from revalidating the same source while preserving the exact
 			// matcher instance and typed load result for every parallel consumer.
 			_loads.TryAdd(
-				sourcePath,
+				cacheKey,
 				new Lazy<GitIgnoreMatcherLoadResult>(
 					() => GitIgnoreMatcherLoadResult.Loaded(matcher),
 					LazyThreadSafetyMode.ExecutionAndPublication));
@@ -152,9 +154,11 @@ internal sealed class GitIgnoreMatcherLoadSession
 		IgnorePipelineDiagnostics.RecordGitIgnoreLoadRequest();
 
 		string normalizedPath;
+		string cacheKey;
 		try
 		{
 			normalizedPath = Path.GetFullPath(gitIgnorePath);
+			cacheKey = GitIgnoreMatcherFileCache.CreateCacheKey(scopeRootPath, normalizedPath);
 		}
 		catch (Exception exception) when (exception is
 		       NotSupportedException or
@@ -164,28 +168,28 @@ internal sealed class GitIgnoreMatcherLoadSession
 			return Execute(scopeRootPath, gitIgnorePath, cancellationToken);
 		}
 
-		if (_loads.TryGetValue(normalizedPath, out var cached))
+		if (_loads.TryGetValue(cacheKey, out var cached))
 		{
 			IgnorePipelineDiagnostics.RecordGitIgnoreLoadReuse();
 			cancellationToken.ThrowIfCancellationRequested();
-			return GetValueOrRemoveCanceled(normalizedPath, cached);
+			return GetValueOrRemoveCanceled(cacheKey, cached);
 		}
 
 		var candidate = new Lazy<GitIgnoreMatcherLoadResult>(
 			() => Execute(scopeRootPath, normalizedPath, cancellationToken),
 			LazyThreadSafetyMode.ExecutionAndPublication);
-		var selected = _loads.GetOrAdd(normalizedPath, candidate);
+		var selected = _loads.GetOrAdd(cacheKey, candidate);
 		if (!ReferenceEquals(selected, candidate))
 			IgnorePipelineDiagnostics.RecordGitIgnoreLoadReuse();
 
 		if (cancellationToken.IsCancellationRequested)
 		{
 			if (ReferenceEquals(selected, candidate))
-				RemoveExact(normalizedPath, selected);
+				RemoveExact(cacheKey, selected);
 			cancellationToken.ThrowIfCancellationRequested();
 		}
 
-		return GetValueOrRemoveCanceled(normalizedPath, selected);
+		return GetValueOrRemoveCanceled(cacheKey, selected);
 	}
 
 	private GitIgnoreMatcherLoadResult GetValueOrRemoveCanceled(
