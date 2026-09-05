@@ -635,7 +635,7 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Published Broken Pipe Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Startup Smoke (macOS)", workflow, StringComparison.Ordinal);
-		Assert.Contains("branches: [ \"master\", \"v5.1\" ]", workflow, StringComparison.Ordinal);
+		Assert.Contains("branches: [ \"master\", \"v5.1\", \"v5.2\" ]", workflow, StringComparison.Ordinal);
 		Assert.Contains("Smart Secrets context contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"Password=DEVPROJEX_REDACTED[connection-password#1]",
