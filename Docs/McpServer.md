@@ -319,8 +319,15 @@ Defaults:
 
 `include_patterns` and `exclude_patterns` are arrays of project-relative globs
 using `/`. Each array accepts at most 256 non-empty patterns, with at most 512
-characters per pattern. `paths` contains existing project-relative files or
-directories.
+characters per pattern. A pattern matches the whole project-relative path:
+`*` and `?` stay inside one path segment, `**/` spans any depth, and `{a,b}`
+lists alternatives (at most 64 per pattern, 1,024 per array after expansion).
+`*.cs` therefore matches only root-level files; `**/*.cs` is every C# file,
+`src/**` a subtree, `**/*.{ts,tsx}` two extensions. Matching is case-sensitive
+on every platform — copy names from `get_tree`. Negation (`!`) and character
+classes (`[...]`) are rejected with `DPX-MCP-INVALID-PATTERN` rather than
+matched literally, because a silently empty result reads as "no such files".
+`paths` contains existing project-relative files or directories.
 Numeric parameters accept JSON numbers and decimal numeric strings.
 Boolean parameters accept JSON booleans and the exact strings `"true"` and
 `"false"`.

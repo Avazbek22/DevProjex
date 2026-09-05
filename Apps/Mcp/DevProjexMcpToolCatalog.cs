@@ -115,7 +115,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "array",
 	  "maxItems": 256,
 	  "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-	  "description": "Project-relative glob patterns using '/'. They only narrow built-in and gitignore filtering."
+	  "description": "Project-relative glob patterns using '/' that only narrow the effective filters. A pattern matches the whole relative path: '*' and '?' stay inside one path segment, '**/' spans any depth ('**/*.cs' is every C# file, 'src/**' a subtree), '{a,b}' lists alternatives. Matching is case-sensitive on every platform; '!' negation and '[...]' classes are rejected."
 	}
 	""";
 
@@ -124,7 +124,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "array",
 	  "maxItems": 256,
 	  "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-	  "description": "Project-relative glob patterns using '/' to exclude additional paths."
+	  "description": "Project-relative glob patterns using '/' that remove further paths; same syntax as include_patterns."
 	}
 	""";
 

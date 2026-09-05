@@ -68,6 +68,40 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GlobBraceAlternativesExpandAndUnsupportedSyntaxIsRejectedNotMatchedLiterally()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "app\n");
+		File.WriteAllText(Path.Combine(project, "src", "Guide.md"), "guide\n");
+		File.WriteAllText(Path.Combine(project, "src", "Notes.txt"), "notes\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var braces = Text(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "**/*.{cs,md}" } }));
+		Assert.Contains("App.cs", braces, StringComparison.Ordinal);
+		Assert.Contains("Guide.md", braces, StringComparison.Ordinal);
+		Assert.DoesNotContain("Notes.txt", braces, StringComparison.Ordinal);
+
+		foreach (var (pattern, reason) in new[]
+		         {
+			         ("!src/**", "negation ('!') is not supported"),
+			         ("[Ss]rc/**", "character classes ('[...]') are not supported"),
+			         ("**/*.{cs,md", "unbalanced '{'")
+		         })
+		{
+			var rejected = await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["include_patterns"] = new[] { pattern } });
+			Assert.True(rejected.IsError);
+			Assert.StartsWith("DPX-MCP-INVALID-PATTERN", Text(rejected), StringComparison.Ordinal);
+			Assert.Contains(reason, Text(rejected), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public async Task ServerExclusionBaselineReplacesTheStandardSetAndYieldsToProfiles()
 	{
 		using var workspace = new TemporaryDirectory();

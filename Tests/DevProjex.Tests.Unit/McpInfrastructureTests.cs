@@ -649,6 +649,74 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void GlobStarStaysInsideOneSegmentAndMatchingIsCaseSensitive()
+	{
+		var rootOnly = McpGlobSet.Create(["*.cs"], null);
+		var anyDepth = McpGlobSet.Create(["**/*.cs"], null);
+		var subtree = McpGlobSet.Create(["src/**"], null);
+
+		Assert.True(rootOnly.Includes("Program.cs"));
+		Assert.False(rootOnly.Includes("src/App.cs"));
+		Assert.True(anyDepth.Includes("Program.cs"));
+		Assert.True(anyDepth.Includes("src/nested/App.cs"));
+		Assert.True(subtree.Includes("src/App.cs"));
+		Assert.False(subtree.Includes("SRC/App.cs"));
+		Assert.False(anyDepth.Includes("src/App.CS"));
+	}
+
+	[Fact]
+	public void GlobBracesExpandToAlternativesWithNestingAndCaps()
+	{
+		Assert.Equal(
+			["**/*.cs", "**/*.md"],
+			McpGlobSet.ExpandBraces("**/*.{cs,md}", "include_patterns"));
+		Assert.Equal(
+			["src/a.ts", "src/a.tsx", "src/b.ts", "src/b.tsx"],
+			McpGlobSet.ExpandBraces("src/{a,b}.{ts,tsx}", "include_patterns"));
+		Assert.Equal(
+			["lib/core.cs", "lib/core.g.cs", "lib/core.md"],
+			McpGlobSet.ExpandBraces("lib/core.{{,g.}cs,md}", "include_patterns"));
+		Assert.Equal(["plain.cs"], McpGlobSet.ExpandBraces("plain.cs", "include_patterns"));
+		Assert.Equal(["a.cs", "a.cs.bak"], McpGlobSet.ExpandBraces("a.cs{,.bak}", "include_patterns"));
+
+		var globs = McpGlobSet.Create(["**/*.{cs,md}"], ["**/*.{g,generated}.cs"]);
+		Assert.True(globs.Includes("src/App.cs"));
+		Assert.True(globs.Includes("docs/guide.md"));
+		Assert.False(globs.Includes("src/App.g.cs"));
+		Assert.False(globs.Includes("src/App.generated.cs"));
+		Assert.False(globs.Includes("src/App.txt"));
+
+		var tooMany = "{" + string.Join(",", Enumerable.Range(0, McpGlobSet.MaximumBraceAlternatives + 1)) + "}.cs";
+		Assert.Contains(
+			"brace alternatives",
+			Assert.Throws<McpToolException>(() => McpGlobSet.Create([tooMany], null)).Message,
+			StringComparison.Ordinal);
+		var perArray = "{" + string.Join(",", Enumerable.Range(0, McpGlobSet.MaximumBraceAlternatives)) + "}.cs";
+		var overflow = Enumerable
+			.Repeat(perArray, McpGlobSet.MaximumExpandedPatterns / McpGlobSet.MaximumBraceAlternatives + 1)
+			.ToArray();
+		Assert.Contains(
+			"after brace expansion",
+			Assert.Throws<McpToolException>(() => McpGlobSet.Create(overflow, null)).Message,
+			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("!src/**", "negation")]
+	[InlineData("[Ss]rc/**", "character classes")]
+	[InlineData("src/*.cs]", "character classes")]
+	[InlineData("**/*.{cs,md", "unbalanced '{'")]
+	[InlineData("**/*.cs}", "unbalanced '}'")]
+	public void GlobRejectsUnsupportedSyntaxInsteadOfMatchingItLiterally(string pattern, string reason)
+	{
+		var exception = Assert.Throws<McpToolException>(() => McpGlobSet.Create([pattern], null));
+
+		Assert.Equal(McpErrorCodes.InvalidPattern, exception.Code);
+		Assert.Contains(reason, exception.Message, StringComparison.Ordinal);
+		Assert.Contains("'**/' spans any depth", exception.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RootJailFileOpenerRejectsADirectPathOutsideEveryRoot()
 	{
 		using var workspace = new TemporaryDirectory();
