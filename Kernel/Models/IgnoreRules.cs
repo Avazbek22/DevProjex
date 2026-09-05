@@ -277,6 +277,8 @@ public sealed record IgnoreRules(
 			var scoped = scopedMatchersSource[0];
 			if (!IsPathInsideCompatibleScope(fullPath, scoped.ScopeRootPath))
 				return GitIgnoreEvaluation.NotIgnored;
+			if (scoped.IsOpaqueRepository)
+				return new GitIgnoreEvaluation(true, false);
 
 			return EvaluateWithSingleMatcher(scoped.Matcher, fullPath, isDirectory, name);
 		}
@@ -292,6 +294,8 @@ public sealed record IgnoreRules(
 
 		foreach (var scoped in scopedMatchers)
 		{
+			if (scoped.IsOpaqueRepository)
+				return new GitIgnoreEvaluation(true, false);
 			if (isDirectory && scoped.Matcher.HasNegationRules)
 				hasNegationAwareScope = true;
 
@@ -672,6 +676,12 @@ public sealed record IgnoreRules(
 			cacheKeyPath,
 			scopedMatchersSource,
 			static scoped => scoped.ScopeRootPath);
+		var lastBoundary = -1;
+		for (var index = 0; index < matched.Count; index++)
+			if (matched[index].IsRepositoryBoundary)
+				lastBoundary = index;
+		if (lastBoundary > 0)
+			matched = matched.Skip(lastBoundary).ToList();
 
 		ScopedGitIgnoreMatcher[] resolved = matched.Count == 0
 			? Array.Empty<ScopedGitIgnoreMatcher>()
@@ -1042,14 +1052,15 @@ public sealed record IgnoreRules(
 			get
 			{
 				if (_relativeMatcher is not null ||
-				    _additionalScopes is not null)
+				    _additionalScopes?.HasPatternRules == true)
 				{
 					return true;
 				}
 
 				return _evaluateRulesFallback &&
 				       (!ReferenceEquals(_rules.GetGitIgnoreMatcher(_useCandidates), GitIgnoreMatcher.Empty) ||
-				        _rules.GetScopedGitIgnoreMatchers(_useCandidates).Count > 0);
+				        _rules.GetScopedGitIgnoreMatchers(_useCandidates).Any(static scope =>
+					        !ReferenceEquals(scope.Matcher, GitIgnoreMatcher.Empty)));
 			}
 		}
 
@@ -1057,12 +1068,25 @@ public sealed record IgnoreRules(
 			(!_useCandidates && _rules.UseTrackedGitFilesOnly) ||
 			HasIgnoreRules;
 
+		public bool IsOpaqueRepository(string fullPath) =>
+			(_useCandidates || _rules.IsGitIgnoreTraversalEnabled) &&
+			_additionalScopes?.FindRepositoryBoundary(fullPath)?.IsOpaqueRepository == true;
+
+		public bool GitFilteringEnabled => _rules.IsGitIgnoreTraversalEnabled;
+
+		public string? GetOwningRepository(string fullPath) =>
+			_additionalScopes?.FindRepositoryBoundary(fullPath)?.ScopeRootPath;
+
+		private bool ContainsRepositoryBoundary(string fullPath) =>
+			_additionalScopes?.FindRepositoryBoundary(fullPath)?.ScopeRootPath == fullPath;
+
 		public GitIgnoreScanContext WithScope(
 			ScopedGitIgnoreMatcher scopedMatcher,
 			string scopeRelativePath)
 		{
-			if (ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty) ||
-			    ContainsScope(scopedMatcher.ScopeRootPath))
+			if (ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty) && !scopedMatcher.IsRepositoryBoundary ||
+			    ContainsScope(scopedMatcher.ScopeRootPath) &&
+			    (!scopedMatcher.IsRepositoryBoundary || ContainsRepositoryBoundary(scopedMatcher.ScopeRootPath)))
 			{
 				return this;
 			}
@@ -1084,12 +1108,12 @@ public sealed record IgnoreRules(
 			ScopedGitIgnoreMatcher scopedMatcher,
 			string scanRootPath)
 		{
-			if (ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty) ||
-			    ContainsScope(scopedMatcher.ScopeRootPath) ||
-			    !scopedMatcher.Matcher.TryGetRelativePath(
+			if (ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty) && !scopedMatcher.IsRepositoryBoundary ||
+			    ContainsScope(scopedMatcher.ScopeRootPath) &&
+			    (!scopedMatcher.IsRepositoryBoundary || ContainsRepositoryBoundary(scopedMatcher.ScopeRootPath)) ||
+			    !TryGetScopeRelativePath(scopedMatcher.ScopeRootPath,
 				    scanRootPath,
-				    out var matcherBaseRelativePath,
-				    allowRoot: true))
+				    out var matcherBaseRelativePath))
 			{
 				return this;
 			}
@@ -1148,6 +1172,8 @@ public sealed record IgnoreRules(
 				return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 			if (!_useCandidates && !_rules.IsGitIgnoreTraversalEnabled)
 				return GitIgnoreEvaluation.NotIgnored;
+			if (IsOpaqueRepository(fullPath))
+				return new GitIgnoreEvaluation(true, false);
 
 			if (!_useCandidates && _rules.UseTrackedGitFilesOnly)
 				return EvaluateTrackedFilesOnly(fullPath, isDirectory);
@@ -1224,9 +1250,9 @@ public sealed record IgnoreRules(
 			if (trackedPath.Index.ContainsOrHasDescendantNormalizedRelativePath(trackedPath.RelativePath))
 				return GitIgnoreEvaluation.NotIgnored;
 
-			// Untracked directories are traversal-only containers. This lets the scanner
-			// discover an independent nested repository at any depth without exposing the
-			// container when it has no tracked descendants.
+			// Untracked containers remain traversable until the scanner can classify a
+			// repository boundary as an independent owner, declared submodule, or opaque
+			// embedded repository. Containers without tracked descendants stay hidden.
 			return new GitIgnoreEvaluation(
 				IsIgnored: true,
 				ShouldTraverseIgnoredDirectory: true);
@@ -1322,6 +1348,26 @@ public sealed record IgnoreRules(
 		{
 			private readonly AdditionalGitIgnoreScope? _parent = parent;
 			private readonly ScopedGitIgnoreMatcher _scopedMatcher = scopedMatcher;
+			public bool HasPatternRules { get; } =
+				!ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty) || parent?.HasPatternRules == true;
+
+			public ScopedGitIgnoreMatcher? FindRepositoryBoundary(string fullPath)
+			{
+				ScopedGitIgnoreMatcher? nearest = null;
+				for (var current = this; current is not null; current = current._parent)
+				{
+					var matcher = current._scopedMatcher;
+					if (matcher.IsRepositoryBoundary &&
+					    (nearest is null || matcher.ScopeRootPath.Length > nearest.ScopeRootPath.Length) &&
+					    IsPathInsideScope(fullPath, matcher.ScopeRootPath))
+						nearest = matcher;
+				}
+				return nearest;
+			}
+
+			private bool ResetsInheritedRules(string scanRelativePath) =>
+				_scopedMatcher.IsRepositoryBoundary &&
+				(matcherBaseRelativePath is not null || TryGetMatcherRelativePath(scanRelativePath, out _));
 
 			public bool Contains(string scopeRootPath)
 			{
@@ -1345,7 +1391,9 @@ public sealed record IgnoreRules(
 			{
 				var evaluation = inherited;
 				reIncludedIgnoredPath = false;
-				if (_parent is not null)
+				if (ResetsInheritedRules(scanRelativePath))
+					evaluation = GitIgnoreEvaluation.NotIgnored;
+				else if (_parent is not null)
 				{
 					evaluation = _parent.Evaluate(
 						scanRelativePath,
@@ -1392,7 +1440,7 @@ public sealed record IgnoreRules(
 				string name,
 				GitIgnoreMatcher.IgnoreEvaluation inherited)
 			{
-				var evaluation = _parent?.EvaluateRulesOnly(
+				var evaluation = ResetsInheritedRules(scanRelativePath) ? default : _parent?.EvaluateRulesOnly(
 					scanRelativePath,
 					isDirectory,
 					name,
@@ -1518,7 +1566,11 @@ public sealed record IgnoreRules(
 
 public sealed record ScopedGitIgnoreMatcher(
 	string ScopeRootPath,
-	GitIgnoreMatcher Matcher);
+	GitIgnoreMatcher Matcher)
+{
+	public bool IsRepositoryBoundary { get; init; }
+	public bool IsOpaqueRepository { get; init; }
+}
 
 public sealed record ScopedSmartIgnoreMatcher(
 	string ScopeRootPath,

@@ -1,6 +1,6 @@
 namespace DevProjex.Tests.Integration;
 
-public sealed class DeepGitWorkspaceEvidenceIntegrationTests
+public sealed partial class DeepGitWorkspaceEvidenceIntegrationTests
 {
 	[Fact]
 	public void FullRefresh_DeepRealRepositorySwitchesGitModesWithoutChangingAvailability()

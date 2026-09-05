@@ -1125,7 +1125,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					directoryGitIgnoreCandidateContext,
 					cancellationToken,
 					loadSession: gitIgnoreLoadSession);
-				if (IsActiveGitIgnoreReadFailure(rules, gitIgnoreLoadStatus))
+				if (directoryGitIgnoreCandidateContext.IsOpaqueRepository(dir))
+					gitIgnoreImpactCount++;
+				if (directoryGitIgnoreContext.IsOpaqueRepository(dir) && gitIgnoreLoadStatus != GitIgnoreMatcherLoadStatus.ReadFailure)
+					continue;
+				if (IsActiveGitIgnoreReadFailure(rules, gitIgnoreLoadStatus) ||
+				    directoryGitIgnoreContext.IsOpaqueRepository(dir) && gitIgnoreLoadStatus == GitIgnoreMatcherLoadStatus.ReadFailure)
 				{
 					directories.Add(new DirectoryScanNode(
 						dir,
@@ -2820,11 +2825,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						cancellationToken,
 						captureFiles);
 					directoryFiles = captureFiles ? directoryBatch.Files : null;
-					if (!string.IsNullOrWhiteSpace(directoryBatch.GitMetadataPath))
-					{
-						discoveredGitRepositoryRoots.Add(facts.FullPath);
-						gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
-					}
 					(gitIgnoreContext, gitIgnoreCandidateContext, var gitIgnoreLoadStatus) = EnterGitIgnoreScope(
 						facts.FullPath,
 						facts.RelativePath,
@@ -2836,7 +2836,21 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						discoveredGitIgnoreMatchers,
 						discoveredGitTrackedPathIndexes,
 						gitIgnoreLoadSession);
-					if (IsActiveGitIgnoreReadFailure(effectiveRules, gitIgnoreLoadStatus))
+					if (!string.IsNullOrWhiteSpace(directoryBatch.GitMetadataPath) &&
+					    !gitIgnoreCandidateContext.IsOpaqueRepository(facts.FullPath))
+					{
+						discoveredGitRepositoryRoots.Add(facts.FullPath);
+						gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
+					}
+					if (gitIgnoreCandidateContext.IsOpaqueRepository(facts.FullPath))
+						directControllerImpactCounts = new IgnoreControllerImpactCounts(GitIgnore: 1);
+					if (gitIgnoreContext.IsOpaqueRepository(facts.FullPath))
+					{
+						directoryFiles = [];
+						canTraverseChildren = false;
+					}
+					if (IsActiveGitIgnoreReadFailure(effectiveRules, gitIgnoreLoadStatus) ||
+					    gitIgnoreContext.IsOpaqueRepository(facts.FullPath) && gitIgnoreLoadStatus == GitIgnoreMatcherLoadStatus.ReadFailure)
 					{
 							directories.Add(new EffectiveIgnoreScanNode(
 								facts.FullPath,
@@ -3838,19 +3852,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		GitIgnoreMatcherLoadSession? loadSession = null)
 	{
 		loadSession ??= new GitIgnoreMatcherLoadSession();
-		var activeContainsScope = activeContext.ContainsScope(directoryPath);
-		var candidateContainsScope = candidateContext.ContainsScope(directoryPath);
-		ScopedGitIgnoreMatcher? scopedMatcher = null;
-		var loadStatus = GitIgnoreMatcherLoadStatus.NotFound;
-		if (!string.IsNullOrWhiteSpace(gitIgnorePath))
-		{
-			var loadResult = loadSession.LoadWithCancellation(
-				directoryPath,
-				gitIgnorePath,
-				cancellationToken);
-			scopedMatcher = loadResult.Matcher;
-			loadStatus = loadResult.Status;
-		}
+		var loadResult = loadSession.LoadScope(directoryPath, gitIgnorePath, gitMetadataPath,
+			gitMetadataPath is null ? null : activeContext.GetOwningRepository(directoryPath), cancellationToken);
+		var scopedMatcher = loadResult.Matcher;
+		var loadStatus = loadResult.Status;
 
 		var requiresTrackedPathIndex =
 			activeContext.RequiresTrackedPathIndex ||
@@ -3858,7 +3863,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			scopedMatcher is not null &&
 			!ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty);
 		var reachedRepositoryBoundary = !string.IsNullOrWhiteSpace(gitMetadataPath);
-		if (requiresTrackedPathIndex && (reachedRepositoryBoundary || scopedMatcher is not null))
+		if (scopedMatcher?.IsOpaqueRepository != true && requiresTrackedPathIndex && (reachedRepositoryBoundary || scopedMatcher is not null))
 		{
 			GitTrackedPathIndex? trackedPathIndex = null;
 			var loadedTrackedPathIndex = reachedRepositoryBoundary
@@ -3903,12 +3908,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		discoveredMatchers?.Add(scopedMatcher);
 		return (
-			activeContainsScope
-				? activeContext
-				: activeContext.WithScope(scopedMatcher, directoryRelativePath),
-			candidateContainsScope
-				? candidateContext
-				: candidateContext.WithScope(scopedMatcher, directoryRelativePath),
+			activeContext.WithScope(scopedMatcher, directoryRelativePath),
+			candidateContext.WithScope(scopedMatcher, directoryRelativePath),
 			loadStatus);
 	}
 

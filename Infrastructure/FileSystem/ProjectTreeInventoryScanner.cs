@@ -340,8 +340,6 @@ internal static class ProjectTreeInventoryScanner
 				continue;
 
 			var gitControlPaths = FindGitControlPaths(childEntries);
-			if (!string.IsNullOrWhiteSpace(gitControlPaths.GitMetadataPath))
-				discoveredGitRepositoryRoots.Add(parent.FullPath);
 			var gitIgnoreContexts = parentGitIgnoreContexts.EnterDirectory(
 				parent.FullPath,
 				parent.RelativePath,
@@ -352,6 +350,11 @@ internal static class ProjectTreeInventoryScanner
 				gitIgnoreLoadSession,
 				cancellationToken,
 				out var gitIgnoreReadFailed);
+			if (gitIgnoreContexts.Primary.IsOpaqueRepository(parent.FullPath) && !gitIgnoreReadFailed)
+				continue;
+			if (!string.IsNullOrWhiteSpace(gitControlPaths.GitMetadataPath) &&
+			    !gitIgnoreContexts.Secondary.IsOpaqueRepository(parent.FullPath))
+				discoveredGitRepositoryRoots.Add(parent.FullPath);
 			if (gitIgnoreReadFailed)
 			{
 				MarkAccessDenied(entries, parentIndex);
@@ -719,17 +722,11 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 
 		var primaryContext = Primary;
 		var secondaryContext = Secondary;
-		ScopedGitIgnoreMatcher? matcher = null;
-		if (!string.IsNullOrWhiteSpace(gitIgnorePath))
-		{
-			var loadResult = gitIgnoreLoadSession.LoadWithCancellation(
-				directoryPath,
-				gitIgnorePath,
-				cancellationToken);
-			matcher = loadResult.Matcher;
-			gitIgnoreReadFailed = ReportGitIgnoreReadFailures &&
-			                      loadResult.Status == GitIgnoreMatcherLoadStatus.ReadFailure;
-		}
+		var loadResult = gitIgnoreLoadSession.LoadScope(directoryPath, gitIgnorePath, gitMetadataPath,
+			gitMetadataPath is null ? null : primaryContext.GetOwningRepository(directoryPath), cancellationToken);
+		var matcher = loadResult.Matcher;
+		gitIgnoreReadFailed = (ReportGitIgnoreReadFailures || matcher?.IsOpaqueRepository == true && Primary.GitFilteringEnabled) &&
+		                     loadResult.Status == GitIgnoreMatcherLoadStatus.ReadFailure;
 
 		var requiresTrackedPathIndex =
 			primaryContext.RequiresTrackedPathIndex ||
@@ -737,7 +734,7 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 			matcher is not null &&
 			!ReferenceEquals(matcher.Matcher, GitIgnoreMatcher.Empty);
 		var reachedRepositoryBoundary = !string.IsNullOrWhiteSpace(gitMetadataPath);
-		if (requiresTrackedPathIndex && (reachedRepositoryBoundary || matcher is not null))
+		if (matcher?.IsOpaqueRepository != true && requiresTrackedPathIndex && (reachedRepositoryBoundary || matcher is not null))
 		{
 			GitTrackedPathIndex? trackedPathIndex = null;
 			var loadedTrackedPathIndex = reachedRepositoryBoundary
@@ -786,17 +783,11 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 			};
 		}
 
-		var primaryContainsScope = primaryContext.ContainsScope(directoryPath);
-		var secondaryContainsScope = secondaryContext.ContainsScope(directoryPath);
 		discoveredMatchers.Add(matcher);
 		return this with
 		{
-			Primary = primaryContainsScope
-				? primaryContext
-				: primaryContext.WithScope(matcher, directoryRelativePath),
-			Secondary = secondaryContainsScope
-				? secondaryContext
-				: secondaryContext.WithScope(matcher, directoryRelativePath)
+			Primary = primaryContext.WithScope(matcher, directoryRelativePath),
+			Secondary = secondaryContext.WithScope(matcher, directoryRelativePath)
 		};
 	}
 }
