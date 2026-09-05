@@ -549,6 +549,7 @@
   "Terminal.Error.DesktopTimeout": "Upłynął limit czasu żądania pulpitu.",
   "Terminal.Error.DesktopProtocolMismatch": "Instancja pulpitu używa niezgodnego protokołu kontroli.",
   "Terminal.Error.DesktopPayloadTooLarge": "Komunikat kontrolny pulpitu przekracza bezpieczny limit rozmiaru.",
+  "Terminal.Error.DesktopNotIncluded": "Ta dystrybucja nie zawiera aplikacji komputerowej; zainstaluj DevProjex Desktop zgodnie z https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
   "Terminal.Error.DesktopRequestFailed": "Nie można zrealizować żądania na pulpicie.",
   "Terminal.Error.CommandInvalid": "Żądanie polecenia jest nieprawidłowe.",
   "Terminal.Hint.DidYouMean": "wskazówka: Czy miałeś na myśli „ {0} ”?",

@@ -1794,6 +1794,8 @@ Write-Host "Version: $resolvedVersion"
 Write-Host "Store package version: $storePackageVersion"
 Write-Host "Build mode  : isolated workspace (local source tree untouched)"
 Write-Host "GitHub build: Release (single-file, self-contained)"
+Write-Step "Headless package channels"
+Write-Host "NuGet and npm headless channels are published by the publish-packages workflow."
 if ($GitHubArtifactsOnly) {
     Write-Host "Store build : skipped (-GitHubArtifactsOnly)"
 }

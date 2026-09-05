@@ -537,6 +537,7 @@
   "Terminal.Error.DesktopTimeout": "Desktop so'rovining kutish vaqti tugadi.",
   "Terminal.Error.DesktopProtocolMismatch": "Desktop nusxasi mos kelmaydigan boshqaruv protokolidan foydalanadi.",
   "Terminal.Error.DesktopPayloadTooLarge": "Desktop boshqaruv xabari xavfsiz o'lcham chegarasidan katta.",
+  "Terminal.Error.DesktopNotIncluded": "Bu distributivda Desktop ilovasi yo‘q; DevProjex Desktop’ni https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md orqali o‘rnating.",
   "Terminal.Error.DesktopRequestFailed": "Desktop so'rovini yakunlab bo'lmadi.",
   "Terminal.Error.CommandInvalid": "Buyruq so'rovi noto'g'ri.",
   "Terminal.Hint.DidYouMean": "maslahat: «{0}» ni nazarda tutdingizmi?",

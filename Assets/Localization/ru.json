@@ -555,6 +555,7 @@
   "Terminal.Error.DesktopTimeout": "Истёк тайм-аут запроса к Desktop.",
   "Terminal.Error.DesktopProtocolMismatch": "Экземпляр Desktop использует несовместимый протокол управления.",
   "Terminal.Error.DesktopPayloadTooLarge": "Сообщение управления Desktop превышает безопасный размер.",
+  "Terminal.Error.DesktopNotIncluded": "В этой дистрибуции нет приложения Desktop; установите DevProjex Desktop по инструкции: https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
   "Terminal.Error.DesktopRequestFailed": "Не удалось выполнить запрос к Desktop.",
   "Terminal.Error.CommandInvalid": "Запрос команды недопустим.",
   "Terminal.Hint.DidYouMean": "подсказка: Возможно, имелось в виду «{0}»?",

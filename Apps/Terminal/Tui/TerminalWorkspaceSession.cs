@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 using Terminal.Gui.App;
@@ -936,13 +937,24 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void BeginOpenDesktopFromWelcome()
 	{
+		if (!_services.HostCapabilities.HasDesktopApplication)
+		{
+			ShowError(
+				"DPX-DESKTOP-NOT-INCLUDED",
+				L("Terminal.Error.DesktopNotIncluded"));
+			return;
+		}
+
 		ShowWelcomeStatus(L("Terminal.Tui.OpeningDesktop"), TerminalWorkspaceTheme.Accent);
 		var operationCts = ReplaceActiveOperation();
 		TrackActiveOperation(Task.Run(async () =>
 		{
 			try
 			{
-				var exitCode = await new DesktopCommandHandler(_environment, writeOutput: false)
+				var exitCode = await new DesktopCommandHandler(
+						_environment,
+						launcher: new DesktopProcessLauncher(_services.HostCapabilities),
+						writeOutput: false)
 					.OpenAsync(new DesktopOpenRequest(), operationCts.Token)
 					.ConfigureAwait(false);
 				if (exitCode != CommandLineExitCodes.Success)

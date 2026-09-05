@@ -30,6 +30,35 @@ users should install or generate the platform launcher and use that command.
 Direct invocation of the physical Windows WinExe path is an advanced diagnostic
 detail and is not the supported shell entry point.
 
+## CI without a persistent install (from v5.2)
+
+The v5.2 headless packages expose this command contract without the desktop app.
+They are published independently; before their first publication, use a direct
+GitHub release binary. The npm route requires Node 20 or later:
+
+```yaml
+- uses: actions/setup-node@v4
+  with:
+    node-version: 24
+- run: npx -y devprojex analyze . --findings --fail-on-findings
+```
+
+The NuGet route requires .NET SDK 10.0.100 or later:
+
+```yaml
+- uses: actions/setup-dotnet@v5
+  with:
+    dotnet-version: 10.0.x
+- run: dnx devprojex analyze . --findings --fail-on-findings
+```
+
+`dnx` performs a non-interactive first download by default; its opt-in switch is
+`--interactive`, and it has no `--yes` option. The DevProjex arguments above do not
+require a delimiter. Both examples return policy exit code `3` when an effective
+secret finding exists and never print the detected value. npm installs with
+`--omit=optional` cannot run the binary; see [Installation.md](Installation.md)
+for the documented exit-`1` launcher diagnostic.
+
 ## Command Tree
 
 ```text

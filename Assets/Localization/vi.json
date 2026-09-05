@@ -549,6 +549,7 @@
   "Terminal.Error.DesktopTimeout": "Yêu cầu máy tính để bàn đã hết thời gian chờ.",
   "Terminal.Error.DesktopProtocolMismatch": "Phiên bản máy tính để bàn sử dụng giao thức điều khiển không tương thích.",
   "Terminal.Error.DesktopPayloadTooLarge": "Thông báo điều khiển trên màn hình vượt quá giới hạn kích thước an toàn.",
+  "Terminal.Error.DesktopNotIncluded": "Bản phân phối này không có ứng dụng máy tính; hãy cài đặt DevProjex Desktop từ https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
   "Terminal.Error.DesktopRequestFailed": "Không thể hoàn thành yêu cầu trên máy tính để bàn.",
   "Terminal.Error.CommandInvalid": "Yêu cầu lệnh không hợp lệ.",
   "Terminal.Hint.DidYouMean": "gợi ý: Ý bạn là ' {0} '?",

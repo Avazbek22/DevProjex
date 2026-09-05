@@ -555,6 +555,7 @@
   "Terminal.Error.DesktopTimeout": "Die Desktop-Anfrage hat das Zeitlimit überschritten.",
   "Terminal.Error.DesktopProtocolMismatch": "Die Desktop-Instanz verwendet ein inkompatibles Steuerprotokoll.",
   "Terminal.Error.DesktopPayloadTooLarge": "Die Desktop-Steuernachricht überschreitet die sichere Größe.",
+  "Terminal.Error.DesktopNotIncluded": "Diese Distribution enthält keine Desktop-App; installieren Sie DevProjex Desktop gemäß https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
   "Terminal.Error.DesktopRequestFailed": "Die Desktop-Anfrage konnte nicht abgeschlossen werden.",
   "Terminal.Error.CommandInvalid": "Die Befehlsanfrage ist ungültig.",
   "Terminal.Hint.DidYouMean": "Hinweis: Meinten Sie „{0}“?",

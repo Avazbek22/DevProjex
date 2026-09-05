@@ -1109,21 +1109,37 @@ internal static class PublishedApplicationLocator
 			path);
 	}
 
-	public static string FindApplicationAssembly()
+	public static string FindApplicationAssembly(
+		PublishedApplicationHost host = PublishedApplicationHost.Desktop)
 	{
-		var path = Path.Combine(
-			FindRepositoryRoot(),
+		var repository = FindRepositoryRoot();
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
+		var projectDirectory = host == PublishedApplicationHost.Desktop
+			? "Avalonia"
+			: "TerminalHost";
+		var assemblyName = host == PublishedApplicationHost.Desktop
+			? "DevProjex.dll"
+			: "devprojex.dll";
+		var basePath = Path.Combine(
+			repository,
 			"Apps",
-			"Avalonia",
+			projectDirectory,
 			"bin",
-			ResolveBuildConfiguration(AppContext.BaseDirectory),
-			"net10.0",
-			"DevProjex.dll");
-		if (File.Exists(path))
+			configuration,
+			"net10.0");
+		var candidates = host == PublishedApplicationHost.Desktop
+			? new[] { Path.Combine(basePath, assemblyName) }
+			: new[]
+			{
+				Path.Combine(basePath, assemblyName),
+				Path.Combine(basePath, RuntimeInformation.RuntimeIdentifier, assemblyName)
+			};
+		var path = candidates.FirstOrDefault(File.Exists);
+		if (path is not null)
 			return path;
 		throw new FileNotFoundException(
-			"Build the DevProjex Avalonia host before running process tests.",
-			path);
+			$"Build the DevProjex {host} host before running process tests.",
+			candidates[0]);
 	}
 
 	internal static string ResolveBuildConfiguration(string baseDirectory)
@@ -1172,4 +1188,10 @@ internal static class PublishedApplicationLocator
 		}
 		throw new DirectoryNotFoundException("DevProjex repository root was not found.");
 	}
+}
+
+internal enum PublishedApplicationHost
+{
+	Desktop,
+	Headless
 }

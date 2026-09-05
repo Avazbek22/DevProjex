@@ -549,6 +549,7 @@
   "Terminal.Error.DesktopTimeout": "デスクトップリクエストがタイムアウトしました。",
   "Terminal.Error.DesktopProtocolMismatch": "デスクトップ インスタンスは互換性のない制御プロトコルを使用しています。",
   "Terminal.Error.DesktopPayloadTooLarge": "デスクトップ コントロール メッセージが安全なサイズ制限を超えています。",
+  "Terminal.Error.DesktopNotIncluded": "このディストリビューションにはデスクトップ アプリがありません。https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md から DevProjex Desktop をインストールしてください。",
   "Terminal.Error.DesktopRequestFailed": "デスクトップ要求を完了できませんでした。",
   "Terminal.Error.CommandInvalid": "コマンド要求が無効です。",
   "Terminal.Hint.DidYouMean": "ヒント:「{0}」のことですか?",

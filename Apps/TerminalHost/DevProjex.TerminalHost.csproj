@@ -1,0 +1,95 @@
+<Project>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>devprojex</AssemblyName>
+    <AssemblyTitle>DevProjex</AssemblyTitle>
+    <Product>DevProjex</Product>
+    <RootNamespace>DevProjex.TerminalHost</RootNamespace>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>devprojex</ToolCommandName>
+    <PackageId>devprojex</PackageId>
+    <RuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
+    <ToolPackageRuntimeIdentifiers>$(RuntimeIdentifiers)</ToolPackageRuntimeIdentifiers>
+    <SelfContained>true</SelfContained>
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+
+    <_HeadlessVersionNeedsPatch>$([System.Text.RegularExpressions.Regex]::IsMatch('$(DevProjexVersion)', '^\d+\.\d+$'))</_HeadlessVersionNeedsPatch>
+    <HeadlessPackageVersion Condition="'$(_HeadlessVersionNeedsPatch)'=='True'">$(DevProjexVersion).0</HeadlessPackageVersion>
+    <HeadlessPackageVersion Condition="'$(HeadlessPackageVersion)'==''">$(DevProjexVersion)</HeadlessPackageVersion>
+    <PackageVersion>$(HeadlessPackageVersion)</PackageVersion>
+    <Description>Turn a folder or repository into focused context for AI from the CLI, TUI, or MCP server.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/Avazbek22/DevProjex</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Avazbek22/DevProjex</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference
+      Include="..\..\Application\Application.csproj"
+      GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
+    <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj">
+      <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
+    <ProjectReference Include="..\Mcp\DevProjex.Mcp.csproj">
+      <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
+    <ProjectReference Include="..\Terminal\DevProjex.Terminal.csproj">
+      <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\Assets\AppIcon\Linux\png\128.png" Pack="true" PackagePath="icon.png" />
+    <None Include="NuGet.README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+  <Target
+    Name="RemovePackageSymbolsFromHeadlessPublish"
+    BeforeTargets="_ComputeFilesToBundle"
+    Condition="'$(DebugSymbols)' != 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish
+        Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+  <!-- Microsoft.NET.PackTool builds every RID inner package concurrently. Each inner build gives
+       Infrastructure a different embedded native payload, while the deliberately RID-less class
+       libraries share ordinary bin/obj paths. Serialize only this pack orchestration so a plain
+       `dotnet pack` remains deterministic; normal build and publish behavior stays unchanged. -->
+  <Target Name="_CreateRIDSpecificToolPackages"
+          Condition="'$(RuntimeIdentifier)' == ''
+            and $(CreateRidSpecificToolPackages)
+            and !$(_InnerToolsPublishAot)">
+    <PropertyGroup>
+      <_PackageRids>$(ToolPackageRuntimeIdentifiers)</_PackageRids>
+      <_PackageRids Condition="'$(_PackageRids)' == ''">$(RuntimeIdentifiers)</_PackageRids>
+    </PropertyGroup>
+    <ItemGroup>
+      <_rids Include="$(_PackageRids)" />
+      <_RidSpecificToolPackageProject
+        Include="$(MSBuildProjectFullPath)"
+        AdditionalProperties="RuntimeIdentifier=%(_rids.Identity);" />
+    </ItemGroup>
+    <MSBuild
+      BuildInParallel="false"
+      Projects="@(_RidSpecificToolPackageProject)"
+      Targets="Pack">
+      <Output TaskParameter="TargetOutputs" ItemName="_ToolPackageOutputs" />
+    </MSBuild>
+  </Target>
+</Project>

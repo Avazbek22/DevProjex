@@ -537,6 +537,7 @@
   "Terminal.Error.DesktopTimeout": "Desktop сұрауының күту уақыты аяқталды.",
   "Terminal.Error.DesktopProtocolMismatch": "Desktop данасы үйлеспейтін басқару протоколын қолданады.",
   "Terminal.Error.DesktopPayloadTooLarge": "Desktop басқару хабары қауіпсіз өлшем шегінен асады.",
+  "Terminal.Error.DesktopNotIncluded": "Бұл дистрибуцияда Desktop қолданбасы жоқ; DevProjex Desktop қолданбасын https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md нұсқаулығы бойынша орнатыңыз.",
   "Terminal.Error.DesktopRequestFailed": "Desktop сұрауын аяқтау мүмкін болмады.",
   "Terminal.Error.CommandInvalid": "Пәрмен сұрауы жарамсыз.",
   "Terminal.Hint.DidYouMean": "кеңес: «{0}» дегенді меңзедіңіз бе?",

@@ -38,6 +38,22 @@ inspect -> select -> verify -> export
 `DevProjex.Terminal` remains a class library inside the primary application. Every
 RID publish contains exactly one primary DevProjex application executable.
 
+### v5.2 headless distribution extension
+
+Starting with v5.2, the same `DevProjex.Terminal` application is hosted by the
+desktop executable and by the `devprojex` headless executable distributed through
+RID-specific NuGet tool packages and npm platform packages. For identical arguments,
+environment, and inputs, the CLI, TUI, and MCP byte contracts are identical; the
+headless host adds no alternate parser or command implementation.
+
+The only additive host-capability difference is an attempted desktop launch. When
+`open` cannot reuse a running desktop and the TUI action **Open desktop** is invoked,
+the headless host reports `DPX-DESKTOP-NOT-INCLUDED`, explains that this distribution
+has no desktop app, links to `Docs/Installation.md`, and returns exit code `5` for a
+direct command. `ui ...` continues to control an already running compatible Desktop
+instance over IPC. Existing `DPX-*` codes, exit meanings, output schemas, and command
+grammar are unchanged.
+
 ## Supported Entry Points
 
 - `devprojex` in an interactive terminal starts Terminal Workspace.

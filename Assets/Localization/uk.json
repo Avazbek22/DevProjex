@@ -549,6 +549,7 @@
   "Terminal.Error.DesktopTimeout": "Час очікування запиту на робочий стіл минув.",
   "Terminal.Error.DesktopProtocolMismatch": "Екземпляр робочого столу використовує несумісний протокол керування.",
   "Terminal.Error.DesktopPayloadTooLarge": "Повідомлення керування робочим столом перевищує безпечний розмір.",
+  "Terminal.Error.DesktopNotIncluded": "Цей дистрибутив не містить застосунку Desktop; установіть DevProjex Desktop за інструкцією https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
   "Terminal.Error.DesktopRequestFailed": "Не вдалося виконати запит робочого столу.",
   "Terminal.Error.CommandInvalid": "Запит команди недійсний.",
   "Terminal.Hint.DidYouMean": "підказка: Ви мали на увазі \" {0} \"?",
