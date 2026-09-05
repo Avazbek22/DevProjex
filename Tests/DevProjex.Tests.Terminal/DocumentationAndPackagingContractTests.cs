@@ -916,6 +916,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("/p:PublishReadyToRun=true", workflow, StringComparison.Ordinal);
 		Assert.Contains("/p:PublishTrimmed=false", workflow, StringComparison.Ordinal);
 		Assert.Contains("appstreamcli validate --strict --explain", workflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_VERSION: 0.16.4", workflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_SHA256:", workflow, StringComparison.Ordinal);
+		Assert.Contains("LIBXMLB_SHA256:", workflow, StringComparison.Ordinal);
+		Assert.Contains("MESON_SHA256:", workflow, StringComparison.Ordinal);
 		Assert.Contains("desktop-file-validate", workflow, StringComparison.Ordinal);
 		Assert.Contains("appdir-lint.sh", workflow, StringComparison.Ordinal);
 		Assert.Contains("Verify packaged binary identity", workflow, StringComparison.Ordinal);

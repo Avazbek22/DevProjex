@@ -66,11 +66,12 @@ Avalonia application independently of the desktop entry.
 ## Local AppImage build
 
 The authoritative build is `.github/workflows/package-appimage.yml`. On an
-x86_64 Ubuntu 22.04 or newer host, the equivalent local build is:
+x86_64 Ubuntu 24.04 or newer host, the equivalent local build is:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y appstream desktop-file-utils file jq libfile-mimeinfo-perl xvfb
+appstreamcli --version # 0.16.4 or newer
 
 VERSION=5.1
 RID=linux-x64
@@ -129,6 +130,12 @@ ARCH="${APPIMAGE_ARCH}" VERSION="${VERSION}" APPIMAGE_EXTRACT_AND_RUN=1 \
   "${BUILD_ROOT}/appimagetool.AppImage" "${APP_DIR}" \
   "artifacts/DevProjex-${VERSION}-${APPIMAGE_ARCH}.AppImage"
 ```
+
+The CI build itself remains on Ubuntu 22.04. Its distribution AppStream is too
+old for strict validation and the `<developer>` element, so the workflow builds
+AppStream 0.16.4 and libxmlb 0.3.14 from checksum-pinned upstream sources. To
+build on Ubuntu 22.04 locally, run that workflow step first and then use the same
+commands above.
 
 For native aarch64, use `RID=linux-arm64`, `APPIMAGE_ARCH=aarch64`, the
 `appimagetool-aarch64.AppImage` URL, and SHA-256

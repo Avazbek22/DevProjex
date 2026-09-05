@@ -99,11 +99,23 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            appstream \
+            build-essential \
             desktop-file-utils \
             file \
+            gettext \
+            gperf \
+            itstool \
             jq \
+            libcurl4-openssl-dev \
             libfile-mimeinfo-perl \
+            libglib2.0-dev \
+            liblzma-dev \
+            libxml2-dev \
+            libyaml-dev \
+            ninja-build \
+            pkg-config \
+            unzip \
+            xsltproc \
             xvfb
 
       - name: Cache NuGet packages
@@ -138,6 +150,75 @@ jobs:
             printf 'Expected exactly one published file named DevProjex; found:\n%s\n' "${published_files[*]}"
             exit 1
           fi
+
+      - name: Build and verify the pinned AppStream validator
+        shell: bash
+        env:
+          APPSTREAM_VERSION: 0.16.4
+          APPSTREAM_SHA256: d4f722d79c6a2f29d9dc5c6f464927469543353f386581c778c9bed7c60a54ed
+          LIBXMLB_VERSION: 0.3.14
+          LIBXMLB_SHA256: 92bea792c6a33d243e7b6f210519bd6ba71b010463fbec1b5a71ddd35736ec20
+          MESON_VERSION: 1.4.0
+          MESON_SHA256: 476a458d51fcfa322a6bdc64da5138997c542d08e6b2e49b9fa68c46fd7c4475
+        run: |
+          set -euo pipefail
+          validator_root="${RUNNER_TEMP}/appstream-validator"
+          source_root="${validator_root}/AppStream-${APPSTREAM_VERSION}"
+          build_root="${validator_root}/build"
+          meson_root="${validator_root}/meson"
+          rm -rf -- "${validator_root}"
+          mkdir -p -- "${validator_root}" "${meson_root}"
+
+          curl --fail --location --retry 3 \
+            "https://www.freedesktop.org/software/appstream/releases/AppStream-${APPSTREAM_VERSION}.tar.xz" \
+            --output "${validator_root}/AppStream.tar.xz"
+          echo "${APPSTREAM_SHA256}  ${validator_root}/AppStream.tar.xz" | \
+            sha256sum --check --strict
+          tar -xf "${validator_root}/AppStream.tar.xz" -C "${validator_root}"
+
+          curl --fail --location --retry 3 \
+            "https://github.com/hughsie/libxmlb/archive/refs/tags/${LIBXMLB_VERSION}.tar.gz" \
+            --output "${validator_root}/libxmlb.tar.gz"
+          echo "${LIBXMLB_SHA256}  ${validator_root}/libxmlb.tar.gz" | \
+            sha256sum --check --strict
+          mkdir -p -- "${source_root}/subprojects/libxmlb"
+          tar -xf "${validator_root}/libxmlb.tar.gz" \
+            --strip-components=1 \
+            -C "${source_root}/subprojects/libxmlb"
+
+          curl --fail --location --retry 3 \
+            "https://files.pythonhosted.org/packages/33/75/b1a37fa7b2dbca8c0dbb04d5cdd7e2720c8ef6febe41b4a74866350e041c/meson-${MESON_VERSION}-py3-none-any.whl" \
+            --output "${validator_root}/meson.whl"
+          echo "${MESON_SHA256}  ${validator_root}/meson.whl" | \
+            sha256sum --check --strict
+          unzip -q "${validator_root}/meson.whl" -d "${meson_root}"
+
+          export PYTHONPATH="${meson_root}"
+          python3 -m mesonbuild.mesonmain setup \
+            "${build_root}" \
+            "${source_root}" \
+            -Dstemming=false \
+            -Dsystemd=false \
+            -Dgir=false \
+            -Dqt=false \
+            -Dcompose=false \
+            -Dapt-support=false \
+            -Ddocs=false \
+            -Dapidocs=false \
+            -Dinstall-docs=false \
+            -Dlibxmlb:gtkdoc=false \
+            -Dlibxmlb:introspection=false \
+            -Dlibxmlb:tests=false \
+            -Dlibxmlb:cli=false \
+            -Dlibxmlb:zstd=false
+          python3 -m mesonbuild.mesonmain compile -C "${build_root}" appstreamcli
+
+          validator_path="${build_root}/tools/appstreamcli"
+          [[ -x "${validator_path}" ]]
+          "${validator_path}" --version | grep --fixed-strings "${APPSTREAM_VERSION}"
+          echo "${build_root}/tools" >> "${GITHUB_PATH}"
+          echo "LD_LIBRARY_PATH=${build_root}/src:${build_root}/subprojects/libxmlb/src" >> \
+            "${GITHUB_ENV}"
 
       - name: Assemble and validate the AppDir
         shell: bash
