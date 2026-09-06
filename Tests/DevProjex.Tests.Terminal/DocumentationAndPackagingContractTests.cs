@@ -273,7 +273,7 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
-	public void ReleasePayloadManifestTracksEveryGrammarLocalizationAndStoreResource()
+	public void ReleasePayloadContractsTrackGrammarsStoreResourcesAndSdkPublishItems()
 	{
 		var rootPath = FindRepositoryRoot();
 		using var manifestDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(
@@ -296,16 +296,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Equal(projectGrammars, manifestGrammars);
 
 		var release = manifest.GetProperty("release");
-		var manifestLocalizations = release.GetProperty("localizations")
-			.EnumerateArray()
-			.Select(static element => element.GetString())
-			.Order(StringComparer.Ordinal)
-			.ToArray();
-		var localizationFiles = Directory.EnumerateFiles(Path.Combine(rootPath, "Assets", "Localization"), "*.json")
-			.Select(Path.GetFileName)
-			.Order(StringComparer.Ordinal)
-			.ToArray();
-		Assert.Equal(localizationFiles, manifestLocalizations);
+		Assert.False(release.TryGetProperty("localizations", out _));
 
 		var store = release.GetProperty("store");
 		var manifestLanguages = store.GetProperty("resourceLanguages")
@@ -333,6 +324,10 @@ public sealed class DocumentationAndPackagingContractTests
 		var releaseScript = File.ReadAllText(Path.Combine(rootPath, "Scripts", "release-all.ps1"));
 		Assert.Contains("/p:EnableCompressionInSingleFile=false", releaseScript, StringComparison.Ordinal);
 		Assert.Contains("Test-ReleaseArtifacts.ps1", releaseScript, StringComparison.Ordinal);
+		var buildTargets = File.ReadAllText(Path.Combine(rootPath, "Directory.Build.targets"));
+		Assert.Contains("@(FilesToBundle)", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("@(ResolvedFileToPublish)", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("Write-PublishPayloadReceipt.ps1", buildTargets, StringComparison.Ordinal);
 	}
 
 	[Fact]
