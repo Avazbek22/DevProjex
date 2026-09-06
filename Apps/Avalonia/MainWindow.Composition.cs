@@ -1365,7 +1365,8 @@ public partial class MainWindow
             SettingsPanelAnimationDuration,
             () => new MemoryCleanupRetentionSnapshot(
                 _codeCompressionSession.Diagnostics.RetainedCacheBytes,
-                _metrics.RetainedReadFactBytes));
+                _metrics.RetainedReadFactBytes),
+			_backgroundTasks);
         _treeViewport = new TreeViewportController(
             _viewModel,
             new TreeViewportControls(
