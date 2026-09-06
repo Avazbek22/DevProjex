@@ -18,9 +18,31 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Architecture.md",
 		"CLI-Profiles.md",
 		"Desktop-Control.md",
+		"Git-Safety.md",
 		"SmartIgnore.md",
-		"HideSecrets.md"
+		"HideSecrets.md",
+		"Release-Channels.md",
+		"Release-Process.md"
 	];
+
+	[Fact]
+	public void GitSafetyProfilesAndFilterRefusalRemainDocumented()
+	{
+		var rootPath = FindRepositoryRoot();
+		var safety = File.ReadAllText(Path.Combine(rootPath, "Docs", "Git-Safety.md"));
+		var smartIgnore = File.ReadAllText(Path.Combine(rootPath, "Docs", "SmartIgnore.md"));
+		var commandLine = File.ReadAllText(Path.Combine(rootPath, "Docs", "CommandLine.md"));
+
+		Assert.Contains("LocalRead", safety, StringComparison.Ordinal);
+		Assert.Contains("ManagedCheckout", safety, StringComparison.Ordinal);
+		Assert.Contains("ExplicitNetwork", safety, StringComparison.Ordinal);
+		Assert.Contains("GIT_CONFIG_NOSYSTEM=1", safety, StringComparison.Ordinal);
+		Assert.Contains("GIT_NO_LAZY_FETCH=1", safety, StringComparison.Ordinal);
+		Assert.Contains("DPX-GIT-UNSAFE-FILTER", safety, StringComparison.Ordinal);
+		Assert.Contains("SSH configuration", safety, StringComparison.Ordinal);
+		Assert.Contains("Git-Safety.md", smartIgnore, StringComparison.Ordinal);
+		Assert.Contains("Git-Safety.md", commandLine, StringComparison.Ordinal);
+	}
 
 	[Fact]
 	public void McpSecretDocumentationSeparatesControlFromDetectionGuarantees()
@@ -49,6 +71,29 @@ public sealed class DocumentationAndPackagingContractTests
 			Assert.Contains("Gitleaks", document, StringComparison.OrdinalIgnoreCase);
 			Assert.Contains("scope-aware", document, StringComparison.OrdinalIgnoreCase);
 		}
+	}
+
+	[Fact]
+	public void McpAgentErgonomicsAreSpecifiedInServerAndVersionContracts()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var version = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedVersion = Regex.Replace(version, @"\s+", " ");
+
+		Assert.Contains("end_line B exceeded the file", server, StringComparison.Ordinal);
+		Assert.Contains("start_line=B+1", server, StringComparison.Ordinal);
+		Assert.Contains("Tree limited to depth D of N", server, StringComparison.Ordinal);
+		Assert.Contains("An explicit `max_depth` is the caller's choice", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("JSON and XML never return partial syntax", server, StringComparison.Ordinal);
+		Assert.Contains("analyze.topFiles[].uninspected", server, StringComparison.Ordinal);
+		Assert.Contains("initialize` result", server, StringComparison.Ordinal);
+
+		Assert.Contains("MCP agent ergonomics changes four v5.2 behaviors", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("there is no strict-range switch", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("Passing an explicit `max_depth` restores", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("Cached MCP", normalizedVersion, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -180,6 +225,193 @@ public sealed class DocumentationAndPackagingContractTests
 			["Infrastructure.csproj", "DevProjex.Mcp.csproj"]);
 		AssertRidPropertyDoesNotFlowPastInfrastructure(mcpProject, ["Infrastructure.csproj"]);
 		AssertRidPropertyDoesNotFlowPastInfrastructure(infrastructureProject, excludedProjects: null);
+	}
+
+	[Fact]
+	public void HeadlessPackagesStayRidSpecificAndFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var hostPath = Path.Combine(rootPath, "Apps", "TerminalHost", "DevProjex.TerminalHost.csproj");
+		var host = XDocument.Load(hostPath);
+		string Property(string name) => host.Descendants(name).Single().Value;
+
+		Assert.Equal("Exe", Property("OutputType"));
+		Assert.Equal("devprojex", Property("AssemblyName"));
+		Assert.Equal("devprojex", Property("PackageId"));
+		Assert.Equal("devprojex", Property("ToolCommandName"));
+		Assert.Equal("true", Property("PackAsTool"));
+		Assert.Equal("true", Property("SelfContained"));
+		Assert.Equal("false", Property("PublishAot"));
+		Assert.Equal("false", Property("PublishTrimmed"));
+		Assert.DoesNotContain(
+			host.Descendants("ProjectReference"),
+			element => (element.Attribute("Include")?.Value ?? string.Empty)
+				.Contains("Avalonia", StringComparison.OrdinalIgnoreCase));
+		var rids = Property("RuntimeIdentifiers").Split(';');
+		Assert.Equal(
+			["win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64"],
+			rids);
+		Assert.DoesNotContain("any", rids);
+
+		using var manifestDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Headless",
+			"payload-manifest.json")));
+		var manifestGrammars = manifestDocument.RootElement.GetProperty("grammars")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var infrastructure = XDocument.Load(Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var projectGrammars = infrastructure.Descendants()
+			.Where(static element => element.Name.LocalName is "DevProjexGrammar" or "DevProjexVendoredGrammar")
+			.Select(static element => element.Attribute("Include")?.Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(projectGrammars, manifestGrammars);
+		Assert.Contains("tree-sitter-c-sharp", manifestGrammars);
+		Assert.Contains("tree-sitter-kotlin", manifestGrammars);
+
+		var launcherTemplate = File.ReadAllText(Path.Combine(
+			rootPath, "Packaging", "Npm", "devprojex", "package.json.template"));
+		Assert.DoesNotContain("\"dependencies\"", launcherTemplate, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"scripts\"", launcherTemplate, StringComparison.Ordinal);
+		Assert.Contains("\"optionalDependencies\"", launcherTemplate, StringComparison.Ordinal);
+		Assert.Contains("\"node\": \">=20\"", launcherTemplate, StringComparison.Ordinal);
+
+		var workflow = File.ReadAllText(Path.Combine(
+			rootPath, ".github", "workflows", "publish-packages.yml"));
+		Assert.Contains("Test-HeadlessPackages.ps1", workflow, StringComparison.Ordinal);
+		Assert.Contains("Test-HeadlessPackageGateMutation.ps1", workflow, StringComparison.Ordinal);
+		Assert.Contains("windows-latest", workflow, StringComparison.Ordinal);
+		Assert.Contains("ubuntu-latest", workflow, StringComparison.Ordinal);
+		Assert.Contains("macos-latest", workflow, StringComparison.Ordinal);
+		Assert.Contains("NuGet/login@v1", workflow, StringComparison.Ordinal);
+		Assert.Contains("inputs.dry_run == false", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("--skip-duplicate", workflow, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ReleasePayloadContractsTrackGrammarsStoreResourcesAndSdkPublishItems()
+	{
+		var rootPath = FindRepositoryRoot();
+		using var manifestDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Headless",
+			"payload-manifest.json")));
+		var manifest = manifestDocument.RootElement;
+		var manifestGrammars = manifest.GetProperty("grammars")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var infrastructure = XDocument.Load(Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var projectGrammars = infrastructure.Descendants()
+			.Where(static element => element.Name.LocalName is "DevProjexGrammar" or "DevProjexVendoredGrammar")
+			.Select(static element => element.Attribute("Include")?.Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(projectGrammars, manifestGrammars);
+
+		var release = manifest.GetProperty("release");
+		Assert.False(release.TryGetProperty("localizations", out _));
+		var headless = release.GetProperty("headless");
+		Assert.Equal("DevProjex-headless", headless.GetProperty("archivePrefix").GetString());
+		Assert.Equal("SHA256SUMS.headless.txt", headless.GetProperty("checksumFile").GetString());
+
+		var store = release.GetProperty("store");
+		var manifestLanguages = store.GetProperty("resourceLanguages")
+			.EnumerateArray()
+			.Select(static element => element.GetString()!.ToLowerInvariant())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var storeManifest = XDocument.Load(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Windows",
+			"DevProjex.Store",
+			"Package.appxmanifest"));
+		var storeLanguages = storeManifest.Descendants()
+			.Where(static element => element.Name.LocalName == "Resource")
+			.Select(static element => element.Attribute("Language")!.Value.ToLowerInvariant())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(storeLanguages, manifestLanguages);
+		Assert.Equal(["arm64", "x64"], store.GetProperty("platforms")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal));
+
+		var releaseScript = File.ReadAllText(Path.Combine(rootPath, "Scripts", "release-all.ps1"));
+		Assert.Contains("/p:EnableCompressionInSingleFile=false", releaseScript, StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifacts.ps1", releaseScript, StringComparison.Ordinal);
+		var buildTargets = File.ReadAllText(Path.Combine(rootPath, "Directory.Build.targets"));
+		Assert.Contains("@(FilesToBundle)", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("@(ResolvedFileToPublish)", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("Write-PublishPayloadReceipt.ps1", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("DevProjexGenerateFolderPayloadReceipt", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("'$(Configuration)'=='ReleaseStore'", buildTargets, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void HeadlessReleaseAndContainerChannelsRemainDistinctAndFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var buildScript = File.ReadAllText(Path.Combine(rootPath, "Scripts", "build-headless-packages.ps1"));
+		var validator = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-ReleaseArtifacts.ps1"));
+		var archiveWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-headless.yml"));
+		var containerWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "publish-container.yml"));
+		var containerSmoke = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-HeadlessContainerSmoke.ps1"));
+		var dockerfile = File.ReadAllText(Path.Combine(rootPath, "Dockerfile"));
+		var installation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Installation.md"));
+		var releaseProcess = File.ReadAllText(Path.Combine(rootPath, "Docs", "Release-Process.md"));
+
+		Assert.Contains("$($manifest.release.headless.archivePrefix).v$Version.$($Rid.rid).$extension", buildScript, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex.v$Version.$($Rid.rid)", buildScript, StringComparison.Ordinal);
+		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", buildScript, StringComparison.Ordinal);
+		Assert.Contains("'headless'", validator, StringComparison.Ordinal);
+		Assert.Contains("[string]$Rid.binary", validator, StringComparison.Ordinal);
+		Assert.Contains("release.headless.checksumFile", validator, StringComparison.Ordinal);
+
+		Assert.Contains("types: [published]", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/checkout@v7", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/setup-dotnet@v6", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/upload-artifact@v7", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/download-artifact@v8", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("gh release upload", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("if: ${{ steps.metadata.outputs.release_tag != '' }}", archiveWorkflow, StringComparison.Ordinal);
+
+		Assert.Contains("FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("runtime-deps:10.0-noble-chiseled-extra", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("-p:PublishSingleFile=false", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("-p:DevProjexGrammarDelivery=Content", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("USER app", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("ENTRYPOINT [\"devprojex\"]", dockerfile, StringComparison.Ordinal);
+		Assert.DoesNotContain("alpine", dockerfile, StringComparison.OrdinalIgnoreCase);
+
+		using var glama = JsonDocument.Parse(File.ReadAllText(Path.Combine(rootPath, "glama.json")));
+		Assert.Equal("https://glama.ai/mcp/schemas/server.json", glama.RootElement.GetProperty("$schema").GetString());
+		Assert.Equal(["Avazbek22"], glama.RootElement.GetProperty("maintainers").EnumerateArray()
+			.Select(static item => item.GetString()!).ToArray());
+
+		Assert.Contains("ubuntu-24.04-arm", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("linux/amd64,linux/arm64", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("docker/setup-buildx-action@v4", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("docker/login-action@v4", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("docker/build-push-action@v7", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/attest-build-provenance@v4", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("packages: write", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("id-token: write", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("attestations: write", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("--read-only", containerSmoke, StringComparison.Ordinal);
+		Assert.Contains("--tmpfs /tmp", containerSmoke, StringComparison.Ordinal);
+		Assert.DoesNotContain("setup-qemu", containerWorkflow, StringComparison.OrdinalIgnoreCase);
+
+		Assert.Contains("DevProjex-headless.v<version>.<rid>", installation, StringComparison.Ordinal);
+		Assert.Contains("ghcr.io/avazbek22/devprojex", installation, StringComparison.Ordinal);
+		Assert.Contains("Two independent producers cannot atomically update one checksum manifest", releaseProcess, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -450,6 +682,8 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("env -u CI \"$2\"", workflow, StringComparison.Ordinal);
 		Assert.Contains("Portable Launcher ConPTY TUI Smoke", workflow, StringComparison.Ordinal);
+		Assert.Contains("${{ startsWith(matrix.rid, 'win-') }}", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("${{ matrix.rid == 'win-x64' }}", workflow, StringComparison.Ordinal);
 		Assert.Contains("Published Native PTY TUI Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Published Single-File Extraction Contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(
@@ -567,7 +801,7 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Published Broken Pipe Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Startup Smoke (macOS)", workflow, StringComparison.Ordinal);
-		Assert.Contains("branches: [ \"master\", \"v5.1\" ]", workflow, StringComparison.Ordinal);
+		Assert.Contains("branches: [ \"master\", \"v5.1\", \"v5.2\" ]", workflow, StringComparison.Ordinal);
 		Assert.Contains("Smart Secrets context contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"Password=DEVPROJEX_REDACTED[connection-password#1]",
@@ -665,7 +899,11 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.DoesNotContain("\"--report\"", workflow, StringComparison.Ordinal);
 
 		var desktopEntry = File.ReadAllText(
-			Path.Combine(rootPath, "Packaging", "Linux", "devprojex.desktop"));
+			Path.Combine(
+				rootPath,
+				"Packaging",
+				"Linux",
+				"io.github.Avazbek22.DevProjex.desktop"));
 		Assert.Contains("Exec=devprojex open %f", desktopEntry, StringComparison.Ordinal);
 		Assert.DoesNotContain("Exec=devprojex %F", desktopEntry, StringComparison.Ordinal);
 
@@ -880,6 +1118,59 @@ public sealed class DocumentationAndPackagingContractTests
 					stack.Push((child, [.. path, child.Name]));
 			}
 		}
+	}
+
+	[Fact]
+	public void AppImageWorkflowAndDocumentationKeepTheReleaseContractFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"package-appimage.yml"));
+		var installation = File.ReadAllText(Path.Combine(
+			rootPath,
+			"Docs",
+			"Installation.md"));
+		var linuxPackaging = File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Linux",
+			"README.md"));
+
+		Assert.Contains("workflow_dispatch:", workflow, StringComparison.Ordinal);
+		Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
+		Assert.Contains("- Packaging/Linux/**", workflow, StringComparison.Ordinal);
+		Assert.Contains("- Kernel/ProcessEntryPointResolver.cs", workflow, StringComparison.Ordinal);
+		Assert.Contains("types: [published]", workflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04", workflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04-arm", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishSingleFile=true", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:IncludeNativeLibrariesForSelfExtract=true", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishReadyToRun=true", workflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishTrimmed=false", workflow, StringComparison.Ordinal);
+		Assert.Contains("appstreamcli validate --strict --explain", workflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_VERSION: 0.16.4", workflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_SHA256:", workflow, StringComparison.Ordinal);
+		Assert.Contains("LIBXMLB_SHA256:", workflow, StringComparison.Ordinal);
+		Assert.Contains("MESON_SHA256:", workflow, StringComparison.Ordinal);
+		Assert.Contains("desktop-file-validate", workflow, StringComparison.Ordinal);
+		Assert.Contains("appdir-lint.sh", workflow, StringComparison.Ordinal);
+		Assert.Contains("Verify packaged binary identity", workflow, StringComparison.Ordinal);
+		Assert.Contains("needs: [prepare, package]", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"if: ${{ needs.prepare.outputs.upload_release == 'true' }}",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains("gh release upload", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("--updateinformation", workflow, StringComparison.Ordinal);
+		Assert.Contains("output_path}.zsync", workflow, StringComparison.Ordinal);
+		Assert.Contains("DevProjex-<version>-x86_64.AppImage", installation, StringComparison.Ordinal);
+		Assert.Contains("--appimage-extract-and-run", installation, StringComparison.Ordinal);
+		Assert.Contains("Open Anyway", installation, StringComparison.Ordinal);
+		Assert.Contains("data/DevProjex", linuxPackaging, StringComparison.Ordinal);
+		Assert.Contains("https://github.com/Avazbek22/DevProjex", linuxPackaging, StringComparison.Ordinal);
 	}
 
 	private static string FindRepositoryRoot()

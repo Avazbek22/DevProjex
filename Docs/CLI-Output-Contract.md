@@ -144,7 +144,8 @@ tree text and content headings. Machine metadata remains directly addressable:
 ```
 
 When enabled content inspection withholds one or more files because they are too
-large, unreadable, non-regular filesystem entries, or use an unsupported encoding,
+large, unreadable, access-denied, non-regular filesystem entries, or use an
+unsupported encoding,
 analysis adds:
 
 ```json
@@ -163,8 +164,8 @@ analysis adds:
 
 `unscannableCount` equals the array length. Each entry contains a source-relative
 `path` with `/` separators and a `reason` token of exactly `too-large`,
-`unreadable`, or `unsupported-encoding`. The object is omitted when no files are
-withheld.
+`unreadable`, `access-denied`, or `unsupported-encoding`. The object is omitted
+when no files are withheld.
 
 With `--findings`, analysis adds an ordered top-level `findings` array. Each
 effective finding contains exactly `ruleId`, `category` (`secret` or
@@ -188,6 +189,15 @@ object with `compressedFiles`, `unchangedFiles`, `bodyTransformedFiles`,
 transformation. Inventory and source byte size still describe the selected project
 files, not a materialized export container. Machine selection output exposes the
 independent `compressCode`, `stripComments`, and `stripBlankLines` Booleans.
+
+When a requested syntax transformation cannot load its grammar delivery source or
+a language grammar, `analyze` and `export context` preserve complete source text and
+emit warning `DPX-COMPRESSION-UNAVAILABLE` on stderr. Their JSON diagnostics include
+the same stable code, warning severity, and one-line reason naming the content
+directory or grammar resource. This warning does not change exit status and is not
+promoted by `analyze --strict`; it reports reduced optimization, not incomplete or
+unsafe output. Unsupported languages and parse/safety rejection remain distinct
+unchanged-file outcomes and do not use this code.
 
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.

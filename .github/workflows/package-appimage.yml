@@ -1,0 +1,619 @@
+---
+name: Package AppImage
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/package-appimage.yml
+      - Apps/Avalonia/Services/AvaloniaDeveloperCommandRunner.cs
+      - Apps/Avalonia/Services/CommandLineBenchmarkRunner.cs
+      - Apps/Terminal/DesktopControl/DesktopProcessLauncher.cs
+      - Assets/AppIcon/Linux/png/**
+      - Infrastructure/AppInstances/AppInstanceLauncher.cs
+      - Infrastructure/TerminalCommands/TerminalCommandSetupService.cs
+      - Kernel/ProcessEntryPointResolver.cs
+      - Packaging/Linux/**
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the v prefix
+        required: true
+        type: string
+      release_tag:
+        description: Existing GitHub release tag to receive the AppImages
+        required: false
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  APPSTREAM_VERSION: 0.16.4
+  APPSTREAM_SHA256: d4f722d79c6a2f29d9dc5c6f464927469543353f386581c778c9bed7c60a54ed
+  LIBXMLB_VERSION: 0.3.14
+  LIBXMLB_SHA256: 92bea792c6a33d243e7b6f210519bd6ba71b010463fbec1b5a71ddd35736ec20
+  MESON_VERSION: 1.4.0
+  MESON_SHA256: 476a458d51fcfa322a6bdc64da5138997c542d08e6b2e49b9fa68c46fd7c4475
+
+jobs:
+  prepare:
+    name: Resolve AppImage release metadata
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      release_tag: ${{ steps.metadata.outputs.release_tag }}
+      upload_release: ${{ steps.metadata.outputs.upload_release }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version and release tag
+        id: metadata
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          DISPATCH_RELEASE_TAG: ${{ inputs.release_tag }}
+          PUBLISHED_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            version="${PUBLISHED_RELEASE_TAG#v}"
+            release_tag="${PUBLISHED_RELEASE_TAG}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            version="$(sed -n 's:.*<DevProjexVersion[^>]*>\([^<]*\)</DevProjexVersion>.*:\1:p' Directory.Build.props)"
+            release_tag=""
+          else
+            version="${DISPATCH_VERSION}"
+            release_tag="${DISPATCH_RELEASE_TAG}"
+            if [[ "${version}" == v* ]]; then
+              echo "::error::workflow_dispatch version must not start with v"
+              exit 1
+            fi
+          fi
+
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+([.][0-9]+)?([.][0-9]+)?([+-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "::error::Unsupported version syntax: ${version}"
+            exit 1
+          fi
+
+          upload_release=false
+          if [[ -n "${release_tag}" ]]; then
+            upload_release=true
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "upload_release=${upload_release}" >> "${GITHUB_OUTPUT}"
+
+  package:
+    name: AppImage (${{ matrix.appimage_arch }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            rid: linux-x64
+            appimage_arch: x86_64
+            appimagetool_sha256: a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0
+          - runner: ubuntu-22.04-arm
+            rid: linux-arm64
+            appimage_arch: aarch64
+            appimagetool_sha256: 1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install packaging and smoke-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential \
+            desktop-file-utils \
+            file \
+            gettext \
+            gperf \
+            itstool \
+            jq \
+            libcurl4-openssl-dev \
+            libfile-mimeinfo-perl \
+            libglib2.0-dev \
+            liblzma-dev \
+            libxml2-dev \
+            libyaml-dev \
+            ninja-build \
+            pkg-config \
+            unzip \
+            xsltproc \
+            xvfb
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: appimage-nuget-${{ matrix.rid }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
+          restore-keys: |
+            appimage-nuget-${{ matrix.rid }}-
+
+      - name: Publish the release single file
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj \
+            -c Release \
+            -r "${{ matrix.rid }}" \
+            --self-contained true \
+            /p:PublishSingleFile=true \
+            /p:IncludeNativeLibrariesForSelfExtract=true \
+            /p:PublishReadyToRun=true \
+            /p:PublishTrimmed=false \
+            /p:DebugType=None \
+            /p:DebugSymbols=false \
+            "/p:DevProjexVersion=${VERSION}" \
+            -o "artifacts/publish/${{ matrix.rid }}"
+
+          mapfile -t published_files < <(find "artifacts/publish/${{ matrix.rid }}" -type f -print)
+          if [[ "${#published_files[@]}" -ne 1 || "$(basename "${published_files[0]}")" != "DevProjex" ]]; then
+            printf 'Expected exactly one published file named DevProjex; found:\n%s\n' "${published_files[*]}"
+            exit 1
+          fi
+
+      - name: Cache the pinned AppStream validator
+        id: appstream_validator_cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/appstream-validator
+          key: appstream-validator-${{ runner.os }}-${{ matrix.rid }}-${{ env.APPSTREAM_VERSION }}-${{ env.APPSTREAM_SHA256 }}-${{ env.LIBXMLB_VERSION }}-${{ env.LIBXMLB_SHA256 }}-${{ env.MESON_VERSION }}-${{ env.MESON_SHA256 }}
+
+      - name: Build and verify the pinned AppStream validator
+        if: steps.appstream_validator_cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          validator_root="${RUNNER_TEMP}/appstream-validator"
+          source_root="${validator_root}/AppStream-${APPSTREAM_VERSION}"
+          build_root="${validator_root}/build"
+          meson_root="${validator_root}/meson"
+          rm -rf -- "${validator_root}"
+          mkdir -p -- "${validator_root}" "${meson_root}"
+
+          curl --fail --location --retry 3 \
+            "https://www.freedesktop.org/software/appstream/releases/AppStream-${APPSTREAM_VERSION}.tar.xz" \
+            --output "${validator_root}/AppStream.tar.xz"
+          echo "${APPSTREAM_SHA256}  ${validator_root}/AppStream.tar.xz" | \
+            sha256sum --check --strict
+          tar -xf "${validator_root}/AppStream.tar.xz" -C "${validator_root}"
+
+          curl --fail --location --retry 3 \
+            "https://github.com/hughsie/libxmlb/archive/refs/tags/${LIBXMLB_VERSION}.tar.gz" \
+            --output "${validator_root}/libxmlb.tar.gz"
+          echo "${LIBXMLB_SHA256}  ${validator_root}/libxmlb.tar.gz" | \
+            sha256sum --check --strict
+          mkdir -p -- "${source_root}/subprojects/libxmlb"
+          tar -xf "${validator_root}/libxmlb.tar.gz" \
+            --strip-components=1 \
+            -C "${source_root}/subprojects/libxmlb"
+
+          curl --fail --location --retry 3 \
+            "https://files.pythonhosted.org/packages/33/75/b1a37fa7b2dbca8c0dbb04d5cdd7e2720c8ef6febe41b4a74866350e041c/meson-${MESON_VERSION}-py3-none-any.whl" \
+            --output "${validator_root}/meson.whl"
+          echo "${MESON_SHA256}  ${validator_root}/meson.whl" | \
+            sha256sum --check --strict
+          unzip -q "${validator_root}/meson.whl" -d "${meson_root}"
+
+          export PYTHONPATH="${meson_root}"
+          python3 -m mesonbuild.mesonmain setup \
+            "${build_root}" \
+            "${source_root}" \
+            -Dstemming=false \
+            -Dsystemd=false \
+            -Dgir=false \
+            -Dqt=false \
+            -Dcompose=false \
+            -Dapt-support=false \
+            -Ddocs=false \
+            -Dapidocs=false \
+            -Dinstall-docs=false \
+            -Dlibxmlb:gtkdoc=false \
+            -Dlibxmlb:introspection=false \
+            -Dlibxmlb:tests=false \
+            -Dlibxmlb:cli=false \
+            -Dlibxmlb:zstd=false
+          python3 -m mesonbuild.mesonmain compile -C "${build_root}" appstreamcli
+
+          validator_path="${build_root}/tools/appstreamcli"
+          [[ -x "${validator_path}" ]]
+          "${validator_path}" --version | grep --fixed-strings "${APPSTREAM_VERSION}"
+
+      - name: Verify and activate the pinned AppStream validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          validator_root="${RUNNER_TEMP}/appstream-validator"
+          build_root="${validator_root}/build"
+
+          echo "${APPSTREAM_SHA256}  ${validator_root}/AppStream.tar.xz" | \
+            sha256sum --check --strict
+          echo "${LIBXMLB_SHA256}  ${validator_root}/libxmlb.tar.gz" | \
+            sha256sum --check --strict
+          echo "${MESON_SHA256}  ${validator_root}/meson.whl" | \
+            sha256sum --check --strict
+
+          validator_path="${build_root}/tools/appstreamcli"
+          [[ -x "${validator_path}" ]]
+          "${validator_path}" --version | grep --fixed-strings "${APPSTREAM_VERSION}"
+          echo "${build_root}/tools" >> "${GITHUB_PATH}"
+          echo "LD_LIBRARY_PATH=${build_root}/src:${build_root}/subprojects/libxmlb/src" >> \
+            "${GITHUB_ENV}"
+
+      - name: Assemble and validate the AppDir
+        shell: bash
+        env:
+          APP_ID: io.github.Avazbek22.DevProjex
+          APPIMAGE_LINT_COMMIT: 19e30b276ffedf4d3b4b56bc6320f463625a74f8
+        run: |
+          set -euo pipefail
+          publish_dir="${GITHUB_WORKSPACE}/artifacts/publish/${{ matrix.rid }}"
+          build_root="${GITHUB_WORKSPACE}/artifacts/appimage/${{ matrix.appimage_arch }}"
+          app_dir="${build_root}/DevProjex.AppDir"
+          rm -rf -- "${build_root}"
+          mkdir -p -- \
+            "${app_dir}/usr/bin" \
+            "${app_dir}/usr/share/applications" \
+            "${app_dir}/usr/share/metainfo"
+
+          install -m 755 "${publish_dir}/DevProjex" "${app_dir}/usr/bin/DevProjex"
+          ln -s DevProjex "${app_dir}/usr/bin/devprojex"
+          ln -s usr/bin/DevProjex "${app_dir}/AppRun"
+
+          desktop_source="Packaging/Linux/${APP_ID}.desktop"
+          metainfo_source="Packaging/Linux/${APP_ID}.metainfo.xml"
+          install -m 644 "${desktop_source}" "${app_dir}/${APP_ID}.desktop"
+          install -m 644 "${desktop_source}" "${app_dir}/usr/share/applications/${APP_ID}.desktop"
+          install -m 644 "${metainfo_source}" "${app_dir}/usr/share/metainfo/${APP_ID}.metainfo.xml"
+          # appimagetool and AppImageHub still probe the legacy suffix. Keep one
+          # canonical metadata file and expose a compatibility symlink to it.
+          ln -s "${APP_ID}.metainfo.xml" "${app_dir}/usr/share/metainfo/${APP_ID}.appdata.xml"
+
+          for size in 128 256 512; do
+            icon_dir="${app_dir}/usr/share/icons/hicolor/${size}x${size}/apps"
+            mkdir -p -- "${icon_dir}"
+            install -m 644 "Assets/AppIcon/Linux/png/${size}.png" "${icon_dir}/${APP_ID}.png"
+          done
+          install -m 644 "Assets/AppIcon/Linux/png/512.png" "${app_dir}/${APP_ID}.png"
+          ln -s "${APP_ID}.png" "${app_dir}/.DirIcon"
+
+          published_sha="$(sha256sum "${publish_dir}/DevProjex" | cut -d ' ' -f 1)"
+          appdir_sha="$(sha256sum "${app_dir}/usr/bin/DevProjex" | cut -d ' ' -f 1)"
+          [[ "${published_sha}" == "${appdir_sha}" ]]
+          [[ ! -e "${app_dir}/usr/share/icons/hicolor/scalable/apps/${APP_ID}.svg" ]]
+
+          desktop-file-validate "${desktop_source}"
+          appstreamcli validate --strict --explain "${metainfo_source}"
+
+          lint_dir="${RUNNER_TEMP}/appimagehub-lint"
+          rm -rf -- "${lint_dir}"
+          mkdir -p -- "${lint_dir}"
+          curl --fail --location --retry 3 \
+            "https://raw.githubusercontent.com/AppImage/AppImages/${APPIMAGE_LINT_COMMIT}/appdir-lint.sh" \
+            --output "${lint_dir}/appdir-lint.sh"
+          curl --fail --location --retry 3 \
+            "https://raw.githubusercontent.com/AppImage/AppImages/${APPIMAGE_LINT_COMMIT}/excludelist" \
+            --output "${lint_dir}/excludelist"
+          bash "${lint_dir}/appdir-lint.sh" "${app_dir}"
+
+      - name: Download and verify appimagetool
+        shell: bash
+        env:
+          APPIMAGETOOL_SHA256: ${{ matrix.appimagetool_sha256 }}
+        run: |
+          set -euo pipefail
+          tool_path="${RUNNER_TEMP}/appimagetool-${{ matrix.appimage_arch }}.AppImage"
+          curl --fail --location --retry 3 \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage_arch }}.AppImage" \
+            --output "${tool_path}"
+          echo "${APPIMAGETOOL_SHA256}  ${tool_path}" | sha256sum --check --strict
+          chmod 755 "${tool_path}"
+
+      - name: Build AppImage
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.appimage_arch }}
+        run: |
+          set -euo pipefail
+          tool_path="${RUNNER_TEMP}/appimagetool-${ARCH}.AppImage"
+          app_dir="${GITHUB_WORKSPACE}/artifacts/appimage/${ARCH}/DevProjex.AppDir"
+          output_path="${GITHUB_WORKSPACE}/artifacts/DevProjex-${VERSION}-${ARCH}.AppImage"
+          APPIMAGE_EXTRACT_AND_RUN=1 "${tool_path}" "${app_dir}" "${output_path}"
+          chmod 755 "${output_path}"
+          [[ -s "${output_path}" ]]
+          [[ ! -e "${output_path}.zsync" ]]
+
+      - name: Verify packaged binary identity
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.appimage_arch }}
+        run: |
+          set -euo pipefail
+          output_path="${GITHUB_WORKSPACE}/artifacts/DevProjex-${VERSION}-${ARCH}.AppImage"
+          extraction_root="${RUNNER_TEMP}/appimage-verification-${ARCH}"
+          rm -rf -- "${extraction_root}"
+          mkdir -p -- "${extraction_root}"
+          (
+            cd "${extraction_root}"
+            "${output_path}" --appimage-extract >/dev/null
+          )
+
+          packaged_binary="${extraction_root}/squashfs-root/usr/bin/DevProjex"
+          published_binary="${GITHUB_WORKSPACE}/artifacts/publish/${{ matrix.rid }}/DevProjex"
+          [[ -x "${packaged_binary}" ]]
+          [[ "$(sha256sum "${published_binary}" | cut -d ' ' -f 1)" == \
+             "$(sha256sum "${packaged_binary}" | cut -d ' ' -f 1)" ]]
+          [[ ! -e "${extraction_root}/squashfs-root/usr/share/icons/hicolor/scalable/apps/io.github.Avazbek22.DevProjex.svg" ]]
+
+      - name: AppImage CLI smoke
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.appimage_arch }}
+        run: |
+          set -euo pipefail
+          appimage="${GITHUB_WORKSPACE}/artifacts/DevProjex-${VERSION}-${ARCH}.AppImage"
+          smoke_root="${RUNNER_TEMP}/devprojex-appimage-smoke-${ARCH}"
+          sample_project="${smoke_root}/sample"
+          rm -rf -- "${smoke_root}"
+          mkdir -p -- \
+            "${sample_project}/src" \
+            "${smoke_root}/bundle-extract" \
+            "${smoke_root}/config" \
+            "${smoke_root}/data" \
+            "${smoke_root}/state" \
+            "${smoke_root}/cache" \
+            "${smoke_root}/runtime"
+          chmod 700 "${smoke_root}/runtime"
+          cat > "${sample_project}/src/App.cs" <<'SOURCE'
+          namespace Sample;
+
+          public static class App
+          {
+              public static int Calculate(int left, int right)
+              {
+                  var sum = left + right;
+                  var doubled = sum * 2;
+                  return doubled;
+              }
+          }
+          SOURCE
+          cat > "${sample_project}/appsettings.json" <<'SOURCE'
+          { "githubToken": "ghp_Q7wE9rT2yU4iO6pA8sD0fG1hJ3kL5zX7cV9b" }
+          SOURCE
+
+          export DOTNET_BUNDLE_EXTRACT_BASE_DIR="${smoke_root}/bundle-extract"
+          export XDG_CONFIG_HOME="${smoke_root}/config"
+          export XDG_DATA_HOME="${smoke_root}/data"
+          export XDG_STATE_HOME="${smoke_root}/state"
+          export XDG_CACHE_HOME="${smoke_root}/cache"
+          export XDG_RUNTIME_DIR="${smoke_root}/runtime"
+
+          actual_version="$(APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" --version)"
+          [[ "${actual_version}" == "${VERSION}" ]]
+
+          APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" tree "${sample_project}" \
+            --git-mode none --exclude none --format text --plain --language en -o - \
+            > "${smoke_root}/tree.txt"
+          grep --fixed-strings "App.cs" "${smoke_root}/tree.txt"
+
+          APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" analyze "${sample_project}" \
+            --git-mode none --exclude none --format json --plain --language en -o - \
+            > "${smoke_root}/analysis-full.json"
+          APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" analyze "${sample_project}" \
+            --git-mode none --exclude none --compress-code --format json --plain --language en -o - \
+            > "${smoke_root}/analysis-compressed.json"
+          full_chars="$(jq -r '.metrics.content.chars' "${smoke_root}/analysis-full.json")"
+          compressed_chars="$(jq -r '.metrics.content.chars' "${smoke_root}/analysis-compressed.json")"
+          compressed_files="$(jq -r '.compression.compressedFiles' "${smoke_root}/analysis-compressed.json")"
+          [[ "${compressed_files}" -gt 0 ]]
+          [[ "${compressed_chars}" -lt "${full_chars}" ]]
+
+          set +e
+          APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" analyze "${sample_project}" \
+            --git-mode none --exclude none --hide-secrets --findings --fail-on-findings \
+            --format json --plain --language en -o - \
+            > "${smoke_root}/analysis-secrets.json"
+          findings_exit=$?
+          set -e
+          [[ "${findings_exit}" -eq 3 ]]
+          jq --exit-status '.findingCount > 0 and (.findings | length > 0)' \
+            "${smoke_root}/analysis-secrets.json" >/dev/null
+          if grep --fixed-strings --quiet "ghp_Q7wE9rT2yU4iO6pA8sD0fG1hJ3kL5zX7cV9b" \
+            "${smoke_root}/analysis-secrets.json"; then
+            echo "::error::Secret value leaked into AppImage smoke output"
+            exit 1
+          fi
+
+      - name: AppImage GUI smoke under Xvfb
+        id: gui_smoke
+        continue-on-error: true
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.appimage_arch }}
+        run: |
+          set -euo pipefail
+          appimage="${GITHUB_WORKSPACE}/artifacts/DevProjex-${VERSION}-${ARCH}.AppImage"
+          smoke_root="${RUNNER_TEMP}/devprojex-appimage-gui-${ARCH}"
+          sample_project="${smoke_root}/sample"
+          log_path="${smoke_root}/gui-smoke.log"
+          rm -rf -- "${smoke_root}"
+          mkdir -p -- \
+            "${sample_project}" \
+            "${smoke_root}/bundle-extract" \
+            "${smoke_root}/config" \
+            "${smoke_root}/data" \
+            "${smoke_root}/state" \
+            "${smoke_root}/cache" \
+            "${smoke_root}/runtime"
+          chmod 700 "${smoke_root}/runtime"
+          printf 'public sealed class App {}\n' > "${sample_project}/App.cs"
+
+          timeout --kill-after=10s 180s xvfb-run -a bash -s -- \
+            "${appimage}" "${sample_project}" "${smoke_root}" <<'SMOKE' 2>&1 | tee "${log_path}"
+          set -euo pipefail
+          appimage="$1"
+          sample_project="$2"
+          smoke_root="$3"
+          export DOTNET_BUNDLE_EXTRACT_BASE_DIR="${smoke_root}/bundle-extract"
+          export XDG_CONFIG_HOME="${smoke_root}/config"
+          export XDG_DATA_HOME="${smoke_root}/data"
+          export XDG_STATE_HOME="${smoke_root}/state"
+          export XDG_CACHE_HOME="${smoke_root}/cache"
+          export XDG_RUNTIME_DIR="${smoke_root}/runtime"
+
+          runtime_pid=""
+          desktop_pid=""
+          cleanup() {
+            cleanup_exit=$?
+            set +e
+            [[ -n "${desktop_pid}" ]] && kill "${desktop_pid}" 2>/dev/null
+            [[ -n "${runtime_pid}" ]] && kill "${runtime_pid}" 2>/dev/null
+            if [[ "${cleanup_exit}" -ne 0 && -s "${smoke_root}/desktop.stderr" ]]; then
+              echo "Desktop stderr:"
+              tail -n 30 "${smoke_root}/desktop.stderr"
+            fi
+            exit "${cleanup_exit}"
+          }
+          trap cleanup EXIT
+
+          env -u CI APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" \
+            </dev/null >"${smoke_root}/desktop.stdout" 2>"${smoke_root}/desktop.stderr" &
+          runtime_pid=$!
+
+          instance_id=""
+          for _ in $(seq 1 60); do
+            if ! kill -0 "${runtime_pid}" 2>/dev/null; then
+              wait "${runtime_pid}"
+              exit 1
+            fi
+            list_json="$(APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" ui list \
+              --format json --language en)"
+            instance_id="$(jq -r '.instances[0].instanceId // empty' <<<"${list_json}")"
+            desktop_pid="$(jq -r '.instances[0].processId // empty' <<<"${list_json}")"
+            [[ -n "${instance_id}" ]] && break
+            sleep 1
+          done
+          if [[ -z "${instance_id}" ]]; then
+            echo "Desktop did not register within 60 seconds."
+            exit 1
+          fi
+
+          open_output="$(APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" open "${sample_project}" \
+            --wait --preview --view tree --language en)"
+          [[ "${open_output}" == "$(realpath "${sample_project}")" ]]
+
+          status_json="$(APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" ui status \
+            --instance "${instance_id}" --language en)"
+          jq --exit-status \
+            '.ok == true and .state.startupReady == true and .state.projectLoaded == true and .state.previewOpen == true and .state.previewView == "tree"' \
+            <<<"${status_json}" >/dev/null
+          printf '%s\n' "${status_json}"
+          SMOKE
+
+      - name: Write AppImage job summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.appimage_arch }}
+          GUI_OUTCOME: ${{ steps.gui_smoke.outcome }}
+        run: |
+          set -euo pipefail
+          output_path="${GITHUB_WORKSPACE}/artifacts/DevProjex-${VERSION}-${ARCH}.AppImage"
+          {
+            echo "### DevProjex AppImage (${ARCH})"
+            if [[ -s "${output_path}" ]]; then
+              bytes="$(stat --format=%s "${output_path}")"
+              human_size="$(numfmt --to=iec-i --suffix=B "${bytes}")"
+              echo "- File: \`$(basename "${output_path}")\`"
+              echo "- Size: ${human_size} (${bytes} bytes)"
+            else
+              echo "- AppImage was not produced."
+            fi
+            echo "- GUI smoke under Xvfb: ${GUI_OUTCOME}"
+            if [[ "${GUI_OUTCOME}" != "success" ]]; then
+              echo "- GUI smoke diagnostics:"
+              echo '```text'
+              tail -n 30 "${RUNNER_TEMP}/devprojex-appimage-gui-${ARCH}/gui-smoke.log" 2>/dev/null || \
+                echo "No GUI smoke log was produced."
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: DevProjex-${{ needs.prepare.outputs.version }}-${{ matrix.appimage_arch }}.AppImage
+          path: artifacts/DevProjex-${{ needs.prepare.outputs.version }}-${{ matrix.appimage_arch }}.AppImage
+          if-no-files-found: error
+
+  release-upload:
+    name: Upload complete AppImage set to GitHub release
+    if: ${{ needs.prepare.outputs.upload_release == 'true' }}
+    needs: [prepare, package]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download both AppImage artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: DevProjex-${{ needs.prepare.outputs.version }}-*.AppImage
+          path: artifacts
+          merge-multiple: true
+
+      - name: Validate complete release set
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected=(
+            "artifacts/DevProjex-${VERSION}-x86_64.AppImage"
+            "artifacts/DevProjex-${VERSION}-aarch64.AppImage"
+          )
+          mapfile -t actual < <(find artifacts -maxdepth 1 -type f -name '*.AppImage' -print | sort)
+          [[ "${#actual[@]}" -eq 2 ]]
+          for appimage in "${expected[@]}"; do
+            [[ -s "${appimage}" ]]
+          done
+
+      - name: Upload AppImages to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}" \
+            "artifacts/DevProjex-${VERSION}-x86_64.AppImage" \
+            "artifacts/DevProjex-${VERSION}-aarch64.AppImage" \
+            --clobber

@@ -24,14 +24,27 @@ namespace DevProjex.Infrastructure.Git;
 /// </summary>
 public sealed class GitRepositoryService : IGitRepositoryService
 {
+	internal const string TestFileTransportPolicyVariable =
+		"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT";
     private const int CommandOutputBufferChars = 64 * 1024;
     private const int CommandErrorBufferChars = 64 * 1024;
     internal const int MaximumProgressFrameCharacters = 4 * 1024;
-    internal const string NonInteractiveSshCommand = "ssh -o BatchMode=yes";
     private readonly string? _gitExecutable;
+    private readonly bool _allowFileTransport;
+	private readonly bool _materializeTestClone;
+	private readonly bool _retainTestManagedMarker;
 
     public GitRepositoryService()
     {
+		// Synthetic file:// remotes are enabled only by explicit test-process policy;
+		// no production host sets or documents this internal escape hatch.
+		_allowFileTransport = string.Equals(
+			Environment.GetEnvironmentVariable(TestFileTransportPolicyVariable),
+			"1",
+			StringComparison.Ordinal);
+		_materializeTestClone = _allowFileTransport;
+        _ = GitRuntime.VersionDisplay;
+        _ = GitRuntime.SshExecutable;
     }
 
     internal GitRepositoryService(string gitExecutable)
@@ -40,26 +53,30 @@ public sealed class GitRepositoryService : IGitRepositoryService
         _gitExecutable = gitExecutable;
     }
 
+    internal GitRepositoryService(bool allowFileTransportForTests)
+		: this(allowFileTransportForTests, retainTestManagedMarker: true)
+	{
+	}
+
+	internal GitRepositoryService(
+		bool allowFileTransportForTests,
+		bool retainTestManagedMarker)
+    {
+        _allowFileTransport = allowFileTransportForTests;
+		_materializeTestClone = allowFileTransportForTests;
+		_retainTestManagedMarker = allowFileTransportForTests && retainTestManagedMarker;
+        _ = GitRuntime.VersionDisplay;
+        _ = GitRuntime.SshExecutable;
+    }
+
     /// <summary>
     /// Checks if Git CLI is available on the system by running "git --version".
     /// This is used to determine if we can use git clone or need to fall back to ZIP download.
     /// </summary>
-    public async Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default)
+    public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var result = await RunGitCommandAsync(null, ["--version"], cancellationToken);
-            return result.ExitCode == 0 && result.Output.Contains("git version");
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            // Git not installed or not in PATH
-            return false;
-        }
+		cancellationToken.ThrowIfCancellationRequested();
+		return Task.FromResult(GitRuntime.VersionDisplay.StartsWith("git version ", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -108,7 +125,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 : GitAskPassSession.Create(authentication);
             var result = await RunGitCommandAsync(
                 null,
-                ["clone", "--progress", "--depth", "1", cloneUrl, targetDirectory],
+				GitProcessOperation.CloneRepository(
+					cloneUrl,
+					targetDirectory,
+					_allowFileTransport),
                 cancellationToken,
                 progress,
                 askPass);
@@ -128,8 +148,17 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     ErrorMessage: errorMessage);
             }
 
+			GitRemoteIdentityStore.Write(targetDirectory, cloneUrl, _allowFileTransport);
+
             // After clone, determine which branch we're on (usually main or master)
             var defaultBranch = await GetDefaultBranchAsync(targetDirectory, cancellationToken);
+			if (_materializeTestClone)
+			{
+				await MaterializeExplicitlyAllowedTestCloneAsync(
+					targetDirectory,
+					defaultBranch,
+					cancellationToken).ConfigureAwait(false);
+			}
 
             return new GitCloneResult(
                 Success: true,
@@ -166,7 +195,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         {
             var result = await RunGitCommandAsync(
                 repositoryPath,
-                ["config", "--get", "remote.origin.url"],
+				GitProcessOperation.ReadRemoteUrl(),
                 cancellationToken);
             if (result.ExitCode != 0)
                 return null;
@@ -256,7 +285,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
             var currentBranch = await GetCurrentBranchAsync(repositoryPath, cancellationToken);
 
             // Get local branches to determine which are already checked out
-            var localResult = await RunGitCommandAsync(repositoryPath, ["branch"], cancellationToken);
+			var localResult = await RunGitCommandAsync(
+				repositoryPath,
+				GitProcessOperation.ListBranches(GitBranchListKind.Local),
+				cancellationToken);
             var localBranches = new HashSet<string>(StringComparer.Ordinal);
 
             if (localResult.ExitCode == 0)
@@ -275,10 +307,17 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
             // PRIMARY METHOD: ls-remote gets ALL remote branches without downloading anything
             // This is the most reliable method for shallow clones
-            var lsRemoteResult = await RunGitCommandAsync(
-                repositoryPath,
-                ["ls-remote", "--heads", "origin"],
-                cancellationToken);
+			var remoteUrl = await GetVerifiedNetworkRemoteAsync(repositoryPath, cancellationToken)
+				.ConfigureAwait(false);
+			var lsRemoteResult = remoteUrl is null
+				? GitCommandResult.Failed("The saved remote identity is unavailable or changed.")
+				: await RunGitCommandAsync(
+					repositoryPath,
+					GitProcessOperation.ListBranches(
+						GitBranchListKind.RemoteHeads,
+						remoteUrl,
+						_allowFileTransport),
+					cancellationToken).ConfigureAwait(false);
 
             var seen = new HashSet<string>(StringComparer.Ordinal);
 
@@ -318,7 +357,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
             {
                 // FALLBACK: If ls-remote fails (network issues, auth problems),
                 // try to use cached remote refs from previous fetch
-                var remoteResult = await RunGitCommandAsync(repositoryPath, ["branch", "-r"], cancellationToken);
+				var remoteResult = await RunGitCommandAsync(
+					repositoryPath,
+					GitProcessOperation.ListBranches(GitBranchListKind.CachedRemote),
+					cancellationToken);
 
                 if (remoteResult.ExitCode == 0)
                 {
@@ -416,75 +458,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     cancellationToken);
             }
 
-            // Note: progress status is set by caller to show localized message
-
-            // OPTIMISTIC PATH: Try to checkout existing local branch
-            // This is the fast path (~50ms) that succeeds when branch was previously fetched
-            var checkoutResult = await RunGitCommandAsync(
-                repositoryPath,
-                ["checkout", branchName],
-                cancellationToken);
-
-            if (checkoutResult.ExitCode == 0)
-                return true;  // Success - branch existed locally
-
-            // RELIABLE PATH: Branch doesn't exist locally - fetch and create it
-            // This happens on first switch to a branch in shallow clones
-
-            // Step 1: Tell git to track this branch from remote
-            // CRITICAL for shallow clones: shallow clone only tracks the default branch
-            // Without this, fetch won't know about the branch we want
-            var setBranchesResult = await RunGitCommandAsync(
-                repositoryPath,
-                ["remote", "set-branches", "--add", "origin", branchName],
-                cancellationToken);
-
-            // Step 2: Fetch only the latest commit of the target branch to minimize traffic
-            // Using --depth 1 is SAFE here because:
-            // 1. This is a cached copy (not user's working directory)
-            // 2. We only need to view files (read-only application)
-            // 3. Reduces network traffic by ~70%
-            var fetchResult = await RunGitCommandAsync(
-                repositoryPath,
-                ["fetch", "origin", branchName, "--depth", "1"],
-                cancellationToken);
-
-            if (fetchResult.ExitCode != 0 || setBranchesResult.ExitCode != 0)
-            {
-                // Fallback: refresh all remote heads in shallow mode.
-                // This improves compatibility for repositories where direct branch fetch
-                // may fail due remote config/state mismatch.
-                var fallbackFetchResult = await RunGitCommandAsync(
-                    repositoryPath,
-                    ["fetch", "origin", "+refs/heads/*:refs/remotes/origin/*", "--depth", "1"],
-                    cancellationToken);
-
-                if (fallbackFetchResult.ExitCode != 0)
-                    return false;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // Create or recreate local branch from fetched remote branch
-            // Using -B (force create) instead of -b to handle edge cases:
-            // - If local branch exists but is stale: it will be reset to remote state
-            // - If local branch doesn't exist: it will be created
-            // This is SAFE because we never modify user files (read-only viewer)
-            var createBranchResult = await RunGitCommandAsync(
-                repositoryPath,
-                ["checkout", "-B", branchName, $"origin/{branchName}"],
-                cancellationToken);
-
-            if (createBranchResult.ExitCode == 0)
-                return true;
-
-            // Last fallback: if branch already exists locally now, try direct checkout again.
-            var finalCheckoutResult = await RunGitCommandAsync(
-                repositoryPath,
-                ["checkout", branchName],
-                cancellationToken);
-
-            return finalCheckoutResult.ExitCode == 0;
+			// A user-selected working tree is read-only to DevProjex. Branch changes are
+			// permitted only in an application-owned cache under its lease protocol.
+			return false;
         }
         catch (OperationCanceledException)
         {
@@ -531,26 +507,29 @@ public sealed class GitRepositoryService : IGitRepositoryService
             // 1. We only need the latest state (read-only viewer)
             // 2. This is a cached copy, not user's repo
             // 3. Reduces bandwidth usage significantly
-            GitCommandResult fetchResult;
-            if (RepositoryCacheLayout.IsManaged(repositoryPath))
-            {
-                await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(
-                    RepositoryCacheLayout.GetBaseOperationLockPath(
-                        RepositoryCacheLayout.GetContainer(repositoryPath),
-                        repositoryPath),
-                    cancellationToken);
-                fetchResult = await RunGitCommandAsync(
-                    repositoryPath,
-                    ["fetch", "origin", currentBranch, "--depth", "1"],
-                    cancellationToken);
-            }
-            else
-            {
-                fetchResult = await RunGitCommandAsync(
-                    repositoryPath,
-                    ["fetch", "origin", currentBranch, "--depth", "1"],
-                    cancellationToken);
-            }
+			if (!RepositoryCacheLayout.IsManaged(repositoryPath))
+				return false;
+			var remoteUrl = await GetVerifiedNetworkRemoteAsync(repositoryPath, cancellationToken)
+				.ConfigureAwait(false);
+			if (remoteUrl is null)
+				return false;
+			await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(
+				RepositoryCacheLayout.GetBaseOperationLockPath(
+					RepositoryCacheLayout.GetContainer(repositoryPath),
+					repositoryPath),
+				cancellationToken);
+			var safety = await GitRepositorySafetyInspector.InspectAsync(repositoryPath, cancellationToken)
+				.ConfigureAwait(false);
+			if (!safety.IsComplete)
+				return false;
+			GitRepositorySafetyInspector.TraceDisabledMaterializationFilters(safety);
+			var fetchResult = await RunGitCommandAsync(
+				repositoryPath,
+				GitProcessOperation.FetchBranch(
+					remoteUrl,
+					currentBranch,
+					allowFileTransport: _allowFileTransport),
+				cancellationToken);
 
             if (fetchResult.ExitCode != 0)
                 return false;  // Network error or branch doesn't exist
@@ -562,7 +541,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
             // This discards any local changes (which should never exist in a cached copy)
             var resetResult = await RunGitCommandAsync(
                 repositoryPath,
-                ["reset", "--hard", $"origin/{currentBranch}"],
+				GitProcessOperation.ManagedCheckout(
+					GitManagedCheckoutKind.HardReset,
+					$"refs/remotes/origin/{currentBranch}",
+					filterDrivers: safety.CheckoutFilterDrivers),
                 cancellationToken);
 
             return resetResult.ExitCode == 0;
@@ -585,7 +567,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         {
             var result = await RunGitCommandAsync(
                 repositoryPath,
-                ["rev-parse", "HEAD"],
+				GitProcessOperation.ResolveCommit("HEAD"),
                 cancellationToken);
 
             if (result.ExitCode != 0)
@@ -617,7 +599,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         {
             var result = await RunGitCommandAsync(
                 repositoryPath,
-                ["rev-parse", "--abbrev-ref", "HEAD"],
+				GitProcessOperation.ListBranches(GitBranchListKind.Current),
                 cancellationToken);
 
             if (result.ExitCode == 0)
@@ -631,7 +613,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 {
                     var configured = await RunGitCommandAsync(
                         repositoryPath,
-                        ["config", "--worktree", "--get", "devprojex.branch"],
+						GitProcessOperation.ReadConfigValue(GitConfigReadKind.WorktreeBranch),
                         cancellationToken);
                     if (configured.ExitCode == 0 && !string.IsNullOrWhiteSpace(configured.Output))
                         return configured.Output.Trim();
@@ -669,21 +651,35 @@ public sealed class GitRepositoryService : IGitRepositoryService
         await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(
             RepositoryCacheLayout.GetBaseOperationLockPath(container, basePath),
             cancellationToken);
+		var safety = await GitRepositorySafetyInspector.InspectAsync(repositoryPath, cancellationToken)
+			.ConfigureAwait(false);
+		if (!safety.IsComplete)
+			return false;
+		GitRepositorySafetyInspector.TraceDisabledMaterializationFilters(safety);
 
         var revision = $"refs/remotes/origin/{branchName}";
         var verify = await RunGitCommandAsync(
             repositoryPath,
-            ["rev-parse", "--verify", "--quiet", revision],
+			GitProcessOperation.ResolveCommit(revision),
             cancellationToken);
         if (verify.ExitCode != 0)
         {
+			var remoteUrl = await GetVerifiedNetworkRemoteAsync(repositoryPath, cancellationToken)
+				.ConfigureAwait(false);
+			if (remoteUrl is null)
+				return false;
             var setBranches = await RunGitCommandAsync(
                 repositoryPath,
-                ["remote", "set-branches", "--add", "origin", branchName],
+				GitProcessOperation.ManagedConfigWrite(
+					GitManagedConfigWriteKind.AddTrackedBranch,
+					branchName),
                 cancellationToken);
             var fetch = await RunGitCommandAsync(
                 repositoryPath,
-                ["fetch", "origin", branchName, "--depth", "1"],
+				GitProcessOperation.FetchBranch(
+					remoteUrl,
+					branchName,
+					allowFileTransport: _allowFileTransport),
                 cancellationToken);
             if (setBranches.ExitCode != 0 || fetch.ExitCode != 0)
                 return false;
@@ -691,14 +687,19 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
         var checkout = await RunGitCommandAsync(
             repositoryPath,
-            ["checkout", "--detach", revision],
+			GitProcessOperation.ManagedCheckout(
+				GitManagedCheckoutKind.Detach,
+				revision,
+				filterDrivers: safety.CheckoutFilterDrivers),
             cancellationToken);
         if (checkout.ExitCode != 0)
             return false;
 
         var config = await RunGitCommandAsync(
             repositoryPath,
-            ["config", "--worktree", "devprojex.branch", branchName],
+			GitProcessOperation.ManagedConfigWrite(
+				GitManagedConfigWriteKind.SetWorktreeBranch,
+				branchName),
             cancellationToken);
         return config.ExitCode == 0;
     }
@@ -717,7 +718,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         // METHOD 1: Try to get default branch from remote HEAD symbolic ref
         var result = await RunGitCommandAsync(
             repositoryPath,
-            ["symbolic-ref", "refs/remotes/origin/HEAD"],
+			GitProcessOperation.ListBranches(GitBranchListKind.RemoteHead),
             cancellationToken);
 
         if (result.ExitCode == 0)
@@ -728,7 +729,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
         }
 
         // METHOD 2: Check for common default branch names
-        var branchResult = await RunGitCommandAsync(repositoryPath, ["branch", "-r"], cancellationToken);
+		var branchResult = await RunGitCommandAsync(
+			repositoryPath,
+			GitProcessOperation.ListBranches(GitBranchListKind.CachedRemote),
+			cancellationToken);
         if (branchResult.ExitCode == 0)
         {
             var commonDefault = ResolveCommonDefaultBranch(branchResult.Output);
@@ -774,6 +778,77 @@ public sealed class GitRepositoryService : IGitRepositoryService
         return hasMaster ? "master" : null;
     }
 
+	private async Task MaterializeExplicitlyAllowedTestCloneAsync(
+		string targetDirectory,
+		string? defaultBranch,
+		CancellationToken cancellationToken)
+	{
+		var normalizedTarget = Path.GetFullPath(targetDirectory);
+		var wasAlreadyManaged = RepositoryCacheLayout.IsManaged(normalizedTarget);
+		var markerPath = Path.Combine(normalizedTarget, RepositoryCacheLayout.MarkerFileName);
+		var leasesPath = Path.Combine(normalizedTarget, RepositoryCacheLayout.LeasesDirectoryName);
+		var leasePath = RepositoryCacheLayout.GetBaseOperationLockPath(normalizedTarget, normalizedTarget);
+		if (!wasAlreadyManaged)
+			File.WriteAllText(markerPath, "git");
+		try
+		{
+			await using var lease = await RepositoryFileLease.AcquireExclusiveAsync(
+				leasePath,
+				cancellationToken).ConfigureAwait(false);
+			var safety = await GitRepositorySafetyInspector.InspectAsync(normalizedTarget, cancellationToken)
+				.ConfigureAwait(false);
+			if (!safety.IsComplete)
+				throw new InvalidOperationException("The test clone safety configuration is unavailable.");
+			GitRepositorySafetyInspector.TraceDisabledMaterializationFilters(safety);
+			var checkout = string.IsNullOrWhiteSpace(defaultBranch)
+				? GitProcessOperation.ManagedCheckout(
+					GitManagedCheckoutKind.Detach,
+					"HEAD",
+					filterDrivers: safety.CheckoutFilterDrivers)
+				: GitProcessOperation.ManagedCheckout(
+					GitManagedCheckoutKind.SwitchBranch,
+					defaultBranch,
+					filterDrivers: safety.CheckoutFilterDrivers);
+			var result = await RunGitCommandAsync(normalizedTarget, checkout, cancellationToken)
+				.ConfigureAwait(false);
+			if (result.ExitCode != 0)
+				throw new InvalidOperationException("The test clone checkout failed.");
+		}
+		finally
+		{
+			File.Delete(leasePath);
+			if (Directory.Exists(leasesPath) && !Directory.EnumerateFileSystemEntries(leasesPath).Any())
+				Directory.Delete(leasesPath);
+			if (!wasAlreadyManaged && !_retainTestManagedMarker)
+				File.Delete(markerPath);
+		}
+	}
+
+	private async Task<string?> GetVerifiedNetworkRemoteAsync(
+		string repositoryPath,
+		CancellationToken cancellationToken)
+	{
+		if (!RepositoryCacheLayout.IsManaged(repositoryPath))
+			return null;
+		var remoteUrl = await GetRemoteUrlAsync(repositoryPath, cancellationToken).ConfigureAwait(false);
+		if (string.IsNullOrWhiteSpace(remoteUrl) || !GitRemoteIdentityStore.Matches(repositoryPath, remoteUrl))
+			return null;
+		var overrides = await RunGitCommandAsync(
+			repositoryPath,
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.NetworkOverrides),
+			cancellationToken).ConfigureAwait(false);
+		if (overrides.ExitCode == 0 && !string.IsNullOrWhiteSpace(overrides.Output))
+			return null;
+		try
+		{
+			return GitNetworkPolicy.ValidateUrl(remoteUrl, _allowFileTransport);
+		}
+		catch (ArgumentException)
+		{
+			return null;
+		}
+	}
+
     /// <summary>
     /// Executes a git command asynchronously with proper output capture.
     ///
@@ -785,7 +860,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// </summary>
     private async Task<GitCommandResult> RunGitCommandAsync(
         string? workingDirectory,
-        IReadOnlyList<string> arguments,
+		GitProcessOperation operation,
         CancellationToken cancellationToken,
         IProgress<string>? progress = null,
         GitAskPassSession? askPass = null)
@@ -795,11 +870,14 @@ public sealed class GitRepositoryService : IGitRepositoryService
         // cancellation, which makes cancellation behavior platform-timing dependent.
         cancellationToken.ThrowIfCancellationRequested();
 
-        var startInfo = GitProcessStartInfoFactory.Create(
-            workingDirectory,
-            arguments,
-            executable: _gitExecutable,
-            askPass: askPass);
+		var startInfo = _gitExecutable is null
+			? GitProcessStartInfoFactory.Create(workingDirectory, operation, askPass: askPass)
+			: GitProcessStartInfoFactory.CreateForTesting(workingDirectory, operation, _gitExecutable);
+		if (_gitExecutable is not null)
+			askPass?.Apply(startInfo);
+		using var deadlineSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		deadlineSource.CancelAfter(operation.Deadline);
+		var operationToken = deadlineSource.Token;
 
         using var process = new Process { StartInfo = startInfo };
 
@@ -815,33 +893,38 @@ public sealed class GitRepositoryService : IGitRepositoryService
             process.StandardOutput,
             CommandOutputBufferChars,
             frame => outputBuffer.Add(frame.Text, frame.ExceededLimit),
-            cancellationToken);
+			operationToken);
         var errorPump = GitProcessLinePump.ReadAsync(
             process.StandardError,
             CommandErrorBufferChars,
             HandleErrorFrame,
-            cancellationToken);
+			operationToken);
 
         try
         {
-            await WaitForExitOrTerminateAsync(process, cancellationToken);
-            _ = await GitProcessOutputReader
-                .WaitForCompletionAfterExitAsync(process, outputPump, errorPump)
-                .ConfigureAwait(false);
-            progressObserver?.ThrowIfFaulted();
+			await WaitForExitOrTerminateAsync(process, operationToken);
+			var outputCompleted = await GitProcessOutputReader
+				.WaitForCompletionAfterExitAsync(process, outputPump, errorPump)
+				.ConfigureAwait(false);
+			if (!outputCompleted)
+				return GitCommandResult.Failed("Git process output did not close after exit.");
+			progressObserver?.ThrowIfFaulted();
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await GitProcessOutputReader
-                .ObserveAfterTerminationAsync(process, outputPump, errorPump)
-                .ConfigureAwait(false);
-            throw;
-        }
+		catch (OperationCanceledException)
+		{
+			await GitProcessOutputReader
+				.ObserveAfterTerminationAsync(process, outputPump, errorPump)
+				.ConfigureAwait(false);
+			if (cancellationToken.IsCancellationRequested)
+				throw;
+			return GitCommandResult.Failed("Git operation exceeded its safety deadline.");
+		}
 
-        return new GitCommandResult(
-            process.ExitCode,
-            outputBuffer.ToString(),
-            errorBuffer.ToString());
+		var outputExceeded = outputBuffer.ExceededLimit || errorBuffer.ExceededLimit;
+		return new GitCommandResult(
+			outputExceeded ? -1 : process.ExitCode,
+			outputBuffer.ToString(),
+			outputExceeded ? "Git process output exceeded the safety limit." : errorBuffer.ToString());
 
         void HandleErrorFrame(GitProcessLineFrame frame)
         {
@@ -893,12 +976,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
         return result.ToString();
     }
 
-    internal static ProcessStartInfo CreateGitCommandStartInfo(
-        string? workingDirectory,
-        IReadOnlyList<string> arguments)
-    {
-        return GitProcessStartInfoFactory.Create(workingDirectory, arguments);
-    }
+	internal static ProcessStartInfo CreateGitCommandStartInfo(
+		string? workingDirectory,
+		GitProcessOperation operation) =>
+		GitProcessStartInfoFactory.Create(workingDirectory, operation);
 
     internal static async Task WaitForExitOrTerminateAsync(
         Process process,
@@ -981,6 +1062,16 @@ public sealed class GitRepositoryService : IGitRepositoryService
         private readonly Queue<string> _lines = new();
         private readonly object _sync = new();
         private int _charCount;
+		private bool _exceededLimit;
+
+		public bool ExceededLimit
+		{
+			get
+			{
+				lock (_sync)
+					return _exceededLimit;
+			}
+		}
 
         public void Add(string line, bool exceededLineLimit)
         {
@@ -988,6 +1079,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
             {
                 if (exceededLineLimit)
                 {
+					_exceededLimit = true;
                     _lines.Clear();
                     _charCount = 0;
                     return;
@@ -998,6 +1090,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
                 while (_charCount > _maxChars && _lines.Count > 0)
                 {
+					_exceededLimit = true;
                     var removed = _lines.Dequeue();
                     _charCount -= removed.Length + Environment.NewLine.Length;
                 }
@@ -1057,5 +1150,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// <summary>
     /// Result of a git command execution.
     /// </summary>
-    private sealed record GitCommandResult(int ExitCode, string Output, string Error);
+	private sealed record GitCommandResult(int ExitCode, string Output, string Error)
+	{
+		public static GitCommandResult Failed(string error) => new(-1, string.Empty, error);
+	}
 }

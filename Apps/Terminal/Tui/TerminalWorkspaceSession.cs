@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 using Terminal.Gui.App;
@@ -67,6 +68,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private long _workspacePersistenceRequestId;
 	private int _workspacePersistencePending;
 	private bool _previewSearchInProgress;
+	private bool _compressionUnavailableNotified;
 
 	private TerminalWelcomeContext? _welcomeContext;
 	private RecentProjectsDb? _recentProjectsSnapshot;
@@ -936,13 +938,24 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void BeginOpenDesktopFromWelcome()
 	{
+		if (!_services.HostCapabilities.HasDesktopApplication)
+		{
+			ShowError(
+				"DPX-DESKTOP-NOT-INCLUDED",
+				L("Terminal.Error.DesktopNotIncluded"));
+			return;
+		}
+
 		ShowWelcomeStatus(L("Terminal.Tui.OpeningDesktop"), TerminalWorkspaceTheme.Accent);
 		var operationCts = ReplaceActiveOperation();
 		TrackActiveOperation(Task.Run(async () =>
 		{
 			try
 			{
-				var exitCode = await new DesktopCommandHandler(_environment, writeOutput: false)
+				var exitCode = await new DesktopCommandHandler(
+						_environment,
+						launcher: new DesktopProcessLauncher(_services.HostCapabilities),
+						writeOutput: false)
 					.OpenAsync(new DesktopOpenRequest(), operationCts.Token)
 					.ConfigureAwait(false);
 				if (exitCode != CommandLineExitCodes.Success)
@@ -1603,22 +1616,43 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			diagnostic.Severity == ContextDiagnosticSeverity.Error);
 		var tokens = ResolveDisplayedTokenCount(state);
 		var folders = state.HasVisibleTreeItems ? state.SelectedFolderCount : 0;
+		var compressionUnavailable = GetCurrentCompressionAvailability(state)?.IsUnavailable == true;
 		if (width < 80)
 		{
 			return $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
 				   $"~{tokens:N0} tok  " +
-				   $"{warningCount:N0} W  {errorCount:N0} E";
+				   $"{warningCount:N0} W  {errorCount:N0} E" +
+				   (compressionUnavailable ? "  C!" : string.Empty);
 		}
 
 		var separator = _environment.SupportsUnicode ? PanelSeparator : " | ";
-		return string.Join(
-			separator,
+		var parts = new List<string>
+		{
 			$"{L("Terminal.Analysis.Files")} {state.SelectedFileCount:N0}",
 			$"{L("Terminal.Analysis.Folders")} {folders:N0}",
 			TerminalWorkspace.FormatBytes(state.Plan.IncludedBytes),
 			$"~{tokens:N0} {L("Terminal.Tui.TokensShort")}",
 			$"{L("Terminal.Tui.Warnings")} {warningCount:N0}",
-			$"{L("Terminal.Tui.Errors")} {errorCount:N0}");
+			$"{L("Terminal.Tui.Errors")} {errorCount:N0}"
+		};
+		if (compressionUnavailable)
+			parts.Add(L("Compression.Metrics.Unavailable"));
+		return string.Join(
+			separator,
+			parts);
+	}
+
+	private CodeCompressionAvailabilitySnapshot? GetCurrentCompressionAvailability(
+		TerminalWorkspaceState state)
+	{
+		if (state.Plan.Selection.CompressCode != true)
+			return null;
+		var snapshot = _services.CodeCompressionSession.Snapshot;
+		return snapshot.SelectionKey == CodeCompressionSession.BuildSelectionKey(
+			state.Plan.SourceRoot,
+			state.Plan.IncludedFiles)
+			? snapshot.Availability
+			: null;
 	}
 
 	internal static long ResolveDisplayedTokenCount(TerminalWorkspaceState state)
@@ -3539,6 +3573,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				L("Terminal.Diagnostic.TrackedIndexUnavailable"),
 			GitScopeFilter.UnavailableDiagnosticCode =>
 				L("Terminal.Diagnostic.GitStateUnavailable"),
+			GitScopeFilter.UnsafeFilterDiagnosticCode =>
+				L("Terminal.Diagnostic.GitUnsafeFilter"),
 			GitScopeFilter.DeletedDiagnosticCode =>
 				L("Terminal.Diagnostic.GitStateDeleted"),
 			"DPX-PROJECT-NOT-FOUND" or "DPX-PROJECT-PATH-INVALID" =>
@@ -4051,6 +4087,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 					RefreshWorkspace();
 					RefreshAppliedCommandResult();
+					var compressionAvailability = GetCurrentCompressionAvailability(state);
+					if (!_compressionUnavailableNotified &&
+					    compressionAvailability is { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason })
+					{
+						_compressionUnavailableNotified = true;
+						ShowTransientStatus(NormalizeLocalizedText(
+							_services.Localization.Format("Compression.Status.Unavailable", reason),
+							_options.Plain,
+							_environment.SupportsUnicode));
+					}
 					return true;
 				}).ConfigureAwait(false);
 				if (applied)

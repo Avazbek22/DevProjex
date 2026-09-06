@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -125,6 +126,7 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		var temporary = workspace.CreateDirectory("url/temp");
 		var dataRoot = workspace.CreateDirectory("url/data");
 		var environment = CreateEnvironment(home, temporary, dataRoot, bundleExtractionRoot: null);
+		environment[GitRepositoryService.TestFileTransportPolicyVariable] = "1";
 
 		var context = await RunAsync(
 			application,

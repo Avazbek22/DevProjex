@@ -36,9 +36,30 @@ Choose what you need in an interactive file tree, check the result in a live pre
 **Latest GitHub release:**
 👉 [https://github.com/Avazbek22/DevProjex/releases/latest](https://github.com/Avazbek22/DevProjex/releases/latest)
 
+**Linux AppImage (x86_64 and aarch64):** [download it from GitHub Releases](https://github.com/Avazbek22/DevProjex/releases/latest)
+
 **Install via WinGet (Windows):** `winget install OlimoffDev.DevProjex`
 
 All install options per OS are covered in [Docs/Installation.md](Docs/Installation.md).
+
+### Run without installing
+
+These headless channels are available from release v5.2. Until the v5.2 packages
+have completed their first publication, use the direct GitHub release binary.
+
+```shell
+npx devprojex tree .
+dnx devprojex tree .
+./DevProjex tree .
+```
+
+The npm and NuGet packages contain the CLI, TUI, and MCP server, but not the
+desktop application. See [Docs/Installation.md](Docs/Installation.md) for the
+Node/.NET requirements and supported platforms.
+
+Release automation also prepares direct headless archives and a non-root Docker
+image; their commands and availability boundary are documented in
+[Docs/Installation.md](Docs/Installation.md).
 
 ---
 
@@ -121,9 +142,9 @@ Works with any language, repository, or project structure.
 | CI secret pre-flight gate (fail build on findings) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Run with no install (npx / uvx / browser) | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Run with no install (npx / dnx / direct binary) | ✅ (v5.2+) | ✅ | ✅ | ❌ | ❌ | ✅ |
 
-<sub>Based on publicly documented features, last verified September 2026.</sub>
+<sub>Based on publicly documented features, last verified September 2026. DevProjex no-install package channels are available from v5.2.</sub>
 
 ---
 
@@ -193,14 +214,14 @@ The server enforces hard security boundaries on top of DevProjex's read-only des
 * **Secret redaction is always on in MCP mode and has no off switch** — not in the server flags, not in the tool schemas, so neither a config mistake nor the agent itself can turn it off
 * **Optional private-data masking** via `devprojex mcp --hide-private-data`, mirroring the CLI flag
 * **Root jail** — local access is pinned to startup roots; opt-in remote Git URL checkouts are pinned on first use; symlink and junction escapes are rejected
-* Smart Ignore and the selected Git baseline or scope stay active; agent paths and globs can only narrow the selection
+* Agent paths and globs can only narrow the selection, and the `.git` administrative area is never exposed. By default the agent sees the repository the way Git does — Smart Ignore and `.gitignore` apply, while `Dockerfile`, `.github/`, dot-files, and empty files stay visible — and every tree ends with a trusted line naming the active filters. Widening or narrowing that view is your startup decision, never the agent's by default: a `--exclude` baseline, the widest-baseline `--unrestricted` preset, or per-call agent control behind the opt-in `--allow-agent-exclusions` flag
 * Returned file contents are wrapped in untrusted-data markers to resist prompt injection
 
 The missing off switch is a control guarantee, not a detection guarantee. DevProjex
 detects common secret formats, but detection is heuristic; review each pack before
 publishing it outside your environment.
 
-**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. A `max_tokens` budget packs the largest files that fit and reports what was included, `top_files` shows where the tokens go, `git_scope` narrows `get_tree`, `analyze`, `pack_context`, or `search_project` to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
+**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. With `max_tokens`, files are considered in deterministic selection order; each is included if its estimated transformed-content tokens fit the remaining budget, otherwise it is reported as skipped and packing continues. `top_files` shows where the tokens go, `git_scope` narrows `get_tree`, `analyze`, `pack_context`, or `search_project` to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
 
 Want to audit what the agent gets? Open the same project in the GUI: the engine and redaction pipeline are shared, and filters match when the same profile and parameters are used.
 
@@ -210,16 +231,17 @@ Want to audit what the agent gets? Open the same project in the GUI: the engine 
 |---|---|---|---|---|---|
 | Cross-platform: Windows + Linux + macOS | ✅ | ✅ | ❌ macOS only | ✅ | ✅ |
 | MCP server ships built into the app | ✅ | ✅ | ✅ | ⚠️ separate server | ❌ community only |
-| Secret masking that cannot be disabled | ✅ | ⚠️ optional, drops whole files | ❌ | ❌ | ❌ |
-| Agent can only narrow the human's selection | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Root jail with symlink-escape rejection | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Prompt-injection hardening (untrusted-data wrapping) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Git-scoped packing: tracked, staged, changes, ref diff | ✅ | ❌ | ⚠️ diffs in context | ❌ | ❌ |
-| Token budget for packing | ✅ | ❌ | ✅ | ❌ | ❌ |
+| Secret masking that cannot be disabled | ✅ | ⚠️ always-on check in MCP; flagged files are excluded, not masked | ❌ | ❌ | ❌ |
+| Agent cannot widen the effective file selection (default) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Root jail with symlink-escape rejection | ✅ default | ✅ opt-in `--sandbox` | ❌ | ❌ | ❌ |
+| Prompt-injection hardening (untrusted-data wrapping) | ✅ | — not documented | ❌ | ❌ | ❌ |
+| Built-in MCP file-selection scopes: tracked / staged / changes / ref diff | ✅ | ❌ | ⚠️ diffs in context | ❌ | ❌ |
+| Automatic file fitting under a content-token budget, with a skipped-file report | ✅ | ❌ | ✅ | ❌ | ❌ |
+| CLI failure when generated output exceeds a tokenizer-based limit | ❌ | ✅ `--token-budget`; output is still produced | — | — | — |
 | Oversized results stored, read back in ranges | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Remote Git repositories by URL | ✅ opt-in | ✅ | ❌ | ❌ | ✅ |
 
-<sub>Based on publicly documented features, last verified September 2026.</sub>
+<sub>Based on publicly documented features; Repomix v1.17.0 source and documentation verified September 6, 2026.</sub>
 
 See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
 
@@ -251,7 +273,7 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
 
 | Mode | What it shows |
 |---|---|
-| `.gitignore` mode | Tracked files, plus untracked files not excluded by `.gitignore` (with nested rules and negations) |
+| `.gitignore` mode | Tracked files and untracked files allowed by repository-local `.gitignore` and `info/exclude`, with opaque embedded repositories and independent declared submodules, following `git status` |
 | Tracked-files-only | Only files currently recorded in the Git index |
 | Staged | Files with staged changes |
 | Changes | Staged, unstaged, and non-ignored untracked files |

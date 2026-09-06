@@ -111,6 +111,19 @@ public sealed class DevProjexCommandTree
 			Description = L("Terminal.Option.McpAllowRemote")
 		};
 		var gitMode = CreateMcpGitModeOption();
+		var exclude = CreateMcpExcludeOption();
+		// Arity is pinned to zero: command validators run before arity validation in
+		// System.CommandLine, and GetValue on an over-arity result throws instead of
+		// reporting a parse error. A value-less switch keeps every spelling graceful.
+		var unrestricted = new Option<bool>("--unrestricted")
+		{
+			Description = L("Terminal.Option.McpUnrestricted"),
+			Arity = ArgumentArity.Zero
+		};
+		var allowAgentExclusions = new Option<bool>("--allow-agent-exclusions")
+		{
+			Description = L("Terminal.Option.McpAgentExclusions")
+		};
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
@@ -119,12 +132,27 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(hidePrivateData);
 		command.Options.Add(allowRemote);
 		command.Options.Add(gitMode);
+		command.Options.Add(exclude);
+		command.Options.Add(unrestricted);
+		command.Options.Add(allowAgentExclusions);
+		CompletionConflictRegistry.RegisterMutual(unrestricted, exclude);
+		CompletionConflictRegistry.RegisterMutual(unrestricted, gitMode);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(unrestricted) &&
+			    (result.GetResult(exclude) is not null || result.GetResult(gitMode) is not null))
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.UnrestrictedConflict")));
+		});
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
 			"devprojex mcp --root . --root ../shared",
 			"devprojex mcp --root . --hide-private-data",
-			"devprojex mcp --root . --git-mode tracked");
+			"devprojex mcp --root . --git-mode tracked",
+			"devprojex mcp --root . --exclude default --exclude dot-folders",
+			"devprojex mcp --root . --unrestricted",
+			"devprojex mcp --root . --allow-agent-exclusions",
+			"devprojex mcp --root . --unrestricted --allow-agent-exclusions");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];
@@ -132,13 +160,31 @@ public sealed class DevProjexCommandTree
 				explicitRoots,
 				environment.Variables,
 				Directory.GetCurrentDirectory());
+			var excludeValues = parseResult.GetValue(exclude);
+			IReadOnlyCollection<ProjectExclusion>? baselineExclusions;
+			GitFilteringMode? gitModeValue;
+			if (parseResult.GetValue(unrestricted))
+			{
+				baselineExclusions = [];
+				gitModeValue = GitFilteringMode.None;
+			}
+			else
+			{
+				baselineExclusions = excludeValues is { Length: > 0 }
+					? SelectionOptions.ParseExclusions(excludeValues)
+					: null;
+				gitModeValue = parseResult.GetValue(gitMode);
+			}
+
 			try
 			{
 				await McpServerHost.RunWithStandardStreamsAsync(
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
-						parseResult.GetValue(gitMode),
+						gitModeValue,
+						baselineExclusions,
+						parseResult.GetValue(allowAgentExclusions),
 						_serviceFactory.AppDataPathProvider,
 						cancellationToken)
 					.ConfigureAwait(false);
@@ -152,6 +198,57 @@ public sealed class DevProjexCommandTree
 			}
 		});
 		return command;
+	}
+
+	private Option<CliExclusionValue[]> CreateMcpExcludeOption()
+	{
+		var option = new Option<CliExclusionValue[]>("--exclude")
+		{
+			Description = L("Terminal.Option.McpExclude"),
+			HelpName = "NAME",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false,
+			CustomParser = result =>
+			{
+				var values = new List<CliExclusionValue>(result.Tokens.Count);
+				foreach (var token in result.Tokens)
+				{
+					// 'default' expands to the server default set, so a startup line extends it
+					// ("--exclude default --exclude dot-folders") instead of re-listing it. Any
+					// other name list replaces the default set — the CLI --exclude rule.
+					if (string.Equals(token.Value, McpServerBaseline.DefaultExclusionsToken, StringComparison.OrdinalIgnoreCase))
+					{
+						foreach (var exclusion in McpServerBaseline.DefaultExclusions)
+							values.Add(new CliExclusionValue(exclusion));
+						continue;
+					}
+
+					// The hidden legacy hide-secrets alias stays out of the server baseline:
+					// redaction is not an exclusion the MCP surface may reason about.
+					if (CliChoiceSets.Exclusion.TryParse(token.Value, out var value) &&
+					    value.Exclusion is not ProjectExclusion.HideSecrets)
+					{
+						values.Add(value);
+						continue;
+					}
+
+					result.AddError(LocalizedParseError.Create(_localization.Format(
+						"Terminal.Validation.UnknownExclusion",
+						token.Value)));
+				}
+
+				if (values.Any(static value => value.IsNone) &&
+				    values.Any(static value => !value.IsNone))
+				{
+					result.AddError(LocalizedParseError.Create(
+						_localization["Terminal.Validation.ExcludeNone"]));
+				}
+
+				return values.ToArray();
+			}
+		};
+		option.CompletionSources.Add([.. CliChoiceSets.Exclusion.Tokens, McpServerBaseline.DefaultExclusionsToken]);
+		return option;
 	}
 
 	private Option<GitFilteringMode?> CreateMcpGitModeOption()
@@ -777,7 +874,9 @@ public sealed class DevProjexCommandTree
 					TreeTextFormat? treeFormatValue = parseResult.GetValue(format) is { } requestedTreeFormat
 						? ParseTreeFormat(requestedTreeFormat)
 						: null;
-					return await new DesktopCommandHandler(environment)
+					return await new DesktopCommandHandler(
+							environment,
+							launcher: new DesktopProcessLauncher(_serviceFactory.HostCapabilities))
 						.OpenAsync(
 							DesktopOpenRequestFactory.Create(
 								projectPath,

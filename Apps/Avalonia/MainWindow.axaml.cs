@@ -1090,6 +1090,7 @@ public partial class MainWindow : Window
             var exists = Directory.Exists(normalizedPath);
             return (
                 Exists: exists,
+                IsReparsePoint: exists && FileSystemRootEntryPolicy.IsReparsePoint(normalizedPath),
                 CanRead: exists && _scanOptions.CanReadRoot(normalizedPath));
         });
 
@@ -1106,7 +1107,19 @@ public partial class MainWindow : Window
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
+            if (rootAccess.IsReparsePoint)
+            {
+                _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "reparse-root");
+                await ShowErrorAsync(_localization["Msg.RootIsReparsePoint"]);
+                return false;
+            }
+
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "access-denied");
+            if (_elevation.IsAdministrator)
+            {
+                await ShowErrorAsync(_localization["Desktop.Error.AccessDenied"]);
+                return false;
+            }
             if (TryElevateAndRestart(normalizedPath))
                 return false;
 
@@ -1329,17 +1342,17 @@ public partial class MainWindow : Window
 
     private bool TryElevateAndRestart(string path)
     {
+        if (_elevation.IsAdministrator) return false;
+        if (_elevationAttempted) return false;
+
+        _elevationAttempted = true;
+
         if (!BuildFlags.AllowElevation)
         {
             // Store builds: never attempt elevation, just show a clear message.
             _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
             return false;
         }
-
-        if (_elevation.IsAdministrator) return false;
-        if (_elevationAttempted) return false;
-
-        _elevationAttempted = true;
 
         var arguments = new[]
         {
@@ -1360,6 +1373,15 @@ public partial class MainWindow : Window
 
         _ = ShowInfoAsync(_localization["Msg.ElevationCanceled"]);
         return false;
+    }
+
+    private bool HandleBackgroundRootAccessDenied(string path)
+    {
+        var message = FileSystemRootEntryPolicy.IsReparsePoint(path)
+            ? _localization["Msg.RootIsReparsePoint"]
+            : _localization["Msg.AccessDeniedRoot"];
+        _ = ShowErrorAsync(message);
+        return true;
     }
 
     private async Task<bool> ReloadProjectAsync(

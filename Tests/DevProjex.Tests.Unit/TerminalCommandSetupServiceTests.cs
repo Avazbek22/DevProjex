@@ -6,6 +6,7 @@ using System.Diagnostics;
 namespace DevProjex.Tests.Unit;
 
 [Trait("Category", "TerminalCommand")]
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class TerminalCommandSetupServiceTests
 {
 	[Fact]
@@ -834,6 +835,43 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void InstallOrRepair_LinuxAppImage_WrapperTargetsOriginalImage()
+	{
+		using var temp = new TemporaryDirectory();
+		var appImagePath = temp.CreateFile(
+			"downloads/DevProjex-5.2-x86_64.AppImage",
+			"appimage fixture");
+		var userBin = Path.Combine(temp.Path, ".local", "bin");
+		var previous = Environment.GetEnvironmentVariable("APPIMAGE");
+		try
+		{
+			Environment.SetEnvironmentVariable("APPIMAGE", appImagePath);
+			var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+			{
+				Platform = TerminalCommandHostPlatform.Linux,
+				HomeDirectoryProvider = () => temp.Path,
+				PathVariableProvider = () => userBin,
+				LauncherValidator = (_, _) => new TerminalCommandValidationResult(true),
+				PathListSeparator = Path.PathSeparator
+			});
+
+			var result = service.InstallOrRepair();
+			var wrapperPath = Path.Combine(
+				userBin,
+				CommandLineExecutableAliases.UnixCommand);
+			var wrapper = File.ReadAllText(wrapperPath);
+
+			Assert.True(result.Success, result.ErrorMessage);
+			Assert.Contains("# target: " + appImagePath, wrapper, StringComparison.Ordinal);
+			Assert.Contains("exec '" + appImagePath + "' \"$@\"", wrapper, StringComparison.Ordinal);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("APPIMAGE", previous);
+		}
+	}
+
+	[Fact]
 	public void Probe_UnixMissingCommand_WhenUserBinMissingFromPath_KeepsInstallActionableAndReturnsHint()
 	{
 		using var temp = new TemporaryDirectory();
@@ -1384,6 +1422,36 @@ public sealed class TerminalCommandSetupServiceTests
 		{
 			Environment.SetEnvironmentVariable(variableName, null);
 		}
+	}
+
+	[Fact]
+	public async Task ValidateLauncher_WindowsCommandIgnoresSameNamedLauncherOnPath()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var commandPath = Path.GetFullPath(temp.CreateFile(
+			"working/devprojex.cmd",
+			"@echo off\r\necho working-launcher\r\nexit /b 0\r\n"));
+		var fakePath = temp.CreateFolder("fake-path");
+		File.WriteAllText(
+			Path.Combine(fakePath, "devprojex.cmd"),
+			"@echo off\r\necho path-launcher\r\nexit /b 17\r\n");
+		var startInfo = TerminalCommandSetupService.CreateLauncherValidationStartInfo(commandPath);
+		startInfo.Environment["NoDefaultCurrentDirectoryInExePath"] = "1";
+		startInfo.Environment["PATH"] = fakePath;
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("Launcher validation process did not start.");
+		var standardOutput = await process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var standardError = await process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, process.ExitCode);
+		Assert.Contains("working-launcher", standardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("path-launcher", standardOutput, StringComparison.Ordinal);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), standardError);
 	}
 
 	[Fact]

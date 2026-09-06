@@ -15,6 +15,10 @@ internal static class GitIgnoreMatcherFileCache
 	private static readonly LinkedList<CacheEntry> CacheLru = new();
 	private static long _retainedSourceBytes;
 
+	// Linked worktrees share info/exclude, but each parsed matcher owns a different root.
+	internal static string CreateCacheKey(string scopeRootPath, string sourcePath) =>
+		string.Concat(Path.GetFullPath(scopeRootPath), "\0", sourcePath);
+
 	public static GitIgnoreMatcherLoadResult Load(
 		string scopeRootPath,
 		string gitIgnorePath,
@@ -86,9 +90,10 @@ internal static class GitIgnoreMatcherFileCache
 			}
 
 			var normalizedPath = Path.GetFullPath(gitIgnorePath);
+			var cacheKey = CreateCacheKey(scopeRootPath, normalizedPath);
 			lock (CacheSync)
 			{
-				if (Cache.TryGetValue(normalizedPath, out var cachedNode) &&
+				if (Cache.TryGetValue(cacheKey, out var cachedNode) &&
 				    cachedNode.Value.SourceLengthBytes == source.LengthBytes &&
 				    string.Equals(
 					    cachedNode.Value.ContentFingerprint,
@@ -110,18 +115,19 @@ internal static class GitIgnoreMatcherFileCache
 			var scopedMatcher = new ScopedGitIgnoreMatcher(Path.GetFullPath(scopeRootPath), matcher);
 			lock (CacheSync)
 			{
-				Remove(normalizedPath);
+				Remove(cacheKey);
 				// Source length is a stable proxy for the parsed matcher's footprint. A single
 				// pathological source is still usable, but is never retained by the process cache.
 				if (source.LengthBytes <= MaximumRetainedSourceBytes)
 				{
 					var entry = new CacheEntry(
 						normalizedPath,
+						scopedMatcher.ScopeRootPath,
 						source.LengthBytes,
 						source.ContentFingerprint,
 						comparisonSemantics,
 						scopedMatcher);
-					Cache[normalizedPath] = CacheLru.AddFirst(entry);
+					Cache[cacheKey] = CacheLru.AddFirst(entry);
 					_retainedSourceBytes += source.LengthBytes;
 					TrimCache();
 				}
@@ -184,7 +190,7 @@ internal static class GitIgnoreMatcherFileCache
 		while ((Cache.Count > CacheLimit || _retainedSourceBytes > MaximumRetainedSourceBytes) &&
 		       CacheLru.Last is { } leastRecentlyUsed)
 		{
-			Remove(leastRecentlyUsed.Value.Path);
+			Remove(CreateCacheKey(leastRecentlyUsed.Value.ScopeRootPath, leastRecentlyUsed.Value.Path));
 		}
 	}
 
@@ -199,6 +205,7 @@ internal static class GitIgnoreMatcherFileCache
 
 	private sealed record CacheEntry(
 		string Path,
+		string ScopeRootPath,
 		long SourceLengthBytes,
 		string ContentFingerprint,
 		GitPathComparisonSemantics ComparisonSemantics,

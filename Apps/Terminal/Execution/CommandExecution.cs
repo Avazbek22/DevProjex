@@ -171,10 +171,13 @@ internal static class CommandExecution
 		"DPX-DESKTOP-TIMEOUT" => localization["Terminal.Error.DesktopTimeout"],
 		"DPX-DESKTOP-PROTOCOL-MISMATCH" => localization["Terminal.Error.DesktopProtocolMismatch"],
 		"DPX-DESKTOP-PAYLOAD-TOO-LARGE" => localization["Terminal.Error.DesktopPayloadTooLarge"],
+		"DPX-DESKTOP-NOT-INCLUDED" => localization["Terminal.Error.DesktopNotIncluded"],
 		ProjectContextGitReadiness.UnavailableDiagnosticCode =>
 			localization["Terminal.Diagnostic.TrackedIndexUnavailable"],
 		GitScopeFilter.UnavailableDiagnosticCode =>
 			localization["Terminal.Diagnostic.GitStateUnavailable"],
+		GitScopeFilter.UnsafeFilterDiagnosticCode =>
+			localization.Format("Terminal.Diagnostic.GitUnsafeFilter", "unknown"),
 		var value when value.StartsWith("DPX-DESKTOP-", StringComparison.Ordinal) =>
 			localization["Terminal.Error.DesktopRequestFailed"],
 		_ => localization["Terminal.Error.CommandInvalid"]

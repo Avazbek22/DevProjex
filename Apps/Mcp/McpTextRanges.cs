@@ -34,7 +34,7 @@ internal static class McpTextRanges
 		if (knownTotalLines is 0 && (startLine is > 1 || endLine is > 0))
 			throw InvalidRange(start, endLine, 0);
 		if (knownTotalLines is { } knownTotal && knownTotal > 0 &&
-		    (start > knownTotal || endLine > knownTotal))
+		    start > knownTotal)
 		{
 			throw InvalidRange(start, endLine, knownTotal);
 		}
@@ -171,9 +171,9 @@ internal static class McpTextRanges
 				throw InvalidRange(start, endLine, reportedTotal);
 			return new McpTextPage(string.Empty, 0, 0, 0, false, false);
 		}
-		if (start > reportedTotal || endLine > reportedTotal)
+		if (start > reportedTotal)
 			throw InvalidRange(start, endLine, reportedTotal);
-		var effectiveEnd = endLine ?? reportedTotal;
+		var effectiveEnd = Math.Min(endLine ?? reportedTotal, reportedTotal);
 		return new McpTextPage(
 			builder.ToString(),
 			start,
@@ -200,8 +200,8 @@ internal static class McpTextRanges
 		}
 
 		var start = startLine ?? 1;
-		var requestedEnd = endLine ?? total;
-		if (start < 1 || start > total || requestedEnd < start || requestedEnd > total)
+		var requestedEnd = Math.Min(endLine ?? total, total);
+		if (start < 1 || start > total || endLine < start)
 			throw InvalidRange(start, endLine, total);
 
 		var upper = Math.Min(requestedEnd, checked(start + maximumLines - 1));
@@ -260,8 +260,8 @@ internal static class McpTextRanges
 		}
 
 		var start = startLine ?? 1;
-		var requestedEnd = endLine ?? total;
-		if (start < 1 || start > total || requestedEnd < start || requestedEnd > total)
+		var requestedEnd = Math.Min(endLine ?? total, total);
+		if (start < 1 || start > total || endLine < start)
 			throw InvalidRange(start, endLine, total);
 
 		var upper = Math.Min(requestedEnd, checked(start + maximumLines - 1));

@@ -25,7 +25,7 @@ public sealed class GitProcessEnvironmentIntegrationTests
 		{
 			Environment.SetEnvironmentVariable("GIT_DIR", Path.Combine(temporary.Path, "wrong.git"));
 			Environment.SetEnvironmentVariable("GIT_WORK_TREE", Path.Combine(temporary.Path, "wrong-tree"));
-			var service = new GitRepositoryService();
+			var service = new GitRepositoryService(allowFileTransportForTests: true);
 
 			var cloned = await service.CloneAsync(
 				source.RepositoryUrl,

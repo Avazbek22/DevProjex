@@ -140,7 +140,7 @@ public sealed class CliUrlSourceCommandTests
 		var bare = Path.Combine(workspace.Path, "origin.git");
 		RunGit(workspace.Path, "clone", "--bare", source, bare);
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		using var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En);
+		using var services = CreateFileRemoteFactory(() => data.Path).Create(AppLanguage.En);
 		var factory = new TerminalServiceFactory(_ => services);
 
 		using var main = await AnalyzeAsync(factory, repositoryUrl, "main");
@@ -209,7 +209,7 @@ public sealed class CliUrlSourceCommandTests
 		var bare = Path.Combine(workspace.Path, "export-origin.git");
 		RunGit(workspace.Path, "clone", "--bare", source, bare);
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		var factory = new TerminalServiceFactory(() => data.Path);
+		var factory = CreateFileRemoteFactory(() => data.Path);
 		var treeEnvironment = new TestTerminalEnvironment();
 
 		var treeExitCode = await new TerminalApplication(treeEnvironment, factory).RunAsync(
@@ -279,7 +279,7 @@ public sealed class CliUrlSourceCommandTests
 		var bare = Path.Combine(workspace.Path, "diff-origin.git");
 		RunGit(workspace.Path, "clone", "--bare", source, bare);
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		var factory = new TerminalServiceFactory(() => data.Path);
+		var factory = CreateFileRemoteFactory(() => data.Path);
 		string[] scope = ["--branch", "main", "--git-mode", "diff:HEAD~1..HEAD", "--progress", "never"];
 
 		var analyzeEnvironment = new TestTerminalEnvironment();
@@ -356,7 +356,7 @@ public sealed class CliUrlSourceCommandTests
 			"--language", "en"
 		];
 
-		var factory = new TerminalServiceFactory(() => data.Path);
+		var factory = CreateFileRemoteFactory(() => data.Path);
 		var progressExitCode = await new TerminalApplication(
 				progressEnvironment,
 				factory)
@@ -459,6 +459,13 @@ public sealed class CliUrlSourceCommandTests
 		Assert.Empty(environment.StandardError);
 		return JsonDocument.Parse(environment.StandardOutput);
 	}
+
+	private static TerminalServiceFactory CreateFileRemoteFactory(Func<string> dataRoot) =>
+		new(
+			dataRoot,
+			new GitRepositoryService(
+				allowFileTransportForTests: true,
+				retainTestManagedMarker: false));
 
 	private static bool IsGitAvailable()
 	{

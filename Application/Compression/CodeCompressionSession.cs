@@ -36,6 +36,9 @@ public sealed record CodeCompressionSnapshot(
 
 	public int TotalFiles => CompressedFiles + UnchangedFiles;
 
+	public CodeCompressionAvailabilitySnapshot Availability { get; init; } =
+		CodeCompressionAvailabilitySnapshot.Available;
+
 	/// <summary>Same estimator the export metrics use, so the summary agrees with the status bar.</summary>
 	public static long EstimateTokens(long characters) =>
 		characters <= 0 ? 0 : (characters / 4) + (characters % 4 == 0 ? 0 : 1);
@@ -55,7 +58,11 @@ public sealed record CodeCompressionDiagnosticsSnapshot(
 	long RetainedCacheBytes,
 	int MaximumCacheEntries,
 	long MaximumRetainedCacheBytes,
-	CodeCompressionRuntimeDiagnosticSnapshot Runtime);
+	CodeCompressionRuntimeDiagnosticSnapshot Runtime)
+{
+	public CodeCompressionAvailabilitySnapshot Availability { get; init; } =
+		CodeCompressionAvailabilitySnapshot.Available;
+}
 
 internal enum CodeCompressionScopeMode
 {
@@ -161,16 +168,22 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	internal void ReleaseIdleAnalysisWorkers() =>
 		(compressor as ICodeCompressionRuntimeDiagnosticsProvider)?.ReleaseIdleAnalysisWorkers();
 
+	public CodeCompressionAvailabilitySnapshot Availability =>
+		(compressor as ICodeCompressionAvailabilityProvider)?.CaptureAvailability() ??
+		CodeCompressionAvailabilitySnapshot.Available;
+
 	public CodeCompressionDiagnosticsSnapshot Diagnostics
 	{
 		get
 		{
 			int cacheEntries;
 			long retainedCacheBytes;
+			CodeCompressionAvailabilitySnapshot snapshotAvailability;
 			lock (_sync)
 			{
 				cacheEntries = _cache.Count;
 				retainedCacheBytes = _retainedCacheBytes;
+				snapshotAvailability = _snapshot.Availability;
 			}
 			return new CodeCompressionDiagnosticsSnapshot(
 				Interlocked.Read(ref _hashComputations),
@@ -187,7 +200,12 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				_maximumCacheEntries,
 				_maximumRetainedCacheBytes,
 				(compressor as ICodeCompressionRuntimeDiagnosticsProvider)
-					?.CaptureRuntimeDiagnostics() ?? CodeCompressionRuntimeDiagnosticSnapshot.Empty);
+					?.CaptureRuntimeDiagnostics() ?? CodeCompressionRuntimeDiagnosticSnapshot.Empty)
+			{
+				Availability = snapshotAvailability.IsUnavailable
+					? snapshotAvailability
+					: Availability
+			};
 		}
 	}
 
@@ -267,7 +285,8 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			generation.Version,
 			mode,
 			kinds,
-			transformIdentity);
+			transformIdentity,
+			Availability);
 	}
 
 	internal CodeCompressionExecution Transform(
@@ -671,6 +690,13 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		             plan.TransformIdentity.Length) * sizeof(char);
 		foreach (var edit in plan.Edits)
 			bytes += 80L + edit.Replacement.Length * sizeof(char);
+		if (plan.Unavailability is { } failure)
+		{
+			bytes += 64L +
+			         (failure.Reason.Length +
+			          (failure.LanguageId?.Length ?? 0) +
+			          (failure.GrammarLibrary?.Length ?? 0)) * sizeof(char);
+		}
 		// Four integer arrays in ContentTransformMap, plus the edit collection references.
 		bytes += plan.Edits.Count * (4L * sizeof(int) + IntPtr.Size);
 		return bytes;
@@ -875,6 +901,9 @@ public sealed class CodeCompressionScope : IDisposable
 	private readonly int[]? _unchangedOutcomeCounts;
 	private readonly IReadOnlyDictionary<string, int>? _fileOrder;
 	private readonly object _diagnosticsSync = new();
+	private readonly Dictionary<string, CodeCompressionUnavailability> _unavailability =
+		new(StringComparer.Ordinal);
+	private readonly CodeCompressionAvailabilitySnapshot initialAvailability;
 	private int _compressed;
 	private int _bodyTransformed;
 	private int _commentTransformed;
@@ -893,7 +922,8 @@ public sealed class CodeCompressionScope : IDisposable
 		long generation,
 		CodeCompressionScopeMode mode,
 		CodeTransformKinds kinds,
-		string transformIdentity)
+		string transformIdentity,
+		CodeCompressionAvailabilitySnapshot initialAvailability)
 	{
 		this.session = session;
 		this.inner = inner;
@@ -902,6 +932,7 @@ public sealed class CodeCompressionScope : IDisposable
 		this.mode = mode;
 		this.kinds = kinds;
 		this.transformIdentity = transformIdentity;
+		this.initialAvailability = initialAvailability;
 		if (mode == CodeCompressionScopeMode.Measurement)
 			return;
 
@@ -1120,6 +1151,11 @@ public sealed class CodeCompressionScope : IDisposable
 			plan.RelativePath);
 		lock (_diagnosticsSync)
 		{
+			if (plan.Unavailability is { } failure)
+			{
+				var failureKey = $"{failure.Scope}\0{failure.LanguageId}\0{failure.GrammarLibrary}\0{failure.Reason}";
+				_unavailability.TryAdd(failureKey, failure);
+			}
 			if (_unchangedExamples!.Count >= MaximumUnchangedDiagnosticExamples &&
 			    DiagnosticOrderKeyComparer.Instance.Compare(
 				    order,
@@ -1145,8 +1181,16 @@ public sealed class CodeCompressionScope : IDisposable
 		if (Interlocked.Exchange(ref _completed, 1) != 0)
 			throw new InvalidOperationException("The compression scope has already completed.");
 		CodeCompressionFileOutcome[] unchanged;
+		CodeCompressionUnavailability[] failures;
 		lock (_diagnosticsSync)
+		{
 			unchanged = _unchangedExamples!.Values.ToArray();
+			failures = _unavailability.Values
+				.OrderBy(static failure => failure.LanguageId, StringComparer.Ordinal)
+				.ThenBy(static failure => failure.GrammarLibrary, StringComparer.Ordinal)
+				.ThenBy(static failure => failure.Reason, StringComparer.Ordinal)
+				.ToArray();
+		}
 		var unchangedFiles = Volatile.Read(ref _unchangedFiles);
 		var outcomeCounts = Enum.GetValues<CodeCompressionOutcome>()
 			.Where(static outcome => outcome != CodeCompressionOutcome.Compressed)
@@ -1165,9 +1209,27 @@ public sealed class CodeCompressionScope : IDisposable
 			Volatile.Read(ref _bodyTransformed),
 			Volatile.Read(ref _commentTransformed),
 			transformIdentity,
-			Volatile.Read(ref _blankLineTransformed));
+			Volatile.Read(ref _blankLineTransformed))
+		{
+			Availability = ResolveAvailability(initialAvailability, failures)
+		};
 		session.Publish(snapshot, generation);
 		return snapshot;
+	}
+
+	private static CodeCompressionAvailabilitySnapshot ResolveAvailability(
+		CodeCompressionAvailabilitySnapshot initial,
+		IReadOnlyList<CodeCompressionUnavailability> failures)
+	{
+		if (initial.State == CodeCompressionAvailabilityState.Unavailable)
+			return initial;
+		if (failures.Count == 0)
+			return initial;
+		return new CodeCompressionAvailabilitySnapshot(
+			failures.Any(static failure => failure.Scope == CodeCompressionUnavailabilityScope.AllLanguages)
+				? CodeCompressionAvailabilityState.Unavailable
+				: CodeCompressionAvailabilityState.LanguageUnavailable,
+			failures);
 	}
 
 	public void Dispose()

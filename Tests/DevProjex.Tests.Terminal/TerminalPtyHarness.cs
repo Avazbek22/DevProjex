@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
+using DevProjex.Infrastructure.Git;
 using Hex1b;
 using XTerm.Options;
 using XTermTerminal = XTerm.Terminal;
@@ -118,7 +119,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		Action<string>? initializeDataRoot = null,
 		bool writeShellCompletionMarker = false,
 		bool useProgressCheckpointHost = false,
-		bool verifyExecutableRelaunch = false)
+		bool verifyExecutableRelaunch = false,
+		bool allowFileGitTransport = false,
+		string? binaryOverride = null)
 	{
 		if (string.Equals(
 			    Environment.GetEnvironmentVariable(SkipInteractiveTuiTestsVariable),
@@ -126,12 +129,12 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			    StringComparison.Ordinal))
 		{
 			Assert.Skip(
-				"Interactive TUI PTY journeys are disabled in CI while the TUI is pending removal.");
+				"Interactive TUI PTY journeys are disabled in broad CI jobs; Release Validation runs the curated PTY matrix.");
 		}
 
-		var binary = useProgressCheckpointHost
+		var binary = binaryOverride ?? (useProgressCheckpointHost
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
-			: PublishedApplicationLocator.FindExecutable();
+			: PublishedApplicationLocator.FindExecutable());
 		var launchArguments = arguments?.ToArray() ?? [];
 		var launchesThroughDotNetHost = false;
 		if (OperatingSystem.IsWindows() &&
@@ -166,6 +169,10 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			["LOCALAPPDATA"] = Path.Combine(dataRoot, "local"),
 			["APPDATA"] = Path.Combine(dataRoot, "roaming")
 		};
+		if (allowFileGitTransport)
+		{
+			variables[GitRepositoryService.TestFileTransportPolicyVariable] = "1";
+		}
 		if (environment is not null)
 		{
 			foreach (var pair in environment)
@@ -1109,21 +1116,37 @@ internal static class PublishedApplicationLocator
 			path);
 	}
 
-	public static string FindApplicationAssembly()
+	public static string FindApplicationAssembly(
+		PublishedApplicationHost host = PublishedApplicationHost.Desktop)
 	{
-		var path = Path.Combine(
-			FindRepositoryRoot(),
+		var repository = FindRepositoryRoot();
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
+		var projectDirectory = host == PublishedApplicationHost.Desktop
+			? "Avalonia"
+			: "TerminalHost";
+		var assemblyName = host == PublishedApplicationHost.Desktop
+			? "DevProjex.dll"
+			: "devprojex.dll";
+		var basePath = Path.Combine(
+			repository,
 			"Apps",
-			"Avalonia",
+			projectDirectory,
 			"bin",
-			ResolveBuildConfiguration(AppContext.BaseDirectory),
-			"net10.0",
-			"DevProjex.dll");
-		if (File.Exists(path))
+			configuration,
+			"net10.0");
+		var candidates = host == PublishedApplicationHost.Desktop
+			? new[] { Path.Combine(basePath, assemblyName) }
+			: new[]
+			{
+				Path.Combine(basePath, assemblyName),
+				Path.Combine(basePath, RuntimeInformation.RuntimeIdentifier, assemblyName)
+			};
+		var path = candidates.FirstOrDefault(File.Exists);
+		if (path is not null)
 			return path;
 		throw new FileNotFoundException(
-			"Build the DevProjex Avalonia host before running process tests.",
-			path);
+			$"Build the DevProjex {host} host before running process tests.",
+			candidates[0]);
 	}
 
 	internal static string ResolveBuildConfiguration(string baseDirectory)
@@ -1172,4 +1195,10 @@ internal static class PublishedApplicationLocator
 		}
 		throw new DirectoryNotFoundException("DevProjex repository root was not found.");
 	}
+}
+
+internal enum PublishedApplicationHost
+{
+	Desktop,
+	Headless
 }

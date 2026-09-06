@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Xml.Linq;
 using DevProjex.Application.Preview;
 using DevProjex.Infrastructure.Git;
+using DevProjex.Infrastructure.Processes;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -1505,15 +1506,19 @@ public sealed class TerminalWorkspaceContractTests
 		var bare = Path.Combine(workspace.Path, "origin.git");
 		Assert.True(TryRunGit(workspace.Path, "clone", "--quiet", "--bare", source, bare));
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var services = new TerminalServiceFactory(
+			() => appData.Path,
+			new GitRepositoryService(
+				allowFileTransportForTests: true,
+				retainTestManagedMarker: false)).Create(AppLanguage.En);
 		await using var resolvedSource = await new TerminalProjectSourceResolver(
 				services,
 				new TestTerminalEnvironment(),
 				new TerminalOutputOptions { Progress = TerminalProgressMode.Never })
 			.ResolveAsync(repositoryUrl, "main", TestContext.Current.CancellationToken);
 		var checkout = resolvedSource.ProjectPath;
-		var headBefore = ReadGit(checkout, "rev-parse", "HEAD");
-		var statusBefore = ReadGit(checkout, "status", "--porcelain=v1");
+		var headBefore = await ReadGit(checkout, "rev-parse", "HEAD");
+		var statusBefore = await ReadGit(checkout, "status", "--porcelain=v1");
 		var contentBefore = File.ReadAllBytes(Path.Combine(checkout, "Last.txt"));
 		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
 		using var state = await controller.OpenAsync(
@@ -1536,8 +1541,8 @@ public sealed class TerminalWorkspaceContractTests
 
 		Assert.False(result.Plan.HasErrors);
 		Assert.Equal("Last.txt", Path.GetFileName(Assert.Single(result.Plan.IncludedFiles)));
-		Assert.Equal(headBefore, ReadGit(checkout, "rev-parse", "HEAD"));
-		Assert.Equal(statusBefore, ReadGit(checkout, "status", "--porcelain=v1"));
+		Assert.Equal(headBefore, await ReadGit(checkout, "rev-parse", "HEAD"));
+		Assert.Equal(statusBefore, await ReadGit(checkout, "status", "--porcelain=v1"));
 		Assert.Equal(contentBefore, File.ReadAllBytes(Path.Combine(checkout, "Last.txt")));
 		var diffResolver = new GitRemoteDiffRangeResolver();
 		var repeated = await Task.WhenAll(
@@ -1778,7 +1783,7 @@ public sealed class TerminalWorkspaceContractTests
 		}
 	}
 
-	private static string ReadGit(string workingDirectory, params string[] arguments)
+	private static async Task<string> ReadGit(string workingDirectory, params string[] arguments)
 	{
 		var startInfo = new ProcessStartInfo("git")
 		{
@@ -1791,9 +1796,14 @@ public sealed class TerminalWorkspaceContractTests
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
 		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
-		var output = process.StandardOutput.ReadToEnd();
-		var error = process.StandardError.ReadToEnd();
-		Assert.True(process.WaitForExit(10_000));
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(10));
+		// Drain both pipes without blocking the process-exit continuation that invoked the test.
+		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+		await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token);
+		var output = await outputTask.WaitAsync(timeout.Token);
+		var error = await errorTask.WaitAsync(timeout.Token);
 		Assert.True(process.ExitCode == 0, error);
 		return output.Trim();
 	}

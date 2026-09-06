@@ -15,7 +15,16 @@ Icon PNGs are located in `Assets/AppIcon/MacOS/AppIconSet/`:
 ./Scripts/release-all.ps1 -Version 5.1 -GitHubArtifactsOnly
 ```
 
+The equivalent channel form is `-Channels github`. Use `-Rids osx-x64` or
+`-Rids osx-arm64` for a diagnostic partial build; it includes
+`PARTIAL-BUILD.txt` and is not release-ready. See
+[`Docs/Release-Process.md`](../../Docs/Release-Process.md) for validation and
+channel commands.
+
 The resulting files are named `DevProjex.v<version>.osx-<architecture>.app.tar.gz`.
+Each selected RID also produces `publish-payload.<rid>.json`, which records every
+file and managed resource embedded by the .NET bundler and is covered by
+`SHA256SUMS.txt`.
 Each archive contains one Finder-ready `DevProjex.app` bundle:
 
 ```text

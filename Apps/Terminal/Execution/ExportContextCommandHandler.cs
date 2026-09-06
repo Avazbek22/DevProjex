@@ -28,6 +28,14 @@ public sealed class ExportContextCommandHandler(
 				request.MaxFileBytes,
 				cancellationToken)
 			.ConfigureAwait(false);
+		var transformationContext = CreateTransformationContext(plan, request.View);
+		await using var prepared = transformationContext is null
+			? null
+			: await services.SecretRedactionOutputPreparer
+				.PrepareAsync(transformationContext, plan.IncludedFiles, cancellationToken)
+				.ConfigureAwait(false);
+		if (prepared?.CompressionSnapshot is { } compressionSnapshot)
+			plan = CodeCompressionDiagnostic.Append(plan, compressionSnapshot.Availability);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 		if (plan.HasErrors)
@@ -45,19 +53,29 @@ public sealed class ExportContextCommandHandler(
 
 		if (request.DryRun)
 		{
-			SecretRedactionSnapshot? redactionSnapshot = null;
+			var redactionSnapshot = prepared?.Snapshot;
 			ProjectContextWriteResult? budgetResult = null;
 			if (request.MaximumEstimatedTokens is { } maximumEstimatedTokens)
 			{
-				budgetResult = await services.ContextDocumentService.EvaluateTokenBudgetAsync(
-						plan,
-						request.View,
-						request.Format,
-						maximumEstimatedTokens,
-						cancellationToken)
-					.ConfigureAwait(false);
+				budgetResult = prepared is null
+					? await services.ContextDocumentService.EvaluateTokenBudgetAsync(
+							plan,
+							request.View,
+							request.Format,
+							maximumEstimatedTokens,
+							cancellationToken)
+						.ConfigureAwait(false)
+					: await services.ContextDocumentService.WritePreparedCompleteAsync(
+							plan,
+							request.View,
+							request.Format,
+							Stream.Null,
+							prepared,
+							cancellationToken,
+							maximumEstimatedTokens: maximumEstimatedTokens)
+						.ConfigureAwait(false);
 			}
-			else
+			else if (prepared is null)
 			{
 				var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
 					plan.Selection.HideSecrets == true,
@@ -107,16 +125,28 @@ public sealed class ExportContextCommandHandler(
 						await using var destination = new Utf8TextWriterStream(
 							environment.Output,
 							cancellationToken);
-						var writeResult = await services.ContextDocumentService.WriteCompleteWithReportAsync(
-								plan,
-								request.View,
-								request.Format,
-								destination,
-								cancellationToken,
-								plain: request.Output.Plain,
-								useSourceMappedStructuredPaths: true,
-								maximumEstimatedTokens: request.MaximumEstimatedTokens)
-							.ConfigureAwait(false);
+						var writeResult = prepared is null
+							? await services.ContextDocumentService.WriteCompleteWithReportAsync(
+									plan,
+									request.View,
+									request.Format,
+									destination,
+									cancellationToken,
+									plain: request.Output.Plain,
+									useSourceMappedStructuredPaths: true,
+									maximumEstimatedTokens: request.MaximumEstimatedTokens)
+								.ConfigureAwait(false)
+							: await services.ContextDocumentService.WritePreparedCompleteAsync(
+									plan,
+									request.View,
+									request.Format,
+									destination,
+									prepared,
+									cancellationToken,
+									plain: request.Output.Plain,
+									useSourceMappedStructuredPaths: true,
+									maximumEstimatedTokens: request.MaximumEstimatedTokens)
+								.ConfigureAwait(false);
 						await destination.CompleteAsync(cancellationToken).ConfigureAwait(false);
 						return writeResult;
 					})
@@ -139,15 +169,28 @@ public sealed class ExportContextCommandHandler(
 					request.Force,
 					async (destination, token) =>
 					{
-						writeReport = await services.ContextDocumentService.WriteCompleteWithReportAsync(
-							plan,
-							request.View,
-							request.Format,
-							destination,
-							token,
-							plain: request.Output.Plain,
-							useSourceMappedStructuredPaths: true,
-							maximumEstimatedTokens: request.MaximumEstimatedTokens).ConfigureAwait(false);
+						writeReport = prepared is null
+							? await services.ContextDocumentService.WriteCompleteWithReportAsync(
+									plan,
+									request.View,
+									request.Format,
+									destination,
+									token,
+									plain: request.Output.Plain,
+									useSourceMappedStructuredPaths: true,
+									maximumEstimatedTokens: request.MaximumEstimatedTokens)
+								.ConfigureAwait(false)
+							: await services.ContextDocumentService.WritePreparedCompleteAsync(
+									plan,
+									request.View,
+									request.Format,
+									destination,
+									prepared,
+									token,
+									plain: request.Output.Plain,
+									useSourceMappedStructuredPaths: true,
+									maximumEstimatedTokens: request.MaximumEstimatedTokens)
+								.ConfigureAwait(false);
 					},
 					cancellationToken,
 					path => ExactOutputDestinationValidator.ValidateContext(
@@ -169,5 +212,34 @@ public sealed class ExportContextCommandHandler(
 				services.Localization);
 		}
 		return CommandLineExitCodes.Success;
+	}
+
+	private ContentTransformationContext? CreateTransformationContext(
+		ProjectContextPlan plan,
+		ProjectContextView view)
+	{
+		if (view is not (ProjectContextView.Content or ProjectContextView.TreeContent))
+			return null;
+
+		var transformKinds = CodeTransformIdentity.Resolve(
+			plan.Selection.CompressCode == true,
+			plan.Selection.StripComments == true,
+			plan.Selection.StripBlankLines == true);
+		var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
+			plan.Selection.HideSecrets == true,
+			plan.Selection.HidePrivateData == true);
+		return ContentTransformationContext.For(
+			transformKinds != CodeTransformKinds.None
+				? new CodeCompressionContext(
+					plan.SourceRoot,
+					services.CodeCompressionSession,
+					transformKinds)
+				: null,
+			redactionFeatures != SecretRedactionFeatures.None
+				? new SecretRedactionContext(
+					plan.SourceRoot,
+					services.SecretRedactionSession,
+					redactionFeatures)
+				: null);
 	}
 }

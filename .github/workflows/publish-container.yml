@@ -1,0 +1,196 @@
+name: Publish Headless Container
+
+on:
+  pull_request:
+    branches: [v5.2]
+    paths:
+      - '.github/workflows/publish-container.yml'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'glama.json'
+      - 'Apps/Terminal/**'
+      - 'Apps/TerminalHost/**'
+      - 'Assets/Localization/**'
+      - 'Infrastructure/**'
+      - 'Packaging/Headless/**'
+      - 'Scripts/*Headless*'
+      - 'Scripts/*Release*'
+      - 'Scripts/release-archive-helpers.ps1'
+      - 'Directory.Build.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the v prefix
+        required: true
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  IMAGE_NAME: ghcr.io/avazbek22/devprojex
+
+jobs:
+  prepare:
+    name: Resolve container version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          PUBLISHED_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            version="${PUBLISHED_RELEASE_TAG#v}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            version="$(sed -n 's:.*<DevProjexVersion[^>]*>\([^<]*\)</DevProjexVersion>.*:\1:p' Directory.Build.props)"
+          else
+            version="${DISPATCH_VERSION}"
+          fi
+          if [[ "${version}" == v* || ! "${version}" =~ ^[0-9]+\.[0-9]+([.][0-9]+)?([+-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "::error::Unsupported version syntax: ${version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  build-gate:
+    name: Cross-build, validate, and smoke container payloads
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build both architectures without compiler emulation
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/container-images
+          docker buildx build --platform linux/amd64 --load \
+            --build-arg "DEVPROJEX_VERSION=${VERSION}" \
+            --tag devprojex-ci:amd64 .
+          docker buildx build --platform linux/arm64 --load \
+            --build-arg "DEVPROJEX_VERSION=${VERSION}" \
+            --tag devprojex-ci:arm64 .
+          docker save devprojex-ci:amd64 | gzip -9 > artifacts/container-images/devprojex-amd64.tar.gz
+          docker save devprojex-ci:arm64 | gzip -9 > artifacts/container-images/devprojex-arm64.tar.gz
+
+      - name: Validate image payload receipts and mutation gates
+        shell: pwsh
+        run: |
+          ./Scripts/Test-HeadlessContainer.ps1 -Image devprojex-ci:amd64 -Version '${{ needs.prepare.outputs.version }}' -Rid linux-x64
+          ./Scripts/Test-HeadlessContainer.ps1 -Image devprojex-ci:arm64 -Version '${{ needs.prepare.outputs.version }}' -Rid linux-arm64
+
+      - name: Smoke amd64 with a read-only root
+        shell: pwsh
+        run: ./Scripts/Test-HeadlessContainerSmoke.ps1 -Image devprojex-ci:amd64 -Version '${{ needs.prepare.outputs.version }}'
+
+      - name: Report compressed image sizes
+        shell: pwsh
+        run: |
+          "### Headless container images" >> $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem artifacts/container-images/*.tar.gz | Sort-Object Name | ForEach-Object {
+            "- ``$($_.Name)``: $($_.Length) bytes compressed" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload arm64 image for native smoke
+        uses: actions/upload-artifact@v7
+        with:
+          name: devprojex-container-arm64
+          path: artifacts/container-images/devprojex-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  smoke-arm64:
+    name: Smoke arm64 image on a native runner
+    needs: [prepare, build-gate]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: devprojex-container-arm64
+          path: artifacts/container-images
+
+      - name: Load and smoke arm64 with a read-only root
+        shell: pwsh
+        run: |
+          docker load -i artifacts/container-images/devprojex-arm64.tar.gz
+          if ($LASTEXITCODE -ne 0) { throw 'Could not load the arm64 image.' }
+          ./Scripts/Test-HeadlessContainerSmoke.ps1 -Image devprojex-ci:arm64 -Version '${{ needs.prepare.outputs.version }}'
+
+  publish:
+    name: Publish multi-architecture image and provenance
+    if: ${{ github.event_name == 'release' }}
+    needs: [prepare, build-gate, smoke-arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-architecture image
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: DEVPROJEX_VERSION=${{ needs.prepare.outputs.version }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}
+            ${{ env.IMAGE_NAME }}:latest
+
+      - name: Attest image build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

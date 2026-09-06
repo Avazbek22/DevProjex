@@ -38,6 +38,22 @@ inspect -> select -> verify -> export
 `DevProjex.Terminal` remains a class library inside the primary application. Every
 RID publish contains exactly one primary DevProjex application executable.
 
+### v5.2 headless distribution extension
+
+Starting with v5.2, the same `DevProjex.Terminal` application is hosted by the
+desktop executable and by the `devprojex` headless executable distributed through
+RID-specific NuGet tool packages and npm platform packages. For identical arguments,
+environment, and inputs, the CLI, TUI, and MCP byte contracts are identical; the
+headless host adds no alternate parser or command implementation.
+
+The only additive host-capability difference is an attempted desktop launch. When
+`open` cannot reuse a running desktop and the TUI action **Open desktop** is invoked,
+the headless host reports `DPX-DESKTOP-NOT-INCLUDED`, explains that this distribution
+has no desktop app, links to `Docs/Installation.md`, and returns exit code `5` for a
+direct command. `ui ...` continues to control an already running compatible Desktop
+instance over IPC. Existing `DPX-*` codes, exit meanings, output schemas, and command
+grammar are unchanged.
+
 ## Supported Entry Points
 
 - `devprojex` in an interactive terminal starts Terminal Workspace.
@@ -64,6 +80,8 @@ direct-command startup when that default is writable or when a private writable
 `DOTNET_BUNDLE_EXTRACT_BASE_DIR` is supplied. An unset or read-only Unix home, or
 an unusable Windows temporary directory, therefore requires the explicit
 extraction base. The v1 contract does not promise extraction-free startup.
+When DevProjex resolves a path for launching or registering itself, an existing
+file named by `APPIMAGE` takes precedence over the temporary mounted process path.
 
 ## Public Command Tree
 
@@ -277,6 +295,12 @@ compressed to block-form declarations for `.kt` and `.kts` files. Kotlin output 
 lambda-valued `= { }` form; Scala uses the same text intentionally as a block expression.
 Analysis content metrics and every context/folder/ZIP output observe the same
 transformed bytes; source files are never modified.
+If the grammar delivery source is empty or unreadable, or a required native grammar
+cannot be found or loaded, the affected source stays complete and direct analysis
+or context export emits warning `DPX-COMPRESSION-UNAVAILABLE` with the delivery path
+or grammar name. The warning is additive, does not change the command exit code, and
+is not promoted by `analyze --strict`. Unsupported languages and parse or structural
+safety failures remain separate unchanged-file outcomes.
 
 `--strip-comments` is an independent, additive content transformation and is off in the
 `standard` profile. It removes syntax-tree comments in the 14 body-compression languages plus
@@ -310,7 +334,9 @@ exports fail with `DPX-EXPORT-RESERVED-NAME` rather than overwrite or duplicate 
 `gitignore` mode reads regular `.gitignore` files reachable in the selected working
 tree. When the selected path is below its owning repository/worktree root, the
 ancestor rule chain from that root through the selected path is applied before
-rules discovered below it. It does not read `.git/info/exclude`, global Git excludes, or symbolic links
+rules discovered below it. Repository-local `info/exclude` is read with lower
+precedence than the root `.gitignore`, resolving `gitdir:` and `commondir` for
+worktrees and submodules. It does not read global Git excludes or symbolic links
 named `.gitignore`; Git itself does not follow a symbolic link when accessing that
 control file. If no regular `.gitignore` exists, the selected mode remains
 `gitignore` with an empty pattern set; the administrative entry named exactly `.git`
@@ -322,6 +348,18 @@ instead of silently including files without complete rule evaluation. Skipping a
 `.gitignore` symbolic link is normal Git-compatible behavior and is not an access
 diagnostic. The reader strips an initial UTF-8 BOM and otherwise decodes as UTF-8;
 UTF-16/UTF-32 BOMs are not auto-detected and reinterpreted as valid rules.
+
+In v5.2 the existing Git modes gain an intentional behavior change: `gitignore`
+reads `info/exclude`, and both `gitignore` and `tracked` treat undeclared embedded
+repositories as opaque directories. Declared initialized submodules own their
+rules and nested declarations recursively; parent rules do not leak inside.
+Without a repository above the scan root, the first repository in each subtree
+becomes an independent owner. A gitlink without a declaration remains embedded;
+a declaration without a boundary remains an ordinary directory. The complete
+source-resolution and ownership specification is in [SmartIgnore.md](SmartIgnore.md).
+To recover the previous embedded-repository visibility, use `--git-mode none`
+(or MCP `--unrestricted` to also disable ordinary exclusions). No new flag,
+checkbox, token, diagnostic code, localization key, or MCP schema is introduced.
 
 Git pattern and tracked-index path comparison use the effective repository
 `core.ignoreCase` value. On macOS, canonical Unicode comparison also follows
@@ -820,7 +858,10 @@ that prevents an accepted option from becoming a no-op.
 | analyze/context/project/open/profile-save | `--hide-private-data` | profile content-transformation state | independently enables or disables private-data redaction without changing path filters | bare form means on; values are `true`, `false`, `on`, `off`; conflicts with `--no-hide-private-data` and `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | `mcp` | `--hide-private-data` | off | enables private-data redaction for the entire server process | startup-only; tool schemas and profiles cannot alter it; secret redaction remains mandatory | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
 | `mcp` | `--allow-remote` | off | permits project tools to resolve Git URL sources through RepoCache | startup-only; local roots and `list_projects` remain unchanged; `branch` is URL-only | stdout remains JSON-RPC-only; tool failures use stable `DPX-MCP-*` results | parser, MCP schema, integration |
-| `mcp` | `--git-mode` | standard-profile mode | selects the server baseline from `none`, `gitignore`, or `tracked` when no explicit profile is requested; accepts `off` as an input alias for `none` | startup-only; momentary modes are rejected | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
+| `mcp` | `--git-mode` | standard-profile mode | selects the server baseline from `none`, `gitignore`, or `tracked` when no explicit profile is requested; accepts `off` as an input alias for `none` | startup-only; momentary modes are rejected; conflicts with `--unrestricted` | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
+| `mcp` | `--exclude` | MCP default set: `smart-ignore`, `empty-folders` | selects the server baseline path-exclusion set from the shared exclusion tokens when no explicit profile is requested; `none` starts with every toggle off; `default` expands to the MCP default set so a list can extend it | startup-only; repeatable; a list without `default` replaces the default set; `none` conflicts with other values; redaction toggles are rejected as unknown; conflicts with `--unrestricted` | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
+| `mcp` | `--unrestricted` | off | starts the widest baseline: every exclusion toggle off and the Git baseline `none`, equivalent to `--exclude none --git-mode none` | startup-only; conflicts with `--exclude` and `--git-mode`; secret redaction remains mandatory | stdout remains JSON-RPC-only; invalid combination exits `2` | parser, MCP contract, process |
+| `mcp` | `--allow-agent-exclusions` | off | publishes an `exclusions` array parameter on the five selection tools (`get_tree`, `analyze`, `pack_context`, `search_project`, `get_file`) so the agent may set the exclusion toggles per call; the value outranks the server baseline and profile exclusions | startup-only; without the flag the parameter is absent from every schema and rejected as an unknown argument; tokens match case-insensitively, duplicates are rejected, redaction toggles never appear in the vocabulary | stdout remains JSON-RPC-only; invalid tokens are `DPX-MCP-INVALID-ARGUMENTS` | parser, MCP schema, integration |
 | MCP `get_tree` | `format` | `markdown` | selects compact Markdown, drawing-character text, JSON, or XML tree output | values are `markdown`, `text`, `json`, `xml`; JSON/XML over 2,000 lines fail instead of returning a partial document | text payload remains spotlight-wrapped; invalid value is `DPX-MCP-INVALID-ARGUMENTS`, structured overflow is `DPX-MCP-PAYLOAD-TRUNCATED` | MCP schema, tree serializer, integration |
 | MCP get_tree/analyze/pack_context/search_project | `git_scope` | absent | narrows the effective selection with `staged`, `changes`, or `diff:<REF>..<REF>` | cannot weaken the profile/server baseline; input is limited to 4,096 characters; non-Git projects and invalid refs fail | tool error is `DPX-MCP-PROJECT-UNAVAILABLE` for unavailable Git state or `DPX-MCP-INVALID-ARGUMENTS` for invalid input | MCP schema, integration |
 | analyze/context/project/open/profile-save | `--compress-code` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | `true|false|on|off`; conflicts with `--no-compress-code` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
@@ -1148,10 +1189,76 @@ persistent server baseline `--git-mode` and the narrowing `git_scope` parameter
 on its four selection tools. Profile schemas remain unchanged and reject
 momentary values.
 
+MCP exclusions are a v5.2 extension with one deliberate default change: a
+server started without exclusion flags runs with `smart-ignore` and
+`empty-folders` instead of the desktop standard set, so dot-files, dot-folders,
+extensionless files, hidden entries, and empty files are visible to agents by
+default. Startup lines that want the pre-v5.2 view spell it out with
+`--exclude` and the full standard token list. `devprojex mcp --exclude`
+selects the persistent server baseline from the shared exclusion tokens plus
+the MCP-only `default` token (the default set, for extending it) and applies
+only when a tool does not name an explicit profile.
+`devprojex mcp --unrestricted` is the widest-baseline preset, equivalent to
+`--exclude none --git-mode none` and in conflict with both spelled-out flags.
+`devprojex mcp --allow-agent-exclusions` additionally publishes an `exclusions` array
+parameter on `get_tree`, `analyze`, `pack_context`, `search_project`, and
+`get_file`; the value is the full desired toggle set, an empty array disables
+every toggle, and it outranks the server baseline and profile exclusions.
+Without the flag the parameter does not exist in any schema. Redaction toggles
+are not part of the vocabulary on either surface. `analyze` results echo the
+effective set in an `exclusions` array and `list_projects` results carry a
+`baseline` object (`git`, `exclusions`, `agentExclusions`); both are required
+on every server — including servers started without the exclusion flags — so
+consumers that pinned the pre-v5.2 output schemas must refresh their copies.
+`get_tree` and `pack_context` responses end with a trusted
+`[Effective filters]` line, every selection tool adds an `[Empty selection]`
+line when nothing survived the filters, and `DPX-MCP-PATH-NOT-FOUND` names the
+effective filters. Glob patterns gain `{a,b}` alternatives; `!` negation and
+`[...]` classes, previously matched as literal characters, are rejected with
+`DPX-MCP-INVALID-PATTERN`.
+
+MCP diagnostics are also refined in v5.2. An unknown `profile` now returns
+`DPX-MCP-INVALID-ARGUMENTS` rather than `DPX-MCP-PATH-NOT-FOUND`, and MCP
+messages no longer expose internal `DPX-CLI-*` codes. Stored responses start
+with `Pack stored as '<id>' (<N> characters, <M> lines)`. Continuation and
+truncation trailers are trusted text outside the untrusted-data block.
+`get_file.path` and the `paths` accepted by `analyze` and `pack_context`
+recognize Markdown-escaped names copied from the default tree format;
+`max_file_bytes` appears in effective-filter diagnostics when supplied; and
+wrong-case path diagnostics are platform-independent and name the spelling
+listed by `get_tree`.
+
 MCP `get_tree.format` is an additive input with `markdown` as its compact default.
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;
 structured output that cannot fit the 2,000-line response limit fails with an
 actionable tool error rather than returning invalid syntax.
+
+MCP agent ergonomics changes four v5.2 behaviors without adding inputs or error
+codes. First, `get_file` and `read_pack` clamp an `end_line` past EOF and append
+a trusted range notice; `start_line` past EOF and reversed ranges keep
+`DPX-MCP-INVALID-RANGE`. A caller that requires a prevalidated end must first
+learn the line count and send `end_line <= N`; there is no strict-range switch.
+Second, when `max_depth` is omitted and a complete human-readable tree exceeds
+2,000 lines, `get_tree` returns the deepest complete depth that fits. Passing an
+explicit `max_depth` restores caller-selected depth and the prior line-truncation
+behavior; JSON/XML still fail rather than return partial syntax and now suggest
+a fitting depth. Third, uninspected entries in MCP `analyze.topFiles` gain the
+optional `uninspected: true` field, and their estimates use the same character
+base as aggregate `characters` and `tokens`. Fourth, `initialize.instructions`
+now carries workflow, trust-boundary, redaction, limit, and glob guidance, while
+all seven tool descriptions are self-contained for tool search. Cached MCP
+schemas must be refreshed for the additive `topFiles` field and new field
+descriptions.
+
+Compression readiness is also explicit in v5.2. CLI analysis and context export
+add warning `DPX-COMPRESSION-UNAVAILABLE` to stderr and machine diagnostics when an
+empty delivery source or a missing, incompatible, or invalid grammar prevents a
+requested transformation. Safe complete output and all exit codes are unchanged,
+including `analyze --strict`. MCP `analyze`, `pack_context`, and `get_file` append
+trusted `[Compression unavailable] ...` text outside project data when compression
+is effective; `analyze` additionally exposes optional structured
+`compressionUnavailable` with `reason` and affected `languages`. Consumers that
+cache the `analyze` output schema must refresh it.
 
 Before the v5.1 output freeze, human-readable content and text-tree presentation
 was aligned across Desktop, Terminal Workspace, CLI, and MCP. Content-only text

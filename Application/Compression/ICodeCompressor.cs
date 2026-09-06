@@ -72,6 +72,12 @@ public interface ICodeCompressionRuntimeDiagnosticsProvider
 	}
 }
 
+/// <summary>Optional delivery-state facts for compressors backed by external language assets.</summary>
+public interface ICodeCompressionAvailabilityProvider
+{
+	CodeCompressionAvailabilitySnapshot CaptureAvailability();
+}
+
 public readonly record struct CodeCompressionRuntimeDiagnosticSnapshot(
 	int CompiledQuerySets,
 	int MaterializedWorkers,

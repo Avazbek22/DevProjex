@@ -30,6 +30,35 @@ users should install or generate the platform launcher and use that command.
 Direct invocation of the physical Windows WinExe path is an advanced diagnostic
 detail and is not the supported shell entry point.
 
+## CI without a persistent install (from v5.2)
+
+The v5.2 headless packages expose this command contract without the desktop app.
+They are published independently; before their first publication, use a direct
+GitHub release binary. The npm route requires Node 20 or later:
+
+```yaml
+- uses: actions/setup-node@v4
+  with:
+    node-version: 24
+- run: npx -y devprojex analyze . --findings --fail-on-findings
+```
+
+The NuGet route requires .NET SDK 10.0.100 or later:
+
+```yaml
+- uses: actions/setup-dotnet@v5
+  with:
+    dotnet-version: 10.0.x
+- run: dnx devprojex analyze . --findings --fail-on-findings
+```
+
+`dnx` performs a non-interactive first download by default; its opt-in switch is
+`--interactive`, and it has no `--yes` option. The DevProjex arguments above do not
+require a delimiter. Both examples return policy exit code `3` when an effective
+secret finding exists and never print the detected value. npm installs with
+`--omit=optional` cannot run the binary; see [Installation.md](Installation.md)
+for the documented exit-`1` launcher diagnostic.
+
 ## Command Tree
 
 ```text
@@ -77,12 +106,27 @@ devprojex
 `dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
 diagnostic workflows.
 
-`devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--hide-private-data] [--allow-remote]`
+`devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--exclude NAME ...] [--unrestricted] [--allow-agent-exclusions] [--hide-private-data] [--allow-remote]`
 starts the local read-only MCP stdio server. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
 tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
 enables RepoCache-backed clone/acquire for MCP project tools without changing
 the local roots returned by `list_projects`.
+Without exclusion flags the server runs with `smart-ignore` and `empty-folders`
+only — narrower than the desktop standard set, so an agent sees dot-files,
+extensionless files, hidden entries, and empty files the way Git does.
+`--exclude` sets the server baseline exclusion set from the shared exclusion
+tokens plus two MCP-only tokens: `none` disables all toggles and `default`
+expands to the server default set, so `--exclude default --exclude dot-folders`
+extends it while a list without `default` replaces it. The baseline applies
+only when a tool does not name an explicit profile. An explicit `--exclude`
+list pins the set: exclusion toggles added in later versions default to off for
+that server until the line is updated. `--unrestricted` is the widest-baseline preset — equivalent to
+`--exclude none --git-mode none` and rejected in combination with either flag;
+secret redaction still applies and the `.git` administrative area remains
+excluded in every mode. `--allow-agent-exclusions` opts in to per-call
+agent control by publishing an `exclusions` array parameter on the selection
+tools; redaction toggles are never part of that vocabulary.
 Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then
 `CLAUDE_PROJECT_DIR`, then the current directory. See
 [McpServer.md](McpServer.md) for its security model, tools, and client
@@ -155,7 +199,7 @@ Git modes:
 | Token | Behavior |
 |---|---|
 | `none` | No Git-based filtering |
-| `gitignore` | Respect applicable hierarchical `.gitignore` rules |
+| `gitignore` | Respect hierarchical `.gitignore` and repository-local `info/exclude`, with opaque embedded repositories and independent declared submodules |
 | `tracked` | Include only paths returned from applicable indexes by the installed Git CLI; no readable index fails closed with exit `3` |
 | `staged` | Include files with staged changes |
 | `changes` | Include staged, unstaged, and untracked files; ignored untracked files remain excluded |
@@ -168,6 +212,7 @@ The three state scopes are invocation-only and cannot be saved in local or
 portable profiles. `open` supports `staged` and `changes`; diff scopes are
 available in direct CLI commands, Terminal Workspace, and MCP, but not Desktop.
 The Git scope narrows the effective profile selection before file-size limits.
+Git subprocess isolation, network boundaries, and the `DPX-GIT-UNSAFE-FILTER` refusal are specified in [Git process safety](Git-Safety.md).
 Smart Ignore, Exclusions, explicit selected paths, extensions, and globs still
 apply. Selected content always comes from the current working tree, including
 when a staged file has newer unstaged edits.
@@ -183,6 +228,15 @@ loads but a nested index does not, that nested scope is excluded and reported wi
 `DPX-GIT-TRACKED-INDEX-PARTIAL`. If none load, commands report
 `DPX-GIT-TRACKED-INDEX-UNAVAILABLE`; they never reinterpret `tracked` as `gitignore`.
 An absent `.gitignore` is an active empty rule set, not a fallback to `none`.
+Repository-local `info/exclude` has lower priority than the root `.gitignore`;
+worktrees resolve it through `gitdir:` and `commondir`. Global excludes are not
+read. In `gitignore` and `tracked`, a nested repository is opaque unless its
+path is declared in its owner's `.gitmodules`; initialized declared submodules
+use their own rules, recursively. Without an owning repository, the first
+repository in each subtree is independent. See [SmartIgnore.md](SmartIgnore.md)
+for the complete ownership, source-resolution, and fail-closed specification.
+This changes v5.2 visibility without adding options: use `--git-mode none` to
+traverse embedded repositories and ignore local exclusion rules.
 The administrative path named exactly `.git` remains excluded; `.github` and other
 `.git*` names are not treated as Git metadata.
 
@@ -190,12 +244,12 @@ Exclusion tokens:
 
 ```text
 smart-ignore
+empty-folders
+empty-files
 hidden-folders
 hidden-files
 dot-folders
 dot-files
-empty-folders
-empty-files
 extensionless-files
 none
 ```

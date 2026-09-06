@@ -4,6 +4,7 @@ using DevProjex.Application.Secrets;
 namespace DevProjex.Terminal.Execution;
 
 public sealed record TerminalServices(
+	TerminalHostCapabilities HostCapabilities,
 	LocalizationService Localization,
 	ProjectAnalysisService AnalysisService,
 	IgnoreRulesService IgnoreRulesService,

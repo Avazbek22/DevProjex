@@ -12,26 +12,23 @@ public class GitRepositoryServiceUnitTests
     {
         var startInfo = GitRepositoryService.CreateGitCommandStartInfo(
             workingDirectory: null,
-            arguments: ["--version"]);
+			operation: GitProcessOperation.ReadRemoteUrl());
 
         Assert.False(startInfo.UseShellExecute);
         Assert.True(startInfo.RedirectStandardInput);
         Assert.True(startInfo.RedirectStandardOutput);
         Assert.True(startInfo.RedirectStandardError);
         Assert.Equal("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
-        Assert.Equal(
-            GitRepositoryService.NonInteractiveSshCommand,
-            startInfo.Environment["GIT_SSH_COMMAND"]);
-        Assert.Equal("ssh", startInfo.Environment["GIT_SSH_VARIANT"]);
+		Assert.False(startInfo.Environment.ContainsKey("GIT_SSH_COMMAND"));
         Assert.Equal(string.Empty, startInfo.Environment["GIT_ASKPASS"]);
         Assert.Equal(string.Empty, startInfo.Environment["SSH_ASKPASS"]);
         Assert.Equal("never", startInfo.Environment["SSH_ASKPASS_REQUIRE"]);
         Assert.Equal("Never", startInfo.Environment["GCM_INTERACTIVE"]);
         Assert.Equal("false", startInfo.Environment["GCM_GUI_PROMPT"]);
-		var expectedArguments = OperatingSystem.IsWindows()
-			? new[] { "-c", "core.longpaths=true", "--version" }
-			: ["--version"];
-		Assert.Equal(expectedArguments, startInfo.ArgumentList);
+		Assert.Contains("--no-pager", startInfo.ArgumentList);
+		Assert.Contains("core.fsmonitor=false", startInfo.ArgumentList);
+		Assert.Contains("config", startInfo.ArgumentList);
+		Assert.Contains("remote.origin.url", startInfo.ArgumentList);
     }
 
 	[Fact]
@@ -254,14 +251,17 @@ public class GitRepositoryServiceUnitTests
 	public async Task DetachedWorktree_VerificationFailureIsNotMaskedByStalledCleanup()
 	{
 		var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var repositoryPath = Path.GetFullPath("repository");
+		var worktreePath = Path.GetFullPath("worktree");
 		var manager = new GitWorktreeManager(
-			async (_, arguments, cancellationToken) =>
+			async (workingDirectory, arguments, cancellationToken) =>
 			{
-				if (arguments is ["rev-parse", "--verify", "--quiet", _])
+				if (arguments is ["rev-parse", "--verify", "--quiet", "--end-of-options", _] &&
+				    !string.Equals(workingDirectory, worktreePath, StringComparison.Ordinal))
 					return new GitWorktreeManager.GitProcessResult(0, "0123456789abcdef\n", string.Empty);
 				if (arguments is ["worktree", "add", ..])
 					return new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty);
-				if (arguments is ["rev-parse", "HEAD"])
+				if (arguments is ["rev-parse", "--verify", "--quiet", "--end-of-options", _])
 					throw new IOException("verification failed");
 				if (arguments is ["worktree", "remove", ..])
 				{
@@ -274,8 +274,8 @@ public class GitRepositoryServiceUnitTests
 			TimeSpan.FromMilliseconds(25));
 
 		var exception = await Assert.ThrowsAsync<IOException>(() => manager.CreateDetachedAsync(
-			"repository",
-			"worktree",
+			repositoryPath,
+			worktreePath,
 			branch: null,
 			TestContext.Current.CancellationToken));
 

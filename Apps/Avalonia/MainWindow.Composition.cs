@@ -109,12 +109,14 @@ public partial class MainWindow
 			hidePrivateDataApplied: _appliedHidePrivateDataEnabled,
 			compressCodeApplied: _appliedCompressCodeEnabled,
 			stripCommentsApplied: _appliedStripCommentsEnabled,
-			stripBlankLinesApplied: _appliedStripBlankLinesEnabled);
+			stripBlankLinesApplied: _appliedStripBlankLinesEnabled,
+			compressionUnavailable: _codeCompressionSnapshot?.Availability.IsUnavailable == true);
 		_viewModel.SetCompressionStatus(
 			_codeCompressionSnapshot?.BodyTransformedFiles,
 			_codeCompressionSnapshot?.TotalFiles,
 			_codeCompressionSnapshot?.SourceCharacters,
-			_codeCompressionSnapshot?.TransformedCharacters);
+			_codeCompressionSnapshot?.TransformedCharacters,
+			_codeCompressionSnapshot?.Availability.PrimaryReason);
 		_viewModel.SetCommentStripStatus(
 			_codeCompressionSnapshot?.CommentTransformedFiles,
 			_codeCompressionSnapshot?.TotalFiles);
@@ -1083,7 +1085,7 @@ public partial class MainWindow
             _ignoreOptionsService,
             BuildIgnoreRules,
             GetIgnoreOptionsAvailability,
-            TryElevateAndRestart,
+            HandleBackgroundRootAccessDenied,
             () => _currentPath,
             _statusOperations,
             ApplyProgrammaticContentTransformationSelectionChange,

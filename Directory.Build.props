@@ -15,10 +15,24 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <TestTfmsInParallel>false</TestTfmsInParallel>
+    <!-- Generated artifacts are ignored repository-wide and must never become implicit source. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!-- Packaging can request a disposable, isolated build graph while keeping NuGet restore assets
+       in each project's normal obj directory. This prevents one RID's embedded native resources
+       from satisfying another RID's incremental build. -->
+  <PropertyGroup Condition="'$(DevProjexHeadlessBuildRoot)'!=''">
+    <IntermediateOutputPath>$(DevProjexHeadlessBuildRoot)/obj/$(MSBuildProjectName)/</IntermediateOutputPath>
+    <OutputPath>$(DevProjexHeadlessBuildRoot)/bin/$(MSBuildProjectName)/</OutputPath>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='ReleaseStore'">
     <DefineConstants>$(DefineConstants);DEVPROJEX_STORE</DefineConstants>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <!-- A packaged app loads grammars only from signed package content: under package identity
+         CodeCompressionFactory refuses runtime-materialized libraries, so embedded delivery leaves
+         every Store user without compression. Content delivery is mandatory here. -->
+    <DevProjexGrammarDelivery>Content</DevProjexGrammarDelivery>
   </PropertyGroup>
 </Project>

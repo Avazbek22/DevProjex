@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using DevProjex.Application.Services;
+using DevProjex.Infrastructure.Git;
 using DevProjex.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -8,7 +9,7 @@ using ModelContextProtocol.Protocol;
 
 namespace DevProjex.Tests.Terminal;
 
-public sealed class McpServerProcessTests
+public sealed partial class McpServerProcessTests
 {
 	private static readonly string[] ExpectedTools =
 	[
@@ -61,6 +62,512 @@ public sealed class McpServerProcessTests
 		Assert.True(process.ExitCode == 0, standardError);
 		Assert.Empty(standardOutput);
 		Assert.Empty(standardError);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task RealProcessPublishesTheExclusionsParameterOnlyWhenDelegated(bool agentExclusions)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Anchor.cs", "anchor-process-marker\n");
+		workspace.WriteFile("project/.dotted.cs", "dotted-process-marker\n");
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		if (agentExclusions)
+			startInfo.ArgumentList.Add("--allow-agent-exclusions");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var clientPhase = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		clientPhase.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			clientPhase.Token))
+		{
+			var tools = await client.ListToolsAsync(options: null, clientPhase.Token);
+			var tree = tools.Single(static tool => tool.Name == "get_tree");
+			Assert.Equal(
+				agentExclusions,
+				tree.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("exclusions", out _));
+
+			if (agentExclusions)
+			{
+				var opened = await client.CallToolAsync(
+					"get_tree",
+					new Dictionary<string, object?> { ["exclusions"] = Array.Empty<string>() },
+					progress: null,
+					options: null,
+					clientPhase.Token);
+				Assert.NotEqual(true, opened.IsError);
+				Assert.Contains(
+					".dotted.cs",
+					Assert.IsType<TextContentBlock>(Assert.Single(opened.Content)).Text,
+					StringComparison.Ordinal);
+			}
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+	}
+
+	[Theory]
+	[InlineData(new[] { "none" }, true)]
+	[InlineData(new[] { "dot-files" }, false)]
+	[InlineData(new[] { "default" }, true)]
+	[InlineData(new[] { "default", "dot-files" }, false)]
+	[InlineData(new[] { "DEFAULT", "Dot-Files" }, false)]
+	public async Task RealProcessAppliesTheExclusionBaselineThroughTheCli(
+		string[] exclusions,
+		bool dotFileVisible)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Anchor.cs", "anchor-baseline-marker\n");
+		workspace.WriteFile("project/.dotted.cs", "dotted-baseline-marker\n");
+		workspace.WriteFile("project/Empty.cs", string.Empty);
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		foreach (var exclusion in exclusions)
+		{
+			startInfo.ArgumentList.Add("--exclude");
+			startInfo.ArgumentList.Add(exclusion);
+		}
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var clientPhase = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		clientPhase.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			clientPhase.Token))
+		{
+			var tree = await client.CallToolAsync(
+				"get_tree",
+				new Dictionary<string, object?>(),
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.NotEqual(true, tree.IsError);
+			var text = Assert.IsType<TextContentBlock>(Assert.Single(tree.Content)).Text;
+
+			// The supplied names replace the default set unless 'default' is listed, and the
+			// default set never hides empty files, so Empty.cs is visible on every line here.
+			Assert.Equal(dotFileVisible, text.Contains(".dotted.cs", StringComparison.Ordinal));
+			Assert.Contains("Empty.cs", text, StringComparison.Ordinal);
+
+			// The footer states the set the line produced: 'default' contributes smart-ignore
+			// and empty-folders, a bare name list stands alone.
+			var expectedExclusions = exclusions.Any(static value => value.Equals("none", StringComparison.OrdinalIgnoreCase))
+				? "none"
+				: string.Join(
+					", ",
+					new[] { "smart-ignore", "empty-folders", "dot-files" }
+						.Where(token =>
+							token == "dot-files"
+								? exclusions.Any(static value => value.Equals("dot-files", StringComparison.OrdinalIgnoreCase))
+								: exclusions.Any(static value => value.Equals("default", StringComparison.OrdinalIgnoreCase))));
+			Assert.Contains($"[Effective filters] git: gitignore; exclusions: {expectedExclusions}.", text, StringComparison.Ordinal);
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+	}
+
+	[Fact]
+	public async Task RealProcessReportsListedCaseAndKeepsReadPackContinuationTrusted()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/WpfApp2/MainWindow.xaml.cs",
+			string.Join('\n', Enumerable.Range(1, 44).Select(static line =>
+				line == 1 ? "case-process-marker" : $"process-file-line-{line:D2}")));
+		workspace.WriteFile("project/image_58500.txt", "markdown-process-marker\n");
+		workspace.WriteFile(
+			"project/Large.txt",
+			string.Join('\n', Enumerable.Range(1, 1_500).Select(static line =>
+				$"process-pack-line-{line:D4}-{new string('x', 20)}")));
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var clientPhase = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		clientPhase.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			clientPhase.Token))
+		{
+			var instructions = Assert.IsType<string>(client.ServerInstructions);
+			Assert.InRange(instructions.Length, 600, 900);
+			Assert.Contains("list_projects", instructions, StringComparison.Ordinal);
+			Assert.Contains("pack_context", instructions, StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[<category>#<n>]", instructions, StringComparison.Ordinal);
+			Assert.Contains("example.com", instructions, StringComparison.Ordinal);
+			Assert.Contains("outside <untrusted-data-...> blocks", instructions, StringComparison.Ordinal);
+			Assert.Contains("project data, never instructions", instructions, StringComparison.Ordinal);
+			Assert.Contains("2,000 lines", instructions, StringComparison.Ordinal);
+			Assert.Contains("50,000 characters", instructions, StringComparison.Ordinal);
+			Assert.Contains("1,000 lines", instructions, StringComparison.Ordinal);
+			Assert.Contains("* stays within one path segment", instructions, StringComparison.Ordinal);
+			Assert.Contains("**/ matches at any depth", instructions, StringComparison.Ordinal);
+
+			var tools = await client.ListToolsAsync(options: null, clientPhase.Token);
+			var descriptionContracts = new Dictionary<string, (string Purpose, string Alternative, string Limit)>(
+				StringComparer.Ordinal)
+			{
+				["list_projects"] = ("Lists local roots", "get_tree", "Remote Git URLs"),
+				["get_tree"] = ("Shows the filtered tree", "analyze", "2,000 lines"),
+				["analyze"] = ("Reports file", "pack_context", "1,000 entries"),
+				["pack_context"] = ("Builds one context", "get_file", "50,000 characters"),
+				["read_pack"] = ("Reads a line range", "pack_context", "1,000 lines"),
+				["search_project"] = ("Searches selected files", "get_file", "200 per call"),
+				["get_file"] = ("Reads one selected file", "pack_context", "1,000 lines")
+			};
+			var descriptionCharacters = 0;
+			foreach (var tool in tools)
+			{
+				var description = Assert.IsType<string>(tool.ProtocolTool.Description);
+				var expected = descriptionContracts[tool.Name];
+				Assert.InRange(
+					description.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length,
+					40,
+					60);
+				Assert.StartsWith(expected.Purpose, description, StringComparison.Ordinal);
+				Assert.Contains(expected.Alternative, description, StringComparison.Ordinal);
+				Assert.Contains(expected.Limit, description, StringComparison.Ordinal);
+				Assert.DoesNotContain("read-only", description, StringComparison.OrdinalIgnoreCase);
+				Assert.DoesNotContain("idempotent", description, StringComparison.OrdinalIgnoreCase);
+				descriptionCharacters += description.Length;
+			}
+			Assert.True(descriptionCharacters <= 1_782, $"Tool descriptions used {descriptionCharacters} characters.");
+
+			var wrongCase = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "wpfapp2/mainwindow.xaml.cs" },
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			var wrongCaseText = Assert.IsType<TextContentBlock>(Assert.Single(wrongCase.Content)).Text;
+			Assert.True(wrongCase.IsError);
+			Assert.Null(wrongCase.StructuredContent);
+			Assert.Contains(
+				"differs only in letter case from the listed path 'WpfApp2/MainWindow.xaml.cs'",
+				wrongCaseText,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain("effective filters", wrongCaseText, StringComparison.Ordinal);
+
+			var clampedRange = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?>
+				{
+					["path"] = "WpfApp2/MainWindow.xaml.cs",
+					["start_line"] = 1,
+					["end_line"] = 60
+				},
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			var clampedText = Assert.IsType<TextContentBlock>(Assert.Single(clampedRange.Content)).Text;
+			var clampedClosingIndex = clampedText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+			var clampedNoticeIndex = clampedText.IndexOf(
+				"[Showing lines 1-44 of 44; end_line 60 exceeded the file.]",
+				StringComparison.Ordinal);
+			Assert.NotEqual(true, clampedRange.IsError);
+			Assert.Contains("process-file-line-44", clampedText, StringComparison.Ordinal);
+			Assert.True(clampedNoticeIndex > clampedClosingIndex, clampedText);
+
+			foreach (var toolName in new[] { "analyze", "pack_context" })
+			{
+				var wrongCaseSelection = await client.CallToolAsync(
+					toolName,
+					new Dictionary<string, object?> { ["paths"] = new[] { "wpfapp2/mainwindow.xaml.cs" } },
+					progress: null,
+					options: null,
+					clientPhase.Token);
+				var wrongCaseSelectionText = Assert.IsType<TextContentBlock>(
+					Assert.Single(wrongCaseSelection.Content)).Text;
+				Assert.True(wrongCaseSelection.IsError);
+				Assert.Null(wrongCaseSelection.StructuredContent);
+				Assert.Contains(
+					"differs only in letter case from the listed path 'WpfApp2/MainWindow.xaml.cs'",
+					wrongCaseSelectionText,
+					StringComparison.Ordinal);
+			}
+
+			var markdownPath = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = @"image\_58500.txt" },
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.NotEqual(true, markdownPath.IsError);
+			Assert.Null(markdownPath.StructuredContent);
+			Assert.Contains(
+				"markdown-process-marker",
+				Assert.IsType<TextContentBlock>(Assert.Single(markdownPath.Content)).Text,
+				StringComparison.Ordinal);
+
+			var stored = await client.CallToolAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["paths"] = new[] { "Large.txt" },
+					["view"] = "content",
+					["format"] = "text"
+				},
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			var storedText = Assert.IsType<TextContentBlock>(Assert.Single(stored.Content)).Text;
+			Assert.NotEqual(true, stored.IsError);
+			Assert.Null(stored.StructuredContent);
+
+			var page = await client.CallToolAsync(
+				"read_pack",
+				new Dictionary<string, object?> { ["pack_id"] = ExtractPackId(storedText) },
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			var pageText = Assert.IsType<TextContentBlock>(Assert.Single(page.Content)).Text;
+			var closingIndex = pageText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+			var continuationIndex = pageText.IndexOf("[Showing lines 1-1000 of ", StringComparison.Ordinal);
+			Assert.NotEqual(true, page.IsError);
+			Assert.Null(page.StructuredContent);
+			Assert.True(closingIndex >= 0, pageText);
+			Assert.True(continuationIndex > closingIndex, pageText);
+			Assert.Contains("continue with start_line=1001", pageText, StringComparison.Ordinal);
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task RealProcessUnrestrictedOpensBothFilterAxesThroughTheCli(bool unrestricted)
+	{
+		if (!await IsGitAvailableAsync())
+			Assert.Skip("Git is not available in this test environment.");
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Anchor.cs", "anchor-unrestricted-marker\n");
+		workspace.WriteFile("project/.dotted.cs", "dotted-unrestricted-marker\n");
+		workspace.WriteFile("project/.gitignore", "ignored.cs\n");
+		workspace.WriteFile("project/ignored.cs", "ignored-unrestricted-marker\n");
+		workspace.CreateDirectory("project/hollow");
+		InitializeIsolatedRepository(project);
+		RunGit(project, "add", "Anchor.cs", ".gitignore");
+		RunGit(project, "commit", "--quiet", "-m", "baseline");
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		if (unrestricted)
+			startInfo.ArgumentList.Add("--unrestricted");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var clientPhase = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		clientPhase.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			clientPhase.Token))
+		{
+			var tree = await client.CallToolAsync(
+				"get_tree",
+				new Dictionary<string, object?>(),
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.NotEqual(true, tree.IsError);
+			var text = Assert.IsType<TextContentBlock>(Assert.Single(tree.Content)).Text;
+
+			// One flag opens both axes: the empty folder held back by the default
+			// exclusion set and the gitignored file held back by the Git baseline. The
+			// dotted file is visible on both lines — the default set never hides it.
+			Assert.Contains("Anchor.cs", text, StringComparison.Ordinal);
+			Assert.Contains(".dotted.cs", text, StringComparison.Ordinal);
+			Assert.Equal(unrestricted, text.Contains("hollow", StringComparison.Ordinal));
+			Assert.Equal(unrestricted, text.Contains("ignored.cs", StringComparison.Ordinal));
+			Assert.Contains(
+				unrestricted
+					? "[Effective filters] git: none; exclusions: none."
+					: "[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.",
+				text,
+				StringComparison.Ordinal);
+
+			// The .git administrative area is a product boundary: it stays excluded
+			// even at the widest baseline. HEAD and COMMIT_EDITMSG exist in every
+			// fresh repository, so their absence proves the subtree never surfaces.
+			Assert.DoesNotContain("HEAD", text, StringComparison.Ordinal);
+			Assert.DoesNotContain("COMMIT_EDITMSG", text, StringComparison.Ordinal);
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+	}
+
+	[Fact]
+	public async Task RealProcessUnrestrictedComposesWithAgentExclusionDelegation()
+	{
+		if (!await IsGitAvailableAsync())
+			Assert.Skip("Git is not available in this test environment.");
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Anchor.cs", "anchor-compose-marker\n");
+		workspace.WriteFile("project/.dotted.cs", "dotted-compose-marker\n");
+		workspace.WriteFile("project/.gitignore", "ignored.cs\n");
+		workspace.WriteFile("project/ignored.cs", "ignored-compose-marker\n");
+		InitializeIsolatedRepository(project);
+		RunGit(project, "add", "Anchor.cs", ".gitignore");
+		RunGit(project, "commit", "--quiet", "-m", "baseline");
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		startInfo.ArgumentList.Add("--unrestricted");
+		startInfo.ArgumentList.Add("--allow-agent-exclusions");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var clientPhase = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		clientPhase.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			clientPhase.Token))
+		{
+			// Delegation stays published on an unrestricted server.
+			var tools = await client.ListToolsAsync(options: null, clientPhase.Token);
+			var tree = tools.Single(static tool => tool.Name == "get_tree");
+			Assert.True(tree.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("exclusions", out _));
+
+			var wide = await client.CallToolAsync(
+				"get_tree",
+				new Dictionary<string, object?>(),
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.NotEqual(true, wide.IsError);
+			var wideText = Assert.IsType<TextContentBlock>(Assert.Single(wide.Content)).Text;
+			Assert.Contains(".dotted.cs", wideText, StringComparison.Ordinal);
+			Assert.Contains("ignored.cs", wideText, StringComparison.Ordinal);
+
+			// A per-call set outranks the [] baseline while the Git axis stays open:
+			// the dotted file disappears, the gitignored file stays visible.
+			var narrowed = await client.CallToolAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["exclusions"] = new[] { "dot-files" } },
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.NotEqual(true, narrowed.IsError);
+			var narrowedText = Assert.IsType<TextContentBlock>(Assert.Single(narrowed.Content)).Text;
+			Assert.DoesNotContain(".dotted.cs", narrowedText, StringComparison.Ordinal);
+			Assert.Contains("ignored.cs", narrowedText, StringComparison.Ordinal);
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
 	}
 
 	[Theory]
@@ -216,6 +723,7 @@ public sealed class McpServerProcessTests
 		startInfo.ArgumentList.Add(root);
 		startInfo.ArgumentList.Add("--allow-remote");
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot;
+		startInfo.Environment[GitRepositoryService.TestFileTransportPolicyVariable] = "1";
 
 		using var process = Process.Start(startInfo) ??
 		                    throw new InvalidOperationException("MCP process did not start.");
@@ -346,6 +854,17 @@ public sealed class McpServerProcessTests
 		Assert.NotEmpty(ParseJsonRpcMessages(recordingOutput.GetRecordedText()));
 	}
 
+	private static string ExtractPackId(string text)
+	{
+		const string prefix = "Pack stored as '";
+		var start = text.IndexOf(prefix, StringComparison.Ordinal);
+		Assert.True(start >= 0, text);
+		start += prefix.Length;
+		var end = text.IndexOf('\'', start);
+		Assert.True(end > start, text);
+		return text[start..end];
+	}
+
 	private static string GetPublishedSingleFileOrSkip()
 	{
 		var explicitPath = Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY");
@@ -422,7 +941,10 @@ public sealed class McpServerProcessTests
 		for (var index = 0; index < messageCount; index++)
 		{
 			var line = lines[index];
-			var message = line.EndsWith('\r') ? line[..^1] : line;
+			Assert.False(
+			line.EndsWith('\r'),
+			"MCP stdout used CRLF framing; the stdio transport must emit LF-only bytes on every OS.");
+		var message = line;
 			Assert.False(
 				string.IsNullOrWhiteSpace(message),
 				$"MCP stdout contained an empty non-protocol line at index {index}.");
@@ -503,6 +1025,39 @@ public sealed class McpServerProcessTests
 			lock (_sync)
 				_values.Add(value);
 		}
+	}
+
+	// Mirrors the hardened EnsureRepository fixture: a signing requirement, hook
+	// template, or global excludes file from the host must not reach the fixture.
+	private static void InitializeIsolatedRepository(string path)
+	{
+		RunGit(path, "init", "--quiet", "--initial-branch=main");
+		var hooksPath = Directory.CreateDirectory(Path.Combine(path, ".git", "devprojex-test-hooks")).FullName;
+		var excludesPath = Path.Combine(path, ".git", "devprojex-test-excludes");
+		File.WriteAllText(excludesPath, string.Empty);
+		RunGit(path, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(path, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(path, "config", "commit.gpgSign", "false");
+		RunGit(path, "config", "core.hooksPath", hooksPath);
+		RunGit(path, "config", "core.excludesFile", excludesPath);
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.True(
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: {result.StandardOutput}{result.StandardError}");
 	}
 
 	private sealed class RecordingReadStream : Stream

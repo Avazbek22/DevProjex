@@ -40,6 +40,8 @@ public sealed class McpInfrastructureTests
 				typeof(bool),
 				typeof(bool),
 				typeof(GitFilteringMode?),
+				typeof(IReadOnlyCollection<ProjectExclusion>),
+				typeof(bool),
 				typeof(CancellationToken)
 			],
 			method.GetParameters().Select(static parameter => parameter.ParameterType));
@@ -647,6 +649,74 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void GlobStarStaysInsideOneSegmentAndMatchingIsCaseSensitive()
+	{
+		var rootOnly = McpGlobSet.Create(["*.cs"], null);
+		var anyDepth = McpGlobSet.Create(["**/*.cs"], null);
+		var subtree = McpGlobSet.Create(["src/**"], null);
+
+		Assert.True(rootOnly.Includes("Program.cs"));
+		Assert.False(rootOnly.Includes("src/App.cs"));
+		Assert.True(anyDepth.Includes("Program.cs"));
+		Assert.True(anyDepth.Includes("src/nested/App.cs"));
+		Assert.True(subtree.Includes("src/App.cs"));
+		Assert.False(subtree.Includes("SRC/App.cs"));
+		Assert.False(anyDepth.Includes("src/App.CS"));
+	}
+
+	[Fact]
+	public void GlobBracesExpandToAlternativesWithNestingAndCaps()
+	{
+		Assert.Equal(
+			["**/*.cs", "**/*.md"],
+			McpGlobSet.ExpandBraces("**/*.{cs,md}", "include_patterns"));
+		Assert.Equal(
+			["src/a.ts", "src/a.tsx", "src/b.ts", "src/b.tsx"],
+			McpGlobSet.ExpandBraces("src/{a,b}.{ts,tsx}", "include_patterns"));
+		Assert.Equal(
+			["lib/core.cs", "lib/core.g.cs", "lib/core.md"],
+			McpGlobSet.ExpandBraces("lib/core.{{,g.}cs,md}", "include_patterns"));
+		Assert.Equal(["plain.cs"], McpGlobSet.ExpandBraces("plain.cs", "include_patterns"));
+		Assert.Equal(["a.cs", "a.cs.bak"], McpGlobSet.ExpandBraces("a.cs{,.bak}", "include_patterns"));
+
+		var globs = McpGlobSet.Create(["**/*.{cs,md}"], ["**/*.{g,generated}.cs"]);
+		Assert.True(globs.Includes("src/App.cs"));
+		Assert.True(globs.Includes("docs/guide.md"));
+		Assert.False(globs.Includes("src/App.g.cs"));
+		Assert.False(globs.Includes("src/App.generated.cs"));
+		Assert.False(globs.Includes("src/App.txt"));
+
+		var tooMany = "{" + string.Join(",", Enumerable.Range(0, McpGlobSet.MaximumBraceAlternatives + 1)) + "}.cs";
+		Assert.Contains(
+			"brace alternatives",
+			Assert.Throws<McpToolException>(() => McpGlobSet.Create([tooMany], null)).Message,
+			StringComparison.Ordinal);
+		var perArray = "{" + string.Join(",", Enumerable.Range(0, McpGlobSet.MaximumBraceAlternatives)) + "}.cs";
+		var overflow = Enumerable
+			.Repeat(perArray, McpGlobSet.MaximumExpandedPatterns / McpGlobSet.MaximumBraceAlternatives + 1)
+			.ToArray();
+		Assert.Contains(
+			"after brace expansion",
+			Assert.Throws<McpToolException>(() => McpGlobSet.Create(overflow, null)).Message,
+			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("!src/**", "negation")]
+	[InlineData("[Ss]rc/**", "character classes")]
+	[InlineData("src/*.cs]", "character classes")]
+	[InlineData("**/*.{cs,md", "unbalanced '{'")]
+	[InlineData("**/*.cs}", "unbalanced '}'")]
+	public void GlobRejectsUnsupportedSyntaxInsteadOfMatchingItLiterally(string pattern, string reason)
+	{
+		var exception = Assert.Throws<McpToolException>(() => McpGlobSet.Create([pattern], null));
+
+		Assert.Equal(McpErrorCodes.InvalidPattern, exception.Code);
+		Assert.Contains(reason, exception.Message, StringComparison.Ordinal);
+		Assert.Contains("'**/' spans any depth", exception.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RootJailFileOpenerRejectsADirectPathOutsideEveryRoot()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -906,6 +976,25 @@ public sealed class McpInfrastructureTests
 		Assert.Contains("Deleted files excluded from the Git state: 2.", warnings, StringComparison.Ordinal);
 		Assert.DoesNotContain(sensitivePath, warnings, StringComparison.Ordinal);
 		Assert.DoesNotContain(sensitiveMessage, warnings, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void UnsafeGitFilterProducesAPathFreeTrustedBlockingTrailer()
+	{
+		const string sensitivePath = "C:/private/repository";
+		var trailer = McpTrustedDiagnosticFormatter.FormatBlocking(
+			new ContextDiagnostic(
+				GitScopeFilter.UnsafeFilterDiagnosticCode,
+				ContextDiagnosticSeverity.Error,
+				"unsafe message",
+				sensitivePath,
+				Detail: "hostile"));
+
+		Assert.NotNull(trailer);
+		Assert.Contains(GitScopeFilter.UnsafeFilterDiagnosticCode, trailer, StringComparison.Ordinal);
+		Assert.Contains("hostile", trailer, StringComparison.Ordinal);
+		Assert.DoesNotContain(sensitivePath, trailer, StringComparison.Ordinal);
+		Assert.DoesNotContain("unsafe message", trailer, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -1677,16 +1766,57 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
-	public void TextRangesRejectInvalidRangesAndReportCharacterTruncation()
+	public void TextRangesClampPastTheEndAndRejectInvalidStartsOrOrdering()
 	{
 		var page = McpTextRanges.Slice(["123456", "next"], 1, 2, 1000, 4);
 		Assert.Equal("1234", page.Text);
 		Assert.True(page.CharacterLimitReached);
 		Assert.True(page.IsTruncated);
 
-		var exception = Assert.Throws<McpToolException>(() =>
+		// A requested end past EOF used to be rejected; MCP range reads now return
+		// the available lines so clients do not need a probing retry.
+		var clamped = McpTextRanges.Slice(["one", "two"], 1, 60, 1000, 50_000);
+		Assert.Equal("one\ntwo", clamped.Text);
+		Assert.Equal(2, clamped.EndLine);
+		Assert.False(clamped.IsTruncated);
+
+		var invalidStart = Assert.Throws<McpToolException>(() =>
 			McpTextRanges.Slice(["one"], 2, null, 1000, 50_000));
-		Assert.Equal(McpErrorCodes.InvalidRange, exception.Code);
+		Assert.Equal(McpErrorCodes.InvalidRange, invalidStart.Code);
+		Assert.Contains("Valid lines are 1-1", invalidStart.Message, StringComparison.Ordinal);
+
+		var invalidOrdering = Assert.Throws<McpToolException>(() =>
+			McpTextRanges.Slice(["one", "two"], 2, 1, 1000, 50_000));
+		Assert.Equal(McpErrorCodes.InvalidRange, invalidOrdering.Code);
+		Assert.Contains("Valid lines are 1-2", invalidOrdering.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task TextPageReaderClampsPastTheKnownAndDiscoveredEnd()
+	{
+		var content = Encoding.UTF8.GetBytes("one\ntwo");
+		await using var knownStream = new MemoryStream(content);
+		await using var discoveredStream = new MemoryStream(content);
+
+		var known = await McpTextRanges.ReadPageAsync(
+			knownStream,
+			startLine: 1,
+			endLine: 60,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken,
+			knownTotalLines: 2);
+		var discovered = await McpTextRanges.ReadPageAsync(
+			discoveredStream,
+			startLine: 1,
+			endLine: 60,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal("one\ntwo", known.Text);
+		Assert.Equal(known, discovered);
+		Assert.False(known.IsTruncated);
 	}
 
 	[Fact]
