@@ -245,20 +245,35 @@ internal sealed class DevProjexMcpTools(
 				.OrderExclusions(plan.Selection.Exclusions ?? [])
 				.Select(ProjectSelectionTokens.ToToken)
 				.ToArray();
-			var envelope = new
+			var envelope = new Dictionary<string, object>(8, StringComparer.Ordinal)
 			{
-				files = plan.IncludedFiles.Count,
-				characters = totalCharacters,
-				tokens = CodeCompressionSnapshot.EstimateTokens(totalCharacters),
-				detail = effectiveDetail.Token,
-				exclusions = activeExclusions,
-				topFiles = top
+				["files"] = plan.IncludedFiles.Count,
+				["characters"] = totalCharacters,
+				["tokens"] = CodeCompressionSnapshot.EstimateTokens(totalCharacters),
+				["detail"] = effectiveDetail.Token,
+				["exclusions"] = activeExclusions,
+				["topFiles"] = top
 			};
+			if (prepared.CompressionSnapshot?.Availability is
+			    { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason } availability)
+			{
+				envelope["compressionUnavailable"] = new
+				{
+					reason,
+					languages = availability.Failures
+						.Where(static failure => failure.LanguageId is not null)
+						.Select(static failure => failure.LanguageId!)
+						.Distinct(StringComparer.Ordinal)
+						.Order(StringComparer.Ordinal)
+						.ToArray()
+				};
+			}
 			await operationProgress.CompleteAsync(100, "building analysis").ConfigureAwait(false);
 			return McpToolResults.StructuredSuccess(
 				envelope,
 				CombineTrustedNotices(
 					FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
+					FormatCompressionUnavailable(prepared.CompressionSnapshot),
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					SelectionNotices(plan, includeFilters: false, selection.NoticeContext)));
 		}, cancellationToken);
@@ -374,6 +389,7 @@ internal sealed class DevProjexMcpTools(
 						FormatUnscannableNotice(
 							writeResult?.UnscannableFiles,
 							UnscannableResultKind.Pack),
+						FormatCompressionUnavailable(prepared?.CompressionSnapshot),
 						trustedPlanWarnings);
 					if (inlineMessage.Length <= MaximumInlinePackCharacters)
 					{
@@ -410,7 +426,9 @@ internal sealed class DevProjexMcpTools(
 					FormatUnscannableNotice(
 						writeResult?.UnscannableFiles,
 						UnscannableResultKind.Pack),
-					trustedPlanWarnings);
+					CombineTrustedNotices(
+						FormatCompressionUnavailable(prepared?.CompressionSnapshot),
+						trustedPlanWarnings));
 				await operationProgress.CompleteAsync(
 						100,
 						$"writing pack {writtenFileCount}/{writtenFileCount}")
@@ -618,7 +636,8 @@ internal sealed class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(page.Text),
 				rangeNotice,
-				characterLimitNotice));
+				characterLimitNotice,
+				FormatCompressionUnavailable(prepared.CompressionSnapshot)));
 		}, cancellationToken);
 
 	private static string? FormatLineRangeNotice(McpTextPage page, int? requestedEnd)
@@ -965,6 +984,11 @@ internal sealed class DevProjexMcpTools(
 		       $"{consequence} Results are partial. Set max_file_bytes={SecretRedactionOutputPreparer.MaximumScannableFileBytes} " +
 		       "or lower, exclude oversized or unsupported files, and retry.";
 	}
+
+	private static string? FormatCompressionUnavailable(CodeCompressionSnapshot? snapshot) =>
+		snapshot?.Availability is { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason }
+			? $"[Compression unavailable] {McpTextEscaping.EscapeSingleLine(reason)}"
+			: null;
 
 	private static ProjectContextPlan WithoutWarningDiagnostics(ProjectContextPlan plan)
 	{

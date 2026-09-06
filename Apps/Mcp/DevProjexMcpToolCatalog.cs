@@ -394,6 +394,16 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "tokens": { "type": "integer", "description": "Estimated tokens for the same character total." },
 	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective content-detail level used for measurement." },
 	    "exclusions": { "type": "array", "items": { "type": "string" }, "description": "Effective exclusion tokens for this call, in catalog order; the same tokens the mcp --exclude flag and the optional exclusions parameter use." },
+	    "compressionUnavailable": {
+	      "type": "object",
+	      "description": "Present when requested code compression could not load all required grammars and content was left complete.",
+	      "properties": {
+	        "reason": { "type": "string", "description": "Trusted reason the grammar delivery or language load failed." },
+	        "languages": { "type": "array", "items": { "type": "string" }, "description": "Language ids whose grammar failed; empty when the entire delivery source is unavailable." }
+	      },
+	      "required": ["reason", "languages"],
+	      "additionalProperties": false
+	    },
 	    "topFiles": {
 	      "type": "array",
 	      "description": "Largest selected text files ordered by estimated tokens, then path.",

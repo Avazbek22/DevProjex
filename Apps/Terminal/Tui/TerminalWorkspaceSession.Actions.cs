@@ -1150,6 +1150,8 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Content);
+		if (optionId == IgnoreOptionId.CompressCode)
+			_compressionUnavailableNotified = false;
 		var selection = SetContentTransformation(EnsureSettingsDraft(), optionId, enabled);
 		PublishOptimisticSettings(selection, originatedFromCommandLine);
 	}
@@ -1162,6 +1164,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Content);
+		_compressionUnavailableNotified = false;
 		var selection = EnsureSettingsDraft() with
 		{
 			HideSecrets = enabled,

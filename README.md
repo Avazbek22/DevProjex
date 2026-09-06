@@ -221,7 +221,7 @@ The missing off switch is a control guarantee, not a detection guarantee. DevPro
 detects common secret formats, but detection is heuristic; review each pack before
 publishing it outside your environment.
 
-**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. A `max_tokens` budget packs the largest files that fit and reports what was included, `top_files` shows where the tokens go, `git_scope` narrows `get_tree`, `analyze`, `pack_context`, or `search_project` to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
+**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. With `max_tokens`, files are considered in deterministic selection order; each is included if its estimated transformed-content tokens fit the remaining budget, otherwise it is reported as skipped and packing continues. `top_files` shows where the tokens go, `git_scope` narrows `get_tree`, `analyze`, `pack_context`, or `search_project` to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
 
 Want to audit what the agent gets? Open the same project in the GUI: the engine and redaction pipeline are shared, and filters match when the same profile and parameters are used.
 
@@ -231,16 +231,17 @@ Want to audit what the agent gets? Open the same project in the GUI: the engine 
 |---|---|---|---|---|---|
 | Cross-platform: Windows + Linux + macOS | ✅ | ✅ | ❌ macOS only | ✅ | ✅ |
 | MCP server ships built into the app | ✅ | ✅ | ✅ | ⚠️ separate server | ❌ community only |
-| Secret masking that cannot be disabled | ✅ | ⚠️ optional, drops whole files | ❌ | ❌ | ❌ |
-| Agent can only narrow the human's selection | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Root jail with symlink-escape rejection | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Prompt-injection hardening (untrusted-data wrapping) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Git-scoped packing: tracked, staged, changes, ref diff | ✅ | ❌ | ⚠️ diffs in context | ❌ | ❌ |
-| Token budget for packing | ✅ | ❌ | ✅ | ❌ | ❌ |
+| Secret masking that cannot be disabled | ✅ | ⚠️ always-on check in MCP; flagged files are excluded, not masked | ❌ | ❌ | ❌ |
+| Agent cannot widen the effective file selection (default) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Root jail with symlink-escape rejection | ✅ default | ✅ opt-in `--sandbox` | ❌ | ❌ | ❌ |
+| Prompt-injection hardening (untrusted-data wrapping) | ✅ | — not documented | ❌ | ❌ | ❌ |
+| Built-in MCP file-selection scopes: tracked / staged / changes / ref diff | ✅ | ❌ | ⚠️ diffs in context | ❌ | ❌ |
+| Automatic file fitting under a content-token budget, with a skipped-file report | ✅ | ❌ | ✅ | ❌ | ❌ |
+| CLI failure when generated output exceeds a tokenizer-based limit | ❌ | ✅ `--token-budget`; output is still produced | — | — | — |
 | Oversized results stored, read back in ranges | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Remote Git repositories by URL | ✅ opt-in | ✅ | ❌ | ❌ | ✅ |
 
-<sub>Based on publicly documented features, last verified September 2026.</sub>
+<sub>Based on publicly documented features; Repomix v1.17.0 source and documentation verified September 6, 2026.</sub>
 
 See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
 

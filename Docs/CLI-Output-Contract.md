@@ -190,6 +190,15 @@ transformation. Inventory and source byte size still describe the selected proje
 files, not a materialized export container. Machine selection output exposes the
 independent `compressCode`, `stripComments`, and `stripBlankLines` Booleans.
 
+When a requested syntax transformation cannot load its grammar delivery source or
+a language grammar, `analyze` and `export context` preserve complete source text and
+emit warning `DPX-COMPRESSION-UNAVAILABLE` on stderr. Their JSON diagnostics include
+the same stable code, warning severity, and one-line reason naming the content
+directory or grammar resource. This warning does not change exit status and is not
+promoted by `analyze --strict`; it reports reduced optimization, not incomplete or
+unsafe output. Unsupported languages and parse/safety rejection remain distinct
+unchanged-file outcomes and do not use this code.
+
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
 `--fail-on-findings` likewise writes the requested document before returning

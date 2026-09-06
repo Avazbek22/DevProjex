@@ -176,10 +176,11 @@ public sealed class PrivateDataRedactionCompositionTests
 		Assert.Equal(expectedSecretCount, scan.Snapshot.SecretDetectedCount);
 		Assert.Equal(expectedPrivateCount, scan.Snapshot.PrivateDataDetectedCount);
 		Assert.Equal(3, scan.Result.Spans.Count);
-		Assert.Single(scan.Result.Spans
+		var secretOccurrenceIds = scan.Result.Spans
 			.Where(static span => span.RuleId == "secret-rule")
 			.Select(static span => span.OccurrenceId)
-			.Distinct(StringComparer.Ordinal));
+			.Distinct(StringComparer.Ordinal);
+		Assert.Single(secretOccurrenceIds);
 		Assert.Equal(
 			expectedPrivateCount,
 			scan.Result.Spans

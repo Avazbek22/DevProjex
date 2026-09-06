@@ -82,6 +82,8 @@ public sealed class ContextDiagnosticRenderer(
 		{
 			GitScopeFilter.DeletedDiagnosticCode =>
 				localization.Format("Terminal.Diagnostic.GitStateDeleted", diagnostic.Count ?? 0),
+			CodeCompressionAvailabilitySnapshot.DiagnosticCode =>
+				localization.Format("Compression.Diagnostic.Unavailable", diagnostic.Message),
 			GitScopeFilter.UnsafeFilterDiagnosticCode =>
 				localization.Format("Terminal.Diagnostic.GitUnsafeFilter", diagnostic.Detail ?? "unknown"),
 			_ => ResolveMessage(localization, diagnostic.Code)

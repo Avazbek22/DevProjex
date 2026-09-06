@@ -58,6 +58,7 @@ internal interface ITreeSitterAnalysisCheckpointObserver
 public sealed class TreeSitterCodeCompressor :
 	ICodeCompressor,
 	ICodeCompressionRuntimeDiagnosticsProvider,
+	ICodeCompressionAvailabilityProvider,
 	IDisposable
 {
 	/// <summary>
@@ -87,6 +88,7 @@ public sealed class TreeSitterCodeCompressor :
 	private readonly uint _queryMatchLimit;
 	private readonly ITreeSitterAnalysisPhaseObserver? _analysisPhaseObserver;
 	private readonly object _lifetimeSync = new();
+	private readonly Lazy<CodeCompressionAvailabilitySnapshot> _deliveryAvailability;
 	private TreeSitterAnalysisDiagnosticsSession? _analysisDiagnostics;
 	private long _nextScopeId;
 	private int _activeScopes;
@@ -107,6 +109,9 @@ public sealed class TreeSitterCodeCompressor :
 		ArgumentOutOfRangeException.ThrowIfZero(queryMatchLimit);
 		_locator = locator;
 		_packs = packs;
+		_deliveryAvailability = new Lazy<CodeCompressionAvailabilitySnapshot>(
+			InspectDeliveryAvailability,
+			LazyThreadSafetyMode.ExecutionAndPublication);
 		_queryMatchLimit = queryMatchLimit;
 		_analysisPhaseObserver = analysisPhaseObserver;
 		_workerBudget = new LanguageWorkerBudget(
@@ -125,6 +130,8 @@ public sealed class TreeSitterCodeCompressor :
 	}
 
 	public string TransformIdentity { get; }
+
+	public CodeCompressionAvailabilitySnapshot CaptureAvailability() => _deliveryAvailability.Value;
 
 	public int AnalysisWorkerCapacity => _workerBudget.Diagnostics.Capacity;
 
@@ -239,17 +246,79 @@ public sealed class TreeSitterCodeCompressor :
 		{
 			ObjectDisposedException.ThrowIf(_disposeRequested, this);
 			_activeScopes++;
+			var availability = CaptureAvailability();
 			return new TreeSitterCompressionScope(
 				_byExtension,
 				CodeTransformIdentity.Create(TransformIdentity, kinds),
 				kinds,
 				Interlocked.Increment(ref _nextScopeId),
+				_locator,
 				GetLanguagePool,
 				ReleaseScope,
+				availability,
 				_analysisPhaseObserver,
 				_analysisDiagnostics);
 		}
 	}
+
+	private CodeCompressionAvailabilitySnapshot InspectDeliveryAvailability()
+	{
+		try
+		{
+			if (_locator.EnumerateLibraries().Count > 0)
+				return CodeCompressionAvailabilitySnapshot.Available;
+		}
+		catch (Exception exception) when (IsDeliveryInspectionFailure(exception))
+		{
+			return GlobalUnavailable(
+				$"The {DescribeDeliveryLocation()} could not be inspected: {DescribeInspectionFailure(exception)}");
+		}
+
+		var location = _locator is ContentGrammarLibraryLocator content
+			? $"directory '{content.RootDirectory}'"
+			: $"{_locator.StrategyName} grammar resources";
+		return GlobalUnavailable($"No grammar libraries were found in {location}.");
+	}
+
+	private static CodeCompressionAvailabilitySnapshot GlobalUnavailable(string reason) =>
+		new(
+			CodeCompressionAvailabilityState.Unavailable,
+			[new CodeCompressionUnavailability(CodeCompressionUnavailabilityScope.AllLanguages, reason)]);
+
+	private static bool IsDeliveryInspectionFailure(Exception exception) =>
+		exception is IOException or
+			UnauthorizedAccessException or
+			InvalidOperationException or
+			System.Security.SecurityException;
+
+	private string DescribeDeliveryLocation() =>
+		_locator is ContentGrammarLibraryLocator content
+			? $"grammar directory '{content.RootDirectory}'"
+			: $"{_locator.StrategyName} grammar resource set";
+
+	private static string DescribeInspectionFailure(Exception exception) =>
+		exception switch
+		{
+			UnauthorizedAccessException => "access was denied.",
+			System.Security.SecurityException => "access was denied.",
+			IOException => "an I/O error prevented enumeration.",
+			InvalidOperationException => "the resource set is invalid.",
+			_ => "the delivery source is invalid."
+		};
+
+	internal static string DescribeGrammarFailure(Exception exception) =>
+		exception switch
+		{
+			FileNotFoundException => "the grammar file or resource was not found.",
+			DllNotFoundException => "the native library or one of its dependencies could not be loaded.",
+			BadImageFormatException => "the grammar is not a valid native library for this process.",
+			EntryPointNotFoundException => "the required grammar export was not found.",
+			UnauthorizedAccessException => "access was denied while reading the grammar.",
+			System.Security.SecurityException => "access was denied while reading the grammar.",
+			IOException => "an I/O error prevented the grammar from being read.",
+			InvalidOperationException => "the grammar resource is missing or its Tree-sitter ABI is incompatible.",
+			_ => "the grammar could not be loaded."
+		};
 
 	private void ReleaseAnalysisDiagnostics(TreeSitterAnalysisDiagnosticsSession diagnostics)
 	{
@@ -336,8 +405,10 @@ internal sealed class TreeSitterCompressionScope(
 	string transformIdentity,
 	CodeTransformKinds transformKinds,
 	long operationId,
+	IGrammarLibraryLocator locator,
 	Func<CompressionLanguagePack, LanguageWorkerPool> languagePoolProvider,
 	Action releaseScope,
+	CodeCompressionAvailabilitySnapshot initialAvailability,
 	ITreeSitterAnalysisPhaseObserver? analysisPhaseObserver = null,
 	TreeSitterAnalysisDiagnosticsSession? analysisDiagnostics = null) : ICodeCompressionScope
 {
@@ -389,6 +460,15 @@ internal sealed class TreeSitterCompressionScope(
 			candidate => (candidate.TransformCapabilities & transformKinds) != CodeTransformKinds.None);
 		if (firstCapable is null)
 			return Refused(relativePath, "unknown", CodeCompressionOutcome.UnchangedUnsupportedLanguage, content.Length);
+		if (initialAvailability.State == CodeCompressionAvailabilityState.Unavailable)
+		{
+			return Refused(
+				relativePath,
+				firstCapable.Id,
+				CodeCompressionOutcome.UnchangedGrammarUnavailable,
+				content.Length,
+				initialAvailability.Failures[0]);
+		}
 
 		if (content.Length > TreeSitterCodeCompressor.MaximumParsableCharacters)
 		{
@@ -410,6 +490,29 @@ internal sealed class TreeSitterCompressionScope(
 				operationId,
 				(effectiveKinds & CodeTransformKinds.Comments) != 0,
 				cancellationToken);
+		}
+		catch (GrammarUnavailableException exception)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var grammarLocation = locator switch
+			{
+				ContentGrammarLibraryLocator contentLocator =>
+					$"file '{Path.Combine(contentLocator.RootDirectory, GrammarPlatform.ResolveFileName(pack.Library))}'",
+				EmbeddedGrammarLibraryLocator => $"embedded resource '{pack.Library}'",
+				_ => $"{locator.StrategyName} resource '{pack.Library}'"
+			};
+			return Refused(
+				relativePath,
+				pack.Id,
+				CodeCompressionOutcome.UnchangedGrammarUnavailable,
+				content.Length,
+				new CodeCompressionUnavailability(
+					CodeCompressionUnavailabilityScope.Language,
+					$"Grammar {grammarLocation} for language '{pack.Id}' is unavailable: " +
+					TreeSitterCodeCompressor.DescribeGrammarFailure(
+						exception.InnerException ?? exception),
+					pack.Id,
+					pack.Library));
 		}
 		catch (Exception exception) when (IsLanguageRuntimeFailure(exception))
 		{
@@ -808,8 +911,14 @@ internal sealed class TreeSitterCompressionScope(
 		string relativePath,
 		string languageId,
 		CodeCompressionOutcome outcome,
-		int length) =>
-		new(CodeCompressionPlan.Unchanged(relativePath, languageId, outcome, length, transformIdentity), null);
+		int length,
+		CodeCompressionUnavailability? unavailability = null) =>
+		new(
+			CodeCompressionPlan.Unchanged(relativePath, languageId, outcome, length, transformIdentity) with
+			{
+				Unavailability = unavailability
+			},
+			null);
 
 	private static CompressionLanguagePack ResolveLanguagePack(
 		IReadOnlyList<CompressionLanguagePack> candidates,
@@ -3178,8 +3287,24 @@ internal sealed class LanguageWorkerPool : IDisposable
 
 			try
 			{
+				string libraryPath;
+				try
+				{
+					libraryPath = _locator.Resolve(_pack.Library);
+				}
+				catch (Exception exception) when (exception is
+				       DllNotFoundException or
+				       InvalidOperationException or
+				       IOException or
+				       UnauthorizedAccessException or
+				       System.Security.SecurityException or
+				       BadImageFormatException or
+				       EntryPointNotFoundException)
+				{
+					throw new GrammarUnavailableException(exception);
+				}
 				_runtime = LanguageRuntime.Create(
-					_locator.Resolve(_pack.Library),
+					libraryPath,
 					_pack);
 				_transientRuntimeFailure = null;
 				_transientFailureOperationId = -1;
@@ -3199,8 +3324,13 @@ internal sealed class LanguageWorkerPool : IDisposable
 		}
 	}
 
-	private static bool IsTransientInitializationFailure(Exception exception) =>
-		exception is IOException or UnauthorizedAccessException or DllNotFoundException;
+	private static bool IsTransientInitializationFailure(Exception exception)
+	{
+		var failure = exception is GrammarUnavailableException { InnerException: { } inner }
+			? inner
+			: exception;
+		return failure is IOException or UnauthorizedAccessException or DllNotFoundException;
+	}
 
 	private LanguageRuntime? TakeRuntimeForDisposalLocked()
 	{
@@ -3364,7 +3494,22 @@ internal sealed record LanguageRuntime(
 {
 	public static LanguageRuntime Create(string libraryPath, CompressionLanguagePack pack)
 	{
-		var language = new Language(libraryPath, pack.Export);
+		Language language;
+		try
+		{
+			language = new Language(libraryPath, pack.Export);
+		}
+		catch (Exception exception) when (exception is
+		       DllNotFoundException or
+		       InvalidOperationException or
+		       IOException or
+		       UnauthorizedAccessException or
+		       System.Security.SecurityException or
+		       BadImageFormatException or
+		       EntryPointNotFoundException)
+		{
+			throw new GrammarUnavailableException(exception);
+		}
 		Query? bodies = null;
 		Query? declarations = null;
 		Query? preserves = null;
@@ -3404,6 +3549,9 @@ internal sealed record LanguageRuntime(
 		Language.Dispose();
 	}
 }
+
+internal sealed class GrammarUnavailableException(Exception innerException)
+	: InvalidOperationException("The grammar library could not be loaded.", innerException);
 
 /// <summary>One non-thread-safe parser and one reusable cursor per query.</summary>
 internal sealed record LoadedLanguage(
