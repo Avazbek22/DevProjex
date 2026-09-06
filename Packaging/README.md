@@ -14,10 +14,12 @@ three-OS functional gates pass.
 ./Scripts/Test-HeadlessPackageGateMutation.ps1 -ArtifactsRoot artifacts/headless -Version 5.2.0
 ```
 
-The expected RID and grammar payload is centralized in
-`Packaging/Headless/payload-manifest.json`. NuGet contains a pointer plus six RID
-packages; npm contains six platform packages plus the dependency-free launcher.
-No channel is published by the build script.
+The stable RID and grammar naming contract is centralized in
+`Packaging/Headless/payload-manifest.json`. Local desktop builds also publish a
+`publish-payload.<rid>.json` receipt generated from SDK publish items; the release
+validator compares every file and managed resource to it. NuGet contains a
+pointer plus six RID packages; npm contains six platform packages plus the
+dependency-free launcher. No channel is published by the build script.
 
 Examples for the local desktop channels:
 

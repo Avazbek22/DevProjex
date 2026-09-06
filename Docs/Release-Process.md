@@ -22,10 +22,13 @@ are copied back to:
 - `publish/github/v<version>`;
 - `publish/store/v<version>`.
 
-`Packaging/Headless/payload-manifest.json` is the common payload contract for
-desktop, Store, NuGet, and npm artifacts. It defines the six RIDs and executable
-names, all native grammar resources, all embedded localization names, the Store
-execution alias, Store architectures, and Store resource languages.
+`Packaging/Headless/payload-manifest.json` keeps the cross-channel facts that are
+independent of one build: the six RIDs, executable and grammar naming, and Store
+alias, architectures, and resource languages. Every local build additionally
+emits `publish-payload.<rid>.json`. This build receipt is the authoritative list
+of publish files for that RID; each entry records its path, size, SHA-256, and,
+for a managed assembly, its complete embedded-resource name table. The receipt
+is covered by `SHA256SUMS.txt` and travels beside the release artifacts.
 
 ## Operator commands
 
@@ -44,7 +47,8 @@ PowerShell console:
 ```
 
 Build one GitHub RID for debugging. This is intentionally marked `PARTIAL`, its
-checksum manifest lists only the selected artifact, and it is not release-ready:
+checksum manifest lists only the selected artifact and its RID receipt, and it
+is not release-ready:
 
 ```powershell
 ./Scripts/release-all.ps1 -Channels github -Rids win-x64 -SkipWack -NonInteractive
@@ -99,15 +103,26 @@ must not be attached to a release.
 
 The static gate checks, without running foreign-RID binaries:
 
-- the exact selected GitHub artifact set and every SHA-256;
+- the exact selected GitHub artifact/receipt set and every SHA-256;
 - Windows file/product versions, Linux and macOS version evidence, archive layout,
   and executable mode bits;
-- every grammar and localization name inside each uncompressed single-file bundle;
+- the .NET single-file manifest against the RID receipt in both directions,
+  including every file path, size, SHA-256, and every managed assembly resource;
+  any compressed bundle entry fails validation;
 - macOS `Info.plist` version and application layout;
 - Store upload, bundle, x64/arm64 application packages, package/bundle versions,
-  execution alias, exact grammar set, and all Store resource languages. The
-  Store directory must contain exactly the versioned `.msixupload`, x64|arm64
-  `.msixbundle`, and x64 `.msix` emitted by the existing packaging layout.
+  execution alias, exact application payload from both RID receipts, and all
+  Store resource languages. The Store directory must contain exactly the
+  versioned `.msixupload`, x64|arm64 `.msixbundle`, x64 `.msix`, and the two
+  Windows RID receipts emitted by the existing packaging layout.
+
+Store compares every application-package file and managed resource in both
+directions. The only channel-generated additions are `AppxManifest.xml`,
+`AppxBlockMap.xml`, `[Content_Types].xml`, `AppxSignature.p7x`, `resources.pri`,
+and `Assets/**`; this allowlist is centralized in the validator. Sizes and
+SHA-256 values are checked for archive/package entries. A missing or unexpected
+help file, ignore profile, icon-pack asset, compression language resource,
+gitleaks rule, notice, managed assembly, or native RID library fails identically.
 
 The host `win-x64` artifact also runs `--version`, `tree`, compressed and full
 `analyze`, the secret findings exit-code/redaction check, and the MCP initialize
@@ -122,7 +137,8 @@ and SHA-256, the status of each selected channel, and its output directory.
 
 A new distribution channel is not connected until all five conditions are met:
 
-1. Its required payload is represented in the shared manifest.
+1. Its stable metadata is represented in the shared manifest and its build emits
+   a complete content receipt from the channel's own publish inputs.
 2. A static completeness gate fails closed on missing or invalid content.
 3. A mutation gate proves the completeness gate rejects a damaged real artifact.
 4. A functional smoke exercises the artifact through its public entry point.

@@ -22,6 +22,9 @@ The equivalent channel form is `-Channels github`. Use `-Rids osx-x64` or
 channel commands.
 
 The resulting files are named `DevProjex.v<version>.osx-<architecture>.app.tar.gz`.
+Each selected RID also produces `publish-payload.<rid>.json`, which records every
+file and managed resource embedded by the .NET bundler and is covered by
+`SHA256SUMS.txt`.
 Each archive contains one Finder-ready `DevProjex.app` bundle:
 
 ```text
