@@ -18,6 +18,8 @@ internal static class GitProcessStartInfoFactory
 		var executable = GitRuntime.GitExecutable;
 		if (!GitExecutableLocator.IsSafeForRepository(executable, workingDirectory))
 			throw new InvalidOperationException("The pinned Git executable is inside the selected project or one of its parent directories.");
+		if (operation.Profile == GitProcessProfile.ManagedCheckout)
+			ValidateManagedScope(workingDirectory, operation);
 
 		var startInfo = CreateBase(executable, workingDirectory, redirectStandardInput);
 		ApplyEnvironmentAllowlist(startInfo, operation.Profile);
@@ -46,34 +48,6 @@ internal static class GitProcessStartInfoFactory
 			startInfo.ArgumentList.Add(argument);
 		GitProcessEnvironmentSanitizer.RemoveRepositoryOverrides(startInfo);
 		ApplyTrustedGitEnvironment(startInfo, operation, isolation);
-		return startInfo;
-	}
-
-	[Obsolete("Migrate the caller to a typed GitProcessOperation.")]
-	public static ProcessStartInfo Create(
-		string? workingDirectory,
-		IReadOnlyList<string> arguments,
-		bool redirectStandardInput = true,
-		string? executable = null,
-		GitAskPassSession? askPass = null)
-	{
-		ArgumentNullException.ThrowIfNull(arguments);
-		var resolvedExecutable = executable is null
-			? GitRuntime.GitExecutable
-			: Path.GetFullPath(executable);
-		var startInfo = CreateBase(resolvedExecutable, workingDirectory, redirectStandardInput);
-		ApplyEnvironmentAllowlist(startInfo, GitProcessProfile.LocalRead);
-		if (OperatingSystem.IsWindows())
-		{
-			startInfo.ArgumentList.Add("-c");
-			startInfo.ArgumentList.Add("core.longpaths=true");
-		}
-		foreach (var argument in arguments)
-			startInfo.ArgumentList.Add(argument);
-
-		GitProcessEnvironmentSanitizer.RemoveRepositoryOverrides(startInfo);
-		ApplyTrustedGitEnvironment(startInfo, null, GitRuntime.IsolationPaths);
-		askPass?.Apply(startInfo);
 		return startInfo;
 	}
 
@@ -219,9 +193,26 @@ internal static class GitProcessStartInfoFactory
 		startInfo.Environment["GCM_GUI_PROMPT"] = "false";
 		if (operation?.Profile != GitProcessProfile.ExplicitNetwork)
 			return;
-		var ssh = GitRuntime.SshExecutable ??
-		          throw new InvalidOperationException("A safe SSH executable is unavailable.");
-		startInfo.Environment["GIT_SSH_COMMAND"] = $"\"{ssh.Replace("\"", "\\\"")}\" -o BatchMode=yes";
-		startInfo.Environment["GIT_SSH_VARIANT"] = "ssh";
+		if (GitNetworkPolicy.GetAllowedProtocols(operation.Value!) == "ssh")
+		{
+			var ssh = GitRuntime.SshExecutable ??
+			          throw new InvalidOperationException("A safe SSH executable is unavailable.");
+			startInfo.Environment["GIT_SSH_COMMAND"] = $"\"{ssh.Replace("\"", "\\\"")}\" -o BatchMode=yes";
+			startInfo.Environment["GIT_SSH_VARIANT"] = "ssh";
+		}
+	}
+
+	private static void ValidateManagedScope(string? workingDirectory, GitProcessOperation operation)
+	{
+		if (string.IsNullOrWhiteSpace(workingDirectory) || !RepositoryCacheLayout.IsManaged(workingDirectory))
+			throw new InvalidOperationException("Managed Git writes require an application-owned cache repository.");
+		var container = RepositoryCacheLayout.GetContainer(workingDirectory);
+		if (!RepositoryFileLease.HasActiveLeaseWithin(container))
+			throw new InvalidOperationException("Managed Git writes require an active repository cache lease.");
+		if (operation.Kind is GitOperationKind.ManagedWorktreeAdd or GitOperationKind.ManagedWorktreeRemove &&
+		    !PathUtility.IsPathInside(operation.Value!, container))
+		{
+			throw new InvalidOperationException("The managed worktree path is outside the application cache.");
+		}
 	}
 }

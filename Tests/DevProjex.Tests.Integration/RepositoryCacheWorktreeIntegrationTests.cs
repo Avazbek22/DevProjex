@@ -571,9 +571,19 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 
 	private static async Task RunGitAsync(string workingDirectory, IReadOnlyList<string> arguments)
 	{
+		var startInfo = new ProcessStartInfo(GitRuntime.GitExecutable)
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
 		using var process = new Process
 		{
-			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, arguments)
+			StartInfo = startInfo
 		};
 		process.Start();
 		process.StandardInput.Close();

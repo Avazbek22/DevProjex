@@ -1340,6 +1340,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 					{
 						if (!await TryRestoreRemoteBranchAsync(
 								entry.LocalPath,
+								entry.RepositoryUrl,
 								effectiveBranch,
 								cancellationToken)
 							.ConfigureAwait(false))
@@ -1475,13 +1476,24 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 	private static async Task<bool> TryRestoreRemoteBranchAsync(
 		string repositoryPath,
+		string repositoryUrl,
 		string branch,
 		CancellationToken cancellationToken)
 	{
 		var normalizedBranch = GitBranchNameValidator.ValidateAndNormalize(branch);
+		if (!GitRemoteIdentityStore.Matches(repositoryPath, repositoryUrl))
+			return false;
+		var networkOverrides = await RunGitForOutputAsync(
+			repositoryPath,
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.NetworkOverrides),
+			cancellationToken).ConfigureAwait(false);
+		if (!string.IsNullOrWhiteSpace(networkOverrides))
+			return false;
 		if (await RunGitForOutputAsync(
 			    repositoryPath,
-			    ["remote", "set-branches", "--add", "origin", normalizedBranch],
+			    GitProcessOperation.ManagedConfigWrite(
+				    GitManagedConfigWriteKind.AddTrackedBranch,
+				    normalizedBranch),
 			    cancellationToken).ConfigureAwait(false) is null)
 		{
 			return false;
@@ -1489,7 +1501,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 		return await RunGitForOutputAsync(
 			       repositoryPath,
-			       ["fetch", "origin", normalizedBranch, "--depth", "1"],
+			       GitProcessOperation.FetchBranch(repositoryUrl, normalizedBranch),
 			       cancellationToken).ConfigureAwait(false) is not null;
 	}
 
@@ -1516,27 +1528,27 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	{
 		var current = await RunGitForOutputAsync(
 			repositoryPath,
-			["rev-parse", "--abbrev-ref", "HEAD"],
+			GitProcessOperation.ListBranches(GitBranchListKind.Current),
 			cancellationToken).ConfigureAwait(false);
 		if (!string.IsNullOrWhiteSpace(current) && !string.Equals(current.Trim(), "HEAD", StringComparison.Ordinal))
 			return current.Trim();
 
 		var configured = await RunGitForOutputAsync(
 			repositoryPath,
-			["config", "--worktree", "--get", "devprojex.branch"],
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.WorktreeBranch),
 			cancellationToken).ConfigureAwait(false);
 		return string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
 	}
 
 	private static async Task<string?> RunGitForOutputAsync(
 		string workingDirectory,
-		IReadOnlyList<string> arguments,
+		GitProcessOperation operation,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		using var process = new Process
 		{
-			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, arguments)
+			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, operation)
 		};
 		process.Start();
 		process.StandardInput.Close();

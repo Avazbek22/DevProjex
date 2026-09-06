@@ -1,13 +1,20 @@
+using System.Collections.Concurrent;
+
 namespace DevProjex.Infrastructure.Git;
 
 internal sealed class RepositoryFileLease : IDisposable, IAsyncDisposable
 {
 	private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(25);
+	private static readonly ConcurrentDictionary<string, int> ActiveLeasePaths =
+		new(PathComparer.Default);
+	private readonly string _path;
 	private FileStream? _stream;
 
-	private RepositoryFileLease(FileStream stream)
+	private RepositoryFileLease(string path, FileStream stream)
 	{
+		_path = path;
 		_stream = stream;
+		ActiveLeasePaths.AddOrUpdate(path, 1, static (_, count) => count + 1);
 	}
 
 	public static bool TryAcquireExclusive(string path, out RepositoryFileLease? lease) =>
@@ -50,7 +57,7 @@ internal sealed class RepositoryFileLease : IDisposable, IAsyncDisposable
 				share,
 				bufferSize: 1,
 				FileOptions.None);
-			lease = new RepositoryFileLease(stream);
+			lease = new RepositoryFileLease(PathUtility.Normalize(path), stream);
 			return true;
 		}
 		catch (Exception ex) when (ex is
@@ -65,7 +72,18 @@ internal sealed class RepositoryFileLease : IDisposable, IAsyncDisposable
 
 	public void Dispose()
 	{
-		Interlocked.Exchange(ref _stream, null)?.Dispose();
+		if (Interlocked.Exchange(ref _stream, null) is not { } stream)
+			return;
+		stream.Dispose();
+		ActiveLeasePaths.AddOrUpdate(_path, 0, static (_, count) => Math.Max(0, count - 1));
+		if (ActiveLeasePaths.TryGetValue(_path, out var count) && count == 0)
+			ActiveLeasePaths.TryRemove(new KeyValuePair<string, int>(_path, 0));
+	}
+
+	internal static bool HasActiveLeaseWithin(string directory)
+	{
+		var normalized = PathUtility.Normalize(directory);
+		return ActiveLeasePaths.Any(pair => pair.Value > 0 && PathUtility.IsPathInside(pair.Key, normalized));
 	}
 
 	public ValueTask DisposeAsync()

@@ -143,7 +143,9 @@ public class GitRepositoryServiceTests : IAsyncLifetime
 
         var startInfo = GitProcessStartInfoFactory.Create(
             null,
-            ["clone", authentication.RepositoryUrl, "target"],
+			GitProcessOperation.CloneRepository(
+				authentication.RepositoryUrl,
+				Path.GetFullPath("target")),
             askPass: askPass);
 
         Assert.Equal("https://example.test/owner/repository.git", authentication.RepositoryUrl);
@@ -214,14 +216,14 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         var script =
             "#!/bin/sh\n" +
             $"printf '%s\\n' \"$@\" >> {ShellQuote(argumentLog)}\n" +
-            "if [ \"$1\" = clone ]; then\n" +
+			"case \" $* \" in *\" clone \"*)\n" +
             $"  \"$GIT_ASKPASS\" 'Password:' > {ShellQuote(passwordLog)}\n" +
             $"  printf '%s' \"$GIT_CONFIG_VALUE_0\" > {ShellQuote(userNameLog)}\n" +
             "  for target do :; done\n" +
             "  mkdir -p \"$target/.git\"\n" +
-            "elif [ \"$1\" = symbolic-ref ]; then\n" +
+			"  ;;\n*\" symbolic-ref \"*)\n" +
             "  printf 'refs/remotes/origin/main\\n'\n" +
-            "fi\n";
+			"  ;;\nesac\n";
         await File.WriteAllTextAsync(
             executablePath,
             script,
@@ -268,12 +270,12 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         var script =
             "#!/bin/sh\n" +
             $"printf '%s\\n' \"$@\" >> {ShellQuote(argumentLog)}\n" +
-            "if [ \"$1\" = clone ]; then\n" +
+			"case \" $* \" in *\" clone \"*)\n" +
             "  for target do :; done\n" +
             "  mkdir -p \"$target/.git\"\n" +
-            "elif [ \"$1\" = symbolic-ref ]; then\n" +
+			"  ;;\n*\" symbolic-ref \"*)\n" +
             "  printf 'refs/remotes/origin/main\\n'\n" +
-            "fi\n";
+			"  ;;\nesac\n";
         await File.WriteAllTextAsync(
             executablePath,
             script,

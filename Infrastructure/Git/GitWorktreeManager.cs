@@ -27,7 +27,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 	private static readonly TimeSpan RecoveryCleanupTimeout = TimeSpan.FromSeconds(10);
 	internal const int MaximumProcessOutputCharacters = GitProcessOutputReader.MaximumOutputCharacters;
 	private readonly object _supportSync = new();
-	private readonly Func<string, IReadOnlyList<string>, CancellationToken, Task<GitProcessResult>> _runAsync;
+	private readonly Func<string, GitProcessOperation, CancellationToken, Task<GitProcessResult>> _runAsync;
 	private readonly Func<string, Task<WorktreeSupportState>> _probeSupport;
 	private readonly TimeSpan _recoveryCleanupTimeout;
 	private Task<WorktreeSupportState>? _supportProbe;
@@ -57,7 +57,8 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			throw new ArgumentOutOfRangeException(nameof(supportProbeTimeout));
 		if (recoveryCleanupTimeout is { } cleanupTimeout && cleanupTimeout <= TimeSpan.Zero)
 			throw new ArgumentOutOfRangeException(nameof(recoveryCleanupTimeout));
-		_runAsync = runAsync;
+		_runAsync = (path, operation, token) =>
+			runAsync(path, operation.BuildArguments(GitRuntime.IsolationPaths), token);
 		_probeSupport = basePath => ProbeSupportAsync(basePath, _runAsync, supportProbeTimeout);
 		_recoveryCleanupTimeout = recoveryCleanupTimeout ?? RecoveryCleanupTimeout;
 	}
@@ -127,7 +128,10 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 	{
 		var revision = await ResolveRevisionAsync(basePath, branch, cancellationToken)
 			.ConfigureAwait(false);
-		if (!await RunSuccessfulAsync(basePath, ["checkout", "--detach", revision], cancellationToken)
+		if (!await RunSuccessfulAsync(
+			basePath,
+			GitProcessOperation.ManagedCheckout(GitManagedCheckoutKind.Detach, revision),
+			cancellationToken)
 			.ConfigureAwait(false))
 		{
 			return false;
@@ -146,7 +150,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			.ConfigureAwait(false);
 		if (!await RunSuccessfulAsync(
 				basePath,
-				["worktree", "add", "--detach", worktreePath, revision],
+				GitProcessOperation.ManagedWorktreeAdd(worktreePath, revision),
 				cancellationToken)
 			.ConfigureAwait(false))
 		{
@@ -195,19 +199,20 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 	{
 		await RunSuccessfulAsync(
 				basePath,
-				["worktree", "remove", "--force", worktreePath],
+				GitProcessOperation.ManagedWorktreeRemove(worktreePath),
 				cancellationToken)
 			.ConfigureAwait(false);
 	}
 
 	public async Task PruneAsync(string basePath, CancellationToken cancellationToken)
 	{
-		await RunSuccessfulAsync(basePath, ["worktree", "prune"], cancellationToken).ConfigureAwait(false);
+		await RunSuccessfulAsync(basePath, GitProcessOperation.ManagedWorktreePrune(), cancellationToken)
+			.ConfigureAwait(false);
 	}
 
 	private static async Task<WorktreeSupportState> ProbeSupportAsync(
 		string basePath,
-		Func<string, IReadOnlyList<string>, CancellationToken, Task<GitProcessResult>> runAsync,
+		Func<string, GitProcessOperation, CancellationToken, Task<GitProcessResult>> runAsync,
 		TimeSpan timeout)
 	{
 		using var timeoutSource = new CancellationTokenSource(timeout);
@@ -215,7 +220,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		{
 			var result = await runAsync(
 					basePath,
-					["worktree", "list", "--porcelain"],
+					GitProcessOperation.ManagedWorktreeList(),
 					timeoutSource.Token)
 				.ConfigureAwait(false);
 			if (result.ExitCode == 0)
@@ -300,7 +305,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 	{
 		var result = await _runAsync(
 			basePath,
-			["rev-parse", "--verify", "--quiet", $"{revision}^{{commit}}"],
+			GitProcessOperation.ResolveCommit(revision),
 			cancellationToken).ConfigureAwait(false);
 		if (result.ExitCode != 0)
 			return null;
@@ -314,7 +319,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		string? branch,
 		CancellationToken cancellationToken)
 	{
-		var head = await _runAsync(repositoryPath, ["rev-parse", "HEAD"], cancellationToken)
+		var head = await _runAsync(repositoryPath, GitProcessOperation.ResolveCommit("HEAD"), cancellationToken)
 			.ConfigureAwait(false);
 		if (head.ExitCode != 0 ||
 		    !string.Equals(head.Output.Trim(), expectedCommit, StringComparison.OrdinalIgnoreCase))
@@ -334,7 +339,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 	{
 		if (!await RunSuccessfulAsync(
 				repositoryPath,
-				["config", "extensions.worktreeConfig", "true"],
+				GitProcessOperation.ManagedConfigWrite(GitManagedConfigWriteKind.EnableWorktreeConfig),
 				cancellationToken)
 			.ConfigureAwait(false))
 		{
@@ -345,7 +350,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		{
 			await RunSuccessfulAsync(
 					repositoryPath,
-					["config", "--worktree", "--unset-all", "devprojex.branch"],
+					GitProcessOperation.ManagedConfigWrite(GitManagedConfigWriteKind.ClearWorktreeBranch),
 					cancellationToken)
 				.ConfigureAwait(false);
 			return true;
@@ -353,26 +358,28 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 
 		return await RunSuccessfulAsync(
 				repositoryPath,
-				["config", "--worktree", "devprojex.branch", branch.Trim()],
+				GitProcessOperation.ManagedConfigWrite(
+					GitManagedConfigWriteKind.SetWorktreeBranch,
+					branch.Trim()),
 				cancellationToken)
 			.ConfigureAwait(false);
 	}
 
 	private async Task<bool> RunSuccessfulAsync(
 		string workingDirectory,
-		IReadOnlyList<string> arguments,
+		GitProcessOperation operation,
 		CancellationToken cancellationToken) =>
-		(await _runAsync(workingDirectory, arguments, cancellationToken).ConfigureAwait(false)).ExitCode == 0;
+		(await _runAsync(workingDirectory, operation, cancellationToken).ConfigureAwait(false)).ExitCode == 0;
 
 	private static async Task<GitProcessResult> RunAsync(
 		string workingDirectory,
-		IReadOnlyList<string> arguments,
+		GitProcessOperation operation,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		var startInfo = GitProcessStartInfoFactory.Create(
 			workingDirectory,
-			arguments);
+			operation);
 
 		using var process = new Process { StartInfo = startInfo };
 		if (!process.Start())

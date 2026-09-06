@@ -8,7 +8,7 @@ public sealed class GitRemoteDiffRangeResolver
 {
 	private const int MaximumFetchDepth = 10_000;
 	private const int MaximumOutputCharacters = 32 * 1024;
-	private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(30);
+	private static readonly TimeSpan OperationTimeout = TimeSpan.FromMinutes(10);
 
 	public async Task<string?> ResolveAsync(
 		string repositoryPath,
@@ -22,7 +22,7 @@ public sealed class GitRemoteDiffRangeResolver
 		var (left, right) = GitScopeSelection.SplitDiffRange(diffRange);
 		if (!GitCloneAuthentication.TryResolveCloneUrl(
 			repositoryUrl,
-			out _,
+			out var cloneUrl,
 			out var authentication))
 		{
 			return null;
@@ -33,6 +33,13 @@ public sealed class GitRemoteDiffRangeResolver
 		IAsyncDisposable? baseLock = null;
 		try
 		{
+			if (!RepositoryCacheLayout.IsManaged(repositoryPath) ||
+			    !GitRemoteIdentityStore.Matches(repositoryPath, cloneUrl) ||
+			    !await IsNetworkConfigurationSafeAsync(repositoryPath, cloneUrl, timeoutSource.Token)
+				    .ConfigureAwait(false))
+			{
+				return null;
+			}
 			if (RepositoryCacheLayout.IsManaged(repositoryPath))
 			{
 				var container = RepositoryCacheLayout.GetContainer(repositoryPath);
@@ -43,12 +50,14 @@ public sealed class GitRemoteDiffRangeResolver
 
 			var resolvedLeft = await ResolveReferenceAsync(
 				repositoryPath,
+				cloneUrl,
 				left,
 				branch,
 				askPass,
 				timeoutSource.Token).ConfigureAwait(false);
 			var resolvedRight = await ResolveReferenceAsync(
 				repositoryPath,
+				cloneUrl,
 				right,
 				branch,
 				askPass,
@@ -70,6 +79,7 @@ public sealed class GitRemoteDiffRangeResolver
 
 	private static async Task<string?> ResolveReferenceAsync(
 		string repositoryPath,
+		string remoteUrl,
 		string reference,
 		string? branch,
 		GitAskPassSession? askPass,
@@ -85,7 +95,7 @@ public sealed class GitRemoteDiffRangeResolver
 		{
 			var deepen = await RunAsync(
 				repositoryPath,
-				["fetch", "--quiet", "--no-tags", "--deepen", depth.ToString(CultureInfo.InvariantCulture), "origin"],
+				GitProcessOperation.FetchDeepen(remoteUrl, depth),
 				cancellationToken,
 				askPass).ConfigureAwait(false);
 			if (deepen?.ExitCode == 0)
@@ -105,15 +115,7 @@ public sealed class GitRemoteDiffRangeResolver
 			return null;
 		var fetch = await RunAsync(
 			repositoryPath,
-			[
-				"fetch",
-				"--quiet",
-				"--no-tags",
-				"--depth",
-				depth.ToString(CultureInfo.InvariantCulture),
-				"origin",
-				remoteReference
-			],
+			GitProcessOperation.FetchBranch(remoteUrl, remoteReference, depth),
 			cancellationToken,
 			askPass).ConfigureAwait(false);
 		return fetch?.ExitCode == 0
@@ -129,7 +131,7 @@ public sealed class GitRemoteDiffRangeResolver
 	{
 		var result = await RunAsync(
 			repositoryPath,
-			["rev-parse", "--verify", "--quiet", "--end-of-options", reference + "^{commit}"],
+			GitProcessOperation.ResolveCommit(reference),
 			cancellationToken).ConfigureAwait(false);
 		return result is { ExitCode: 0 } && !string.IsNullOrWhiteSpace(result.Output)
 			? result.Output.Trim()
@@ -179,14 +181,14 @@ public sealed class GitRemoteDiffRangeResolver
 
 	private static async Task<GitCommandResult?> RunAsync(
 		string repositoryPath,
-		IReadOnlyList<string> arguments,
+		GitProcessOperation operation,
 		CancellationToken cancellationToken,
 		GitAskPassSession? askPass = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		using var process = new Process
 		{
-			StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, arguments, askPass: askPass)
+			StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, operation, askPass: askPass)
 		};
 		try
 		{
@@ -231,6 +233,31 @@ public sealed class GitRemoteDiffRangeResolver
 				.ConfigureAwait(false);
 			throw;
 		}
+	}
+
+	private static async Task<bool> IsNetworkConfigurationSafeAsync(
+		string repositoryPath,
+		string expectedRemoteUrl,
+		CancellationToken cancellationToken)
+	{
+		var configured = await RunAsync(
+			repositoryPath,
+			GitProcessOperation.ReadRemoteUrl(),
+			cancellationToken).ConfigureAwait(false);
+		if (configured is not { ExitCode: 0 } ||
+		    !string.Equals(
+			    RepositoryUrlUtility.GetComparisonKey(configured.Output.Trim()),
+			    RepositoryUrlUtility.GetComparisonKey(expectedRemoteUrl),
+			    StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		var overrides = await RunAsync(
+			repositoryPath,
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.NetworkOverrides),
+			cancellationToken).ConfigureAwait(false);
+		return overrides is null || overrides.ExitCode != 0 || string.IsNullOrWhiteSpace(overrides.Output);
 	}
 
 	private sealed record GitCommandResult(int ExitCode, string Output);

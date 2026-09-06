@@ -124,7 +124,7 @@ internal static class GitExecutableLocator
 			try
 			{
 				directory = Path.GetFullPath(entry);
-				if (IsDirectoryAtOrAbove(directory, current))
+				if (PathsAreNested(directory, current))
 					continue;
 				candidate = Path.GetFullPath(Path.Combine(directory, executableName));
 			}
@@ -144,8 +144,11 @@ internal static class GitExecutableLocator
 			return true;
 		var executableDirectory = Path.GetDirectoryName(Path.GetFullPath(executable));
 		var repository = Path.GetFullPath(repositoryPath);
-		return executableDirectory is not null && !IsDirectoryAtOrAbove(executableDirectory, repository);
+		return executableDirectory is not null && !PathsAreNested(executableDirectory, repository);
 	}
+
+	private static bool PathsAreNested(string left, string right) =>
+		IsDirectoryAtOrAbove(left, right) || IsDirectoryAtOrAbove(right, left);
 
 	private static bool IsDirectoryAtOrAbove(string candidateDirectory, string path)
 	{

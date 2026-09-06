@@ -37,7 +37,8 @@ internal enum GitConfigReadKind
 	PathComparisonSemantics,
 	UnsafeDrivers,
 	WorktreeBranch,
-	PromisorRemotes
+	PromisorRemotes,
+	NetworkOverrides
 }
 
 internal enum GitBranchListKind
@@ -178,6 +179,18 @@ internal sealed record GitProcessOperation
 			GitBranchNameValidator.ValidateAndNormalize(branch),
 			ValidateDepth(depth));
 
+	public static GitProcessOperation FetchRefSpec(string remoteUrl, string refspec, int depth = 1)
+	{
+		if (!IsSafeRefSpec(refspec))
+			throw new ArgumentException("The Git refspec is invalid.", nameof(refspec));
+		return new GitProcessOperation(
+			GitOperationKind.FetchBranch,
+			GitProcessProfile.ExplicitNetwork,
+			GitNetworkPolicy.ValidateUrl(remoteUrl),
+			refspec,
+			ValidateDepth(depth));
+	}
+
 	public static GitProcessOperation FetchDeepen(string remoteUrl, int depth, string? refspec = null)
 	{
 		if (refspec is not null && !IsSafeRefSpec(refspec))
@@ -232,7 +245,7 @@ internal sealed record GitProcessOperation
 		new(GitOperationKind.ManagedWorktreePrune, GitProcessProfile.ManagedCheckout);
 
 	public static GitProcessOperation ManagedWorktreeList() =>
-		new(GitOperationKind.ManagedWorktreeList, GitProcessProfile.ManagedCheckout);
+		new(GitOperationKind.ManagedWorktreeList, GitProcessProfile.LocalRead);
 
 	public static GitProcessOperation ManagedConfigWrite(
 		GitManagedConfigWriteKind kind,
@@ -291,6 +304,8 @@ internal sealed record GitProcessOperation
 		GitConfigReadKind.WorktreeBranch => ["config", "--worktree", "--get", "devprojex.branch"],
 		GitConfigReadKind.PromisorRemotes =>
 			["config", "--local", "--name-only", "--get-regexp", "^remote\\..*\\.promisor$"],
+		GitConfigReadKind.NetworkOverrides =>
+			["config", "--local", "--name-only", "--get-regexp", "^(url\\..*\\.insteadof|http\\..*\\.(extraheader|cookiefile|proxy)|core\\.(gitproxy|sshcommand)|remote\\..*\\.uploadpack)$"],
 		_ => throw new ArgumentOutOfRangeException()
 	};
 
