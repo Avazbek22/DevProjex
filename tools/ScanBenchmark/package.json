@@ -1,0 +1,12 @@
+{
+  "name": "devprojex-scan-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "measure:mcp": "node measure-mcp.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "gpt-tokenizer": "4.0.0"
+  }
+}
