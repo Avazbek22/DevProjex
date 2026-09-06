@@ -128,8 +128,27 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("project/.dotted.cs", "dotted-local-profile-marker\n");
 		workspace.WriteFile("project/Empty.cs", string.Empty);
 		var dataRoot = workspace.CreateDirectory("data");
-		new ProjectProfileStore(() => dataRoot).SaveProfile(
+
+		await using var server = await ActualMcpProcess.StartAsync(
 			project,
+			dataRoot,
+			"--allow-agent-exclusions",
+			"--exclude",
+			"empty-files");
+		var initial = await server.Client.CallToolAsync(
+			"list_projects",
+			new Dictionary<string, object?>(),
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var initialList = Assert.IsType<JsonElement>(initial.StructuredContent);
+		var canonicalProject = Assert.Single(initialList.GetProperty("projects").EnumerateArray())
+			.GetProperty("path")
+			.GetString()!;
+		// macOS temporary roots may be spelled through /var while the server's root jail resolves
+		// /private/var. Persist against the canonical project value the real client receives.
+		new ProjectProfileStore(() => dataRoot).SaveProfile(
+			canonicalProject,
 			new ProjectSelectionProfile(
 				SelectedRootFolders: [],
 				SelectedExtensions: [".cs"],
@@ -145,13 +164,6 @@ public sealed partial class McpServerProcessTests
 					[IgnoreOptionId.DotFiles] = true,
 					[IgnoreOptionId.ExtensionlessFiles] = false
 				}));
-
-		await using var server = await ActualMcpProcess.StartAsync(
-			project,
-			dataRoot,
-			"--allow-agent-exclusions",
-			"--exclude",
-			"empty-files");
 		var listed = await server.Client.CallToolAsync(
 			"list_projects",
 			new Dictionary<string, object?>(),
