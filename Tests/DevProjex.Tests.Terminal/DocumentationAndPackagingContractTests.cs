@@ -468,6 +468,10 @@ public sealed class DocumentationAndPackagingContractTests
 
 		var appImageWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-appimage.yml"));
 		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", appImageWorkflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"receipt_root=\"${GITHUB_WORKSPACE}/artifacts/appimage-release",
+			appImageWorkflow,
+			StringComparison.Ordinal);
 		Assert.Contains("Test-ReleaseArtifacts.ps1", appImageWorkflow, StringComparison.Ordinal);
 		Assert.Contains("Test-ReleaseArtifactGateMutation.ps1", appImageWorkflow, StringComparison.Ordinal);
 		Assert.Contains("-Channels appimage", appImageWorkflow, StringComparison.Ordinal);

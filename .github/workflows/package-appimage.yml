@@ -166,7 +166,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          receipt_root="artifacts/appimage-release/appimage/v${VERSION}"
+          receipt_root="${GITHUB_WORKSPACE}/artifacts/appimage-release/appimage/v${VERSION}"
           publish_dir="${receipt_root}/${{ matrix.rid }}"
           mkdir -p -- "${receipt_root}"
           dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj \
