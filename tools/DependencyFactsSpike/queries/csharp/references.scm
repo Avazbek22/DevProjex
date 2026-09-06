@@ -3,7 +3,7 @@
 (parameter) @reference.parameter_type
 (method_declaration) @reference.return_type
 (base_list) @reference.base
-(type_argument_list) @reference.generic_argument
+(type_parameter_constraints_clause) @reference.constraint
 (attribute) @reference.attribute
 (object_creation_expression) @reference.object_creation
 (typeof_expression) @reference.typeof

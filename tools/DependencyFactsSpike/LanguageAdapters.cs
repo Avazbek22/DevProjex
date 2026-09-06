@@ -71,7 +71,9 @@ internal sealed partial class CSharpFactAdapter : LanguageFactAdapterBase
 		var declarations = new List<DeclarationFact>(declarationCaptures.Length);
 		foreach (var capture in declarationCaptures)
 		{
-			var match = CSharpDeclarationRegex().Match(capture.Text);
+			var match = capture.Name == "declaration.delegate"
+				? CSharpDelegateRegex().Match(capture.Text)
+				: CSharpDeclarationRegex().Match(capture.Text);
 			if (!match.Success)
 				continue;
 			var name = match.Groups["name"].Value;
@@ -83,7 +85,9 @@ internal sealed partial class CSharpFactAdapter : LanguageFactAdapterBase
 			var parents = declarationCaptures
 				.Where(item => item.StartIndex < capture.StartIndex && item.EndIndex >= capture.EndIndex)
 				.OrderBy(static item => item.StartIndex)
-				.Select(item => CSharpDeclarationRegex().Match(item.Text))
+				.Select(item => item.Name == "declaration.delegate"
+					? CSharpDelegateRegex().Match(item.Text)
+					: CSharpDeclarationRegex().Match(item.Text))
 				.Where(static item => item.Success)
 				.Select(static item => item.Groups["name"].Value + AritySuffix(GenericArity(item.Value)))
 				.ToArray();
@@ -162,11 +166,24 @@ internal sealed partial class CSharpFactAdapter : LanguageFactAdapterBase
 			"reference.parameter_type" => ParameterTypeRegex().Match(text).Groups["type"].Value,
 			"reference.return_type" => ReturnTypeRegex().Match(text).Groups["type"].Value,
 			"reference.base" => text.TrimStart(':', ' '),
-			"reference.generic_argument" => text.Trim('<', '>', ' '),
+			"reference.constraint" => text[(text.IndexOf(':') + 1)..],
 			"reference.attribute" => AttributeRegex().Match(text).Groups["type"].Value,
 			"reference.object_creation" => ObjectCreationRegex().Match(text).Groups["type"].Value,
 			_ => ParenthesizedTypeRegex().Match(text).Groups["type"].Value
 		};
+		if (string.IsNullOrWhiteSpace(candidates) &&
+		    capture.Name == "reference.object_creation" &&
+		    TargetTypedNewRegex().IsMatch(text))
+		{
+			yield return new ReferenceFact(
+				EvidenceLayer.TypeReference,
+				"<target-typed-new>",
+				0,
+				capture.Line,
+				OneLine(capture.Text),
+				capture.NodeType);
+			yield break;
+		}
 		if (string.IsNullOrWhiteSpace(candidates))
 			yield break;
 		foreach (Match match in TypeNameRegex().Matches(candidates))
@@ -195,6 +212,8 @@ internal sealed partial class CSharpFactAdapter : LanguageFactAdapterBase
 
 	[GeneratedRegex(@"\b(?:class|struct|interface|record(?:\s+class|\s+struct)?|enum|delegate)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)", RegexOptions.CultureInvariant)]
 	private static partial Regex CSharpDeclarationRegex();
+	[GeneratedRegex(@"\bdelegate\s+[A-Za-z_][\w.:<>,?\[\]\s]*\s+(?<name>[A-Za-z_]\w*)\s*(?:<[^>]+>)?\s*\(", RegexOptions.CultureInvariant)]
+	private static partial Regex CSharpDelegateRegex();
 	[GeneratedRegex(@"\bnamespace\s+(?<name>[A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.CultureInvariant)]
 	private static partial Regex NamespaceRegex();
 	[GeneratedRegex(@"\busing\s+(?<static>static\s+)?(?:(?<alias>[A-Za-z_]\w*)\s*=\s*)?(?<target>(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*)\s*;", RegexOptions.CultureInvariant)]
@@ -215,6 +234,8 @@ internal sealed partial class CSharpFactAdapter : LanguageFactAdapterBase
 	private static partial Regex AttributeRegex();
 	[GeneratedRegex(@"\bnew\s+(?<type>[A-Za-z_][\w.:]*(?:\s*<[^>;(){}]+>)?)", RegexOptions.CultureInvariant)]
 	private static partial Regex ObjectCreationRegex();
+	[GeneratedRegex(@"\bnew\s*\(", RegexOptions.CultureInvariant)]
+	private static partial Regex TargetTypedNewRegex();
 	[GeneratedRegex(@"\((?<type>[A-Za-z_][\w.:<>,?\[\]\s]*)\)", RegexOptions.CultureInvariant)]
 	private static partial Regex ParenthesizedTypeRegex();
 	[GeneratedRegex(@"(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)]
@@ -304,7 +325,10 @@ internal sealed partial class TypeScriptFactAdapter : LanguageFactAdapterBase
 
 	private static IEnumerable<ReferenceFact> ExtractTypes(SyntaxCapture capture)
 	{
-		foreach (Match match in TsTypeRegex().Matches(capture.Text))
+		var candidate = capture.Name == "reference.new"
+			? TsNewTypeRegex().Match(capture.Text).Groups["type"].Value
+			: capture.Text;
+		foreach (Match match in TsTypeRegex().Matches(candidate))
 		{
 			var value = match.Value;
 			if (TsKeywords.Contains(value))
@@ -327,6 +351,8 @@ internal sealed partial class TypeScriptFactAdapter : LanguageFactAdapterBase
 	private static partial Regex NamedImportsRegex();
 	[GeneratedRegex(@"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*", RegexOptions.CultureInvariant)]
 	private static partial Regex TsTypeRegex();
+	[GeneratedRegex(@"\bnew\s+(?<type>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)", RegexOptions.CultureInvariant)]
+	private static partial Regex TsNewTypeRegex();
 }
 
 internal sealed partial class PythonFactAdapter : LanguageFactAdapterBase

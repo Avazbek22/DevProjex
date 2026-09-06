@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace DependencyFactsSpike;
@@ -13,9 +14,10 @@ internal sealed record ScopeDescriptor(
 	string? PackageName,
 	IReadOnlyDictionary<string, IReadOnlyList<string>> TypeScriptPaths,
 	string? RootDir,
-	string? OutDir);
+	string? OutDir,
+	IReadOnlySet<string> PythonExternalPackages);
 
-internal sealed class ProjectMap
+internal sealed partial class ProjectMap
 {
 	private readonly string _repositoryRoot;
 	private readonly IReadOnlyList<ScopeDescriptor> _scopes;
@@ -53,7 +55,8 @@ internal sealed class ProjectMap
 				null,
 				new Dictionary<string, IReadOnlyList<string>>(),
 				null,
-				null));
+				null,
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
 		}
 
 		foreach (var config in Directory.EnumerateFiles(repositoryRoot, "tsconfig*.json", SearchOption.AllDirectories)
@@ -82,7 +85,8 @@ internal sealed class ProjectMap
 					package is null ? null : ReadPackageName(package),
 					paths,
 					TryString(compiler, "rootDir"),
-					TryString(compiler, "outDir")));
+					TryString(compiler, "outDir"),
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
 			}
 			catch (JsonException)
 			{
@@ -102,7 +106,8 @@ internal sealed class ProjectMap
 				Path.GetRelativePath(repositoryRoot, marker).Replace('\\', '/'),
 				directory,
 				LanguageId.Python,
-				[], null, false, null, new Dictionary<string, IReadOnlyList<string>>(), null, null));
+				[], null, false, null, new Dictionary<string, IReadOnlyList<string>>(), null, null,
+				ReadPythonExternalPackages(marker)));
 		}
 
 		return new ProjectMap(repositoryRoot, scopes
@@ -173,6 +178,26 @@ internal sealed class ProjectMap
 			return null;
 		}
 	}
+
+	private static IReadOnlySet<string> ReadPythonExternalPackages(string marker)
+	{
+		var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var line in File.ReadLines(marker))
+		{
+			if (line.Contains("::", StringComparison.Ordinal) || line.Contains("://", StringComparison.Ordinal))
+				continue;
+			foreach (Match match in PythonRequirementRegex().Matches(line))
+			{
+				var name = match.Groups["name"].Value.Replace('-', '_');
+				if (name.Length > 0)
+					packages.Add(name);
+			}
+		}
+		return packages;
+	}
+
+	[GeneratedRegex("[\\\"'](?<name>[A-Za-z0-9_.-]+)(?:\\[[^\\]]+\\])?(?=[<>=!~\\\"'])", RegexOptions.CultureInvariant)]
+	private static partial Regex PythonRequirementRegex();
 }
 
 internal static class PathPolicy

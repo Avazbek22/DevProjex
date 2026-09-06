@@ -60,6 +60,7 @@ internal sealed class DependencyFactsEngine(string grammarCache)
 		var metrics = new RepositoryMetrics(
 			facts.Count,
 			errors,
+			facts.Count(static fact => fact.HasSyntaxErrors),
 			edges.Count(static edge => edge.Layer == EvidenceLayer.ExplicitImport),
 			edges.Count(static edge => edge.Layer == EvidenceLayer.TypeReference),
 			statusCounts,
@@ -69,7 +70,17 @@ internal sealed class DependencyFactsEngine(string grammarCache)
 			reused,
 			facts.Count);
 		var result = new RepositoryResult(options.Root.Replace('\\', '/'), options.CorpusSha, facts, symbols, edges, metrics, string.Empty);
-		var persisted = result with { Metrics = metrics with { ElapsedMilliseconds = 0, PeakWorkingSetBytes = 0 } };
+		var persisted = result with
+		{
+			Metrics = metrics with
+			{
+				ElapsedMilliseconds = 0,
+				PeakWorkingSetBytes = 0,
+				ParsedFiles = 0,
+				ReusedFiles = 0,
+				ReresolvedFiles = 0
+			}
+		};
 		var firstBytes = JsonSerializer.SerializeToUtf8Bytes(persisted, SpikeJsonContext.Default.RepositoryResult);
 		var resultHash = Convert.ToHexString(SHA256.HashData(firstBytes)).ToLowerInvariant();
 		persisted = persisted with { ResultSha256 = resultHash };
@@ -115,6 +126,8 @@ internal sealed class DependencyResolver(
 	IReadOnlyList<DeclarationFact> symbols,
 	ProjectMap projects)
 {
+	private readonly IReadOnlyDictionary<string, FileFacts> filesByPath =
+		files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
 	private static readonly HashSet<string> CSharpExternalTypes = new(
 		["String", "Int32", "Int64", "Boolean", "Object", "DateTime", "DateTimeOffset", "Guid", "Task", "ValueTask", "CancellationToken", "IEnumerable", "IReadOnlyList", "IReadOnlyCollection", "IReadOnlyDictionary", "Dictionary", "List", "HashSet", "Exception", "Stream", "FileInfo", "DirectoryInfo", "Uri", "Regex", "JsonElement", "JsonDocument", "string", "int", "long", "bool", "byte", "char", "double", "decimal"],
 		StringComparer.Ordinal);
@@ -220,9 +233,11 @@ internal sealed class DependencyResolver(
 					if (!package.RootElement.TryGetProperty(propertyName, out var map) || map.ValueKind != JsonValueKind.Object)
 						return [];
 					var key = propertyName == "exports" ? (specifier.Length == 0 ? "." : "./" + specifier) : specifier;
-					if (!map.TryGetProperty(key, out var target) || target.ValueKind == JsonValueKind.Null)
+					if (!TrySelectPackageMapTarget(map, key, out var target, out var wildcard) || target.ValueKind == JsonValueKind.Null)
 						return [];
 					var value = SelectConditionalTarget(target);
+					if (value is not null && wildcard is not null)
+						value = value.Replace("*", wildcard, StringComparison.Ordinal);
 					return value is null ? [] : ProbeTypeScript(Path.GetFullPath(Path.Combine(current, value)), projects.Descriptor(source.ScopeId));
 				}
 				catch (JsonException)
@@ -235,6 +250,35 @@ internal sealed class DependencyResolver(
 			current = Path.GetDirectoryName(current)!;
 		}
 		return [];
+	}
+
+	private static bool TrySelectPackageMapTarget(
+		JsonElement map,
+		string key,
+		out JsonElement target,
+		out string? wildcard)
+	{
+		if (map.TryGetProperty(key, out target))
+		{
+			wildcard = null;
+			return true;
+		}
+		foreach (var property in map.EnumerateObject()
+			         .Where(static property => property.Name.Contains('*'))
+			         .OrderByDescending(static property => property.Name.Length))
+		{
+			var star = property.Name.IndexOf('*');
+			var prefix = property.Name[..star];
+			var suffix = property.Name[(star + 1)..];
+			if (!key.StartsWith(prefix, StringComparison.Ordinal) || !key.EndsWith(suffix, StringComparison.Ordinal))
+				continue;
+			target = property.Value;
+			wildcard = key[prefix.Length..(key.Length - suffix.Length)];
+			return true;
+		}
+		target = default;
+		wildcard = null;
+		return false;
 	}
 
 	private static string? SelectConditionalTarget(JsonElement element)
@@ -280,7 +324,9 @@ internal sealed class DependencyResolver(
 	private DependencyEdge ResolvePythonImport(FileFacts source, ImportContext import)
 	{
 		var sourceModule = PythonModule(source.Path);
-		var sourcePackage = sourceModule.Contains('.') ? sourceModule[..sourceModule.LastIndexOf('.')] : string.Empty;
+		var sourcePackage = Path.GetFileNameWithoutExtension(source.Path) == "__init__"
+			? sourceModule
+			: sourceModule.Contains('.') ? sourceModule[..sourceModule.LastIndexOf('.')] : string.Empty;
 		var baseParts = sourcePackage.Split('.', StringSplitOptions.RemoveEmptyEntries).ToList();
 		if (import.RelativeLevel > 0)
 		{
@@ -299,14 +345,84 @@ internal sealed class DependencyResolver(
 			var childCandidates = ProbePythonModule(child).ToArray();
 			if (childCandidates.Length > 0)
 				candidates = childCandidates.ToList();
+			else
+				candidates = candidates
+					.Where(candidate => !Path.GetFileName(candidate).StartsWith("__init__.", StringComparison.Ordinal) ||
+					                    PythonModuleStaticallyProvides(candidate, import.ImportedName, 0, new HashSet<string>(StringComparer.Ordinal)))
+					.ToList();
+		}
+		if (candidates.Count == 0)
+		{
+			var portions = ProbePythonNamespace(module).ToArray();
+			if (portions.Length > 0)
+				return Edge(source, import, ResolutionStatus.Resolved, "namespace:" + module,
+					$"one namespace-package entity with {portions.Length} portion(s)", portions);
 		}
 		if (candidates.Count == 0 && import.RelativeLevel == 0 && PythonExternalModules.Contains(import.Specifier.Split('.')[0]))
 			return Edge(source, import, ResolutionStatus.External, null, "Python standard-library module is outside the manifest", []);
+		if (candidates.Count == 0 && import.RelativeLevel == 0 &&
+		    projects.Descriptor(source.ScopeId)?.PythonExternalPackages.Contains(import.Specifier.Split('.')[0]) == true)
+			return Edge(source, import, ResolutionStatus.External, null, "declared Python package is outside the source manifest", []);
 		if (candidates.Count == 0 && import.RelativeLevel == 0)
-			return Edge(source, import, ResolutionStatus.External, null, "site-package or missing external module is outside the manifest", []);
+			return Edge(source, import, ResolutionStatus.Unresolved, null, "no module target or declared external package; absence is not evidence of externality", []);
 		if (import.IsWildcard && candidates.Any(IsDynamicPythonAll))
 			return Edge(source, import, ResolutionStatus.Unresolved, null, "dynamic __all__ is an unsupported mechanism", candidates);
 		return FinishImport(source, import, candidates);
+	}
+
+	private bool PythonModuleStaticallyProvides(string candidate, string name, int depth, ISet<string> visited)
+	{
+		if (depth >= 8 || !visited.Add(candidate) || !filesByPath.TryGetValue(candidate, out var facts))
+			return false;
+		if (facts.Declarations.Any(declaration => SimpleName(declaration.Identity.QualifiedName) == name))
+			return true;
+
+		foreach (var reexport in facts.Imports.Where(import =>
+				string.Equals(import.Alias ?? import.ImportedName ?? import.Specifier.Split('.').Last(), name, StringComparison.Ordinal)))
+		{
+			var sourceModule = PythonModule(candidate);
+			var sourcePackage = Path.GetFileNameWithoutExtension(candidate) == "__init__"
+				? sourceModule
+				: sourceModule.Contains('.') ? sourceModule[..sourceModule.LastIndexOf('.')] : string.Empty;
+			var baseParts = sourcePackage.Split('.', StringSplitOptions.RemoveEmptyEntries).ToList();
+			if (reexport.RelativeLevel > 0)
+			{
+				var remove = reexport.RelativeLevel - 1;
+				if (remove > baseParts.Count)
+					continue;
+				baseParts.RemoveRange(baseParts.Count - remove, remove);
+			}
+			var module = reexport.RelativeLevel == 0
+				? reexport.Specifier
+				: string.Join('.', baseParts.Concat(reexport.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
+			if (reexport.ImportedName is { Length: > 0 } importedName)
+			{
+				var child = module.Length == 0 ? importedName : module + "." + importedName;
+				var childCandidates = ProbePythonModule(child).ToArray();
+				if (childCandidates.Length > 0)
+					return true;
+				if (ProbePythonModule(module).Any(next => PythonModuleStaticallyProvides(next, importedName, depth + 1, visited)))
+					return true;
+			}
+			else if (ProbePythonModule(module).Any())
+				return true;
+		}
+		return false;
+	}
+
+	private IEnumerable<string> ProbePythonNamespace(string module)
+	{
+		if (module.Length == 0)
+			yield break;
+		var relative = module.Replace('.', Path.DirectorySeparatorChar);
+		foreach (var pythonRoot in new[] { root, Path.Combine(root, "src") })
+		{
+			var directory = Path.Combine(pythonRoot, relative);
+			if (Directory.Exists(directory) &&
+			    !File.Exists(Path.Combine(directory, "__init__.py")) &&
+			    !File.Exists(Path.Combine(directory, "__init__.pyi")))
+				yield return Path.GetRelativePath(root, directory).Replace('\\', '/') + "/";
+		}
 	}
 
 	private bool IsDynamicPythonAll(string candidate)

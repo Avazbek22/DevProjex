@@ -22,7 +22,10 @@ internal sealed class TreeSitterFactExtractor : IDisposable
 	{
 		var relativePath = Path.GetRelativePath(root, fullPath).Replace('\\', '/');
 		var languageId = LanguageCatalog.ForPath(fullPath);
-		var source = File.ReadAllText(fullPath, Encoding.UTF8);
+		var bytes = File.ReadAllBytes(fullPath);
+		var source = Encoding.UTF8.GetString(bytes);
+		if (source.Length > 0 && source[0] == '\uFEFF')
+			source = source[1..];
 		var runtime = GetRuntime(languageId);
 		using var tree = runtime.Parser.Parse(source)
 		                 ?? throw new InvalidOperationException($"Tree-sitter returned no tree for '{relativePath}'.");
@@ -35,6 +38,7 @@ internal sealed class TreeSitterFactExtractor : IDisposable
 			projects.ScopeFor(fullPath, languageId),
 			languageId,
 			source,
+			Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
 			tree.RootNode.HasError,
 			declarationCaptures,
 			referenceCaptures);
@@ -115,12 +119,10 @@ internal sealed record ExtractionContext(
 	string ScopeId,
 	LanguageId Language,
 	string Source,
+	string ContentHash,
 	bool HasSyntaxErrors,
 	IReadOnlyList<SyntaxCapture> Declarations,
-	IReadOnlyList<SyntaxCapture> References)
-{
-	public string ContentHash => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Source))).ToLowerInvariant();
-}
+	IReadOnlyList<SyntaxCapture> References);
 
 internal sealed record LanguageDefinition(
 	string Library,

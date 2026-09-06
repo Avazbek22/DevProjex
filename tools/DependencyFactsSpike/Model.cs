@@ -62,6 +62,7 @@ internal sealed record DependencyEdge(
 internal sealed record RepositoryMetrics(
 	int FilesParsed,
 	int ExtractionErrors,
+	int SyntaxErrorFiles,
 	int LayerAReferences,
 	int LayerBReferences,
 	IReadOnlyDictionary<ResolutionStatus, int> StatusCounts,
@@ -105,6 +106,14 @@ internal sealed record ExpectedEdge(
 
 internal sealed record AbsentEdge(string Source, string Reference);
 
+internal sealed record CbmFileEdge(string Kind, string Source, string Target);
+
+internal sealed record CbmEdgeSet(
+	string Version,
+	string Project,
+	IReadOnlyList<CbmFileEdge> Edges,
+	IReadOnlyList<string> Notes);
+
 [JsonSourceGenerationOptions(
 	WriteIndented = true,
 	PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
@@ -113,4 +122,5 @@ internal sealed record AbsentEdge(string Source, string Reference);
 [JsonSerializable(typeof(RepositoryMetrics))]
 [JsonSerializable(typeof(IReadOnlyList<FileFacts>))]
 [JsonSerializable(typeof(FixtureExpectation))]
+[JsonSerializable(typeof(CbmEdgeSet))]
 internal partial class SpikeJsonContext : JsonSerializerContext;

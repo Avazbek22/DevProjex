@@ -4,6 +4,7 @@
     { "source": "src/pkg/consumer.py", "reference": "", "status": "Resolved", "target": "src/pkg/sibling.py" },
     { "source": "src/pkg/consumer.py", "reference": "pkg", "status": "Resolved", "target": "src/pkg/__init__.py" },
     { "source": "src/pkg/consumer.py", "reference": "pkg.*", "status": "Unresolved", "reasonContains": "dynamic __all__" },
+    { "source": "src/pkg/namespaces.py", "reference": "ns", "status": "Resolved", "target": "namespace:ns" },
     { "source": "src/pkg/namespaces.py", "reference": "ns.alpha", "status": "Resolved", "target": "ns/alpha.py" },
     { "source": "src/pkg/namespaces.py", "reference": "ns.beta", "status": "Resolved", "target": "src/ns/beta.py" }
   ]
