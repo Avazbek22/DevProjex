@@ -378,6 +378,9 @@ public sealed class DocumentationAndPackagingContractTests
 
 		Assert.Contains("ubuntu-24.04-arm", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("linux/amd64,linux/arm64", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("docker/setup-buildx-action@v4", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("docker/login-action@v4", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("docker/build-push-action@v7", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("actions/attest-build-provenance@v4", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("packages: write", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("id-token: write", containerWorkflow, StringComparison.Ordinal);

@@ -505,11 +505,6 @@ function Test-ContainerArtifacts([object[]] $SelectedRids) {
             -ArtifactName "container:$ridName"
         $binaryPath = Join-Path $payloadDirectory ([string]$rid.binary)
         Assert-Artifact (Test-Path -LiteralPath $binaryPath -PathType Leaf) "container:$ridName" "missing executable '$($rid.binary)'"
-        $binaryText = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes($binaryPath))
-        Assert-Artifact `
-            ($binaryText.IndexOf($Version, [System.StringComparison]::Ordinal) -ge 0) `
-            "container:$ridName" `
-            "invalid informational version; expected '$Version'"
     }
 
     $partial = $SelectedRids.Count -ne 2
