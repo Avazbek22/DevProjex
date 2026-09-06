@@ -295,6 +295,12 @@ compressed to block-form declarations for `.kt` and `.kts` files. Kotlin output 
 lambda-valued `= { }` form; Scala uses the same text intentionally as a block expression.
 Analysis content metrics and every context/folder/ZIP output observe the same
 transformed bytes; source files are never modified.
+If the grammar delivery source is empty or unreadable, or a required native grammar
+cannot be found or loaded, the affected source stays complete and direct analysis
+or context export emits warning `DPX-COMPRESSION-UNAVAILABLE` with the delivery path
+or grammar name. The warning is additive, does not change the command exit code, and
+is not promoted by `analyze --strict`. Unsupported languages and parse or structural
+safety failures remain separate unchanged-file outcomes.
 
 `--strip-comments` is an independent, additive content transformation and is off in the
 `standard` profile. It removes syntax-tree comments in the 14 body-compression languages plus
@@ -1243,6 +1249,16 @@ now carries workflow, trust-boundary, redaction, limit, and glob guidance, while
 all seven tool descriptions are self-contained for tool search. Cached MCP
 schemas must be refreshed for the additive `topFiles` field and new field
 descriptions.
+
+Compression readiness is also explicit in v5.2. CLI analysis and context export
+add warning `DPX-COMPRESSION-UNAVAILABLE` to stderr and machine diagnostics when an
+empty delivery source or a missing, incompatible, or invalid grammar prevents a
+requested transformation. Safe complete output and all exit codes are unchanged,
+including `analyze --strict`. MCP `analyze`, `pack_context`, and `get_file` append
+trusted `[Compression unavailable] ...` text outside project data when compression
+is effective; `analyze` additionally exposes optional structured
+`compressionUnavailable` with `reason` and affected `languages`. Consumers that
+cache the `analyze` output schema must refresh it.
 
 Before the v5.1 output freeze, human-readable content and text-tree presentation
 was aligned across Desktop, Terminal Workspace, CLI, and MCP. Content-only text

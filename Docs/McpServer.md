@@ -264,6 +264,11 @@ flags; consumers that pinned an earlier output schema must refresh it.
 size-based metrics are estimates. The aggregate `characters` and `tokens` use
 the same estimated character base, so a ranked file's token estimate cannot
 exceed the response total merely because its content was withheld.
+When requested compression cannot inspect its delivery source or load a language
+grammar, `analyze` adds optional `compressionUnavailable` with a one-line `reason`
+and a deterministic `languages` array. The array is empty when the whole delivery
+source is unavailable. This is an additive schema field; clients that cache the
+schema must refresh it.
 
 Filters are never silent. `get_tree` and `pack_context` end with a trusted
 `[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
@@ -289,6 +294,14 @@ searches the inspected files, `analyze` preserves its structured metrics
 envelope while identifying metrics that may be estimated, and `pack_context`
 withholds uninspected content. The notice is outside spotlight delimiters and
 reports only a count, never file paths or uninspected content.
+
+Unavailable compression is reduced optimization, not unsafe output. The affected
+file remains complete, and `analyze`, `pack_context`, and `get_file` append
+`[Compression unavailable] <reason>` when their effective selection requests
+compression. This trusted trailer is outside every project spotlight block and
+names the delivery directory or grammar resource without including project data.
+Unsupported languages and files rejected by parse or structural safety checks are
+separate unchanged-file outcomes and do not produce this trailer.
 
 `get_tree`, `pack_context`, `read_pack`, `search_project`, and `get_file` are
 text tools. They do not declare `outputSchema`, omit `structuredContent`, and
