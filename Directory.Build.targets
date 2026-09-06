@@ -45,4 +45,49 @@
     </ItemGroup>
   </Target>
 
+  <Target Name="DevProjexWriteSingleFilePayloadReceipt"
+          AfterTargets="GenerateSingleFileBundle"
+          Condition="'$(DevProjexGenerateReleasePayloadReceipt)'=='true' and
+                     '$(PublishSingleFile)'=='true' and
+                     '$(RuntimeIdentifier)'!='' and
+                     '$(DevProjexPayloadReceiptDirectory)'!=''">
+    <ItemGroup>
+      <_DevProjexPayloadReceiptFile Include="@(FilesToBundle)"
+        Condition="'%(RelativePath)'!='$(PublishedSingleFileName)'" />
+      <_DevProjexPayloadReceiptFile Remove="@(_FilesExcludedFromBundle)" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_DevProjexPayloadItemsPath>$(IntermediateOutputPath)publish-payload.$(RuntimeIdentifier).items</_DevProjexPayloadItemsPath>
+      <_DevProjexPayloadReceiptPath>$(DevProjexPayloadReceiptDirectory)/publish-payload.$(RuntimeIdentifier).json</_DevProjexPayloadReceiptPath>
+    </PropertyGroup>
+    <WriteLinesToFile
+      File="$(_DevProjexPayloadItemsPath)"
+      Lines="@(_DevProjexPayloadReceiptFile->'%(FullPath)&#x9;%(RelativePath)')"
+      Overwrite="true" />
+    <Exec Command="pwsh -NoLogo -NoProfile -File &quot;$(MSBuildThisFileDirectory)Scripts/Write-PublishPayloadReceipt.ps1&quot; -Rid &quot;$(RuntimeIdentifier)&quot; -ItemsPath &quot;$(_DevProjexPayloadItemsPath)&quot; -OutputPath &quot;$(_DevProjexPayloadReceiptPath)&quot;" />
+  </Target>
+
+  <Target Name="DevProjexWriteStorePayloadReceipt"
+          AfterTargets="CopyFilesToPublishDirectory"
+          Condition="'$(DevProjexGenerateReleasePayloadReceipt)'=='true' and
+                     '$(PublishSingleFile)'!='true' and
+                     '$(RuntimeIdentifier)'!='' and
+                     '$(DevProjexPayloadReceiptDirectory)'!='' and
+                     '$(Configuration)'=='ReleaseStore'">
+    <ItemGroup>
+      <!-- Desktop Bridge puts PDBs in the symbol package, not in the application MSIX. -->
+      <_DevProjexPayloadReceiptFile Include="@(ResolvedFileToPublish)"
+        Condition="'%(Extension)'!='.pdb'" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_DevProjexPayloadItemsPath>$(IntermediateOutputPath)publish-payload.$(RuntimeIdentifier).items</_DevProjexPayloadItemsPath>
+      <_DevProjexPayloadReceiptPath>$(DevProjexPayloadReceiptDirectory)/publish-payload.$(RuntimeIdentifier).json</_DevProjexPayloadReceiptPath>
+    </PropertyGroup>
+    <WriteLinesToFile
+      File="$(_DevProjexPayloadItemsPath)"
+      Lines="@(_DevProjexPayloadReceiptFile->'%(FullPath)&#x9;%(RelativePath)')"
+      Overwrite="true" />
+    <Exec Command="pwsh -NoLogo -NoProfile -File &quot;$(MSBuildThisFileDirectory)Scripts/Write-PublishPayloadReceipt.ps1&quot; -Rid &quot;$(RuntimeIdentifier)&quot; -ItemsPath &quot;$(_DevProjexPayloadItemsPath)&quot; -OutputPath &quot;$(_DevProjexPayloadReceiptPath)&quot;" />
+  </Target>
+
 </Project>
