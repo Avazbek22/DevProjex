@@ -85,7 +85,9 @@ function Get-ReceiptMutationCases([object] $Receipt) {
         foreach ($resource in @($file.managedResources)) {
             $candidate = [pscustomobject]@{ File = [string]$file.path; Entry = [string]$resource }
             $resourceCandidates.Add($candidate)
-            if ([string]$resource -ceq 'DevProjex.Grammars/tree-sitter-kotlin.dll') { $fixedGrammar = $candidate }
+            if ([string]$resource -cmatch '^DevProjex\.Grammars/(lib)?tree-sitter-kotlin\.(dll|so|dylib)$') {
+                $fixedGrammar = $candidate
+            }
             if ([string]$resource -ceq 'DevProjex.Assets.Localization.en.json') { $fixedLocalization = $candidate }
 		}
 	}
