@@ -1668,6 +1668,44 @@ jobs:
             --filter $filter `
             --logger "console;verbosity=minimal"
 
+  release-local-channel-gate:
+    name: Local Release Channel Gate (Windows)
+    needs:
+      - plan-release
+      - validate-release-config
+    if: ${{ needs.plan-release.outputs.run_release == 'true' }}
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build and gate representative local release channels
+        shell: pwsh
+        run: |
+          ./Scripts/release-all.ps1 `
+            -Channels github `
+            -Rids win-x64,linux-x64 `
+            -SkipWack `
+            -NonInteractive
+          . ./Scripts/release-helpers.ps1
+          $version = (Get-DefaultReleaseVersionInfo -repoRoot (Resolve-Path '.').Path).DisplayVersion
+          ./Scripts/Test-ReleaseArtifacts.ps1 `
+            -PublishRoot publish `
+            -Version $version `
+            -Channels github `
+            -Rids win-x64,linux-x64
+          ./Scripts/Test-ReleaseArtifactGateMutation.ps1 `
+            -PublishRoot publish `
+            -Version $version `
+            -Channels github `
+            -Rids win-x64,linux-x64
+
   release-gate:
     name: Release Gate
     needs:
@@ -1675,6 +1713,7 @@ jobs:
       - validate-release-config
       - prepare-publish-matrix
       - publish-smoke
+      - release-local-channel-gate
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1687,12 +1726,14 @@ jobs:
           CONFIG_RESULT: ${{ needs.validate-release-config.result }}
           MATRIX_RESULT: ${{ needs.prepare-publish-matrix.result }}
           PUBLISH_RESULT: ${{ needs.publish-smoke.result }}
+          LOCAL_CHANNEL_RESULT: ${{ needs.release-local-channel-gate.result }}
         run: |
           $results = @{
             plan = $env:PLAN_RESULT
             config = $env:CONFIG_RESULT
             matrix = $env:MATRIX_RESULT
             publish = $env:PUBLISH_RESULT
+            local_channel = $env:LOCAL_CHANNEL_RESULT
           }
           $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
           if ($failed.Count -gt 0) {
