@@ -502,6 +502,7 @@
   "Terminal.Error.ProfileTransientGitMode": "Momentane Git-Modi können nicht in Profilen gespeichert werden; verwenden Sie none, gitignore oder tracked.",
   "Terminal.Diagnostic.GitStateUnavailable": "Der angeforderte Git-Status ist nicht verfügbar. Prüfen Sie Git, das Repository und die Referenzen.",
   "Terminal.Diagnostic.GitStateDeleted": "Aus dem Git-Status ausgeschlossene gelöschte Dateien: {0}.",
+  "Terminal.Diagnostic.GitUnsafeFilter": "Ein exakter Vergleich ist nicht möglich, ohne den nicht vertrauenswürdigen Git-Filter '{0}' auszuführen.",
   "Terminal.Option.Exclude": "Gewöhnlichen Ausschluss festlegen.",
   "Terminal.Option.HideSecrets": "Erkannte Werte in ausgewählten Textdateien schwärzen. Binärdateien werden nicht untersucht; keine Treffer sind keine Sicherheitsgarantie.",
   "Terminal.Option.HidePrivateData": "Erkannte private Daten in ausgewählten Textdateien schwärzen. Binärdateien werden nicht untersucht; keine Treffer sind keine Datenschutzgarantie.",

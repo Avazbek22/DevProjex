@@ -496,6 +496,7 @@
   "Terminal.Error.ProfileTransientGitMode": "一時的なGitモードはプロファイルに保存できません。none、gitignore、またはtrackedを使用してください。",
   "Terminal.Diagnostic.GitStateUnavailable": "指定されたGit状態を利用できません。Git、リポジトリ、および参照を確認してください。",
   "Terminal.Diagnostic.GitStateDeleted": "Git状態から除外された削除済みファイル：{0}件。",
+  "Terminal.Diagnostic.GitUnsafeFilter": "信頼されていないGitフィルター「{0}」を実行せずに正確な比較を行うことはできません。",
   "Terminal.Option.Exclude": "通常の除外を設定します。",
   "Terminal.Option.HideSecrets": "選択したテキスト ファイル内の検出された値を秘匿化します。バイナリ ファイルは検査されません。一致しないことは安全を保証するものではありません。",
   "Terminal.Option.HidePrivateData": "選択したテキスト ファイル内で検出された個人データを秘匿化します。バイナリ ファイルは検査されません。一致しないことはプライバシーを保証するものではありません。",

@@ -496,6 +496,7 @@
   "Terminal.Error.ProfileTransientGitMode": "Mode Git sesaat tidak dapat disimpan dalam profil; gunakan none, gitignore, atau tracked.",
   "Terminal.Diagnostic.GitStateUnavailable": "Status Git yang diminta tidak tersedia. Periksa Git, repositori, dan referensinya.",
   "Terminal.Diagnostic.GitStateDeleted": "File terhapus yang dikecualikan dari status Git: {0}.",
+  "Terminal.Diagnostic.GitUnsafeFilter": "Perbandingan tepat tidak tersedia tanpa menjalankan filter Git yang tidak tepercaya '{0}'.",
   "Terminal.Option.Exclude": "Tetapkan pengecualian biasa.",
   "Terminal.Option.HideSecrets": "Samarkan nilai yang terdeteksi dalam file teks yang dipilih. File biner tidak diperiksa; tidak adanya hasil bukan jaminan keamanan.",
   "Terminal.Option.HidePrivateData": "Samarkan data pribadi yang terdeteksi dalam file teks yang dipilih. File biner tidak diperiksa; tidak adanya hasil bukan jaminan privasi.",

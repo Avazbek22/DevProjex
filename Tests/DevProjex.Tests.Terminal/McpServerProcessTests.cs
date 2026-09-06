@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using DevProjex.Application.Services;
+using DevProjex.Infrastructure.Git;
 using DevProjex.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -722,6 +723,7 @@ public sealed partial class McpServerProcessTests
 		startInfo.ArgumentList.Add(root);
 		startInfo.ArgumentList.Add("--allow-remote");
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot;
+		startInfo.Environment[GitRepositoryService.TestFileTransportPolicyVariable] = "1";
 
 		using var process = Process.Start(startInfo) ??
 		                    throw new InvalidOperationException("MCP process did not start.");

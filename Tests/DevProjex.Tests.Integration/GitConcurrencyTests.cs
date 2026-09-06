@@ -17,7 +17,7 @@ public class GitConcurrencyTests : IAsyncLifetime
 
     public GitConcurrencyTests()
     {
-        _service = new GitRepositoryService();
+        _service = new GitRepositoryService(allowFileTransportForTests: true);
         var testCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitIntegration");
         _cacheService = new RepoCacheService(testCachePath);
         _tempDir = new TemporaryDirectory();

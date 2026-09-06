@@ -17,7 +17,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
 
     public GitCacheLifecycleTests()
     {
-        _gitService = new GitRepositoryService();
+        _gitService = new GitRepositoryService(allowFileTransportForTests: true);
         var testCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitIntegration");
         _cacheService = new RepoCacheService(testCachePath);
         _tempDir = new TemporaryDirectory();

@@ -60,6 +60,8 @@ public sealed class ContextDiagnosticRenderer(
 				"Terminal.Diagnostic.GitStateUnavailable",
 			GitScopeFilter.DeletedDiagnosticCode =>
 				"Terminal.Diagnostic.GitStateDeleted",
+			GitScopeFilter.UnsafeFilterDiagnosticCode =>
+				"Terminal.Diagnostic.GitUnsafeFilter",
 			"DPX-SELECTION-PATH-MISSING" =>
 				"Terminal.Diagnostic.SelectedPathMissing",
 			"DPX-PROJECT-ROOT-ACCESS-DENIED" =>
@@ -76,7 +78,12 @@ public sealed class ContextDiagnosticRenderer(
 	internal static string ResolveMessage(
 		LocalizationService localization,
 		ContextDiagnostic diagnostic) =>
-		diagnostic.Code == GitScopeFilter.DeletedDiagnosticCode
-			? localization.Format("Terminal.Diagnostic.GitStateDeleted", diagnostic.Count ?? 0)
-			: ResolveMessage(localization, diagnostic.Code);
+		diagnostic.Code switch
+		{
+			GitScopeFilter.DeletedDiagnosticCode =>
+				localization.Format("Terminal.Diagnostic.GitStateDeleted", diagnostic.Count ?? 0),
+			GitScopeFilter.UnsafeFilterDiagnosticCode =>
+				localization.Format("Terminal.Diagnostic.GitUnsafeFilter", diagnostic.Detail ?? "unknown"),
+			_ => ResolveMessage(localization, diagnostic.Code)
+		};
 }

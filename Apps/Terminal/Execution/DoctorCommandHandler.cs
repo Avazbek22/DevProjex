@@ -440,10 +440,11 @@ public sealed class DoctorCommandHandler(
 	private static async Task<(bool Available, string Version)> TryReadGitVersionAsync(
 		CancellationToken cancellationToken)
 	{
-		return await TryReadGitVersionAsync(
-			CreateGitVersionStartInfo(),
-			TimeSpan.FromSeconds(3),
-			cancellationToken).ConfigureAwait(false);
+		cancellationToken.ThrowIfCancellationRequested();
+		var version = GitRuntimeInformation.VersionDisplay;
+		return await Task.FromResult((
+			!string.Equals(version, "unavailable", StringComparison.OrdinalIgnoreCase),
+			version)).ConfigureAwait(false);
 	}
 
 	internal static async Task<(bool Available, string Version)> TryReadGitVersionAsync(
@@ -516,20 +517,7 @@ public sealed class DoctorCommandHandler(
 	}
 
 	internal static ProcessStartInfo CreateGitVersionStartInfo()
-	{
-		var startInfo = new ProcessStartInfo
-		{
-			FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
-			UseShellExecute = false,
-			CreateNoWindow = true,
-			RedirectStandardInput = true,
-			RedirectStandardOutput = true,
-			RedirectStandardError = true
-		};
-		startInfo.ArgumentList.Add("--version");
-		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
-		return startInfo;
-	}
+		=> GitRuntimeInformation.CreateVersionProbeStartInfo();
 
 	private static bool CanReadDirectory(string path)
 	{

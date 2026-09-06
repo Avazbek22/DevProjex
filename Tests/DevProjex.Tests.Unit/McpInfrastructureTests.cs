@@ -979,6 +979,25 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void UnsafeGitFilterProducesAPathFreeTrustedBlockingTrailer()
+	{
+		const string sensitivePath = "C:/private/repository";
+		var trailer = McpTrustedDiagnosticFormatter.FormatBlocking(
+			new ContextDiagnostic(
+				GitScopeFilter.UnsafeFilterDiagnosticCode,
+				ContextDiagnosticSeverity.Error,
+				"unsafe message",
+				sensitivePath,
+				Detail: "hostile"));
+
+		Assert.NotNull(trailer);
+		Assert.Contains(GitScopeFilter.UnsafeFilterDiagnosticCode, trailer, StringComparison.Ordinal);
+		Assert.Contains("hostile", trailer, StringComparison.Ordinal);
+		Assert.DoesNotContain(sensitivePath, trailer, StringComparison.Ordinal);
+		Assert.DoesNotContain("unsafe message", trailer, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RemoteSourceResolverCapsDistinctKeysReusesExistingSourcesAndDisposesOnce()
 	{
 		using var workspace = new TemporaryDirectory();

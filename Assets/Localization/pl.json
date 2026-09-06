@@ -496,6 +496,7 @@
   "Terminal.Error.ProfileTransientGitMode": "Chwilowych trybów Git nie można zapisywać w profilach; użyj none, gitignore lub tracked.",
   "Terminal.Diagnostic.GitStateUnavailable": "Żądany stan Git jest niedostępny. Sprawdź Git, repozytorium i referencje.",
   "Terminal.Diagnostic.GitStateDeleted": "Usunięte pliki wykluczone ze stanu Git: {0}.",
+  "Terminal.Diagnostic.GitUnsafeFilter": "Dokładne porównanie jest niedostępne bez uruchomienia niezaufanego filtra Git „{0}”.",
   "Terminal.Option.Exclude": "Ustaw zwykłe wykluczenie.",
   "Terminal.Option.HideSecrets": "Maskuj wykryte wartości w wybranych plikach tekstowych. Pliki binarne nie są sprawdzane; brak dopasowań nie gwarantuje bezpieczeństwa.",
   "Terminal.Option.HidePrivateData": "Maskuj wykryte dane osobowe w wybranych plikach tekstowych. Pliki binarne nie są sprawdzane; brak dopasowań nie gwarantuje prywatności.",

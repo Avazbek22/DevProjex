@@ -496,6 +496,7 @@
   "Terminal.Error.ProfileTransientGitMode": "Anlık Git modları profillere kaydedilemez; none, gitignore veya tracked kullanın.",
   "Terminal.Diagnostic.GitStateUnavailable": "İstenen Git durumu kullanılamıyor. Git'i, depoyu ve referansları denetleyin.",
   "Terminal.Diagnostic.GitStateDeleted": "Git durumundan hariç tutulan silinmiş dosya sayısı: {0}.",
+  "Terminal.Diagnostic.GitUnsafeFilter": "Güvenilmeyen Git filtresi '{0}' çalıştırılmadan tam karşılaştırma yapılamaz.",
   "Terminal.Option.Exclude": "Sıradan bir hariç tutma ayarlayın.",
   "Terminal.Option.HideSecrets": "Seçili metin dosyalarında algılanan değerleri maskele. İkili dosyalar incelenmez; eşleşme bulunmaması güvenlik garantisi değildir.",
   "Terminal.Option.HidePrivateData": "Seçili metin dosyalarında algılanan kişisel verileri maskele. İkili dosyalar incelenmez; eşleşme bulunmaması gizlilik garantisi değildir.",
