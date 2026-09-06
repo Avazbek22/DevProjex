@@ -83,6 +83,78 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		Assert.Contains(expected, output, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void ValidatorAcceptsAHeadlessArchiveWithItsDedicatedChecksumManifest()
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateHeadlessLinuxFixture(workspace.Path);
+
+		var result = RunValidator(workspace.Path, "headless", "linux-x64");
+
+		Assert.True(result.ExitCode == 0, result.StandardOutput + result.StandardError);
+		Assert.Contains("Channel headless: VALIDATED; PARTIAL RID set", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("missing-file", "receipt-only.dat")]
+	[InlineData("missing-resource", "Fixture.Missing.Resource")]
+	[InlineData("extra-file", "unexpected.dat")]
+	[InlineData("payload-hash", "libSkiaSharp.dll")]
+	[InlineData("checksum", "SHA-256")]
+	public void HeadlessValidatorUsesTheCommonFailClosedPayloadDiff(string mutation, string expected)
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateHeadlessLinuxFixture(workspace.Path, mutation);
+
+		var result = RunValidator(workspace.Path, "headless", "linux-x64");
+		var output = result.StandardOutput + result.StandardError;
+
+		Assert.NotEqual(0, result.ExitCode);
+		Assert.Contains("DevProjex-headless.v5.2.linux-x64.tar.gz", output, StringComparison.Ordinal);
+		Assert.Contains(expected, output, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void HeadlessMutationGateDamagesFilesAndResourcesWithoutChannelSpecificPayloadRules()
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateHeadlessWindowsFixture(workspace.Path);
+
+		var result = RunPowerShell(
+			Path.Combine(RepoRoot.Value, "Scripts", "Test-ReleaseArtifactGateMutation.ps1"),
+			["-PublishRoot", Path.Combine(workspace.Path, "publish"), "-Version", Version,
+				"-Channels", "headless", "-Rids", "win-x64"]);
+
+		Assert.True(result.ExitCode == 0, result.StandardOutput + result.StandardError);
+		Assert.Contains("DevProjex-headless.v5.2.win-x64.zip", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("DevProjex.Assets.Localization.en.json", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(null, null)]
+	[InlineData("missing-file", "receipt-only.dat")]
+	[InlineData("missing-resource", "Fixture.Missing.Resource")]
+	[InlineData("extra-file", "unexpected.dat")]
+	[InlineData("payload-hash", "libSkiaSharp.dll")]
+	public void ContainerValidatorUsesTheCommonFolderPayloadDiff(string? mutation, string? expected)
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateContainerFixture(workspace.Path, mutation);
+
+		var result = RunValidator(workspace.Path, "container", "linux-x64");
+		var output = result.StandardOutput + result.StandardError;
+		if (mutation is null)
+		{
+			Assert.True(result.ExitCode == 0, output);
+			Assert.Contains("Channel container: VALIDATED; PARTIAL RID set", result.StandardOutput, StringComparison.Ordinal);
+			return;
+		}
+
+		Assert.NotEqual(0, result.ExitCode);
+		Assert.Contains("container:linux-x64", output, StringComparison.Ordinal);
+		Assert.Contains(expected!, output, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData(false, false)]
 	[InlineData(true, false)]
@@ -139,12 +211,22 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		Assert.True(singleResult.ExitCode == 0, singleResult.StandardOutput + singleResult.StandardError);
 
 		var folderResult = RunDotNet(fixture.Root,
-			["publish", fixture.AppProject, "-c", "ReleaseStore", "-r", "win-x64", "--self-contained", "false",
+			["publish", fixture.AppProject, "-c", "Release", "-r", "win-x64", "--self-contained", "false",
 				"-nodeReuse:false",
 				"/p:PublishSingleFile=false", "/p:DebugType=None", "/p:DebugSymbols=false",
 				"/p:DevProjexGenerateReleasePayloadReceipt=true",
+				"/p:DevProjexGenerateFolderPayloadReceipt=true",
 				$"/p:DevProjexPayloadReceiptDirectory={fixture.FolderReceipt}", "-o", fixture.FolderPublish]);
 		Assert.True(folderResult.ExitCode == 0, folderResult.StandardOutput + folderResult.StandardError);
+		var storeReceiptDirectory = Path.Combine(fixture.Root, "store-receipt");
+		var storeResult = RunDotNet(fixture.Root,
+			["publish", fixture.AppProject, "-c", "ReleaseStore", "-r", "win-x64", "--self-contained", "false",
+				"-nodeReuse:false", "/p:PublishSingleFile=false", "/p:DebugType=None", "/p:DebugSymbols=false",
+				"/p:DevProjexGenerateReleasePayloadReceipt=true",
+				$"/p:DevProjexPayloadReceiptDirectory={storeReceiptDirectory}", "-o", Path.Combine(fixture.Root, "store")]);
+		Assert.True(storeResult.ExitCode == 0, storeResult.StandardOutput + storeResult.StandardError);
+		Assert.True(File.Exists(Path.Combine(storeReceiptDirectory, "publish-payload.win-x64.json")),
+			"ReleaseStore must retain its implicit folder-receipt opt-in.");
 
 		var singleReceipt = ReadReceipt(Path.Combine(fixture.SingleReceipt, "publish-payload.win-x64.json"));
 		var folderReceipt = ReadReceipt(Path.Combine(fixture.FolderReceipt, "publish-payload.win-x64.json"));
@@ -244,21 +326,7 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		var payload = CreateFixturePayload(version);
 		var bundleFiles = payload.ToList();
 		var receiptFiles = payload.Select(ToReceiptFile).ToList();
-		if (mutation == "missing-file") receiptFiles.Add(new ReceiptFile("receipt-only.dat", 1, new string('0', 64), null));
-		if (mutation == "missing-resource")
-		{
-			var index = receiptFiles.FindIndex(static file => file.Path == "Assets.dll");
-			receiptFiles[index] = receiptFiles[index] with
-			{
-				ManagedResources = [.. receiptFiles[index].ManagedResources!, "Fixture.Missing.Resource"]
-			};
-		}
-		if (mutation == "extra-file") bundleFiles.Add(new PayloadFile("unexpected.dat", Encoding.ASCII.GetBytes("extra"), 0));
-		if (mutation == "payload-hash")
-		{
-			var index = receiptFiles.FindIndex(static file => file.Path == "libSkiaSharp.dll");
-			receiptFiles[index] = receiptFiles[index] with { Sha256 = new string('0', 64) };
-		}
+		ApplyPayloadMutation(mutation, bundleFiles, receiptFiles);
 
 		var artifactName = $"DevProjex.v{version}.linux-x64.tar.gz";
 		var artifactPath = Path.Combine(releaseDirectory, artifactName);
@@ -281,6 +349,103 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		if (mutation != "partial-marker")
 			File.WriteAllText(Path.Combine(releaseDirectory, "PARTIAL-BUILD.txt"),
 				"PARTIAL BUILD - NOT READY FOR RELEASE\nRIDs: linux-x64\n", new UTF8Encoding(false));
+	}
+
+	private static void CreateHeadlessLinuxFixture(string workspaceRoot, string? mutation = null)
+	{
+		var releaseDirectory = Path.Combine(workspaceRoot, "publish", "headless", $"v{Version}");
+		Directory.CreateDirectory(releaseDirectory);
+		var payload = CreateFixturePayload();
+		var bundleFiles = payload.ToList();
+		var receiptFiles = payload.Select(ToReceiptFile).ToList();
+		ApplyPayloadMutation(mutation, bundleFiles, receiptFiles);
+
+		var artifactName = $"DevProjex-headless.v{Version}.linux-x64.tar.gz";
+		using (var file = File.Create(Path.Combine(releaseDirectory, artifactName)))
+		using (var gzip = new GZipStream(file, CompressionLevel.SmallestSize))
+		using (var writer = new TarWriter(gzip, TarEntryFormat.Ustar, leaveOpen: false))
+		{
+			writer.WriteEntry(new UstarTarEntry(TarEntryType.RegularFile, "devprojex")
+			{
+				DataStream = new MemoryStream(CreateBundle(bundleFiles), writable: false),
+				Mode = (UnixFileMode)493,
+				ModificationTime = DateTimeOffset.UnixEpoch
+			});
+		}
+		var receiptName = "publish-payload.linux-x64.json";
+		WriteReceipt(Path.Combine(releaseDirectory, receiptName), "linux-x64", receiptFiles);
+		WriteChecksums(releaseDirectory, [artifactName, receiptName],
+			mutation == "checksum" ? artifactName : null, "SHA256SUMS.headless.txt");
+	}
+
+	private static void CreateHeadlessWindowsFixture(string workspaceRoot)
+	{
+		var releaseDirectory = Path.Combine(workspaceRoot, "publish", "headless", $"v{Version}");
+		Directory.CreateDirectory(releaseDirectory);
+		var payload = CreateFixturePayload();
+		var artifactName = $"DevProjex-headless.v{Version}.win-x64.zip";
+		File.WriteAllBytes(Path.Combine(releaseDirectory, artifactName), CreateZip(new Dictionary<string, byte[]>
+		{
+			["devprojex.exe"] = CreateBundle(payload)
+		}));
+		var receiptName = "publish-payload.win-x64.json";
+		WriteReceipt(Path.Combine(releaseDirectory, receiptName), "win-x64", payload.Select(ToReceiptFile).ToArray());
+		WriteChecksums(releaseDirectory, [artifactName, receiptName], manifestName: "SHA256SUMS.headless.txt");
+	}
+
+	private static void CreateContainerFixture(string workspaceRoot, string? mutation)
+	{
+		var releaseDirectory = Path.Combine(workspaceRoot, "publish", "container", $"v{Version}");
+		var payloadDirectory = Path.Combine(releaseDirectory, "linux-x64");
+		Directory.CreateDirectory(payloadDirectory);
+		var payload = CreateFixturePayload().ToList();
+		payload[0] = payload[0] with { Path = "devprojex" };
+		var receiptFiles = payload.Select(ToReceiptFile).ToList();
+		if (mutation == "missing-file") receiptFiles.Add(new ReceiptFile("receipt-only.dat", 1, new string('0', 64), null));
+		if (mutation == "missing-resource")
+		{
+			var index = receiptFiles.FindIndex(static file => file.Path == "Assets.dll");
+			receiptFiles[index] = receiptFiles[index] with
+			{
+				ManagedResources = [.. receiptFiles[index].ManagedResources!, "Fixture.Missing.Resource"]
+			};
+		}
+		if (mutation == "payload-hash")
+		{
+			var index = receiptFiles.FindIndex(static file => file.Path == "libSkiaSharp.dll");
+			receiptFiles[index] = receiptFiles[index] with { Sha256 = new string('0', 64) };
+		}
+
+		foreach (var file in payload)
+		{
+			var path = Path.Combine(payloadDirectory, file.Path.Replace('/', Path.DirectorySeparatorChar));
+			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+			File.WriteAllBytes(path, file.Bytes);
+		}
+		if (mutation == "extra-file") File.WriteAllText(Path.Combine(payloadDirectory, "unexpected.dat"), "extra");
+		WriteReceipt(Path.Combine(releaseDirectory, "publish-payload.linux-x64.json"), "linux-x64", receiptFiles);
+	}
+
+	private static void ApplyPayloadMutation(
+		string? mutation,
+		List<PayloadFile> bundleFiles,
+		List<ReceiptFile> receiptFiles)
+	{
+		if (mutation == "missing-file") receiptFiles.Add(new ReceiptFile("receipt-only.dat", 1, new string('0', 64), null));
+		if (mutation == "missing-resource")
+		{
+			var index = receiptFiles.FindIndex(static file => file.Path == "Assets.dll");
+			receiptFiles[index] = receiptFiles[index] with
+			{
+				ManagedResources = [.. receiptFiles[index].ManagedResources!, "Fixture.Missing.Resource"]
+			};
+		}
+		if (mutation == "extra-file") bundleFiles.Add(new PayloadFile("unexpected.dat", Encoding.ASCII.GetBytes("extra"), 0));
+		if (mutation == "payload-hash")
+		{
+			var index = receiptFiles.FindIndex(static file => file.Path == "libSkiaSharp.dll");
+			receiptFiles[index] = receiptFiles[index] with { Sha256 = new string('0', 64) };
+		}
 	}
 
 	private static IReadOnlyList<PayloadFile> CreateFixturePayload(string version = Version) =>
@@ -436,7 +601,11 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 	private static Receipt ReadReceipt(string path) =>
 		JsonSerializer.Deserialize<Receipt>(File.ReadAllText(path), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
 
-	private static void WriteChecksums(string directory, IEnumerable<string> names, string? invalidName = null)
+	private static void WriteChecksums(
+		string directory,
+		IEnumerable<string> names,
+		string? invalidName = null,
+		string manifestName = "SHA256SUMS.txt")
 	{
 		var lines = names.Order(StringComparer.Ordinal).Select(name =>
 		{
@@ -444,7 +613,7 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 				Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.Combine(directory, name)))).ToLowerInvariant();
 			return $"{hash} *{name}";
 		});
-		File.WriteAllText(Path.Combine(directory, "SHA256SUMS.txt"), string.Join('\n', lines) + '\n', new UTF8Encoding(false));
+		File.WriteAllText(Path.Combine(directory, manifestName), string.Join('\n', lines) + '\n', new UTF8Encoding(false));
 	}
 
 	private static ReceiptBuildFixture CreateReceiptBuildFixture(string root)

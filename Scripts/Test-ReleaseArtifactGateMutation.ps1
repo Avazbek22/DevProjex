@@ -35,11 +35,14 @@ function Copy-ChannelFixture([string] $SourcePublishRoot, [string] $Channel) {
     return $fixturePublishRoot
 }
 
-function Write-ChannelChecksums([string] $ChannelDirectory) {
+function Write-ChannelChecksums(
+    [string] $ChannelDirectory,
+    [string] $ManifestName = 'SHA256SUMS.txt'
+) {
     $artifacts = @(Get-ChildItem -LiteralPath $ChannelDirectory -File |
-        Where-Object { $_.Name -notin @('SHA256SUMS.txt', 'PARTIAL-BUILD.txt') } | Sort-Object Name)
+        Where-Object { $_.Name -notin @('SHA256SUMS.txt', 'SHA256SUMS.headless.txt', 'PARTIAL-BUILD.txt') } | Sort-Object Name)
     $lines = @($artifacts | ForEach-Object { "$(Get-FileSha256Hex -path $_.FullName) *$($_.Name)" })
-    Write-ReleaseChecksumManifest -path (Join-Path $ChannelDirectory 'SHA256SUMS.txt') -lines $lines
+    Write-ReleaseChecksumManifest -path (Join-Path $ChannelDirectory $ManifestName) -lines $lines
 }
 
 function Invoke-FailingValidation(
@@ -51,7 +54,7 @@ function Invoke-FailingValidation(
     $shellPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
     $arguments = @('-NoLogo', '-NoProfile', '-File', (Join-Path $PSScriptRoot 'Test-ReleaseArtifacts.ps1'),
         '-PublishRoot', $FixturePublishRoot, '-Version', $Version, '-Channels', $Channel)
-    if ($Channel -ceq 'github') {
+    if ($Channel -in @('github', 'headless', 'container')) {
         $arguments += @('-Rids', ($script:SelectedRids -join ','))
     }
     $output = & $shellPath @arguments 2>&1 | Out-String
@@ -103,10 +106,14 @@ function Get-ReceiptMutationCases([object] $Receipt) {
 		$fixedGrammar | Add-Member -NotePropertyName Kind -NotePropertyValue 'Resource'
 	}
     $fixedNative = @($Receipt.files | Where-Object {
-        [string]$_.path -ceq 'libSkiaSharp.dll' -and $_.PSObject.Properties.Name -notcontains 'managedResources'
-    } | Select-Object -First 1)
+        $_.PSObject.Properties.Name -notcontains 'managedResources' -and
+        ([string]$_.path -ceq 'libSkiaSharp.dll' -or
+            [string]$_.path -cmatch '(^|/)(lib)?tree-sitter\.(dll|so|dylib)$')
+    } | Sort-Object {
+        if ([string]$_.path -ceq 'libSkiaSharp.dll') { 0 } else { 1 }
+    }, { [string]$_.path } | Select-Object -First 1)
     if ($fixedNative.Count -ne 1) {
-        throw "Mutation setup failed: fixed native file 'libSkiaSharp.dll' is absent from the receipt."
+        throw "Mutation setup failed: no fixed native runtime library is present in the receipt."
     }
 	$genericFile = @($Receipt.files | Where-Object {
 		[long]$_.size -gt 0 -and [string]$_.path -cne [string]$fixedNative[0].path -and
@@ -231,16 +238,71 @@ function Invoke-StoreMutation([string] $SourcePublishRoot, [object] $Case) {
     }
 }
 
+function Invoke-HeadlessMutation([string] $SourcePublishRoot, [object] $Case) {
+    $fixtureRoot = Copy-ChannelFixture -SourcePublishRoot $SourcePublishRoot -Channel 'headless'
+    $workRoot = $null
+    try {
+        $channelDirectory = Join-Path $fixtureRoot "headless/v$Version"
+        $artifactName = "DevProjex-headless.v$Version.win-x64.zip"
+        $artifactPath = Join-Path $channelDirectory $artifactName
+        $workRoot = Join-Path $script:MutationRoot ('headless-' + [guid]::NewGuid().ToString('N'))
+        [System.IO.Directory]::CreateDirectory($workRoot) | Out-Null
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($artifactPath, $workRoot)
+        $binaryPath = Join-Path $workRoot 'devprojex.exe'
+        if ([string]$Case.Kind -ceq 'File') {
+            [DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateBundleEntry($binaryPath, [string]$Case.File)
+        }
+        else {
+            [void][DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateBundleResource(
+                $binaryPath, [string]$Case.File, [string]$Case.Entry)
+        }
+        Compress-Directory -SourceDirectory $workRoot -DestinationPath $artifactPath
+        Write-ChannelChecksums -ChannelDirectory $channelDirectory -ManifestName 'SHA256SUMS.headless.txt'
+        Invoke-FailingValidation -FixturePublishRoot $fixtureRoot -Channel 'headless' `
+            -ArtifactName $artifactName -ExpectedEntry ([string]$Case.Entry)
+    }
+    finally {
+        try { Remove-MutationDirectory -Path $workRoot }
+        finally { Remove-MutationDirectory -Path $fixtureRoot }
+    }
+}
+
+function Invoke-ContainerMutation([string] $SourcePublishRoot, [string] $Rid, [object] $Case) {
+    $fixtureRoot = Copy-ChannelFixture -SourcePublishRoot $SourcePublishRoot -Channel 'container'
+    try {
+        $payloadPath = Join-Path (Join-Path $fixtureRoot "container/v$Version/$Rid") `
+            (([string]$Case.File) -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+        if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
+            throw "Mutation setup failed: container payload file '$($Case.File)' was not found."
+        }
+        if ([string]$Case.Kind -ceq 'File') {
+            $bytes = [System.IO.File]::ReadAllBytes($payloadPath)
+            if ($bytes.Length -eq 0) { throw "Mutation setup failed: container payload file '$($Case.File)' is empty." }
+            $offset = [int]($bytes.Length / 2)
+            $bytes[$offset] = $bytes[$offset] -bxor 1
+            [System.IO.File]::WriteAllBytes($payloadPath, $bytes)
+        }
+        else {
+            [void][DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateManagedResource(
+                $payloadPath, [string]$Case.Entry)
+        }
+        Invoke-FailingValidation -FixturePublishRoot $fixtureRoot -Channel 'container' `
+            -ArtifactName "container:$Rid" -ExpectedEntry ([string]$Case.Entry)
+    }
+    finally { Remove-MutationDirectory -Path $fixtureRoot }
+}
+
 $sourcePublishRoot = [System.IO.Path]::GetFullPath($(if ([string]::IsNullOrWhiteSpace($PublishRoot)) {
     Join-Path (Split-Path -Parent $PSScriptRoot) 'publish'
 } else { $PublishRoot }))
 $selectedChannels = @(ConvertTo-Tokens $Channels)
 $script:SelectedRids = @(ConvertTo-Tokens $Rids)
 foreach ($channel in $selectedChannels) {
-    if ($channel -notin @('github', 'store')) { throw "Unknown release channel '$channel'." }
+    if ($channel -notin @('github', 'store', 'headless', 'container')) { throw "Unknown release channel '$channel'." }
 }
-if ('github' -in $selectedChannels -and 'win-x64' -notin $script:SelectedRids) {
-    throw 'GitHub mutation gate requires win-x64 in -Rids.'
+if (@($selectedChannels | Where-Object { $_ -in @('github', 'headless') }).Count -gt 0 -and
+    'win-x64' -notin $script:SelectedRids) {
+    throw 'GitHub and headless mutation gates require win-x64 in -Rids.'
 }
 
 $script:MutationRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('devprojex-release-mutation-' + [guid]::NewGuid().ToString('N'))
@@ -256,6 +318,20 @@ try {
         $directory = Join-Path $sourcePublishRoot "store/v$Version"
         foreach ($case in @(Get-ReceiptMutationCases -Receipt (Read-PayloadReceipt $directory 'win-x64'))) {
             Invoke-StoreMutation -SourcePublishRoot $sourcePublishRoot -Case $case
+        }
+    }
+    if ('headless' -in $selectedChannels) {
+        $directory = Join-Path $sourcePublishRoot "headless/v$Version"
+        foreach ($case in @(Get-ReceiptMutationCases -Receipt (Read-PayloadReceipt $directory 'win-x64'))) {
+            Invoke-HeadlessMutation -SourcePublishRoot $sourcePublishRoot -Case $case
+        }
+    }
+    if ('container' -in $selectedChannels) {
+        $containerRid = @($script:SelectedRids | Where-Object { $_ -in @('linux-x64', 'linux-arm64') } | Select-Object -First 1)
+        if ($containerRid.Count -ne 1) { throw 'Container mutation gate requires a Linux RID in -Rids.' }
+        $directory = Join-Path $sourcePublishRoot "container/v$Version"
+        foreach ($case in @(Get-ReceiptMutationCases -Receipt (Read-PayloadReceipt $directory $containerRid[0]))) {
+            Invoke-ContainerMutation -SourcePublishRoot $sourcePublishRoot -Rid $containerRid[0] -Case $case
         }
     }
 }

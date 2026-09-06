@@ -4,7 +4,11 @@ param(
     [string] $ArtifactsRoot,
 
     [Parameter(Mandatory = $true)]
-    [string] $Version
+    [string] $Version,
+
+    [string] $ReleasePublishRoot = "",
+
+    [string] $ReleaseVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +21,11 @@ $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $artifactsPath = [System.IO.Path]::GetFullPath($ArtifactsRoot)
 $nugetPath = Join-Path $artifactsPath "nuget"
 $npmPath = Join-Path $artifactsPath "npm"
+$publishPath = Join-Path $artifactsPath "publish"
+$hasReleaseArchives = -not [string]::IsNullOrWhiteSpace($ReleasePublishRoot)
+if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) { $ReleaseVersion = $Version }
+
+. (Join-Path $PSScriptRoot 'release-archive-helpers.ps1')
 
 if ($manifest.schemaVersion -ne 1) {
     throw "Unsupported headless payload manifest schema: $($manifest.schemaVersion)."
@@ -80,6 +89,10 @@ function Assert-GrammarPayload(
 
 function Open-Zip([string] $Path) {
     return [System.IO.Compression.ZipFile]::OpenRead($Path)
+}
+
+function Get-BytesSha256([byte[]] $Bytes) {
+    return [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
 }
 
 $expectedNugetNames = @("devprojex.$Version.nupkg") + @(
@@ -234,6 +247,40 @@ try {
             Assert-Artifact (-not ($packageJson.PSObject.Properties.Name -contains "libc")) $packageName "absence of a non-Linux libc restriction"
         }
         Assert-GrammarPayload ([System.IO.File]::ReadAllBytes($binaryPath)) $rid $packageName
+
+        if ($hasReleaseArchives) {
+            $releaseDirectory = Join-Path ([System.IO.Path]::GetFullPath($ReleasePublishRoot)) "headless/v$ReleaseVersion"
+            $extension = if ($rid.os -ceq 'win32') { 'zip' } else { 'tar.gz' }
+            $releaseName = "$($manifest.release.headless.archivePrefix).v$ReleaseVersion.$($rid.rid).$extension"
+            $releasePath = Join-Path $releaseDirectory $releaseName
+            Assert-Artifact (Test-Path -LiteralPath $releasePath -PathType Leaf) $releaseName "release archive"
+
+            if ($rid.os -ceq 'win32') {
+                $releaseZip = Open-Zip $releasePath
+                try {
+                    $releaseEntries = @($releaseZip.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
+                    Assert-Artifact ($releaseEntries.Count -eq 1 -and $releaseEntries[0].FullName -ceq [string]$rid.binary) `
+                        $releaseName "exact archive layout '$($rid.binary)'"
+                    $releaseBytes = Get-ZipEntryBytes $releaseEntries[0]
+                }
+                finally { $releaseZip.Dispose() }
+            }
+            else {
+                $releaseEntries = @(Read-UstarGzipArchive -archivePath $releasePath -captureEntryNames @([string]$rid.binary))
+                Assert-Artifact ($releaseEntries.Count -eq 1 -and $releaseEntries[0].Name -ceq [string]$rid.binary) `
+                    $releaseName "exact archive layout '$($rid.binary)'"
+                Assert-Artifact (($releaseEntries[0].Mode -band 73) -eq 73) $releaseName "executable mode for '$($rid.binary)'"
+                $releaseBytes = [byte[]]$releaseEntries[0].Bytes
+            }
+
+            $npmHash = Get-FileSha256Hex -path $binaryPath
+            $publishBinary = Join-Path (Join-Path $publishPath ([string]$rid.rid)) ([string]$rid.binary)
+            Assert-Artifact (Test-Path -LiteralPath $publishBinary -PathType Leaf) $releaseName "canonical publish binary"
+            $publishHash = Get-FileSha256Hex -path $publishBinary
+            $releaseHash = Get-BytesSha256 $releaseBytes
+            Assert-Artifact ($releaseHash -ceq $npmHash -and $releaseHash -ceq $publishHash) `
+                $releaseName "byte-identical release, npm, and canonical publish binaries"
+        }
     }
 
     $mainName = "devprojex-$Version.tgz"
@@ -267,4 +314,5 @@ finally {
     }
 }
 
-Write-Host "Headless package completeness gate passed for $Version (7 NuGet + 7 npm artifacts)."
+$releaseSummary = if ($hasReleaseArchives) { ' + 6 release archives' } else { '' }
+Write-Host "Headless package completeness gate passed for $Version (7 NuGet + 7 npm artifacts$releaseSummary)."

@@ -91,6 +91,11 @@ function Get-GitHubArtifactName([object] $Rid) {
     throw "Unsupported release operating system '$($Rid.os)' for RID '$($Rid.rid)'."
 }
 
+function Get-HeadlessArtifactName([object] $Rid) {
+    $extension = if ($Rid.os -ceq 'win32') { 'zip' } else { 'tar.gz' }
+    return "$($script:Manifest.release.headless.archivePrefix).v$Version.$($Rid.rid).$extension"
+}
+
 function Get-PayloadReceiptName([string] $Rid) {
     return "publish-payload.$Rid.json"
 }
@@ -141,9 +146,13 @@ function Assert-ExactNames(
         -Problem "missing or unexpected $Kind; expected: $($expectedNames -join ', '); found: $($actualNames -join ', ')"
 }
 
-function Get-ChecksumEntries([string] $DirectoryPath, [string[]] $ExpectedNames) {
-    $manifestPath = Join-Path $DirectoryPath 'SHA256SUMS.txt'
-    Assert-Artifact (Test-Path -LiteralPath $manifestPath -PathType Leaf) $DirectoryPath "missing SHA256SUMS.txt"
+function Get-ChecksumEntries(
+    [string] $DirectoryPath,
+    [string[]] $ExpectedNames,
+    [string] $ManifestName = 'SHA256SUMS.txt'
+) {
+    $manifestPath = Join-Path $DirectoryPath $ManifestName
+    Assert-Artifact (Test-Path -LiteralPath $manifestPath -PathType Leaf) $DirectoryPath "missing $ManifestName"
 
     $entries = @{}
     foreach ($line in @(Get-Content -LiteralPath $manifestPath)) {
@@ -274,6 +283,47 @@ function Assert-SingleFilePayload(
         "invalid informational version; expected '$Version' in the uncompressed single-file payload"
 }
 
+function Get-ZipEntryBytes([System.IO.Compression.ZipArchiveEntry] $Entry) {
+    $entryStream = $Entry.Open()
+    try {
+        $memory = [System.IO.MemoryStream]::new()
+        try {
+            $entryStream.CopyTo($memory)
+            return $memory.ToArray()
+        }
+        finally { $memory.Dispose() }
+    }
+    finally { $entryStream.Dispose() }
+}
+
+function Assert-HeadlessArtifact([string] $ArtifactPath, [object] $Rid, [object] $Receipt) {
+    $artifactName = [System.IO.Path]::GetFileName($ArtifactPath)
+    if ($Rid.os -ceq 'win32') {
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($ArtifactPath)
+        try {
+            $entries = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
+            Assert-Artifact `
+                ($entries.Count -eq 1 -and $entries[0].FullName -ceq [string]$Rid.binary) `
+                $artifactName `
+                "invalid archive layout; expected only '$($Rid.binary)'"
+            $bytes = Get-ZipEntryBytes -Entry $entries[0]
+        }
+        finally { $archive.Dispose() }
+    }
+    else {
+        $entries = @(Read-UstarGzipArchive -archivePath $ArtifactPath -captureEntryNames @([string]$Rid.binary))
+        Assert-Artifact `
+            ($entries.Count -eq 1 -and $entries[0].Name -ceq [string]$Rid.binary) `
+            $artifactName `
+            "invalid archive layout; expected only '$($Rid.binary)'"
+        Assert-Artifact (($entries[0].Mode -band 73) -eq 73) $artifactName "invalid executable mode for '$($Rid.binary)'"
+        $bytes = [byte[]]$entries[0].Bytes
+    }
+
+    Assert-Artifact ($null -ne $bytes -and $bytes.Length -gt 0) $artifactName "empty executable '$($Rid.binary)'"
+    Assert-SingleFilePayload -Bytes $bytes -Receipt $Receipt -ArtifactName $artifactName
+}
+
 function Assert-WindowsReleaseArtifact([string] $ArtifactPath, [object] $Receipt) {
     $artifactName = [System.IO.Path]::GetFileName($ArtifactPath)
     $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($ArtifactPath)
@@ -386,6 +436,85 @@ function Test-GitHubArtifacts([object[]] $SelectedRids) {
 
     $status = if ($partial) { 'VALIDATED; PARTIAL (not release-ready)' } else { 'VALIDATED; COMPLETE' }
     return [pscustomobject]@{ Channel = 'github'; Directory = $directory; Status = $status; Artifacts = $expectedNames }
+}
+
+function Test-HeadlessArtifacts([object[]] $SelectedRids) {
+    $directory = Join-Path $script:PublishPath "headless/v$Version"
+    Assert-Artifact (Test-Path -LiteralPath $directory -PathType Container) $directory "missing headless channel directory"
+    $artifactNames = @($SelectedRids | ForEach-Object { Get-HeadlessArtifactName $_ })
+    $receiptNames = @($SelectedRids | ForEach-Object { Get-PayloadReceiptName -Rid ([string]$_.rid) })
+    $expectedNames = @($artifactNames) + @($receiptNames)
+    $actualNames = @(Get-ChildItem -LiteralPath $directory -File |
+        Where-Object { $_.Name -cne [string]$script:Manifest.release.headless.checksumFile } |
+        ForEach-Object Name)
+    Assert-ExactNames -Expected $expectedNames -Actual $actualNames -ArtifactName $directory -Kind 'headless artifact set'
+    [void](Get-ChecksumEntries `
+        -DirectoryPath $directory `
+        -ExpectedNames $expectedNames `
+        -ManifestName ([string]$script:Manifest.release.headless.checksumFile))
+
+    foreach ($rid in $SelectedRids) {
+        $artifactName = Get-HeadlessArtifactName $rid
+        $receipt = Read-PayloadReceipt `
+            -DirectoryPath $directory `
+            -Rid ([string]$rid.rid) `
+            -ArtifactName $artifactName
+        Assert-HeadlessArtifact `
+            -ArtifactPath (Join-Path $directory $artifactName) `
+            -Rid $rid `
+            -Receipt $receipt
+    }
+
+    $partial = $SelectedRids.Count -ne @($script:Manifest.rids).Count
+    $status = if ($partial) { 'VALIDATED; PARTIAL RID set' } else { 'VALIDATED; COMPLETE' }
+    return [pscustomobject]@{ Channel = 'headless'; Directory = $directory; Status = $status; Artifacts = $expectedNames }
+}
+
+function Get-FolderPayloadFiles([string] $DirectoryPath) {
+    $payloadFiles = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($file in @(Get-ChildItem -LiteralPath $DirectoryPath -Recurse -File)) {
+        $relativePath = $file.FullName.Substring($DirectoryPath.Length).TrimStart('\', '/').Replace('\', '/')
+        $resources = [DevProjex.ReleaseValidation.ReleasePayloadInspector]::TryReadManagedResources($file.FullName)
+        $payloadFiles.Add([pscustomobject]@{
+            Path = $relativePath
+            Size = $file.Length
+            Sha256 = Get-FileSha256Hex -path $file.FullName
+            IsManagedAssembly = $null -ne $resources
+            ManagedResources = if ($null -eq $resources) { @() } else { @($resources) }
+        })
+    }
+    return $payloadFiles.ToArray()
+}
+
+function Test-ContainerArtifacts([object[]] $SelectedRids) {
+    $directory = Join-Path $script:PublishPath "container/v$Version"
+    Assert-Artifact (Test-Path -LiteralPath $directory -PathType Container) $directory "missing container channel directory"
+    $expectedNames = @($SelectedRids | ForEach-Object { [string]$_.rid }) +
+        @($SelectedRids | ForEach-Object { Get-PayloadReceiptName -Rid ([string]$_.rid) })
+    $actualNames = @(Get-ChildItem -LiteralPath $directory | ForEach-Object Name)
+    Assert-ExactNames -Expected $expectedNames -Actual $actualNames -ArtifactName $directory -Kind 'container payload set'
+
+    foreach ($rid in $SelectedRids) {
+        $ridName = [string]$rid.rid
+        $payloadDirectory = Join-Path $directory $ridName
+        Assert-Artifact (Test-Path -LiteralPath $payloadDirectory -PathType Container) $ridName "missing extracted image payload"
+        $receipt = Read-PayloadReceipt -DirectoryPath $directory -Rid $ridName -ArtifactName $ridName
+        Assert-PayloadDiff `
+            -Receipt $receipt `
+            -ActualFiles @(Get-FolderPayloadFiles -DirectoryPath $payloadDirectory) `
+            -ArtifactName "container:$ridName"
+        $binaryPath = Join-Path $payloadDirectory ([string]$rid.binary)
+        Assert-Artifact (Test-Path -LiteralPath $binaryPath -PathType Leaf) "container:$ridName" "missing executable '$($rid.binary)'"
+        $binaryText = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes($binaryPath))
+        Assert-Artifact `
+            ($binaryText.IndexOf($Version, [System.StringComparison]::Ordinal) -ge 0) `
+            "container:$ridName" `
+            "invalid informational version; expected '$Version'"
+    }
+
+    $partial = $SelectedRids.Count -ne 2
+    $status = if ($partial) { 'VALIDATED; PARTIAL RID set' } else { 'VALIDATED; COMPLETE' }
+    return [pscustomobject]@{ Channel = 'container'; Directory = $directory; Status = $status; Artifacts = @() }
 }
 
 function Expand-Zip([string] $ArchivePath, [string] $DestinationPath) {
@@ -603,7 +732,7 @@ Assert-Artifact ($script:Manifest.schemaVersion -eq 1) $manifestPath "unsupporte
 Assert-Artifact ($null -ne $script:Manifest.release) $manifestPath "missing release contract"
 $script:StorePackageVersion = Get-StorePackageVersion -DisplayVersion $Version
 $script:PublishPath = [System.IO.Path]::GetFullPath($(if ([string]::IsNullOrWhiteSpace($PublishRoot)) { Join-Path $repoRoot 'publish' } else { $PublishRoot }))
-$allowedChannels = @('github', 'store')
+$allowedChannels = @('github', 'store', 'headless', 'container')
 $allowedRids = @($script:Manifest.rids | ForEach-Object { [string]$_.rid })
 $selectedChannels = @(ConvertTo-Selection -Values $Channels -Allowed $allowedChannels -Kind 'channel')
 $selectedRidNames = @(ConvertTo-Selection -Values $Rids -Allowed $allowedRids -Kind 'RID')
@@ -615,6 +744,14 @@ $selectedRids = @($selectedRidNames | ForEach-Object {
 $results = New-Object 'System.Collections.Generic.List[object]'
 if ('github' -in $selectedChannels) {
     $results.Add((Test-GitHubArtifacts -SelectedRids $selectedRids))
+}
+if ('headless' -in $selectedChannels) {
+    $results.Add((Test-HeadlessArtifacts -SelectedRids $selectedRids))
+}
+if ('container' -in $selectedChannels) {
+    $containerRids = @($selectedRids | Where-Object { $_.rid -in @('linux-x64', 'linux-arm64') })
+    Assert-Artifact ($containerRids.Count -eq $selectedRids.Count) 'container' 'non-Linux RID selection'
+    $results.Add((Test-ContainerArtifacts -SelectedRids $containerRids))
 }
 if ('store' -in $selectedChannels) {
     $results.Add((Test-StoreArtifacts))
