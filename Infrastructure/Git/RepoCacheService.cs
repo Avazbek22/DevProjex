@@ -1501,7 +1501,10 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 		return await RunGitForOutputAsync(
 			       repositoryPath,
-			       GitProcessOperation.FetchBranch(repositoryUrl, normalizedBranch),
+			       GitProcessOperation.FetchBranch(
+				       repositoryUrl,
+				       normalizedBranch,
+				       allowFileTransport: true),
 			       cancellationToken).ConfigureAwait(false) is not null;
 	}
 
@@ -1546,6 +1549,9 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		deadline.CancelAfter(operation.Deadline);
+		var operationToken = deadline.Token;
 		using var process = new Process
 		{
 			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, operation)
@@ -1555,15 +1561,15 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		var output = GitProcessOutputReader.ReadAsync(
 			process.StandardOutput,
 			GitProcessOutputReader.MaximumOutputCharacters,
-			cancellationToken);
+			operationToken);
 		var error = GitProcessOutputReader.ReadAsync(
 			process.StandardError,
 			GitProcessOutputReader.MaximumOutputCharacters,
-			cancellationToken);
+			operationToken);
 		try
 		{
 			await GitRepositoryService
-				.WaitForExitOrTerminateAsync(process, cancellationToken)
+				.WaitForExitOrTerminateAsync(process, operationToken)
 				.ConfigureAwait(false);
 			if (!await GitProcessOutputReader
 				    .WaitForCompletionAfterExitAsync(process, output, error)
@@ -1584,7 +1590,9 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			await GitProcessOutputReader
 				.ObserveAfterTerminationAsync(process, output, error)
 				.ConfigureAwait(false);
-			throw;
+			if (cancellationToken.IsCancellationRequested)
+				throw;
+			return null;
 		}
 	}
 

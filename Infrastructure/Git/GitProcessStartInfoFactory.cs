@@ -16,7 +16,9 @@ internal static class GitProcessStartInfoFactory
 		ArgumentNullException.ThrowIfNull(operation);
 		var isolation = GitRuntime.IsolationPaths;
 		var executable = GitRuntime.GitExecutable;
-		if (!GitExecutableLocator.IsSafeForRepository(executable, workingDirectory))
+		var safetyBoundary = workingDirectory ??
+		                     (operation.Kind == GitOperationKind.CloneRepository ? operation.SecondaryValue : null);
+		if (!GitExecutableLocator.IsSafeForRepository(executable, safetyBoundary))
 			throw new InvalidOperationException("The pinned Git executable is inside the selected project or one of its parent directories.");
 		if (operation.Profile == GitProcessProfile.ManagedCheckout)
 			ValidateManagedScope(workingDirectory, operation);
@@ -92,8 +94,8 @@ internal static class GitProcessStartInfoFactory
 	{
 		startInfo.ArgumentList.Add("--no-pager");
 		startInfo.ArgumentList.Add("--no-optional-locks");
-		AddConfig(startInfo, "core.fsmonitor=false");
 		AddConfig(startInfo, "core.quotepath=false");
+		AddConfig(startInfo, "core.fsmonitor=false");
 		AddConfig(startInfo, $"core.hooksPath={isolation.EmptyHooksDirectory}");
 		AddConfig(startInfo, "credential.helper=");
 		AddConfig(startInfo, "core.askPass=");
@@ -120,7 +122,7 @@ internal static class GitProcessStartInfoFactory
 				}
 				break;
 			case GitProcessProfile.ExplicitNetwork:
-				AddConfig(startInfo, $"protocol.allow={GitNetworkPolicy.GetAllowedProtocols(operation.Value!)}");
+				AddConfig(startInfo, $"protocol.allow={operation.AllowedProtocols}");
 				AddConfig(startInfo, "http.extraHeader=");
 				AddConfig(startInfo, "http.cookieFile=");
 				AddConfig(startInfo, "http.proxy=");
@@ -167,7 +169,7 @@ internal static class GitProcessStartInfoFactory
 		startInfo.Environment["GIT_NO_LAZY_FETCH"] = "1";
 		startInfo.Environment["GIT_PROTOCOL_FROM_USER"] = "0";
 		startInfo.Environment["GIT_ALLOW_PROTOCOL"] = operation.Profile == GitProcessProfile.ExplicitNetwork
-			? GitNetworkPolicy.GetAllowedProtocols(operation.Value!)
+			? operation.AllowedProtocols ?? string.Empty
 			: string.Empty;
 	}
 
@@ -184,7 +186,7 @@ internal static class GitProcessStartInfoFactory
 		startInfo.Environment["GIT_NO_LAZY_FETCH"] = "1";
 		startInfo.Environment["GIT_PROTOCOL_FROM_USER"] = "0";
 		startInfo.Environment["GIT_ALLOW_PROTOCOL"] = operation?.Profile == GitProcessProfile.ExplicitNetwork
-			? GitNetworkPolicy.GetAllowedProtocols(operation.Value!)
+			? operation.AllowedProtocols ?? string.Empty
 			: string.Empty;
 		startInfo.Environment["GIT_ASKPASS"] = string.Empty;
 		startInfo.Environment["SSH_ASKPASS"] = string.Empty;
@@ -193,10 +195,17 @@ internal static class GitProcessStartInfoFactory
 		startInfo.Environment["GCM_GUI_PROMPT"] = "false";
 		if (operation?.Profile != GitProcessProfile.ExplicitNetwork)
 			return;
-		if (GitNetworkPolicy.GetAllowedProtocols(operation.Value!) == "ssh")
+		if (operation.AllowedProtocols == "ssh")
 		{
 			var ssh = GitRuntime.SshExecutable ??
 			          throw new InvalidOperationException("A safe SSH executable is unavailable.");
+			var safetyBoundary = startInfo.WorkingDirectory.Length > 0
+				? startInfo.WorkingDirectory
+				: operation.Kind == GitOperationKind.CloneRepository
+					? operation.SecondaryValue
+					: null;
+			if (!GitExecutableLocator.IsSafeForRepository(ssh, safetyBoundary))
+				throw new InvalidOperationException("The pinned SSH executable is inside the selected project or one of its parent directories.");
 			startInfo.Environment["GIT_SSH_COMMAND"] = $"\"{ssh.Replace("\"", "\\\"")}\" -o BatchMode=yes";
 			startInfo.Environment["GIT_SSH_VARIANT"] = "ssh";
 		}

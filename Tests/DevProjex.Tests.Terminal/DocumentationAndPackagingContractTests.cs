@@ -18,11 +18,31 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Architecture.md",
 		"CLI-Profiles.md",
 		"Desktop-Control.md",
+		"Git-Safety.md",
 		"SmartIgnore.md",
 		"HideSecrets.md",
 		"Release-Channels.md",
 		"Release-Process.md"
 	];
+
+	[Fact]
+	public void GitSafetyProfilesAndFilterRefusalRemainDocumented()
+	{
+		var rootPath = FindRepositoryRoot();
+		var safety = File.ReadAllText(Path.Combine(rootPath, "Docs", "Git-Safety.md"));
+		var smartIgnore = File.ReadAllText(Path.Combine(rootPath, "Docs", "SmartIgnore.md"));
+		var commandLine = File.ReadAllText(Path.Combine(rootPath, "Docs", "CommandLine.md"));
+
+		Assert.Contains("LocalRead", safety, StringComparison.Ordinal);
+		Assert.Contains("ManagedCheckout", safety, StringComparison.Ordinal);
+		Assert.Contains("ExplicitNetwork", safety, StringComparison.Ordinal);
+		Assert.Contains("GIT_CONFIG_NOSYSTEM=1", safety, StringComparison.Ordinal);
+		Assert.Contains("GIT_NO_LAZY_FETCH=1", safety, StringComparison.Ordinal);
+		Assert.Contains("DPX-GIT-UNSAFE-FILTER", safety, StringComparison.Ordinal);
+		Assert.Contains("SSH configuration", safety, StringComparison.Ordinal);
+		Assert.Contains("Git-Safety.md", smartIgnore, StringComparison.Ordinal);
+		Assert.Contains("Git-Safety.md", commandLine, StringComparison.Ordinal);
+	}
 
 	[Fact]
 	public void McpSecretDocumentationSeparatesControlFromDetectionGuarantees()

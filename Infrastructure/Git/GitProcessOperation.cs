@@ -78,7 +78,8 @@ internal sealed record GitProcessOperation
 		GitBranchListKind branchListKind = default,
 		GitManagedCheckoutKind checkoutKind = default,
 		GitManagedConfigWriteKind configWriteKind = default,
-		IReadOnlyList<string>? filterDrivers = null)
+		IReadOnlyList<string>? filterDrivers = null,
+		string? allowedProtocols = null)
 	{
 		Kind = kind;
 		Profile = profile;
@@ -90,6 +91,7 @@ internal sealed record GitProcessOperation
 		CheckoutKind = checkoutKind;
 		ConfigWriteKind = configWriteKind;
 		FilterDrivers = filterDrivers ?? [];
+		AllowedProtocols = allowedProtocols;
 	}
 
 	public GitOperationKind Kind { get; }
@@ -102,6 +104,7 @@ internal sealed record GitProcessOperation
 	public GitManagedCheckoutKind CheckoutKind { get; }
 	public GitManagedConfigWriteKind ConfigWriteKind { get; }
 	public IReadOnlyList<string> FilterDrivers { get; }
+	public string? AllowedProtocols { get; }
 
 	public TimeSpan Deadline => Profile switch
 	{
@@ -148,10 +151,13 @@ internal sealed record GitProcessOperation
 	public static GitProcessOperation ReadRemoteUrl() =>
 		new(GitOperationKind.ReadRemoteUrl, GitProcessProfile.LocalRead);
 
-	public static GitProcessOperation ListBranches(GitBranchListKind kind, string? remoteUrl = null)
+	public static GitProcessOperation ListBranches(
+		GitBranchListKind kind,
+		string? remoteUrl = null,
+		bool allowFileTransport = false)
 	{
 		if (kind == GitBranchListKind.RemoteHeads)
-			remoteUrl = GitNetworkPolicy.ValidateUrl(remoteUrl);
+			remoteUrl = GitNetworkPolicy.ValidateUrl(remoteUrl, allowFileTransport);
 		else if (remoteUrl is not null)
 			throw new ArgumentException("Only a remote-head query accepts a URL.", nameof(remoteUrl));
 
@@ -161,46 +167,76 @@ internal sealed record GitProcessOperation
 				? GitProcessProfile.ExplicitNetwork
 				: GitProcessProfile.LocalRead,
 			remoteUrl,
-			branchListKind: kind);
+			branchListKind: kind,
+			allowedProtocols: kind == GitBranchListKind.RemoteHeads
+				? GitNetworkPolicy.GetAllowedProtocols(remoteUrl!)
+				: null);
 	}
 
-	public static GitProcessOperation CloneRepository(string url, string targetDirectory) =>
-		new(
+	public static GitProcessOperation CloneRepository(
+		string url,
+		string targetDirectory,
+		bool allowFileTransport = false)
+	{
+		var validatedUrl = GitNetworkPolicy.ValidateUrl(url, allowFileTransport);
+		return new GitProcessOperation(
 			GitOperationKind.CloneRepository,
 			GitProcessProfile.ExplicitNetwork,
-			GitNetworkPolicy.ValidateUrl(url),
-			ValidateAbsolutePath(targetDirectory));
+			validatedUrl,
+			ValidateAbsolutePath(targetDirectory),
+			allowedProtocols: GitNetworkPolicy.GetAllowedProtocols(validatedUrl));
+	}
 
-	public static GitProcessOperation FetchBranch(string remoteUrl, string branch, int depth = 1) =>
-		new(
+	public static GitProcessOperation FetchBranch(
+		string remoteUrl,
+		string branch,
+		int depth = 1,
+		bool allowFileTransport = false)
+	{
+		var validatedUrl = GitNetworkPolicy.ValidateUrl(remoteUrl, allowFileTransport);
+		return new GitProcessOperation(
 			GitOperationKind.FetchBranch,
 			GitProcessProfile.ExplicitNetwork,
-			GitNetworkPolicy.ValidateUrl(remoteUrl),
-			GitBranchNameValidator.ValidateAndNormalize(branch),
-			ValidateDepth(depth));
+			validatedUrl,
+			BuildRemoteTrackingRefSpec(GitBranchNameValidator.ValidateAndNormalize(branch)),
+			ValidateDepth(depth),
+			allowedProtocols: GitNetworkPolicy.GetAllowedProtocols(validatedUrl));
+	}
 
-	public static GitProcessOperation FetchRefSpec(string remoteUrl, string refspec, int depth = 1)
+	public static GitProcessOperation FetchRefSpec(
+		string remoteUrl,
+		string refspec,
+		int depth = 1,
+		bool allowFileTransport = false)
 	{
 		if (!IsSafeRefSpec(refspec))
 			throw new ArgumentException("The Git refspec is invalid.", nameof(refspec));
+		var validatedUrl = GitNetworkPolicy.ValidateUrl(remoteUrl, allowFileTransport);
 		return new GitProcessOperation(
 			GitOperationKind.FetchBranch,
 			GitProcessProfile.ExplicitNetwork,
-			GitNetworkPolicy.ValidateUrl(remoteUrl),
+			validatedUrl,
 			refspec,
-			ValidateDepth(depth));
+			ValidateDepth(depth),
+			allowedProtocols: GitNetworkPolicy.GetAllowedProtocols(validatedUrl));
 	}
 
-	public static GitProcessOperation FetchDeepen(string remoteUrl, int depth, string? refspec = null)
+	public static GitProcessOperation FetchDeepen(
+		string remoteUrl,
+		int depth,
+		string? refspec = null,
+		bool allowFileTransport = false)
 	{
 		if (refspec is not null && !IsSafeRefSpec(refspec))
 			throw new ArgumentException("The Git refspec is invalid.", nameof(refspec));
+		var validatedUrl = GitNetworkPolicy.ValidateUrl(remoteUrl, allowFileTransport);
 		return new GitProcessOperation(
 			GitOperationKind.FetchDeepen,
 			GitProcessProfile.ExplicitNetwork,
-			GitNetworkPolicy.ValidateUrl(remoteUrl),
+			validatedUrl,
 			refspec,
-			ValidateDepth(depth));
+			ValidateDepth(depth),
+			allowedProtocols: GitNetworkPolicy.GetAllowedProtocols(validatedUrl));
 	}
 
 	public static GitProcessOperation ManagedCheckout(
@@ -300,12 +336,12 @@ internal sealed record GitProcessOperation
 		GitConfigReadKind.PathComparisonSemantics =>
 			["config", "--show-scope", "--type=bool", "--get-regexp", "^core\\.(repositoryformatversion|ignorecase|precomposeunicode)$"],
 		GitConfigReadKind.UnsafeDrivers =>
-			["config", "--local", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|diff\\..*\\.(command|textconv)|diff\\.external)$"],
+			["config", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|diff\\..*\\.(command|textconv)|diff\\.external)$"],
 		GitConfigReadKind.WorktreeBranch => ["config", "--worktree", "--get", "devprojex.branch"],
 		GitConfigReadKind.PromisorRemotes =>
-			["config", "--local", "--name-only", "--get-regexp", "^remote\\..*\\.promisor$"],
+			["config", "--name-only", "--get-regexp", "^remote\\..*\\.promisor$"],
 		GitConfigReadKind.NetworkOverrides =>
-			["config", "--local", "--name-only", "--get-regexp", "^(url\\..*\\.insteadof|http\\..*\\.(extraheader|cookiefile|proxy)|core\\.(gitproxy|sshcommand)|remote\\..*\\.uploadpack)$"],
+			["config", "--name-only", "--get-regexp", "^(url\\..*\\.insteadof|http(\\..*)?\\.(extraheader|cookiefile|proxy)|core\\.(gitproxy|sshcommand)|remote\\..*\\.uploadpack)$"],
 		_ => throw new ArgumentOutOfRangeException()
 	};
 
@@ -389,18 +425,22 @@ internal sealed record GitProcessOperation
 
 	private static bool IsSafeRefSpec(string value) =>
 		value.Length > 0 && value[0] != '-' && value.IndexOf('\0') < 0 && !value.Any(char.IsWhiteSpace);
+
+	private static string BuildRemoteTrackingRefSpec(string branch) =>
+		$"+refs/heads/{branch}:refs/remotes/origin/{branch}";
 }
 
 internal static class GitNetworkPolicy
 {
 	private static readonly string[] SupportedSchemes = ["https", "ssh"];
 
-	public static string ValidateUrl(string? url)
+	public static string ValidateUrl(string? url, bool allowFileTransport = false)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(url);
 		if (Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
-		    SupportedSchemes.Contains(uri.Scheme, StringComparer.OrdinalIgnoreCase) &&
-		    !string.IsNullOrWhiteSpace(uri.Host))
+		    (SupportedSchemes.Contains(uri.Scheme, StringComparer.OrdinalIgnoreCase) ||
+		     allowFileTransport && uri.IsFile) &&
+		    (!string.IsNullOrWhiteSpace(uri.Host) || uri.IsFile))
 		{
 			return url;
 		}
@@ -408,8 +448,11 @@ internal static class GitNetworkPolicy
 		// Git's scp-like SSH syntax has no URI scheme.
 		var colon = url.IndexOf(':');
 		if (colon > 0 &&
-		    url.AsSpan(0, colon).IndexOfAny('/', '\\') < 0 &&
-		    !url.AsSpan(colon + 1).IsEmpty)
+		    !url.Contains("://", StringComparison.Ordinal) &&
+		    !(colon == 1 && char.IsAsciiLetter(url[0])) &&
+		    !url.AsSpan(colon + 1).IsEmpty &&
+		    url[colon + 1] != ':' &&
+		    url.AsSpan(0, colon).IndexOfAny('/', '\\') < 0)
 		{
 			return url;
 		}
@@ -417,6 +460,10 @@ internal static class GitNetworkPolicy
 		throw new ArgumentException("Only explicit HTTPS and SSH Git URLs are allowed.", nameof(url));
 	}
 
-	public static string GetAllowedProtocols(string url) =>
-		url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? "https" : "ssh";
+	public static string GetAllowedProtocols(string url)
+	{
+		if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsFile)
+			return "file";
+		return url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? "https" : "ssh";
+	}
 }

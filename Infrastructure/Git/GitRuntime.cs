@@ -140,8 +140,11 @@ internal static class GitExecutableLocator
 			{
 				continue;
 			}
-			if (File.Exists(candidate) && IsPhysicalFile(candidate))
-				return candidate;
+			if (TryResolvePhysicalFile(candidate, out var resolved) &&
+			    !PathsAreNested(Path.GetDirectoryName(resolved)!, current))
+			{
+				return resolved;
+			}
 		}
 		return null;
 	}
@@ -170,13 +173,19 @@ internal static class GitExecutableLocator
 		       !relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
 	}
 
-	private static bool IsPhysicalFile(string path)
+	private static bool TryResolvePhysicalFile(string path, out string resolved)
 	{
+		resolved = string.Empty;
 		try
 		{
-			var attributes = File.GetAttributes(path);
-			return !attributes.HasFlag(FileAttributes.Directory) &&
-			       !attributes.HasFlag(FileAttributes.ReparsePoint);
+			var info = new FileInfo(path);
+			if (!info.Exists || info.Attributes.HasFlag(FileAttributes.Directory))
+				return false;
+			var target = info.LinkTarget is null ? info : info.ResolveLinkTarget(returnFinalTarget: true);
+			if (target is null || !target.Exists || target.Attributes.HasFlag(FileAttributes.Directory))
+				return false;
+			resolved = Path.GetFullPath(target.FullName);
+			return true;
 		}
 		catch
 		{

@@ -28,6 +28,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 	internal const int MaximumProcessOutputCharacters = GitProcessOutputReader.MaximumOutputCharacters;
 	private readonly object _supportSync = new();
 	private readonly Func<string, GitProcessOperation, CancellationToken, Task<GitProcessResult>> _runAsync;
+	private readonly Func<string, CancellationToken, Task<GitRepositorySafetyInspection>> _inspectAsync;
 	private readonly Func<string, Task<WorktreeSupportState>> _probeSupport;
 	private readonly TimeSpan _recoveryCleanupTimeout;
 	private Task<WorktreeSupportState>? _supportProbe;
@@ -36,6 +37,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 	public GitWorktreeManager()
 	{
 		_runAsync = RunAsync;
+		_inspectAsync = GitRepositorySafetyInspector.InspectAsync;
 		_probeSupport = basePath => ProbeSupportAsync(basePath, _runAsync, SupportProbeTimeout);
 		_recoveryCleanupTimeout = RecoveryCleanupTimeout;
 	}
@@ -43,6 +45,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 	internal GitWorktreeManager(Func<string, Task<WorktreeSupportState>> probeSupport)
 	{
 		_runAsync = RunAsync;
+		_inspectAsync = GitRepositorySafetyInspector.InspectAsync;
 		_probeSupport = probeSupport ?? throw new ArgumentNullException(nameof(probeSupport));
 		_recoveryCleanupTimeout = RecoveryCleanupTimeout;
 	}
@@ -59,6 +62,8 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			throw new ArgumentOutOfRangeException(nameof(recoveryCleanupTimeout));
 		_runAsync = (path, operation, token) =>
 			runAsync(path, operation.BuildArguments(GitRuntime.IsolationPaths), token);
+		_inspectAsync = static (_, _) => Task.FromResult(
+			new GitRepositorySafetyInspection([], [], [], OldGitPromisorRepository: false));
 		_probeSupport = basePath => ProbeSupportAsync(basePath, _runAsync, supportProbeTimeout);
 		_recoveryCleanupTimeout = recoveryCleanupTimeout ?? RecoveryCleanupTimeout;
 	}
@@ -126,10 +131,11 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		string? branch,
 		CancellationToken cancellationToken)
 	{
-		var safety = await GitRepositorySafetyInspector.InspectAsync(basePath, cancellationToken)
+		var safety = await _inspectAsync(basePath, cancellationToken)
 			.ConfigureAwait(false);
 		if (!safety.IsComplete)
 			return false;
+		GitRepositorySafetyInspector.TraceDisabledMaterializationFilters(safety);
 		var revision = await ResolveRevisionAsync(basePath, branch, cancellationToken)
 			.ConfigureAwait(false);
 		if (!await RunSuccessfulAsync(
@@ -153,10 +159,11 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		string? branch,
 		CancellationToken cancellationToken)
 	{
-		var safety = await GitRepositorySafetyInspector.InspectAsync(basePath, cancellationToken)
+		var safety = await _inspectAsync(basePath, cancellationToken)
 			.ConfigureAwait(false);
 		if (!safety.IsComplete)
 			return false;
+		GitRepositorySafetyInspector.TraceDisabledMaterializationFilters(safety);
 		var revision = await ResolveRevisionAsync(basePath, branch, cancellationToken)
 			.ConfigureAwait(false);
 		if (!await RunSuccessfulAsync(
@@ -391,6 +398,9 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		deadline.CancelAfter(operation.Deadline);
+		var operationToken = deadline.Token;
 		var startInfo = GitProcessStartInfoFactory.Create(
 			workingDirectory,
 			operation);
@@ -403,15 +413,15 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		var outputTask = GitProcessOutputReader.ReadAsync(
 			process.StandardOutput,
 			MaximumProcessOutputCharacters,
-			cancellationToken);
+			operationToken);
 		var errorTask = GitProcessOutputReader.ReadAsync(
 			process.StandardError,
 			MaximumProcessOutputCharacters,
-			cancellationToken);
+			operationToken);
 		try
 		{
 			await GitRepositoryService
-				.WaitForExitOrTerminateAsync(process, cancellationToken)
+				.WaitForExitOrTerminateAsync(process, operationToken)
 				.ConfigureAwait(false);
 			if (!await GitProcessOutputReader
 				    .WaitForCompletionAfterExitAsync(process, outputTask, errorTask)
@@ -431,7 +441,9 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 				.ObserveAfterTerminationAsync(process, outputTask, errorTask)
 				.ConfigureAwait(false);
 
-			throw;
+			if (cancellationToken.IsCancellationRequested)
+				throw;
+			return new GitProcessResult(-1, string.Empty, "Git operation exceeded its safety deadline.");
 		}
 	}
 

@@ -102,6 +102,8 @@ radio rows and shows the active `diff:<REF>..<REF>` value as an additional row.
 Diff scopes are available through CLI, TUI, and MCP, but not Desktop. Changing the
 Git mode never changes Smart Ignore or an ordinary exclusion.
 
+Git-backed modes run through the fail-closed profiles in [Git process safety](Git-Safety.md). In particular, `changes` reports `DPX-GIT-UNSAFE-FILTER` with the driver name instead of executing a repository clean/process filter or presenting a non-equivalent raw comparison.
+
 ### `.gitignore` mode
 
 The `.gitignore` implementation supports nested rule scopes, negations, and ancestor rules from the owning repository or worktree root to the selected folder. An ignored directory is still traversed when a later applicable negation may expose a descendant. Tracked files retain the existing index override.

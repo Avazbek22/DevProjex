@@ -16,7 +16,7 @@ namespace DevProjex.Tests.Integration;
 [Collection(GitNetworkTestCollection.Name)]
 public class GitRepositoryServiceTests : IAsyncLifetime
 {
-    private readonly GitRepositoryService _service = new();
+    private readonly GitRepositoryService _service = new(allowFileTransportForTests: true);
     private string? _tempDir;
     private bool _gitAvailable;
     private GitTestRepository? _testRepository;

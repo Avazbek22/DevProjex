@@ -8,12 +8,15 @@ internal static class GitRemoteIdentityStore
 	private const string IdentityFileName = "devprojex.remote-identity";
 	private const int MaximumIdentityLength = 4096;
 
-	public static void Write(string repositoryPath, string remoteUrl)
+	public static void Write(
+		string repositoryPath,
+		string remoteUrl,
+		bool allowFileTransport = false)
 	{
 		var gitDirectory = ResolveCommonGitDirectory(repositoryPath);
 		if (!Directory.Exists(gitDirectory))
 			throw new InvalidOperationException("The cloned repository metadata is unavailable.");
-		var safeUrl = GitNetworkPolicy.ValidateUrl(remoteUrl);
+		var safeUrl = GitNetworkPolicy.ValidateUrl(remoteUrl, allowFileTransport);
 		var path = Path.Combine(gitDirectory, IdentityFileName);
 		File.WriteAllText(path, safeUrl, new UTF8Encoding(false));
 		if (!OperatingSystem.IsWindows())

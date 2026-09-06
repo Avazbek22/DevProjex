@@ -81,6 +81,16 @@ internal static class GitRepositorySafetyInspector
 			oldGitPromisor);
 	}
 
+	public static void TraceDisabledMaterializationFilters(GitRepositorySafetyInspection inspection)
+	{
+		ArgumentNullException.ThrowIfNull(inspection);
+		if (inspection.CheckoutFilterDrivers.Count == 0)
+			return;
+		Trace.TraceWarning(
+			"Git materialization filters were disabled; LFS or similar content remains in pointer form. Drivers: {0}",
+			string.Join(", ", inspection.CheckoutFilterDrivers));
+	}
+
 	private static bool TryReadDriver(
 		string key,
 		string prefix,

@@ -8,6 +8,48 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalClonePtyTests
 {
 	[Fact(Timeout = 120_000)]
+	public async Task ExplicitHttpsNetworkProfileOpensARealRemoteInTerminalWorkspace()
+	{
+		if (!string.Equals(
+			    Environment.GetEnvironmentVariable("DEVPROJEX_RUN_HTTPS_TUI_PROBE"),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			Assert.Skip("Set DEVPROJEX_RUN_HTTPS_TUI_PROBE=1 for the opt-in real-network probe.");
+			return;
+		}
+
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "HTTPS clone probe");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			"https://github.com/octocat/Hello-World",
+			TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForStableScreenAsync(
+			required: "DevProjex Terminal · Hello-World",
+			timeout: TimeSpan.FromSeconds(60),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("Hello-World", workspace, StringComparison.Ordinal);
+		Assert.Contains("https://github.com/octocat/Hello-World", workspace, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task SshCloneCannotPromptThroughTheParentPty()
 	{
 		if (OperatingSystem.IsWindows())

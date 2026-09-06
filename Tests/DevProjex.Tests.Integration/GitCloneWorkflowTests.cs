@@ -17,7 +17,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
 
     public GitCloneWorkflowTests()
     {
-        _gitService = new GitRepositoryService();
+        _gitService = new GitRepositoryService(allowFileTransportForTests: true);
         var testCachePath = Path.Combine(
             Path.GetTempPath(),
             "DevProjex",

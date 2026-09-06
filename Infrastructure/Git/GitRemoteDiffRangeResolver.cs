@@ -95,7 +95,10 @@ public sealed class GitRemoteDiffRangeResolver
 		{
 			var deepen = await RunAsync(
 				repositoryPath,
-				GitProcessOperation.FetchDeepen(remoteUrl, depth),
+				GitProcessOperation.FetchDeepen(
+					remoteUrl,
+					depth,
+					allowFileTransport: true),
 				cancellationToken,
 				askPass).ConfigureAwait(false);
 			if (deepen?.ExitCode == 0)
@@ -115,7 +118,11 @@ public sealed class GitRemoteDiffRangeResolver
 			return null;
 		var fetch = await RunAsync(
 			repositoryPath,
-			GitProcessOperation.FetchBranch(remoteUrl, remoteReference, depth),
+			GitProcessOperation.FetchRefSpec(
+				remoteUrl,
+				remoteReference,
+				depth,
+				allowFileTransport: true),
 			cancellationToken,
 			askPass).ConfigureAwait(false);
 		return fetch?.ExitCode == 0
@@ -186,6 +193,9 @@ public sealed class GitRemoteDiffRangeResolver
 		GitAskPassSession? askPass = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		deadline.CancelAfter(operation.Deadline);
+		var operationToken = deadline.Token;
 		using var process = new Process
 		{
 			StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, operation, askPass: askPass)
@@ -204,14 +214,14 @@ public sealed class GitRemoteDiffRangeResolver
 		var outputTask = GitProcessOutputReader.ReadAsync(
 			process.StandardOutput,
 			MaximumOutputCharacters,
-			cancellationToken);
+			operationToken);
 		var errorTask = GitProcessOutputReader.ReadAsync(
 			process.StandardError,
 			MaximumOutputCharacters,
-			cancellationToken);
+			operationToken);
 		try
 		{
-			await GitRepositoryService.WaitForExitOrTerminateAsync(process, cancellationToken)
+			await GitRepositoryService.WaitForExitOrTerminateAsync(process, operationToken)
 				.ConfigureAwait(false);
 			if (!await GitProcessOutputReader
 				    .WaitForCompletionAfterExitAsync(process, outputTask, errorTask)
@@ -226,12 +236,14 @@ public sealed class GitRemoteDiffRangeResolver
 				return null;
 			return new GitCommandResult(process.ExitCode, output.Text);
 		}
-		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		catch (OperationCanceledException)
 		{
 			await GitProcessOutputReader
 				.ObserveAfterTerminationAsync(process, outputTask, errorTask)
 				.ConfigureAwait(false);
-			throw;
+			if (cancellationToken.IsCancellationRequested)
+				throw;
+			return null;
 		}
 	}
 
