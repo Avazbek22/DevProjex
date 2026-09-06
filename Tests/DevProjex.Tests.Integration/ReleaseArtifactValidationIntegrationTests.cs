@@ -155,6 +155,22 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		Assert.Contains(expected!, output, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void ContainerMutationGateRecognizesLinuxGrammarPayloadNames()
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateContainerFixture(workspace.Path, mutation: null);
+
+		var result = RunPowerShell(
+			Path.Combine(RepoRoot.Value, "Scripts", "Test-ReleaseArtifactGateMutation.ps1"),
+			["-PublishRoot", Path.Combine(workspace.Path, "publish"), "-Version", Version,
+				"-Channels", "container", "-Rids", "linux-x64"]);
+
+		Assert.True(result.ExitCode == 0, result.StandardOutput + result.StandardError);
+		Assert.Contains("grammars/libtree-sitter-kotlin.so", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("DevProjex.Assets.Localization.en.json", result.StandardOutput, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData(false, false)]
 	[InlineData(true, false)]
@@ -400,6 +416,8 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		Directory.CreateDirectory(payloadDirectory);
 		var payload = CreateFixturePayload().ToList();
 		payload[0] = payload[0] with { Path = "devprojex" };
+		var grammarIndex = payload.FindIndex(static file => file.Path == "grammars/tree-sitter-kotlin.dll");
+		payload[grammarIndex] = payload[grammarIndex] with { Path = "grammars/libtree-sitter-kotlin.so" };
 		var receiptFiles = payload.Select(ToReceiptFile).ToList();
 		if (mutation == "missing-file") receiptFiles.Add(new ReceiptFile("receipt-only.dat", 1, new string('0', 64), null));
 		if (mutation == "missing-resource")

@@ -90,7 +90,7 @@ function Get-ReceiptMutationCases([object] $Receipt) {
 		}
 	}
 	$grammarFile = @($Receipt.files | Where-Object {
-		[string]$_.path -ceq 'grammars/tree-sitter-kotlin.dll'
+		[string]$_.path -cmatch '^grammars/(lib)?tree-sitter-kotlin\.(dll|so|dylib)$'
 	} | Select-Object -First 1)
 	if ($grammarFile.Count -eq 1) {
 		$fixedGrammar = [pscustomobject]@{
