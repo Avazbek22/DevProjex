@@ -32,6 +32,12 @@ permissions:
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  APPSTREAM_VERSION: 0.16.4
+  APPSTREAM_SHA256: d4f722d79c6a2f29d9dc5c6f464927469543353f386581c778c9bed7c60a54ed
+  LIBXMLB_VERSION: 0.3.14
+  LIBXMLB_SHA256: 92bea792c6a33d243e7b6f210519bd6ba71b010463fbec1b5a71ddd35736ec20
+  MESON_VERSION: 1.4.0
+  MESON_SHA256: 476a458d51fcfa322a6bdc64da5138997c542d08e6b2e49b9fa68c46fd7c4475
 
 jobs:
   prepare:
@@ -44,7 +50,7 @@ jobs:
       upload_release: ${{ steps.metadata.outputs.upload_release }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve version and release tag
         id: metadata
@@ -102,10 +108,10 @@ jobs:
             appimagetool_sha256: 1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -135,7 +141,7 @@ jobs:
             xvfb
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: appimage-nuget-${{ matrix.rid }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
@@ -167,15 +173,16 @@ jobs:
             exit 1
           fi
 
+      - name: Cache the pinned AppStream validator
+        id: appstream_validator_cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/appstream-validator
+          key: appstream-validator-${{ runner.os }}-${{ matrix.rid }}-${{ env.APPSTREAM_VERSION }}-${{ env.APPSTREAM_SHA256 }}-${{ env.LIBXMLB_VERSION }}-${{ env.LIBXMLB_SHA256 }}-${{ env.MESON_VERSION }}-${{ env.MESON_SHA256 }}
+
       - name: Build and verify the pinned AppStream validator
+        if: steps.appstream_validator_cache.outputs.cache-hit != 'true'
         shell: bash
-        env:
-          APPSTREAM_VERSION: 0.16.4
-          APPSTREAM_SHA256: d4f722d79c6a2f29d9dc5c6f464927469543353f386581c778c9bed7c60a54ed
-          LIBXMLB_VERSION: 0.3.14
-          LIBXMLB_SHA256: 92bea792c6a33d243e7b6f210519bd6ba71b010463fbec1b5a71ddd35736ec20
-          MESON_VERSION: 1.4.0
-          MESON_SHA256: 476a458d51fcfa322a6bdc64da5138997c542d08e6b2e49b9fa68c46fd7c4475
         run: |
           set -euo pipefail
           validator_root="${RUNNER_TEMP}/appstream-validator"
@@ -228,6 +235,24 @@ jobs:
             -Dlibxmlb:cli=false \
             -Dlibxmlb:zstd=false
           python3 -m mesonbuild.mesonmain compile -C "${build_root}" appstreamcli
+
+          validator_path="${build_root}/tools/appstreamcli"
+          [[ -x "${validator_path}" ]]
+          "${validator_path}" --version | grep --fixed-strings "${APPSTREAM_VERSION}"
+
+      - name: Verify and activate the pinned AppStream validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          validator_root="${RUNNER_TEMP}/appstream-validator"
+          build_root="${validator_root}/build"
+
+          echo "${APPSTREAM_SHA256}  ${validator_root}/AppStream.tar.xz" | \
+            sha256sum --check --strict
+          echo "${LIBXMLB_SHA256}  ${validator_root}/libxmlb.tar.gz" | \
+            sha256sum --check --strict
+          echo "${MESON_SHA256}  ${validator_root}/meson.whl" | \
+            sha256sum --check --strict
 
           validator_path="${build_root}/tools/appstreamcli"
           [[ -x "${validator_path}" ]]
@@ -541,7 +566,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: DevProjex-${{ needs.prepare.outputs.version }}-${{ matrix.appimage_arch }}.AppImage
           path: artifacts/DevProjex-${{ needs.prepare.outputs.version }}-${{ matrix.appimage_arch }}.AppImage
@@ -558,7 +583,7 @@ jobs:
 
     steps:
       - name: Download both AppImage artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: DevProjex-${{ needs.prepare.outputs.version }}-*.AppImage
           path: artifacts
