@@ -1506,7 +1506,9 @@ public sealed class TerminalWorkspaceContractTests
 		var bare = Path.Combine(workspace.Path, "origin.git");
 		Assert.True(TryRunGit(workspace.Path, "clone", "--quiet", "--bare", source, bare));
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var services = new TerminalServiceFactory(
+			() => appData.Path,
+			new GitRepositoryService(allowFileTransportForTests: true)).Create(AppLanguage.En);
 		await using var resolvedSource = await new TerminalProjectSourceResolver(
 				services,
 				new TestTerminalEnvironment(),

@@ -24,6 +24,8 @@ namespace DevProjex.Infrastructure.Git;
 /// </summary>
 public sealed class GitRepositoryService : IGitRepositoryService
 {
+	internal const string TestFileTransportPolicyVariable =
+		"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT";
     private const int CommandOutputBufferChars = 64 * 1024;
     private const int CommandErrorBufferChars = 64 * 1024;
     internal const int MaximumProgressFrameCharacters = 4 * 1024;
@@ -32,6 +34,12 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
     public GitRepositoryService()
     {
+		// Synthetic file:// remotes are enabled only by explicit test-process policy;
+		// no production host sets or documents this internal escape hatch.
+		_allowFileTransport = string.Equals(
+			Environment.GetEnvironmentVariable(TestFileTransportPolicyVariable),
+			"1",
+			StringComparison.Ordinal);
         _ = GitRuntime.VersionDisplay;
         _ = GitRuntime.SshExecutable;
     }

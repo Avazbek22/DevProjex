@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
+using DevProjex.Infrastructure.Git;
 using Hex1b;
 using XTerm.Options;
 using XTermTerminal = XTerm.Terminal;
@@ -118,7 +119,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		Action<string>? initializeDataRoot = null,
 		bool writeShellCompletionMarker = false,
 		bool useProgressCheckpointHost = false,
-		bool verifyExecutableRelaunch = false)
+		bool verifyExecutableRelaunch = false,
+		bool allowFileGitTransport = false)
 	{
 		if (string.Equals(
 			    Environment.GetEnvironmentVariable(SkipInteractiveTuiTestsVariable),
@@ -166,6 +168,10 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			["LOCALAPPDATA"] = Path.Combine(dataRoot, "local"),
 			["APPDATA"] = Path.Combine(dataRoot, "roaming")
 		};
+		if (allowFileGitTransport)
+		{
+			variables[GitRepositoryService.TestFileTransportPolicyVariable] = "1";
+		}
 		if (environment is not null)
 		{
 			foreach (var pair in environment)

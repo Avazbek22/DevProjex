@@ -155,7 +155,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -212,7 +213,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -283,7 +285,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -356,7 +359,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -465,7 +469,8 @@ public sealed class TerminalClonePtyTests
 			},
 			cancellationToken: TestContext.Current.CancellationToken,
 			initializeDataRoot: dataRoot => internalDataRoot = dataRoot,
-			useProgressCheckpointHost: true);
+			useProgressCheckpointHost: true,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
