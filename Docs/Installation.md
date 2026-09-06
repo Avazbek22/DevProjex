@@ -116,3 +116,46 @@ or build from source. A persistent installation is also available:
 ```shell
 dotnet tool install --global devprojex
 ```
+
+## Headless binary
+
+Release automation prepares one headless archive for each supported RID. Choose
+`DevProjex-headless.v<version>.<rid>.zip` on Windows or
+`DevProjex-headless.v<version>.<rid>.tar.gz` on Linux and macOS. For example:
+
+```powershell
+Expand-Archive DevProjex-headless.v<version>.win-x64.zip
+./devprojex.exe --version
+```
+
+```bash
+tar xzf DevProjex-headless.v<version>.linux-x64.tar.gz
+./devprojex --version
+```
+
+The archive contains the same self-contained host used by the matching npm
+platform package. It provides the CLI, Terminal Workspace, and MCP server without
+Avalonia. It cannot launch the GUI with `open`; `ui ...` remains available only
+to control an already running Desktop instance.
+
+## Docker
+
+The release workflow is configured to publish a glibc-based, multi-architecture
+image for amd64 and arm64 to `ghcr.io/avazbek22/devprojex`. The image contains no
+desktop application and runs as a non-root user. Mount project input read-only by
+default:
+
+```bash
+docker run --rm -i --read-only --tmpfs /tmp \
+  -v "$PWD:/project:ro" \
+  ghcr.io/avazbek22/devprojex mcp --root /project
+
+docker run --rm --read-only --tmpfs /tmp \
+  -v "$PWD:/project:ro" \
+  ghcr.io/avazbek22/devprojex analyze /project --findings --fail-on-findings
+```
+
+Use an explicit version tag for reproducible automation, for example
+`ghcr.io/avazbek22/devprojex:5.2`. The untagged examples use Docker's `latest`
+tag only after a release workflow has published it. Alpine and other musl hosts
+are not supported.

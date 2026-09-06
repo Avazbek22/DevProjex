@@ -1,10 +1,11 @@
 # Release process
 
-DevProjex has two local desktop release channels and three CI-owned channels.
+DevProjex has two local desktop release channels and five CI-owned channels.
 `Scripts/release-all.ps1` owns the GitHub desktop artifacts and Microsoft Store
-upload. AppImage is assembled only by the release workflow. NuGet and npm are
-built and published only by `.github/workflows/publish-packages.yml`; the local
-desktop script never publishes any channel.
+upload. AppImage, headless archives, and the Docker image are assembled only by
+release workflows. NuGet and npm are built and published only by
+`.github/workflows/publish-packages.yml`; the local desktop script never publishes
+any CI-owned channel.
 
 ## Local channel model
 
@@ -148,3 +149,56 @@ The current publishing paths remain separate: GitHub desktop archives and Store
 uploads are prepared locally, AppImage is attached by the release workflow, and
 NuGet/npm are published through `publish-packages.yml` after their own static,
 mutation, and three-OS functional gates.
+
+## CI-owned headless archives
+
+`.github/workflows/package-headless.yml` builds all six
+`DevProjex-headless.v<version>.<rid>.zip|tar.gz` archives from the same single-file
+publish directories used to stage npm platform packages. The workflow validates
+the complete set and uploads it only for a published release, or for a manual run
+that names an existing `release_tag`. Outputs are staged below
+`artifacts/headless/release/headless/v<version>`.
+
+This channel satisfies the five connection requirements as follows:
+
+1. RID and executable names come from `payload-manifest.json`; each build emits a
+   complete `publish-payload.<rid>.json` from `_FilesToBundle`.
+2. `Test-ReleaseArtifacts.ps1 -Channels headless` checks the exact archive set,
+   USTAR executable modes, single-file entries, resources, sizes, and hashes.
+3. `Test-ReleaseArtifactGateMutation.ps1 -Channels headless` damages deterministic
+   file and resource entries plus grammar, localization, and native-library cases.
+4. The workflow runs `--version`, `tree`, both `analyze` forms, the secret exit-3
+   check, and an MCP initialize handshake against the linux-x64 archive payload.
+5. The workflow attaches archives, receipts, and `SHA256SUMS.headless.txt` to the
+   GitHub release; installation commands live in `Docs/Installation.md`.
+
+The separate checksum filename is deliberate. Desktop artifacts and
+`SHA256SUMS.txt` are produced by an operator, while headless assets are produced by
+CI. Two independent producers cannot atomically update one checksum manifest.
+
+## CI-owned Docker image
+
+`.github/workflows/publish-container.yml` builds amd64 and arm64 from the root
+`Dockerfile`, but pushes `ghcr.io/avazbek22/devprojex:<version>` and `latest` only
+for `release: published`. Pull requests and manual runs build, validate, and smoke
+without pushing. The SDK stage cross-publishes linux-arm64 on the x64 runner;
+`BUILDPLATFORM` keeps the compiler native, and the final multi-architecture image
+contains the prebuilt output without a target-architecture build step.
+
+The container channel meets the same connection contract:
+
+1. The folder publish opts into the shared build receipt and uses manifest RID and
+   binary metadata. Store retains its existing automatic folder-receipt default.
+2. `Test-ReleaseArtifacts.ps1 -Channels container` compares the extracted `/app`
+   directory with its receipt in both directions, including managed resources.
+3. `Test-ReleaseArtifactGateMutation.ps1 -Channels container` mutates a copied
+   extracted payload and proves the common diff rejects it.
+4. amd64 and native arm64 jobs run version, tree, compression, secret, and MCP
+   smoke with `--read-only`, `--tmpfs /tmp`, and a read-only project mount.
+5. The published multi-architecture manifest receives version and `latest` tags
+   plus build-provenance attestation; Docker and MCP client recipes are documented
+   in `Docs/Installation.md` and `Docs/McpServer.md`.
+
+The image is a folder publish with `DevProjexGrammarDelivery=Content`. Grammar
+libraries stay beside the executable, so neither .NET single-file extraction nor
+grammar materialization needs a writable filesystem at startup.

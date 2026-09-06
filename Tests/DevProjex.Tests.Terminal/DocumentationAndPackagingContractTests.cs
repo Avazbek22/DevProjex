@@ -297,6 +297,9 @@ public sealed class DocumentationAndPackagingContractTests
 
 		var release = manifest.GetProperty("release");
 		Assert.False(release.TryGetProperty("localizations", out _));
+		var headless = release.GetProperty("headless");
+		Assert.Equal("DevProjex-headless", headless.GetProperty("archivePrefix").GetString());
+		Assert.Equal("SHA256SUMS.headless.txt", headless.GetProperty("checksumFile").GetString());
 
 		var store = release.GetProperty("store");
 		var manifestLanguages = store.GetProperty("resourceLanguages")
@@ -328,6 +331,64 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("@(FilesToBundle)", buildTargets, StringComparison.Ordinal);
 		Assert.Contains("@(ResolvedFileToPublish)", buildTargets, StringComparison.Ordinal);
 		Assert.Contains("Write-PublishPayloadReceipt.ps1", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("DevProjexGenerateFolderPayloadReceipt", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("'$(Configuration)'=='ReleaseStore'", buildTargets, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void HeadlessReleaseAndContainerChannelsRemainDistinctAndFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var buildScript = File.ReadAllText(Path.Combine(rootPath, "Scripts", "build-headless-packages.ps1"));
+		var validator = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-ReleaseArtifacts.ps1"));
+		var archiveWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-headless.yml"));
+		var containerWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "publish-container.yml"));
+		var containerSmoke = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-HeadlessContainerSmoke.ps1"));
+		var dockerfile = File.ReadAllText(Path.Combine(rootPath, "Dockerfile"));
+		var installation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Installation.md"));
+		var releaseProcess = File.ReadAllText(Path.Combine(rootPath, "Docs", "Release-Process.md"));
+
+		Assert.Contains("$($manifest.release.headless.archivePrefix).v$Version.$($Rid.rid).$extension", buildScript, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex.v$Version.$($Rid.rid)", buildScript, StringComparison.Ordinal);
+		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", buildScript, StringComparison.Ordinal);
+		Assert.Contains("'headless'", validator, StringComparison.Ordinal);
+		Assert.Contains("[string]$Rid.binary", validator, StringComparison.Ordinal);
+		Assert.Contains("release.headless.checksumFile", validator, StringComparison.Ordinal);
+
+		Assert.Contains("types: [published]", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/checkout@v7", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/setup-dotnet@v6", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/upload-artifact@v7", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/download-artifact@v8", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("gh release upload", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("if: ${{ steps.metadata.outputs.release_tag != '' }}", archiveWorkflow, StringComparison.Ordinal);
+
+		Assert.Contains("FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("runtime-deps:10.0-noble-chiseled-extra", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("-p:PublishSingleFile=false", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("-p:DevProjexGrammarDelivery=Content", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("USER app", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("ENTRYPOINT [\"devprojex\"]", dockerfile, StringComparison.Ordinal);
+		Assert.DoesNotContain("alpine", dockerfile, StringComparison.OrdinalIgnoreCase);
+
+		using var glama = JsonDocument.Parse(File.ReadAllText(Path.Combine(rootPath, "glama.json")));
+		Assert.Equal("https://glama.ai/mcp/schemas/server.json", glama.RootElement.GetProperty("$schema").GetString());
+		Assert.Equal(["Avazbek22"], glama.RootElement.GetProperty("maintainers").EnumerateArray()
+			.Select(static item => item.GetString()!).ToArray());
+
+		Assert.Contains("ubuntu-24.04-arm", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("linux/amd64,linux/arm64", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/attest-build-provenance@v4", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("packages: write", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("id-token: write", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("attestations: write", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("--read-only", containerSmoke, StringComparison.Ordinal);
+		Assert.Contains("--tmpfs /tmp", containerSmoke, StringComparison.Ordinal);
+		Assert.DoesNotContain("setup-qemu", containerWorkflow, StringComparison.OrdinalIgnoreCase);
+
+		Assert.Contains("DevProjex-headless.v<version>.<rid>", installation, StringComparison.Ordinal);
+		Assert.Contains("ghcr.io/avazbek22/devprojex", installation, StringComparison.Ordinal);
+		Assert.Contains("Two independent producers cannot atomically update one checksum manifest", releaseProcess, StringComparison.Ordinal);
 	}
 
 	[Fact]

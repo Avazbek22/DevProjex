@@ -628,5 +628,50 @@ For Visual Studio Code, use the same commands in `.vscode/mcp.json`:
 }
 ```
 
+### Docker launch
+
+Release automation is configured to publish the headless image at
+`ghcr.io/avazbek22/devprojex`. Docker clients should keep stdin open with `-i`,
+mount the project read-only, and run the container with a read-only root filesystem.
+
+For Claude Code:
+
+```shell
+claude mcp add devprojex-docker -- docker run --rm -i --read-only --tmpfs /tmp -v /absolute/path/to/project:/project:ro ghcr.io/avazbek22/devprojex mcp --root /project
+```
+
+For Claude Desktop or Cursor, add this entry to `mcpServers`:
+
+```json
+{
+  "devprojex-docker": {
+    "command": "docker",
+    "args": ["run", "--rm", "-i", "--read-only", "--tmpfs", "/tmp", "-v", "/absolute/path/to/project:/project:ro", "ghcr.io/avazbek22/devprojex", "mcp", "--root", "/project"]
+  }
+}
+```
+
+For Visual Studio Code, place the equivalent entry in `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "devprojex-docker": {
+      "type": "stdio",
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "--read-only", "--tmpfs", "/tmp", "-v", "${workspaceFolder}:/project:ro", "ghcr.io/avazbek22/devprojex", "mcp", "--root", "/project"]
+    }
+  }
+}
+```
+
+For OpenAI Codex, add:
+
+```toml
+[mcp_servers.devprojex_docker]
+command = "docker"
+args = ["run", "--rm", "-i", "--read-only", "--tmpfs", "/tmp", "-v", "/absolute/path/to/project:/project:ro", "ghcr.io/avazbek22/devprojex", "mcp", "--root", "/project"]
+```
+
 MCP traffic uses stdout exclusively. If startup fails, diagnostics are written
 to stderr. Closing the client's stdin terminates the server process.
