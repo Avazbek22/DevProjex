@@ -44,7 +44,7 @@ jobs:
       upload_release: ${{ steps.metadata.outputs.upload_release }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve version and release tag
         id: metadata
@@ -102,10 +102,10 @@ jobs:
             appimagetool_sha256: 1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -135,7 +135,7 @@ jobs:
             xvfb
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: appimage-nuget-${{ matrix.rid }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
@@ -541,7 +541,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: DevProjex-${{ needs.prepare.outputs.version }}-${{ matrix.appimage_arch }}.AppImage
           path: artifacts/DevProjex-${{ needs.prepare.outputs.version }}-${{ matrix.appimage_arch }}.AppImage
@@ -558,7 +558,7 @@ jobs:
 
     steps:
       - name: Download both AppImage artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: DevProjex-${{ needs.prepare.outputs.version }}-*.AppImage
           path: artifacts
