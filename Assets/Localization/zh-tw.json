@@ -496,6 +496,7 @@
   "Terminal.Error.ProfileTransientGitMode": "瞬時Git模式無法儲存至設定檔；請使用none、gitignore或tracked。",
   "Terminal.Diagnostic.GitStateUnavailable": "要求的Git狀態無法使用。請檢查Git、儲存庫及參照。",
   "Terminal.Diagnostic.GitStateDeleted": "從Git狀態中排除的已刪除檔案：{0}個。",
+  "Terminal.Diagnostic.GitUnsafeFilter": "不執行不受信任的Git篩選器「{0}」時，無法進行精確比較。",
   "Terminal.Option.Exclude": "設定普通排除。",
   "Terminal.Option.HideSecrets": "遮蔽所選文字檔案中偵測到的值。不檢查二進位檔案；未找到符合項目並不保證安全。",
   "Terminal.Option.HidePrivateData": "遮蔽所選文字檔案中偵測到的個人資料。不檢查二進位檔案；未找到符合項目並不保證隱私安全。",

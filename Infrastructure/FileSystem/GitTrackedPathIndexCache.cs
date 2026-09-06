@@ -216,6 +216,11 @@ internal static class GitTrackedPathIndexCache
 		GitIndexSignature signature,
 		CancellationToken cancellationToken)
 	{
+		var safety = await GitRepositorySafetyInspector
+			.InspectAsync(signature.RepositoryRootPath, cancellationToken)
+			.ConfigureAwait(false);
+		if (!safety.IsComplete || safety.OldGitPromisorRepository)
+			return null;
 		using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		timeoutSource.CancelAfter(CommandTimeout);
 

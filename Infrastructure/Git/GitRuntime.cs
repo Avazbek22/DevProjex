@@ -101,6 +101,14 @@ internal static class GitRuntime
 	}
 }
 
+public static class GitRuntimeInformation
+{
+	public static string VersionDisplay => GitRuntime.VersionDisplay;
+
+	public static ProcessStartInfo CreateVersionProbeStartInfo() =>
+		GitProcessStartInfoFactory.CreateVersionProbe();
+}
+
 internal static class GitExecutableLocator
 {
 	public static string Resolve(string executableName) =>

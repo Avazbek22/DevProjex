@@ -107,7 +107,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 					cancellationToken)
 				.ConfigureAwait(false);
 			if (!repositoryResult.IsAvailable)
-				return GitScopePathResult.Unavailable(repositoryResult.FailureReason);
+			{
+				return GitScopePathResult.Unavailable(
+					repositoryResult.FailureReason,
+					repositoryResult.FailureDiagnosticCode,
+					repositoryResult.FailureDetail);
+			}
 
 			included.UnionWith(repositoryResult.IncludedPaths);
 			deleted.UnionWith(repositoryResult.DeletedPaths);
@@ -132,6 +137,23 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		cancellationToken.ThrowIfCancellationRequested();
 		if (!comparisonSemantics.IsAuthoritative)
 			return RepositoryScopeResult.Unavailable("Git path comparison settings could not be resolved.");
+		var safety = await GitRepositorySafetyInspector.InspectAsync(repositoryRoot, cancellationToken)
+			.ConfigureAwait(false);
+		if (!safety.IsComplete)
+			return RepositoryScopeResult.Unavailable("Git safety configuration could not be inspected.");
+		if (safety.OldGitPromisorRepository)
+		{
+			return RepositoryScopeResult.Unavailable(
+				"This partial clone requires Git 2.45 or newer for a no-network local read.");
+		}
+		if (mode == GitFilteringMode.Changes && safety.UnsafeWorkingTreeDrivers.Count > 0)
+		{
+			var driver = safety.UnsafeWorkingTreeDrivers[0];
+			return RepositoryScopeResult.Unavailable(
+				$"Exact comparison is unavailable without running the untrusted Git filter '{driver}'.",
+				GitScopeFilter.UnsafeFilterDiagnosticCode,
+				driver);
+		}
 
 		IReadOnlyList<GitCommandOutput> outputs;
 		switch (mode)
@@ -633,14 +655,21 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		IReadOnlySet<string> IncludedPaths,
 		IReadOnlySet<string> DeletedPaths,
 		GitTrackedPathIndex? PathMatcher = null,
-		string? FailureReason = null)
+		string? FailureReason = null,
+		string? FailureDiagnosticCode = null,
+		string? FailureDetail = null)
 	{
-		public static RepositoryScopeResult Unavailable(string? reason) =>
+		public static RepositoryScopeResult Unavailable(
+			string? reason,
+			string? diagnosticCode = null,
+			string? detail = null) =>
 			new(
 				false,
 				new HashSet<string>(StringComparer.Ordinal),
 				new HashSet<string>(StringComparer.Ordinal),
-				FailureReason: reason);
+				FailureReason: reason,
+				FailureDiagnosticCode: diagnosticCode,
+				FailureDetail: detail);
 	}
 
 	private sealed record GitCommandOutput(

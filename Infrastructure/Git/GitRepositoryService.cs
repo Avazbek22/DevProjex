@@ -31,6 +31,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
     public GitRepositoryService()
     {
+		_ = GitRuntime.VersionDisplay;
     }
 
     internal GitRepositoryService(string gitExecutable)
@@ -475,6 +476,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
 					RepositoryCacheLayout.GetContainer(repositoryPath),
 					repositoryPath),
 				cancellationToken);
+			var safety = await GitRepositorySafetyInspector.InspectAsync(repositoryPath, cancellationToken)
+				.ConfigureAwait(false);
+			if (!safety.IsComplete)
+				return false;
 			var fetchResult = await RunGitCommandAsync(
 				repositoryPath,
 				GitProcessOperation.FetchBranch(remoteUrl, currentBranch),
@@ -492,7 +497,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 repositoryPath,
 				GitProcessOperation.ManagedCheckout(
 					GitManagedCheckoutKind.HardReset,
-					$"refs/remotes/origin/{currentBranch}"),
+					$"refs/remotes/origin/{currentBranch}",
+					filterDrivers: safety.CheckoutFilterDrivers),
                 cancellationToken);
 
             return resetResult.ExitCode == 0;
@@ -599,6 +605,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
         await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(
             RepositoryCacheLayout.GetBaseOperationLockPath(container, basePath),
             cancellationToken);
+		var safety = await GitRepositorySafetyInspector.InspectAsync(repositoryPath, cancellationToken)
+			.ConfigureAwait(false);
+		if (!safety.IsComplete)
+			return false;
 
         var revision = $"refs/remotes/origin/{branchName}";
         var verify = await RunGitCommandAsync(
@@ -627,7 +637,10 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
         var checkout = await RunGitCommandAsync(
             repositoryPath,
-			GitProcessOperation.ManagedCheckout(GitManagedCheckoutKind.Detach, revision),
+			GitProcessOperation.ManagedCheckout(
+				GitManagedCheckoutKind.Detach,
+				revision,
+				filterDrivers: safety.CheckoutFilterDrivers),
             cancellationToken);
         if (checkout.ExitCode != 0)
             return false;

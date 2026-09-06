@@ -126,11 +126,18 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		string? branch,
 		CancellationToken cancellationToken)
 	{
+		var safety = await GitRepositorySafetyInspector.InspectAsync(basePath, cancellationToken)
+			.ConfigureAwait(false);
+		if (!safety.IsComplete)
+			return false;
 		var revision = await ResolveRevisionAsync(basePath, branch, cancellationToken)
 			.ConfigureAwait(false);
 		if (!await RunSuccessfulAsync(
 			basePath,
-			GitProcessOperation.ManagedCheckout(GitManagedCheckoutKind.Detach, revision),
+			GitProcessOperation.ManagedCheckout(
+				GitManagedCheckoutKind.Detach,
+				revision,
+				filterDrivers: safety.CheckoutFilterDrivers),
 			cancellationToken)
 			.ConfigureAwait(false))
 		{
@@ -146,11 +153,18 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		string? branch,
 		CancellationToken cancellationToken)
 	{
+		var safety = await GitRepositorySafetyInspector.InspectAsync(basePath, cancellationToken)
+			.ConfigureAwait(false);
+		if (!safety.IsComplete)
+			return false;
 		var revision = await ResolveRevisionAsync(basePath, branch, cancellationToken)
 			.ConfigureAwait(false);
 		if (!await RunSuccessfulAsync(
 				basePath,
-				GitProcessOperation.ManagedWorktreeAdd(worktreePath, revision),
+				GitProcessOperation.ManagedWorktreeAdd(
+					worktreePath,
+					revision,
+					safety.CheckoutFilterDrivers),
 				cancellationToken)
 			.ConfigureAwait(false))
 		{

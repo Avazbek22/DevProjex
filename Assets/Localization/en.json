@@ -502,6 +502,7 @@
   "Terminal.Error.ProfileTransientGitMode": "Momentary Git modes cannot be saved in profiles; use none, gitignore, or tracked.",
   "Terminal.Diagnostic.GitStateUnavailable": "The requested Git state is unavailable. Verify Git, the repository, and any refs.",
   "Terminal.Diagnostic.GitStateDeleted": "Deleted files excluded from the Git state: {0}.",
+  "Terminal.Diagnostic.GitUnsafeFilter": "Exact comparison is unavailable without running the untrusted Git filter '{0}'.",
   "Terminal.Option.Exclude": "Set an ordinary exclusion.",
   "Terminal.Option.HideSecrets": "Redact detected values in selected text files. Binary files are not inspected; no matches is not a safety guarantee.",
   "Terminal.Option.HidePrivateData": "Redact detected private data in selected text files. Binary files are not inspected; no matches is not a privacy guarantee.",
