@@ -20,7 +20,8 @@ public sealed class DocumentationAndPackagingContractTests
 		"Desktop-Control.md",
 		"SmartIgnore.md",
 		"HideSecrets.md",
-		"Release-Channels.md"
+		"Release-Channels.md",
+		"Release-Process.md"
 	];
 
 	[Fact]
@@ -269,6 +270,69 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("NuGet/login@v1", workflow, StringComparison.Ordinal);
 		Assert.Contains("inputs.dry_run == false", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("--skip-duplicate", workflow, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ReleasePayloadManifestTracksEveryGrammarLocalizationAndStoreResource()
+	{
+		var rootPath = FindRepositoryRoot();
+		using var manifestDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Headless",
+			"payload-manifest.json")));
+		var manifest = manifestDocument.RootElement;
+		var manifestGrammars = manifest.GetProperty("grammars")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var infrastructure = XDocument.Load(Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var projectGrammars = infrastructure.Descendants()
+			.Where(static element => element.Name.LocalName is "DevProjexGrammar" or "DevProjexVendoredGrammar")
+			.Select(static element => element.Attribute("Include")?.Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(projectGrammars, manifestGrammars);
+
+		var release = manifest.GetProperty("release");
+		var manifestLocalizations = release.GetProperty("localizations")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var localizationFiles = Directory.EnumerateFiles(Path.Combine(rootPath, "Assets", "Localization"), "*.json")
+			.Select(Path.GetFileName)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(localizationFiles, manifestLocalizations);
+
+		var store = release.GetProperty("store");
+		var manifestLanguages = store.GetProperty("resourceLanguages")
+			.EnumerateArray()
+			.Select(static element => element.GetString()!.ToLowerInvariant())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var storeManifest = XDocument.Load(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Windows",
+			"DevProjex.Store",
+			"Package.appxmanifest"));
+		var storeLanguages = storeManifest.Descendants()
+			.Where(static element => element.Name.LocalName == "Resource")
+			.Select(static element => element.Attribute("Language")!.Value.ToLowerInvariant())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(storeLanguages, manifestLanguages);
+		Assert.Equal(["arm64", "x64"], store.GetProperty("platforms")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal));
+
+		var releaseScript = File.ReadAllText(Path.Combine(rootPath, "Scripts", "release-all.ps1"));
+		Assert.Contains("/p:EnableCompressionInSingleFile=false", releaseScript, StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifacts.ps1", releaseScript, StringComparison.Ordinal);
 	}
 
 	[Fact]
