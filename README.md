@@ -57,6 +57,10 @@ The npm and NuGet packages contain the CLI, TUI, and MCP server, but not the
 desktop application. See [Docs/Installation.md](Docs/Installation.md) for the
 Node/.NET requirements and supported platforms.
 
+Release automation also prepares direct headless archives and a non-root Docker
+image; their commands and availability boundary are documented in
+[Docs/Installation.md](Docs/Installation.md).
+
 ---
 
 ## Why DevProjex? 💡

@@ -1,5 +1,10 @@
 <Project>
 
+  <PropertyGroup>
+    <DevProjexGenerateFolderPayloadReceipt
+      Condition="'$(DevProjexGenerateFolderPayloadReceipt)'=='' and '$(Configuration)'=='ReleaseStore'">true</DevProjexGenerateFolderPayloadReceipt>
+  </PropertyGroup>
+
   <!--
     TreeSitter.DotNet ships every grammar for the target architecture: 30 native libraries, ~68 MB
     on win-x64, of which DevProjex uses ten. Referencing the package without filtering adds all of
@@ -67,13 +72,13 @@
     <Exec Command="pwsh -NoLogo -NoProfile -File &quot;$(MSBuildThisFileDirectory)Scripts/Write-PublishPayloadReceipt.ps1&quot; -Rid &quot;$(RuntimeIdentifier)&quot; -ItemsPath &quot;$(_DevProjexPayloadItemsPath)&quot; -OutputPath &quot;$(_DevProjexPayloadReceiptPath)&quot;" />
   </Target>
 
-  <Target Name="DevProjexWriteStorePayloadReceipt"
+  <Target Name="DevProjexWriteFolderPayloadReceipt"
           AfterTargets="CopyFilesToPublishDirectory"
           Condition="'$(DevProjexGenerateReleasePayloadReceipt)'=='true' and
+                     '$(DevProjexGenerateFolderPayloadReceipt)'=='true' and
                      '$(PublishSingleFile)'!='true' and
                      '$(RuntimeIdentifier)'!='' and
-                     '$(DevProjexPayloadReceiptDirectory)'!='' and
-                     '$(Configuration)'=='ReleaseStore'">
+                     '$(DevProjexPayloadReceiptDirectory)'!=''">
     <ItemGroup>
       <!-- Desktop Bridge puts PDBs in the symbol package, not in the application MSIX. -->
       <_DevProjexPayloadReceiptFile Include="@(ResolvedFileToPublish)"

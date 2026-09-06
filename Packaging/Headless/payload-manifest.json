@@ -31,6 +31,10 @@
     "tree-sitter-yaml"
   ],
   "release": {
+    "headless": {
+      "archivePrefix": "DevProjex-headless",
+      "checksumFile": "SHA256SUMS.headless.txt"
+    },
     "store": {
       "executionAlias": "devprojex.exe",
       "applicationExecutable": "DevProjex.Avalonia\\DevProjex.exe",

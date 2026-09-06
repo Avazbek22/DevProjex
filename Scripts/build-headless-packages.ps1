@@ -16,6 +16,11 @@ $nugetRoot = Join-Path $headlessRoot "nuget"
 $npmRoot = Join-Path $headlessRoot "npm"
 $publishRoot = Join-Path $headlessRoot "publish"
 $stagingRoot = Join-Path $headlessRoot "staging"
+$releasePublishRoot = Join-Path $headlessRoot "release"
+
+. (Join-Path $PSScriptRoot "release-archive-helpers.ps1")
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 function Normalize-PackageVersion([string] $Value) {
     if ($Value -match '^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)(?<suffix>[-+].+)?$') {
@@ -41,11 +46,51 @@ function Invoke-Checked([string] $FilePath, [string[]] $Arguments, [string] $Wor
     }
 }
 
+function Get-HeadlessArchiveName([object] $Rid) {
+    $extension = if ($Rid.os -ceq "win32") { "zip" } else { "tar.gz" }
+    return "$($manifest.release.headless.archivePrefix).v$Version.$($Rid.rid).$extension"
+}
+
+function New-HeadlessArchive([object] $Rid, [string] $BinaryPath) {
+    $archivePath = Join-Path $headlessReleaseRoot (Get-HeadlessArchiveName $Rid)
+    if ($Rid.os -ceq "win32") {
+        $stream = [System.IO.File]::Create($archivePath)
+        try {
+            $archive = [System.IO.Compression.ZipArchive]::new(
+                $stream,
+                [System.IO.Compression.ZipArchiveMode]::Create,
+                $false)
+            try {
+                $entry = $archive.CreateEntry([string]$Rid.binary, [System.IO.Compression.CompressionLevel]::Optimal)
+                $entryStream = $entry.Open()
+                try {
+                    $source = [System.IO.File]::OpenRead($BinaryPath)
+                    try { $source.CopyTo($entryStream) } finally { $source.Dispose() }
+                }
+                finally { $entryStream.Dispose() }
+            }
+            finally { $archive.Dispose() }
+        }
+        finally { $stream.Dispose() }
+        return
+    }
+
+    New-UstarGzipArchive -archivePath $archivePath -entries @(
+        [pscustomobject]@{
+            Name = [string]$Rid.binary
+            Mode = 493
+            IsDirectory = $false
+            SourcePath = $BinaryPath
+            Bytes = $null
+        })
+}
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
     [xml] $buildProperties = Get-Content -LiteralPath (Join-Path $repoRoot "Directory.Build.props") -Raw
     $Version = [string]($buildProperties.Project.PropertyGroup.DevProjexVersion | Select-Object -First 1)
 }
 $packageVersion = Normalize-PackageVersion $Version
+$headlessReleaseRoot = Join-Path $releasePublishRoot "headless/v$Version"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 
 $resolvedHeadlessRoot = [System.IO.Path]::GetFullPath($headlessRoot)
@@ -56,7 +101,7 @@ if (-not $resolvedHeadlessRoot.StartsWith($resolvedArtifactsRoot, [System.String
 if (Test-Path -LiteralPath $resolvedHeadlessRoot) {
     Remove-Item -LiteralPath $resolvedHeadlessRoot -Recurse -Force
 }
-foreach ($directory in @($nugetRoot, $npmRoot, $publishRoot, $stagingRoot)) {
+foreach ($directory in @($nugetRoot, $npmRoot, $publishRoot, $stagingRoot, $headlessReleaseRoot)) {
     [System.IO.Directory]::CreateDirectory($directory) | Out-Null
 }
 
@@ -89,10 +134,13 @@ foreach ($rid in $manifest.rids) {
         "/p:DevProjexHeadlessBuildRoot=$ridBuildRoot",
         "/p:PublishSingleFile=true",
         "/p:IncludeNativeLibrariesForSelfExtract=true",
+        "/p:EnableCompressionInSingleFile=false",
         "/p:PublishReadyToRun=true",
         "/p:PublishTrimmed=false",
         "/p:DebugType=None",
         "/p:DebugSymbols=false",
+        "/p:DevProjexGenerateReleasePayloadReceipt=true",
+        "/p:DevProjexPayloadReceiptDirectory=$headlessReleaseRoot",
         "-o", $ridPublishRoot
     ) $repoRoot
 
@@ -129,6 +177,7 @@ foreach ($rid in $manifest.rids) {
             -PackagePath (Join-Path $npmRoot "devprojex-cli-$($rid.npmPlatform)-$packageVersion.tgz") `
             -EntryName "package/bin/$($rid.binary)"
     }
+    New-HeadlessArchive -Rid $rid -BinaryPath $publishedFiles[0].FullName
 }
 
 $mainStage = Join-Path $stagingRoot "devprojex"
@@ -142,13 +191,29 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "Packaging/Npm/devprojex/bin/devproj
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $mainStage "LICENSE")
 Invoke-Checked "npm" @("pack", ".", "--pack-destination", $npmRoot) $mainStage
 
+$releaseFiles = @(Get-ChildItem -LiteralPath $headlessReleaseRoot -File | Sort-Object Name)
+$checksumLines = @($releaseFiles | ForEach-Object {
+    "$(Get-FileSha256Hex -path $_.FullName) *$($_.Name)"
+})
+Write-ReleaseChecksumManifest `
+    -path (Join-Path $headlessReleaseRoot ([string]$manifest.release.headless.checksumFile)) `
+    -lines $checksumLines
+
 & (Join-Path $PSScriptRoot "Test-HeadlessPackages.ps1") `
     -ArtifactsRoot $headlessRoot `
-    -Version $packageVersion
+    -Version $packageVersion `
+    -ReleasePublishRoot $releasePublishRoot `
+    -ReleaseVersion $Version
+
+& (Join-Path $PSScriptRoot "Test-ReleaseArtifacts.ps1") `
+    -PublishRoot $releasePublishRoot `
+    -Version $Version `
+    -Channels headless
 
 $packageFiles = @(
     Get-ChildItem -LiteralPath $nugetRoot -Filter "*.nupkg" -File
     Get-ChildItem -LiteralPath $npmRoot -Filter "*.tgz" -File
+    Get-ChildItem -LiteralPath $headlessReleaseRoot -File
 ) | Sort-Object Name
 $sizeReport = [System.Collections.Generic.List[string]]::new()
 $sizeReport.Add("| Package | Bytes | MiB |")
