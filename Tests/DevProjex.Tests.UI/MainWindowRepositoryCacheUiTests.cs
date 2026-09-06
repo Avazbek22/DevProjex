@@ -1397,6 +1397,11 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
+		if (OperatingSystem.IsWindows())
+		{
+			startInfo.ArgumentList.Add("-c");
+			startInfo.ArgumentList.Add("core.longpaths=true");
+		}
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
 		using var process = new Process

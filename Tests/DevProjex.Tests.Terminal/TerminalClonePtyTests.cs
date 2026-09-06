@@ -65,12 +65,13 @@ public sealed class TerminalClonePtyTests
 		var batchMarker = Path.Combine(
 			fakeTransportRoot.Path,
 			"batch-mode-observed");
+		var escapedBatchMarker = batchMarker.Replace("'", "'\"'\"'", StringComparison.Ordinal);
 		File.WriteAllText(
 			fakeSsh,
 			"#!/bin/sh\n" +
 			"case \" $* \" in\n" +
 			"  *\" -o BatchMode=yes \"*)\n" +
-			"    printf '%s' batch > \"$DPX_FAKE_SSH_BATCH_MARKER\"\n" +
+			$"    printf '%s' batch > '{escapedBatchMarker}'\n" +
 			"    exit 73\n" +
 			"    ;;\n" +
 			"esac\n" +
@@ -96,7 +97,6 @@ public sealed class TerminalClonePtyTests
 			environment: new Dictionary<string, string>
 			{
 				["PATH"] = fakeBin + Path.PathSeparator + inheritedPath,
-				["DPX_FAKE_SSH_BATCH_MARKER"] = batchMarker,
 				["GIT_SSH_COMMAND"] = "interactive-user-override",
 				["GIT_SSH_VARIANT"] = "simple"
 			},
