@@ -1,0 +1,177 @@
+name: Package Headless Release Archives
+
+on:
+  pull_request:
+    branches: [v5.2]
+    paths:
+      - '.github/workflows/package-headless.yml'
+      - 'Apps/Terminal/**'
+      - 'Apps/TerminalHost/**'
+      - 'Infrastructure/**'
+      - 'Packaging/Headless/**'
+      - 'Scripts/*Headless*'
+      - 'Scripts/*Release*'
+      - 'Scripts/release-archive-helpers.ps1'
+      - 'Directory.Build.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the v prefix
+        required: true
+        type: string
+      release_tag:
+        description: Existing GitHub release tag to receive the archives
+        required: false
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  package:
+    name: Build and gate six headless archives
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      release_tag: ${{ steps.metadata.outputs.release_tag }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Resolve release metadata
+        id: metadata
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          DISPATCH_RELEASE_TAG: ${{ inputs.release_tag }}
+          PUBLISHED_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            version="${PUBLISHED_RELEASE_TAG#v}"
+            release_tag="${PUBLISHED_RELEASE_TAG}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            version="$(sed -n 's:.*<DevProjexVersion[^>]*>\([^<]*\)</DevProjexVersion>.*:\1:p' Directory.Build.props)"
+            release_tag=""
+          else
+            version="${DISPATCH_VERSION}"
+            release_tag="${DISPATCH_RELEASE_TAG}"
+          fi
+          if [[ "${version}" == v* || ! "${version}" =~ ^[0-9]+\.[0-9]+([.][0-9]+)?([+-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "::error::Unsupported version syntax: ${version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build packages and release archives from one publish output
+        shell: pwsh
+        run: ./Scripts/build-headless-packages.ps1 -Version '${{ steps.metadata.outputs.version }}' -DryRun
+
+      - name: Prove release receipt mutations fail closed
+        shell: pwsh
+        run: >
+          ./Scripts/Test-ReleaseArtifactGateMutation.ps1
+          -PublishRoot artifacts/headless/release
+          -Version '${{ steps.metadata.outputs.version }}'
+          -Channels headless
+
+      - name: Functional smoke of the host RID archive payload
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $binary = Resolve-Path 'artifacts/headless/publish/linux-x64/devprojex'
+          chmod +x $binary
+          $actualVersion = (& $binary --version).Trim()
+          if ($actualVersion -cne $env:VERSION) { throw "Version mismatch: expected '$env:VERSION', found '$actualVersion'." }
+
+          $sample = Join-Path $env:RUNNER_TEMP 'devprojex-headless-release-smoke'
+          New-Item -ItemType Directory -Path $sample -Force | Out-Null
+          @'
+          namespace Sample;
+          public static class Program {
+              public static int Compute(int value) {
+                  var implementationMustDisappear = value * 2;
+                  return implementationMustDisappear;
+              }
+          }
+          '@ | Set-Content -LiteralPath (Join-Path $sample 'Program.cs') -Encoding utf8NoBOM
+          $secret = 'ghp_123456789012345678901234567890123456'
+          "token=$secret" | Set-Content -LiteralPath (Join-Path $sample 'settings.txt') -Encoding utf8NoBOM
+
+          $tree = & $binary tree $sample --git-mode none --exclude none
+          if ($LASTEXITCODE -ne 0 -or -not (($tree -join "`n").Contains('Program.cs', [StringComparison]::Ordinal))) {
+            throw 'Headless archive tree smoke failed.'
+          }
+          $full = & $binary analyze $sample --format json --git-mode none --exclude none -o - | ConvertFrom-Json
+          $compressed = & $binary analyze $sample --format json --git-mode none --exclude none --compress-code -o - | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $compressed.metrics.content.chars -ge $full.metrics.content.chars) {
+            throw 'Headless archive compression smoke failed.'
+          }
+          $findings = & $binary analyze $sample --format json --git-mode none --exclude none --findings --fail-on-findings -o -
+          $findingsText = $findings -join "`n"
+          if ($LASTEXITCODE -ne 3 -or $findingsText.Contains($secret, [StringComparison]::Ordinal)) {
+            throw 'Headless archive secret gate smoke failed.'
+          }
+          node Scripts/smoke-headless-mcp.mjs $binary $sample
+          if ($LASTEXITCODE -ne 0) { throw 'Headless archive MCP initialize smoke failed.' }
+
+      - name: Report archive sizes
+        shell: pwsh
+        run: |
+          "### Headless release archives" >> $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem 'artifacts/headless/release/headless/v${{ steps.metadata.outputs.version }}' -File |
+            Where-Object Name -Like 'DevProjex-headless.*' | Sort-Object Name | ForEach-Object {
+              "- ``$($_.Name)``: $($_.Length) bytes" >> $env:GITHUB_STEP_SUMMARY
+            }
+
+      - name: Stage release assets
+        if: ${{ steps.metadata.outputs.release_tag != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: headless-release-assets
+          path: artifacts/headless/release/headless/v${{ steps.metadata.outputs.version }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release-upload:
+    name: Upload complete headless set to GitHub release
+    if: ${{ needs.package.outputs.release_tag != '' }}
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: headless-release-assets
+          path: artifacts/headless-release
+
+      - name: Upload archives, receipts, and checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.package.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}" artifacts/headless-release/* --clobber
