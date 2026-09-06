@@ -31,6 +31,24 @@ internal static class GitProcessStartInfoFactory
 		return startInfo;
 	}
 
+	internal static ProcessStartInfo CreateForTesting(
+		string? workingDirectory,
+		GitProcessOperation operation,
+		string executable)
+	{
+		ArgumentNullException.ThrowIfNull(operation);
+		ArgumentException.ThrowIfNullOrWhiteSpace(executable);
+		var isolation = GitRuntime.IsolationPaths;
+		var startInfo = CreateBase(Path.GetFullPath(executable), workingDirectory, redirectStandardInput: true);
+		ApplyEnvironmentAllowlist(startInfo, operation.Profile);
+		AddProfileArguments(startInfo, operation, isolation);
+		foreach (var argument in operation.BuildArguments(isolation))
+			startInfo.ArgumentList.Add(argument);
+		GitProcessEnvironmentSanitizer.RemoveRepositoryOverrides(startInfo);
+		ApplyTrustedGitEnvironment(startInfo, operation, isolation);
+		return startInfo;
+	}
+
 	[Obsolete("Migrate the caller to a typed GitProcessOperation.")]
 	public static ProcessStartInfo Create(
 		string? workingDirectory,
@@ -101,6 +119,7 @@ internal static class GitProcessStartInfoFactory
 		startInfo.ArgumentList.Add("--no-pager");
 		startInfo.ArgumentList.Add("--no-optional-locks");
 		AddConfig(startInfo, "core.fsmonitor=false");
+		AddConfig(startInfo, "core.quotepath=false");
 		AddConfig(startInfo, $"core.hooksPath={isolation.EmptyHooksDirectory}");
 		AddConfig(startInfo, "credential.helper=");
 		AddConfig(startInfo, "core.askPass=");

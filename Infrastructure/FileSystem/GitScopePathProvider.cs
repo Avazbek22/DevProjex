@@ -141,7 +141,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				[
 					await RunAsync(
 						repositoryRoot,
-						CreateDiffArguments(cached: true, diffRange: null),
+						GitProcessOperation.ReadStagedChanges(),
 						cancellationToken).ConfigureAwait(false)
 				];
 				break;
@@ -149,17 +149,17 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				var outputBudget = new GitScopeOutputBudget(MaximumOutputBytes);
 				var stagedTask = RunAsync(
 					repositoryRoot,
-					CreateDiffArguments(cached: true, diffRange: null),
+					GitProcessOperation.ReadStagedChanges(),
 					cancellationToken,
 					outputBudget);
 				var unstagedTask = RunAsync(
 					repositoryRoot,
-					CreateDiffArguments(cached: false, diffRange: null),
+					GitProcessOperation.ReadWorkingChanges(),
 					cancellationToken,
 					outputBudget);
 				var untrackedTask = RunAsync(
 					repositoryRoot,
-					["ls-files", "--others", "--exclude-standard", "-z", "--"],
+					GitProcessOperation.ReadUntracked(),
 					cancellationToken,
 					outputBudget);
 				outputs = await Task.WhenAll(stagedTask, unstagedTask, untrackedTask)
@@ -172,7 +172,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				[
 					await RunAsync(
 						repositoryRoot,
-						CreateDiffArguments(cached: false, diffRange),
+						GitProcessOperation.ReadRefDiff(diffRange!),
 						cancellationToken).ConfigureAwait(false)
 				];
 				break;
@@ -183,14 +183,14 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		var failed = outputs.FirstOrDefault(static output => !output.Succeeded);
 		if (failed is not null)
 			return RepositoryScopeResult.Unavailable(failed.FailureReason);
-		var topLevelOutput = await RunAsync(
+		if (!GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
 			repositoryRoot,
-			["rev-parse", "--show-toplevel"],
-			cancellationToken).ConfigureAwait(false);
-		if (!topLevelOutput.Succeeded)
-			return RepositoryScopeResult.Unavailable(topLevelOutput.FailureReason);
-		if (!MatchesExpectedRepositoryRoot(topLevelOutput.Values, repositoryRoot))
+			cancellationToken,
+			out var currentRepositoryRoot) ||
+		    !PathComparer.Default.Equals(currentRepositoryRoot, repositoryRoot))
+		{
 			return RepositoryScopeResult.Unavailable("The Git repository boundary changed during scope resolution.");
+		}
 
 		var included = new HashSet<string>(StringComparer.Ordinal);
 		var deleted = new HashSet<string>(StringComparer.Ordinal);
@@ -486,7 +486,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 
 	private static async Task<GitCommandOutput> RunAsync(
 		string repositoryRoot,
-		IReadOnlyList<string> commandArguments,
+		GitProcessOperation operation,
 		CancellationToken cancellationToken,
 		GitScopeOutputBudget? outputBudget = null)
 	{
@@ -494,7 +494,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		timeoutSource.CancelAfter(CommandTimeout);
 		using var process = new Process
 		{
-			StartInfo = CreateStartInfo(repositoryRoot, commandArguments)
+			StartInfo = CreateStartInfo(repositoryRoot, operation)
 		};
 		try
 		{
@@ -560,24 +560,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 
 	internal static ProcessStartInfo CreateStartInfo(
 		string repositoryRoot,
-		IReadOnlyList<string> commandArguments)
+		GitProcessOperation operation)
 	{
-		var arguments = new List<string>(commandArguments.Count + 6)
-		{
-			"-C",
-			repositoryRoot,
-			"-c",
-			"core.quotepath=false",
-			"-c",
-			"core.fsmonitor=false"
-		};
-		arguments.AddRange(commandArguments);
-		var startInfo = GitProcessStartInfoFactory.Create(repositoryRoot, arguments);
+		var startInfo = GitProcessStartInfoFactory.Create(repositoryRoot, operation);
 		startInfo.StandardOutputEncoding = new UTF8Encoding(
 			encoderShouldEmitUTF8Identifier: false,
 			throwOnInvalidBytes: false);
-		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-		startInfo.Environment["GIT_NO_LAZY_FETCH"] = "1";
 		return startInfo;
 	}
 

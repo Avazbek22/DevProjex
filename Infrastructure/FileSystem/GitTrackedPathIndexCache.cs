@@ -292,15 +292,10 @@ internal static class GitTrackedPathIndexCache
 	{
 		var startInfo = GitProcessStartInfoFactory.Create(
 			repositoryRootPath,
-			[
-				"-C", repositoryRootPath,
-				"-c", "core.quotepath=false",
-				"ls-files", "--cached", "--full-name", "-z", "--"
-			]);
+			GitProcessOperation.ReadTrackedIndex());
 		startInfo.StandardOutputEncoding = new UTF8Encoding(
 			encoderShouldEmitUTF8Identifier: false,
 			throwOnInvalidBytes: false);
-		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
 		return startInfo;
 	}
 

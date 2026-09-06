@@ -202,7 +202,6 @@ public sealed class GitConfigPathComparisonSemanticsResolverTests
 			var stopwatch = Stopwatch.StartNew();
 			var succeeded = GitConfigPathComparisonSemanticsResolver.TryRunGit(
 				repositoryRoot,
-				[],
 				out _,
 				out _,
 				executable);
