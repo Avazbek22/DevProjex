@@ -43,8 +43,11 @@ internal static class GitProcessStartInfoFactory
 		ArgumentNullException.ThrowIfNull(operation);
 		ArgumentException.ThrowIfNullOrWhiteSpace(executable);
 		var isolation = GitRuntime.IsolationPaths;
+		var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
 		var startInfo = CreateBase(Path.GetFullPath(executable), workingDirectory, redirectStandardInput: true);
 		ApplyEnvironmentAllowlist(startInfo, operation.Profile);
+		if (!string.IsNullOrEmpty(dotnetRoot))
+			startInfo.Environment["DOTNET_ROOT"] = dotnetRoot;
 		AddProfileArguments(startInfo, operation, isolation);
 		foreach (var argument in operation.BuildArguments(isolation))
 			startInfo.ArgumentList.Add(argument);

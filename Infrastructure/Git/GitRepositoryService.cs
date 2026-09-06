@@ -784,10 +784,12 @@ public sealed class GitRepositoryService : IGitRepositoryService
 		CancellationToken cancellationToken)
 	{
 		var normalizedTarget = Path.GetFullPath(targetDirectory);
+		var wasAlreadyManaged = RepositoryCacheLayout.IsManaged(normalizedTarget);
 		var markerPath = Path.Combine(normalizedTarget, RepositoryCacheLayout.MarkerFileName);
 		var leasesPath = Path.Combine(normalizedTarget, RepositoryCacheLayout.LeasesDirectoryName);
 		var leasePath = RepositoryCacheLayout.GetBaseOperationLockPath(normalizedTarget, normalizedTarget);
-		File.WriteAllText(markerPath, "git");
+		if (!wasAlreadyManaged)
+			File.WriteAllText(markerPath, "git");
 		try
 		{
 			await using var lease = await RepositoryFileLease.AcquireExclusiveAsync(
@@ -817,7 +819,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
 			File.Delete(leasePath);
 			if (Directory.Exists(leasesPath) && !Directory.EnumerateFileSystemEntries(leasesPath).Any())
 				Directory.Delete(leasesPath);
-			if (!_retainTestManagedMarker)
+			if (!wasAlreadyManaged && !_retainTestManagedMarker)
 				File.Delete(markerPath);
 		}
 	}

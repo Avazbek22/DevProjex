@@ -59,7 +59,9 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var service = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService(allowFileTransportForTests: true);
+		var git = new GitRepositoryService(
+			allowFileTransportForTests: true,
+			retainTestManagedMarker: false);
 		var basePath = await PublishGitAsync(
 			service,
 			git,
@@ -261,7 +263,9 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var service = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService(allowFileTransportForTests: true);
+		var git = new GitRepositoryService(
+			allowFileTransportForTests: true,
+			retainTestManagedMarker: false);
 		var legacyPath = service.CreateRepositoryDirectory(source.RepositoryUrl);
 		var result = await git.CloneAsync(
 			source.RepositoryUrl,
