@@ -200,5 +200,8 @@ The container channel meets the same connection contract:
    in `Docs/Installation.md` and `Docs/McpServer.md`.
 
 The image is a folder publish with `DevProjexGrammarDelivery=Content`. Grammar
-libraries stay beside the executable, so neither .NET single-file extraction nor
-grammar materialization needs a writable filesystem at startup.
+libraries stay beside the executable, and `CodeCompressionFactory` selects content
+delivery from the presence of that `grammars` directory on every OS. It does not
+fall back to embedded delivery when a shipped grammar is missing. Neither .NET
+single-file extraction nor grammar materialization needs a writable filesystem at
+startup.
