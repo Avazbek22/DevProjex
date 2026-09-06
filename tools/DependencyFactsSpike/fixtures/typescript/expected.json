@@ -1,0 +1,13 @@
+{
+  "name": "typescript",
+  "edges": [
+    { "source": "src/main.ts", "reference": "./x.js", "status": "Resolved", "target": "src/x.ts" },
+    { "source": "src/main.ts", "reference": "./dir", "status": "Unresolved", "reasonContains": "no target" },
+    { "source": "src/main.ts", "reference": "fixture/blocked", "status": "Unresolved", "reasonContains": "null-blocked" },
+    { "source": "src/main.ts", "reference": "@exact", "status": "Resolved", "target": "src/exact.ts" },
+    { "source": "src/main.ts", "reference": "@lib/item", "status": "Resolved", "target": "src/lib/item.ts" }
+  ],
+  "parsedAfterSourceChange": 1,
+  "parsedAfterConfigChange": 0,
+  "reresolvedAfterConfigChange": 5
+}
