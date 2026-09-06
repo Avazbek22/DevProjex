@@ -87,6 +87,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private long? _compressionSourceCharacters;
 	private long? _compressionTransformedCharacters;
 	private bool _compressionPreparationActive;
+	private string? _compressionUnavailableReason;
 	private int? _commentStrippedFilesCount;
 	private int? _commentStripTotalFilesCount;
 	private bool _commentStripPreparationActive;
@@ -2397,12 +2398,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		int? compressedFiles,
 		int? totalFiles,
 		long? sourceCharacters,
-		long? transformedCharacters)
+		long? transformedCharacters,
+		string? unavailableReason = null)
 	{
 		if (_compressedFilesCount == compressedFiles &&
 		    _compressionTotalFilesCount == totalFiles &&
 		    _compressionSourceCharacters == sourceCharacters &&
-		    _compressionTransformedCharacters == transformedCharacters)
+		    _compressionTransformedCharacters == transformedCharacters &&
+		    string.Equals(_compressionUnavailableReason, unavailableReason, StringComparison.Ordinal))
 		{
 			return;
 		}
@@ -2411,6 +2414,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		_compressionTotalFilesCount = totalFiles;
 		_compressionSourceCharacters = sourceCharacters;
 		_compressionTransformedCharacters = transformedCharacters;
+		_compressionUnavailableReason = unavailableReason;
 		UpdateSettingsCompressionNotice();
 	}
 
@@ -2581,6 +2585,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	{
 		var notice = _compressionPreparationActive
 			? _localization["Settings.Compression.Status.Scanning"]
+			: _compressionUnavailableReason is { Length: > 0 } unavailableReason
+				? _localization.Format("Compression.Status.Unavailable", unavailableReason)
 			: (_compressedFilesCount, _compressionTotalFilesCount) switch
 		{
 			(0, 0) => _localization["Settings.Compression.Status.NothingToCompress"],

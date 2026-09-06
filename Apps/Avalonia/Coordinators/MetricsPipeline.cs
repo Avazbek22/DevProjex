@@ -714,7 +714,8 @@ internal sealed class MetricsPipeline(
 								snapshot.BodyTransformedFiles,
 								snapshot.TotalFiles,
 								snapshot.SourceCharacters,
-								snapshot.TransformedCharacters);
+								snapshot.TransformedCharacters,
+								snapshot.Availability.PrimaryReason);
 						}
 						if ((compression.Kinds & CodeTransformKinds.Comments) != 0)
 						{

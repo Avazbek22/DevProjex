@@ -118,6 +118,8 @@ public sealed class AnalyzeCommandHandler(
 					: null,
 				UnscannableFiles = prepared.UnscannableFiles
 			};
+			if (prepared.CompressionSnapshot is { } compressionSnapshot)
+				plan = CodeCompressionDiagnostic.Append(plan, compressionSnapshot.Availability);
 		}
 		else if (topFileRanking is not null)
 		{
@@ -276,7 +278,8 @@ public sealed class AnalyzeCommandHandler(
 		}
 
 		return plan.HasErrors ||
-		       request.Strict && plan.Diagnostics.Count > 0 ||
+		       request.Strict && plan.Diagnostics.Any(static diagnostic =>
+			       diagnostic.Code != CodeCompressionAvailabilitySnapshot.DiagnosticCode) ||
 		       request.FailOnFindings && effectiveFindingCount > 0
 			? CommandLineExitCodes.PolicyFailure
 			: CommandLineExitCodes.Success;

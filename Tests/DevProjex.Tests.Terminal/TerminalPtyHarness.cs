@@ -118,7 +118,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		Action<string>? initializeDataRoot = null,
 		bool writeShellCompletionMarker = false,
 		bool useProgressCheckpointHost = false,
-		bool verifyExecutableRelaunch = false)
+		bool verifyExecutableRelaunch = false,
+		string? binaryOverride = null)
 	{
 		if (string.Equals(
 			    Environment.GetEnvironmentVariable(SkipInteractiveTuiTestsVariable),
@@ -129,9 +130,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				"Interactive TUI PTY journeys are disabled in broad CI jobs; Release Validation runs the curated PTY matrix.");
 		}
 
-		var binary = useProgressCheckpointHost
+		var binary = binaryOverride ?? (useProgressCheckpointHost
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
-			: PublishedApplicationLocator.FindExecutable();
+			: PublishedApplicationLocator.FindExecutable());
 		var launchArguments = arguments?.ToArray() ?? [];
 		var launchesThroughDotNetHost = false;
 		if (OperatingSystem.IsWindows() &&

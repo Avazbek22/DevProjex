@@ -68,6 +68,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private long _workspacePersistenceRequestId;
 	private int _workspacePersistencePending;
 	private bool _previewSearchInProgress;
+	private bool _compressionUnavailableNotified;
 
 	private TerminalWelcomeContext? _welcomeContext;
 	private RecentProjectsDb? _recentProjectsSnapshot;
@@ -1615,22 +1616,43 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			diagnostic.Severity == ContextDiagnosticSeverity.Error);
 		var tokens = ResolveDisplayedTokenCount(state);
 		var folders = state.HasVisibleTreeItems ? state.SelectedFolderCount : 0;
+		var compressionUnavailable = GetCurrentCompressionAvailability(state)?.IsUnavailable == true;
 		if (width < 80)
 		{
 			return $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
 				   $"~{tokens:N0} tok  " +
-				   $"{warningCount:N0} W  {errorCount:N0} E";
+				   $"{warningCount:N0} W  {errorCount:N0} E" +
+				   (compressionUnavailable ? "  C!" : string.Empty);
 		}
 
 		var separator = _environment.SupportsUnicode ? PanelSeparator : " | ";
-		return string.Join(
-			separator,
+		var parts = new List<string>
+		{
 			$"{L("Terminal.Analysis.Files")} {state.SelectedFileCount:N0}",
 			$"{L("Terminal.Analysis.Folders")} {folders:N0}",
 			TerminalWorkspace.FormatBytes(state.Plan.IncludedBytes),
 			$"~{tokens:N0} {L("Terminal.Tui.TokensShort")}",
 			$"{L("Terminal.Tui.Warnings")} {warningCount:N0}",
-			$"{L("Terminal.Tui.Errors")} {errorCount:N0}");
+			$"{L("Terminal.Tui.Errors")} {errorCount:N0}"
+		};
+		if (compressionUnavailable)
+			parts.Add(L("Compression.Metrics.Unavailable"));
+		return string.Join(
+			separator,
+			parts);
+	}
+
+	private CodeCompressionAvailabilitySnapshot? GetCurrentCompressionAvailability(
+		TerminalWorkspaceState state)
+	{
+		if (state.Plan.Selection.CompressCode != true)
+			return null;
+		var snapshot = _services.CodeCompressionSession.Snapshot;
+		return snapshot.SelectionKey == CodeCompressionSession.BuildSelectionKey(
+			state.Plan.SourceRoot,
+			state.Plan.IncludedFiles)
+			? snapshot.Availability
+			: null;
 	}
 
 	internal static long ResolveDisplayedTokenCount(TerminalWorkspaceState state)
@@ -4063,6 +4085,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 					RefreshWorkspace();
 					RefreshAppliedCommandResult();
+					var compressionAvailability = GetCurrentCompressionAvailability(state);
+					if (!_compressionUnavailableNotified &&
+					    compressionAvailability is { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason })
+					{
+						_compressionUnavailableNotified = true;
+						ShowTransientStatus(NormalizeLocalizedText(
+							_services.Localization.Format("Compression.Status.Unavailable", reason),
+							_options.Plain,
+							_environment.SupportsUnicode));
+					}
 					return true;
 				}).ConfigureAwait(false);
 				if (applied)

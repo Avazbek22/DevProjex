@@ -76,7 +76,12 @@ public sealed class ContextDiagnosticRenderer(
 	internal static string ResolveMessage(
 		LocalizationService localization,
 		ContextDiagnostic diagnostic) =>
-		diagnostic.Code == GitScopeFilter.DeletedDiagnosticCode
-			? localization.Format("Terminal.Diagnostic.GitStateDeleted", diagnostic.Count ?? 0)
-			: ResolveMessage(localization, diagnostic.Code);
+		diagnostic.Code switch
+		{
+			GitScopeFilter.DeletedDiagnosticCode =>
+				localization.Format("Terminal.Diagnostic.GitStateDeleted", diagnostic.Count ?? 0),
+			CodeCompressionAvailabilitySnapshot.DiagnosticCode =>
+				localization.Format("Compression.Diagnostic.Unavailable", diagnostic.Message),
+			_ => ResolveMessage(localization, diagnostic.Code)
+		};
 }
