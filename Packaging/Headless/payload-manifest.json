@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "rids": [
-    { "rid": "win-x64", "npmPlatform": "win32-x64", "os": "win32", "cpu": "x64", "binary": "devprojex.exe", "grammarPrefix": "", "grammarExtension": ".dll" },
-    { "rid": "win-arm64", "npmPlatform": "win32-arm64", "os": "win32", "cpu": "arm64", "binary": "devprojex.exe", "grammarPrefix": "", "grammarExtension": ".dll" },
-    { "rid": "linux-x64", "npmPlatform": "linux-x64", "os": "linux", "cpu": "x64", "binary": "devprojex", "grammarPrefix": "lib", "grammarExtension": ".so" },
-    { "rid": "linux-arm64", "npmPlatform": "linux-arm64", "os": "linux", "cpu": "arm64", "binary": "devprojex", "grammarPrefix": "lib", "grammarExtension": ".so" },
-    { "rid": "osx-x64", "npmPlatform": "darwin-x64", "os": "darwin", "cpu": "x64", "binary": "devprojex", "grammarPrefix": "lib", "grammarExtension": ".dylib" },
-    { "rid": "osx-arm64", "npmPlatform": "darwin-arm64", "os": "darwin", "cpu": "arm64", "binary": "devprojex", "grammarPrefix": "lib", "grammarExtension": ".dylib" }
+    { "rid": "win-x64", "npmPlatform": "win32-x64", "os": "win32", "cpu": "x64", "binary": "devprojex.exe", "releaseBinary": "DevProjex.exe", "grammarPrefix": "", "grammarExtension": ".dll" },
+    { "rid": "win-arm64", "npmPlatform": "win32-arm64", "os": "win32", "cpu": "arm64", "binary": "devprojex.exe", "releaseBinary": "DevProjex.exe", "grammarPrefix": "", "grammarExtension": ".dll" },
+    { "rid": "linux-x64", "npmPlatform": "linux-x64", "os": "linux", "cpu": "x64", "binary": "devprojex", "releaseBinary": "DevProjex", "grammarPrefix": "lib", "grammarExtension": ".so" },
+    { "rid": "linux-arm64", "npmPlatform": "linux-arm64", "os": "linux", "cpu": "arm64", "binary": "devprojex", "releaseBinary": "DevProjex", "grammarPrefix": "lib", "grammarExtension": ".so" },
+    { "rid": "osx-x64", "npmPlatform": "darwin-x64", "os": "darwin", "cpu": "x64", "binary": "devprojex", "releaseBinary": "DevProjex", "grammarPrefix": "lib", "grammarExtension": ".dylib" },
+    { "rid": "osx-arm64", "npmPlatform": "darwin-arm64", "os": "darwin", "cpu": "arm64", "binary": "devprojex", "releaseBinary": "DevProjex", "grammarPrefix": "lib", "grammarExtension": ".dylib" }
   ],
   "grammars": [
     "tree-sitter-bash",
@@ -29,5 +29,34 @@
     "tree-sitter-typescript",
     "tree-sitter-xml",
     "tree-sitter-yaml"
-  ]
+  ],
+  "release": {
+    "store": {
+      "executionAlias": "devprojex.exe",
+      "applicationExecutable": "DevProjex.Avalonia\\DevProjex.exe",
+      "platforms": ["x64", "arm64"],
+      "resourceLanguages": [
+        "de-de",
+        "en-us",
+        "es-es",
+        "fr-fr",
+        "id-id",
+        "it-it",
+        "ja-jp",
+        "kk-kz",
+        "ko-kr",
+        "pl-pl",
+        "pt-br",
+        "pt-pt",
+        "ru-ru",
+        "tg-cyrl-tj",
+        "tr-tr",
+        "uk-ua",
+        "uz-latn-uz",
+        "vi-vn",
+        "zh-cn",
+        "zh-tw"
+      ]
+    }
+  }
 }

@@ -270,7 +270,11 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains("DevProjex.v$version.osx-arm64.app.tar.gz", releaseScript, StringComparison.Ordinal);
         Assert.Contains("New-UstarGzipArchive", releaseScript, StringComparison.Ordinal);
         Assert.Contains("Read-UstarGzipArchive", releaseScript, StringComparison.Ordinal);
-        Assert.Contains("-GitHubOnly:$GitHubArtifactsOnly", releaseScript, StringComparison.Ordinal);
+        // Channel selection intentionally replaces the former boolean-only copy boundary;
+        // -GitHubArtifactsOnly remains an input alias and is normalized before this call.
+        Assert.Contains("-channels $invocation.Channels", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("/p:EnableCompressionInSingleFile=false", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Test-ReleaseArtifacts.ps1", releaseScript, StringComparison.Ordinal);
         Assert.Contains("(Join-Path $sourceRoot \"artifacts\")", releaseScript, StringComparison.Ordinal);
         Assert.Contains("(Join-Path $sourceRoot \".artifacts\")", releaseScript, StringComparison.Ordinal);
         Assert.Contains("\"bin\"", releaseScript, StringComparison.Ordinal);
@@ -298,10 +302,10 @@ public sealed class AppInstancePackagingContractTests
             "Get-RelativePublishedPath -basePath $ridOutDir -publishedPath $_.FullName",
             releaseScript,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "Build-GitHubArtifactsInWorkspace -version $resolvedVersion -configuration \"Release\" -storePackageVersion $storePackageVersion",
-            releaseScript,
-            StringComparison.Ordinal);
+        Assert.Contains("Build-GitHubArtifactsInWorkspace `", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("-configuration \"Release\" `", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("-storePackageVersion $storePackageVersion `", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("-rids $invocation.Rids", releaseScript, StringComparison.Ordinal);
         Assert.DoesNotContain("\"/p:PublishTrimmed=true\"", releaseScript, StringComparison.Ordinal);
     }
 
