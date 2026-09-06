@@ -1,6 +1,8 @@
 name: Publish Headless Packages
 
 on:
+  release:
+    types: [published]
   pull_request:
     branches:
       - v5.2
@@ -16,6 +18,7 @@ on:
       - 'Tests/DevProjex.Tests.Terminal/**'
       - 'Directory.Build.props'
       - 'Directory.Build.targets'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
   workflow_dispatch:
     inputs:
       version:
@@ -74,9 +77,15 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $displayVersion = '${{ inputs.version }}'
+          $displayVersion = if ('${{ github.event_name }}' -ceq 'release') {
+            '${{ github.event.release.tag_name }}'.TrimStart('v')
+          } elseif ('${{ github.event_name }}' -ceq 'pull_request') {
+            ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.DevProjexVersion
+          } else {
+            '${{ inputs.version }}'
+          }
           if ([string]::IsNullOrWhiteSpace($displayVersion)) {
-            $displayVersion = '5.2'
+            throw 'Could not resolve the DevProjex display version.'
           }
           $packageVersion = $displayVersion
           if ($packageVersion -match '^(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
@@ -87,6 +96,14 @@ jobs:
           }
           "display_version=$displayVersion" >> $env:GITHUB_OUTPUT
           "package_version=$packageVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Validate release version metadata
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ReleaseVersion.ps1
+          -ResolvedVersion '${{ steps.version.outputs.display_version }}'
+          -EventName '${{ github.event_name }}'
+          -ReleaseTag '${{ github.event.release.tag_name }}'
 
       - name: Test npm launcher contract
         run: node --test Packaging/Npm/test/*.test.js

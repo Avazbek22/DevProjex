@@ -415,6 +415,37 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void ReleaseWorkflowsShareVersionAndAppImageReceiptGates()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflowNames = new[]
+		{
+			"package-appimage.yml",
+			"package-headless.yml",
+			"publish-container.yml",
+			"publish-packages.yml"
+		};
+		foreach (var workflowName in workflowNames)
+		{
+			var workflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", workflowName));
+			Assert.Contains("types: [published]", workflow, StringComparison.Ordinal);
+			Assert.Contains("Scripts/ci/Test-ReleaseVersion.ps1", workflow, StringComparison.Ordinal);
+			Assert.Contains("github.event.release.tag_name", workflow, StringComparison.Ordinal);
+		}
+
+		var appImageWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-appimage.yml"));
+		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", appImageWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifacts.ps1", appImageWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifactGateMutation.ps1", appImageWorkflow, StringComparison.Ordinal);
+		Assert.Contains("-Channels appimage", appImageWorkflow, StringComparison.Ordinal);
+
+		var releaseProcess = File.ReadAllText(Path.Combine(rootPath, "Docs", "Release-Process.md"));
+		Assert.Contains("must match", releaseProcess, StringComparison.Ordinal);
+		Assert.Contains("workflow_dispatch", releaseProcess, StringComparison.Ordinal);
+		Assert.Contains("AppImage workflow enables the same SDK-generated", releaseProcess, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void ReadmeCommandExamplesParseAgainstTheProductionCommandTree()
 	{
 		var rootPath = FindRepositoryRoot();

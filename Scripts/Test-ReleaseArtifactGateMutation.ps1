@@ -54,7 +54,7 @@ function Invoke-FailingValidation(
     $shellPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
     $arguments = @('-NoLogo', '-NoProfile', '-File', (Join-Path $PSScriptRoot 'Test-ReleaseArtifacts.ps1'),
         '-PublishRoot', $FixturePublishRoot, '-Version', $Version, '-Channels', $Channel)
-    if ($Channel -in @('github', 'headless', 'container')) {
+    if ($Channel -in @('github', 'headless', 'container', 'appimage')) {
         $arguments += @('-Rids', ($script:SelectedRids -join ','))
     }
     $output = & $shellPath @arguments 2>&1 | Out-String
@@ -107,7 +107,7 @@ function Get-ReceiptMutationCases([object] $Receipt) {
 	}
     $fixedNative = @($Receipt.files | Where-Object {
         $_.PSObject.Properties.Name -notcontains 'managedResources' -and
-        ([string]$_.path -ceq 'libSkiaSharp.dll' -or
+        ([string]$_.path -cmatch '(^|/)libSkiaSharp\.(dll|so|dylib)$' -or
             [string]$_.path -cmatch '(^|/)(lib)?tree-sitter\.(dll|so|dylib)$')
     } | Sort-Object {
         if ([string]$_.path -ceq 'libSkiaSharp.dll') { 0 } else { 1 }
@@ -292,13 +292,33 @@ function Invoke-ContainerMutation([string] $SourcePublishRoot, [string] $Rid, [o
     finally { Remove-MutationDirectory -Path $fixtureRoot }
 }
 
+function Invoke-AppImageMutation([string] $SourcePublishRoot, [string] $Rid, [object] $Case) {
+	$fixtureRoot = Copy-ChannelFixture -SourcePublishRoot $SourcePublishRoot -Channel 'appimage'
+	try {
+		$binaryPath = Join-Path $fixtureRoot "appimage/v$Version/$Rid/DevProjex"
+		if (-not (Test-Path -LiteralPath $binaryPath -PathType Leaf)) {
+			throw "Mutation setup failed: AppImage publish binary was not found: $binaryPath"
+		}
+		if ([string]$Case.Kind -ceq 'File') {
+			[DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateBundleEntry($binaryPath, [string]$Case.File)
+		}
+		else {
+			[void][DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateBundleResource(
+				$binaryPath, [string]$Case.File, [string]$Case.Entry)
+		}
+		Invoke-FailingValidation -FixturePublishRoot $fixtureRoot -Channel 'appimage' `
+			-ArtifactName "AppImage publish:$Rid" -ExpectedEntry ([string]$Case.Entry)
+	}
+	finally { Remove-MutationDirectory -Path $fixtureRoot }
+}
+
 $sourcePublishRoot = [System.IO.Path]::GetFullPath($(if ([string]::IsNullOrWhiteSpace($PublishRoot)) {
     Join-Path (Split-Path -Parent $PSScriptRoot) 'publish'
 } else { $PublishRoot }))
 $selectedChannels = @(ConvertTo-Tokens $Channels)
 $script:SelectedRids = @(ConvertTo-Tokens $Rids)
 foreach ($channel in $selectedChannels) {
-    if ($channel -notin @('github', 'store', 'headless', 'container')) { throw "Unknown release channel '$channel'." }
+    if ($channel -notin @('github', 'store', 'headless', 'container', 'appimage')) { throw "Unknown release channel '$channel'." }
 }
 if (@($selectedChannels | Where-Object { $_ -in @('github', 'headless') }).Count -gt 0 -and
     'win-x64' -notin $script:SelectedRids) {
@@ -334,6 +354,14 @@ try {
             Invoke-ContainerMutation -SourcePublishRoot $sourcePublishRoot -Rid $containerRid[0] -Case $case
         }
     }
+	if ('appimage' -in $selectedChannels) {
+		$appImageRid = @($script:SelectedRids | Where-Object { $_ -in @('linux-x64', 'linux-arm64') } | Select-Object -First 1)
+		if ($appImageRid.Count -ne 1) { throw 'AppImage mutation gate requires a Linux RID in -Rids.' }
+		$directory = Join-Path $sourcePublishRoot "appimage/v$Version"
+		foreach ($case in @(Get-ReceiptMutationCases -Receipt (Read-PayloadReceipt $directory $appImageRid[0]))) {
+			Invoke-AppImageMutation -SourcePublishRoot $sourcePublishRoot -Rid $appImageRid[0] -Case $case
+		}
+	}
 }
 finally {
     $resolvedMutationRoot = [System.IO.Path]::GetFullPath($script:MutationRoot)
