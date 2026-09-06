@@ -928,6 +928,7 @@ function Invoke-StoreSmokeBuild([string]$repoRoot, [string]$versionOverride) {
     $msbuildPath = Get-MsBuildPath
     $targetPlatformResolution = Resolve-StoreTargetPlatformVersion -projectPath $projectPath
     $outputRoot = Join-Path $env:TEMP ("devprojex-store-smoke-" + [Guid]::NewGuid().ToString("N"))
+    $payloadReceiptDirectory = Join-Path $outputRoot 'payload-receipts'
     $originalProjectContent = $null
     $projectPatched = $false
 
@@ -944,6 +945,16 @@ function Invoke-StoreSmokeBuild([string]$repoRoot, [string]$versionOverride) {
         $originalProjectContent = Get-Content -Path $projectPath -Raw
         $projectPatched = Set-StoreProjectTargetPlatformVersion -projectPath $projectPath -targetPlatformVersion $targetPlatformResolution.ResolvedVersion
 
+        foreach ($staleStorePath in @(
+            (Join-Path $repoRoot 'Packaging\Windows\DevProjex.Store\bin'),
+            (Join-Path $repoRoot 'Packaging\Windows\DevProjex.Store\obj'),
+            (Join-Path $repoRoot 'Packaging\Windows\DevProjex.Store\BundleArtifacts')
+        )) {
+            if (Test-Path -LiteralPath $staleStorePath) {
+                Remove-Item -LiteralPath $staleStorePath -Recurse -Force
+            }
+        }
+
         Invoke-ExternalCommand -filePath "dotnet" -arguments (@("restore", $appProjectPath, "/p:Configuration=ReleaseStore") + $versionProperties) -failureMessage "dotnet restore failed for store smoke build" -workingDirectory $repoRoot
 
         $msbuildArgs = @(
@@ -954,7 +965,9 @@ function Invoke-StoreSmokeBuild([string]$repoRoot, [string]$versionOverride) {
             "/p:AppxBundlePlatforms=x64|arm64",
             "/p:UapAppxPackageBuildMode=StoreUpload",
             "/p:GenerateAppInstallerFile=false",
-            "/p:AppxPackageDir=$outputRoot\"
+            "/p:AppxPackageDir=$outputRoot\",
+            "/p:DevProjexGenerateReleasePayloadReceipt=true",
+            "/p:DevProjexPayloadReceiptDirectory=$payloadReceiptDirectory"
         ) + $versionProperties
 
         Invoke-ExternalCommand -filePath $msbuildPath -arguments $msbuildArgs -failureMessage "MS Store smoke build failed" -workingDirectory $repoRoot
@@ -979,6 +992,7 @@ function Invoke-StoreSmokeBuild([string]$repoRoot, [string]$versionOverride) {
         $validationPublishRoot = Join-Path $outputRoot 'publish'
         [void](New-StoreValidationDirectory `
             -artifacts @($artifacts) `
+            -payloadReceipts @(Get-ChildItem -LiteralPath $payloadReceiptDirectory -File -Filter 'publish-payload.win-*.json') `
             -buildLogPath '' `
             -publishRoot $validationPublishRoot `
             -version $resolvedDisplayVersion)
@@ -1327,6 +1341,7 @@ function Build-GitHubArtifactsInWorkspace(
 
     $releaseDir = Join-Path $script:IsolatedRepoRoot "publish\github\v$version"
     $workDir = Join-Path $releaseDir "_work"
+    $receiptDir = Join-Path $workDir "receipts"
 
     $targets = @(
         @{ Rid = "win-x64"; Binary = "DevProjex.exe"; Kind = "Windows"; Name = "DevProjex.v$version.win-x64.exe" },
@@ -1343,6 +1358,7 @@ function Build-GitHubArtifactsInWorkspace(
 
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
     New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $receiptDir -Force | Out-Null
 
     Write-Host "Preparing GitHub release artifacts..."
     Write-Host "  Version: $version"
@@ -1371,6 +1387,8 @@ function Build-GitHubArtifactsInWorkspace(
             "/p:EnableProjectLoadTiming=false",
             "/p:DebugType=None",
             "/p:DebugSymbols=false",
+            "/p:DevProjexGenerateReleasePayloadReceipt=true",
+            "/p:DevProjexPayloadReceiptDirectory=$receiptDir",
             "-o", $ridOutDir
         ) + $versionProperties
 
@@ -1414,6 +1432,13 @@ function Build-GitHubArtifactsInWorkspace(
                 throw "Unsupported GitHub artifact kind '$($target.Kind)' for $rid."
             }
         }
+
+        $receiptName = "publish-payload.$rid.json"
+        $receiptPath = Join-Path $receiptDir $receiptName
+        if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
+            throw "Payload receipt was not generated for RID '$rid': $receiptPath"
+        }
+        Copy-Item -LiteralPath $receiptPath -Destination (Join-Path $releaseDir $receiptName) -Force
     }
 
     if ($rids.Count -ne $script:AllReleaseRids.Count) {
@@ -1572,6 +1597,8 @@ function Build-StoreArtifactsInWorkspace(
 
     $publishStoreDir = Join-Path $script:IsolatedRepoRoot "publish\store"
     New-Item -ItemType Directory -Force -Path $publishStoreDir | Out-Null
+    $payloadReceiptDirectory = Join-Path $publishStoreDir 'payload-receipts'
+    New-Item -ItemType Directory -Force -Path $payloadReceiptDirectory | Out-Null
     $buildLogRelative = "publish\store\msix-build.log"
 
     $bundleMode = if ($bundlePlatforms -like "*|*") { "Always" } else { "Never" }
@@ -1583,6 +1610,8 @@ function Build-StoreArtifactsInWorkspace(
         "/p:AppxBundlePlatforms=$bundlePlatforms",
         "/p:UapAppxPackageBuildMode=StoreUpload",
         "/p:AppxPackageDir=publish\store\",
+        "/p:DevProjexGenerateReleasePayloadReceipt=true",
+        "/p:DevProjexPayloadReceiptDirectory=$payloadReceiptDirectory",
         "/p:EnableProjectLoadTiming=false",
         "/flp:logfile=$buildLogRelative;verbosity=normal"
     ) + $versionProperties
@@ -1676,6 +1705,7 @@ function Build-StoreArtifactsInWorkspace(
 
 function New-StoreValidationDirectory(
     [object[]]$artifacts,
+    [object[]]$payloadReceipts,
     [string]$buildLogPath,
     [string]$publishRoot,
     [string]$version
@@ -1688,6 +1718,9 @@ function New-StoreValidationDirectory(
 
     foreach ($artifact in @($artifacts | Sort-Object Name -Unique)) {
         Copy-Item -LiteralPath $artifact.FullName -Destination (Join-Path $destination $artifact.Name) -Force
+    }
+    foreach ($receipt in @($payloadReceipts | Sort-Object Name -Unique)) {
+        Copy-Item -LiteralPath $receipt.FullName -Destination (Join-Path $destination $receipt.Name) -Force
     }
     if (-not [string]::IsNullOrWhiteSpace($buildLogPath) -and
         (Test-Path -LiteralPath $buildLogPath -PathType Leaf)) {
@@ -1704,9 +1737,18 @@ function Stage-StoreArtifactsForValidation([string]$version) {
     }
     return New-StoreValidationDirectory `
         -artifacts $artifacts `
+        -payloadReceipts @(Get-StorePayloadReceiptPaths) `
         -buildLogPath (Join-Path $script:IsolatedRepoRoot 'publish\store\msix-build.log') `
         -publishRoot (Join-Path $script:IsolatedRepoRoot 'publish') `
         -version $version
+}
+
+function Get-StorePayloadReceiptPaths() {
+    $receiptDirectory = Join-Path $script:IsolatedRepoRoot 'publish\store\payload-receipts'
+    if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) {
+        return @()
+    }
+    return @(Get-ChildItem -LiteralPath $receiptDirectory -File -Filter 'publish-payload.win-*.json')
 }
 
 function Get-StoreArtifactPaths([string[]]$candidateRoots = @()) {

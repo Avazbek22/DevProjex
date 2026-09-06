@@ -91,6 +91,41 @@ function Get-GitHubArtifactName([object] $Rid) {
     throw "Unsupported release operating system '$($Rid.os)' for RID '$($Rid.rid)'."
 }
 
+function Get-PayloadReceiptName([string] $Rid) {
+    return "publish-payload.$Rid.json"
+}
+
+function Read-PayloadReceipt(
+    [string] $DirectoryPath,
+    [string] $Rid,
+    [string] $ArtifactName
+) {
+    $receiptName = Get-PayloadReceiptName -Rid $Rid
+    $receiptPath = Join-Path $DirectoryPath $receiptName
+    Assert-Artifact (Test-Path -LiteralPath $receiptPath -PathType Leaf) $ArtifactName "missing payload receipt '$receiptName'"
+    try {
+        $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        Fail-Artifact $ArtifactName "invalid payload receipt '$receiptName': $($_.Exception.Message)"
+    }
+    Assert-Artifact `
+        ($receipt.PSObject.Properties.Name -contains 'schemaVersion') `
+        $ArtifactName `
+        "payload receipt '$receiptName' has no schemaVersion"
+    Assert-Artifact ($receipt.schemaVersion -eq 1) $ArtifactName "unsupported payload receipt schema '$($receipt.schemaVersion)'"
+    Assert-Artifact `
+        ($receipt.PSObject.Properties.Name -contains 'rid') `
+        $ArtifactName `
+        "payload receipt '$receiptName' has no RID"
+    Assert-Artifact ([string]$receipt.rid -ceq $Rid) $ArtifactName "payload receipt '$receiptName' names RID '$($receipt.rid)'"
+    Assert-Artifact `
+        ($receipt.PSObject.Properties.Name -contains 'files' -and $null -ne $receipt.files) `
+        $ArtifactName `
+        "payload receipt '$receiptName' has no files"
+    return $receipt
+}
+
 function Assert-ExactNames(
     [string[]] $Expected,
     [string[]] $Actual,
@@ -135,43 +170,111 @@ function Get-ChecksumEntries([string] $DirectoryPath, [string[]] $ExpectedNames)
     return $entries
 }
 
-function Assert-BinaryPayload(
-    [byte[]] $Bytes,
-    [object] $Rid,
+function Assert-PayloadDiff(
+    [object] $Receipt,
+    [object[]] $ActualFiles,
     [string] $ArtifactName
 ) {
-    $payload = [System.Text.Encoding]::Latin1.GetString($Bytes)
-    $expectedPayloadNames = New-Object 'System.Collections.Generic.List[object]'
-    foreach ($grammar in @($script:Manifest.grammars)) {
-        $grammarName = "$($Rid.grammarPrefix)$grammar$($Rid.grammarExtension)"
-        $expectedPayloadNames.Add([pscustomobject]@{ Name = $grammarName; Kind = 'grammar' })
-    }
-    foreach ($localization in @($script:Manifest.release.localizations)) {
-        $expectedPayloadNames.Add([pscustomobject]@{ Name = [string]$localization; Kind = 'localization' })
-    }
-    $pattern = @($expectedPayloadNames |
-        ForEach-Object { [System.Text.RegularExpressions.Regex]::Escape([string]$_.Name) } |
-        Sort-Object { $_.Length } -Descending) -join '|'
-    $foundNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
-    foreach ($match in [System.Text.RegularExpressions.Regex]::Matches(
-        $payload,
-        $pattern,
-        [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
-        [void]$foundNames.Add($match.Value)
-    }
-    foreach ($expected in $expectedPayloadNames) {
+    $expectedByPath = @{}
+    foreach ($expected in @($Receipt.files)) {
         Assert-Artifact `
-            ($foundNames.Contains([string]$expected.Name)) `
+            ($null -ne $expected -and $expected.PSObject.Properties.Name -contains 'path') `
             $ArtifactName `
-            "missing $($expected.Kind) '$($expected.Name)'"
+            'payload receipt contains a file without a path'
+        $path = ([string]$expected.path).Replace('\', '/')
+        Assert-Artifact (-not [string]::IsNullOrWhiteSpace($path)) $ArtifactName 'payload receipt contains an empty file path'
+        Assert-Artifact (-not $expectedByPath.ContainsKey($path)) $ArtifactName "payload receipt contains duplicate file '$path'"
+        Assert-Artifact `
+            ($expected.PSObject.Properties.Name -contains 'size') `
+            $ArtifactName `
+            "payload receipt has no size for '$path'"
+        Assert-Artifact `
+            ($expected.PSObject.Properties.Name -contains 'sha256') `
+            $ArtifactName `
+            "payload receipt has no SHA-256 for '$path'"
+        Assert-Artifact ([long]$expected.size -ge 0) $ArtifactName "payload receipt has an invalid size for '$path'"
+        Assert-Artifact ([string]$expected.sha256 -cmatch '^[0-9a-f]{64}$') $ArtifactName "payload receipt has an invalid SHA-256 for '$path'"
+        if ($expected.PSObject.Properties.Name -contains 'managedResources') {
+            $resourceNames = @($expected.managedResources | ForEach-Object { [string]$_ })
+            Assert-Artifact `
+                (@($resourceNames | Sort-Object -Unique).Count -eq $resourceNames.Count) `
+                $ArtifactName `
+                "payload receipt has duplicate managed-resource names for '$path'"
+        }
+        $expectedByPath[$path] = $expected
     }
+
+    $actualByPath = @{}
+    foreach ($actual in @($ActualFiles)) {
+        $path = ([string]$actual.Path).Replace('\', '/')
+        Assert-Artifact (-not $actualByPath.ContainsKey($path)) $ArtifactName "artifact contains duplicate file '$path'"
+        $actualByPath[$path] = $actual
+    }
+
+    foreach ($path in @($expectedByPath.Keys | Sort-Object)) {
+        if (-not $actualByPath.ContainsKey($path)) {
+            Fail-Artifact $ArtifactName "missing file '$path'"
+        }
+    }
+    foreach ($path in @($actualByPath.Keys | Sort-Object)) {
+        if (-not $expectedByPath.ContainsKey($path)) {
+            Fail-Artifact $ArtifactName "unexpected file '$path'"
+        }
+    }
+
+    foreach ($path in @($expectedByPath.Keys | Sort-Object)) {
+        $expected = $expectedByPath[$path]
+        $actual = $actualByPath[$path]
+        $expectsResources = $expected.PSObject.Properties.Name -contains 'managedResources'
+        if ($expectsResources) {
+            Assert-Artifact ([bool]$actual.IsManagedAssembly) $ArtifactName "file '$path' is no longer a managed assembly"
+            $expectedResources = @($expected.managedResources | ForEach-Object { [string]$_ })
+            $actualResources = @($actual.ManagedResources | ForEach-Object { [string]$_ })
+            foreach ($resource in @($expectedResources | Sort-Object)) {
+                if ($resource -cnotin $actualResources) {
+                    Fail-Artifact $ArtifactName "missing resource '$resource' from '$path'"
+                }
+            }
+            foreach ($resource in @($actualResources | Sort-Object)) {
+                if ($resource -cnotin $expectedResources) {
+                    Fail-Artifact $ArtifactName "unexpected resource '$resource' in '$path'"
+                }
+            }
+        }
+        elseif ([bool]$actual.IsManagedAssembly) {
+            Fail-Artifact $ArtifactName "unexpected managed assembly '$path'"
+        }
+
+        $expectedSize = [long]$expected.size
+        $actualSize = [long]$actual.Size
+        Assert-Artifact ($actualSize -eq $expectedSize) $ArtifactName "invalid size for '$path'; expected '$expectedSize', found '$actualSize'"
+        $expectedHash = ([string]$expected.sha256).ToLowerInvariant()
+        $actualHash = ([string]$actual.Sha256).ToLowerInvariant()
+        Assert-Artifact ($actualHash -ceq $expectedHash) $ArtifactName "invalid SHA-256 for '$path'; expected '$expectedHash', found '$actualHash'"
+    }
+}
+
+function Assert-SingleFilePayload(
+    [byte[]] $Bytes,
+    [object] $Receipt,
+    [string] $ArtifactName
+) {
+    try {
+        $inspection = [DevProjex.ReleaseValidation.ReleasePayloadInspector]::InspectBundle($Bytes)
+    }
+    catch {
+        $problem = if ($null -ne $_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+        Fail-Artifact $ArtifactName $problem
+    }
+    Assert-PayloadDiff -Receipt $Receipt -ActualFiles @($inspection.Files) -ArtifactName $ArtifactName
+    $payload = [System.Text.Encoding]::Latin1.GetString($Bytes)
     Assert-Artifact `
         ($payload.IndexOf($Version, [System.StringComparison]::Ordinal) -ge 0) `
         $ArtifactName `
         "invalid informational version; expected '$Version' in the uncompressed single-file payload"
 }
 
-function Assert-WindowsReleaseArtifact([string] $ArtifactPath, [object] $Rid) {
+function Assert-WindowsReleaseArtifact([string] $ArtifactPath, [object] $Receipt) {
     $artifactName = [System.IO.Path]::GetFileName($ArtifactPath)
     $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($ArtifactPath)
     Assert-Artifact `
@@ -184,10 +287,10 @@ function Assert-WindowsReleaseArtifact([string] $ArtifactPath, [object] $Rid) {
             $versionInfo.ProductVersion.StartsWith($Version, [System.StringComparison]::OrdinalIgnoreCase)) `
         $artifactName `
         "invalid ProductVersion; expected '$Version', found '$($versionInfo.ProductVersion)'"
-    Assert-BinaryPayload -Bytes ([System.IO.File]::ReadAllBytes($ArtifactPath)) -Rid $Rid -ArtifactName $artifactName
+    Assert-SingleFilePayload -Bytes ([System.IO.File]::ReadAllBytes($ArtifactPath)) -Receipt $Receipt -ArtifactName $artifactName
 }
 
-function Assert-LinuxReleaseArtifact([string] $ArtifactPath, [object] $Rid) {
+function Assert-LinuxReleaseArtifact([string] $ArtifactPath, [object] $Rid, [object] $Receipt) {
     $artifactName = [System.IO.Path]::GetFileName($ArtifactPath)
     $entries = @(Read-UstarGzipArchive -archivePath $ArtifactPath -captureEntryNames @([string]$Rid.releaseBinary))
     Assert-Artifact ($entries.Count -eq 1) $artifactName "invalid archive layout; expected only '$($Rid.releaseBinary)'"
@@ -195,7 +298,7 @@ function Assert-LinuxReleaseArtifact([string] $ArtifactPath, [object] $Rid) {
     Assert-Artifact ($binary.Name -ceq [string]$Rid.releaseBinary) $artifactName "missing executable '$($Rid.releaseBinary)'"
     Assert-Artifact (($binary.Mode -band 73) -eq 73) $artifactName "invalid executable mode for '$($Rid.releaseBinary)'"
     Assert-Artifact ($null -ne $binary.Bytes -and $binary.Bytes.Length -gt 0) $artifactName "empty executable '$($Rid.releaseBinary)'"
-    Assert-BinaryPayload -Bytes $binary.Bytes -Rid $Rid -ArtifactName $artifactName
+    Assert-SingleFilePayload -Bytes $binary.Bytes -Receipt $Receipt -ArtifactName $artifactName
 }
 
 function Get-PlistValue([xml] $Document, [string] $Key) {
@@ -213,7 +316,7 @@ function Get-PlistValue([xml] $Document, [string] $Key) {
     return [string]$valueNode.InnerText
 }
 
-function Assert-MacReleaseArtifact([string] $ArtifactPath, [object] $Rid) {
+function Assert-MacReleaseArtifact([string] $ArtifactPath, [object] $Rid, [object] $Receipt) {
     $artifactName = [System.IO.Path]::GetFileName($ArtifactPath)
     $binaryEntryName = 'DevProjex.app/Contents/MacOS/DevProjex'
     $plistEntryName = 'DevProjex.app/Contents/Info.plist'
@@ -230,7 +333,7 @@ function Assert-MacReleaseArtifact([string] $ArtifactPath, [object] $Rid) {
     Assert-ExactNames -Expected $expectedEntries -Actual @($entries | ForEach-Object Name) -ArtifactName $artifactName -Kind 'macOS bundle entries'
     $binary = $entries | Where-Object { $_.Name -ceq $binaryEntryName } | Select-Object -First 1
     Assert-Artifact ($null -ne $binary -and ($binary.Mode -band 73) -eq 73) $artifactName "invalid executable mode for '$binaryEntryName'"
-    Assert-BinaryPayload -Bytes $binary.Bytes -Rid $Rid -ArtifactName $artifactName
+    Assert-SingleFilePayload -Bytes $binary.Bytes -Receipt $Receipt -ArtifactName $artifactName
     $plist = $entries | Where-Object { $_.Name -ceq $plistEntryName } | Select-Object -First 1
     Assert-Artifact ($null -ne $plist -and $null -ne $plist.Bytes) $artifactName "missing Info.plist"
     [xml]$plistDocument = [System.Text.Encoding]::UTF8.GetString($plist.Bytes)
@@ -243,7 +346,9 @@ function Assert-MacReleaseArtifact([string] $ArtifactPath, [object] $Rid) {
 function Test-GitHubArtifacts([object[]] $SelectedRids) {
     $directory = Join-Path $script:PublishPath "github/v$Version"
     Assert-Artifact (Test-Path -LiteralPath $directory -PathType Container) $directory "missing GitHub channel directory"
-    $expectedNames = @($SelectedRids | ForEach-Object { Get-GitHubArtifactName $_ })
+    $artifactNames = @($SelectedRids | ForEach-Object { Get-GitHubArtifactName $_ })
+    $receiptNames = @($SelectedRids | ForEach-Object { Get-PayloadReceiptName -Rid ([string]$_.rid) })
+    $expectedNames = @($artifactNames) + @($receiptNames)
     $actualNames = @(
         Get-ChildItem -LiteralPath $directory -File |
             Where-Object { $_.Name -notin @('SHA256SUMS.txt', 'PARTIAL-BUILD.txt') } |
@@ -267,14 +372,15 @@ function Test-GitHubArtifacts([object[]] $SelectedRids) {
 
     foreach ($rid in $SelectedRids) {
         $artifactPath = Join-Path $directory (Get-GitHubArtifactName $rid)
+        $receipt = Read-PayloadReceipt -DirectoryPath $directory -Rid ([string]$rid.rid) -ArtifactName ([System.IO.Path]::GetFileName($artifactPath))
         if ($rid.os -ceq 'win32') {
-            Assert-WindowsReleaseArtifact -ArtifactPath $artifactPath -Rid $rid
+            Assert-WindowsReleaseArtifact -ArtifactPath $artifactPath -Receipt $receipt
         }
         elseif ($rid.os -ceq 'linux') {
-            Assert-LinuxReleaseArtifact -ArtifactPath $artifactPath -Rid $rid
+            Assert-LinuxReleaseArtifact -ArtifactPath $artifactPath -Rid $rid -Receipt $receipt
         }
         else {
-            Assert-MacReleaseArtifact -ArtifactPath $artifactPath -Rid $rid
+            Assert-MacReleaseArtifact -ArtifactPath $artifactPath -Rid $rid -Receipt $receipt
         }
     }
 
@@ -285,6 +391,52 @@ function Test-GitHubArtifacts([object[]] $SelectedRids) {
 function Expand-Zip([string] $ArchivePath, [string] $DestinationPath) {
     [System.IO.Directory]::CreateDirectory($DestinationPath) | Out-Null
     [System.IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $DestinationPath)
+}
+
+function Test-StoreChannelAddition([string] $Path) {
+    $normalized = $Path.Replace('\', '/')
+    # Package identity and application declarations are generated by Desktop Bridge.
+    if ($normalized -ceq 'AppxManifest.xml') { return $true }
+    # The block map is generated from the final package layout.
+    if ($normalized -ceq 'AppxBlockMap.xml') { return $true }
+    # OPC content types describe the MSIX container itself.
+    if ($normalized -ceq '[Content_Types].xml') { return $true }
+    # Package signing adds this file after payload collection.
+    if ($normalized -ceq 'AppxSignature.p7x') { return $true }
+    # PRI data is generated from Store resource declarations.
+    if ($normalized -ceq 'resources.pri') { return $true }
+    # Store logos and tiles belong to the packaging project, not the application publish.
+    if ($normalized.StartsWith('Assets/', [System.StringComparison]::Ordinal)) { return $true }
+    return $false
+}
+
+function Get-StorePayloadFiles(
+    [string] $PackageRoot,
+    [string] $ApplicationDirectory,
+    [string] $ArtifactName
+) {
+    $applicationPrefix = $ApplicationDirectory.Replace('\', '/').TrimEnd('/') + '/'
+    $payloadFiles = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($file in @(Get-ChildItem -LiteralPath $PackageRoot -Recurse -File)) {
+        $relativePath = $file.FullName.Substring($PackageRoot.Length).TrimStart('\', '/').Replace('\', '/')
+        if (-not $relativePath.StartsWith($applicationPrefix, [System.StringComparison]::Ordinal)) {
+            if (-not (Test-StoreChannelAddition -Path $relativePath)) {
+                Fail-Artifact $ArtifactName "unexpected file '$relativePath'"
+            }
+            continue
+        }
+
+        $payloadPath = $relativePath.Substring($applicationPrefix.Length)
+        $resources = [DevProjex.ReleaseValidation.ReleasePayloadInspector]::TryReadManagedResources($file.FullName)
+        $payloadFiles.Add([pscustomobject]@{
+            Path = $payloadPath
+            Size = $file.Length
+            Sha256 = Get-FileSha256Hex -path $file.FullName
+            IsManagedAssembly = $null -ne $resources
+            ManagedResources = if ($null -eq $resources) { @() } else { @($resources) }
+        })
+    }
+    return $payloadFiles.ToArray()
 }
 
 function Assert-StoreExecutionAlias([xml] $PackageManifest, [string] $PackageRoot, [string] $ArtifactName) {
@@ -307,7 +459,8 @@ function Assert-StoreApplicationPackage(
     [string] $PackagePath,
     [string] $Architecture,
     [string] $ArtifactName,
-    [string] $TemporaryRoot
+    [string] $TemporaryRoot,
+    [object] $Receipt
 ) {
     $packageRoot = Join-Path $TemporaryRoot ("package-" + $Architecture + '-' + [guid]::NewGuid().ToString('N'))
     Expand-Zip -ArchivePath $PackagePath -DestinationPath $packageRoot
@@ -323,17 +476,18 @@ function Assert-StoreApplicationPackage(
     Assert-StoreExecutionAlias -PackageManifest $packageManifest -PackageRoot $packageRoot -ArtifactName $ArtifactName
 
     $applicationDirectory = Split-Path -Path ([string]$script:Manifest.release.store.applicationExecutable) -Parent
-    $grammarDirectory = Join-Path (Join-Path $packageRoot $applicationDirectory) 'grammars'
-    Assert-Artifact (Test-Path -LiteralPath $grammarDirectory -PathType Container) $ArtifactName "missing grammar directory '$applicationDirectory\grammars'"
-    $expectedGrammars = @($script:Manifest.grammars | ForEach-Object { "$_`.dll" })
-    $actualGrammars = @(Get-ChildItem -LiteralPath $grammarDirectory -File -Filter 'tree-sitter-*.dll' | ForEach-Object Name)
-    Assert-ExactNames -Expected $expectedGrammars -Actual $actualGrammars -ArtifactName $ArtifactName -Kind "grammar set for '$Architecture'"
+    $payloadFiles = @(Get-StorePayloadFiles `
+        -PackageRoot $packageRoot `
+        -ApplicationDirectory $applicationDirectory `
+        -ArtifactName $ArtifactName)
+    Assert-PayloadDiff -Receipt $Receipt -ActualFiles $payloadFiles -ArtifactName $ArtifactName
 }
 
 function Assert-StoreBundle(
     [string] $BundlePath,
     [string] $ArtifactName,
-    [string] $TemporaryRoot
+    [string] $TemporaryRoot,
+    [hashtable] $Receipts
 ) {
     $bundleRoot = Join-Path $TemporaryRoot ('bundle-' + [guid]::NewGuid().ToString('N'))
     Expand-Zip -ArchivePath $BundlePath -DestinationPath $bundleRoot
@@ -361,11 +515,16 @@ function Assert-StoreBundle(
         $fileName = [string]$matches[0].GetAttribute('FileName')
         $packagePath = Join-Path $bundleRoot ($fileName -replace '/', [System.IO.Path]::DirectorySeparatorChar)
         Assert-Artifact (Test-Path -LiteralPath $packagePath -PathType Leaf) $ArtifactName "missing inner package '$fileName'"
-        Assert-StoreApplicationPackage -PackagePath $packagePath -Architecture $platform -ArtifactName $ArtifactName -TemporaryRoot $TemporaryRoot
+        Assert-StoreApplicationPackage `
+            -PackagePath $packagePath `
+            -Architecture $platform `
+            -ArtifactName $ArtifactName `
+            -TemporaryRoot $TemporaryRoot `
+            -Receipt $Receipts[$platform]
     }
 }
 
-function Assert-StoreUpload([string] $UploadPath, [string] $TemporaryRoot) {
+function Assert-StoreUpload([string] $UploadPath, [string] $TemporaryRoot, [hashtable] $Receipts) {
     $artifactName = [System.IO.Path]::GetFileName($UploadPath)
     $uploadRoot = Join-Path $TemporaryRoot 'upload'
     Expand-Zip -ArchivePath $UploadPath -DestinationPath $uploadRoot
@@ -374,38 +533,53 @@ function Assert-StoreUpload([string] $UploadPath, [string] $TemporaryRoot) {
     Assert-StoreBundle `
         -BundlePath $bundles[0].FullName `
         -ArtifactName $artifactName `
-        -TemporaryRoot $TemporaryRoot
+        -TemporaryRoot $TemporaryRoot `
+        -Receipts $Receipts
 }
 
 function Test-StoreArtifacts() {
     $directory = Join-Path $script:PublishPath "store/v$Version"
     Assert-Artifact (Test-Path -LiteralPath $directory -PathType Container) $directory "missing Store channel directory"
-    $expectedNames = @(
+    $packageNames = @(
         "DevProjex.Store_$($script:StorePackageVersion)_x64_arm64_bundle_ReleaseStore.msixupload",
         "DevProjex.Store_$($script:StorePackageVersion)_x64_arm64_ReleaseStore.msixbundle",
         "DevProjex.Store_$($script:StorePackageVersion)_x64_ReleaseStore.msix"
     )
+    $storeRidNames = @($script:Manifest.release.store.platforms | ForEach-Object { "win-$(([string]$_).ToLowerInvariant())" })
+    $receiptNames = @($storeRidNames | ForEach-Object { Get-PayloadReceiptName -Rid $_ })
+    $expectedNames = @($packageNames) + @($receiptNames)
     $packages = @(Get-ChildItem -LiteralPath $directory -File |
-        Where-Object { $_.Name -notin @('SHA256SUMS.txt', 'msix-build.log') })
-    $packageNames = @($packages | ForEach-Object Name)
-    Assert-ExactNames -Expected $expectedNames -Actual $packageNames -ArtifactName $directory -Kind 'Store artifact set'
+        Where-Object { $_.Extension -in @('.msixupload', '.msixbundle', '.msix') })
+    $actualNames = @(Get-ChildItem -LiteralPath $directory -File |
+        Where-Object { $_.Name -notin @('SHA256SUMS.txt', 'msix-build.log') } |
+        ForEach-Object Name)
+    Assert-ExactNames -Expected $expectedNames -Actual $actualNames -ArtifactName $directory -Kind 'Store artifact set'
     $uploads = @($packages | Where-Object { $_.Extension -ceq '.msixupload' })
     Assert-Artifact ($uploads.Count -eq 1) $directory "missing exactly one .msixupload; found '$($uploads.Count)'"
     [void](Get-ChecksumEntries -DirectoryPath $directory -ExpectedNames $expectedNames)
 
+    $receipts = @{}
+    foreach ($platform in @($script:Manifest.release.store.platforms)) {
+        $platformName = ([string]$platform).ToLowerInvariant()
+        $rid = "win-$platformName"
+        $receipts[$platformName] = Read-PayloadReceipt -DirectoryPath $directory -Rid $rid -ArtifactName $directory
+    }
+
     $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("devprojex-release-artifacts-" + [guid]::NewGuid().ToString('N'))
     [System.IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
     try {
-        Assert-StoreUpload -UploadPath $uploads[0].FullName -TemporaryRoot $temporaryRoot
+        Assert-StoreUpload -UploadPath $uploads[0].FullName -TemporaryRoot $temporaryRoot -Receipts $receipts
         Assert-StoreBundle `
-            -BundlePath (Join-Path $directory $expectedNames[1]) `
-            -ArtifactName $expectedNames[1] `
-            -TemporaryRoot $temporaryRoot
+            -BundlePath (Join-Path $directory $packageNames[1]) `
+            -ArtifactName $packageNames[1] `
+            -TemporaryRoot $temporaryRoot `
+            -Receipts $receipts
         Assert-StoreApplicationPackage `
-            -PackagePath (Join-Path $directory $expectedNames[2]) `
+            -PackagePath (Join-Path $directory $packageNames[2]) `
             -Architecture 'x64' `
-            -ArtifactName $expectedNames[2] `
-            -TemporaryRoot $temporaryRoot
+            -ArtifactName $packageNames[2] `
+            -TemporaryRoot $temporaryRoot `
+            -Receipt $receipts['x64']
     }
     finally {
         $resolvedTemporaryRoot = [System.IO.Path]::GetFullPath($temporaryRoot)
@@ -419,6 +593,7 @@ function Test-StoreArtifacts() {
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -Path (Join-Path $PSScriptRoot 'ReleasePayloadInspection.cs')
 
 $manifestPath = Join-Path $repoRoot 'Packaging/Headless/payload-manifest.json'
 $script:Manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json

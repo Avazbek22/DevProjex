@@ -31,28 +31,6 @@
     "tree-sitter-yaml"
   ],
   "release": {
-    "localizations": [
-      "de.json",
-      "en.json",
-      "es.json",
-      "fr.json",
-      "id.json",
-      "it.json",
-      "ja.json",
-      "kk.json",
-      "ko.json",
-      "pl.json",
-      "pt-pt.json",
-      "pt.json",
-      "ru.json",
-      "tg.json",
-      "tr.json",
-      "uk.json",
-      "uz.json",
-      "vi.json",
-      "zh-cn.json",
-      "zh-tw.json"
-    ],
     "store": {
       "executionAlias": "devprojex.exe",
       "applicationExecutable": "DevProjex.Avalonia\\DevProjex.exe",
