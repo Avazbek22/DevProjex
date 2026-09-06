@@ -29,6 +29,30 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		Assert.Contains("publish-payload.linux-x64.json", result.StandardOutput, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void ValidatorReusesPayloadInspectorLoadedFromAnotherPath()
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateLinuxFixture(workspace.Path);
+		var alternateDirectory = Directory.CreateDirectory(Path.Combine(workspace.Path, "alternate")).FullName;
+		var alternateInspector = Path.Combine(alternateDirectory, "ReleasePayloadInspection.cs");
+		File.Copy(Path.Combine(RepoRoot.Value, "Scripts", "ReleasePayloadInspection.cs"), alternateInspector);
+		var wrapperPath = Path.Combine(workspace.Path, "invoke-validator.ps1");
+		File.WriteAllText(wrapperPath, """
+			param($InspectorPath, $ValidatorPath, $PublishRoot)
+			Add-Type -Path $InspectorPath
+			& $ValidatorPath -PublishRoot $PublishRoot -Version 5.2 -Channels github -Rids linux-x64
+			exit $LASTEXITCODE
+			""", new UTF8Encoding(false));
+
+		var result = RunPowerShell(wrapperPath,
+			["-InspectorPath", alternateInspector,
+				"-ValidatorPath", Path.Combine(RepoRoot.Value, "Scripts", "Test-ReleaseArtifacts.ps1"),
+				"-PublishRoot", Path.Combine(workspace.Path, "publish")]);
+
+		Assert.True(result.ExitCode == 0, result.StandardOutput + result.StandardError);
+	}
+
 	[Theory]
 	[InlineData("missing-file")]
 	[InlineData("missing-resource")]

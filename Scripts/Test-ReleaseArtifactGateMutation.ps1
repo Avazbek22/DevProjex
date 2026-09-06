@@ -13,7 +13,9 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'release-archive-helpers.ps1')
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-Add-Type -Path (Join-Path $PSScriptRoot 'ReleasePayloadInspection.cs')
+if ($null -eq ('DevProjex.ReleaseValidation.ReleasePayloadInspector' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'ReleasePayloadInspection.cs')
+}
 
 function ConvertTo-Tokens([string[]] $Values) {
     return @($Values | ForEach-Object { ([string]$_).Split(',') } |

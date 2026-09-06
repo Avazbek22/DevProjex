@@ -593,7 +593,9 @@ function Test-StoreArtifacts() {
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-Add-Type -Path (Join-Path $PSScriptRoot 'ReleasePayloadInspection.cs')
+if ($null -eq ('DevProjex.ReleaseValidation.ReleasePayloadInspector' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'ReleasePayloadInspection.cs')
+}
 
 $manifestPath = Join-Path $repoRoot 'Packaging/Headless/payload-manifest.json'
 $script:Manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
