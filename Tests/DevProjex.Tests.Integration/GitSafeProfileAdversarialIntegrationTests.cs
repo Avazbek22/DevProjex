@@ -85,7 +85,7 @@ public sealed class GitSafeProfileAdversarialIntegrationTests
 		fixture.RepositoryPath = basePath;
 		var hookDirectory = Path.Combine(basePath, ".git", "hostile-hooks");
 		Directory.CreateDirectory(hookDirectory);
-		var hookMarker = fixture.CreateMarkerProgram("post-checkout", hookDirectory, "post-checkout");
+		fixture.CreateMarkerProgram("post-checkout", hookDirectory, "post-checkout");
 		fixture.RunGit("config", "core.hooksPath", hookDirectory);
 		fixture.RunGit("config", "filter.hostile.smudge", fixture.CreateMarkerCommand("smudge"));
 		fixture.RunGit("config", "filter.hostile.process", fixture.CreateMarkerCommand("process"));
@@ -115,7 +115,7 @@ public sealed class GitSafeProfileAdversarialIntegrationTests
 				inspection.CheckoutFilterDrivers),
 			TestContext.Current.CancellationToken);
 
-		Assert.False(File.Exists(hookMarker));
+		Assert.False(File.Exists(fixture.MarkerPath("post-checkout")));
 		Assert.False(File.Exists(fixture.MarkerPath("smudge")));
 		Assert.False(File.Exists(fixture.MarkerPath("process")));
 	}

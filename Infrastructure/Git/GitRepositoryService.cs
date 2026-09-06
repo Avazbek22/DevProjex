@@ -31,6 +31,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     internal const int MaximumProgressFrameCharacters = 4 * 1024;
     private readonly string? _gitExecutable;
     private readonly bool _allowFileTransport;
+	private readonly bool _materializeTestClone;
 
     public GitRepositoryService()
     {
@@ -40,6 +41,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
 			Environment.GetEnvironmentVariable(TestFileTransportPolicyVariable),
 			"1",
 			StringComparison.Ordinal);
+		_materializeTestClone = _allowFileTransport;
         _ = GitRuntime.VersionDisplay;
         _ = GitRuntime.SshExecutable;
     }
@@ -53,6 +55,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     internal GitRepositoryService(bool allowFileTransportForTests)
     {
         _allowFileTransport = allowFileTransportForTests;
+		_materializeTestClone = allowFileTransportForTests;
         _ = GitRuntime.VersionDisplay;
         _ = GitRuntime.SshExecutable;
     }
@@ -140,9 +143,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
             // After clone, determine which branch we're on (usually main or master)
             var defaultBranch = await GetDefaultBranchAsync(targetDirectory, cancellationToken);
-			if (_allowFileTransport && Uri.TryCreate(cloneUrl, UriKind.Absolute, out var cloneUri) && cloneUri.IsFile)
+			if (_materializeTestClone)
 			{
-				await MaterializeExplicitlyAllowedFileCloneForTestsAsync(
+				await MaterializeExplicitlyAllowedTestCloneAsync(
 					targetDirectory,
 					defaultBranch,
 					cancellationToken).ConfigureAwait(false);
@@ -766,35 +769,47 @@ public sealed class GitRepositoryService : IGitRepositoryService
         return hasMaster ? "master" : null;
     }
 
-	private async Task MaterializeExplicitlyAllowedFileCloneForTestsAsync(
+	private async Task MaterializeExplicitlyAllowedTestCloneAsync(
 		string targetDirectory,
 		string? defaultBranch,
 		CancellationToken cancellationToken)
 	{
-		var container = Directory.GetParent(Path.GetFullPath(targetDirectory))?.FullName ??
-		                throw new InvalidOperationException("The test clone container is unavailable.");
-		File.WriteAllText(Path.Combine(container, RepositoryCacheLayout.MarkerFileName), "git");
-		await using var lease = await RepositoryFileLease.AcquireExclusiveAsync(
-			RepositoryCacheLayout.GetBaseOperationLockPath(container, targetDirectory),
-			cancellationToken).ConfigureAwait(false);
-		var safety = await GitRepositorySafetyInspector.InspectAsync(targetDirectory, cancellationToken)
-			.ConfigureAwait(false);
-		if (!safety.IsComplete)
-			throw new InvalidOperationException("The test clone safety configuration is unavailable.");
-		GitRepositorySafetyInspector.TraceDisabledMaterializationFilters(safety);
-		var checkout = string.IsNullOrWhiteSpace(defaultBranch)
-			? GitProcessOperation.ManagedCheckout(
-				GitManagedCheckoutKind.Detach,
-				"HEAD",
-				filterDrivers: safety.CheckoutFilterDrivers)
-			: GitProcessOperation.ManagedCheckout(
-				GitManagedCheckoutKind.SwitchBranch,
-				defaultBranch,
-				filterDrivers: safety.CheckoutFilterDrivers);
-		var result = await RunGitCommandAsync(targetDirectory, checkout, cancellationToken)
-			.ConfigureAwait(false);
-		if (result.ExitCode != 0)
-			throw new InvalidOperationException("The test clone checkout failed.");
+		var normalizedTarget = Path.GetFullPath(targetDirectory);
+		var markerPath = Path.Combine(normalizedTarget, RepositoryCacheLayout.MarkerFileName);
+		var leasesPath = Path.Combine(normalizedTarget, RepositoryCacheLayout.LeasesDirectoryName);
+		var leasePath = RepositoryCacheLayout.GetBaseOperationLockPath(normalizedTarget, normalizedTarget);
+		File.WriteAllText(markerPath, "git");
+		try
+		{
+			await using var lease = await RepositoryFileLease.AcquireExclusiveAsync(
+				leasePath,
+				cancellationToken).ConfigureAwait(false);
+			var safety = await GitRepositorySafetyInspector.InspectAsync(normalizedTarget, cancellationToken)
+				.ConfigureAwait(false);
+			if (!safety.IsComplete)
+				throw new InvalidOperationException("The test clone safety configuration is unavailable.");
+			GitRepositorySafetyInspector.TraceDisabledMaterializationFilters(safety);
+			var checkout = string.IsNullOrWhiteSpace(defaultBranch)
+				? GitProcessOperation.ManagedCheckout(
+					GitManagedCheckoutKind.Detach,
+					"HEAD",
+					filterDrivers: safety.CheckoutFilterDrivers)
+				: GitProcessOperation.ManagedCheckout(
+					GitManagedCheckoutKind.SwitchBranch,
+					defaultBranch,
+					filterDrivers: safety.CheckoutFilterDrivers);
+			var result = await RunGitCommandAsync(normalizedTarget, checkout, cancellationToken)
+				.ConfigureAwait(false);
+			if (result.ExitCode != 0)
+				throw new InvalidOperationException("The test clone checkout failed.");
+		}
+		finally
+		{
+			File.Delete(markerPath);
+			File.Delete(leasePath);
+			if (Directory.Exists(leasesPath) && !Directory.EnumerateFileSystemEntries(leasesPath).Any())
+				Directory.Delete(leasesPath);
+		}
 	}
 
 	private async Task<string?> GetVerifiedNetworkRemoteAsync(

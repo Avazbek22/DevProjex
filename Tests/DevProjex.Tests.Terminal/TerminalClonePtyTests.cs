@@ -11,11 +11,11 @@ public sealed class TerminalClonePtyTests
 	public async Task ExplicitHttpsNetworkProfileOpensARealRemoteInTerminalWorkspace()
 	{
 		if (!string.Equals(
-			    Environment.GetEnvironmentVariable("DEVPROJEX_RUN_HTTPS_TUI_PROBE"),
+			    Environment.GetEnvironmentVariable("DEVPROJEX_INTERNAL_HTTPS_TUI_PROBE"),
 			    "1",
 			    StringComparison.Ordinal))
 		{
-			Assert.Skip("Set DEVPROJEX_RUN_HTTPS_TUI_PROBE=1 for the opt-in real-network probe.");
+			Assert.Skip("Set DEVPROJEX_INTERNAL_HTTPS_TUI_PROBE=1 for the opt-in real-network probe.");
 			return;
 		}
 
