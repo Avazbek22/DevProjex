@@ -32,6 +32,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     private readonly string? _gitExecutable;
     private readonly bool _allowFileTransport;
 	private readonly bool _materializeTestClone;
+	private readonly bool _retainTestManagedMarker;
 
     public GitRepositoryService()
     {
@@ -53,9 +54,17 @@ public sealed class GitRepositoryService : IGitRepositoryService
     }
 
     internal GitRepositoryService(bool allowFileTransportForTests)
+		: this(allowFileTransportForTests, retainTestManagedMarker: true)
+	{
+	}
+
+	internal GitRepositoryService(
+		bool allowFileTransportForTests,
+		bool retainTestManagedMarker)
     {
         _allowFileTransport = allowFileTransportForTests;
 		_materializeTestClone = allowFileTransportForTests;
+		_retainTestManagedMarker = allowFileTransportForTests && retainTestManagedMarker;
         _ = GitRuntime.VersionDisplay;
         _ = GitRuntime.SshExecutable;
     }
@@ -805,10 +814,11 @@ public sealed class GitRepositoryService : IGitRepositoryService
 		}
 		finally
 		{
-			File.Delete(markerPath);
 			File.Delete(leasePath);
 			if (Directory.Exists(leasesPath) && !Directory.EnumerateFileSystemEntries(leasesPath).Any())
 				Directory.Delete(leasesPath);
+			if (!_retainTestManagedMarker)
+				File.Delete(markerPath);
 		}
 	}
 

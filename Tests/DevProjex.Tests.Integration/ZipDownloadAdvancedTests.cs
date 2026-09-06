@@ -213,7 +213,11 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
             .ToList();
 
         var gitFiles = Directory.GetFiles(gitDir, "*", SearchOption.AllDirectories)
-            .Where(f => !f.Contains(".git"))
+            .Where(f =>
+                !f.Contains(".git") &&
+                !Path.GetFileName(f).Equals(
+                    RepositoryCacheLayout.MarkerFileName,
+                    StringComparison.Ordinal))
             .Select(f => Path.GetRelativePath(gitDir, f))
             .OrderBy(f => f)
             .ToList();

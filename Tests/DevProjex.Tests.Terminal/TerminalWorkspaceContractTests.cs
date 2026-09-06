@@ -1508,7 +1508,9 @@ public sealed class TerminalWorkspaceContractTests
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
 		var services = new TerminalServiceFactory(
 			() => appData.Path,
-			new GitRepositoryService(allowFileTransportForTests: true)).Create(AppLanguage.En);
+			new GitRepositoryService(
+				allowFileTransportForTests: true,
+				retainTestManagedMarker: false)).Create(AppLanguage.En);
 		await using var resolvedSource = await new TerminalProjectSourceResolver(
 				services,
 				new TestTerminalEnvironment(),

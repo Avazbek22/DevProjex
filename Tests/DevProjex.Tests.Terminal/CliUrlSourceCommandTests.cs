@@ -461,7 +461,11 @@ public sealed class CliUrlSourceCommandTests
 	}
 
 	private static TerminalServiceFactory CreateFileRemoteFactory(Func<string> dataRoot) =>
-		new(dataRoot, new GitRepositoryService(allowFileTransportForTests: true));
+		new(
+			dataRoot,
+			new GitRepositoryService(
+				allowFileTransportForTests: true,
+				retainTestManagedMarker: false));
 
 	private static bool IsGitAvailable()
 	{
