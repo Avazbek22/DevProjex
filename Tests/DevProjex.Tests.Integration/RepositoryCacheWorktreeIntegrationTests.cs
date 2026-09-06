@@ -12,7 +12,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 		using var cache = new TemporaryDirectory();
 		var firstStack = new RepoCacheService(cache.Path);
 		var secondStack = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		await PublishGitAsync(firstStack, git, source, TestContext.Current.CancellationToken);
 
 		using var first = await firstStack.TryAcquireRepositorySessionAsync(
@@ -59,7 +59,9 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var service = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(
+			allowFileTransportForTests: true,
+			retainTestManagedMarker: false);
 		var basePath = await PublishGitAsync(
 			service,
 			git,
@@ -107,7 +109,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var service = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		await PublishGitAsync(service, git, source, TestContext.Current.CancellationToken);
 		var before = Assert.IsType<RepositoryCacheIndexEntry>(service.FindIndexedRepository(source.RepositoryUrl));
 
@@ -130,7 +132,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var service = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		var basePath = await PublishGitAsync(service, git, source, TestContext.Current.CancellationToken);
 		service.RecordIndexedRepository(source.RepositoryUrl, basePath, source.FeatureBranchName);
 		await RunGitAsync(basePath, ["update-ref", "-d", $"refs/remotes/origin/{source.FeatureBranchName}"]);
@@ -156,7 +158,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var service = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		var basePath = await PublishGitAsync(service, git, source, TestContext.Current.CancellationToken);
 		service.RecordIndexedRepository(source.RepositoryUrl, basePath, source.FeatureBranchName);
 		await RunGitAsync(source.BareRepositoryPath, ["update-ref", "-d", $"refs/heads/{source.FeatureBranchName}"]);
@@ -178,7 +180,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var service = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		await PublishGitAsync(service, git, source, TestContext.Current.CancellationToken);
 		using var first = await service.TryAcquireRepositorySessionAsync(
 			source.RepositoryUrl,
@@ -220,7 +222,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 		async Task<IRepositoryCacheSession> OpenAsync()
 		{
 			var service = new RepoCacheService(cache.Path);
-			var git = new GitRepositoryService();
+			var git = new GitRepositoryService(allowFileTransportForTests: true);
 			await using var operation = await service.AcquireRepositoryOperationAsync(
 				source.RepositoryUrl,
 				TestContext.Current.CancellationToken);
@@ -261,13 +263,16 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var service = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(
+			allowFileTransportForTests: true,
+			retainTestManagedMarker: false);
 		var legacyPath = service.CreateRepositoryDirectory(source.RepositoryUrl);
 		var result = await git.CloneAsync(
 			source.RepositoryUrl,
 			legacyPath,
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.True(result.Success);
+		File.Delete(Path.Combine(cache.Path, RepositoryCacheLayout.MarkerFileName));
 		service.RecordIndexedRepository(
 			source.RepositoryUrl,
 			legacyPath,
@@ -345,7 +350,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var publishingService = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		var basePath = await PublishGitAsync(
 			publishingService,
 			git,
@@ -386,7 +391,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var publishingService = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		var basePath = await PublishGitAsync(
 			publishingService,
 			git,
@@ -418,7 +423,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
 		var publishingService = new RepoCacheService(cache.Path);
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		await PublishGitAsync(
 			publishingService,
 			git,
@@ -461,7 +466,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 						cleanupCompleted.Set();
 				}
 			});
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		var cloneCount = 0;
 
 		async Task<IRepositoryCacheSession> OpenAsync()
@@ -571,9 +576,19 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 
 	private static async Task RunGitAsync(string workingDirectory, IReadOnlyList<string> arguments)
 	{
+		var startInfo = new ProcessStartInfo(GitRuntime.GitExecutable)
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
 		using var process = new Process
 		{
-			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, arguments)
+			StartInfo = startInfo
 		};
 		process.Start();
 		process.StandardInput.Close();

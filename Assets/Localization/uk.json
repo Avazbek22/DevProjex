@@ -500,6 +500,7 @@
   "Terminal.Error.ProfileTransientGitMode": "Миттєві режими Git не можна зберігати у профілях; використайте none, gitignore або tracked.",
   "Terminal.Diagnostic.GitStateUnavailable": "Запитаний стан Git недоступний. Перевірте Git, репозиторій і посилання.",
   "Terminal.Diagnostic.GitStateDeleted": "Не включено видалених файлів зі стану Git: {0}.",
+  "Terminal.Diagnostic.GitUnsafeFilter": "Точне порівняння недоступне без запуску недовіреного Git-фільтра «{0}».",
   "Terminal.Option.Exclude": "Встановіть звичайне виключення.",
   "Terminal.Option.HideSecrets": "Маскувати виявлені значення у вибраних текстових файлах. Двійкові файли не перевіряються; відсутність збігів не гарантує безпеки.",
   "Terminal.Option.HidePrivateData": "Маскувати виявлені особисті дані у вибраних текстових файлах. Двійкові файли не перевіряються; відсутність збігів не гарантує конфіденційності.",

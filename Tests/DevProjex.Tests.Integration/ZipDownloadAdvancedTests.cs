@@ -24,7 +24,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     public ZipDownloadAdvancedTests()
     {
         _zipService = new ZipDownloadService();
-        _gitService = new GitRepositoryService();
+		_gitService = new GitRepositoryService(allowFileTransportForTests: true);
         var testCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitIntegration");
         _cacheService = new RepoCacheService(testCachePath);
         _tempDir = new TemporaryDirectory();
@@ -213,7 +213,11 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
             .ToList();
 
         var gitFiles = Directory.GetFiles(gitDir, "*", SearchOption.AllDirectories)
-            .Where(f => !f.Contains(".git"))
+            .Where(f =>
+                !f.Contains(".git") &&
+                !Path.GetFileName(f).Equals(
+                    RepositoryCacheLayout.MarkerFileName,
+                    StringComparison.Ordinal))
             .Select(f => Path.GetRelativePath(gitDir, f))
             .OrderBy(f => f)
             .ToList();

@@ -160,7 +160,10 @@ internal sealed class McpProjectService(
 				throw new McpToolException(
 					McpErrorCodes.ProjectUnavailable,
 					$"{McpErrorCodes.ProjectUnavailable}: Git state preparation failed " +
-					$"({diagnostic.Code}: {diagnostic.Message}). Verify the repository and refs, then retry.");
+					$"({diagnostic.Code}: {diagnostic.Message}). Verify the repository and refs, then retry." +
+					(McpTrustedDiagnosticFormatter.FormatBlocking(diagnostic) is { } trailer
+						? Environment.NewLine + trailer
+						: string.Empty));
 			}
 		}
 		ProjectContextPlan narrowed;

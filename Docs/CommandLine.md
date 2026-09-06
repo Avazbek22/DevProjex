@@ -212,6 +212,7 @@ The three state scopes are invocation-only and cannot be saved in local or
 portable profiles. `open` supports `staged` and `changes`; diff scopes are
 available in direct CLI commands, Terminal Workspace, and MCP, but not Desktop.
 The Git scope narrows the effective profile selection before file-size limits.
+Git subprocess isolation, network boundaries, and the `DPX-GIT-UNSAFE-FILTER` refusal are specified in [Git process safety](Git-Safety.md).
 Smart Ignore, Exclusions, explicit selected paths, extensions, and globs still
 apply. Selected content always comes from the current working tree, including
 when a staged file has newer unstaged edits.

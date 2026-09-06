@@ -482,6 +482,7 @@
     "Terminal.Error.ProfileTransientGitMode": "Os modos Git momentâneos não podem ser guardados em perfis; use none, gitignore ou tracked.",
     "Terminal.Diagnostic.GitStateUnavailable": "O estado Git pedido não está disponível. Verifique o Git, o repositório e as referências.",
     "Terminal.Diagnostic.GitStateDeleted": "Ficheiros eliminados excluídos do estado Git: {0}.",
+    "Terminal.Diagnostic.GitUnsafeFilter": "A comparação exata não está disponível sem executar o filtro Git não fidedigno '{0}'.",
     "Terminal.Option.Exclude": "Define uma exclusão comum.",
     "Terminal.Option.HideSecrets": "Oculta valores detetados nos ficheiros de texto selecionados. Os ficheiros binários não são inspecionados; a ausência de resultados não garante segurança.",
     "Terminal.Option.HidePrivateData": "Oculta dados privados detetados nos ficheiros de texto selecionados. Os ficheiros binários não são inspecionados; a ausência de resultados não garante privacidade.",

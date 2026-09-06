@@ -500,6 +500,7 @@
   "Terminal.Error.ProfileTransientGitMode": "일시적 Git 모드는 프로필에 저장할 수 없습니다. none, gitignore 또는 tracked를 사용하세요.",
   "Terminal.Diagnostic.GitStateUnavailable": "요청한 Git 상태를 사용할 수 없습니다. Git, 저장소 및 참조를 확인하세요.",
   "Terminal.Diagnostic.GitStateDeleted": "Git 상태에서 제외된 삭제 파일: {0}개.",
+  "Terminal.Diagnostic.GitUnsafeFilter": "신뢰할 수 없는 Git 필터 '{0}'을(를) 실행하지 않으면 정확한 비교를 사용할 수 없습니다.",
   "Terminal.Option.Exclude": "일반 제외를 설정합니다.",
   "Terminal.Option.HideSecrets": "선택한 텍스트 파일에서 감지된 값을 마스킹합니다. 바이너리 파일은 검사하지 않으며, 탐지 결과가 없다고 해서 안전이 보장되지는 않습니다.",
   "Terminal.Option.HidePrivateData": "선택한 텍스트 파일에서 감지된 개인 데이터를 마스킹합니다. 바이너리 파일은 검사하지 않으며, 탐지 결과가 없다고 해서 개인정보 보호가 보장되지는 않습니다.",

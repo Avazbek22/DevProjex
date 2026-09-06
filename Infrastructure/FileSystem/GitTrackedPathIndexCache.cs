@@ -216,6 +216,11 @@ internal static class GitTrackedPathIndexCache
 		GitIndexSignature signature,
 		CancellationToken cancellationToken)
 	{
+		var safety = await GitRepositorySafetyInspector
+			.InspectAsync(signature.RepositoryRootPath, cancellationToken)
+			.ConfigureAwait(false);
+		if (!safety.IsComplete || safety.OldGitPromisorRepository)
+			return null;
 		using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		timeoutSource.CancelAfter(CommandTimeout);
 
@@ -292,15 +297,10 @@ internal static class GitTrackedPathIndexCache
 	{
 		var startInfo = GitProcessStartInfoFactory.Create(
 			repositoryRootPath,
-			[
-				"-C", repositoryRootPath,
-				"-c", "core.quotepath=false",
-				"ls-files", "--cached", "--full-name", "-z", "--"
-			]);
+			GitProcessOperation.ReadTrackedIndex());
 		startInfo.StandardOutputEncoding = new UTF8Encoding(
 			encoderShouldEmitUTF8Identifier: false,
 			throwOnInvalidBytes: false);
-		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
 		return startInfo;
 	}
 

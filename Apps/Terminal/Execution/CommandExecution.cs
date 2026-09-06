@@ -176,6 +176,8 @@ internal static class CommandExecution
 			localization["Terminal.Diagnostic.TrackedIndexUnavailable"],
 		GitScopeFilter.UnavailableDiagnosticCode =>
 			localization["Terminal.Diagnostic.GitStateUnavailable"],
+		GitScopeFilter.UnsafeFilterDiagnosticCode =>
+			localization.Format("Terminal.Diagnostic.GitUnsafeFilter", "unknown"),
 		var value when value.StartsWith("DPX-DESKTOP-", StringComparison.Ordinal) =>
 			localization["Terminal.Error.DesktopRequestFailed"],
 		_ => localization["Terminal.Error.CommandInvalid"]

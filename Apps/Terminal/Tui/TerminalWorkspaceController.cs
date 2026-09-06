@@ -1098,7 +1098,9 @@ public sealed class TerminalWorkspaceController(
 	private static void ThrowIfTrackedModeIsUnavailable(ProjectContextPlan plan)
 	{
 		var diagnostic = plan.Diagnostics.FirstOrDefault(static item =>
-			item.Code is TrackedIndexUnavailableCode or GitScopeFilter.UnavailableDiagnosticCode &&
+			item.Code is TrackedIndexUnavailableCode or
+				GitScopeFilter.UnavailableDiagnosticCode or
+				GitScopeFilter.UnsafeFilterDiagnosticCode &&
 			item.Severity == ContextDiagnosticSeverity.Error);
 		if (diagnostic is not null)
 		{

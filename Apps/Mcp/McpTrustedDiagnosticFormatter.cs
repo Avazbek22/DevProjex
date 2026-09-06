@@ -37,12 +37,23 @@ internal static class McpTrustedDiagnosticFormatter
 		return output?.ToString();
 	}
 
+	internal static string? FormatBlocking(ContextDiagnostic diagnostic)
+	{
+		ArgumentNullException.ThrowIfNull(diagnostic);
+		if (diagnostic.Code != GitScopeFilter.UnsafeFilterDiagnosticCode)
+			return null;
+		var driver = McpTextEscaping.EscapeSingleLine(diagnostic.Detail ?? "unknown");
+		return $"[Error {GitScopeFilter.UnsafeFilterDiagnosticCode}] Exact working-tree comparison was refused because the untrusted Git filter '{driver}' is configured.";
+	}
+
 	private static string FormatSafeMessage(
 		string code,
 		IReadOnlyList<ContextDiagnostic> diagnostics) =>
 		code switch
 		{
 			GitScopeFilter.DeletedDiagnosticCode => FormatDeletedFiles(diagnostics),
+			GitScopeFilter.UnsafeFilterDiagnosticCode =>
+				"Exact working-tree comparison was refused because an untrusted Git filter is configured.",
 			ProjectContextGitReadiness.PartialDiagnosticCode =>
 				"Some nested Git indexes could not be read; those repository scopes were excluded. Results are partial.",
 			MissingSelectedPathCode => FormatMissingPaths(diagnostics.Count),

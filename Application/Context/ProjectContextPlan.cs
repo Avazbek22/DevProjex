@@ -14,7 +14,8 @@ public sealed record ContextDiagnostic(
 	ContextDiagnosticSeverity Severity,
 	string Message,
 	string? Path = null,
-	int? Count = null);
+	int? Count = null,
+	string? Detail = null);
 
 public sealed record ProjectContextGitReadiness(
 	GitFilteringMode Mode,

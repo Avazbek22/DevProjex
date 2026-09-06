@@ -488,7 +488,7 @@ public sealed class McpServerIntegrationTests
 			allowRemote: true,
 			remoteServicesFactory: () => new McpRemoteProjectServices(
 				new RepoCacheService(cachePath),
-				new GitRepositoryService()),
+				new GitRepositoryService(allowFileTransportForTests: true)),
 			exclusions: [ProjectExclusion.DotFiles],
 			agentExclusions: true);
 
@@ -2382,7 +2382,8 @@ public sealed class McpServerIntegrationTests
 		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
 		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
 		var cachePath = Path.Combine(workspace.Path, "repo-cache");
-		var git = new CountingGitRepositoryService(new GitRepositoryService());
+		var git = new CountingGitRepositoryService(
+			new GitRepositoryService(allowFileTransportForTests: true));
 		await using var server = await McpTestServer.StartAsync(
 			localProject,
 			workspace.Path,

@@ -241,7 +241,8 @@ public sealed class TerminalPtyJourneyTests
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			welcomeDirectory.Path,
 			["--language", "en"],
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",

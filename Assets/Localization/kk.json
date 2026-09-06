@@ -488,6 +488,7 @@
   "Terminal.Error.ProfileTransientGitMode": "Уақытша Git режимдерін профильде сақтау мүмкін емес; none, gitignore немесе tracked пайдаланыңыз.",
   "Terminal.Diagnostic.GitStateUnavailable": "Сұралған Git күйі қолжетімсіз. Git, репозиторий және сілтемелерді тексеріңіз.",
   "Terminal.Diagnostic.GitStateDeleted": "Git күйінен шығарылған жойылған файлдар: {0}.",
+  "Terminal.Diagnostic.GitUnsafeFilter": "Сенімсіз '{0}' Git сүзгісін іске қоспай нақты салыстыру қолжетімсіз.",
   "Terminal.Option.Exclude": "Қалыпты алып тастау ережесін орнатады.",
   "Terminal.Option.HideSecrets": "Таңдалған мәтіндік файлдардағы табылған мәндерді жасырады. Бинарлық файлдар тексерілмейді; сәйкестіктің болмауы қауіпсіздік кепілі емес.",
   "Terminal.Option.HidePrivateData": "Таңдалған мәтіндік файлдардағы табылған жеке деректерді жасырады. Бинарлық файлдар тексерілмейді; сәйкестіктің болмауы құпиялылық кепілі емес.",

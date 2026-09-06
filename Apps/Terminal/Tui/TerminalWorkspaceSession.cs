@@ -3573,6 +3573,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				L("Terminal.Diagnostic.TrackedIndexUnavailable"),
 			GitScopeFilter.UnavailableDiagnosticCode =>
 				L("Terminal.Diagnostic.GitStateUnavailable"),
+			GitScopeFilter.UnsafeFilterDiagnosticCode =>
+				L("Terminal.Diagnostic.GitUnsafeFilter"),
 			GitScopeFilter.DeletedDiagnosticCode =>
 				L("Terminal.Diagnostic.GitStateDeleted"),
 			"DPX-PROJECT-NOT-FOUND" or "DPX-PROJECT-PATH-INVALID" =>

@@ -26,7 +26,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
 
     public GitEdgeCasesTests()
     {
-        _service = new GitRepositoryService();
+        _service = new GitRepositoryService(allowFileTransportForTests: true);
         var testCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitIntegration");
         _cacheService = new RepoCacheService(testCachePath);
         _tempDir = new TemporaryDirectory();

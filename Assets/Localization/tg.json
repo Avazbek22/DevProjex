@@ -488,6 +488,7 @@
   "Terminal.Error.ProfileTransientGitMode": "Реҷаҳои лаҳзавии Git дар профил нигоҳ дошта намешаванд; none, gitignore ё tracked-ро истифода баред.",
   "Terminal.Diagnostic.GitStateUnavailable": "Ҳолати дархостшудаи Git дастрас нест. Git, анбор ва истинодҳоро санҷед.",
   "Terminal.Diagnostic.GitStateDeleted": "Шумораи файлҳои ҳазфшудаи дохилнашуда аз ҳолати Git: {0}.",
+  "Terminal.Diagnostic.GitUnsafeFilter": "Муқоисаи дақиқ бе иҷрои филтри беэътимоди Git «{0}» дастнорас аст.",
   "Terminal.Option.Exclude": "Истиснои одиро таъин мекунад.",
   "Terminal.Option.HideSecrets": "Қиматҳои ёфтшударо дар файлҳои матнии интихобшуда пинҳон мекунад. Файлҳои бинарӣ санҷида намешаванд; набудани мутобиқат кафолати амният нест.",
   "Terminal.Option.HidePrivateData": "Маълумоти хусусии ёфтшударо дар файлҳои матнии интихобшуда пинҳон мекунад. Файлҳои бинарӣ санҷида намешаванд; набудани мутобиқат кафолати махфият нест.",
