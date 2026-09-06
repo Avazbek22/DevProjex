@@ -231,7 +231,7 @@ Want to audit what the agent gets? Open the same project in the GUI: the engine 
 |---|---|---|---|---|---|
 | Cross-platform: Windows + Linux + macOS | ✅ | ✅ | ❌ macOS only | ✅ | ✅ |
 | MCP server ships built into the app | ✅ | ✅ | ✅ | ⚠️ separate server | ❌ community only |
-| Secret masking that cannot be disabled | ✅ | ⚠️ optional, drops whole files | ❌ | ❌ | ❌ |
+| Secret masking that cannot be disabled | ✅ | ⚠️ always-on check in MCP; flagged files are excluded, not masked | ❌ | ❌ | ❌ |
 | Agent cannot widen the effective file selection (default) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Root jail with symlink-escape rejection | ✅ default | ✅ opt-in `--sandbox` | ❌ | ❌ | ❌ |
 | Prompt-injection hardening (untrusted-data wrapping) | ✅ | — not documented | ❌ | ❌ | ❌ |
@@ -241,7 +241,7 @@ Want to audit what the agent gets? Open the same project in the GUI: the engine 
 | Oversized results stored, read back in ranges | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Remote Git repositories by URL | ✅ opt-in | ✅ | ❌ | ❌ | ✅ |
 
-<sub>Based on publicly documented features, last verified September 2026.</sub>
+<sub>Based on publicly documented features; Repomix v1.17.0 source and documentation verified September 6, 2026.</sub>
 
 See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
 
