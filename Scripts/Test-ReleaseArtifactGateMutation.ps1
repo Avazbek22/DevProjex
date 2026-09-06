@@ -132,21 +132,39 @@ function Get-ReceiptMutationCases([object] $Receipt) {
     )
 }
 
+function Remove-MutationDirectory([AllowNull()][string] $Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    $mutationRoot = [System.IO.Path]::GetFullPath($script:MutationRoot)
+    $mutationRoot = $mutationRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    if (-not $resolvedPath.StartsWith($mutationRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Mutation cleanup refused path outside its temporary root: $resolvedPath"
+    }
+    if (Test-Path -LiteralPath $resolvedPath -PathType Container) {
+        Remove-Item -LiteralPath $resolvedPath -Recurse -Force
+    }
+}
+
 function Invoke-GitHubMutation([string] $SourcePublishRoot, [object] $Case) {
     $fixtureRoot = Copy-ChannelFixture -SourcePublishRoot $SourcePublishRoot -Channel 'github'
-    $artifactName = "DevProjex.v$Version.win-x64.exe"
-    $channelDirectory = Join-Path $fixtureRoot "github/v$Version"
-    $artifactPath = Join-Path $channelDirectory $artifactName
-    if ([string]$Case.Kind -ceq 'File') {
-        [DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateBundleEntry($artifactPath, [string]$Case.File)
+    try {
+        $artifactName = "DevProjex.v$Version.win-x64.exe"
+        $channelDirectory = Join-Path $fixtureRoot "github/v$Version"
+        $artifactPath = Join-Path $channelDirectory $artifactName
+        if ([string]$Case.Kind -ceq 'File') {
+            [DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateBundleEntry($artifactPath, [string]$Case.File)
+        }
+        else {
+            [void][DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateBundleResource(
+                $artifactPath, [string]$Case.File, [string]$Case.Entry)
+        }
+        Write-ChannelChecksums -ChannelDirectory $channelDirectory
+        Invoke-FailingValidation -FixturePublishRoot $fixtureRoot -Channel 'github' `
+            -ArtifactName $artifactName -ExpectedEntry ([string]$Case.Entry)
     }
-    else {
-        [void][DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateBundleResource(
-            $artifactPath, [string]$Case.File, [string]$Case.Entry)
+    finally {
+        Remove-MutationDirectory -Path $fixtureRoot
     }
-    Write-ChannelChecksums -ChannelDirectory $channelDirectory
-    Invoke-FailingValidation -FixturePublishRoot $fixtureRoot -Channel 'github' `
-        -ArtifactName $artifactName -ExpectedEntry ([string]$Case.Entry)
 }
 
 function Compress-Directory([string] $SourceDirectory, [string] $DestinationPath) {
@@ -157,49 +175,60 @@ function Compress-Directory([string] $SourceDirectory, [string] $DestinationPath
 
 function Invoke-StoreMutation([string] $SourcePublishRoot, [object] $Case) {
     $fixtureRoot = Copy-ChannelFixture -SourcePublishRoot $SourcePublishRoot -Channel 'store'
-    $channelDirectory = Join-Path $fixtureRoot "store/v$Version"
-    $uploads = @(Get-ChildItem -LiteralPath $channelDirectory -File -Filter '*.msixupload')
-    if ($uploads.Count -ne 1) { throw "Mutation setup failed: expected one .msixupload, found $($uploads.Count)." }
-    $artifactName = $uploads[0].Name
-    $workRoot = Join-Path $script:MutationRoot ('store-' + [guid]::NewGuid().ToString('N'))
-    $uploadRoot = Join-Path $workRoot 'upload'
-    $bundleRoot = Join-Path $workRoot 'bundle'
-    $packageRoot = Join-Path $workRoot 'package'
-    New-Item -ItemType Directory -Path $uploadRoot, $bundleRoot, $packageRoot -Force | Out-Null
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($uploads[0].FullName, $uploadRoot)
-    $bundles = @(Get-ChildItem -LiteralPath $uploadRoot -Recurse -File -Filter '*.msixbundle')
-    if ($bundles.Count -ne 1) { throw "Mutation setup failed: '$artifactName' must contain exactly one .msixbundle." }
-    $bundleRelativePath = $bundles[0].FullName.Substring($uploadRoot.Length).TrimStart([char[]]@('\', '/'))
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($bundles[0].FullName, $bundleRoot)
-    [xml]$bundleManifest = Get-Content -LiteralPath (Join-Path $bundleRoot 'AppxMetadata\AppxBundleManifest.xml') -Raw
-    $packageNode = $bundleManifest.SelectSingleNode("//*[local-name()='Package' and translate(@Architecture,'X','x')='x64']")
-    if ($null -eq $packageNode) { throw "Mutation setup failed: '$artifactName' has no x64 package." }
-    $packagePath = Join-Path $bundleRoot (([string]$packageNode.GetAttribute('FileName')) -replace '/', [System.IO.Path]::DirectorySeparatorChar)
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($packagePath, $packageRoot)
-    $payloadPath = Join-Path (Join-Path $packageRoot 'DevProjex.Avalonia') (([string]$Case.File) -replace '/', [System.IO.Path]::DirectorySeparatorChar)
-    if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
-        throw "Mutation setup failed: Store payload file '$($Case.File)' was not found."
+    $workRoot = $null
+    try {
+        $channelDirectory = Join-Path $fixtureRoot "store/v$Version"
+        $uploads = @(Get-ChildItem -LiteralPath $channelDirectory -File -Filter '*.msixupload')
+        if ($uploads.Count -ne 1) { throw "Mutation setup failed: expected one .msixupload, found $($uploads.Count)." }
+        $artifactName = $uploads[0].Name
+        $workRoot = Join-Path $script:MutationRoot ('store-' + [guid]::NewGuid().ToString('N'))
+        $uploadRoot = Join-Path $workRoot 'upload'
+        $bundleRoot = Join-Path $workRoot 'bundle'
+        $packageRoot = Join-Path $workRoot 'package'
+        New-Item -ItemType Directory -Path $uploadRoot, $bundleRoot, $packageRoot -Force | Out-Null
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($uploads[0].FullName, $uploadRoot)
+        $bundles = @(Get-ChildItem -LiteralPath $uploadRoot -Recurse -File -Filter '*.msixbundle')
+        if ($bundles.Count -ne 1) { throw "Mutation setup failed: '$artifactName' must contain exactly one .msixbundle." }
+        $bundleRelativePath = $bundles[0].FullName.Substring($uploadRoot.Length).TrimStart([char[]]@('\', '/'))
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($bundles[0].FullName, $bundleRoot)
+        [xml]$bundleManifest = Get-Content -LiteralPath (Join-Path $bundleRoot 'AppxMetadata\AppxBundleManifest.xml') -Raw
+        $packageNode = $bundleManifest.SelectSingleNode("//*[local-name()='Package' and translate(@Architecture,'X','x')='x64']")
+        if ($null -eq $packageNode) { throw "Mutation setup failed: '$artifactName' has no x64 package." }
+        $packagePath = Join-Path $bundleRoot (([string]$packageNode.GetAttribute('FileName')) -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($packagePath, $packageRoot)
+        $payloadPath = Join-Path (Join-Path $packageRoot 'DevProjex.Avalonia') (([string]$Case.File) -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+        if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
+            throw "Mutation setup failed: Store payload file '$($Case.File)' was not found."
+        }
+        if ([string]$Case.Kind -ceq 'File') {
+            $bytes = [System.IO.File]::ReadAllBytes($payloadPath)
+            if ($bytes.Length -eq 0) { throw "Mutation setup failed: Store payload file '$($Case.File)' is empty." }
+            $offset = [int]($bytes.Length / 2)
+            $bytes[$offset] = $bytes[$offset] -bxor 1
+            [System.IO.File]::WriteAllBytes($payloadPath, $bytes)
+        }
+        else {
+            [void][DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateManagedResource($payloadPath, [string]$Case.Entry)
+        }
+        Compress-Directory -SourceDirectory $packageRoot -DestinationPath $packagePath
+        Compress-Directory -SourceDirectory $bundleRoot -DestinationPath $bundles[0].FullName
+        $rebuiltBundlePath = Join-Path $uploadRoot ($bundleRelativePath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+        if ($rebuiltBundlePath -cne $bundles[0].FullName) {
+            Copy-Item -LiteralPath $bundles[0].FullName -Destination $rebuiltBundlePath -Force
+        }
+        Compress-Directory -SourceDirectory $uploadRoot -DestinationPath $uploads[0].FullName
+        Write-ChannelChecksums -ChannelDirectory $channelDirectory
+        Invoke-FailingValidation -FixturePublishRoot $fixtureRoot -Channel 'store' `
+            -ArtifactName $artifactName -ExpectedEntry ([string]$Case.Entry)
     }
-    if ([string]$Case.Kind -ceq 'File') {
-        $bytes = [System.IO.File]::ReadAllBytes($payloadPath)
-        if ($bytes.Length -eq 0) { throw "Mutation setup failed: Store payload file '$($Case.File)' is empty." }
-        $offset = [int]($bytes.Length / 2)
-        $bytes[$offset] = $bytes[$offset] -bxor 1
-        [System.IO.File]::WriteAllBytes($payloadPath, $bytes)
+    finally {
+        try {
+            Remove-MutationDirectory -Path $workRoot
+        }
+        finally {
+            Remove-MutationDirectory -Path $fixtureRoot
+        }
     }
-    else {
-        [void][DevProjex.ReleaseValidation.ReleasePayloadInspector]::MutateManagedResource($payloadPath, [string]$Case.Entry)
-    }
-    Compress-Directory -SourceDirectory $packageRoot -DestinationPath $packagePath
-    Compress-Directory -SourceDirectory $bundleRoot -DestinationPath $bundles[0].FullName
-    $rebuiltBundlePath = Join-Path $uploadRoot ($bundleRelativePath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
-    if ($rebuiltBundlePath -cne $bundles[0].FullName) {
-        Copy-Item -LiteralPath $bundles[0].FullName -Destination $rebuiltBundlePath -Force
-    }
-    Compress-Directory -SourceDirectory $uploadRoot -DestinationPath $uploads[0].FullName
-    Write-ChannelChecksums -ChannelDirectory $channelDirectory
-    Invoke-FailingValidation -FixturePublishRoot $fixtureRoot -Channel 'store' `
-        -ArtifactName $artifactName -ExpectedEntry ([string]$Case.Entry)
 }
 
 $sourcePublishRoot = [System.IO.Path]::GetFullPath($(if ([string]::IsNullOrWhiteSpace($PublishRoot)) {
