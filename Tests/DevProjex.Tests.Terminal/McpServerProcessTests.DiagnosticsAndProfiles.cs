@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Kernel.Models;
 using ModelContextProtocol.Client;
@@ -79,10 +80,14 @@ public sealed partial class McpServerProcessTests
 		await using var server = await ActualMcpProcess.StartAsync(
 			root,
 			workspace.CreateDirectory("data"),
-			"--allow-remote",
-			"--allow-agent-exclusions",
-			"--exclude",
-			"dot-files");
+			arguments:
+			[
+				"--allow-remote",
+				"--allow-agent-exclusions",
+				"--exclude",
+				"dot-files"
+			],
+			allowFileGitTransport: true);
 		var baseline = await server.Client.CallToolAsync(
 			"get_tree",
 			new Dictionary<string, object?> { ["project"] = repositoryUrl },
@@ -132,9 +137,12 @@ public sealed partial class McpServerProcessTests
 		await using var server = await ActualMcpProcess.StartAsync(
 			project,
 			dataRoot,
-			"--allow-agent-exclusions",
-			"--exclude",
-			"empty-files");
+			arguments:
+			[
+				"--allow-agent-exclusions",
+				"--exclude",
+				"empty-files"
+			]);
 		var initial = await server.Client.CallToolAsync(
 			"list_projects",
 			new Dictionary<string, object?>(),
@@ -228,7 +236,8 @@ public sealed partial class McpServerProcessTests
 		public static async Task<ActualMcpProcess> StartAsync(
 			string project,
 			string dataRoot,
-			params string[] arguments)
+			IReadOnlyList<string>? arguments = null,
+			bool allowFileGitTransport = false)
 		{
 			var startInfo = new ProcessStartInfo("dotnet")
 			{
@@ -243,9 +252,13 @@ public sealed partial class McpServerProcessTests
 			startInfo.ArgumentList.Add("mcp");
 			startInfo.ArgumentList.Add("--root");
 			startInfo.ArgumentList.Add(project);
-			foreach (var argument in arguments)
+			foreach (var argument in arguments ?? [])
 				startInfo.ArgumentList.Add(argument);
 			startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot;
+			if (allowFileGitTransport)
+			{
+				startInfo.Environment[GitRepositoryService.TestFileTransportPolicyVariable] = "1";
+			}
 
 			var process = Process.Start(startInfo) ??
 			              throw new InvalidOperationException("MCP process did not start.");
