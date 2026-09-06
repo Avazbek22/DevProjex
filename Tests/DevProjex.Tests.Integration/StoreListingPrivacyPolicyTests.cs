@@ -50,7 +50,7 @@ public sealed class StoreListingPrivacyPolicyTests
             "privacy-policy.md");
         var lines = File.ReadAllLines(policyPath);
 
-        Assert.Single(lines.Where(static line => line.StartsWith("# ", StringComparison.Ordinal)));
+        Assert.Single(lines, static line => line.StartsWith("# ", StringComparison.Ordinal));
         Assert.True(
             lines.Count(static line => line.StartsWith("## ", StringComparison.Ordinal)) >= 5,
             "The privacy policy lost its section structure.");
