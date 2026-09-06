@@ -1,0 +1,16 @@
+(variable_declaration) @reference.variable_type
+(property_declaration) @reference.property_type
+(parameter) @reference.parameter_type
+(method_declaration) @reference.return_type
+(base_list) @reference.base
+(type_argument_list) @reference.generic_argument
+(attribute) @reference.attribute
+(object_creation_expression) @reference.object_creation
+(typeof_expression) @reference.typeof
+(sizeof_expression) @reference.sizeof
+(default_expression) @reference.default
+(cast_expression) @reference.cast
+(as_expression) @reference.as
+(is_pattern_expression) @reference.is
+(declaration_pattern) @reference.pattern
+(type_parameter_list) @context.type_parameters
