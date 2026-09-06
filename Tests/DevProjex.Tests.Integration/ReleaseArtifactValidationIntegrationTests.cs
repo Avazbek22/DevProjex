@@ -24,7 +24,7 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 
 		var result = RunValidator(workspace.Path, "github", "linux-x64");
 
-		Assert.Equal(0, result.ExitCode);
+		Assert.True(result.ExitCode == 0, result.StandardOutput + result.StandardError);
 		Assert.Contains("Channel github: VALIDATED; PARTIAL (not release-ready)", result.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("publish-payload.linux-x64.json", result.StandardOutput, StringComparison.Ordinal);
 	}
@@ -93,8 +93,8 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 			Path.Combine(RepoRoot.Value, "Scripts", "Test-ReleaseArtifactGateMutation.ps1"),
 			["-PublishRoot", Path.Combine(workspace.Path, "publish"), "-Version", Version, "-Channels", "store"]);
 
-		Assert.Equal(0, result.ExitCode);
-		Assert.Contains("DevProjex.Grammars/tree-sitter-kotlin.dll", result.StandardOutput, StringComparison.Ordinal);
+		Assert.True(result.ExitCode == 0, result.StandardOutput + result.StandardError);
+		Assert.Contains("grammars/tree-sitter-kotlin.dll", result.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("DevProjex.Assets.Localization.en.json", result.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("libSkiaSharp.dll", result.StandardOutput, StringComparison.Ordinal);
 	}
@@ -264,6 +264,7 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		new("DevProjex.exe", Encoding.ASCII.GetBytes($"fixture-{version}"), 2),
 		new("Assets.dll", File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Assets.dll")), 1),
 		new("Infrastructure.dll", File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Infrastructure.dll")), 1),
+		new("grammars/tree-sitter-kotlin.dll", Encoding.ASCII.GetBytes($"grammar-{version}"), 2),
 		new("libSkiaSharp.dll", Encoding.ASCII.GetBytes($"native-{version}"), 2),
 		new("DevProjex.runtimeconfig.json", Encoding.UTF8.GetBytes($"{{\"version\":\"{version}\"}}"), 4)
 	];

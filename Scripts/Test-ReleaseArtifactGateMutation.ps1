@@ -84,16 +84,14 @@ function Get-ReceiptMutationCases([object] $Receipt) {
             if ([string]$resource -ceq 'DevProjex.Assets.Localization.en.json') { $fixedLocalization = $candidate }
 		}
 	}
-	if ($null -eq $fixedGrammar) {
-		$grammarFile = @($Receipt.files | Where-Object {
-			[string]$_.path -ceq 'grammars/tree-sitter-kotlin.dll'
-		} | Select-Object -First 1)
-		if ($grammarFile.Count -eq 1) {
-			$fixedGrammar = [pscustomobject]@{
-				Kind = 'File'
-				File = [string]$grammarFile[0].path
-				Entry = [string]$grammarFile[0].path
-			}
+	$grammarFile = @($Receipt.files | Where-Object {
+		[string]$_.path -ceq 'grammars/tree-sitter-kotlin.dll'
+	} | Select-Object -First 1)
+	if ($grammarFile.Count -eq 1) {
+		$fixedGrammar = [pscustomobject]@{
+			Kind = 'File'
+			File = [string]$grammarFile[0].path
+			Entry = [string]$grammarFile[0].path
 		}
 	}
 	if ($null -eq $fixedGrammar -or $null -eq $fixedLocalization) {
