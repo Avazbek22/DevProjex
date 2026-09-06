@@ -31,7 +31,9 @@ if ($EventName -ceq 'release') {
 		$ReleaseTag
 	}
 	if ($tagVersion -cne $repositoryVersion) {
-		throw "Release tag version '$tagVersion' does not match DevProjexVersion '$repositoryVersion' in Directory.Build.props."
+		[Console]::Error.WriteLine(
+			"Release tag version '$tagVersion' does not match DevProjexVersion '$repositoryVersion' in Directory.Build.props.")
+		exit 1
 	}
 }
 elseif ($EventName -ceq 'workflow_dispatch') {
