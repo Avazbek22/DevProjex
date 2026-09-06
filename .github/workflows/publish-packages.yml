@@ -80,7 +80,12 @@ jobs:
           $displayVersion = if ('${{ github.event_name }}' -ceq 'release') {
             '${{ github.event.release.tag_name }}'.TrimStart('v')
           } elseif ('${{ github.event_name }}' -ceq 'pull_request') {
-            ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.DevProjexVersion
+            $buildProps = [xml](Get-Content Directory.Build.props -Raw)
+            $versionNode = $buildProps.SelectSingleNode('/Project/PropertyGroup/DevProjexVersion')
+            if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText)) {
+              throw 'DevProjexVersion was not found in Directory.Build.props.'
+            }
+            $versionNode.InnerText.Trim()
           } else {
             '${{ inputs.version }}'
           }

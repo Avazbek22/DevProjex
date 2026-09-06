@@ -455,6 +455,16 @@ public sealed class DocumentationAndPackagingContractTests
 			Assert.Contains("Scripts/ci/Test-ReleaseVersion.ps1", workflow, StringComparison.Ordinal);
 			Assert.Contains("github.event.release.tag_name", workflow, StringComparison.Ordinal);
 		}
+		var packagesWorkflow = File.ReadAllText(Path.Combine(
+			rootPath, ".github", "workflows", "publish-packages.yml"));
+		Assert.Contains(
+			"SelectSingleNode('/Project/PropertyGroup/DevProjexVersion')",
+			packagesWorkflow,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			".Project.PropertyGroup.DevProjexVersion",
+			packagesWorkflow,
+			StringComparison.Ordinal);
 
 		var appImageWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-appimage.yml"));
 		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", appImageWorkflow, StringComparison.Ordinal);
