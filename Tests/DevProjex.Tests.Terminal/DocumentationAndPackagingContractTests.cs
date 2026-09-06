@@ -19,11 +19,34 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Profiles.md",
 		"Desktop-Control.md",
 		"Git-Safety.md",
+		"Security.md",
 		"SmartIgnore.md",
 		"HideSecrets.md",
+		"Benchmarks.md",
+		"Comparison.md",
 		"Release-Channels.md",
 		"Release-Process.md"
 	];
+
+	[Fact]
+	public void SecurityAndBenchmarkDocumentsKeepTheirEvidenceBoundaries()
+	{
+		var rootPath = FindRepositoryRoot();
+		var security = File.ReadAllText(Path.Combine(rootPath, "Docs", "Security.md"));
+		var benchmarks = File.ReadAllText(Path.Combine(rootPath, "Docs", "Benchmarks.md"));
+		var comparison = File.ReadAllText(Path.Combine(rootPath, "Docs", "Comparison.md"));
+
+		Assert.Contains("Prompt injection", security, StringComparison.Ordinal);
+		Assert.Contains("Secret detection is not proof", security, StringComparison.Ordinal);
+		Assert.Contains("ProxyCommand", security, StringComparison.Ordinal);
+		Assert.Contains("same operating-system user", security, StringComparison.Ordinal);
+		Assert.Contains("d318b683471101618febed18996405ad26462110", benchmarks, StringComparison.Ordinal);
+		Assert.Contains("85e3969b010c72b905203812d1a3f5beb84a2102", benchmarks, StringComparison.Ordinal);
+		Assert.Contains("three", benchmarks, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("operating-system page cache", benchmarks, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("Benchmarks.md", comparison, StringComparison.Ordinal);
+		Assert.Contains("different", comparison, StringComparison.OrdinalIgnoreCase);
+	}
 
 	[Fact]
 	public void GitSafetyProfilesAndFilterRefusalRemainDocumented()
