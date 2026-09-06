@@ -58,7 +58,7 @@ internal sealed class CommandLineUiBenchmarkRunner(CommandLineUiBenchmarkContext
 					cancellationToken)
 				.ConfigureAwait(false);
 
-			var firstRequest = BuildUiProcessRequest(targetPath, Path.Combine(runReportsDirectory, "session-template.json"));
+			using var firstRequest = BuildUiProcessRequest(targetPath, Path.Combine(runReportsDirectory, "session-template.json"));
 			var report = CommandLineUiBenchmarkReport.Create(
 				createdAt,
 				targetPath,
@@ -98,7 +98,7 @@ internal sealed class CommandLineUiBenchmarkRunner(CommandLineUiBenchmarkContext
 		{
 			var isWarmup = index < configuration.Warmup;
 			var sessionReportPath = Path.Combine(runReportsDirectory, $"session-{index + 1:000}.json");
-			var request = BuildUiProcessRequest(targetPath, sessionReportPath);
+			using var request = BuildUiProcessRequest(targetPath, sessionReportPath);
 			var processRun = await context.ProcessRunner
 				.RunAsync(request, index + 1, isWarmup, cancellationToken)
 				.ConfigureAwait(false);

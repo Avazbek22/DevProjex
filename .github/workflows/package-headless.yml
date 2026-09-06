@@ -12,6 +12,7 @@ on:
       - 'Scripts/*Headless*'
       - 'Scripts/*Release*'
       - 'Scripts/release-archive-helpers.ps1'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
       - 'Directory.Build.*'
   workflow_dispatch:
     inputs:
@@ -80,6 +81,14 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate release version metadata
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ReleaseVersion.ps1
+          -ResolvedVersion '${{ steps.metadata.outputs.version }}'
+          -EventName '${{ github.event_name }}'
+          -ReleaseTag '${{ github.event.release.tag_name }}'
 
       - name: Build packages and release archives from one publish output
         shell: pwsh

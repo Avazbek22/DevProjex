@@ -13,6 +13,10 @@ on:
       - Infrastructure/TerminalCommands/TerminalCommandSetupService.cs
       - Kernel/ProcessEntryPointResolver.cs
       - Packaging/Linux/**
+      - Scripts/Test-ReleaseArtifacts.ps1
+      - Scripts/Test-ReleaseArtifactGateMutation.ps1
+      - Scripts/ci/Test-ReleaseVersion.ps1
+      - Directory.Build.targets
   workflow_dispatch:
     inputs:
       version:
@@ -89,6 +93,14 @@ jobs:
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
           echo "upload_release=${upload_release}" >> "${GITHUB_OUTPUT}"
 
+      - name: Validate release version metadata
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ReleaseVersion.ps1
+          -ResolvedVersion '${{ steps.metadata.outputs.version }}'
+          -EventName '${{ github.event_name }}'
+          -ReleaseTag '${{ github.event.release.tag_name }}'
+
   package:
     name: AppImage (${{ matrix.appimage_arch }})
     needs: prepare
@@ -154,6 +166,9 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
+          receipt_root="${GITHUB_WORKSPACE}/artifacts/appimage-release/appimage/v${VERSION}"
+          publish_dir="${receipt_root}/${{ matrix.rid }}"
+          mkdir -p -- "${receipt_root}"
           dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj \
             -c Release \
             -r "${{ matrix.rid }}" \
@@ -164,14 +179,34 @@ jobs:
             /p:PublishTrimmed=false \
             /p:DebugType=None \
             /p:DebugSymbols=false \
+            /p:DevProjexGenerateReleasePayloadReceipt=true \
+            "/p:DevProjexPayloadReceiptDirectory=${receipt_root}" \
             "/p:DevProjexVersion=${VERSION}" \
-            -o "artifacts/publish/${{ matrix.rid }}"
+            -o "${publish_dir}"
 
-          mapfile -t published_files < <(find "artifacts/publish/${{ matrix.rid }}" -type f -print)
+          mapfile -t published_files < <(find "${publish_dir}" -type f -print)
           if [[ "${#published_files[@]}" -ne 1 || "$(basename "${published_files[0]}")" != "DevProjex" ]]; then
             printf 'Expected exactly one published file named DevProjex; found:\n%s\n' "${published_files[*]}"
             exit 1
           fi
+
+      - name: Validate the AppImage publish receipt
+        shell: pwsh
+        run: >
+          ./Scripts/Test-ReleaseArtifacts.ps1
+          -PublishRoot artifacts/appimage-release
+          -Version '${{ needs.prepare.outputs.version }}'
+          -Channels appimage
+          -Rids '${{ matrix.rid }}'
+
+      - name: Prove AppImage receipt mutations fail closed
+        shell: pwsh
+        run: >
+          ./Scripts/Test-ReleaseArtifactGateMutation.ps1
+          -PublishRoot artifacts/appimage-release
+          -Version '${{ needs.prepare.outputs.version }}'
+          -Channels appimage
+          -Rids '${{ matrix.rid }}'
 
       - name: Cache the pinned AppStream validator
         id: appstream_validator_cache
@@ -268,7 +303,7 @@ jobs:
           APPIMAGE_LINT_COMMIT: 19e30b276ffedf4d3b4b56bc6320f463625a74f8
         run: |
           set -euo pipefail
-          publish_dir="${GITHUB_WORKSPACE}/artifacts/publish/${{ matrix.rid }}"
+          publish_dir="${GITHUB_WORKSPACE}/artifacts/appimage-release/appimage/v${{ needs.prepare.outputs.version }}/${{ matrix.rid }}"
           build_root="${GITHUB_WORKSPACE}/artifacts/appimage/${{ matrix.appimage_arch }}"
           app_dir="${build_root}/DevProjex.AppDir"
           rm -rf -- "${build_root}"
@@ -362,7 +397,7 @@ jobs:
           )
 
           packaged_binary="${extraction_root}/squashfs-root/usr/bin/DevProjex"
-          published_binary="${GITHUB_WORKSPACE}/artifacts/publish/${{ matrix.rid }}/DevProjex"
+          published_binary="${GITHUB_WORKSPACE}/artifacts/appimage-release/appimage/v${VERSION}/${{ matrix.rid }}/DevProjex"
           [[ -x "${packaged_binary}" ]]
           [[ "$(sha256sum "${published_binary}" | cut -d ' ' -f 1)" == \
              "$(sha256sum "${packaged_binary}" | cut -d ' ' -f 1)" ]]

@@ -7,7 +7,8 @@ internal sealed class MemoryCleanupCoordinator(
     SessionMetricsRecorder sessionMetrics,
     Func<bool> uiReady,
     TimeSpan animationDuration,
-    Func<MemoryCleanupRetentionSnapshot>? captureMemoryRetention = null)
+    Func<MemoryCleanupRetentionSnapshot>? captureMemoryRetention = null,
+    BackgroundTaskRegistry? backgroundTasks = null)
     : IDisposable
 {
     private static readonly TimeSpan BackgroundCollectionObservationTimeout =
@@ -39,6 +40,8 @@ internal sealed class MemoryCleanupCoordinator(
         cancellationToken => QueryUiReadinessAsync(
             uiReady,
             cancellationToken);
+	private readonly BackgroundTaskRegistry _backgroundTasks = backgroundTasks ?? new();
+	private readonly bool _ownsBackgroundTasks = backgroundTasks is null;
     private readonly TimeSpan _uiReadinessTimeout = UiReadinessTimeout;
     private readonly TimeSpan _uiReadinessPollInterval =
         UiReadinessPollInterval;
@@ -73,8 +76,9 @@ internal sealed class MemoryCleanupCoordinator(
         Func<TimeSpan, CancellationToken, Task>? deferCleanup = null,
         Func<CancellationToken, Task>? waitForRenderPasses = null,
         Func<CancellationToken, Task<bool>>? queryUiReadiness = null,
-        MemoryCleanupTrace? memoryCleanupTrace = null)
-        : this(sessionMetrics, uiReady, animationDuration, captureMemoryRetention: null)
+        MemoryCleanupTrace? memoryCleanupTrace = null,
+		BackgroundTaskRegistry? backgroundTasks = null)
+        : this(sessionMetrics, uiReady, animationDuration, captureMemoryRetention: null, backgroundTasks)
     {
         _captureMemorySnapshot = captureMemorySnapshot;
         _collect = collect;
@@ -140,11 +144,13 @@ internal sealed class MemoryCleanupCoordinator(
         if (cleanupPlan.CollectionMode == MemoryCleanupCollectionMode.None)
             return;
 
-        var cleanupCts = ReplaceCancellationSource(ref _previewCleanupCts);
+        var cleanupCts = ReplaceCancellationSource(
+			ref _previewCleanupCts,
+			_backgroundTasks.LifetimeToken);
         var cleanupToken = cleanupCts.Token;
         var cleanupVersion = Interlocked.Increment(ref _previewCleanupVersion);
 
-        _ = Task.Run(async () =>
+		var task = Task.Run(async () =>
         {
             try
             {
@@ -167,6 +173,7 @@ internal sealed class MemoryCleanupCoordinator(
                 DisposeIfCurrent(ref _previewCleanupCts, cleanupCts);
             }
         });
+		_backgroundTasks.Register(task, "MemoryCleanup.SchedulePreview");
     }
 
     public void CancelBackground() =>
@@ -200,6 +207,8 @@ internal sealed class MemoryCleanupCoordinator(
             return;
 
         CancelAll();
+		if (_ownsBackgroundTasks)
+			_backgroundTasks.Dispose();
     }
 
     private void ScheduleCore(
@@ -220,7 +229,7 @@ internal sealed class MemoryCleanupCoordinator(
         sessionMetrics.RecordMemoryCleanupScheduled(reason);
         var cleanupToken = cleanupCts.Token;
 
-        _ = Task.Run(async () =>
+		var task = Task.Run(async () =>
         {
             try
             {
@@ -309,6 +318,7 @@ internal sealed class MemoryCleanupCoordinator(
                 DisposeBackgroundCleanupIfCurrent(cleanupCts);
             }
         });
+		_backgroundTasks.Register(task, "MemoryCleanup.ScheduleCore");
     }
 
     private bool TryScheduleBackgroundCleanup(
@@ -327,10 +337,12 @@ internal sealed class MemoryCleanupCoordinator(
                 return false;
             }
 
-            cleanupCts = triggerCancellationToken.CanBeCanceled
-                ? CancellationTokenSource.CreateLinkedTokenSource(
-                    triggerCancellationToken)
-                : new CancellationTokenSource();
+			cleanupCts = triggerCancellationToken.CanBeCanceled
+				? CancellationTokenSource.CreateLinkedTokenSource(
+					triggerCancellationToken,
+					_backgroundTasks.LifetimeToken)
+				: CancellationTokenSource.CreateLinkedTokenSource(
+					_backgroundTasks.LifetimeToken);
             previous = _backgroundCleanupCts;
             _backgroundCleanupCts = cleanupCts;
             _backgroundCleanupMode = collectionMode;

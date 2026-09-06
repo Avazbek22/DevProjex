@@ -19,11 +19,34 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Profiles.md",
 		"Desktop-Control.md",
 		"Git-Safety.md",
+		"Security.md",
 		"SmartIgnore.md",
 		"HideSecrets.md",
+		"Benchmarks.md",
+		"Comparison.md",
 		"Release-Channels.md",
 		"Release-Process.md"
 	];
+
+	[Fact]
+	public void SecurityAndBenchmarkDocumentsKeepTheirEvidenceBoundaries()
+	{
+		var rootPath = FindRepositoryRoot();
+		var security = File.ReadAllText(Path.Combine(rootPath, "Docs", "Security.md"));
+		var benchmarks = File.ReadAllText(Path.Combine(rootPath, "Docs", "Benchmarks.md"));
+		var comparison = File.ReadAllText(Path.Combine(rootPath, "Docs", "Comparison.md"));
+
+		Assert.Contains("Prompt injection", security, StringComparison.Ordinal);
+		Assert.Contains("Secret detection is not proof", security, StringComparison.Ordinal);
+		Assert.Contains("ProxyCommand", security, StringComparison.Ordinal);
+		Assert.Contains("same operating-system user", security, StringComparison.Ordinal);
+		Assert.Contains("d318b683471101618febed18996405ad26462110", benchmarks, StringComparison.Ordinal);
+		Assert.Contains("85e3969b010c72b905203812d1a3f5beb84a2102", benchmarks, StringComparison.Ordinal);
+		Assert.Contains("three", benchmarks, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("operating-system page cache", benchmarks, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("Benchmarks.md", comparison, StringComparison.Ordinal);
+		Assert.Contains("different", comparison, StringComparison.OrdinalIgnoreCase);
+	}
 
 	[Fact]
 	public void GitSafetyProfilesAndFilterRefusalRemainDocumented()
@@ -412,6 +435,51 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("DevProjex-headless.v<version>.<rid>", installation, StringComparison.Ordinal);
 		Assert.Contains("ghcr.io/avazbek22/devprojex", installation, StringComparison.Ordinal);
 		Assert.Contains("Two independent producers cannot atomically update one checksum manifest", releaseProcess, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ReleaseWorkflowsShareVersionAndAppImageReceiptGates()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflowNames = new[]
+		{
+			"package-appimage.yml",
+			"package-headless.yml",
+			"publish-container.yml",
+			"publish-packages.yml"
+		};
+		foreach (var workflowName in workflowNames)
+		{
+			var workflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", workflowName));
+			Assert.Contains("types: [published]", workflow, StringComparison.Ordinal);
+			Assert.Contains("Scripts/ci/Test-ReleaseVersion.ps1", workflow, StringComparison.Ordinal);
+			Assert.Contains("github.event.release.tag_name", workflow, StringComparison.Ordinal);
+		}
+		var packagesWorkflow = File.ReadAllText(Path.Combine(
+			rootPath, ".github", "workflows", "publish-packages.yml"));
+		Assert.Contains(
+			"SelectSingleNode('/Project/PropertyGroup/DevProjexVersion')",
+			packagesWorkflow,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			".Project.PropertyGroup.DevProjexVersion",
+			packagesWorkflow,
+			StringComparison.Ordinal);
+
+		var appImageWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-appimage.yml"));
+		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", appImageWorkflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"receipt_root=\"${GITHUB_WORKSPACE}/artifacts/appimage-release",
+			appImageWorkflow,
+			StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifacts.ps1", appImageWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifactGateMutation.ps1", appImageWorkflow, StringComparison.Ordinal);
+		Assert.Contains("-Channels appimage", appImageWorkflow, StringComparison.Ordinal);
+
+		var releaseProcess = File.ReadAllText(Path.Combine(rootPath, "Docs", "Release-Process.md"));
+		Assert.Contains("must match", releaseProcess, StringComparison.Ordinal);
+		Assert.Contains("workflow_dispatch", releaseProcess, StringComparison.Ordinal);
+		Assert.Contains("AppImage workflow enables the same SDK-generated", releaseProcess, StringComparison.Ordinal);
 	}
 
 	[Fact]
