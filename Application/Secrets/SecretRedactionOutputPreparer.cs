@@ -2579,6 +2579,13 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 			? sourceAnalyzer
 			: preparedContentAnalyzer;
 
+	internal bool IsApplicationOwnedImmutableContent(string path)
+	{
+		var file = prepared.GetFile(path);
+		return file.ContentSlice is not null ||
+		       !ProjectTreePathIdentity.CanonicalComparer.Equals(file.SourcePath, file.ContentPath);
+	}
+
 	private bool TryResolveStoredSlice(
 		PreparedSecretFile file,
 		out PreparedContentStore store,

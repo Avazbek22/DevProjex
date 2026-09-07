@@ -1254,10 +1254,11 @@ public sealed class ProjectContextDocumentService(
 		string path,
 		CancellationToken cancellationToken)
 	{
-		if (contentAnalyzer is PreparedSecretFileContentAnalyzer)
+		if (contentAnalyzer is PreparedSecretFileContentAnalyzer preparedAnalyzer &&
+		    preparedAnalyzer.IsApplicationOwnedImmutableContent(path))
 		{
-			// Prepared content was read through this policy and is an immutable, already-inspected
-			// snapshot. Rewalking the mutable source path cannot make that captured content safer.
+			// Application-owned prepared content is immutable and was captured through this policy.
+			// Source-backed pass-through entries still require the checks below when they are opened.
 			return await contentAnalyzer
 				.OpenCompleteSnapshotAsync(path, cancellationToken)
 				.ConfigureAwait(false);
