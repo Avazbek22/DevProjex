@@ -954,8 +954,13 @@ public sealed class DependencyFactsEngine : IDisposable
 			IEnumerable<string> candidates;
 			if (import.Specifier.StartsWith(".", StringComparison.Ordinal))
 			{
+				if (Path.GetExtension(import.Specifier).Length == 0 && RequiresExplicitRelativeExtension(source, scope))
+				{
+					return Edge(source, import, ResolutionStatus.Unresolved, null,
+						"extension required for a relative ESM import under node16/nodenext", []);
+				}
 				var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
-				candidates = ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, import.Specifier)), scope);
+				candidates = ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, import.Specifier)), scope, source);
 			}
 			else if (import.Specifier.StartsWith("#", StringComparison.Ordinal))
 			{
@@ -973,7 +978,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			else
 			{
-				var mapped = ResolvePaths(scope, import.Specifier).ToArray();
+				var mapped = ResolvePaths(scope, source, import.Specifier).ToArray();
 				if (mapped.Length > 0)
 					return FinishImport(source, import, mapped,
 						$"one module target under {scope.ModuleResolution} in {scope.ScopeId}");
@@ -1002,7 +1007,18 @@ public sealed class DependencyFactsEngine : IDisposable
 		private static bool IsRequire(ImportFact import) =>
 			import.Site.Evidence.TrimStart().StartsWith("require", StringComparison.Ordinal);
 
-		private IEnumerable<string> ResolvePaths(DependencyScopeDescriptor? scope, string specifier)
+		private bool RequiresExplicitRelativeExtension(FileFacts source, DependencyScopeDescriptor scope)
+		{
+			var mode = scope.ModuleResolution ?? "bundler";
+			return (mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
+			        mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase)) &&
+			       !SupportsCommonJs(source, scope);
+		}
+
+		private IEnumerable<string> ResolvePaths(
+			DependencyScopeDescriptor? scope,
+			FileFacts source,
+			string specifier)
 		{
 			if (scope is null)
 				return [];
@@ -1014,11 +1030,15 @@ public sealed class DependencyFactsEngine : IDisposable
 			{
 				var wildcard = mapping.Star < 0 ? string.Empty :
 					specifier[mapping.Star..(specifier.Length - (mapping.Key.Length - mapping.Star - 1))];
-				var targets = mapping.Value.SelectMany(target => ProbeTypeScript(
-					Path.GetFullPath(Path.Combine(scope.Root, target.Replace("*", wildcard, StringComparison.Ordinal))),
-					scope)).ToArray();
-				if (targets.Length > 0)
-					return targets;
+				foreach (var target in mapping.Value)
+				{
+					var resolved = ProbeTypeScript(
+						Path.GetFullPath(Path.Combine(scope.Root, target.Replace("*", wildcard, StringComparison.Ordinal))),
+						scope,
+						source).FirstOrDefault();
+					if (resolved is not null)
+						return [resolved];
+				}
 			}
 			return [];
 		}
@@ -1047,7 +1067,10 @@ public sealed class DependencyFactsEngine : IDisposable
 					var values = exports ? map.Exports : map.Imports;
 					var key = exports ? (specifier.Length == 0 ? "." : "./" + specifier) : specifier;
 					if (TryMap(values, key, out var target) && target is not null)
-						return ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, target)), FindScope(source.ScopeId));
+						return ProbeTypeScript(
+							Path.GetFullPath(Path.Combine(directory, target)),
+							FindScope(source.ScopeId),
+							source);
 					return [];
 				}
 				if (Path.GetFullPath(directory) == Path.GetFullPath(_root))
@@ -1105,29 +1128,60 @@ public sealed class DependencyFactsEngine : IDisposable
 			return false;
 		}
 
-		private IEnumerable<string> ProbeTypeScript(string candidate, DependencyScopeDescriptor? scope)
+		private IEnumerable<string> ProbeTypeScript(
+			string candidate,
+			DependencyScopeDescriptor? scope,
+			FileFacts source)
 		{
-			var extension = Path.GetExtension(candidate);
+			var extension = Path.GetExtension(candidate).ToLowerInvariant();
 			var probes = new List<string>();
 			if (extension is ".js" or ".mjs" or ".cjs")
 			{
 				var stem = candidate[..^extension.Length];
 				probes.AddRange(extension switch
 				{
-					".mjs" => [stem + ".mts", stem + ".d.mts"],
-					".cjs" => [stem + ".cts", stem + ".d.cts"],
-					_ => [stem + ".ts", stem + ".tsx", stem + ".d.ts"]
+					".mjs" => [stem + ".mts", stem + ".d.mts", candidate],
+					".cjs" => [stem + ".cts", stem + ".d.cts", candidate],
+					_ => [stem + ".ts", stem + ".tsx", stem + ".d.ts", candidate]
 				});
 			}
 			else if (extension.Length > 0)
 				probes.Add(candidate);
 			else
-				probes.AddRange([candidate + ".ts", candidate + ".tsx", candidate + ".d.ts", candidate + ".js"]);
+			{
+				probes.AddRange([candidate + ".ts", candidate + ".tsx", candidate + ".d.ts"]);
+				if (scope?.AllowJavaScript == true || source.LanguageId is LanguageId.JavaScript)
+					probes.AddRange([candidate + ".js", candidate + ".jsx"]);
+			}
 			var mode = scope?.ModuleResolution ?? "bundler";
-			if (mode.Equals("node", StringComparison.OrdinalIgnoreCase) || mode.Equals("node16", StringComparison.OrdinalIgnoreCase))
-				probes.AddRange([Path.Combine(candidate, "index.ts"), Path.Combine(candidate, "index.tsx"), Path.Combine(candidate, "index.d.ts")]);
-			return probes.Select(path => PortableRelative(_root, path)).Where(_files.ContainsKey).Distinct(StringComparer.Ordinal);
+			if (SupportsDirectoryIndex(mode, source, scope))
+			{
+				probes.AddRange([
+					Path.Combine(candidate, "index.ts"),
+					Path.Combine(candidate, "index.tsx"),
+					Path.Combine(candidate, "index.d.ts")]);
+				if (scope?.AllowJavaScript == true || source.LanguageId is LanguageId.JavaScript)
+					probes.AddRange([Path.Combine(candidate, "index.js"), Path.Combine(candidate, "index.jsx")]);
+			}
+			foreach (var probe in probes)
+			{
+				var relative = PortableRelative(_root, probe);
+				if (_files.ContainsKey(relative))
+					return [relative];
+			}
+			return [];
 		}
+
+		private bool SupportsDirectoryIndex(
+			string mode,
+			FileFacts source,
+			DependencyScopeDescriptor? scope) =>
+			mode.Equals("bundler", StringComparison.OrdinalIgnoreCase) ||
+			mode.Equals("node", StringComparison.OrdinalIgnoreCase) ||
+			mode.Equals("node10", StringComparison.OrdinalIgnoreCase) ||
+			(mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
+			 mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase)) &&
+			SupportsCommonJs(source, scope!);
 
 		private DependencyEdge ResolvePythonImport(FileFacts source, ImportFact import)
 		{

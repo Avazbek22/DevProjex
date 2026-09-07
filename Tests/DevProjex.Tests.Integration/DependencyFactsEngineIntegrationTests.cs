@@ -136,7 +136,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
-	public async Task TypeScriptFacts_ApplyJsSubstitutionPathsAndNoBundlerIndexFallback()
+	public async Task TypeScriptFacts_ApplyOrderedJsSubstitutionPathsAndBundlerIndexFallback()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("tsconfig.json", """
@@ -164,7 +164,76 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal("src/x.ts", resolvedImport.Target);
 		Assert.Contains(result.Edges, edge => edge.Source == "src/main.ts" && edge.Target == "src/exact.ts");
 		Assert.Contains(result.Edges, edge => edge.Source == "src/main.ts" && edge.Target == "src/lib/item.ts");
-		Assert.Contains(result.Edges, edge => edge.Source == "src/main.ts" && edge.Reference == "./dir" && edge.Status == ResolutionStatus.Unresolved);
+		Assert.Contains(result.Edges, edge => edge.Source == "src/main.ts" && edge.Reference == "./dir" && edge.Target == "src/dir/index.ts");
+	}
+
+	[Fact]
+	public async Task TypeScriptRelativeResolution_UsesTheFirstExistingProbeAndPreservesJavaScriptFallback()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var source = fixture.CreateFile("main.ts", "import one from './worker.js'; import two from './plain.js';");
+		var workerTypeScript = fixture.CreateFile("worker.ts", "export default 1;");
+		var workerDeclaration = fixture.CreateFile("worker.d.ts", "declare const value: number; export default value;");
+		var plainJavaScript = fixture.CreateFile("plain.js", "export default 2;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, workerTypeScript, workerDeclaration, plainJavaScript],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "./worker.js" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "worker.ts");
+		Assert.Contains(result.Edges, edge => edge.Reference == "./plain.js" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "plain.js");
+		Assert.DoesNotContain(result.Edges, edge => edge.Reference == "./worker.js" &&
+			edge.Status == ResolutionStatus.Ambiguous);
+	}
+
+	[Fact]
+	public async Task TypeScriptDirectoryResolution_DistinguishesBundlerFromNodeEsm()
+	{
+		using var fixture = new TemporaryDirectory();
+		var bundlerConfig = fixture.CreateFile("bundler/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var bundlerSource = fixture.CreateFile("bundler/main.ts", "import value from './dir';");
+		var bundlerIndex = fixture.CreateFile("bundler/dir/index.ts", "export default 1;");
+		var nodeConfig = fixture.CreateFile("node/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var nodePackage = fixture.CreateFile("node/package.json", "{\"type\":\"module\"}");
+		var nodeSource = fixture.CreateFile("node/main.mts", "import value from './dir';");
+		var nodeIndex = fixture.CreateFile("node/dir/index.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[bundlerConfig, bundlerSource, bundlerIndex, nodeConfig, nodePackage, nodeSource, nodeIndex],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "bundler/main.ts" &&
+			edge.Reference == "./dir" && edge.Target == "bundler/dir/index.ts");
+		Assert.Contains(result.Edges, edge => edge.Source == "node/main.mts" &&
+			edge.Reference == "./dir" && edge.Status == ResolutionStatus.Unresolved &&
+			edge.Reasons.Contains("extension required for a relative ESM import under node16/nodenext"));
+	}
+
+	[Fact]
+	public async Task TypeScriptPaths_UsesTheFirstFallbackTargetThatExists()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", """
+			{"compilerOptions":{"moduleResolution":"bundler","paths":{"alias":["missing.ts","src/value.ts"]}}}
+			""");
+		var source = fixture.CreateFile("main.ts", "import value from 'alias';");
+		var target = fixture.CreateFile("src/value.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "alias" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "src/value.ts");
 	}
 
 	[Fact]

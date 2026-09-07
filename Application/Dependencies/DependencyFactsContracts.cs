@@ -54,7 +54,8 @@ public sealed record DependencyScopeDescriptor(
 	IReadOnlySet<string> PythonExternalPackages,
 	IReadOnlyList<string> PythonRoots,
 	bool HasConfiguration,
-	string? PythonVersion = null);
+	string? PythonVersion = null,
+	bool AllowJavaScript = false);
 
 public sealed record PackageMapDescriptor(
 	string Directory,
