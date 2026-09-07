@@ -65,13 +65,12 @@ public sealed class AnalyzeCommandHandler(
 		if (transformationContext is not null)
 		{
 			await using var prepared = await services.SecretRedactionOutputPreparer
-				.PrepareAsync(
+				.MeasureAsync(
 					transformationContext,
 					plan.IncludedFiles,
 					request.IncludeFindings && plan.Selection.HideSecrets == true,
-					cancellationToken)
+					cancellationToken: cancellationToken)
 				.ConfigureAwait(false);
-			var transformedAnalyzer = services.SecretRedactionOutputPreparer.CreatePreparedAnalyzer(prepared);
 			if (findingsRequested && plan.Selection.HideSecrets == true)
 			{
 				effectiveFindingCount = prepared.Snapshot?.DetectedCount ?? 0;
@@ -82,14 +81,9 @@ public sealed class AnalyzeCommandHandler(
 				}
 				findingsCapturedByOutput = true;
 			}
-			var transformedMetrics = await ProjectContentMetricsCalculator
-				.CalculateAsync(
-					transformedAnalyzer,
-					plan.IncludedFiles,
-					topFileObserver,
-					progress: null,
-					cancellationToken)
-				.ConfigureAwait(false);
+			foreach (var fileMetrics in prepared.TransformedFileMetrics)
+				topFileObserver?.Invoke(fileMetrics);
+			var transformedMetrics = prepared.GetTransformedMetrics();
 			plan = plan with
 			{
 				Analysis = plan.Analysis with

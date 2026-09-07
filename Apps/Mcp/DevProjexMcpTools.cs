@@ -187,7 +187,7 @@ internal sealed class DevProjexMcpTools(
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
 			operationProgress.Milestone(11, $"transforming content 0/{plan.IncludedFiles.Count}");
-			await using var prepared = await Projects.PrepareAsync(
+			await using var prepared = await Projects.MeasureAsync(
 					plan,
 					detail,
 					operationProgress.Measure("transforming content", 12, 59),
@@ -196,32 +196,34 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(
 				60,
 				$"transforming content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var analyzer = Projects.CreatePreparedAnalyzer(prepared);
 			operationProgress.Milestone(61, $"analyzing content 0/{plan.IncludedFiles.Count}");
 			var largest = new TopFileRanking(topFileCount);
 			var uninspectedPaths = prepared.UnscannablePaths.ToHashSet(
 				ProjectTreePathIdentity.CanonicalComparer);
 			long estimatedContentCharacters = 0;
-			var metrics = await ProjectContentMetricsCalculator
-				.CalculateAsync(
-					analyzer,
-					plan.IncludedFiles,
-					fileMetrics =>
-					{
-						largest.Add(
-							fileMetrics.Path,
-							CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount));
-						if (fileMetrics.IsEstimated)
-						{
-							estimatedContentCharacters =
-								estimatedContentCharacters > long.MaxValue - fileMetrics.CharCount
-									? long.MaxValue
-									: estimatedContentCharacters + fileMetrics.CharCount;
-						}
-					},
-					operationProgress.Measure("analyzing content", 62, 98),
-					cancellationToken)
-				.ConfigureAwait(false);
+			var metrics = prepared.GetTransformedMetrics();
+			var analyzedFiles = 0;
+			var analysisProgress = operationProgress.Measure("analyzing content", 62, 98);
+			foreach (var fileMetrics in prepared.TransformedFileMetrics)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				largest.Add(
+					fileMetrics.Path,
+					CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount));
+				if (fileMetrics.IsEstimated)
+				{
+					estimatedContentCharacters =
+						estimatedContentCharacters > long.MaxValue - fileMetrics.CharCount
+							? long.MaxValue
+							: estimatedContentCharacters + fileMetrics.CharCount;
+				}
+				analyzedFiles++;
+				analysisProgress.Report(new ProjectCopyExportProgress(
+					analyzedFiles,
+					plan.IncludedFiles.Count,
+					BytesWritten: 0,
+					Percentage: analyzedFiles * 100d / Math.Max(1, plan.IncludedFiles.Count)));
+			}
 			operationProgress.Milestone(
 				99,
 				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");

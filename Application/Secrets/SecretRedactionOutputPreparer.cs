@@ -79,6 +79,7 @@ public sealed class SecretRedactionOutputPreparer
 			orderedFilePaths,
 			captureEffectiveFindings,
 			materializeTransformedContent: true,
+			captureTransformedMetrics: false,
 			cancellationToken,
 			progress);
 
@@ -92,21 +93,38 @@ public sealed class SecretRedactionOutputPreparer
 			orderedFilePaths,
 			captureEffectiveFindings,
 			materializeTransformedContent: false,
+			captureTransformedMetrics: false,
 			cancellationToken,
 			progress: null);
+
+	public Task<PreparedSecretRedactionOutput> MeasureAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		bool captureEffectiveFindings,
+		IProgress<ProjectCopyExportProgress>? progress = null,
+		CancellationToken cancellationToken = default) =>
+		PrepareCoreAsync(
+			context,
+			orderedFilePaths,
+			captureEffectiveFindings,
+			materializeTransformedContent: false,
+			captureTransformedMetrics: true,
+			cancellationToken,
+			progress);
 
 	private async Task<PreparedSecretRedactionOutput> PrepareCoreAsync(
 		ContentTransformationContext context,
 		IReadOnlyList<string> orderedFilePaths,
 		bool captureEffectiveFindings,
 		bool materializeTransformedContent,
+		bool captureTransformedMetrics,
 		CancellationToken cancellationToken,
 		IProgress<ProjectCopyExportProgress>? progress)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 		EnsureSourcePathsAvailable(context, orderedFilePaths);
-		if (context is { Compression: not null, Redaction: null })
+		if (materializeTransformedContent && context is { Compression: not null, Redaction: null })
 		{
 			return await PrepareCompressionOnlyAsync(
 					context,
@@ -128,6 +146,9 @@ public sealed class SecretRedactionOutputPreparer
 
 		SecretRedactionTempDirectory? workingDirectory = null;
 		var preparedFiles = new Dictionary<string, PreparedSecretFile>(ProjectTreePathIdentity.CanonicalComparer);
+		var transformedFileMetrics = captureTransformedMetrics
+			? new Dictionary<string, ContentFileMetrics>(ProjectTreePathIdentity.CanonicalComparer)
+			: null;
 		var unscannableFiles = new List<UnscannableFile>();
 		using var transformationScope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		var scope = transformationScope.Redaction;
@@ -177,6 +198,8 @@ public sealed class SecretRedactionOutputPreparer
 							// A per-file inspection limitation degrades that file, not the whole run.
 							// Redaction cannot promise anything about text it never decoded or fully read,
 							// so every output withholds the content and reports the exact reason.
+							if (captureTransformedMetrics && result.Content is { } estimatedContent)
+								transformedFileMetrics![sourcePath] = ToContentFileMetrics(sourcePath, estimatedContent);
 							if (scope is not null &&
 							    scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None)
 							{
@@ -229,6 +252,15 @@ public sealed class SecretRedactionOutputPreparer
 					IReadOnlyList<EffectiveRedactionFinding> findings = plan is null || !captureEffectiveFindings
 						? []
 						: BuildEffectiveFindings(plan.Spans, content.Content, compressed.Map);
+					if (captureTransformedMetrics)
+					{
+						transformedFileMetrics![sourcePath] = await MeasureTransformedContentAsync(
+							sourcePath,
+							transformedText,
+							plan,
+							ResolveEncoding(result.Encoding ?? TextFileEncoding.Utf8),
+							cancellationToken).ConfigureAwait(false);
+					}
 					if (!materializeTransformedContent)
 					{
 						preparedFiles[sourcePath] = new PreparedSecretFile(
@@ -304,7 +336,13 @@ public sealed class SecretRedactionOutputPreparer
 				preparedFiles,
 				snapshot,
 				compression,
-				unscannableFiles);
+				unscannableFiles,
+				transformedFileMetrics is null
+					? []
+					: orderedFilePaths
+						.Where(transformedFileMetrics.ContainsKey)
+						.Select(path => transformedFileMetrics[path])
+						.ToArray());
 		}
 		catch
 		{
@@ -1798,6 +1836,80 @@ public sealed class SecretRedactionOutputPreparer
 		ContentPipelineDiagnostics.RecordPreparedWrite(stream.Position);
 	}
 
+	private static async Task<ContentFileMetrics> MeasureTransformedContentAsync(
+		string path,
+		string content,
+		SecretFileRedactionPlan? plan,
+		Encoding encoding,
+		CancellationToken cancellationToken)
+	{
+		using var stage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.RedactionAndOutput);
+		var writer = new ContentMetricsTextWriter(encoding);
+		if (plan is null)
+			await writer.WriteAsync(content.AsMemory(), cancellationToken).ConfigureAwait(false);
+		else
+			await plan.WriteToAsync(writer, content, cancellationToken).ConfigureAwait(false);
+		return writer.Build(path);
+	}
+
+	private static ContentFileMetrics ToContentFileMetrics(string path, TextFileMetrics metrics) =>
+		new(
+			path,
+			metrics.SizeBytes,
+			metrics.LineCount,
+			metrics.CharCount,
+			metrics.IsEmpty,
+			metrics.IsWhitespaceOnly,
+			metrics.IsEstimated,
+			metrics.CrLfPairCount,
+			metrics.TrailingNewlineChars,
+			metrics.TrailingNewlineLineBreaks);
+
+	private static ContentFileMetrics ToContentFileMetrics(string path, TextFileContent content) =>
+		new(
+			path,
+			content.SizeBytes,
+			content.LineCount,
+			content.CharCount,
+			content.IsEmpty,
+			content.IsWhitespaceOnly,
+			content.IsEstimated,
+			CrLfPairCount: 0,
+			content.TrailingNewlineChars,
+			content.TrailingNewlineLineBreaks);
+
+	private sealed class ContentMetricsTextWriter(Encoding encoding) : TextWriter
+	{
+		private readonly Encoder _encoder = encoding.GetEncoder();
+		private FileContentAnalyzer.TextMetricsCounter _counter = new();
+		private long _encodedBytes = encoding.GetPreamble().Length;
+		private bool _built;
+
+		public override Encoding Encoding { get; } = encoding;
+
+		public override Task WriteAsync(
+			ReadOnlyMemory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (_built)
+				throw new InvalidOperationException("Transformed content metrics were already completed.");
+			if (!_counter.Append(buffer.Span))
+				throw new InvalidOperationException("Decoded transformed text unexpectedly contained a null character.");
+			_encodedBytes = checked(_encodedBytes + _encoder.GetByteCount(buffer.Span, flush: false));
+			return Task.CompletedTask;
+		}
+
+		public ContentFileMetrics Build(string path)
+		{
+			if (_built)
+				throw new InvalidOperationException("Transformed content metrics were already completed.");
+			_built = true;
+			_encodedBytes = checked(_encodedBytes + _encoder.GetByteCount([], flush: true));
+			return ToContentFileMetrics(path, _counter.Build(_encodedBytes));
+		}
+	}
+
 	private static void EnsureStableRead(
 		string path,
 		SecretFileMetadata before,
@@ -1945,7 +2057,8 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 		IReadOnlyDictionary<string, PreparedSecretFile> files,
 		SecretRedactionSnapshot? snapshot,
 		Compression.CodeCompressionSnapshot? compressionSnapshot = null,
-		IReadOnlyList<UnscannableFile>? unscannableFiles = null)
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null,
+		IReadOnlyList<ContentFileMetrics>? transformedFileMetrics = null)
 	{
 		_workingDirectory = workingDirectory;
 		_files = files;
@@ -1957,6 +2070,9 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 		UnscannablePaths = UnscannableFiles.Count == 0
 			? []
 			: UnscannableFiles.Select(static file => file.Path).ToArray();
+		TransformedFileMetrics = transformedFileMetrics is { Count: > 0 }
+			? transformedFileMetrics.ToArray()
+			: [];
 	}
 
 	/// <summary>
@@ -1974,6 +2090,11 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 	public SecretRedactionSnapshot? Snapshot { get; }
 
 	public Compression.CodeCompressionSnapshot? CompressionSnapshot { get; }
+
+	public IReadOnlyList<ContentFileMetrics> TransformedFileMetrics { get; }
+
+	public ExportOutputMetrics GetTransformedMetrics() =>
+		ExportOutputMetricsCalculator.FromOrderedContentFiles(TransformedFileMetrics);
 
 	public PreparedSecretFile GetFile(string sourcePath)
 	{

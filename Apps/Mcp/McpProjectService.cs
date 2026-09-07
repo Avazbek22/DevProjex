@@ -427,6 +427,20 @@ internal sealed class McpProjectService(
 		CancellationToken cancellationToken) =>
 		PrepareAsync(plan, McpDetailLevel.Full, cancellationToken);
 
+	public async Task<PreparedSecretRedactionOutput> MeasureAsync(
+		ProjectContextPlan plan,
+		McpDetailLevel detail,
+		IProgress<ProjectCopyExportProgress>? progress,
+		CancellationToken cancellationToken) =>
+		await services.OutputPreparer
+			.MeasureAsync(
+				CreateTransformationContext(plan, detail),
+				plan.IncludedFiles,
+				captureEffectiveFindings: false,
+				progress,
+				cancellationToken)
+			.ConfigureAwait(false);
+
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
 		services.OutputPreparer.CreatePreparedAnalyzer(prepared);
 
