@@ -657,6 +657,7 @@ Specific options:
 --force
 -n, --dry-run
 --max-tokens <N>
+--rank <importance>
 ```
 
 The format applies to the entire document. JSON and XML are parseable structured
@@ -684,6 +685,15 @@ Markdown payloads remain unchanged apart from omitted file sections.
 In JSON and XML, the existing `metrics` object and tree continue to describe the
 complete effective selection, while `files` and `tokenBudget` describe the
 content admitted by the budget.
+
+`--rank importance` opts into the experimental `importance-v1` order described
+in [Ranking.md](Ranking.md). Selection, profiles, Git scope, globs, and exclusions
+run first; ranking never adds a file. With `--max-tokens`, the existing greedy
+pass considers candidates in importance order. Without a budget, every selected
+file is emitted in that order. The option is invalid with `--view tree`.
+Omitting `--rank` preserves the existing bytes and does not read Git history or
+index dependency facts. The trusted stderr report names graph coverage, the
+200-commit Git window, the top ten entries, and ranked skips.
 
 With `--hide-secrets` or `--hide-private-data`, detector and budget failures fail closed and
 produce no complete output artifact. A text file above the supported scan limit or in an
@@ -714,6 +724,7 @@ devprojex export context . --format markdown -o ../devprojex-context.md --force
 devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
 devprojex export context . --hide-private-data --format markdown -o ../devprojex-private.md
 devprojex export context . --compress-code --format markdown -o ../devprojex-compact.md
+devprojex export context . --rank importance --max-tokens 16000 -o ../devprojex-ranked.md
 ```
 
 ## Export Project

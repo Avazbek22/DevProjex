@@ -384,6 +384,15 @@ estimated tokens for both groups, up to 25 largest skipped paths, an `and X more
 line when needed, and a `--compress-code`/larger-budget hint. stdout remains the
 document-only channel.
 
+With `export context --rank importance`, stderr additionally receives a bounded,
+trusted ranking report after the document has been planned. Its summary names
+`importance-v1`, graph coverage, the fixed Git window, and signal degradation;
+at most ten `[Ranking top]` lines report path, unique dependents, unique
+dependencies, Git activity, and an optional role label. Ranked budget omissions
+use `[Skipped] path — priority P, T tokens, R remaining: does not fit the remaining
+budget`. The existing largest-skipped report remains present. Project-derived
+paths are single-line escaped. stdout remains document-only.
+
 ## Context JSON
 
 The top-level shape is:
@@ -450,6 +459,19 @@ document's `metrics.estimatedTokens` value.
 The existing `metrics` object and `tree` describe the complete effective
 selection before token-budget omission; `files` and `tokenBudget` describe the
 content admitted by the budget.
+
+With `export context --rank importance`, JSON adds an optional `ranking` object
+after `files`. It contains stable fields `algorithm`, `graphVariant`,
+`candidateFiles`, `graphSupportedSources`, `graphExtractionFailures`,
+`graphCoverage`, `gitWindow`, `gitCommits`, `gitUnavailableReason`,
+`redistributedMissingSignals`, and `top`. Each of at most ten `top` entries has
+`path`, `priority`, `score`, `dependents`, `dependencies`, optional `commits`,
+optional `mostRecentCommitPosition`, and `role`. The object is absent when rank is
+omitted. Its `skipped` array contains at most ten highest-priority budget misses,
+each with `path`, `priority`, `estimatedTokens`, `remainingEstimatedTokens`, and
+the stable `reason`. Ranking changes neither a file's prepared content nor its
+token cost. `role` uses `source`, `test-source`, `manifest`, or `entry-point`;
+`gitUnavailableReason` uses lowercase kebab-case tokens headed by `none`.
 
 ## Context XML
 
