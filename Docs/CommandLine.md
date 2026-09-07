@@ -729,7 +729,8 @@ performs planning and destination preflight but does not generate a document,
 create an artifact, or print a result path. Its operational plan is written to
 stderr.
 With `--max-tokens`, dry-run performs the same transformed-content forecast and
-writes the same budget report without generating the document.
+writes the same budget report without materializing prepared files or serializing
+the document.
 
 Examples:
 

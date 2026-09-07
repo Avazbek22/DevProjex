@@ -525,6 +525,136 @@ public sealed class ExportContextDocumentContractTests
 	}
 
 	[Fact]
+	public async Task RankedCompressedDryRunUsesMeasuredBudgetWithoutMaterializingOrSerializing()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstPath = workspace.WriteFile("A.cs", "public sealed class A { public int Value => 1; }\n");
+		var secondPath = workspace.WriteFile("B.cs", "public sealed class B { private readonly A dependency = new(); }\n");
+		var dryRun = new TestTerminalEnvironment();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				dryRun,
+				"markdown",
+				maximumEstimatedTokens: 8,
+				dryRun: true,
+				view: "content",
+				compressCode: true,
+				rank: true));
+		var diagnostics = measurement.Capture();
+
+		var actual = new TestTerminalEnvironment();
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				actual,
+				"markdown",
+				maximumEstimatedTokens: 8,
+				view: "content",
+				compressCode: true,
+				rank: true));
+
+		Assert.Equal(ExtractBudgetReport(dryRun.StandardError), ExtractBudgetReport(actual.StandardError));
+		Assert.Empty(dryRun.StandardOutput);
+		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
+		Assert.Equal(0, diagnostics.PreparedWriteBytes);
+		Assert.Equal(0, diagnostics.DocumentWriteBytes);
+		Assert.Equal(6, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(
+			3 * (new FileInfo(firstPath).Length + new FileInfo(secondPath).Length),
+			diagnostics.SourceVersionHashBytes);
+	}
+
+	[Fact]
+	public async Task RankedSourceBackedExportHashesEachSourceThreeTimes()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstPath = workspace.WriteFile("A.cs", "public sealed class A { }\n");
+		var secondPath = workspace.WriteFile("B.cs", "public sealed class B { private readonly A value = new(); }\n");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				"markdown",
+				view: "content",
+				rank: true));
+		var diagnostics = measurement.Capture();
+
+		Assert.Equal(6, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(
+			3 * (new FileInfo(firstPath).Length + new FileInfo(secondPath).Length),
+			diagnostics.SourceVersionHashBytes);
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task StructuredCompressedExportReusesPreparationMetricsWithoutRereadingPreparedText(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile(
+			"App.cs",
+			"public sealed class App { private int Hidden() { return 42; } }\n");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				format,
+				view: "content",
+				compressCode: true));
+		var diagnostics = measurement.Capture();
+		var documentFormat = format == "json"
+			? ProjectContextDocumentFormat.Json
+			: ProjectContextDocumentFormat.Xml;
+		using var referenceData = new TemporaryDirectory();
+		using var referenceServices = new TerminalServiceFactory(
+				() => referenceData.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var referencePlan = await referenceServices.ContextFactory.BuildAsync(
+			workspace.Path,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				CompressCode: true),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var transformation = DevProjex.Application.Compression.ContentTransformationContext.For(
+			new DevProjex.Application.Compression.CodeCompressionContext(
+				referencePlan.SourceRoot,
+				referenceServices.CodeCompressionSession,
+				DevProjex.Application.Compression.CodeTransformKinds.Bodies),
+			redaction: null)!;
+		await using var referencePrepared = await referenceServices.SecretRedactionOutputPreparer
+			.PrepareAsync(transformation, referencePlan.IncludedFiles, TestContext.Current.CancellationToken);
+		using var referenceDestination = new MemoryStream();
+		await referenceServices.ContextDocumentService.WritePreparedCompleteAsync(
+			referencePlan,
+			ProjectContextView.Content,
+			documentFormat,
+			referenceDestination,
+			referencePrepared,
+			TestContext.Current.CancellationToken,
+			useSourceMappedStructuredPaths: true);
+		var referenceOutput = Encoding.UTF8.GetString(referenceDestination.ToArray());
+
+		Assert.Equal(referenceOutput + Environment.NewLine, environment.StandardOutput);
+		Assert.True(diagnostics.PreparedFilesMaterialized > 0, diagnostics.ToString());
+		Assert.Equal(diagnostics.PreparedWriteBytes, diagnostics.PreparedReadBytes);
+		Assert.True(diagnostics.DocumentWriteBytes > 0, diagnostics.ToString());
+	}
+
+	[Fact]
 	public async Task TokenBudgetRejectsValuesBelowOne()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -676,7 +806,8 @@ public sealed class ExportContextDocumentContractTests
 		long? maximumEstimatedTokens = null,
 		bool dryRun = false,
 		string view = "tree-content",
-		bool compressCode = false)
+		bool compressCode = false,
+		bool rank = false)
 	{
 		var arguments = new List<string>
 		{
@@ -697,6 +828,11 @@ public sealed class ExportContextDocumentContractTests
 			arguments.Add("--dry-run");
 		if (compressCode)
 			arguments.Add("--compress-code");
+		if (rank)
+		{
+			arguments.Add("--rank");
+			arguments.Add("importance");
+		}
 
 		return new TerminalApplication(
 				environment,

@@ -44,6 +44,15 @@ public sealed class ExportContextCommandHandler(
 			diagnosticRenderer.Write(plan.Diagnostics);
 			return CommandLineExitCodes.PolicyFailure;
 		}
+		var outputPath = request.OutputPath is not null and not "-"
+			? ExactOutputDestinationValidator.ValidateContext(
+				plan.SourceRoot,
+				request.OutputPath,
+				request.Force)
+			: null;
+		var requestedOutputPath = outputPath is not null
+			? Path.GetFullPath(request.OutputPath!)
+			: null;
 		IReadOnlyList<FocusRankingSeedRequest>? focusSeeds;
 		try
 		{
@@ -80,22 +89,26 @@ public sealed class ExportContextCommandHandler(
 		var transformationContext = CreateTransformationContext(plan, request.View);
 		await using var prepared = transformationContext is null
 			? null
-			: await services.SecretRedactionOutputPreparer
-				.PrepareAsync(transformationContext, plan.IncludedFiles, cancellationToken)
-				.ConfigureAwait(false);
+			: request.DryRun
+				? await services.SecretRedactionOutputPreparer
+					.MeasureAsync(
+						transformationContext,
+						plan.IncludedFiles,
+						captureEffectiveFindings: false,
+						cancellationToken: cancellationToken)
+					.ConfigureAwait(false)
+				: await services.SecretRedactionOutputPreparer
+					.PrepareAsync(
+						transformationContext,
+						plan.IncludedFiles,
+						captureEffectiveFindings: false,
+						captureTransformedMetrics: request.Format is
+							ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml,
+						cancellationToken)
+					.ConfigureAwait(false);
 		if (prepared?.CompressionSnapshot is { } compressionSnapshot)
 			plan = CodeCompressionDiagnostic.Append(plan, compressionSnapshot.Availability);
 		diagnosticRenderer.Write(plan.Diagnostics);
-
-		var outputPath = request.OutputPath is not null and not "-"
-			? ExactOutputDestinationValidator.ValidateContext(
-				plan.SourceRoot,
-				request.OutputPath,
-				request.Force)
-			: null;
-		var requestedOutputPath = outputPath is not null
-			? Path.GetFullPath(request.OutputPath!)
-			: null;
 
 		if (request.DryRun)
 		{
@@ -112,36 +125,18 @@ public sealed class ExportContextCommandHandler(
 							cancellationToken,
 							ranking)
 						.ConfigureAwait(false)
-					: await services.ContextDocumentService.WritePreparedCompleteAsync(
+					: await services.ContextDocumentService.EvaluateMeasuredTokenBudgetAsync(
 							plan,
 							request.View,
 							request.Format,
-							Stream.Null,
+							maximumEstimatedTokens,
 							prepared,
-							cancellationToken,
-							maximumEstimatedTokens: maximumEstimatedTokens,
-							ranking: ranking)
-						.ConfigureAwait(false);
-			}
-			else if (prepared is null)
-			{
-				var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
-					plan.Selection.HideSecrets == true,
-					plan.Selection.HidePrivateData == true);
-				if (request.View is ProjectContextView.Content or ProjectContextView.TreeContent &&
-				    redactionFeatures != SecretRedactionFeatures.None)
-				{
-					redactionSnapshot = await services.SecretRedactionOutputPreparer
-						.AnalyzeAsync(
-							new SecretRedactionContext(
-								plan.SourceRoot,
-								services.SecretRedactionSession,
-								redactionFeatures),
-							plan.IncludedFiles,
+							ranking,
 							cancellationToken)
 						.ConfigureAwait(false);
-				}
 			}
+			if (prepared is not null)
+				plan = ProjectContextDocumentService.ApplyMeasuredContentMetrics(plan, prepared);
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,

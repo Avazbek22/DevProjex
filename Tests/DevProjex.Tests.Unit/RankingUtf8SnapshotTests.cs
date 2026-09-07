@@ -20,6 +20,7 @@ public sealed class RankingUtf8SnapshotTests
 		var capturedVersion = RankingSourceVersion.Capture(sourcePath);
 		var ranking = CreateRanking(sourcePath, capturedVersion);
 		await using var destination = new MemoryStream();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
 
 		IOException? exception = null;
 		try
@@ -44,6 +45,73 @@ public sealed class RankingUtf8SnapshotTests
 		Assert.NotNull(exception);
 		Assert.Contains("changed after importance facts were indexed", exception.Message, StringComparison.Ordinal);
 		Assert.True(snapshot.IsDisposed);
+		var diagnostics = measurement.Capture();
+		Assert.Equal(1, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(Encoding.UTF8.GetByteCount("alpha\n"), diagnostics.SourceVersionHashBytes);
+	}
+
+	[Fact]
+	public async Task RankedPreparedImmutableContentValidatesSourceOnlyBeforeOwnershipTransfer()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourcePath = workspace.CreateFile("project/A.txt", "source\n");
+		var preparedPath = workspace.CreateFile("prepared/A.txt", "prepared\n");
+		var projectRoot = Path.GetDirectoryName(sourcePath)!;
+		var analyzer = new FileContentAnalyzer();
+		var service = new ProjectContextDocumentService(new TreeExportService(), analyzer);
+		var plan = CreatePlan(projectRoot, sourcePath);
+		var ranking = CreateRanking(sourcePath, RankingSourceVersion.Capture(sourcePath));
+		await using var prepared = new PreparedSecretRedactionOutput(
+			workingDirectory: null,
+			files: new Dictionary<string, PreparedSecretFile>(ProjectTreePathIdentity.CanonicalComparer)
+			{
+				[sourcePath] = new PreparedSecretFile(
+					sourcePath,
+					preparedPath,
+					FileContentClassification.Text,
+					TextFileEncoding.Utf8,
+					[])
+			},
+			snapshot: null);
+		await using var destination = new MemoryStream();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		await service.WritePreparedCompleteAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			destination,
+			prepared,
+			TestContext.Current.CancellationToken,
+			ranking: ranking);
+
+		var diagnostics = measurement.Capture();
+		Assert.Equal(1, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(new FileInfo(sourcePath).Length, diagnostics.SourceVersionHashBytes);
+		Assert.Contains("prepared", Encoding.UTF8.GetString(destination.ToArray()), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SourceVersionHashCancellationStopsAfterTheObservedChunk()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("large.txt", new string('x', 2 * 1024 * 1024));
+		using var cancellation = new CancellationTokenSource();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+			await RankingSourceVersion.CaptureAsync(
+				path,
+				cancellation.Token,
+				read =>
+				{
+					Assert.True(read > 0);
+					cancellation.Cancel();
+				}));
+
+		var diagnostics = measurement.Capture();
+		Assert.Equal(1, diagnostics.SourceVersionHashPasses);
+		Assert.InRange(diagnostics.SourceVersionHashBytes, 1, new FileInfo(path).Length - 1);
 	}
 
 	private static ProjectContextPlan CreatePlan(string projectRoot, string sourcePath)

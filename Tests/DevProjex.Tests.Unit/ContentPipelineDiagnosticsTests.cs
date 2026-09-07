@@ -15,6 +15,9 @@ public sealed class ContentPipelineDiagnosticsTests
 		ContentPipelineDiagnostics.RecordSourceRead(100);
 		ContentPipelineDiagnostics.RecordPreparedRead(70);
 		ContentPipelineDiagnostics.RecordPreparedWrite(80);
+		ContentPipelineDiagnostics.RecordDocumentWrite(60);
+		ContentPipelineDiagnostics.RecordSourceVersionHashPass();
+		ContentPipelineDiagnostics.RecordSourceVersionHashBytes(50);
 		ContentPipelineDiagnostics.RecordQueueWait(Stopwatch.Frequency / 100);
 		ContentPipelineDiagnostics.RecordByteBudgetWait(Stopwatch.Frequency / 200);
 		ContentPipelineDiagnostics.RecordByteBudgetLease(64);
@@ -27,6 +30,10 @@ public sealed class ContentPipelineDiagnosticsTests
 		Assert.Equal(100, snapshot.SourceReadBytes);
 		Assert.Equal(70, snapshot.PreparedReadBytes);
 		Assert.Equal(80, snapshot.PreparedWriteBytes);
+		Assert.Equal(1, snapshot.PreparedFilesMaterialized);
+		Assert.Equal(60, snapshot.DocumentWriteBytes);
+		Assert.Equal(1, snapshot.SourceVersionHashPasses);
+		Assert.Equal(50, snapshot.SourceVersionHashBytes);
 		Assert.True(snapshot.QueueWaitTimeTicks > 0);
 		Assert.True(snapshot.ByteBudgetWaitTimeTicks > 0);
 		Assert.Equal(64, snapshot.ByteBudgetRequestedBytes);
