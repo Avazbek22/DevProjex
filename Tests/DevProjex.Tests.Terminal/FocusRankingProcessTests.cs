@@ -6,6 +6,67 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
+	public void RealCliProcessRedactsAnAbsoluteFocusSeedEverywhereInJson()
+	{
+		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+		if (string.IsNullOrWhiteSpace(userProfile))
+			Assert.Skip("The environment does not expose a user profile directory.");
+		using var workspace = new TemporaryDirectory(userProfile);
+		var project = CreateRankingFixture(workspace);
+		if (OutputRootPathPresentation.MaskLocalUserSegment(project) == project)
+			Assert.Skip("The user profile path does not use a supported local-user layout.");
+		var result = RunFocusCliCore(
+			workspace.CreateDirectory("cli-private-focus-data"),
+			project,
+			"json",
+			includeRank: true,
+			[Path.Combine(project, "A.cs")],
+			["--hide-private-data"]);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.DoesNotContain(new DirectoryInfo(userProfile).Name, result.StandardOutput, StringComparison.Ordinal);
+		Assert.True(
+			result.StandardOutput.Split(OutputRootPathPresentation.LocalUserPlaceholder, StringSplitOptions.None).Length >= 3,
+			result.StandardOutput);
+	}
+
+	[Fact]
+	public async Task RealMcpProcessRedactsAnAbsoluteFocusSeedEverywhereInJson()
+	{
+		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+		if (string.IsNullOrWhiteSpace(userProfile))
+			Assert.Skip("The environment does not expose a user profile directory.");
+		using var workspace = new TemporaryDirectory(userProfile);
+		var project = CreateRankingFixture(workspace);
+		if (OutputRootPathPresentation.MaskLocalUserSegment(project) == project)
+			Assert.Skip("The user profile path does not use a supported local-user layout.");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("mcp-private-focus-data"),
+			arguments: ["--hide-private-data"]);
+
+		var result = await server.Client.CallToolAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "json",
+				["rank"] = "importance",
+				["focus"] = Path.Combine(project, "A.cs")
+			},
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var text = AllProcessText(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.DoesNotContain(new DirectoryInfo(userProfile).Name, text, StringComparison.Ordinal);
+		Assert.True(
+			text.Split(OutputRootPathPresentation.LocalUserPlaceholder, StringSplitOptions.None).Length >= 3,
+			text);
+	}
+
+	[Fact]
 	public void RealCliProcessExportsFocusOrderAndValidatesTheRankPair()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -50,16 +111,22 @@ public sealed partial class McpServerProcessTests
 			includeRank: true,
 			Enumerable.Repeat("A.cs", 17).ToArray());
 		Assert.Equal(CommandLineExitCodes.UsageError, tooMany.ExitCode);
+		Assert.Contains("16", tooMany.StandardError, StringComparison.Ordinal);
 
-		foreach (var invalid in new[]
-		         {
-			         RunFocusCli(dataRoot, project, "text", includeRank: true, ""),
-			         RunFocusCli(dataRoot, project, "text", includeRank: true, "folder"),
-			         RunFocusCli(dataRoot, project, "text", includeRank: true, Path.Combine(workspace.Path, "outside.cs"))
-		         })
-		{
-			Assert.True(invalid.ExitCode is CommandLineExitCodes.UsageError or CommandLineExitCodes.PolicyFailure);
-		}
+		var empty = RunFocusCli(dataRoot, project, "text", includeRank: true, "");
+		Assert.Equal(CommandLineExitCodes.UsageError, empty.ExitCode);
+		Assert.Contains("--focus", empty.StandardError, StringComparison.Ordinal);
+		var directory = RunFocusCli(dataRoot, project, "text", includeRank: true, "folder");
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, directory.ExitCode);
+		Assert.Contains("DPX-SELECTION-PATH-MISSING", directory.StandardError, StringComparison.Ordinal);
+		var outside = RunFocusCli(
+			dataRoot,
+			project,
+			"text",
+			includeRank: true,
+			Path.Combine(workspace.Path, "outside.cs"));
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, outside.ExitCode);
+		Assert.Contains("DPX-SELECTION-PATH-MISSING", outside.StandardError, StringComparison.Ordinal);
 		var filtered = RunFocusCliCore(
 			dataRoot,
 			project,
@@ -143,7 +210,7 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("[Ranking] focus-v1", AllProcessText(result), StringComparison.Ordinal);
 		}
 
-		var invalidCases = new Dictionary<string, object?>[]
+		var invalidArgumentCases = new Dictionary<string, object?>[]
 		{
 			new() { ["focus"] = "A.cs" },
 			new() { ["rank"] = "importance", ["focus"] = Array.Empty<string>() },
@@ -151,19 +218,9 @@ public sealed partial class McpServerProcessTests
 			new() { ["rank"] = "importance", ["focus"] = null },
 			new() { ["rank"] = "importance", ["focus"] = 42 },
 			new() { ["rank"] = "importance", ["focus"] = new object[] { "A.cs", 42 } },
-			new() { ["rank"] = "importance", ["focus"] = Enumerable.Repeat("A.cs", 17).ToArray() },
-			new() { ["rank"] = "importance", ["focus"] = "folder" },
-			new() { ["rank"] = "importance", ["focus"] = "a.cs" },
-			new() { ["rank"] = "importance", ["focus"] = new[] { "A.cs", "a.cs" } },
-			new() { ["rank"] = "importance", ["focus"] = Path.Combine(workspace.Path, "outside.cs") },
-			new()
-			{
-				["rank"] = "importance",
-				["focus"] = "A.cs",
-				["include_patterns"] = new[] { "B.cs" }
-			}
+			new() { ["rank"] = "importance", ["focus"] = Enumerable.Repeat("A.cs", 17).ToArray() }
 		};
-		foreach (var invalidArguments in invalidCases)
+		foreach (var invalidArguments in invalidArgumentCases)
 		{
 			var invalid = await server.Client.CallToolAsync(
 				"pack_context",
@@ -173,9 +230,47 @@ public sealed partial class McpServerProcessTests
 				TestContext.Current.CancellationToken);
 			Assert.Equal(true, invalid.IsError);
 			var error = AllProcessText(invalid);
-			Assert.Contains("DPX-MCP-", error, StringComparison.Ordinal);
+			Assert.Contains("DPX-MCP-INVALID-ARGUMENTS:", error, StringComparison.Ordinal);
 			if (invalidArguments.ContainsKey("focus") && !invalidArguments.ContainsKey("rank"))
 				Assert.Contains("focus", error, StringComparison.Ordinal);
+		}
+
+		foreach (var (invalidArguments, reason) in new[]
+		         {
+			         (new Dictionary<string, object?>
+			         {
+				         ["rank"] = "importance",
+				         ["focus"] = "folder"
+			         }, "is a directory"),
+			         (new Dictionary<string, object?>
+			         {
+				         ["rank"] = "importance",
+				         ["focus"] = "a.cs"
+			         }, "differs only in letter case"),
+			         (new Dictionary<string, object?>
+			         {
+				         ["rank"] = "importance",
+				         ["focus"] = "A.cs",
+				         ["include_patterns"] = new[] { "B.cs" }
+			         }, "effective filters"),
+			         (new Dictionary<string, object?>
+			         {
+				         ["rank"] = "importance",
+				         ["focus"] = "A.cs",
+				         ["max_file_bytes"] = 1
+			         }, "max_file_bytes")
+		         })
+		{
+			var invalid = await server.Client.CallToolAsync(
+				"pack_context",
+				invalidArguments,
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(true, invalid.IsError);
+			var error = AllProcessText(invalid);
+			Assert.Contains("DPX-MCP-PATH-NOT-FOUND:", error, StringComparison.Ordinal);
+			Assert.Contains(reason, error, StringComparison.Ordinal);
 		}
 	}
 

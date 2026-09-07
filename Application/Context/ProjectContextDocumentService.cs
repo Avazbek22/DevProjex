@@ -379,6 +379,7 @@ public sealed class ProjectContextDocumentService(
 			view,
 			format,
 			useSourceMappedStructuredPaths: true);
+		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
 		await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 			               plan.SourceRoot,
 			               orderedPaths,
@@ -394,8 +395,9 @@ public sealed class ProjectContextDocumentService(
 			TryIncludeInBudget(
 				tokenBudget,
 				file.Path,
+				source.Path,
 				file.Metrics?.CharCount ?? 0,
-				ranking,
+				rankingEntriesByFullPath,
 				source.Index);
 		}
 	}
@@ -408,21 +410,33 @@ public sealed class ProjectContextDocumentService(
 
 	private static bool TryIncludeInBudget(
 		ProjectContextTokenBudgetAccumulator tokenBudget,
-		string path,
+		string outputPath,
+		string fullPath,
 		int transformedCharacterCount,
-		ImportanceRankingReport? ranking,
-		int index)
+		IReadOnlyDictionary<string, ImportanceRankingEntry>? rankingEntriesByFullPath,
+		int admissionIndex)
 	{
-		var entry = ranking is not null && index < ranking.Entries.Count
-			? ranking.Entries[index]
-			: null;
+		ImportanceRankingEntry? entry = null;
+		if (rankingEntriesByFullPath is not null)
+			rankingEntriesByFullPath.TryGetValue(Path.GetFullPath(fullPath), out entry);
 		return tokenBudget.TryInclude(
-			path,
+			outputPath,
 			transformedCharacterCount,
-			entry?.Priority,
+			rankingEntriesByFullPath is null ? null : admissionIndex + 1,
 			entry?.Hop,
 			entry?.BaseImportancePriority,
 			entry?.Via);
+	}
+
+	private static IReadOnlyDictionary<string, ImportanceRankingEntry>? CreateRankingEntryLookup(
+		ImportanceRankingReport? ranking)
+	{
+		if (ranking is null)
+			return null;
+		var result = new Dictionary<string, ImportanceRankingEntry>(PathComparer.Default);
+		foreach (var entry in ranking.Entries)
+			result.TryAdd(Path.GetFullPath(entry.FullPath), entry);
+		return result;
 	}
 
 	internal static IReadOnlyList<string> ResolveOrderedPaths(
@@ -607,6 +621,7 @@ public sealed class ProjectContextDocumentService(
 	{
 		await using var streamWriter = CreateStreamWriter(destination);
 		var writer = new TrailingLineEndingTextWriter(streamWriter);
+		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
 		var hasOutput = false;
 		var includesContent = IncludesContent(view) && orderedPaths.Count > 0;
 		if (view == ProjectContextView.Content)
@@ -652,8 +667,9 @@ public sealed class ProjectContextDocumentService(
 				    !TryIncludeInBudget(
 					    tokenBudget,
 					    file.Path,
+					    source.Path,
 					    file.Metrics?.CharCount ?? 0,
-					    ranking,
+					    rankingEntriesByFullPath,
 					    index))
 				{
 					ReportProgress(writeProgress, index + 1, orderedPaths.Count);
@@ -716,6 +732,7 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
+		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
 		await writer.WriteAsync("# ".AsMemory(), cancellationToken).ConfigureAwait(false);
 		await writer.WriteAsync(EscapeMarkdownHeading(GetProjectName(plan)).AsMemory(), cancellationToken)
 			.ConfigureAwait(false);
@@ -782,8 +799,9 @@ public sealed class ProjectContextDocumentService(
 				    !TryIncludeInBudget(
 					    tokenBudget,
 					    file.Path,
+					    source.Path,
 					    file.Metrics?.CharCount ?? 0,
-					    ranking,
+					    rankingEntriesByFullPath,
 					    source.Index))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
@@ -848,6 +866,7 @@ public sealed class ProjectContextDocumentService(
 			Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
 			MaxDepth = int.MaxValue
 		});
+		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
 
 		writer.WriteStartObject();
 		writer.WriteNumber("schemaVersion", SchemaVersion);
@@ -893,8 +912,9 @@ public sealed class ProjectContextDocumentService(
 				    !TryIncludeInBudget(
 					    tokenBudget,
 					    file.Path,
+					    source.Path,
 					    file.Metrics?.CharCount ?? 0,
-					    ranking,
+					    rankingEntriesByFullPath,
 					    source.Index))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
@@ -932,7 +952,7 @@ public sealed class ProjectContextDocumentService(
 		}
 		writer.WriteEndArray();
 		if (ranking is not null)
-			WriteRanking(writer, ranking, tokenBudget?.CreateReport());
+			WriteRanking(writer, ranking, tokenBudget?.CreateReport(), pathRedaction);
 		if (tokenBudget is not null)
 			WriteTokenBudget(writer, tokenBudget.CreateReport());
 		var mapDiagnosticPaths = ShouldMapDiagnosticPathsToSource(plan, useSourceMappedStructuredPaths);
@@ -967,6 +987,7 @@ public sealed class ProjectContextDocumentService(
 			CloseOutput = false,
 			Async = true
 		});
+		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
 
 		writer.WriteStartDocument();
 		writer.WriteStartElement("devprojexContext");
@@ -1015,8 +1036,9 @@ public sealed class ProjectContextDocumentService(
 				    !TryIncludeInBudget(
 					    tokenBudget,
 					    file.Path,
+					    source.Path,
 					    file.Metrics?.CharCount ?? 0,
-					    ranking,
+					    rankingEntriesByFullPath,
 					    source.Index))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
@@ -1996,7 +2018,8 @@ public sealed class ProjectContextDocumentService(
 	private static void WriteRanking(
 		Utf8JsonWriter writer,
 		ImportanceRankingReport report,
-		ProjectContextTokenBudgetReport? tokenBudget)
+		ProjectContextTokenBudgetReport? tokenBudget,
+		OutputPathRedactionDecision? pathRedaction)
 	{
 		writer.WriteStartObject("ranking");
 		writer.WriteString("algorithm", report.Algorithm);
@@ -2018,7 +2041,9 @@ public sealed class ProjectContextDocumentService(
 			foreach (var seed in focus.Seeds)
 			{
 				writer.WriteStartObject();
-				writer.WriteString("requested", seed.Requested);
+				writer.WriteString(
+					"requested",
+					OutputRootPathPresentation.ResolvePath(seed.Requested, pathRedaction).Text);
 				writer.WriteString("path", NormalizePath(seed.Path));
 				writer.WriteString("state", FocusSeedStateToken(seed.State));
 				writer.WriteEndObject();

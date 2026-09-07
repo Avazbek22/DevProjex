@@ -108,6 +108,73 @@ public sealed class ImportanceRankedContextDocumentTests
 	}
 
 	[Fact]
+	public async Task BudgetMetadataUsesFileIdentityAfterRankingOrderIsReconciled()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/A.txt", "aaaaaaaa");
+		workspace.WriteFile("project/B.txt", "bbbbbbbb");
+		workspace.WriteFile("project/C.txt", "cccccccc");
+		var (service, plan) = await CreateContextAsync(workspace, project);
+		var outside = Path.Combine(project, "outside.txt");
+		var raw = CreateRanking(
+			project,
+			[
+				(outside, "outside.txt"),
+				(Path.Combine(project, "B.txt"), "B.txt"),
+				(Path.Combine(project, "B.txt"), "B.txt"),
+				(Path.Combine(project, "C.txt"), "C.txt")
+			]);
+		var bVia = new FocusRankingVia("Seed.txt", FocusRankingRelation.DependencyOf);
+		var cVia = new FocusRankingVia("B.txt", FocusRankingRelation.DependentOf);
+		var entries = new[]
+		{
+			raw.Entries[0] with { Priority = 91, Hop = 9, BaseImportancePriority = 90 },
+			raw.Entries[1] with { Priority = 92, Hop = 1, BaseImportancePriority = 12, Via = bVia },
+			raw.Entries[2] with { Priority = 93, Hop = 8, BaseImportancePriority = 88 },
+			raw.Entries[3] with { Priority = 94, Hop = 2, BaseImportancePriority = 23, Via = cVia }
+		};
+		var ranking = raw with { Entries = entries, TopEntries = entries };
+
+		var result = await WriteWithReportAsync(service, plan, ranking, maximumTokens: 1);
+
+		Assert.DoesNotContain("outside.txt", result.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain("A.txt:", result.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain("B.txt:", result.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain("C.txt:", result.Content, StringComparison.Ordinal);
+		var skipped = result.Report.TokenBudget!.RankedSkippedFiles!;
+		Assert.Collection(
+			skipped,
+			file =>
+			{
+				Assert.Equal("B.txt", file.Path);
+				Assert.Equal(1, file.Priority);
+				Assert.Equal(1, file.Hop);
+				Assert.Equal(12, file.BaseImportancePriority);
+				Assert.Equal(bVia, file.Via);
+				Assert.Equal(1, file.RemainingEstimatedTokens);
+			},
+			file =>
+			{
+				Assert.Equal("C.txt", file.Path);
+				Assert.Equal(2, file.Priority);
+				Assert.Equal(2, file.Hop);
+				Assert.Equal(23, file.BaseImportancePriority);
+				Assert.Equal(cVia, file.Via);
+				Assert.Equal(1, file.RemainingEstimatedTokens);
+			},
+			file =>
+			{
+				Assert.Equal("A.txt", file.Path);
+				Assert.Equal(3, file.Priority);
+				Assert.Null(file.Hop);
+				Assert.Null(file.BaseImportancePriority);
+				Assert.Null(file.Via);
+				Assert.Equal(1, file.RemainingEstimatedTokens);
+			});
+	}
+
+	[Fact]
 	public async Task RankingNeverAddsFilesOutsideEffectiveSelection()
 	{
 		using var workspace = new TemporaryDirectory();
