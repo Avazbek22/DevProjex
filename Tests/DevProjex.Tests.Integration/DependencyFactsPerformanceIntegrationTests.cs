@@ -3,6 +3,13 @@ using DevProjex.Infrastructure.Dependencies;
 
 namespace DevProjex.Tests.Integration;
 
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class DependencyFactsPerformanceCollection
+{
+	public const string Name = "Dependency facts performance";
+}
+
+[Collection(DependencyFactsPerformanceCollection.Name)]
 public sealed class DependencyFactsPerformanceIntegrationTests(ITestOutputHelper output)
 {
 	[Fact]
