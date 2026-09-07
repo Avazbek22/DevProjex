@@ -17,6 +17,8 @@ public sealed class DependencyFactsEngine : IDisposable
 	private readonly ConcurrentDictionary<IndexCacheKey, Lazy<Task<ResolvedIndex>>> _indexCache = [];
 	private readonly ConcurrentQueue<IndexCacheKey> _indexCacheOrder = [];
 	private readonly ConcurrentDictionary<IndexCacheKey, long> _indexCacheWeights = [];
+	private readonly ConcurrentDictionary<ManifestRequestKey, ManifestSnapshotCacheEntry> _manifestSnapshots = [];
+	private readonly ConcurrentQueue<ManifestRequestKey> _manifestSnapshotOrder = [];
 	private readonly object _cacheTrimSync = new();
 	private long _fileCacheBytes;
 	private long _indexCacheBytes;
@@ -53,6 +55,27 @@ public sealed class DependencyFactsEngine : IDisposable
 			.Distinct(PathComparer)
 			.OrderBy(path => PortableRelative(root, path), StringComparer.Ordinal)
 			.ToArray();
+		var manifestRequestKey = new ManifestRequestKey(
+			root,
+			Hash(manifest.Select(path => PortableRelative(root, path))));
+		var initialStamps = TryCaptureFileStamps(manifest);
+		if (initialStamps is not null &&
+		    _manifestSnapshots.TryGetValue(manifestRequestKey, out var cachedSnapshot) &&
+		    cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
+		    _indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
+		{
+			var snapshot = cachedSnapshot.Snapshot;
+			progress?.Report(new DependencyIndexProgress(manifest.Length, manifest.Length));
+			return snapshot with
+			{
+				Metrics = new DependencyIndexMetrics(
+					0,
+					snapshot.Files.Count,
+					0,
+					started.ElapsedMilliseconds,
+					true)
+			};
+		}
 		var configuration = await _configurationProvider
 			.ReadAsync(root, manifest, cancellationToken)
 			.ConfigureAwait(false);
@@ -95,12 +118,7 @@ public sealed class DependencyFactsEngine : IDisposable
 						prepared.Length));
 					return;
 				}
-				var key = new FileCacheKey(
-					Path.GetFullPath(source.FullPath),
-					source.RelativePath,
-					source.ContentFingerprint,
-					source.LanguageId,
-					source.ExtractorIdentity);
+				var key = CreateFileCacheKey(source);
 				var created = new Lazy<Task<FileFacts>>(
 					() => Task.Run(() => _extractor.Extract(source, _limits), token),
 					LazyThreadSafetyMode.ExecutionAndPublication);
@@ -152,7 +170,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		if (ReferenceEquals(cachedIndex, createdIndex))
 			RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		var coverage = BuildCoverage(resolved.Files);
-		return new DependencyIndexSnapshot(
+		var result = new DependencyIndexSnapshot(
 			root,
 			manifestGeneration,
 			declarationRevision,
@@ -168,6 +186,13 @@ public sealed class DependencyFactsEngine : IDisposable
 				ReferenceEquals(cachedIndex, createdIndex) ? orderedFacts.Length : 0,
 				started.ElapsedMilliseconds,
 				!ReferenceEquals(cachedIndex, createdIndex)));
+		var finalStamps = TryCaptureFileStamps(manifest);
+		if (initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps))
+		{
+			if (_indexCache.ContainsKey(cacheKey))
+				StoreManifestSnapshot(manifestRequestKey, initialStamps, cacheKey, result);
+		}
+		return result;
 	}
 
 	public async Task<DependencyRelatedResult> FindRelatedAsync(
@@ -372,8 +397,59 @@ public sealed class DependencyFactsEngine : IDisposable
 		       _indexCacheOrder.TryDequeue(out var oldest))
 		{
 			_indexCache.TryRemove(oldest, out _);
+			foreach (var snapshot in _manifestSnapshots.Where(pair => pair.Value.IndexCacheKey == oldest).ToArray())
+				_manifestSnapshots.TryRemove(snapshot.Key, out _);
 			if (_indexCacheWeights.TryRemove(oldest, out var weight))
 				_indexCacheBytes -= weight;
+		}
+	}
+
+	private void StoreManifestSnapshot(
+		ManifestRequestKey key,
+		IReadOnlyList<FileStamp> stamps,
+		IndexCacheKey indexCacheKey,
+		DependencyIndexSnapshot snapshot)
+	{
+		lock (_cacheTrimSync)
+		{
+			if (!_indexCache.ContainsKey(indexCacheKey)) return;
+			var entry = new ManifestSnapshotCacheEntry(stamps, indexCacheKey, snapshot);
+			if (_manifestSnapshots.TryAdd(key, entry))
+				_manifestSnapshotOrder.Enqueue(key);
+			else
+				_manifestSnapshots[key] = entry;
+			while (_manifestSnapshots.Count > _limits.MaximumCachedIndexes &&
+			       _manifestSnapshotOrder.TryDequeue(out var oldest))
+				_manifestSnapshots.TryRemove(oldest, out _);
+		}
+	}
+
+	private static FileCacheKey CreateFileCacheKey(PreparedDependencySource source) => new(
+		Path.GetFullPath(source.FullPath),
+		source.RelativePath,
+		source.ContentFingerprint,
+		source.LanguageId,
+		source.ExtractorIdentity);
+
+	private static IReadOnlyList<FileStamp>? TryCaptureFileStamps(IReadOnlyList<string> manifest)
+	{
+		try
+		{
+			var stamps = new FileStamp[manifest.Count];
+			for (var index = 0; index < manifest.Count; index++)
+			{
+				var info = new FileInfo(manifest[index]);
+				if (!info.Exists) return null;
+				stamps[index] = new FileStamp(
+					info.Length,
+					info.LastWriteTimeUtc.Ticks,
+					info.CreationTimeUtc.Ticks);
+			}
+			return stamps;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+		{
+			return null;
 		}
 	}
 
@@ -487,7 +563,10 @@ public sealed class DependencyFactsEngine : IDisposable
 	public void Dispose()
 	{
 		if (Interlocked.Exchange(ref _disposed, 1) == 0)
+		{
+			_manifestSnapshots.Clear();
 			_extractor.Dispose();
+		}
 	}
 
 	private readonly record struct FileCacheKey(
@@ -501,6 +580,20 @@ public sealed class DependencyFactsEngine : IDisposable
 		string ManifestGeneration,
 		string DeclarationRevision,
 		string ConfigurationFingerprint);
+
+	private readonly record struct ManifestRequestKey(
+		string SourceRoot,
+		string ManifestPathsFingerprint);
+
+	private readonly record struct FileStamp(
+		long Length,
+		long LastWriteTimeUtcTicks,
+		long CreationTimeUtcTicks);
+
+	private sealed record ManifestSnapshotCacheEntry(
+		IReadOnlyList<FileStamp> Stamps,
+		IndexCacheKey IndexCacheKey,
+		DependencyIndexSnapshot Snapshot);
 
 	private sealed record ResolvedIndex(
 		IReadOnlyList<DependencyEdge> Edges,

@@ -11,11 +11,18 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 {
 	private const int MaximumWorkers = 8;
 	private const int MaximumRetainedWorkersPerLanguage = 2;
+	private const int MaximumPreparedSources = 8_192;
+	private const long MaximumPreparedSourceBytes = 64L * 1024 * 1024;
 	private readonly IGrammarLibraryLocator _locator;
 	private readonly IReadOnlyDictionary<LanguageId, LanguageDefinition> _definitions;
 	private readonly ConcurrentDictionary<LanguageId, Lazy<LanguageRuntime>> _runtimes = [];
 	private readonly ConcurrentDictionary<LanguageId, string> _extractorIdentities = [];
+	private readonly ConcurrentDictionary<PreparedSourceCacheKey, Lazy<Task<PreparedSourceContent>>> _preparedSources = [];
+	private readonly ConcurrentDictionary<PreparedSourceCacheKey, long> _preparedSourceWeights = [];
+	private readonly ConcurrentQueue<PreparedSourceCacheKey> _preparedSourceOrder = [];
 	private readonly SemaphoreSlim _workerBudget = new(Math.Clamp(Environment.ProcessorCount, 1, MaximumWorkers));
+	private readonly object _preparedSourceTrimSync = new();
+	private long _preparedSourceBytes;
 	private int _parseCount;
 	private int _compiledQuerySetCount;
 	private int _disposed;
@@ -61,17 +68,39 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 		try
 		{
-			var bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken).ConfigureAwait(false);
-			var source = Encoding.UTF8.GetString(bytes);
-			if (source.Length > 0 && source[0] == '\uFEFF') source = source[1..];
+			var info = new FileInfo(fullPath);
+			var key = new PreparedSourceCacheKey(
+				Path.GetFullPath(fullPath),
+				info.Length,
+				info.LastWriteTimeUtc.Ticks,
+				info.CreationTimeUtc.Ticks,
+				language);
+			var created = new Lazy<Task<PreparedSourceContent>>(
+				() => ReadPreparedSourceAsync(fullPath, language, cancellationToken),
+				LazyThreadSafetyMode.ExecutionAndPublication);
+			var lazy = _preparedSources.GetOrAdd(key, created);
+			if (ReferenceEquals(lazy, created))
+				_preparedSourceOrder.Enqueue(key);
+			PreparedSourceContent content;
+			try
+			{
+				content = await lazy.Value.ConfigureAwait(false);
+				if (ReferenceEquals(lazy, created))
+					RegisterPreparedSourceWeight(key, lazy, EstimatePreparedSourceBytes(content));
+			}
+			catch
+			{
+				_preparedSources.TryRemove(new KeyValuePair<PreparedSourceCacheKey, Lazy<Task<PreparedSourceContent>>>(key, lazy));
+				throw;
+			}
 			return new PreparedDependencySource(
 				fullPath,
 				relative,
 				scope,
 				language,
-				Hash(bytes),
-				GetExtractorIdentity(language),
-				source);
+				content.Fingerprint,
+				content.ExtractorIdentity,
+				content.Source);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
 		{
@@ -81,6 +110,41 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				$"{exception.GetType().Name}: {OneLine(exception.Message)}");
 		}
 	}
+
+	private async Task<PreparedSourceContent> ReadPreparedSourceAsync(
+		string fullPath,
+		LanguageId language,
+		CancellationToken cancellationToken)
+	{
+		var bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken).ConfigureAwait(false);
+		var source = Encoding.UTF8.GetString(bytes);
+		if (source.Length > 0 && source[0] == '\uFEFF') source = source[1..];
+		return new PreparedSourceContent(Hash(bytes), GetExtractorIdentity(language), source);
+	}
+
+	private void RegisterPreparedSourceWeight(
+		PreparedSourceCacheKey key,
+		Lazy<Task<PreparedSourceContent>> entry,
+		long weight)
+	{
+		lock (_preparedSourceTrimSync)
+		{
+			if (_preparedSources.TryGetValue(key, out var current) && ReferenceEquals(current, entry) &&
+			    _preparedSourceWeights.TryAdd(key, weight))
+				_preparedSourceBytes += weight;
+			while ((_preparedSources.Count > MaximumPreparedSources ||
+			        _preparedSourceBytes > MaximumPreparedSourceBytes) &&
+			       _preparedSourceOrder.TryDequeue(out var oldest))
+			{
+				_preparedSources.TryRemove(oldest, out _);
+				if (_preparedSourceWeights.TryRemove(oldest, out var removedWeight))
+					_preparedSourceBytes -= removedWeight;
+			}
+		}
+	}
+
+	private static long EstimatePreparedSourceBytes(PreparedSourceContent content) =>
+		192L + (content.Source.Length + content.Fingerprint.Length + content.ExtractorIdentity.Length) * 2L;
 
 	private string GetExtractorIdentity(LanguageId languageId) =>
 		_extractorIdentities.GetOrAdd(languageId, id =>
@@ -245,11 +309,25 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	public void Dispose()
 	{
 		if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+		_preparedSources.Clear();
+		_preparedSourceWeights.Clear();
 		foreach (var runtime in _runtimes.Values.Where(static value => value.IsValueCreated))
 			runtime.Value.Dispose();
 		_workerBudget.Dispose();
 		(_locator as IDisposable)?.Dispose();
 	}
+
+	private readonly record struct PreparedSourceCacheKey(
+		string Path,
+		long Length,
+		long LastWriteTimeUtcTicks,
+		long CreationTimeUtcTicks,
+		LanguageId LanguageId);
+
+	private sealed record PreparedSourceContent(
+		string Fingerprint,
+		string ExtractorIdentity,
+		string Source);
 
 	private sealed record LanguageDefinition(
 		string Library,
