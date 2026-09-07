@@ -62,7 +62,11 @@ public sealed record SymbolIdentity(
 
 public sealed record DeclarationFact(
 	SymbolIdentity Identity,
-	IReadOnlyList<SourceSite> DeclarationSites);
+	IReadOnlyList<SourceSite> DeclarationSites)
+{
+	public string ContainingNamespace { get; init; } = string.Empty;
+	public string? ContainingType { get; init; }
+}
 
 public sealed record ImportFact(
 	string Specifier,
@@ -85,7 +89,11 @@ public sealed record ReferenceFact(
 	ResolutionStatus Status = ResolutionStatus.Unresolved,
 	string Reason = "not resolved yet",
 	IReadOnlyList<string>? Candidates = null,
-	string? Target = null);
+	string? Target = null)
+{
+	public string ContainingNamespace { get; init; } = string.Empty;
+	public string? ContainingType { get; init; }
+}
 
 public sealed record FileFacts(
 	string Path,
@@ -104,7 +112,10 @@ public sealed record FileFacts(
 	IReadOnlyDictionary<string, string> Aliases,
 	IReadOnlyList<string> GlobalContextNamespaces,
 	IReadOnlyDictionary<string, string> GlobalAliases,
-	IReadOnlyList<string> TypeParameters);
+	IReadOnlyList<string> TypeParameters)
+{
+	public bool CanCache { get; init; } = true;
+}
 
 public sealed record DependencyEdge(
 	string Source,

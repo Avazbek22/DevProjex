@@ -68,7 +68,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				packageName,
 				new HashSet<string>(),
 				[],
-				true));
+				true,
+				AllowJavaScript: parsed.AllowJavaScript));
 		}
 
 		foreach (var configPath in manifest.Where(IsPythonConfig).Order(StringComparer.Ordinal))
@@ -170,6 +171,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			var legacy = moduleResolution.Equals("node10", StringComparison.OrdinalIgnoreCase) ||
 			             moduleResolution.Equals("node", StringComparison.OrdinalIgnoreCase) ||
 			             options.TryGetProperty("baseUrl", out _);
+			var allowJavaScript = options.TryGetProperty("allowJs", out var allowJs) &&
+			                      allowJs.ValueKind is JsonValueKind.True;
 			var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 			if (options.TryGetProperty("paths", out var mappings) && mappings.ValueKind == JsonValueKind.Object)
 			{
@@ -179,7 +182,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 							.Select(static item => item.GetString()!).ToArray()
 						: [];
 			}
-			return new TypeScriptConfiguration(moduleResolution, legacy, paths);
+			return new TypeScriptConfiguration(moduleResolution, legacy, paths, allowJavaScript);
 		}
 		catch (JsonException)
 		{
@@ -413,8 +416,16 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) && !Path.IsPathRooted(relative);
 	}
 	private static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-	private sealed record TypeScriptConfiguration(string ModuleResolution, bool Legacy, IReadOnlyDictionary<string, IReadOnlyList<string>> Paths)
+	private sealed record TypeScriptConfiguration(
+		string ModuleResolution,
+		bool Legacy,
+		IReadOnlyDictionary<string, IReadOnlyList<string>> Paths,
+		bool AllowJavaScript)
 	{
-		public static readonly TypeScriptConfiguration Default = new("bundler", false, new Dictionary<string, IReadOnlyList<string>>());
+		public static readonly TypeScriptConfiguration Default = new(
+			"bundler",
+			false,
+			new Dictionary<string, IReadOnlyList<string>>(),
+			false);
 	}
 }

@@ -9,7 +9,8 @@ public sealed record PreparedDependencySource(
 	string ExtractorIdentity,
 	string Source,
 	DependencyFileStatus PreparedStatus = DependencyFileStatus.Supported,
-	string? PreparedStatusReason = null);
+	string? PreparedStatusReason = null,
+	bool CanCache = true);
 
 public sealed class DependencyManifestContentIdentities
 {
@@ -53,7 +54,8 @@ public sealed record DependencyScopeDescriptor(
 	IReadOnlySet<string> PythonExternalPackages,
 	IReadOnlyList<string> PythonRoots,
 	bool HasConfiguration,
-	string? PythonVersion = null);
+	string? PythonVersion = null,
+	bool AllowJavaScript = false);
 
 public sealed record PackageMapDescriptor(
 	string Directory,
