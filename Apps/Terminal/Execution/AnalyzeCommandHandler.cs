@@ -1,6 +1,7 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -21,17 +22,21 @@ public sealed class AnalyzeCommandHandler(
 			: metrics => topFileRanking.Add(
 				metrics.Path,
 				CodeCompressionSnapshot.EstimateTokens(metrics.CharCount));
-		var plan = await new StatusRenderer(environment, request.Output)
-			.RunAsync(
-				services.Localization["Terminal.Status.AnalyzingProject"],
-				() => services.ContextFactory.BuildAsync(
-					request.ProjectPath,
-					request.Selection,
-					includeOutputMetrics: true,
-					cancellationToken: cancellationToken,
-					includeContentOutputMetrics: includeSourceContentMetrics && topFileRanking is null,
-					repositorySourceUrl: request.RepositorySourceUrl))
-			.ConfigureAwait(false);
+		ProjectContextPlan plan;
+		using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Selection))
+		{
+			plan = await new StatusRenderer(environment, request.Output)
+				.RunAsync(
+					services.Localization["Terminal.Status.AnalyzingProject"],
+					() => services.ContextFactory.BuildAsync(
+						request.ProjectPath,
+						request.Selection,
+						includeOutputMetrics: true,
+						cancellationToken: cancellationToken,
+						includeContentOutputMetrics: includeSourceContentMetrics && topFileRanking is null,
+						repositorySourceUrl: request.RepositorySourceUrl))
+				.ConfigureAwait(false);
+		}
 		plan = await ProjectFileSizeFilter.ApplyAsync(
 				services.ContextPlanner,
 				plan,

@@ -1,6 +1,7 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -13,15 +14,19 @@ public sealed class ExportContextCommandHandler(
 		CancellationToken cancellationToken)
 	{
 		var status = new StatusRenderer(environment, request.Output);
-		var plan = await status
-			.RunAsync(
-				services.Localization["Terminal.Status.AnalyzingProject"],
-				() => services.ContextFactory.BuildAsync(
-					request.ProjectPath,
-					request.Selection,
-					cancellationToken: cancellationToken,
-					repositorySourceUrl: request.RepositorySourceUrl))
-			.ConfigureAwait(false);
+		ProjectContextPlan plan;
+		using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Selection))
+		{
+			plan = await status
+				.RunAsync(
+					services.Localization["Terminal.Status.AnalyzingProject"],
+					() => services.ContextFactory.BuildAsync(
+						request.ProjectPath,
+						request.Selection,
+						cancellationToken: cancellationToken,
+						repositorySourceUrl: request.RepositorySourceUrl))
+				.ConfigureAwait(false);
+		}
 		plan = await ProjectFileSizeFilter.ApplyAsync(
 				services.ContextPlanner,
 				plan,

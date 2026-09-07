@@ -24,8 +24,9 @@ same cache. The operating-system page cache was not flushed. Repomix was acquire
 through `npx --yes repomix@1.17.0` before timing; registry resolution and download
 are excluded.
 
-For DevProjex, elapsed time is `analyze --format json` plus `export context` in
-two real processes; RSS is the larger main-process peak. For Repomix, elapsed
+For DevProjex, the historical `Elapsed` column is the sum of two distinct operations:
+`analyze --format json` followed by `export context` in two real processes; it is
+not the latency of either command. RSS is the larger main-process peak. For Repomix, elapsed
 time and RSS cover its one real Node pack process. RSS does not aggregate child
 processes. Output bytes are exact file sizes. DevProjex token counts come from
 its content metrics; Repomix token counts come from its summary. Those estimators
@@ -67,6 +68,37 @@ policy; for example, Repomix reported and excluded a suspicious Godot test file,
 while the DevProjex inventory reflects its own selection and redaction contract.
 The table therefore does not support a claim that either tool is faster on an
 identical corpus.
+
+### Content-pipeline optimization baseline
+
+The performance work based on `c249c309` first repeated the defensive series with
+one unprofiled control sample per corpus. Unlike the historical aggregate above,
+these columns expose the two real DevProjex operations separately. The immutable
+raw samples, including CPU time and per-operation RSS, are in
+[`baseline-c249c309.json`](../tools/ScanBenchmark/results/baseline-c249c309.json).
+The final optimization measurements use the same binary layout, corpus commits,
+arguments, machine, and harness.
+
+| Corpus | Analyze ms cold / warm | Export context ms cold / warm | Combined ms cold / warm |
+|---|---:|---:|---:|
+| Flask | 1,331 / 1,270 | 1,398 / 1,347 | 2,729 / 2,618 |
+| Repomix | 2,627 / 2,638 | 3,152 / 3,212 | 5,779 / 5,850 |
+| Godot | 27,837 / 28,379 | 33,785 / 36,737 | 61,622 / 65,117 |
+
+The same baseline also ran two identical narrow `get_tree` → `search_project` →
+`get_file` sequences in one initialized MCP process. Warm detector state helped,
+but the unchanged project inventory was still rebuilt for every call.
+
+| Corpus | First sequence ms | Second sequence ms | Same-process speedup |
+|---|---:|---:|---:|
+| Flask | 1,258 | 646 | 1.95× |
+| Repomix | 4,057 | 3,271 | 1.24× |
+| Godot | 37,160 | 34,004 | 1.09× |
+
+Stage attribution uses `dotnet-trace` with `dotnet-common`, sampled thread time,
+verbose GC/allocation events, and the content-only-free `DevProjex-ContentPipeline`
+provider. Every profiled observation has a separate unprofiled control; `.nettrace`
+files are temporary and excluded from published results.
 
 Three Godot Repomix pairs in the accepted run terminated after processing with a
 Windows native access-violation or heap-corruption code. Each failed pair was

@@ -1,3 +1,5 @@
+using DevProjex.Application.Diagnostics;
+
 namespace DevProjex.Mcp;
 
 internal sealed class McpProjectService(
@@ -33,6 +35,7 @@ internal sealed class McpProjectService(
 		bool includeOutputMetrics = true,
 		IReadOnlyList<ProjectExclusion>? exclusions = null)
 	{
+		using var selectionStage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Selection);
 		var parsedScope = ParseGitScope(gitScope);
 		var hasSelectionFilters =
 			paths is { Count: > 0 } ||
