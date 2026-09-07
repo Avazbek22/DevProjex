@@ -22,7 +22,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private readonly IReadOnlyDictionary<LanguageId, LanguageDefinition> _definitions;
 	private readonly ConcurrentDictionary<LanguageId, Lazy<LanguageRuntime>> _runtimes = [];
 	private readonly ConcurrentDictionary<LanguageId, string> _extractorIdentities = [];
-	private readonly ConcurrentDictionary<PreparedSourceCacheKey, Lazy<Task<PreparedSourceContent>>> _preparedSources = [];
+	private readonly ConcurrentDictionary<PreparedSourceCacheKey, PreparedSourceCacheEntry> _preparedSources = [];
 	private readonly ConcurrentDictionary<PreparedSourceCacheKey, long> _preparedSourceWeights = [];
 	private readonly ConcurrentQueue<PreparedSourceCacheKey> _preparedSourceOrder = [];
 	private readonly SemaphoreSlim _workerBudget = new(Math.Clamp(Environment.ProcessorCount, 1, MaximumWorkers));
@@ -51,7 +51,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string fullPath,
 		DependencyResolverConfiguration configuration,
 		DependencyFactsLimits limits,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		string? contentIdentity = null)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 		var relative = Normalize(Path.GetRelativePath(sourceRoot, fullPath));
@@ -82,22 +83,23 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				info.CreationTimeUtc.Ticks,
 				language,
 				limits.MaximumCharactersPerFile);
-			var created = new Lazy<Task<PreparedSourceContent>>(
-				() => ReadPreparedSourceAsync(fullPath, language, limits.MaximumCharactersPerFile, cancellationToken),
-				LazyThreadSafetyMode.ExecutionAndPublication);
-			var lazy = _preparedSources.GetOrAdd(key, created);
-			if (ReferenceEquals(lazy, created))
-				_preparedSourceOrder.Enqueue(key);
+			var created = new PreparedSourceCacheEntry(
+				contentIdentity,
+				new Lazy<Task<PreparedSourceContent>>(
+					() => ReadPreparedSourceAsync(fullPath, language, limits.MaximumCharactersPerFile, cancellationToken),
+					LazyThreadSafetyMode.ExecutionAndPublication));
+			var (entry, ownsEntry) = GetOrReplacePreparedSource(key, created, contentIdentity, cancellationToken);
 			PreparedSourceContent content;
 			try
 			{
-				content = await lazy.Value.ConfigureAwait(false);
-				if (ReferenceEquals(lazy, created))
-					RegisterPreparedSourceWeight(key, lazy, EstimatePreparedSourceBytes(content));
+				content = await entry.Value.Value.ConfigureAwait(false);
+				if (ownsEntry)
+					RegisterPreparedSourceWeight(key, entry, EstimatePreparedSourceBytes(content));
 			}
 			catch
 			{
-				_preparedSources.TryRemove(new KeyValuePair<PreparedSourceCacheKey, Lazy<Task<PreparedSourceContent>>>(key, lazy));
+				_preparedSources.TryRemove(
+					new KeyValuePair<PreparedSourceCacheKey, PreparedSourceCacheEntry>(key, entry));
 				throw;
 			}
 			return new PreparedDependencySource(
@@ -117,6 +119,38 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				Hash(Encoding.UTF8.GetBytes(exception.GetType().Name)), GetExtractorIdentity(language),
 				string.Empty, DependencyFileStatus.ExtractionFailed,
 				$"{exception.GetType().Name}: {OneLine(exception.Message)}");
+		}
+	}
+
+	private (PreparedSourceCacheEntry Entry, bool OwnsEntry) GetOrReplacePreparedSource(
+		PreparedSourceCacheKey key,
+		PreparedSourceCacheEntry created,
+		string? requestedIdentity,
+		CancellationToken cancellationToken)
+	{
+		while (true)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var entry = _preparedSources.GetOrAdd(key, created);
+			if (ReferenceEquals(entry, created))
+			{
+				_preparedSourceOrder.Enqueue(key);
+				return (entry, true);
+			}
+			if (requestedIdentity is null ||
+			    entry.ContentIdentity is not null &&
+			    string.Equals(entry.ContentIdentity, requestedIdentity, StringComparison.Ordinal))
+				return (entry, false);
+
+			lock (_preparedSourceTrimSync)
+			{
+				if (!_preparedSources.TryGetValue(key, out var current) || !ReferenceEquals(current, entry))
+					continue;
+				_preparedSources[key] = created;
+				if (_preparedSourceWeights.TryRemove(key, out var removedWeight))
+					_preparedSourceBytes -= removedWeight;
+				return (created, true);
+			}
 		}
 	}
 
@@ -193,7 +227,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	private void RegisterPreparedSourceWeight(
 		PreparedSourceCacheKey key,
-		Lazy<Task<PreparedSourceContent>> entry,
+		PreparedSourceCacheEntry entry,
 		long weight)
 	{
 		lock (_preparedSourceTrimSync)
@@ -447,6 +481,10 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		long CreationTimeUtcTicks,
 		LanguageId LanguageId,
 		int MaximumCharacters);
+
+	private sealed record PreparedSourceCacheEntry(
+		string? ContentIdentity,
+		Lazy<Task<PreparedSourceContent>> Value);
 
 	private sealed record PreparedSourceContent(
 		string Fingerprint,

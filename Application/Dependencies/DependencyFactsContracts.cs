@@ -11,6 +11,24 @@ public sealed record PreparedDependencySource(
 	DependencyFileStatus PreparedStatus = DependencyFileStatus.Supported,
 	string? PreparedStatusReason = null);
 
+public sealed class DependencyManifestContentIdentities
+{
+	public DependencyManifestContentIdentities(IReadOnlyDictionary<string, string> byFullPath)
+	{
+		ArgumentNullException.ThrowIfNull(byFullPath);
+		var normalized = new Dictionary<string, string>(byFullPath.Count, PathComparer.Default);
+		foreach (var pair in byFullPath)
+		{
+			ArgumentException.ThrowIfNullOrWhiteSpace(pair.Key);
+			ArgumentNullException.ThrowIfNull(pair.Value);
+			normalized[Path.GetFullPath(pair.Key)] = pair.Value;
+		}
+		ByFullPath = normalized;
+	}
+
+	public IReadOnlyDictionary<string, string> ByFullPath { get; }
+}
+
 public sealed record DependencyResolverConfiguration(
 	string Fingerprint,
 	IReadOnlyList<DependencyScopeDescriptor> Scopes,
@@ -52,7 +70,8 @@ public interface IDependencyFactExtractor : IDisposable
 		string fullPath,
 		DependencyResolverConfiguration configuration,
 		DependencyFactsLimits limits,
-		CancellationToken cancellationToken);
+		CancellationToken cancellationToken,
+		string? contentIdentity = null);
 
 	FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits);
 
