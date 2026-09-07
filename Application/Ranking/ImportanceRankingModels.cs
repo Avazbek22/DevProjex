@@ -15,6 +15,18 @@ public enum ImportanceFileRole
 	EntryPoint
 }
 
+public enum ImportanceRankingStage
+{
+	IndexingFacts,
+	ReadingHistory,
+	ComputingPriorities
+}
+
+public readonly record struct ImportanceRankingProgress(
+	ImportanceRankingStage Stage,
+	int Completed,
+	int Total);
+
 public sealed record ImportanceRankingEntry(
 	string FullPath,
 	string Path,
@@ -97,4 +109,11 @@ public interface IImportanceRankingService
 		string sourceRoot,
 		IReadOnlyList<string> candidateFiles,
 		CancellationToken cancellationToken = default);
+
+	Task<ImportanceRankingReport> RankAsync(
+		string sourceRoot,
+		IReadOnlyList<string> candidateFiles,
+		IProgress<ImportanceRankingProgress>? progress,
+		CancellationToken cancellationToken = default) =>
+		RankAsync(sourceRoot, candidateFiles, cancellationToken);
 }

@@ -40,7 +40,8 @@ public sealed class ImportanceRankingServiceTests
 				["ordinary.cs"] = 10,
 				["giant.cs"] = 10_000,
 				["missing.cs"] = null
-			});
+			},
+			TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, normalized["small.cs"]);
 		Assert.Equal(0, normalized["peer.cs"]);
@@ -109,7 +110,8 @@ public sealed class ImportanceRankingServiceTests
 				(FullPath: "b.cs", RelativePath: "b.cs"),
 				(FullPath: "c.cs", RelativePath: "c.cs")
 			},
-			snapshot);
+			snapshot,
+			TestContext.Current.CancellationToken);
 
 		Assert.True(ranks["b.cs"] > ranks["a.cs"]);
 		Assert.Equal(ranks["a.cs"], ranks["c.cs"], precision: 10);
@@ -142,11 +144,48 @@ public sealed class ImportanceRankingServiceTests
 			(FullPath: "a.cs", RelativePath: "a.cs")
 		};
 
-		var first = ImportanceRankingService.CalculatePageRank(candidates, firstSnapshot);
-		var second = ImportanceRankingService.CalculatePageRank(candidates.Reverse().ToArray(), secondSnapshot);
+		var first = ImportanceRankingService.CalculatePageRank(
+			candidates,
+			firstSnapshot,
+			TestContext.Current.CancellationToken);
+		var second = ImportanceRankingService.CalculatePageRank(
+			candidates.Reverse().ToArray(),
+			secondSnapshot,
+			TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain("notes.md", first.Keys);
 		Assert.Equal(first.OrderBy(static pair => pair.Key), second.OrderBy(static pair => pair.Key));
+	}
+
+	[Fact]
+	public void CalculatePageRank_ObservesCancellationInsideIterations()
+	{
+		const int count = 2_000;
+		var candidates = Enumerable.Range(0, count)
+			.Select(index => (
+				FullPath: $"{index:D4}.cs",
+				RelativePath: $"{index:D4}.cs"))
+			.ToArray();
+		var edges = Enumerable.Range(0, count)
+			.Select(index => Edge($"{index:D4}.cs", $"{(index + 1) % count:D4}.cs"))
+			.ToArray();
+		var snapshot = Snapshot(edges) with
+		{
+			Files = candidates.Select(candidate => CreateFacts(candidate.RelativePath, null)).ToArray()
+		};
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+
+		Assert.Throws<OperationCanceledException>(() =>
+			ImportanceRankingService.CalculatePageRank(
+				candidates,
+				snapshot,
+				cancellation.Token,
+				iteration =>
+				{
+					if (iteration == 1)
+						cancellation.Cancel();
+				}));
 	}
 
 	private static FileFacts CreateFacts(string path, string? importedFramework)
