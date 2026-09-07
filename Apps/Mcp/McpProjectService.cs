@@ -373,6 +373,11 @@ internal sealed class McpProjectService(
 			var paths = new HashSet<string>(PathComparer.Default);
 			paths.Add(plan.SourceRoot);
 			stamps.Add(CachedPathStamp.Capture(plan.SourceRoot, expectDirectory: true));
+			foreach (var directory in plan.IncludedFolders.Order(ProjectTreePathIdentity.CanonicalComparer))
+			{
+				if (paths.Add(directory))
+					stamps.Add(CachedPathStamp.Capture(directory, expectDirectory: true));
+			}
 			var metadataPath = Path.Combine(plan.SourceRoot, ".git");
 			var hasGitDirectories = GitRepositoryBoundaryProbe.TryResolveMetadataDirectories(
 				plan.SourceRoot,
