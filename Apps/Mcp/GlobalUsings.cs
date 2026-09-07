@@ -1,5 +1,6 @@
 global using DevProjex.Application.Compression;
 global using DevProjex.Application.Context;
+global using DevProjex.Application.Dependencies;
 global using DevProjex.Application.Presentation;
 global using DevProjex.Application.Secrets;
 global using DevProjex.Application.Services;
@@ -7,6 +8,7 @@ global using DevProjex.Application.UseCases;
 global using DevProjex.Infrastructure.Compression;
 global using DevProjex.Infrastructure.FileSystem;
 global using DevProjex.Infrastructure.Git;
+global using DevProjex.Infrastructure.Dependencies;
 global using DevProjex.Infrastructure.ProjectProfiles;
 global using DevProjex.Infrastructure.ResourceStore;
 global using DevProjex.Infrastructure.SmartIgnore;

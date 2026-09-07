@@ -24,6 +24,7 @@ public sealed class DocumentationAndPackagingContractTests
 		"HideSecrets.md",
 		"Benchmarks.md",
 		"Comparison.md",
+		"Dependencies.md",
 		"Release-Channels.md",
 		"Release-Process.md"
 	];

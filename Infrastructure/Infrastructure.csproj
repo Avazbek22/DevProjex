@@ -107,6 +107,8 @@
   <ItemGroup>
     <EmbeddedResource Include="Compression\Languages\**\*.json" />
     <EmbeddedResource Include="Compression\Languages\**\*.scm" />
+    <EmbeddedResource Include="Dependencies\Languages\**\*.scm" />
+    <EmbeddedResource Include="Dependencies\PlatformSymbols\*.json" />
   </ItemGroup>
 
   <ItemGroup>

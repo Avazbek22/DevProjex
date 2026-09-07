@@ -125,6 +125,19 @@ public sealed class TerminalServiceFactory(
 			secretRedactionSession.Dispose();
 			throw;
 		}
+		DependencyFactsEngine dependencyFactsEngine;
+		try
+		{
+			dependencyFactsEngine = new DependencyFactsEngine(
+				new TreeSitterDependencyFactExtractor(),
+				new FileDependencyConfigurationProvider());
+		}
+		catch
+		{
+			codeCompressionSession.Dispose();
+			secretRedactionSession.Dispose();
+			throw;
+		}
 
 		try
 		{
@@ -175,11 +188,13 @@ public sealed class TerminalServiceFactory(
 				RepoCacheService: repoCache,
 				SecretRedactionSession: secretRedactionSession,
 				CodeCompressionSession: codeCompressionSession,
+				DependencyFactsEngine: dependencyFactsEngine,
 				SecretRedactionOutputPreparer: new SecretRedactionOutputPreparer(contentAnalyzer))
 				.AttachOwnedLifetime();
 		}
 		catch
 		{
+			dependencyFactsEngine.Dispose();
 			codeCompressionSession.Dispose();
 			secretRedactionSession.Dispose();
 			throw;

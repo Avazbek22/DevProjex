@@ -23,6 +23,7 @@ public sealed class McpServerIntegrationTests
 		"pack_context",
 		"read_pack",
 		"search_project",
+		"related_files",
 		"get_file"
 	];
 
@@ -1482,7 +1483,7 @@ public sealed class McpServerIntegrationTests
 			options: null,
 			TestContext.Current.CancellationToken);
 
-		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project", "get_file"];
+		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project", "related_files", "get_file"];
 		foreach (var tool in tools)
 		{
 			var schema = tool.ProtocolTool.InputSchema;
@@ -1839,6 +1840,7 @@ public sealed class McpServerIntegrationTests
 			"analyze",
 			"pack_context",
 			"search_project",
+			"related_files",
 			"get_file"
 		};
 		Assert.All(tools, tool =>
@@ -1902,6 +1904,7 @@ public sealed class McpServerIntegrationTests
 			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "max_tokens", "max_file_bytes", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line"],
 			["search_project"] = ["project", "branch", "pattern", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "max_results"],
+			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
 			["get_file"] = ["project", "branch", "path", "start_line", "end_line"]
 		};
 		foreach (var tool in tools)
@@ -1957,7 +1960,7 @@ public sealed class McpServerIntegrationTests
 				["full", "compact", "signatures"],
 				detail.GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
 		}
-		foreach (var toolName in new[] { "get_tree", "analyze", "pack_context", "search_project" })
+		foreach (var toolName in new[] { "get_tree", "analyze", "pack_context", "search_project", "related_files" })
 		{
 			var publishedGitScope = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
@@ -2031,6 +2034,7 @@ public sealed class McpServerIntegrationTests
 			("read_pack", "end_line"),
 			("search_project", "max_file_bytes"),
 			("search_project", "max_results"),
+			("related_files", "max_file_bytes"),
 			("get_file", "start_line"),
 			("get_file", "end_line")
 		};
@@ -2043,7 +2047,7 @@ public sealed class McpServerIntegrationTests
 			Assert.Matches(pattern!, "0002");
 			Assert.DoesNotMatch(pattern!, "0000");
 		}
-		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project" })
+		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project", "related_files" })
 		{
 			var properties = tools.Single(tool => tool.Name == name)
 				.ProtocolTool.InputSchema.GetProperty("properties");
