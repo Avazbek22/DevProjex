@@ -445,12 +445,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			// the fast gate instead of treating a physical line as a semantic boundary.
 			var keyWindowStart = Math.Max(0, delimiterStart - 40);
 			var keyWindow = content[keyWindowStart..delimiterStart];
-			if (!HasCompatibleGenericKey(keyWindow))
+			if (!TryFindCompatibleGenericKey(keyWindow, out var signalStart))
 				continue;
 			// UserSecretsId is project metadata, and the pinned Gitleaks generic rule already
 			// allowlists it. Recognising it before lazy regex construction preserves that
 			// upstream decision without paying for the large generic allowlist on every csproj.
-			if (!keyWindow.Contains("UserSecretsId", StringComparison.OrdinalIgnoreCase))
+			if (!IsUserSecretsIdSignal(keyWindow, signalStart))
 				return true;
 		}
 		return false;
@@ -504,7 +504,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return length;
 	}
 
-	private static bool HasCompatibleGenericKey(ReadOnlySpan<char> keyWindow)
+	private static bool TryFindCompatibleGenericKey(ReadOnlySpan<char> keyWindow, out int matchedSignalStart)
 	{
 		var suffixEnd = keyWindow.Length;
 		var punctuationCount = 0;
@@ -525,9 +525,31 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 					break;
 				var suffix = key[(signalStart + signal.Length)..];
 				if (suffix.Length <= 20 && IsGenericKeySuffix(suffix))
+				{
+					matchedSignalStart = signalStart;
 					return true;
+				}
 				searchEnd = signalStart;
 			}
+		}
+		matchedSignalStart = -1;
+		return false;
+	}
+
+	private static bool IsUserSecretsIdSignal(ReadOnlySpan<char> keyWindow, int signalStart)
+	{
+		const string userSecretsId = "UserSecretsId";
+		var searchStart = 0;
+		while (searchStart <= keyWindow.Length - userSecretsId.Length)
+		{
+			var relativeStart = keyWindow[searchStart..]
+				.IndexOf(userSecretsId, StringComparison.OrdinalIgnoreCase);
+			if (relativeStart < 0)
+				return false;
+			var identifierStart = searchStart + relativeStart;
+			if (signalStart >= identifierStart && signalStart < identifierStart + userSecretsId.Length)
+				return true;
+			searchStart = identifierStart + 1;
 		}
 		return false;
 	}
