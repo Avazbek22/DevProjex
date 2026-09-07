@@ -791,12 +791,14 @@ internal sealed class McpProjectService(
 		ProjectContextPlan plan,
 		McpDetailLevel detail,
 		IProgress<ProjectCopyExportProgress>? progress,
-		CancellationToken cancellationToken) =>
+		CancellationToken cancellationToken,
+		bool captureTransformedMetrics = false) =>
 		await services.OutputPreparer
 			.PrepareAsync(
 				CreateTransformationContext(plan, detail),
 				plan.IncludedFiles,
 				captureEffectiveFindings: false,
+				captureTransformedMetrics,
 				cancellationToken,
 				progress)
 			.ConfigureAwait(false);

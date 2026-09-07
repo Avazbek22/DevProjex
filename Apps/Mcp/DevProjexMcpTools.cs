@@ -403,7 +403,9 @@ internal sealed class DevProjexMcpTools(
 						plan,
 						McpDetailLevel.Full,
 						operationProgress.Measure("transforming content", 31, 64),
-						cancellationToken)
+						cancellationToken,
+						captureTransformedMetrics: format is
+							ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 					.ConfigureAwait(false);
 			operationProgress.Milestone(
 				65,

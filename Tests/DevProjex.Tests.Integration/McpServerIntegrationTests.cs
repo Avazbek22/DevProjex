@@ -4106,6 +4106,54 @@ public sealed class McpServerIntegrationTests
 		Assert.Empty(treeSignaturesDocument.RootElement.GetProperty("files").EnumerateArray());
 	}
 
+	[Fact]
+	public async Task StructuredPackReusesPreparedMetricsAndMatchesCli()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "App.cs"),
+			"public sealed class App { private int Hidden() { return 42; } }\n");
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "json",
+				["detail"] = "signatures"
+			});
+		var diagnostics = measurement.Capture();
+		using var mcpDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(result)));
+
+		var terminal = new TerminalTestHost();
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.RunAsync(
+				[
+					"--language", "en",
+					"export", "context", project,
+					"--view", "content",
+					"--format", "json",
+					"--git-mode", "none",
+					"--exclude", "none",
+					"--compress-code",
+					"-o", "-"
+				],
+				() => workspace.CreateDirectory("terminal-data"),
+				TestContext.Current.CancellationToken));
+		using var cliDocument = JsonDocument.Parse(terminal.StandardOutput);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.True(JsonElement.DeepEquals(
+			mcpDocument.RootElement.GetProperty("metrics"),
+			cliDocument.RootElement.GetProperty("metrics")));
+		Assert.True(diagnostics.PreparedFilesMaterialized > 0, diagnostics.ToString());
+		Assert.Equal(diagnostics.PreparedWriteBytes, diagnostics.PreparedReadBytes);
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
