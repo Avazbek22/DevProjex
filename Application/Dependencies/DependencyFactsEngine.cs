@@ -87,6 +87,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		var prepared = new PreparedDependencyIdentity[manifest.Length];
 		var parsedBefore = _extractor.ParseCount;
 		var facts = new FileFacts[prepared.Length];
+		var cacheable = new bool[prepared.Length];
 		var completed = 0;
 		var reusedFiles = 0;
 		await Parallel.ForEachAsync(
@@ -108,7 +109,9 @@ public sealed class DependencyFactsEngine : IDisposable
 					source.LanguageId);
 				if (source.PreparedStatus != DependencyFileStatus.Supported)
 				{
-					facts[index] = _extractor.Extract(source, _limits);
+					var extracted = _extractor.Extract(source, _limits);
+					facts[index] = extracted;
+					cacheable[index] = source.CanCache && extracted.CanCache;
 					progress?.Report(new DependencyIndexProgress(
 						Interlocked.Increment(ref completed),
 						prepared.Length));
@@ -126,9 +129,12 @@ public sealed class DependencyFactsEngine : IDisposable
 				try
 				{
 					var extracted = await lazy.Value.ConfigureAwait(false);
-					if (ReferenceEquals(lazy, created))
+					if (!extracted.CanCache)
+						_fileCache.TryRemove(new KeyValuePair<FileCacheKey, Lazy<Task<FileFacts>>>(key, lazy));
+					else if (ReferenceEquals(lazy, created))
 						RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
 					facts[index] = RebindScope(extracted, source.ScopeId);
+					cacheable[index] = source.CanCache && extracted.CanCache;
 				}
 				catch
 				{
@@ -151,6 +157,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			declarationRevision,
 			configuration.Fingerprint);
 		var allowed = orderedFacts.Select(static fact => fact.Path).ToHashSet(StringComparer.Ordinal);
+		var canCacheIndex = cacheable.All(static value => value);
 		var createdIndex = new Lazy<Task<ResolvedIndex>>(
 			() => Task.FromResult(GateResolvedIndex(
 				DependencyResolver.Resolve(
@@ -162,21 +169,30 @@ public sealed class DependencyFactsEngine : IDisposable
 					cancellationToken),
 				allowed)),
 			LazyThreadSafetyMode.ExecutionAndPublication);
-		var cachedIndex = _indexCache.GetOrAdd(cacheKey, createdIndex);
-		if (ReferenceEquals(cachedIndex, createdIndex))
-			_indexCacheOrder.Enqueue(cacheKey);
 		ResolvedIndex resolved;
-		try
+		var resolutionCacheHit = false;
+		if (!canCacheIndex)
 		{
-			resolved = await cachedIndex.Value.ConfigureAwait(false);
+			resolved = await createdIndex.Value.ConfigureAwait(false);
 		}
-		catch
+		else
 		{
-			_indexCache.TryRemove(new KeyValuePair<IndexCacheKey, Lazy<Task<ResolvedIndex>>>(cacheKey, cachedIndex));
-			throw;
+			var cachedIndex = _indexCache.GetOrAdd(cacheKey, createdIndex);
+			if (ReferenceEquals(cachedIndex, createdIndex))
+				_indexCacheOrder.Enqueue(cacheKey);
+			try
+			{
+				resolved = await cachedIndex.Value.ConfigureAwait(false);
+			}
+			catch
+			{
+				_indexCache.TryRemove(new KeyValuePair<IndexCacheKey, Lazy<Task<ResolvedIndex>>>(cacheKey, cachedIndex));
+				throw;
+			}
+			resolutionCacheHit = !ReferenceEquals(cachedIndex, createdIndex);
+			if (!resolutionCacheHit)
+				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		}
-		if (ReferenceEquals(cachedIndex, createdIndex))
-			RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		var coverage = BuildCoverage(resolved.Files);
 		var result = new DependencyIndexSnapshot(
 			root,
@@ -191,14 +207,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			new DependencyIndexMetrics(
 				parsedFiles,
 				reusedFiles,
-				ReferenceEquals(cachedIndex, createdIndex) ? orderedFacts.Length : 0,
+				resolutionCacheHit ? 0 : orderedFacts.Length,
 				started.ElapsedMilliseconds,
-				!ReferenceEquals(cachedIndex, createdIndex)))
+				resolutionCacheHit))
 		{
 			FileByPath = resolved.FileByPath
 		};
 		var finalStamps = TryCaptureFileStamps(manifest);
-		if (initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps))
+		if (canCacheIndex && initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps))
 		{
 			if (_indexCache.ContainsKey(cacheKey))
 				StoreManifestSnapshot(

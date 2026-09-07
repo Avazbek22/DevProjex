@@ -434,6 +434,64 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task TransientExtractionFailure_IsRetriedAtThePreparedAndManifestCacheLayers()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var extractor = new FailOnceDependencyFactExtractor();
+		using var engine = new DependencyFactsEngine(extractor, new EmptyDependencyConfigurationProvider());
+
+		var failed = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var recovered = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var warm = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, Assert.Single(failed.Files).Status);
+		Assert.Equal(DependencyFileStatus.Supported, Assert.Single(recovered.Files).Status);
+		Assert.False(recovered.Metrics.ResolutionCacheHit);
+		Assert.True(warm.Metrics.ResolutionCacheHit);
+		Assert.Equal(2, extractor.PrepareCount);
+	}
+
+	[Fact]
+	public async Task WindowsExclusiveSourceLock_IsRetriedAfterTheLockIsReleased()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Exclusive source locking has the required access-denied behavior only on Windows.");
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		using var engine = CreateEngine();
+		DependencyIndexSnapshot failed;
+		using (File.Open(source, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+		{
+			failed = await engine.IndexAsync(
+				fixture.Path,
+				[project, source],
+				cancellationToken: TestContext.Current.CancellationToken);
+		}
+
+		var recovered = await engine.IndexAsync(
+			fixture.Path,
+			[project, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.ExtractionFailed,
+			Assert.Single(failed.Files, file => file.Path == "Source.cs").Status);
+		Assert.Equal(DependencyFileStatus.Supported,
+			Assert.Single(recovered.Files, file => file.Path == "Source.cs").Status);
+		Assert.False(recovered.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
 	public async Task PreparedSourceCacheIdentityMismatchReadsSameStampReplacement()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -953,6 +1011,62 @@ public sealed class DependencyFactsEngineIntegrationTests
 				new Dictionary<string, string>(StringComparer.Ordinal),
 				[]);
 		}
+
+		public void Dispose()
+		{
+		}
+	}
+
+	private sealed class FailOnceDependencyFactExtractor : IDependencyFactExtractor
+	{
+		private int _prepareCount;
+
+		public int PrepareCount => Volatile.Read(ref _prepareCount);
+		public int ParseCount => 0;
+		public int CompiledQuerySetCount => 0;
+
+		public ValueTask<PreparedDependencySource> PrepareAsync(
+			string sourceRoot,
+			string fullPath,
+			DependencyResolverConfiguration configuration,
+			DependencyFactsLimits limits,
+			CancellationToken cancellationToken,
+			string? contentIdentity = null)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var relativePath = PathUtility.GetPortableRelativePath(sourceRoot, fullPath);
+			var failed = Interlocked.Increment(ref _prepareCount) == 1;
+			return ValueTask.FromResult(new PreparedDependencySource(
+				fullPath,
+				relativePath,
+				"fixture",
+				LanguageId.CSharp,
+				failed ? "transient" : "recovered",
+				"fail-once-fixture",
+				string.Empty,
+				failed ? DependencyFileStatus.ExtractionFailed : DependencyFileStatus.Supported,
+				failed ? "IOException: sharing violation" : null,
+				CanCache: !failed));
+		}
+
+		public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) => new(
+			source.RelativePath,
+			source.ScopeId,
+			source.LanguageId,
+			source.ContentFingerprint,
+			0,
+			source.PreparedStatus,
+			source.PreparedStatusReason,
+			HasSyntaxErrors: false,
+			new Dictionary<string, int>(StringComparer.Ordinal),
+			[], [], [], [],
+			new Dictionary<string, string>(StringComparer.Ordinal),
+			[],
+			new Dictionary<string, string>(StringComparer.Ordinal),
+			[])
+		{
+			CanCache = source.CanCache
+		};
 
 		public void Dispose()
 		{

@@ -9,7 +9,8 @@ public sealed record PreparedDependencySource(
 	string ExtractorIdentity,
 	string Source,
 	DependencyFileStatus PreparedStatus = DependencyFileStatus.Supported,
-	string? PreparedStatusReason = null);
+	string? PreparedStatusReason = null,
+	bool CanCache = true);
 
 public sealed class DependencyManifestContentIdentities
 {

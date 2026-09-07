@@ -93,7 +93,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			try
 			{
 				content = await entry.Value.Value.ConfigureAwait(false);
-				if (ownsEntry)
+				if (!content.CanCache)
+					RemovePreparedSource(key, entry);
+				else if (ownsEntry)
 					RegisterPreparedSourceWeight(key, entry, EstimatePreparedSourceBytes(content));
 			}
 			catch
@@ -111,14 +113,27 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				content.ExtractorIdentity,
 				content.Source,
 				content.Status,
-				content.StatusReason);
+				content.StatusReason,
+				content.CanCache);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
 		{
 			return new PreparedDependencySource(fullPath, relative, scope, language,
 				Hash(Encoding.UTF8.GetBytes(exception.GetType().Name)), GetExtractorIdentity(language),
 				string.Empty, DependencyFileStatus.ExtractionFailed,
-				$"{exception.GetType().Name}: {OneLine(exception.Message)}");
+				$"{exception.GetType().Name}: {OneLine(exception.Message)}",
+				CanCache: false);
+		}
+	}
+
+	private void RemovePreparedSource(PreparedSourceCacheKey key, PreparedSourceCacheEntry entry)
+	{
+		lock (_preparedSourceTrimSync)
+		{
+			_preparedSources.TryRemove(
+				new KeyValuePair<PreparedSourceCacheKey, PreparedSourceCacheEntry>(key, entry));
+			if (_preparedSourceWeights.TryRemove(key, out var removedWeight))
+				_preparedSourceBytes -= removedWeight;
 		}
 	}
 
@@ -167,12 +182,17 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		var extractorIdentity = GetExtractorIdentity(language);
 		if (result.Classification != FileContentClassification.Text || result.Metrics is null)
 		{
+			var canCache = result.Classification is not (
+				FileContentClassification.AccessDenied or
+				FileContentClassification.Missing or
+				FileContentClassification.Unreadable);
 			return new PreparedSourceContent(
 				FingerprintForUnavailableFile(fullPath, result.Classification),
 				extractorIdentity,
 				string.Empty,
 				DependencyFileStatus.ExtractionFailed,
-				$"source is {result.Classification.ToString().ToLowerInvariant()}");
+				$"source is {result.Classification.ToString().ToLowerInvariant()}",
+				canCache);
 		}
 		if (result.Metrics.CharCount > maximumCharacters)
 		{
@@ -292,7 +312,13 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return runtime.Adapter.Extract(context, limits);
 		}
 		catch (Exception exception) when (exception is
-		       IOException or UnauthorizedAccessException or DllNotFoundException or BadImageFormatException or
+		       IOException or UnauthorizedAccessException or System.Security.SecurityException)
+		{
+			return StatusOnly(source, DependencyFileStatus.ExtractionFailed,
+				$"{exception.GetType().Name}: {OneLine(exception.Message)}") with { CanCache = false };
+		}
+		catch (Exception exception) when (exception is
+		       DllNotFoundException or BadImageFormatException or
 		       EntryPointNotFoundException or InvalidOperationException)
 		{
 			return StatusOnly(source, DependencyFileStatus.ExtractionFailed,
@@ -491,7 +517,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string ExtractorIdentity,
 		string Source,
 		DependencyFileStatus Status = DependencyFileStatus.Supported,
-		string? StatusReason = null);
+		string? StatusReason = null,
+		bool CanCache = true);
 
 	private sealed record LanguageDefinition(
 		string Library,

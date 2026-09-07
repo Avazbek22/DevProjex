@@ -104,7 +104,10 @@ public sealed record FileFacts(
 	IReadOnlyDictionary<string, string> Aliases,
 	IReadOnlyList<string> GlobalContextNamespaces,
 	IReadOnlyDictionary<string, string> GlobalAliases,
-	IReadOnlyList<string> TypeParameters);
+	IReadOnlyList<string> TypeParameters)
+{
+	public bool CanCache { get; init; } = true;
+}
 
 public sealed record DependencyEdge(
 	string Source,
