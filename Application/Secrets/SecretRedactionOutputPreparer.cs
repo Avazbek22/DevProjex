@@ -448,11 +448,12 @@ public sealed class SecretRedactionOutputPreparer
 			AllowSynchronousContinuations = false
 		});
 
-		var producer = ProduceAsync();
+		Exception? primaryFailure = null;
+		var producer = ObserveParticipantAsync(ProduceAsync);
 		var workers = Enumerable.Range(0, workerCount)
-			.Select(_ => Task.Run(ConsumeAsync, linkedCancellation.Token))
+			.Select(_ => Task.Run(() => ObserveParticipantAsync(ConsumeAsync), CancellationToken.None))
 			.ToArray();
-		var completion = CompleteAsync();
+		var completion = SuperviseAsync();
 		var pending = new Dictionary<int, PreparedTransformationEntry>();
 		var nextScheduledIndex = 0;
 		try
@@ -479,17 +480,44 @@ public sealed class SecretRedactionOutputPreparer
 		finally
 		{
 			linkedCancellation.Cancel();
+			input.Writer.TryComplete();
+			output.Writer.TryComplete();
 			try
 			{
 				await completion.ConfigureAwait(false);
 			}
-			catch when (cancellationToken.IsCancellationRequested)
+			catch
 			{
+				// Participant failures are delivered by the output channel. Cleanup must not
+				// replace a consumer exception or the first participant failure.
 			}
 			foreach (var entry in pending.Values)
 				entry.Dispose();
 			while (input.Reader.TryRead(out var abandoned))
 				abandoned.DisposeReservations();
+			while (output.Reader.TryRead(out var abandoned))
+				abandoned.Dispose();
+		}
+
+		async Task ObserveParticipantAsync(Func<Task> participant)
+		{
+			try
+			{
+				await participant().ConfigureAwait(false);
+			}
+			catch (Exception exception)
+			{
+				RegisterFailure(exception);
+			}
+		}
+
+		void RegisterFailure(Exception exception)
+		{
+			if (Interlocked.CompareExchange(ref primaryFailure, exception, null) is not null)
+				return;
+
+			output.Writer.TryComplete(exception);
+			linkedCancellation.Cancel();
 		}
 
 		async Task ProduceAsync()
@@ -538,6 +566,7 @@ public sealed class SecretRedactionOutputPreparer
 			await foreach (var item in input.Reader.ReadAllAsync(linkedCancellation.Token).ConfigureAwait(false))
 			{
 				PreparedTransformationEntry? entry = null;
+				var ownsItemReservations = true;
 				try
 				{
 					entry = IsUnsupportedNonRegularSource(context, item.SourcePath)
@@ -547,6 +576,7 @@ public sealed class SecretRedactionOutputPreparer
 							transformationScope,
 							item,
 							linkedCancellation.Token).ConfigureAwait(false);
+					ownsItemReservations = false;
 					await WriteWithQueueTimingAsync(
 						output.Writer,
 						entry,
@@ -556,24 +586,17 @@ public sealed class SecretRedactionOutputPreparer
 				finally
 				{
 					entry?.Dispose();
+					if (ownsItemReservations)
+						item.DisposeReservations();
 				}
 			}
 		}
 
-		async Task CompleteAsync()
+		async Task SuperviseAsync()
 		{
-			try
-			{
-				await producer.ConfigureAwait(false);
-				await Task.WhenAll(workers).ConfigureAwait(false);
+			await Task.WhenAll(workers.Prepend(producer)).ConfigureAwait(false);
+			if (primaryFailure is null)
 				output.Writer.TryComplete();
-			}
-			catch (Exception exception)
-			{
-				linkedCancellation.Cancel();
-				output.Writer.TryComplete(exception);
-				throw;
-			}
 		}
 	}
 
@@ -703,21 +726,22 @@ public sealed class SecretRedactionOutputPreparer
 		CompressionWorkItem item,
 		CancellationToken cancellationToken)
 	{
-		CoherentSecretContentRead coherentRead;
-		using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.SourceRead))
-		{
-			coherentRead = await ReadFactCoherentlyAsync(item.SourcePath, cancellationToken)
-				.ConfigureAwait(false);
-			ContentPipelineDiagnostics.RecordSourceRead(coherentRead.Metadata.Length);
-		}
-		if (IsUnsupportedNonRegularSource(context, item.SourcePath))
-			return CreateUnreadableTransformationEntry(item, coherentRead.Metadata);
-		EnsureSourcePathAvailable(context, item.SourcePath);
-		var readFact = coherentRead.Fact;
-		var result = readFact.ToReadResult();
 		IDisposable? contentLease = null;
 		try
 		{
+			CoherentSecretContentRead coherentRead;
+			using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.SourceRead))
+			{
+				coherentRead = await ReadFactCoherentlyAsync(item.SourcePath, cancellationToken)
+					.ConfigureAwait(false);
+				ContentPipelineDiagnostics.RecordSourceRead(coherentRead.Metadata.Length);
+			}
+			if (IsUnsupportedNonRegularSource(context, item.SourcePath))
+				return CreateUnreadableTransformationEntry(item, coherentRead.Metadata);
+			EnsureSourcePathAvailable(context, item.SourcePath);
+			var readFact = coherentRead.Fact;
+			var result = readFact.ToReadResult();
+
 			CodeCompressionResult compression;
 			using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Compression))
 			{
