@@ -14,7 +14,7 @@ public sealed class CommandTreeContractTests
 		Assert.Equal(
 			[
 				"analyze", "cache", "completion", "doctor", "export", "help", "mcp", "open", "profile",
-				"recent", "tree", "tui", "ui"
+				"recent", "related", "tree", "tui", "ui"
 			],
 			root.Subcommands
 				.Where(static command => !command.Hidden)
@@ -291,6 +291,7 @@ public sealed class CommandTreeContractTests
 	{
 		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
 		var analyze = root.Subcommands.Single(static command => command.Name == "analyze");
+		var related = root.Subcommands.Single(static command => command.Name == "related");
 		var tree = root.Subcommands.Single(static command => command.Name == "tree");
 		var export = root.Subcommands.Single(static command => command.Name == "export");
 		var context = export.Subcommands.Single(static command => command.Name == "context");
@@ -300,6 +301,7 @@ public sealed class CommandTreeContractTests
 		var open = root.Subcommands.Single(static command => command.Name == "open");
 
 		Assert.Contains(analyze.Options, static option => option.Name == "--max-file-bytes");
+		Assert.Contains(related.Options, static option => option.Name == "--max-file-bytes");
 		Assert.Contains(tree.Options, static option => option.Name == "--max-file-bytes");
 		Assert.Contains(context.Options, static option => option.Name == "--max-file-bytes");
 		Assert.DoesNotContain(project.Options, static option => option.Name == "--max-file-bytes");

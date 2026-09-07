@@ -21,6 +21,7 @@ public sealed class DocumentationAndPackagingContractTests
 		"Git-Safety.md",
 		"SmartIgnore.md",
 		"HideSecrets.md",
+		"Dependencies.md",
 		"Release-Channels.md",
 		"Release-Process.md"
 	];

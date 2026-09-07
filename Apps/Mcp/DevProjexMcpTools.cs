@@ -578,6 +578,93 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
+		"Finds statically evidenced dependencies and dependents for selected seed files without widening the effective project selection. " +
+		"Use it after search_project or get_tree; use get_file for source content. Returns paths, evidence reasons, resolution status, token estimates, coverage, and search-scope diagnostics. Results over 50,000 characters are stored for read_pack.")]
+	public Task<CallToolResult> RelatedFiles(
+		RequestContext<CallToolRequestParams> request,
+		CancellationToken cancellationToken) =>
+		RunProjectAsync(async () =>
+		{
+			var arguments = McpJsonArguments.Create(
+				request.Params,
+				WithAgentArguments(
+					"project",
+					"branch",
+					"path",
+					"direction",
+					"include_patterns",
+					"exclude_patterns",
+					"profile",
+					"tracked_only",
+					"git_scope",
+					"max_file_bytes"));
+			var seeds = arguments.RequiredStringOrArray(
+				"path",
+				maximumItems: 16,
+				maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength);
+			var direction = ParseDependencyDirection(arguments.OptionalString("direction") ?? "both");
+			var includePatterns = arguments.OptionalStringArray("include_patterns");
+			var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
+			var plan = await Projects.BuildPlanAsync(
+				arguments.OptionalString("project"),
+				arguments.OptionalString("branch"),
+				paths: null,
+				includePatterns,
+				excludePatterns,
+				arguments.OptionalString("profile"),
+				arguments.OptionalBoolean("tracked_only", false),
+				arguments.OptionalString("git_scope"),
+				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
+				cancellationToken,
+				includeOutputMetrics: false,
+				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
+			var relativeSeeds = Projects.ResolveRequestedFiles(plan, seeds, cancellationToken)
+				.Select(seed => McpProjectService.ToRelative(plan.SourceRoot, seed))
+				.ToArray();
+			var progress = new McpProgressReporter(request, cancellationToken);
+			progress.Milestone(5, "Preparing dependency manifest");
+			var related = await Projects.DependencyFactsEngine.FindRelatedAsync(
+				plan.SourceRoot,
+				plan.IncludedFiles,
+				relativeSeeds,
+				direction,
+				progress.MeasureFacts("Indexing dependency facts", 5, 90),
+				cancellationToken).ConfigureAwait(false);
+			await progress.CompleteAsync(100, related.Index.Metrics.ResolutionCacheHit
+				? "Dependency index reused"
+				: "Dependency index complete").ConfigureAwait(false);
+
+			var body = FormatRelatedFiles(related, direction);
+			var coverage = related.Index.Coverage;
+			var selectionContext = new McpSelectionNoticeContext(
+				HasPaths: false,
+				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns));
+			var noFactsNotices = related.Seeds
+				.Where(static seed => seed.NoFactsReason is { Length: > 0 })
+				.Select(static seed => $"[No facts] {McpTextEscaping.EscapeSingleLine(seed.NoFactsReason!)}.")
+				.ToArray();
+			var noRelatedNotice = noFactsNotices.Length == 0 && related.Seeds.All(static seed =>
+				seed.Dependencies.Count == 0 && seed.Dependents.Count == 0)
+				? "[No related files] in the effective selection."
+				: null;
+			var message = AppendTrustedNotices(
+				McpSpotlight.Wrap(body),
+				$"[Facts coverage] files={coverage.Files}, supported={coverage.Supported}, unsupported={coverage.Unsupported}, extraction-failed={coverage.ExtractionFailed}",
+				$"[Search scope] files={plan.IncludedFiles.Count}",
+				SelectionNotices(plan, includeFilters: true, selectionContext),
+				string.Join('\n', noFactsNotices),
+				noRelatedNotice);
+			if (message.Length <= MaximumInlinePackCharacters)
+				return McpToolResults.TextSuccess(message, advertiseLargeResult: true);
+
+			var packId = await packs.StoreAsync(message, cancellationToken).ConfigureAwait(false);
+			return McpToolResults.TextSuccess(
+				$"Related-files result stored as '{packId}' ({message.Length} characters). " +
+				"Call read_pack with this pack_id to read it.",
+				advertiseLargeResult: true);
+		}, cancellationToken);
+
+	[Description(
 		"Reads one selected file or line range after secrets become DEVPROJEX_REDACTED[<category>#<n>]. Use it after get_tree or search_project; " +
 		"use pack_context for many files. Returns up to 1,000 lines or 50,000 characters; files excluded by effective filters stay unreadable in this tool.")]
 	public Task<CallToolResult> GetFile(
@@ -840,6 +927,55 @@ internal sealed class DevProjexMcpTools(
 			McpErrorCodes.InvalidArguments,
 			$"{McpErrorCodes.InvalidArguments}: invalid format '{token}'. Valid values: markdown, text, json, xml.")
 	};
+
+	private static DependencyDirection ParseDependencyDirection(string token) => token switch
+	{
+		"dependencies" => DependencyDirection.Dependencies,
+		"dependents" => DependencyDirection.Dependents,
+		"both" => DependencyDirection.Both,
+		_ => throw new McpToolException(
+			McpErrorCodes.InvalidArguments,
+			$"{McpErrorCodes.InvalidArguments}: invalid direction '{token}'. Valid values: dependencies, dependents, both.")
+	};
+
+	private static string FormatRelatedFiles(
+		DependencyRelatedResult result,
+		DependencyDirection direction)
+	{
+		var output = new StringBuilder();
+		foreach (var seed in result.Seeds)
+		{
+			if (result.Seeds.Count > 1)
+				output.Append("Seed: ").AppendLine(McpTextEscaping.EscapeSingleLine(seed.Seed));
+			if (seed.NoFactsReason is { Length: > 0 })
+				continue;
+			if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
+				AppendRelatedSection(output, "Dependencies", seed.Dependencies);
+			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
+				AppendRelatedSection(output, "Dependents", seed.Dependents);
+		}
+		return output.ToString().TrimEnd();
+	}
+
+	private static void AppendRelatedSection(
+		StringBuilder output,
+		string title,
+		IReadOnlyList<RelatedFile> files)
+	{
+		output.Append(title).AppendLine(":");
+		foreach (var file in files)
+		{
+			var reasons = string.Join(" · ", file.Reasons.Select(McpTextEscaping.EscapeSingleLine));
+			output.Append(McpTextEscaping.EscapeSingleLine(file.Path))
+				.Append(" — ").Append(reasons)
+				.Append(" — ").Append(file.Status.ToString().ToLowerInvariant())
+				.Append(" — ").Append(file.EstimatedTokens.ToString(CultureInfo.InvariantCulture)).Append(" tokens");
+			if (file.CrossScope) output.Append(" — cross-scope");
+			if (file.Candidates.Count > 1)
+				output.Append(" — candidates: ").Append(string.Join(", ", file.Candidates.Select(McpTextEscaping.EscapeSingleLine)));
+			output.AppendLine();
+		}
+	}
 
 	private static string BuildSpotlightedPackContent(
 		string content,

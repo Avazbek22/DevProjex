@@ -204,6 +204,63 @@ when diagnostics are present.
 `--fail-on-findings` likewise writes the requested document before returning
 policy exit code `3` when effective findings exist; the two gates are independent.
 
+## Related-files JSON
+
+`related --format json` emits one deterministic document on stdout. Operational
+progress and the optional `warning[DPX-DEPENDENCY-UNSUPPORTED]` language diagnostic
+stay on stderr. The shape is:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-related-files",
+  "direction": "both",
+  "seeds": [
+    {
+      "seed": "Services/ClockService.cs",
+      "languageId": "cSharp",
+      "dependencies": [
+        {
+          "path": "Contracts/IClock.cs",
+          "status": "resolved",
+          "reasons": ["type reference IClock at line 3"],
+          "candidates": ["Contracts/IClock.cs"],
+          "crossScope": false,
+          "estimatedTokens": 84
+        }
+      ],
+      "dependents": [],
+      "noFactsReason": null
+    }
+  ],
+  "coverage": {
+    "files": 3,
+    "supported": 3,
+    "unsupported": 0,
+    "extractionFailed": 0,
+    "unsupportedLanguages": {},
+    "cSharpErrorNodeKinds": {}
+  },
+  "searchScope": {
+    "files": 3
+  }
+}
+```
+
+`direction` is `dependencies`, `dependents`, or `both`. Seeds and related paths use
+portable project-relative `/` separators. Each related item retains its aggregate
+evidence reasons, resolution status, sorted candidate list, cross-compilation-scope
+flag, and estimated source tokens. Ambiguous references have `status: "ambiguous"`
+and list every allowed candidate; self-file edges are absent. A seed whose language
+has no adapter has empty relationship arrays and a non-null `noFactsReason`.
+
+`coverage` describes the complete effective manifest, not only the seeds. Its
+unsupported-language and C# error-node dictionaries use stable ordinal keys.
+`searchScope.files` is the manifest file count after the profile, selected paths,
+Git mode, exclusions, and file-size limit. No field can contain a file or candidate
+outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and
+resolution semantics.
+
 ## Recent and Cache JSON
 
 `recent --format json` emits schema version 1 with kind `devprojex-recent` and a

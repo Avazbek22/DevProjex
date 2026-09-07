@@ -39,6 +39,31 @@ internal sealed class McpJsonArguments(
 		return value;
 	}
 
+	public IReadOnlyList<string> RequiredStringOrArray(
+		string name,
+		int maximumItems,
+		int maximumItemScalarValues)
+	{
+		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: '{name}' is required and must be a non-empty string or array of strings.");
+		if (value.ValueKind == JsonValueKind.String)
+		{
+			var scalar = value.GetString();
+			if (string.IsNullOrWhiteSpace(scalar) || McpUnicodeLength.ExceedsScalarValueCount(scalar, maximumItemScalarValues))
+				throw Invalid(name, $"a non-empty string containing at most {maximumItemScalarValues} characters");
+			return [scalar];
+		}
+		if (value.ValueKind != JsonValueKind.Array)
+			throw Invalid(name, "a non-empty string or array of strings");
+		var values = OptionalStringArray(name, maximumItems: maximumItems,
+			maximumItemScalarValues: maximumItemScalarValues) ?? [];
+		if (values.Count == 0)
+			throw Invalid(name, "a non-empty string or array of strings");
+		return values;
+	}
+
 	public IReadOnlyList<string>? OptionalStringArray(
 		string name,
 		bool allowWhitespace = false,

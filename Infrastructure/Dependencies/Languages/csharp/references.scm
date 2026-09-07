@@ -1,0 +1,18 @@
+(field_declaration (variable_declaration type: (_) @reference.variable_type))
+(property_declaration type: (_) @reference.property_type)
+(parameter type: (_) @reference.parameter_type)
+(method_declaration returns: (_) @reference.return_type)
+(base_list (_) @reference.base)
+(type_parameter_constraints_clause (type_parameter_constraint type: (_) @reference.constraint))
+(attribute name: (_) @reference.attribute)
+(object_creation_expression type: (_) @reference.object_creation)
+(object_creation_expression !type) @reference.target_typed_object_creation
+(typeof_expression type: (_) @reference.typeof)
+(sizeof_expression type: (_) @reference.sizeof)
+(default_expression type: (_) @reference.default)
+(cast_expression type: (_) @reference.cast)
+(as_expression right: (_) @reference.as)
+(is_expression right: (_) @reference.is)
+(type_pattern type: (_) @reference.is)
+(declaration_pattern type: (_) @reference.pattern)
+(type_parameter_list) @context.type_parameters
