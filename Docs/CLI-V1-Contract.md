@@ -929,6 +929,7 @@ that prevents an accepted option from becoming a no-op.
 | `export context` | `--force` | off | atomically replaces an existing context file | invalid with stdout | success path on stdout; conflict exits `4`, invalid combination `2` | parser, destination, handler |
 | `export context` | `--dry-run` | off | runs plan and destination preflight without document generation | creates no parent, staging, or output | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
 | `export context` | `--max-tokens` | unlimited | greedily limits included transformed file content by estimated tokens while preserving deterministic path order | integer `>= 1`; skipped files do not stop consideration of later files; document structure is outside the budget | document stays on stdout/file; localized budget report is written to stderr; JSON/XML add `tokenBudget` | parser, serializer, handler, process |
+| `export context` | `--rank importance` | absent | reorders only the effective content candidates by `importance-v1`; with a budget this is admission priority, without one it is serialization order | invalid with `--view tree`; unknown values exit `2`; no rank performs no ranking work | trusted stderr ranking report; context JSON adds `ranking` | parser, serializer, handler, process |
 | `export project` | `--as` | required | selects exact folder or ZIP export | missing/invalid value exits `2` | real absolute created destination on stdout | parser, handler, process |
 | `export project` | `-o`, `--output` | required | selects the exact destination | folder must be absent; ZIP path ends in `.zip`; destination outside source; `-` is valid only with `--as zip` | folder/file success returns its real absolute path; ZIP stdout is the raw archive byte stream | parser, destination, integration |
 | `export project` | `--force` | off | atomically replaces an existing ZIP file | invalid for folder output and ZIP stdout | success path on stdout; invalid combination exits `2` | parser, destination, integration |
@@ -1381,6 +1382,22 @@ transformations and excludes tree text, headings, and serialization markup.
 The existing `metrics` object and `tree` remain pre-budget descriptions of the
 complete effective selection; `files` and `tokenBudget` describe the content
 admitted by the budget.
+
+Importance-aware packing is an additive v5.2 extension. CLI `export context`
+accepts `--rank importance`; MCP `pack_context` accepts the equivalent optional
+`rank: "importance"`. MCP unknown values and tree-only combinations are
+`DPX-MCP-INVALID-ARGUMENTS`; CLI follows its existing argument-error contract and
+exits `2`. `importance-v1` reorders only candidates that survived the complete
+effective-selection pipeline. With a token budget, its order feeds the unchanged
+greedy fits/skip-and-continue pass. Without a budget, the same descending order is
+the document serialization order and no file is omitted. This defines order, not
+model attention. Omitting rank preserves prior bytes and initiates no Git history
+read or dependency indexing. The trusted ranking report is bounded to ten top
+entries; context JSON adds an optional `ranking` object. The algorithm, weights,
+coverage semantics, and frozen evaluation are specified in
+[Ranking.md](Ranking.md). Per-file source-version guards fail the operation if
+facts and the coherent emitted-content snapshot no longer describe the same
+file version.
 
 Analysis v1 contains inventory, effective selection, metrics, diagnostics, and
 fingerprint. Either findings option adds `findingCount`. With `--findings`, it

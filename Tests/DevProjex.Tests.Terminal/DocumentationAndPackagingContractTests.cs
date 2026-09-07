@@ -25,6 +25,7 @@ public sealed class DocumentationAndPackagingContractTests
 		"Benchmarks.md",
 		"Comparison.md",
 		"Dependencies.md",
+		"Ranking.md",
 		"Release-Channels.md",
 		"Release-Process.md"
 	];

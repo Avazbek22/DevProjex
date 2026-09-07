@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using DevProjex.Application.Ranking;
 
 namespace DevProjex.Mcp;
 
@@ -304,12 +305,20 @@ internal sealed class DevProjexMcpTools(
 					"detail",
 					"tracked_only",
 					"git_scope",
+					"rank",
 					"max_tokens",
 					"max_file_bytes"));
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
 			var maximumEstimatedTokens = arguments.OptionalInt64("max_tokens", 1, long.MaxValue);
 			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
 			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
+			var rank = ParseRank(arguments.OptionalString("rank"));
+			if (rank is not null && view == ProjectContextView.Tree)
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: rank is valid only when pack_context includes file content.");
+			}
 			var selection = await BuildSelectionAsync(
 					arguments,
 					cancellationToken,
@@ -329,6 +338,13 @@ internal sealed class DevProjexMcpTools(
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
 			plan = Projects.ApplyDetail(plan, effectiveDetail, cancellationToken);
 			var outputPlan = WithoutWarningDiagnostics(plan);
+			var ranking = rank is null
+				? null
+				: await new ImportanceRankingService(
+						Projects.DependencyFactsEngine,
+						new ProjectGitHistoryReader())
+					.RankAsync(plan.SourceRoot, plan.IncludedFiles, cancellationToken)
+					.ConfigureAwait(false);
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(11, $"transforming content 0/{transformedFileCount}");
 			await using var prepared = view == ProjectContextView.Tree
@@ -360,7 +376,8 @@ internal sealed class DevProjexMcpTools(
 								plain: false,
 								useSourceMappedStructuredPaths: true,
 								writeProgress: writeProgress,
-								maximumEstimatedTokens: maximumEstimatedTokens)
+								maximumEstimatedTokens: maximumEstimatedTokens,
+								ranking: ranking)
 							.ConfigureAwait(false);
 						return;
 					}
@@ -375,7 +392,8 @@ internal sealed class DevProjexMcpTools(
 							plain: false,
 							useSourceMappedStructuredPaths: true,
 							writeProgress,
-							maximumEstimatedTokens)
+							maximumEstimatedTokens,
+							ranking)
 						.ConfigureAwait(false);
 				},
 				cancellationToken).ConfigureAwait(false);
@@ -388,6 +406,7 @@ internal sealed class DevProjexMcpTools(
 					var inlineMessage = AppendTrustedNotices(BuildSpotlightedPackContent(
 						content,
 						writeResult?.TokenBudget),
+						FormatRankingReport(writeResult?.Ranking, writeResult?.TokenBudget),
 						FormatUnscannableNotice(
 							writeResult?.UnscannableFiles,
 							UnscannableResultKind.Pack),
@@ -429,6 +448,7 @@ internal sealed class DevProjexMcpTools(
 						writeResult?.UnscannableFiles,
 						UnscannableResultKind.Pack),
 					CombineTrustedNotices(
+						FormatRankingReport(writeResult?.Ranking, writeResult?.TokenBudget),
 						FormatCompressionUnavailable(prepared?.CompressionSnapshot),
 						trustedPlanWarnings));
 				await operationProgress.CompleteAsync(
@@ -920,6 +940,15 @@ internal sealed class DevProjexMcpTools(
 			$"{McpErrorCodes.InvalidArguments}: invalid format '{token}'. Valid values: text, markdown, json, xml.")
 	};
 
+	private static ProjectContextRank? ParseRank(string? token) => token switch
+	{
+		null => null,
+		"importance" => ProjectContextRank.Importance,
+		_ => throw new McpToolException(
+			McpErrorCodes.InvalidArguments,
+			$"{McpErrorCodes.InvalidArguments}: invalid rank '{token}'. Valid value: importance.")
+	};
+
 	private static TreeTextFormat ParseTreeFormat(string token) => token switch
 	{
 		"markdown" => TreeTextFormat.Markdown,
@@ -1178,10 +1207,78 @@ internal sealed class DevProjexMcpTools(
 
 		if (report.SkippedFileCount > 0)
 		{
-			output.Append(
-				"Tip: use detail=compact or detail=signatures, narrow the selection, or increase max_tokens.");
+			output.Append(report.RankedSkippedFiles is { Count: > 0 } &&
+			              report.LargestSkippedFiles.Any(file => file.EstimatedTokens > report.MaximumEstimatedTokens)
+				? "Tip: increase max_tokens or lower detail for a file that is larger than the entire budget."
+				: "Tip: use detail=compact or detail=signatures, narrow the selection, or increase max_tokens.");
 		}
 		return output.ToString().TrimEnd('\r', '\n');
+	}
+
+	private static string? FormatRankingReport(
+		ImportanceRankingReport? report,
+		ProjectContextTokenBudgetReport? tokenBudget)
+	{
+		if (report is null)
+			return null;
+		var output = new StringBuilder(1_024);
+		output.Append("[Ranking] ")
+			.Append(report.Algorithm)
+			.Append(" · graph ")
+			.Append(report.GraphVariant)
+			.Append(' ')
+			.Append(Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
+			.Append("% of ")
+			.Append(report.CandidateCount.ToString(CultureInfo.InvariantCulture))
+			.Append(" sources · git window ")
+			.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture))
+			.Append(" commits · tests deprioritized");
+		if (report.GitUnavailableReason != ProjectGitHistoryUnavailableReason.None)
+		{
+			output.Append(" · git unavailable: ")
+				.Append(report.GitUnavailableReason)
+				.Append("; weights redistributed");
+		}
+		else if (report.RedistributedMissingSignals)
+		{
+			output.Append(" · missing signals redistributed");
+		}
+		foreach (var entry in report.TopEntries.Take(10))
+		{
+			output.Append("\n[Ranking top] ")
+				.Append(McpTextEscaping.EscapeSingleLine(entry.Path))
+				.Append(" — dependents ")
+				.Append(entry.Dependents.ToString(CultureInfo.InvariantCulture))
+				.Append(" · dependencies ")
+				.Append(entry.Dependencies.ToString(CultureInfo.InvariantCulture))
+				.Append(" · commits ")
+				.Append(entry.Commits?.ToString(CultureInfo.InvariantCulture) ??
+				        $"unavailable: {entry.GitUnavailableReason}")
+				.Append('/')
+				.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture));
+			if (entry.Role == ImportanceFileRole.TestSource)
+				output.Append(" · test source");
+			else if (entry.Role == ImportanceFileRole.Manifest)
+				output.Append(" · manifest");
+			else if (entry.Role == ImportanceFileRole.EntryPoint)
+				output.Append(" · entry point");
+		}
+		if (tokenBudget is not null)
+		{
+			foreach (var file in tokenBudget.RankedSkippedFiles ?? [])
+			{
+				output.Append("\n[Skipped] ")
+					.Append(McpTextEscaping.EscapeSingleLine(file.Path))
+					.Append(" — priority ")
+					.Append(file.Priority!.Value.ToString(CultureInfo.InvariantCulture))
+					.Append(", ")
+					.Append(file.EstimatedTokens.ToString(CultureInfo.InvariantCulture))
+					.Append(" tokens, ")
+					.Append(file.RemainingEstimatedTokens.GetValueOrDefault().ToString(CultureInfo.InvariantCulture))
+					.Append(" remaining: does not fit the remaining budget");
+			}
+		}
+		return output.ToString();
 	}
 
 	private sealed record McpSelectionResult(

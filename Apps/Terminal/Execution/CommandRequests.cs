@@ -1,4 +1,5 @@
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Application.Ranking;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -52,6 +53,7 @@ public sealed record ExportContextCommandRequest(
 	bool DryRun,
 	long? MaximumEstimatedTokens,
 	TerminalOutputOptions Output,
+	ProjectContextRank? Rank = null,
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null);
 
