@@ -19,6 +19,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
 			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions), openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions), largeResult: true, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote)
 		];
 	}
@@ -331,6 +332,32 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
 	    "start_line": { "description": "First 1-based line; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "end_line": { "description": "Last 1-based line, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	  },
+	  "required": ["path"],
+	  "additionalProperties": false
+	}
+	""";
+
+	private static string RelatedFilesInput(bool agentExclusions) => $$"""
+	{
+	  "type": "object",
+	  "properties": {
+	    {{ProjectProperty}},
+	    {{BranchProperty}},
+	    "path": {
+	      "description": "One seed path, or up to 16 seed paths, inside the effective project selection.",
+	      "oneOf": [
+	        { "type": "string", "minLength": 1, "maxLength": 4096 },
+	        { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	      ]
+	    },
+	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Which direction of statically evidenced file relationships to return." },
+	    {{IncludeProperty}},
+	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{ProfileProperty}},
+	    {{TrackedOnlyProperty}},
+	    {{GitScopeProperty}},
+	    {{MaxFileBytesProperty}}
 	  },
 	  "required": ["path"],
 	  "additionalProperties": false

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Application.Dependencies;
 
 namespace DevProjex.Mcp;
 
@@ -33,6 +34,18 @@ internal sealed class McpProgressReporter(
 				: processed / (double)total;
 			var mapped = start + Math.Clamp(fraction, 0d, 1d) * (end - start);
 			Report(mapped, $"{phase} {processed}/{total}", force: false);
+		});
+
+	public IProgress<DependencyIndexProgress> MeasureFacts(
+		string phase,
+		double start,
+		double end) =>
+		new SynchronousProgress<DependencyIndexProgress>(value =>
+		{
+			var total = Math.Max(0, value.TotalFiles);
+			var processed = Math.Clamp(value.CompletedFiles, 0, total);
+			var fraction = total == 0 ? 1d : processed / (double)total;
+			Report(start + fraction * (end - start), $"{phase} {processed}/{total}", force: false);
 		});
 
 	public Task CompleteAsync(double progress, string message)

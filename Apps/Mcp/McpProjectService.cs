@@ -463,11 +463,22 @@ internal sealed class McpProjectService(
 		return physical;
 	}
 
+	public IReadOnlyList<string> ResolveRequestedFiles(
+		ProjectContextPlan plan,
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken)
+	{
+		var requested = ResolveRequestedPaths(plan.SourceRoot, paths, cancellationToken);
+		ValidateRequestedPathCasing(plan, requested);
+		return paths.Select(path => ResolveFile(plan, path)).ToArray();
+	}
+
 	public bool HasLocalProfile(string projectRoot) =>
 		services.ProfileStore.TryLoadProfile(projectRoot, out _);
 
 	public TreeExportService TreeExportService => services.TreeExportService;
 	public ProjectContextDocumentService DocumentService => services.DocumentService;
+	public DependencyFactsEngine DependencyFactsEngine => services.DependencyFactsEngine;
 
 	private ProjectProfileReference ResolveProfile(string projectRoot, string? profile)
 	{

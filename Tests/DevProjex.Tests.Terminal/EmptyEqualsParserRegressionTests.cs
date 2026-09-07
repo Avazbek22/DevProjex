@@ -143,6 +143,8 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--as",
 		"--branch",
 		"--color",
+		// related intentionally adds this required-value option to the public CLI grammar.
+		"--direction",
 		"--exclude",
 		"--extension",
 		"--filter",

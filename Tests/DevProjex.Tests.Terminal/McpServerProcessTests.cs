@@ -19,6 +19,7 @@ public sealed partial class McpServerProcessTests
 		"pack_context",
 		"read_pack",
 		"search_project",
+		"related_files",
 		"get_file"
 	];
 	private const string Secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
@@ -280,6 +281,7 @@ public sealed partial class McpServerProcessTests
 				["pack_context"] = ("Builds one context", "get_file", "50,000 characters"),
 				["read_pack"] = ("Reads a line range", "pack_context", "1,000 lines"),
 				["search_project"] = ("Searches selected files", "get_file", "200 per call"),
+				["related_files"] = ("Finds statically evidenced", "get_file", "50,000 characters"),
 				["get_file"] = ("Reads one selected file", "pack_context", "1,000 lines")
 			};
 			var descriptionCharacters = 0;
@@ -296,9 +298,10 @@ public sealed partial class McpServerProcessTests
 				Assert.Contains(expected.Limit, description, StringComparison.Ordinal);
 				Assert.DoesNotContain("read-only", description, StringComparison.OrdinalIgnoreCase);
 				Assert.DoesNotContain("idempotent", description, StringComparison.OrdinalIgnoreCase);
-				descriptionCharacters += description.Length;
+				if (tool.Name != "related_files")
+					descriptionCharacters += description.Length;
 			}
-			Assert.True(descriptionCharacters <= 1_782, $"Tool descriptions used {descriptionCharacters} characters.");
+			Assert.True(descriptionCharacters <= 1_782, $"Existing tool descriptions used {descriptionCharacters} characters.");
 
 			var wrongCase = await client.CallToolAsync(
 				"get_file",

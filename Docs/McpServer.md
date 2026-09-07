@@ -91,7 +91,7 @@ devprojex mcp --root /absolute/path/to/project --allow-agent-exclusions
 ```
 
 With the flag, the selection tools `get_tree`, `analyze`, `pack_context`,
-`search_project`, and `get_file` gain an `exclusions` array parameter that
+`search_project`, `related_files`, and `get_file` gain an `exclusions` array parameter that
 carries the full desired toggle set for that call; an empty array turns every
 toggle off, and the value outranks both the server baseline and profile
 exclusions. Tokens match case-insensitively and duplicates are rejected.
@@ -124,7 +124,7 @@ so check `analyze.files` when combining `paths` with exclusions.
 The recommended tool sequence is:
 
 ```text
-list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> read_pack
+list_projects -> get_tree/analyze -> search_project/related_files/get_file -> pack_context -> read_pack
 ```
 
 The MCP `initialize` result publishes the same workflow in `instructions`, along
@@ -222,7 +222,7 @@ allowlisted to keep documentation and fixtures readable.
 The tool order is stable. Every tool is annotated read-only and non-destructive
 because none modifies the source project. `pack_context` is non-idempotent because
 each stored result gets a new session id. Without `--allow-remote`, every tool is
-closed-world; with it, the five tools that accept `project` Git URLs are annotated
+closed-world; with it, the six tools that accept `project` Git URLs are annotated
 open-world.
 
 | Tool | Parameters | Result and limits |
@@ -233,10 +233,11 @@ open-world.
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
+| `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). Results larger than 50,000 characters are stored and returned with a `pack_id` for `read_pack`. |
 | `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
-`pack_context`, `search_project`, and `get_file` additionally accept the
+`pack_context`, `search_project`, `related_files`, and `get_file` additionally accept the
 `exclusions` array parameter described in the startup section, so a file
 revealed by a per-call value stays readable through the same value.
 
@@ -245,6 +246,40 @@ entry is limited to 4,096 Unicode scalar values. Lexically equivalent entries ar
 deduplicated before root-jail resolution; every unique path still passes the full
 physical containment check. Regex, glob, and `git_scope` schema lengths use the
 same Unicode scalar-value semantics at runtime.
+
+### `related_files`
+
+`related_files.path` is one seed path or an array of at most 16 seed paths. A seed
+selects the starting point for the answer; it does not promise that only the seed is
+read. The server first builds the complete effective manifest through the same
+baseline, profile, Git scope, exclusion, glob, and file-size pipeline as the other
+selection tools, without narrowing that manifest to the seed paths. Each seed is then
+resolved with the same path checks and case-correction guidance as `get_file`. A seed
+outside the effective selection returns the existing `DPX-MCP-PATH-NOT-FOUND` error.
+
+The human-readable payload has `Dependencies` and `Dependents` sections according to
+`direction`. Each line contains a project-relative path, one or more evidence reasons
+separated by ` · `, a `resolved` or `ambiguous` status, an estimated token count, and
+an optional `cross-scope` marker. One ambiguous reference is one row with its complete
+candidate list. Self-file edges are omitted. For example:
+
+```text
+Dependencies:
+Application/Context/ProjectContextPlan.cs — one visible declaration identity in csharp:Apps/Mcp/DevProjex.Mcp.csproj · type reference ProjectContextPlan at line 18 — resolved — 642 tokens — cross-scope
+Models/Alpha/User.cs — multiple visible declaration identities · type reference User at line 27 — ambiguous — 84 tokens — candidates: Models/Alpha/User.cs, Models/Beta/User.cs
+Dependents:
+Apps/Terminal/Execution/AnalyzeCommandHandler.cs — one visible declaration identity in csharp:Apps/Terminal/DevProjex.Terminal.csproj · type reference ProjectContextPlan at line 44 — resolved — 1830 tokens — cross-scope
+```
+
+Project-derived paths and evidence remain inside the random `untrusted-data` block.
+Outside that block, the server appends `[Facts coverage] files=N, supported=N,
+unsupported=N, extraction-failed=N`, `[Search scope] files=N`, and the ordinary
+`[Effective filters]` trailer. An unsupported seed is a successful empty result with
+trusted `[No facts] <language> is not supported by the dependency engine yet.`; a
+supported seed without projected edges receives trusted `[No related files] in the
+effective selection.` No trailer names a file hidden by the manifest. See
+[Dependencies.md](Dependencies.md) for evidence layers, statuses, resolver boundaries,
+limits, caching, and determinism.
 
 ## Result Contract
 
@@ -303,11 +338,11 @@ names the delivery directory or grammar resource without including project data.
 Unsupported languages and files rejected by parse or structural safety checks are
 separate unchanged-file outcomes and do not produce this trailer.
 
-`get_tree`, `pack_context`, `read_pack`, `search_project`, and `get_file` are
+`get_tree`, `pack_context`, `read_pack`, `search_project`, `related_files`, and `get_file` are
 text tools. They do not declare `outputSchema`, omit `structuredContent`, and
 return the useful payload directly in the first text block in `content`. This
 avoids JSON escaping and unnecessary token overhead for trees, source text,
-search context, and packs. Truncation and continuation metadata is appended as
+search context, dependency facts, and packs. Truncation and continuation metadata is appended as
 trusted plain-text trailers outside every project spotlight block, such as
 `[Tree truncated ...]` and `[Showing lines ...]`.
 For `get_file` and `read_pack`, a requested `end_line` past EOF returns every
@@ -382,8 +417,9 @@ Metadata about a text payload is not sufficient reason to add a schema.
 
 ## Progress Notifications
 
-`pack_context` and `analyze` report measured selection, content-transformation,
-and output phases through MCP `notifications/progress`. Notifications are sent
+`pack_context`, `analyze`, and first-use `related_files` indexing report measured
+selection, extraction, resolution, content-transformation, and output phases through MCP
+`notifications/progress`. Notifications are sent
 only when the caller supplies a `progressToken` in the request `_meta`; without
 that token the server sends none. `progressToken` is transport metadata, not a
 tool argument, so tool input schemas are unchanged. Progress is monotonic and
@@ -406,6 +442,8 @@ Defaults:
 - `search_project.context_lines`: `2`
 - `search_project.ignore_case`: `true`
 - `search_project.max_results`: `50`
+- `related_files.direction`: `both`
+- `related_files.path`: one string or an array of at most 16 strings
 
 `include_patterns` and `exclude_patterns` are arrays of project-relative globs
 using `/`. Each array accepts at most 256 non-empty patterns, with at most 512
@@ -453,7 +491,7 @@ does not apply to `get_file`, which addresses one already-effective file. Its
 value is echoed in the effective-filter diagnostics of every tool that accepts
 the parameter.
 
-For the five project tools, `project` may be a Git URL only when the server was
+For the six project tools, `project` may be a Git URL only when the server was
 started with `--allow-remote`. The optional `branch` is valid only with a URL.
 Remote checkouts are reused from RepoCache and remain pinned for this server
 session. `list_projects` continues to report only configured local roots.
@@ -467,7 +505,7 @@ actionable error instead of returning an empty result.
 
 `git_scope` accepts only the narrowing values `staged`, `changes`, and
 `diff:<ref>..<ref>` on `get_tree`, `analyze`, `pack_context`, and
-`search_project`. It intersects the server/profile baseline and therefore cannot
+`search_project`, and `related_files`. It intersects the server/profile baseline and therefore cannot
 re-enable paths excluded by `tracked_only` or a tracked profile. Staged selects
 index changes; changes adds unstaged and non-ignored untracked paths; diff uses
 two Git references. The complete value is limited to 4,096 characters. File

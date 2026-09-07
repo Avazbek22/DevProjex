@@ -30,6 +30,7 @@ public sealed record TerminalServices(
 	IRepoCacheService RepoCacheService,
 	SecretRedactionSession SecretRedactionSession,
 	CodeCompressionSession CodeCompressionSession,
+	DependencyFactsEngine DependencyFactsEngine,
 	SecretRedactionOutputPreparer SecretRedactionOutputPreparer) : IDisposable
 {
 	private OwnedLifetime? _ownedLifetime;
@@ -39,7 +40,8 @@ public sealed record TerminalServices(
 		var lifetime = new OwnedLifetime(
 			RepoCacheService as IDisposable,
 			SecretRedactionSession,
-			CodeCompressionSession);
+			CodeCompressionSession,
+			DependencyFactsEngine);
 		if (Interlocked.CompareExchange(ref _ownedLifetime, lifetime, null) is not null)
 			throw new InvalidOperationException("Terminal service ownership is already configured.");
 
@@ -51,17 +53,20 @@ public sealed record TerminalServices(
 	private sealed class OwnedLifetime(
 		IDisposable? repoCacheLifetime,
 		SecretRedactionSession secretRedactionSession,
-		CodeCompressionSession codeCompressionSession) : IDisposable
+		CodeCompressionSession codeCompressionSession,
+		DependencyFactsEngine dependencyFactsEngine) : IDisposable
 	{
 		private IDisposable? _repoCacheLifetime = repoCacheLifetime;
 		private SecretRedactionSession? _secretRedactionSession = secretRedactionSession;
 		private CodeCompressionSession? _codeCompressionSession = codeCompressionSession;
+		private DependencyFactsEngine? _dependencyFactsEngine = dependencyFactsEngine;
 
 		public void Dispose()
 		{
 			var cacheLifetime = Interlocked.Exchange(ref _repoCacheLifetime, null);
 			var redactionSession = Interlocked.Exchange(ref _secretRedactionSession, null);
 			var compressionSession = Interlocked.Exchange(ref _codeCompressionSession, null);
+			var dependencyEngine = Interlocked.Exchange(ref _dependencyFactsEngine, null);
 			try
 			{
 				cacheLifetime?.Dispose();
@@ -74,7 +79,14 @@ public sealed record TerminalServices(
 				}
 				finally
 				{
-					compressionSession?.Dispose();
+					try
+					{
+						compressionSession?.Dispose();
+					}
+					finally
+					{
+						dependencyEngine?.Dispose();
+					}
 				}
 			}
 		}
