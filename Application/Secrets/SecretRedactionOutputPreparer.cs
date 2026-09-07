@@ -2866,10 +2866,19 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 				throw new IOException("The snapshot contains fewer characters than expected.");
 
 			var content = await store.ReadTextAsync(slice, cancellationToken).ConfigureAwait(false);
-			for (var offset = 0; offset < maximumCharacters; offset += ChunkSize)
+			var offset = 0;
+			while (offset < maximumCharacters)
 			{
 				var length = Math.Min(ChunkSize, maximumCharacters - offset);
+				var boundary = offset + length;
+				if (boundary < maximumCharacters &&
+				    char.IsHighSurrogate(content[boundary - 1]) &&
+				    char.IsLowSurrogate(content[boundary]))
+				{
+					length--;
+				}
 				await writeChunk(content.AsMemory(offset, length), cancellationToken).ConfigureAwait(false);
+				offset += length;
 			}
 		}
 
