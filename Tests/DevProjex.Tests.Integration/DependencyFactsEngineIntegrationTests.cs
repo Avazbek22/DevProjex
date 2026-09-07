@@ -1,6 +1,8 @@
+using System.Text;
 using DevProjex.Application.Dependencies;
 using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.Dependencies;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.Integration;
 
@@ -851,6 +853,81 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task PreparedSourceCache_TransientFailuresDoNotAccumulateEvictionEntries()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var analyzer = new TransientPreparedSourceAnalyzer();
+		using var extractor = new TreeSitterDependencyFactExtractor(new MissingGrammarLocator(), analyzer);
+		var configuration = EmptyConfiguration();
+
+		for (var attempt = 0; attempt < 10_000; attempt++)
+		{
+			var prepared = await extractor.PrepareAsync(
+				fixture.Path,
+				source,
+				configuration,
+				new DependencyFactsLimits(),
+				TestContext.Current.CancellationToken,
+				$"attempt-{attempt}");
+			Assert.False(prepared.CanCache);
+		}
+
+		Assert.Equal(10_000, analyzer.OpenCount);
+		Assert.Equal(new TreeSitterDependencyFactExtractor.PreparedSourceCacheState(0, 0, 0), extractor.CacheState);
+	}
+
+	[Fact]
+	public async Task PreparedSourceCache_StaleCompletionCannotRemoveReplacementWeight()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var analyzer = new CoordinatedPreparedSourceAnalyzer();
+		using var extractor = new TreeSitterDependencyFactExtractor(new MissingGrammarLocator(), analyzer);
+		var configuration = EmptyConfiguration();
+
+		var staleTask = extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken,
+			"identity-v1").AsTask();
+		await analyzer.FirstReadStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		var replacement = await extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken,
+			"identity-v2");
+		var replacementState = extractor.CacheState;
+		analyzer.ReleaseFirstRead();
+		var stale = await staleTask;
+		var afterStaleCompletion = extractor.CacheState;
+		var warm = await extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken,
+			"identity-v2");
+
+		Assert.Equal("new source", replacement.Source);
+		Assert.Equal("old source", stale.Source);
+		Assert.Same(replacement.Source, warm.Source);
+		Assert.Equal(2, analyzer.OpenCount);
+		Assert.Equal(1, replacementState.Entries);
+		Assert.Equal(1, replacementState.EvictionEntries);
+		Assert.True(replacementState.RetainedBytes > 0);
+		Assert.Equal(replacementState, afterStaleCompletion);
+		Assert.Equal(replacementState, extractor.CacheState);
+	}
+
+	[Fact]
 	public async Task Cache_RebindsFactsWhenConfigurationChangesFileOwnershipWithoutParsingSource()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -1211,6 +1288,14 @@ public sealed class DependencyFactsEngineIntegrationTests
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());
 
+	private static DependencyResolverConfiguration EmptyConfiguration() => new(
+		"fixture",
+		[],
+		new Dictionary<string, PackageMapDescriptor>(StringComparer.Ordinal),
+		new HashSet<string>(StringComparer.Ordinal),
+		new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal),
+		new HashSet<string>(StringComparer.Ordinal));
+
 	private static DependencyManifestContentIdentities Identities(
 		params (string Path, string Identity)[] values) =>
 		new(values.ToDictionary(
@@ -1292,6 +1377,112 @@ public sealed class DependencyFactsEngineIntegrationTests
 		public IReadOnlyList<string> EnumerateLibraries() => [];
 		public string Resolve(string libraryBaseName) =>
 			throw new FileNotFoundException($"Grammar '{libraryBaseName}' is unavailable.", libraryBaseName);
+	}
+
+	private sealed class TransientPreparedSourceAnalyzer : IFileContentAnalyzer
+	{
+		private int _openCount;
+
+		public int OpenCount => Volatile.Read(ref _openCount);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Interlocked.Increment(ref _openCount);
+			return ValueTask.FromResult<IFileContentSnapshot>(
+				new ClassifiedSnapshot(FileContentClassification.Missing));
+		}
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) => throw new NotSupportedException();
+	}
+
+	private sealed class CoordinatedPreparedSourceAnalyzer : IFileContentAnalyzer
+	{
+		private readonly TaskCompletionSource _firstReadStarted =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource _releaseFirstRead =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private int _openCount;
+
+		public TaskCompletionSource FirstReadStarted => _firstReadStarted;
+		public int OpenCount => Volatile.Read(ref _openCount);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			var invocation = Interlocked.Increment(ref _openCount);
+			return invocation == 1
+				? AwaitFirstReadAsync(cancellationToken)
+				: ValueTask.FromResult<IFileContentSnapshot>(new TextSnapshot("new source"));
+		}
+
+		public void ReleaseFirstRead() => _releaseFirstRead.TrySetResult();
+
+		private async ValueTask<IFileContentSnapshot> AwaitFirstReadAsync(CancellationToken cancellationToken)
+		{
+			_firstReadStarted.TrySetResult();
+			await _releaseFirstRead.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+			return new TextSnapshot("old source");
+		}
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) => throw new NotSupportedException();
+	}
+
+	private sealed class ClassifiedSnapshot(FileContentClassification classification) : IFileContentSnapshot
+	{
+		public FileContentMetricsResult Result { get; } = new(classification);
+
+		public ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	private sealed class TextSnapshot(string content) : IFileContentSnapshot
+	{
+		public FileContentMetricsResult Result { get; } = new(
+			FileContentClassification.Text,
+			new TextFileMetrics(
+				Encoding.UTF8.GetByteCount(content),
+				1,
+				content.Length,
+				content.Length == 0,
+				string.IsNullOrWhiteSpace(content)));
+
+		public async ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default)
+		{
+			await writeChunk(
+				content.AsMemory(0, Math.Min(content.Length, maximumCharacters)),
+				cancellationToken).ConfigureAwait(false);
+		}
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 	}
 
 	private sealed class CostedFactExtractor(IReadOnlyDictionary<string, int> costs) : IDependencyFactExtractor
