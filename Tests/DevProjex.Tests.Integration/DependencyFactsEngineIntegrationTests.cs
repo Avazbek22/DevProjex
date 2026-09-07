@@ -879,6 +879,62 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RelatedFiles_KeepResolvedAndDistinctAmbiguousReferencesInSeparateRows()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var a = fixture.CreateFile("A.cs", """
+			namespace Targets { public sealed class ResolvedType { } }
+			namespace One { public sealed class SharedAB { } public sealed class SharedAC { } }
+			""");
+		var b = fixture.CreateFile("B.cs", "namespace Two; public sealed class SharedAB { }\n");
+		var c = fixture.CreateFile("C.cs", "namespace Three; public sealed class SharedAC { }\n");
+		var seed = fixture.CreateFile("Seed.cs", """
+			using Targets;
+			using One;
+			using Two;
+			using Three;
+			public sealed class Seed
+			{
+				public ResolvedType Resolved { get; }
+				public SharedAB FirstAmbiguous { get; }
+				public SharedAC SecondAmbiguous { get; }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var fromSeed = await engine.FindRelatedAsync(
+			fixture.Path,
+			[project, a, b, c, seed],
+			["Seed.cs"],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var toA = await engine.FindRelatedAsync(
+			fixture.Path,
+			[project, a, b, c, seed],
+			["A.cs"],
+			DependencyDirection.Dependents,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertRelatedOverlap(Assert.Single(fromSeed.Seeds).Dependencies, "A.cs", fromSeed.Index.Edges);
+		AssertRelatedOverlap(Assert.Single(toA.Seeds).Dependents, "Seed.cs", toA.Index.Edges);
+	}
+
+	private static void AssertRelatedOverlap(
+		IReadOnlyList<RelatedFile> related,
+		string expectedPath,
+		IReadOnlyList<DependencyEdge> edges)
+	{
+		Assert.True(related.Count == 3, JsonSerializer.Serialize(edges));
+		Assert.All(related, item => Assert.Equal(expectedPath, item.Path));
+		Assert.Single(related, static item => item.Status == ResolutionStatus.Resolved);
+		var ambiguous = related.Where(static item => item.Status == ResolutionStatus.Ambiguous).ToArray();
+		Assert.Equal(2, ambiguous.Length);
+		Assert.Contains(ambiguous, item => item.Candidates.SequenceEqual(["A.cs", "B.cs"]));
+		Assert.Contains(ambiguous, item => item.Candidates.SequenceEqual(["A.cs", "C.cs"]));
+	}
+
+	[Fact]
 	public async Task MissingGrammar_IsAnExtractionFailureWithAReason()
 	{
 		using var fixture = new TemporaryDirectory();

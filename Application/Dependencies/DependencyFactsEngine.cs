@@ -278,32 +278,63 @@ public sealed class DependencyFactsEngine : IDisposable
 	private static IReadOnlyList<RelatedFile> ProjectDependencies(
 		string seed,
 		IReadOnlyList<DependencyEdge> sourceEdges,
-		IReadOnlyDictionary<string, FileFacts> files) =>
-		sourceEdges.Where(edge => edge.Target != seed &&
-		                    (edge.Target is not null || edge.Status == ResolutionStatus.Ambiguous))
-			.GroupBy(edge => edge.Target ?? edge.Candidates.Order(StringComparer.Ordinal).FirstOrDefault() ??
-				$"[{edge.Status.ToString().ToLowerInvariant()}] {edge.Reference}", StringComparer.Ordinal)
-			.Select(group => ToRelated(group.Key, group, files))
+		IReadOnlyDictionary<string, FileFacts> files)
+	{
+		var resolved = sourceEdges
+			.Where(edge => edge.Status == ResolutionStatus.Resolved && edge.Target is not null && edge.Target != seed)
+			.GroupBy(static edge => edge.Target!, StringComparer.Ordinal)
+			.Select(group => ToRelated(group.Key, ResolutionStatus.Resolved, group, files));
+		var ambiguous = sourceEdges
+			.Where(static edge => edge.Status == ResolutionStatus.Ambiguous)
+			.Select(edge => (Edge: edge, Path: edge.Candidates.Order(StringComparer.Ordinal)
+				.FirstOrDefault(candidate => candidate != seed)))
+			.Where(static item => item.Path is not null)
+			.GroupBy(item => new RelatedGroupKey(
+				item.Path!,
+				item.Edge.Layer,
+				item.Edge.Reference,
+				Hash(item.Edge.Candidates.Order(StringComparer.Ordinal))))
+			.Select(group => ToRelated(group.Key.Path, ResolutionStatus.Ambiguous,
+				group.Select(static item => item.Edge), files));
+		return resolved.Concat(ambiguous)
 			.OrderBy(static item => item.Path, StringComparer.Ordinal)
+			.ThenBy(static item => item.Status)
+			.ThenBy(static item => string.Join('\0', item.Candidates), StringComparer.Ordinal)
 			.ToArray();
+	}
 
 	private static IReadOnlyList<RelatedFile> ProjectDependents(
 		string seed,
 		IReadOnlyList<DependencyEdge> targetEdges,
-		IReadOnlyDictionary<string, FileFacts> files) =>
-		targetEdges.Where(edge => edge.Source != seed)
+		IReadOnlyDictionary<string, FileFacts> files)
+	{
+		var eligible = targetEdges.Where(edge => edge.Source != seed).ToArray();
+		var resolved = eligible
+			.Where(static edge => edge.Status == ResolutionStatus.Resolved)
 			.GroupBy(static edge => edge.Source, StringComparer.Ordinal)
-			.Select(group => ToRelated(group.Key, group, files))
+			.Select(group => ToRelated(group.Key, ResolutionStatus.Resolved, group, files));
+		var ambiguous = eligible
+			.Where(static edge => edge.Status == ResolutionStatus.Ambiguous)
+			.GroupBy(edge => new RelatedGroupKey(
+				edge.Source,
+				edge.Layer,
+				edge.Reference,
+				Hash(edge.Candidates.Order(StringComparer.Ordinal))))
+			.Select(group => ToRelated(group.Key.Path, ResolutionStatus.Ambiguous, group, files));
+		return resolved.Concat(ambiguous)
 			.OrderBy(static item => item.Path, StringComparer.Ordinal)
+			.ThenBy(static item => item.Status)
+			.ThenBy(static item => string.Join('\0', item.Candidates), StringComparer.Ordinal)
 			.ToArray();
+	}
 
 	private static RelatedFile ToRelated(
 		string path,
+		ResolutionStatus status,
 		IEnumerable<DependencyEdge> groupedEdges,
 		IReadOnlyDictionary<string, FileFacts> files)
 	{
 		var edges = groupedEdges.ToArray();
-		var status = edges.Select(static edge => edge.Status).OrderBy(static value => value).First();
 		return new RelatedFile(
 			path,
 			status,
@@ -676,6 +707,12 @@ public sealed class DependencyFactsEngine : IDisposable
 	private readonly record struct ManifestRequestKey(
 		string SourceRoot,
 		string ManifestPathsFingerprint);
+
+	private readonly record struct RelatedGroupKey(
+		string Path,
+		EvidenceLayer Layer,
+		string Reference,
+		string CandidatesFingerprint);
 
 	private readonly record struct FileStamp(
 		long Length,
