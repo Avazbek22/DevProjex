@@ -1,8 +1,8 @@
 {
   "protocol": "focus-v1",
   "runDate": "2026-09-07",
-  "productSha": "15a34d2918f14581c876e712e727ba628eb6b9ca",
-  "evaluatorSha": "15a34d2918f14581c876e712e727ba628eb6b9ca",
+  "productSha": "25b4acb6283913afe989374be60883694cb090a9",
+  "evaluatorSha": "25b4acb6283913afe989374be60883694cb090a9",
   "repositories": [
     {
       "id": "devprojex",
@@ -825,100 +825,100 @@
           "mode": "cold",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 3106.9465,
-          "medianPeakWorkingSetBytes": 314060800,
+          "medianElapsedMilliseconds": 2726.3282,
+          "medianPeakWorkingSetBytes": 300453888,
           "elapsedMilliseconds": [
-            3476.2423,
-            2758.7489,
-            2664.7874,
-            2753.8386,
-            3106.9465,
-            3220.1375,
-            3229.5425
+            2717.9614,
+            2726.3282,
+            2698.6197,
+            2737.7128,
+            2696.9874,
+            2890.9551,
+            2762.2087
           ],
           "peakWorkingSetBytes": [
-            313671680,
-            312934400,
-            314286080,
-            314269696,
-            314060800,
-            314863616,
-            313749504
+            301821952,
+            300449792,
+            301756416,
+            300204032,
+            301486080,
+            300007424,
+            300453888
           ]
         },
         {
           "mode": "cold",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 2880.1748,
-          "medianPeakWorkingSetBytes": 313835520,
+          "medianElapsedMilliseconds": 2778.9973,
+          "medianPeakWorkingSetBytes": 302862336,
           "elapsedMilliseconds": [
-            2973.9346,
-            2880.1748,
-            3022.8968,
-            2922.9661,
-            2718.0725,
-            2727.5801,
-            2712.1667
+            2767.7627,
+            2753.9851,
+            2844.6242,
+            2778.9973,
+            2762.3726,
+            2814.7969,
+            2791.7261
           ],
           "peakWorkingSetBytes": [
-            313835520,
-            312410112,
-            313749504,
-            314716160,
-            314482688,
-            313417728,
-            314589184
+            305172480,
+            301531136,
+            302862336,
+            302284800,
+            304816128,
+            302735360,
+            303968256
           ]
         },
         {
           "mode": "warm",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 937.8076,
-          "medianPeakWorkingSetBytes": 325509120,
+          "medianElapsedMilliseconds": 963.2234,
+          "medianPeakWorkingSetBytes": 313761792,
           "elapsedMilliseconds": [
-            922.3759,
-            1064.3343,
-            923.9317,
-            924.133,
-            937.8076,
-            982.2964,
-            953.1725
+            956.5843,
+            999.0454,
+            963.2234,
+            1083.6795,
+            901.2034,
+            961.8287,
+            983.3566
           ],
           "peakWorkingSetBytes": [
-            325509120,
-            329469952,
-            325947392,
-            317378560,
-            317554688,
-            319852544,
-            328265728
+            313761792,
+            321998848,
+            316080128,
+            317079552,
+            310820864,
+            305303552,
+            310005760
           ]
         },
         {
           "mode": "warm",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 933.2271,
-          "medianPeakWorkingSetBytes": 326561792,
+          "medianElapsedMilliseconds": 1047.1624,
+          "medianPeakWorkingSetBytes": 317468672,
           "elapsedMilliseconds": [
-            947.9766,
-            933.2271,
-            946.5025,
-            920.0902,
-            940.668,
-            909.801,
-            932.4599
+            931.4746,
+            966.4111,
+            1223.7262,
+            1398.1819,
+            1565.1181,
+            1047.1624,
+            901.116
           ],
           "peakWorkingSetBytes": [
-            333496320,
-            330563584,
-            322936832,
-            321662976,
-            333520896,
-            325906432,
-            326561792
+            316710912,
+            308109312,
+            319959040,
+            317468672,
+            325844992,
+            322748416,
+            307859456
           ]
         }
       ]
@@ -1744,100 +1744,100 @@
           "mode": "cold",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 806.8579,
-          "medianPeakWorkingSetBytes": 114900992,
+          "medianElapsedMilliseconds": 807.9358,
+          "medianPeakWorkingSetBytes": 115171328,
           "elapsedMilliseconds": [
-            796.8864,
-            826.8318,
-            806.8579,
-            799.7402,
-            827.1045,
-            815.8833,
-            790.8618
+            822.7609,
+            822.0804,
+            799.3832,
+            804.1743,
+            800.7245,
+            819.1301,
+            807.9358
           ],
           "peakWorkingSetBytes": [
-            115142656,
-            113774592,
-            113115136,
-            113565696,
-            115310592,
-            114900992,
-            114987008
+            113483776,
+            115171328,
+            115089408,
+            115265536,
+            115363840,
+            115073024,
+            115875840
           ]
         },
         {
           "mode": "cold",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 808.0846,
-          "medianPeakWorkingSetBytes": 115531776,
+          "medianElapsedMilliseconds": 809.4142,
+          "medianPeakWorkingSetBytes": 115118080,
           "elapsedMilliseconds": [
-            799.588,
-            825.454,
-            801.4304,
-            808.0846,
-            831.2671,
-            804.4821,
-            810.3308
+            863.4567,
+            855.5966,
+            817.3058,
+            806.9406,
+            807.3073,
+            799.7565,
+            809.4142
           ],
           "peakWorkingSetBytes": [
-            115531776,
-            115535872,
-            113475584,
-            113295360,
-            115552256,
-            115392512,
-            115712000
+            115281920,
+            115224576,
+            115724288,
+            115089408,
+            114823168,
+            115118080,
+            114868224
           ]
         },
         {
           "mode": "warm",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 408.2035,
-          "medianPeakWorkingSetBytes": 112418816,
+          "medianElapsedMilliseconds": 404.5227,
+          "medianPeakWorkingSetBytes": 112218112,
           "elapsedMilliseconds": [
-            407.8802,
-            406.5904,
-            400.4946,
-            419.6943,
-            408.2035,
-            438.6073,
-            433.2468
+            414.3616,
+            400.5229,
+            403.9158,
+            410.2114,
+            405.5427,
+            404.5227,
+            400.8836
           ],
           "peakWorkingSetBytes": [
-            112680960,
-            112418816,
-            111992832,
-            111828992,
-            112742400,
-            112316416,
-            112701440
+            112283648,
+            111759360,
+            112091136,
+            112218112,
+            112128000,
+            112218112,
+            112308224
           ]
         },
         {
           "mode": "warm",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 410.017,
-          "medianPeakWorkingSetBytes": 112672768,
+          "medianElapsedMilliseconds": 412.8746,
+          "medianPeakWorkingSetBytes": 112537600,
           "elapsedMilliseconds": [
-            403.592,
-            403.8261,
-            410.017,
-            437.7942,
-            429.4142,
-            423.4816,
-            406.1372
+            421.067,
+            415.5048,
+            403.0993,
+            410.5365,
+            420.8001,
+            412.8746,
+            403.8871
           ],
           "peakWorkingSetBytes": [
-            112275456,
-            112672768,
-            112771072,
-            113360896,
-            112582656,
-            112586752,
-            113053696
+            111996928,
+            112574464,
+            112300032,
+            112340992,
+            112865280,
+            113086464,
+            112537600
           ]
         }
       ]
@@ -2663,100 +2663,100 @@
           "mode": "cold",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 578.643,
-          "medianPeakWorkingSetBytes": 88182784,
+          "medianElapsedMilliseconds": 541.7877,
+          "medianPeakWorkingSetBytes": 87822336,
           "elapsedMilliseconds": [
-            562.3936,
-            615.9049,
-            593.855,
-            542.0977,
-            564.2873,
-            578.643,
-            631.9968
+            562.9431,
+            541.7877,
+            536.6992,
+            554.1312,
+            540.8867,
+            526.8387,
+            544.967
           ],
           "peakWorkingSetBytes": [
-            88223744,
-            88285184,
-            87777280,
-            88809472,
-            88182784,
-            88047616,
-            87617536
+            87547904,
+            87662592,
+            88039424,
+            87822336,
+            87867392,
+            87490560,
+            88285184
           ]
         },
         {
           "mode": "cold",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 698.3756,
-          "medianPeakWorkingSetBytes": 88113152,
+          "medianElapsedMilliseconds": 561.0574,
+          "medianPeakWorkingSetBytes": 88170496,
           "elapsedMilliseconds": [
-            845.194,
-            660.1038,
-            715.329,
-            698.3756,
-            588.6013,
-            734.3685,
-            679.2918
+            560.808,
+            548.2033,
+            561.0574,
+            547.7078,
+            576.9564,
+            621.6922,
+            657.5556
           ],
           "peakWorkingSetBytes": [
-            88784896,
-            87531520,
-            88010752,
-            87912448,
-            88182784,
-            88113152,
-            88657920
+            87793664,
+            88170496,
+            88346624,
+            88211456,
+            88326144,
+            87674880,
+            87744512
           ]
         },
         {
           "mode": "warm",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 289.0842,
-          "medianPeakWorkingSetBytes": 90968064,
+          "medianElapsedMilliseconds": 276.2381,
+          "medianPeakWorkingSetBytes": 91521024,
           "elapsedMilliseconds": [
-            323.9465,
-            286.892,
-            289.0842,
-            310.675,
-            272.0716,
-            273.3685,
-            309.7265
+            293.1194,
+            311.9157,
+            286.4159,
+            266.6004,
+            266.8981,
+            268.6043,
+            276.2381
           ],
           "peakWorkingSetBytes": [
-            90406912,
-            90988544,
-            91475968,
-            91058176,
-            90968064,
-            90845184,
-            90923008
+            91693056,
+            90583040,
+            91983872,
+            91521024,
+            91381760,
+            91439104,
+            91594752
           ]
         },
         {
           "mode": "warm",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 314.325,
-          "medianPeakWorkingSetBytes": 91537408,
+          "medianElapsedMilliseconds": 265.3574,
+          "medianPeakWorkingSetBytes": 91471872,
           "elapsedMilliseconds": [
-            333.1018,
-            371.7613,
-            314.325,
-            306.225,
-            308.4353,
-            309.2467,
-            328.9807
+            274.8634,
+            265.3574,
+            265.181,
+            270.3878,
+            262.1114,
+            261.917,
+            265.67
           ],
           "peakWorkingSetBytes": [
-            91455488,
-            91590656,
-            90906624,
-            91836416,
-            91856896,
-            91537408,
-            91402240
+            91471872,
+            92033024,
+            91635712,
+            91525120,
+            91107328,
+            91103232,
+            91369472
           ]
         }
       ]
@@ -2772,19 +2772,19 @@
     },
     "allRequiredRegressions": 0,
     "warmIncrementalMilliseconds": {
-      "devprojex": -4.580500000000029,
-      "repomix": 1.8134999999999764,
-      "flask": 25.24079999999998
+      "devprojex": 83.93899999999996,
+      "repomix": 8.3519,
+      "flask": -10.88069999999999
     },
     "warmIncrementalPercent": {
-      "devprojex": -0.48842641070514137,
-      "repomix": 0.44426370670510573,
-      "flask": 8.731296971608957
+      "devprojex": 8.714385468625448,
+      "repomix": 2.0646307364209724,
+      "flask": -3.938884607155925
     },
     "maximumPeakWorkingSetGrowthPercent": {
-      "devprojex": 0.3233924751478545,
-      "repomix": 0.548980464850991,
-      "flask": 0.6258723940744744
+      "devprojex": 1.181431294222083,
+      "repomix": 0.2847027046756944,
+      "flask": 0.3964367333613171
     },
     "recallPassed": true,
     "allRequiredPassed": true,
