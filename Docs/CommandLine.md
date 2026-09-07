@@ -724,7 +724,7 @@ devprojex export context . --format markdown -o ../devprojex-context.md --force
 devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
 devprojex export context . --hide-private-data --format markdown -o ../devprojex-private.md
 devprojex export context . --compress-code --format markdown -o ../devprojex-compact.md
-devprojex export context . --rank importance --max-tokens 16000 -o ../devprojex-ranked.md
+$ devprojex export context . --view content --rank importance --max-tokens 16000 -o ../devprojex-ranked.md
 ```
 
 ## Export Project
