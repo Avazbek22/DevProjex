@@ -672,7 +672,10 @@ public sealed class DevProjexCommandTree
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.MaxTokens")));
 			}
-			if (result.GetValue(rank) is not null && result.GetValue(view) == ProjectContextView.Tree)
+			if (CliParseValue.TryGet(result, rank, out var rankValue) &&
+			    rankValue is not null &&
+			    CliParseValue.TryGet(result, view, out var viewValue) &&
+			    viewValue == ProjectContextView.Tree)
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.RankRequiresContent")));

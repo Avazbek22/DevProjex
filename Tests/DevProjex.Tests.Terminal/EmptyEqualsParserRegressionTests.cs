@@ -76,6 +76,10 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--max-tokens"
 			},
 			{
+				["export", "context", ".", "--rank=", "importance"],
+				"--rank"
+			},
+			{
 				["tui", ".", "--screen=", "inline"],
 				"--screen"
 			},
@@ -160,6 +164,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--profile",
 		"--progress",
 		"--project",
+		"--rank",
 		"--root",
 		"--screen",
 		"--search",
