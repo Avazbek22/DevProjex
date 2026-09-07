@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
@@ -55,13 +56,15 @@ public sealed class DependencyFactsEngine : IDisposable
 			.Distinct(PathComparer)
 			.OrderBy(path => PortableRelative(root, path), StringComparer.Ordinal)
 			.ToArray();
+		var manifestRelativePaths = manifest.Select(path => PortableRelative(root, path)).ToArray();
 		var manifestRequestKey = new ManifestRequestKey(
 			root,
-			Hash(manifest.Select(path => PortableRelative(root, path))));
+			Hash(manifestRelativePaths));
 		var initialStamps = TryCaptureFileStamps(manifest);
 		var alignedContentIdentities = AlignContentIdentities(manifest, contentIdentities);
 		if (initialStamps is not null &&
 		    _manifestSnapshots.TryGetValue(manifestRequestKey, out var cachedSnapshot) &&
+		    cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
 		    cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
 		    ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 		    _indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
@@ -200,6 +203,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (_indexCache.ContainsKey(cacheKey))
 				StoreManifestSnapshot(
 					manifestRequestKey,
+					manifestRelativePaths,
 					initialStamps,
 					alignedContentIdentities,
 					cacheKey,
@@ -419,6 +423,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private void StoreManifestSnapshot(
 		ManifestRequestKey key,
+		IReadOnlyList<string> manifestPaths,
 		IReadOnlyList<FileStamp> stamps,
 		IReadOnlyList<string>? contentIdentities,
 		IndexCacheKey indexCacheKey,
@@ -427,7 +432,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		lock (_cacheTrimSync)
 		{
 			if (!_indexCache.ContainsKey(indexCacheKey)) return;
-			var entry = new ManifestSnapshotCacheEntry(stamps, contentIdentities, indexCacheKey, snapshot);
+			var entry = new ManifestSnapshotCacheEntry(manifestPaths, stamps, contentIdentities, indexCacheKey, snapshot);
 			if (_manifestSnapshots.TryAdd(key, entry))
 				_manifestSnapshotOrder.Enqueue(key);
 			else
@@ -593,9 +598,20 @@ public sealed class DependencyFactsEngine : IDisposable
 		}).ToArray();
 	}
 
-	private static string Hash(IEnumerable<string> values) =>
-		Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', values))))
-			.ToLowerInvariant();
+	private static string Hash(IEnumerable<string> values)
+	{
+		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		Span<byte> lengthPrefix = stackalloc byte[sizeof(int)];
+		foreach (var value in values)
+		{
+			var bytes = Encoding.UTF8.GetBytes(value);
+			BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, bytes.Length);
+			hash.AppendData(lengthPrefix);
+			hash.AppendData(bytes);
+		}
+
+		return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+	}
 
 	private static bool IsWithin(string root, string path)
 	{
@@ -646,6 +662,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		long CreationTimeUtcTicks);
 
 	private sealed record ManifestSnapshotCacheEntry(
+		IReadOnlyList<string> ManifestPaths,
 		IReadOnlyList<FileStamp> Stamps,
 		IReadOnlyList<string>? ContentIdentities,
 		IndexCacheKey IndexCacheKey,

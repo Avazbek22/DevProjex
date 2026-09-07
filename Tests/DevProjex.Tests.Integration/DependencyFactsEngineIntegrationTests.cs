@@ -598,6 +598,39 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task ManifestSnapshot_LengthPrefixesPathsAndVerifiesTheCanonicalManifest()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not permit line-feed characters in file names.");
+		using var fixture = new TemporaryDirectory();
+		var backing = fixture.CreateFile("backing", "public sealed class Shared { }\n");
+		var a = Path.Combine(fixture.Path, "A.cs");
+		var bc = Path.Combine(fixture.Path, "B.cs\nC.cs");
+		var ab = Path.Combine(fixture.Path, "A.cs\nB.cs");
+		var c = Path.Combine(fixture.Path, "C.cs");
+		foreach (var link in new[] { a, bc, ab, c })
+			CreateHardLinkOrSkip(link, backing);
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var seed = fixture.CreateFile("Seed.cs", "public sealed class Seed { }\n");
+		using var engine = CreateEngine();
+
+		_ = await engine.FindRelatedAsync(
+			fixture.Path,
+			[a, bc, project, seed],
+			["Seed.cs"],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var second = await engine.FindRelatedAsync(
+			fixture.Path,
+			[ab, c, project, seed],
+			["Seed.cs"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(second.Index.Files, file => file.Path is "A.cs" or "B.cs\nC.cs");
+		Assert.Contains(second.Index.Files, file => file.Path == "A.cs\nB.cs");
+		Assert.Contains(second.Index.Files, file => file.Path == "C.cs");
+	}
+
+	[Fact]
 	public async Task ConcurrentColdRequests_DeduplicateFileParsingAndResolution()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -815,6 +848,29 @@ public sealed class DependencyFactsEngineIntegrationTests
 				$"The file system did not preserve the complete file stamp: " +
 				$"length {length}/{after.Length}, mtime {lastWrite:o}/{after.LastWriteTimeUtc:o}, " +
 				$"creation {creation:o}/{after.CreationTimeUtc:o}.");
+		}
+	}
+
+	private static void CreateHardLinkOrSkip(string linkPath, string targetPath)
+	{
+		var startInfo = new ProcessStartInfo("ln")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add(targetPath);
+		startInfo.ArgumentList.Add(linkPath);
+		try
+		{
+			using var process = Process.Start(startInfo);
+			if (process is null || !process.WaitForExit(TimeSpan.FromSeconds(10)) || process.ExitCode != 0)
+				Assert.Skip("Hard links are unavailable in this test environment.");
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			Assert.Skip($"Hard links are unavailable: {exception.GetType().Name}.");
 		}
 	}
 
