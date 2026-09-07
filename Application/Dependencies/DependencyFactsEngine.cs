@@ -1037,10 +1037,12 @@ public sealed class DependencyFactsEngine : IDisposable
 			var extension = Path.GetExtension(source.Path).ToLowerInvariant();
 			if (extension is ".cjs" or ".cts") return true;
 			if (extension is ".mjs" or ".mts") return false;
+			if (extension is not (".ts" or ".tsx" or ".js" or ".jsx"))
+				return scope.LegacyTypeScriptConfiguration;
 			var moduleType = FindNearestPackageMap(source)?.ModuleType;
 			if (string.Equals(moduleType, "commonjs", StringComparison.OrdinalIgnoreCase)) return true;
 			if (string.Equals(moduleType, "module", StringComparison.OrdinalIgnoreCase)) return false;
-			return extension == ".js" || scope.LegacyTypeScriptConfiguration;
+			return true;
 		}
 
 		private static bool IsRequire(ImportFact import) =>
@@ -1061,23 +1063,26 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			if (scope is null)
 				return [];
-			foreach (var mapping in scope.TypeScriptPaths
-				         .Select(pair => (pair.Key, pair.Value, Star: pair.Key.IndexOf('*')))
-				         .Where(item => Matches(item.Key, item.Star, specifier))
-				         .OrderBy(static item => item.Star >= 0)
-				         .ThenByDescending(static item => item.Key.Length))
+			var mappings = scope.TypeScriptPaths
+				.Select(pair => (pair.Key, pair.Value, Star: pair.Key.IndexOf('*')))
+				.Where(item => Matches(item.Key, item.Star, specifier))
+				.OrderBy(static item => item.Star >= 0)
+				.ThenByDescending(static item => item.Star)
+				.ThenBy(static item => item.Key, StringComparer.Ordinal)
+				.ToArray();
+			if (mappings.Length == 0)
+				return [];
+			var mapping = mappings[0];
+			var wildcard = mapping.Star < 0 ? string.Empty :
+				specifier[mapping.Star..(specifier.Length - (mapping.Key.Length - mapping.Star - 1))];
+			foreach (var target in mapping.Value)
 			{
-				var wildcard = mapping.Star < 0 ? string.Empty :
-					specifier[mapping.Star..(specifier.Length - (mapping.Key.Length - mapping.Star - 1))];
-				foreach (var target in mapping.Value)
-				{
-					var resolved = ProbeTypeScript(
-						Path.GetFullPath(Path.Combine(scope.Root, target.Replace("*", wildcard, StringComparison.Ordinal))),
-						scope,
-						source).FirstOrDefault();
-					if (resolved is not null)
-						return [resolved];
-				}
+				var resolved = ProbeTypeScript(
+					Path.GetFullPath(Path.Combine(scope.Root, target.Replace("*", wildcard, StringComparison.Ordinal))),
+					scope,
+					source).FirstOrDefault();
+				if (resolved is not null)
+					return [resolved];
 			}
 			return [];
 		}
@@ -1188,9 +1193,12 @@ public sealed class DependencyFactsEngine : IDisposable
 				probes.Add(candidate);
 			else
 			{
-				probes.AddRange([candidate + ".ts", candidate + ".tsx", candidate + ".d.ts"]);
-				if (scope?.AllowJavaScript == true || source.LanguageId is LanguageId.JavaScript)
-					probes.AddRange([candidate + ".js", candidate + ".jsx"]);
+				probes.AddRange([
+					candidate + ".ts",
+					candidate + ".tsx",
+					candidate + ".d.ts",
+					candidate + ".js",
+					candidate + ".jsx"]);
 			}
 			var mode = scope?.ModuleResolution ?? "bundler";
 			if (SupportsDirectoryIndex(mode, source, scope))
@@ -1198,9 +1206,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				probes.AddRange([
 					Path.Combine(candidate, "index.ts"),
 					Path.Combine(candidate, "index.tsx"),
-					Path.Combine(candidate, "index.d.ts")]);
-				if (scope?.AllowJavaScript == true || source.LanguageId is LanguageId.JavaScript)
-					probes.AddRange([Path.Combine(candidate, "index.js"), Path.Combine(candidate, "index.jsx")]);
+					Path.Combine(candidate, "index.d.ts"),
+					Path.Combine(candidate, "index.js"),
+					Path.Combine(candidate, "index.jsx")]);
 			}
 			foreach (var probe in probes)
 			{

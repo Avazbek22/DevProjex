@@ -51,23 +51,28 @@ type name can resolve only to a declaration in the current or an enclosing names
 imported namespace, the current type's nesting chain, or the global namespace. Importing `Company`
 does not expose `Company.Internal`, and a sole same-named declaration elsewhere in the project is not
 guessed as the target. Current and enclosing namespaces take precedence over imported namespaces;
-multiple visible imported declarations remain ambiguous. Without an owning `.csproj` inside the
-effective manifest, cross-file C# type references stay unresolved.
+multiple visible imported declarations remain ambiguous. Namespace lookup considers only immediate
+members of that namespace: a nested type is visible through an explicit qualification such as
+`Holder.Task` or through the source type's nearest-to-farthest containing-type chain. Without an
+owning `.csproj` inside the effective manifest, cross-file C# type references stay unresolved.
 
 TypeScript and JavaScript use the nearest `tsconfig.json` or `jsconfig.json`. The resolver distinguishes
 relative, bare, package-self, and `#imports` specifiers and follows ordered substitution: the first
 existing probe wins, so multiple files found later in the same probe sequence are not ambiguity.
 `.js`, `.mjs`, and `.cjs` specifiers probe their TypeScript and declaration counterparts before the
-literal JavaScript file. Extensionless imports probe TypeScript first and JavaScript only for an
-`allowJs` project or JavaScript source. Exact `paths` entries precede wildcard entries, and fallback
-targets are tried in declaration order. `package.json` `exports`, conditions, and explicit `null`
-blocking remain authoritative. Directory-index fallback is allowed by `node10` and `bundler`; under
-`node16`/`nodenext`, an ESM relative import needs an explicit extension while a supported CommonJS
-context can use extensionless and directory probes. Literal `require(...)` calls are import evidence
-only in such a CommonJS context. `node10` (including its `node` alias) and `baseUrl` are marked legacy
-under the TypeScript 7 contract. DevProjex never guesses a `dist` to `src` mapping without
-configuration, and module references without an owning `tsconfig.json` or `jsconfig.json` stay
-unresolved.
+literal JavaScript file. Extensionless imports and directory indexes always probe `.js` and `.jsx`
+after `.ts`, `.tsx`, and `.d.ts`; `allowJs` controls compilation membership, not resolution of files
+already present in the manifest. Exact `paths` entries precede wildcard entries; among matching
+wildcards, the longest prefix before `*` wins. Only that pattern's targets are tried, in declaration
+order. `package.json` `exports`, conditions, and explicit `null` blocking remain authoritative.
+Directory-index fallback is allowed by `node10` and `bundler`; under `node16`/`nodenext`, an ESM
+relative import needs an explicit extension while a supported CommonJS context can use extensionless
+and directory probes. `.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ordinary
+`.ts`/`.tsx`/`.js`/`.jsx` files default to CommonJS unless the nearest `package.json` has
+`"type": "module"`. Literal `require(...)` calls are import evidence only in such a CommonJS context.
+`node10` (including its `node` alias) and `baseUrl` are marked legacy under the TypeScript 7 contract.
+DevProjex never guesses a `dist` to `src` mapping without configuration, and module references without
+an owning `tsconfig.json` or `jsconfig.json` stay unresolved.
 
 Python relative imports start at the source package. Regular and namespace-package portions are
 combined, `.py` is preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and

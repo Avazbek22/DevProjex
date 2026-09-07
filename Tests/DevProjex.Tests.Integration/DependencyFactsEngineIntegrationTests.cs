@@ -192,6 +192,42 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task TypeScriptExtensionlessResolution_ProbesJavaScriptWithoutAllowJs()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var source = fixture.CreateFile("main.ts", "import value from './dep';");
+		var target = fixture.CreateFile("dep.js", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "main.ts" &&
+			edge.Reference == "./dep" && edge.Status == ResolutionStatus.Resolved && edge.Target == "dep.js");
+	}
+
+	[Fact]
+	public async Task TypeScriptNode16_DefaultsOrdinaryTypeScriptFilesToCommonJsWithoutPackageType()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var source = fixture.CreateFile("main.ts", "import value from './dep';");
+		var target = fixture.CreateFile("dep.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "main.ts" &&
+			edge.Reference == "./dep" && edge.Status == ResolutionStatus.Resolved && edge.Target == "dep.ts");
+	}
+
+	[Fact]
 	public async Task TypeScriptDirectoryResolution_DistinguishesBundlerFromNodeEsm()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -234,6 +270,55 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		Assert.Contains(result.Edges, edge => edge.Reference == "alias" &&
 			edge.Status == ResolutionStatus.Resolved && edge.Target == "src/value.ts");
+	}
+
+	[Fact]
+	public async Task TypeScriptPaths_SelectsTheLongestPrefixBeforeTheWildcard()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", """
+			{"compilerOptions":{"moduleResolution":"bundler","paths":{
+				"foo/*":["correct/*"],
+				"f*tail":["wrong/*"]
+			}}}
+			""");
+		var source = fixture.CreateFile("main.ts", "import value from 'foo/xtail';");
+		var correct = fixture.CreateFile("correct/xtail.ts", "export default 1;");
+		var wrong = fixture.CreateFile("wrong/oo/x.ts", "export default 2;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, correct, wrong],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "foo/xtail" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "correct/xtail.ts");
+		Assert.DoesNotContain(result.Edges, edge => edge.Reference == "foo/xtail" && edge.Target == "wrong/oo/x.ts");
+	}
+
+	[Fact]
+	public async Task TypeScriptPaths_DoesNotFallBackToALessSpecificPattern()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", """
+			{"compilerOptions":{"moduleResolution":"bundler","paths":{
+				"foo/*":["missing/*"],
+				"*":["fallback/*"]
+			}}}
+			""");
+		var source = fixture.CreateFile("main.ts", "import value from 'foo/item';");
+		var fallback = fixture.CreateFile("fallback/foo/item.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, fallback],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Reference == "foo/item");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
 	}
 
 	[Fact]
