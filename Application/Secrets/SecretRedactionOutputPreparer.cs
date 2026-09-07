@@ -190,6 +190,24 @@ public sealed class SecretRedactionOutputPreparer
 				    SecretContentInspectionMode.None)
 				{
 					preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
+					if (captureTransformedMetrics)
+					{
+						var unavailableBeforeRead = ClassifySourcePath(context, sourcePath);
+						if (unavailableBeforeRead is null)
+						{
+							FileContentMetricsResult metrics;
+							using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.SourceRead))
+							{
+								metrics = await contentAnalyzer
+									.GetClassifiedMetricsAsync(sourcePath, cancellationToken)
+									.ConfigureAwait(false);
+								if (metrics.Metrics is { } sourceMetrics)
+									ContentPipelineDiagnostics.RecordSourceRead(sourceMetrics.SizeBytes);
+							}
+							if (ClassifySourcePath(context, sourcePath) is null && metrics.Metrics is { } textMetrics)
+								transformedFileMetrics![sourcePath] = ToContentFileMetrics(sourcePath, textMetrics);
+						}
+					}
 				}
 			}
 		}
