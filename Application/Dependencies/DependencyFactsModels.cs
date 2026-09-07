@@ -65,6 +65,7 @@ public sealed record DeclarationFact(
 	IReadOnlyList<SourceSite> DeclarationSites)
 {
 	public string ContainingNamespace { get; init; } = string.Empty;
+	public string? ContainingType { get; init; }
 }
 
 public sealed record ImportFact(

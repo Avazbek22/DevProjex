@@ -560,6 +560,77 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task CSharpResolution_KeepsNestedTypesOutOfNamespaceLookupAndUsesTheNearestContainingType()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var holder = fixture.CreateFile("Holder.cs", """
+			namespace App;
+			public partial class Holder { public class Task { } }
+			""");
+		var holderConsumer = fixture.CreateFile("HolderConsumer.cs", """
+			namespace App;
+			public partial class Holder { public Task Inside { get; } }
+			""");
+		var consumer = fixture.CreateFile("Consumer.cs", """
+			using System.Threading.Tasks;
+			namespace App;
+			public sealed class Consumer
+			{
+				public Task External { get; }
+				public Holder.Task Qualified { get; }
+			}
+			""");
+		var globalHolder = fixture.CreateFile(
+			"GlobalHolder.cs",
+			"public sealed class GlobalHolder { public class Task { } }\n");
+		var globalConsumer = fixture.CreateFile(
+			"GlobalConsumer.cs",
+			"using System.Threading.Tasks; public sealed class GlobalConsumer { public Task Value { get; } }\n");
+		var outerTask = fixture.CreateFile("OuterTask.cs", """
+			namespace App;
+			public partial class Outer { public class Task { } }
+			""");
+		var innerTask = fixture.CreateFile("InnerTask.cs", """
+			namespace App;
+			public partial class Outer { public partial class Inner { public class Task { } } }
+			""");
+		var outerConsumer = fixture.CreateFile("OuterConsumer.cs", """
+			namespace App;
+			public partial class Outer { public Task Value { get; } }
+			""");
+		var innerConsumer = fixture.CreateFile("InnerConsumer.cs", """
+			namespace App;
+			public partial class Outer { public partial class Inner { public Task Value { get; } } }
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[project, holder, holderConsumer, consumer, globalHolder, globalConsumer,
+				outerTask, innerTask, outerConsumer, innerConsumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var appExternal = Assert.Single(index.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "Task");
+		Assert.Equal(ResolutionStatus.External, appExternal.Status);
+		Assert.DoesNotContain("Holder.cs", appExternal.Candidates);
+		Assert.Contains(index.Edges, edge => edge.Source == "Consumer.cs" &&
+			edge.Reference == "Holder.Task" && edge.Target == "Holder.cs");
+		Assert.Contains(index.Edges, edge => edge.Source == "HolderConsumer.cs" &&
+			edge.Reference == "Task" && edge.Target == "Holder.cs");
+
+		var globalExternal = Assert.Single(index.Edges, edge =>
+			edge.Source == "GlobalConsumer.cs" && edge.Reference == "Task");
+		Assert.Equal(ResolutionStatus.External, globalExternal.Status);
+		Assert.DoesNotContain("GlobalHolder.cs", globalExternal.Candidates);
+		Assert.Contains(index.Edges, edge => edge.Source == "OuterConsumer.cs" &&
+			edge.Reference == "Task" && edge.Target == "OuterTask.cs");
+		Assert.Contains(index.Edges, edge => edge.Source == "InnerConsumer.cs" &&
+			edge.Reference == "Task" && edge.Target == "InnerTask.cs");
+	}
+
+	[Fact]
 	public async Task TransientExtractionFailure_IsRetriedAtThePreparedAndManifestCacheLayers()
 	{
 		using var fixture = new TemporaryDirectory();

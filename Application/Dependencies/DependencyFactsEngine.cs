@@ -393,7 +393,9 @@ public sealed class DependencyFactsEngine : IDisposable
 					.ToArray())
 			{
 				ContainingNamespace = group.Select(static item => item.ContainingNamespace)
-					.Order(StringComparer.Ordinal).FirstOrDefault() ?? string.Empty
+					.Order(StringComparer.Ordinal).FirstOrDefault() ?? string.Empty,
+				ContainingType = group.Select(static item => item.ContainingType)
+					.Order(StringComparer.Ordinal).FirstOrDefault()
 			})
 			.OrderBy(static declaration => declaration.Identity.ScopeId, StringComparer.Ordinal)
 			.ThenBy(static declaration => declaration.Identity.QualifiedName, StringComparer.Ordinal)
@@ -1361,8 +1363,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			if (source.TypeParameters.Contains(simpleName, StringComparer.Ordinal))
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
+			var expandedName = ExpandQualifiedAlias(source, reference.Name);
 			var candidates = reference.Name.Contains('.')
-				? LookupQualified(source, ExpandQualifiedAlias(source, reference.Name), reference.GenericArity)
+				? LookupQualified(source, expandedName, reference.GenericArity)
 				: LookupSimple(source, simpleName, reference.GenericArity);
 			var attributeName = reference.SyntaxKind == "attribute"
 				? reference.Name + "Attribute"
@@ -1379,6 +1382,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (source.Aliases.TryGetValue(simpleName, out var alias) ||
 				    globalAliases?.TryGetValue(simpleName, out alias) == true)
 					candidates = LookupQualified(source, alias, reference.GenericArity);
+				else if (reference.Name.Contains('.') && candidates.Length == 0)
+					candidates = LookupContextualCSharpQualified(source, reference, expandedName);
 				else if (!reference.Name.Contains('.'))
 					candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
 			}
@@ -1437,21 +1442,20 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			if (reference.ContainingType is { Length: > 0 } containingType)
 			{
-				var nested = candidates.Where(candidate =>
+				foreach (var enclosingType in EnumerateContainingTypes(containingType, reference.ContainingNamespace))
 				{
-					var separator = candidate.Identity.QualifiedName.LastIndexOf('.');
-					if (separator < 0) return false;
-					var parent = candidate.Identity.QualifiedName[..separator];
-					return parent == containingType || containingType.StartsWith(parent + '.', StringComparison.Ordinal);
-				}).ToArray();
-				if (nested.Length > 0)
-					return nested;
+					var nested = candidates.Where(candidate =>
+						string.Equals(candidate.ContainingType, enclosingType, StringComparison.Ordinal)).ToArray();
+					if (nested.Length > 0)
+						return nested;
+				}
 			}
 
 			var namespaceName = reference.ContainingNamespace;
 			while (namespaceName.Length > 0)
 			{
 				var lexical = candidates.Where(candidate =>
+					candidate.ContainingType is null &&
 					candidate.ContainingNamespace.Equals(namespaceName, StringComparison.Ordinal)).ToArray();
 				if (lexical.Length > 0)
 					return lexical;
@@ -1461,11 +1465,52 @@ public sealed class DependencyFactsEngine : IDisposable
 
 			var importedNamespaces = _contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [];
 			var imported = candidates.Where(candidate =>
+				candidate.ContainingType is null &&
 				importedNamespaces.Contains(candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
 			if (imported.Length > 0)
 				return imported;
 
-			return candidates.Where(static candidate => candidate.ContainingNamespace.Length == 0).ToArray();
+			return candidates.Where(static candidate =>
+				candidate.ContainingType is null && candidate.ContainingNamespace.Length == 0).ToArray();
+		}
+
+		private DeclarationFact[] LookupContextualCSharpQualified(
+			FileFacts source,
+			ReferenceFact reference,
+			string qualifiedName)
+		{
+			var namespaceName = reference.ContainingNamespace;
+			while (namespaceName.Length > 0)
+			{
+				var lexical = LookupQualified(source, namespaceName + "." + qualifiedName, reference.GenericArity);
+				if (lexical.Length > 0)
+					return lexical;
+				var separator = namespaceName.LastIndexOf('.');
+				namespaceName = separator < 0 ? string.Empty : namespaceName[..separator];
+			}
+
+			return (_contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [])
+				.SelectMany(namespaceValue => LookupQualified(
+					source,
+					namespaceValue + "." + qualifiedName,
+					reference.GenericArity))
+				.Distinct()
+				.ToArray();
+		}
+
+		private static IEnumerable<string> EnumerateContainingTypes(
+			string containingType,
+			string containingNamespace)
+		{
+			var current = containingType;
+			while (current.Length > containingNamespace.Length)
+			{
+				yield return current;
+				var separator = current.LastIndexOf('.');
+				if (separator < 0)
+					yield break;
+				current = current[..separator];
+			}
 		}
 
 		private IReadOnlyList<string> VisibleScopeIds(string scopeId) =>

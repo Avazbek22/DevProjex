@@ -144,11 +144,16 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				.Select(static item => string.IsNullOrEmpty(item.CapturedName)
 					? null
 					: item.CapturedName + AritySuffix(item.GenericArity))
-				.OfType<string>();
+				.OfType<string>()
+				.ToArray();
 			var name = capture.CapturedName;
 			var qualified = string.Join('.', new[] { containingNamespace }
 				.Concat(parents).Append(name + AritySuffix(capture.GenericArity))
 				.Where(static value => value.Length > 0));
+			var containingType = parents.Length == 0
+				? null
+				: string.Join('.', new[] { containingNamespace }.Concat(parents)
+					.Where(static value => value.Length > 0));
 			declarations.Add(new DeclarationFact(
 				new SymbolIdentity(
 					context.ScopeId,
@@ -159,7 +164,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 					capture.IsFileLocal ? context.RelativePath : null),
 				[Site(context, capture)])
 			{
-				ContainingNamespace = containingNamespace
+				ContainingNamespace = containingNamespace,
+				ContainingType = containingType
 			});
 		}
 
