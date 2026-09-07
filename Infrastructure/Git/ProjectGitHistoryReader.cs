@@ -122,30 +122,24 @@ public sealed class ProjectGitHistoryReader : IProjectGitHistoryReader
 			static _ => new MutableActivity(),
 			StringComparer.Ordinal);
 		var commitPosition = 0;
-		foreach (var record in output.Split('\x1e', StringSplitOptions.RemoveEmptyEntries))
+		HashSet<string>? changedInCommit = null;
+		foreach (var field in output.Split('\0', StringSplitOptions.None))
 		{
-			var fields = record.Split('\0', StringSplitOptions.RemoveEmptyEntries);
-			if (fields.Length == 0)
+			if (TryReadRecordHeader(field, out _))
+			{
+				ApplyCommit(changedInCommit, counts, commitPosition);
+				commitPosition++;
+				changedInCommit = new HashSet<string>(StringComparer.Ordinal);
 				continue;
-			var hash = fields[0].Trim();
-			if (hash.Length < 7 || !hash.All(Uri.IsHexDigit))
+			}
+			if (field.Length == 0)
+				continue;
+			if (changedInCommit is null)
 				return Unavailable(ProjectGitHistoryUnavailableReason.InvalidOutput);
-			commitPosition++;
-			var changedInCommit = new HashSet<string>(StringComparer.Ordinal);
-			foreach (var field in fields.Skip(1))
-			{
-				var path = field.Trim('\r', '\n');
-				if (path.Length > 0 && counts.ContainsKey(path))
-					changedInCommit.Add(path);
-			}
-			foreach (var path in changedInCommit)
-			{
-				var activity = counts[path];
-				activity.CommitCount++;
-				if (activity.MostRecentCommitPosition == 0)
-					activity.MostRecentCommitPosition = commitPosition;
-			}
+			if (counts.ContainsKey(field))
+				changedInCommit.Add(field);
 		}
+		ApplyCommit(changedInCommit, counts, commitPosition);
 
 		var files = counts.ToDictionary(
 			pair => canonicalCandidates[pair.Key],
@@ -158,6 +152,37 @@ public sealed class ProjectGitHistoryReader : IProjectGitHistoryReader
 			commitPosition,
 			files,
 			unavailable);
+	}
+
+	private static bool TryReadRecordHeader(string field, out string hash)
+	{
+		hash = string.Empty;
+		if (field.Length is not (41 or 65) || field[0] != '\x1e')
+			return false;
+		var candidate = field.AsSpan(1);
+		foreach (var character in candidate)
+		{
+			if (character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f') and not (>= 'A' and <= 'F'))
+				return false;
+		}
+		hash = candidate.ToString();
+		return true;
+	}
+
+	private static void ApplyCommit(
+		HashSet<string>? changedPaths,
+		IReadOnlyDictionary<string, MutableActivity> counts,
+		int commitPosition)
+	{
+		if (changedPaths is null)
+			return;
+		foreach (var path in changedPaths)
+		{
+			var activity = counts[path];
+			activity.CommitCount++;
+			if (activity.MostRecentCommitPosition == 0)
+				activity.MostRecentCommitPosition = commitPosition;
+		}
 	}
 
 	private static ProjectGitHistorySnapshot Unavailable(
