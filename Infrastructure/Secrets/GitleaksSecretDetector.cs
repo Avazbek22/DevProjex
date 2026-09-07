@@ -655,8 +655,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				HasPrefixedRun(content, "SG.", 66, 66, IsProviderTokenCharacter),
 			"sentry-access-token" => HasRun(content, 64, char.IsAsciiHexDigit),
 			"square-access-token" =>
-				HasPrefixedRun(content, "EAAA", 22, 60, IsWordOrHyphen) ||
-				HasPrefixedRun(content, "sq0atp-", 22, 60, IsWordOrHyphen),
+				HasPrefixedRun(content, "EAAA", 22, 60, IsRegexWordOrHyphen) ||
+				HasPrefixedRun(content, "sq0atp-", 22, 60, IsRegexWordOrHyphen),
 			"telegram-bot-api-token" => HasTelegramTokenEvidence(content),
 			"twitter-access-secret" => HasRun(content, 45, char.IsAsciiLetterOrDigit),
 			"twitter-access-token" => HasTwitterAccessTokenEvidence(content),
@@ -671,7 +671,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 					IsTwitterBearerCharacter,
 					comparison: StringComparison.OrdinalIgnoreCase),
 			"vault-service-token" =>
-				HasPrefixedRun(content, "hvs.", 90, 120, IsVaultTokenCharacter, IsGitleaksValueTerminator) ||
+				HasPrefixedRun(content, "hvs.", 90, 120, IsRegexWordOrHyphen, IsGitleaksValueTerminator) ||
 				HasPrefixedRun(content, "s.", 24, 24, char.IsAsciiLetterOrDigit, IsGitleaksValueTerminator),
 			"twilio-api-key" => HasPrefixedRun(content, "SK", 32, int.MaxValue, char.IsAsciiHexDigit),
 			"jwt" => HasJwtEvidence(content),
@@ -967,9 +967,6 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return false;
 	}
 
-	private static bool IsVaultTokenCharacter(char character) =>
-		char.IsAsciiLetterOrDigit(character) || character is '_' or '-';
-
 	private static bool IsGitleaksValueTerminator(char character) =>
 		character is '`' or '\'' or '"' or ';' or '\\' || char.IsWhiteSpace(character);
 
@@ -983,6 +980,9 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		char.IsAsciiLetterOrDigit(character) || character is '=' or '_' or '-' or '.';
 
 	private static bool IsWordOrHyphen(char character) =>
+		char.IsAsciiLetterOrDigit(character) || character is '_' or '-';
+
+	private static bool IsRegexWordOrHyphen(char character) =>
 		character == '-' || IsRegexWordCharacter(character);
 
 	private static bool IsRegexWordCharacter(char character) =>

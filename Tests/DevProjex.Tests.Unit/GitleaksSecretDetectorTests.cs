@@ -80,6 +80,7 @@ public sealed class GitleaksSecretDetectorTests
 	{
 		Assert.Equal(24, ShapeGateAudit.Length);
 		Assert.Equal(24, ShapeGateAudit.Select(static row => row.RuleId).Distinct(StringComparer.Ordinal).Count());
+		Assert.Equal(6, ShapeGateAudit.Count(static row => row.Corrected));
 		Assert.All(ShapeGateAudit, static row =>
 		{
 			Assert.NotEmpty(row.RegexRequirement);
@@ -91,6 +92,8 @@ public sealed class GitleaksSecretDetectorTests
 	[Fact(Timeout = 30_000)]
 	public void ShapeGates_AcceptEveryPinnedOrGeneratedTextThatMatchesItsRegex()
 	{
+		// The pinned upstream corpus is the pre-audit sample set. Every generated case below
+		// is accepted only when the current exact regex confirms that it is still positive.
 		var pinnedCases = LoadUpstreamCorpus()
 			.Where(static item => item.ShouldMatch)
 			.ToLookup(static item => item.RuleId, StringComparer.Ordinal);
@@ -557,7 +560,11 @@ public sealed class GitleaksSecretDetectorTests
 
 		var secretStart = match.SecretStart;
 		var secretEnd = match.SecretStart + match.SecretLength;
-		var replacementCharacters = new[] { 'A', 'a', 'F', 'f', 'Z', 'z', '0', '9', '_', '-', '=', '%', '+', '/', '.' };
+		var replacementCharacters = new[]
+		{
+			'A', 'a', 'F', 'f', 'Z', 'z', '0', '9', '_', '-', '=', '%', '+', '/', '.',
+			'\u00E9', '\u0301', '\u203F'
+		};
 		for (var offset = secretStart; offset < secretEnd; offset++)
 		{
 			variants.Add(content.Remove(offset, 1));
