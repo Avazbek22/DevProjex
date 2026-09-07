@@ -508,6 +508,10 @@ Seed states are `resolved`, `no-resolved-neighbors`, `extraction-failed`, and
 relation `dependent-of`, `dependency-of`, or `linked-with`. These properties and
 the `focus` object are omitted entirely without focus; `importance-v1` JSON stays
 byte-for-byte unchanged.
+`focus.seeds[].requested` preserves the submitted spelling only after applying the
+same safe output-path policy and captured local-user occurrence decision as
+`project.root`. With private-data masking enabled, an absolute seed masks its local
+user segment with the same placeholder as the document header.
 
 ## Context XML
 

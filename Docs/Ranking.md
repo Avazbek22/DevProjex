@@ -193,11 +193,20 @@ oracles are counts over the five tasks at that repository and budget.
 | Flask / 8,000 | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5262` |
 | Flask / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.9412` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5368` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5310` |
 
+`focus-v1` and `directed-from-seed` have the same RecallNew and AllRequired result
+in all nine repository/budget aggregates above. Directed context spends a smaller
+share of its budget on irrelevant files in every aggregate. The experiment
+therefore does not show focus outperforming an explicitly assembled directed
+context. Focus instead automates prioritizing the neighborhood of a known file in
+one call while preserving the broad effective selection and its importance-ordered
+fallback.
+
 ### Focus cost and release decision
 
-Timing and peak working set use seven independent process repetitions and the median. Cold
+Timing and peak working set measure the ranking invocation, not the complete
+`pack_context` operation. They use seven independent process repetitions and the median. Cold
 repetitions use fresh application data; warm repetitions prime the same manifest and
-application caches once before the measured invocation. RSS columns are
+application caches once before the measured ranking invocation. RSS columns are
 `importance-v1 / focus-v1` in MiB. Maximum RSS growth is the greater cold or warm median
 growth for the corpus.
 

@@ -705,6 +705,12 @@ remaining files are ordered by minimum undirected dependency-graph hop, then the
 importance order. Focus never widens `--select`, profile, Git scope, exclusion,
 glob, submodule, or file-size filters. A seed is considered first by the same
 greedy budget pass but is not guaranteed admission when it is too large.
+In the registered evaluation, focus and an explicitly assembled directed context
+had identical RecallNew and AllRequired outcomes in all nine repository/budget
+aggregates, while directed context spent less budget on irrelevant files. Focus
+automates neighborhood priority in one export while retaining the broad selection
+and fallback; it is not presented as more accurate than a directed workflow. The
+published timing measures the ranking invocation, not the whole context export.
 
 With `--hide-secrets` or `--hide-private-data`, detector and budget failures fail closed and
 produce no complete output artifact. A text file above the supported scan limit or in an

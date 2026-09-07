@@ -426,6 +426,9 @@ case, directory, and effective-selection rules as `get_file` and `paths`.
 `focus` without rank, null, an empty string/array, a non-string item, or more than
 16 values returns `DPX-MCP-INVALID-ARGUMENTS`; a missing, outside-root, directory,
 case-mismatched, or filtered file returns the established path diagnostic.
+For JSON packs, `ranking.focus.seeds[].requested` keeps the submitted spelling
+only after applying the same safe output-path policy and local-user occurrence
+decision as the document root.
 
 Valid seeds keep caller order at hop 0. A multi-source BFS over the same unique,
 resolved, non-self file graph used by importance ranking orders reachable files
@@ -437,6 +440,14 @@ histogram, parent relation, original importance priority, and degraded fact stat
 are reported as `focus-v1`; path-bearing explanation lines remain inside the
 standard untrusted-data block. Personalized PageRank is evaluation-only and is
 not exposed. GUI and TUI selection are human-controlled and do not apply focus.
+
+The registered evaluation showed the same RecallNew and AllRequired outcomes for
+focus and an explicitly assembled `directed-from-seed` context in all nine
+repository/budget aggregates; directed context used a smaller irrelevant-token
+share in each. Focus is a one-call convenience for prioritizing a known file's
+neighborhood while keeping a broad effective selection and fallback, not a claim
+of superiority over directed `related_files` plus `paths` workflows. Reported
+performance numbers measure ranking only, not the complete `pack_context` call.
 
 The ranking uses quantized resolved-dependency PageRank, a safe offline
 200-commit Git history window, and a small file-role signal. Missing evidence
