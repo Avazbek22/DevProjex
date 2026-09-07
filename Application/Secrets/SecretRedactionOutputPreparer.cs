@@ -1007,6 +1007,15 @@ public sealed class SecretRedactionOutputPreparer
 
 		if (result.Classification != FileContentClassification.Text)
 		{
+			if (captureTransformedMetrics &&
+			    result.Classification == FileContentClassification.TooLarge)
+			{
+				return await MeasureExactPassThroughAsync(
+						sourcePath,
+						coherentRead.Metadata,
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
 			var file = result.Classification == FileContentClassification.TooLarge
 				? PreparedSecretFile.Unchanged(sourcePath, coherentRead.Metadata)
 				: new PreparedSecretFile(
@@ -1089,6 +1098,57 @@ public sealed class SecretRedactionOutputPreparer
 			FileContentClassification.Text,
 			encoding,
 			[]), metrics);
+	}
+
+	private async Task<PreparedCompressionResult> MeasureExactPassThroughAsync(
+		string sourcePath,
+		SecretFileMetadata expectedMetadata,
+		CancellationToken cancellationToken)
+	{
+		IFileContentSnapshot? snapshot = null;
+		try
+		{
+			using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.SourceRead))
+			{
+				snapshot = await contentAnalyzer
+					.OpenCompleteSnapshotAsync(sourcePath, cancellationToken)
+					.ConfigureAwait(false);
+				ContentPipelineDiagnostics.RecordSourceRead(expectedMetadata.Length);
+			}
+
+			var result = snapshot.Result;
+			EnsureStableSnapshot(
+				sourcePath,
+				expectedMetadata,
+				SecretFileMetadata.Capture(sourcePath),
+				result);
+			if (result.Metrics is { IsEstimated: true })
+			{
+				throw new SecretDetectionException(
+					$"Code compression could not measure exact pass-through text for '{sourcePath}'.");
+			}
+
+			var file = result.Classification == FileContentClassification.Text
+				? PreparedSecretFile.Unchanged(sourcePath, expectedMetadata)
+				: new PreparedSecretFile(
+					sourcePath,
+					sourcePath,
+					result.Classification,
+					null,
+					[])
+				{
+					SourceMetadata = expectedMetadata
+				};
+			ContentFileMetrics? metrics = result is { Classification: FileContentClassification.Text, Metrics: { } exact }
+				? ToContentFileMetrics(sourcePath, exact)
+				: null;
+			return new PreparedCompressionResult(file, metrics);
+		}
+		finally
+		{
+			if (snapshot is not null)
+				await snapshot.DisposeAsync().ConfigureAwait(false);
+		}
 	}
 
 	private readonly record struct PreparedCompressionResult(

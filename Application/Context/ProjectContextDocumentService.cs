@@ -402,15 +402,19 @@ public sealed class ProjectContextDocumentService(
 		var metricsByPath = measured.TransformedFileMetrics.ToDictionary(
 			static metrics => Path.GetFullPath(metrics.Path),
 			PathComparer.Default);
+		var measuredAnalyzer = CreatePreparedAnalyzer(measured);
 		var orderedPaths = ResolveOrderedPaths(plan.IncludedFiles, ranking);
 		for (var index = 0; index < orderedPaths.Count; index++)
 		{
 			var path = orderedPaths[index];
 			metricsByPath.TryGetValue(Path.GetFullPath(path), out var metrics);
 			var preparedFile = measured.GetFile(path);
-			var result = new FileContentMetricsResult(
-				preparedFile.Classification,
-				metrics.Path is null ? null : ToTextFileMetrics(metrics));
+			var result = metrics.Path is not null && !metrics.IsEstimated
+				? new FileContentMetricsResult(
+					preparedFile.Classification,
+					ToTextFileMetrics(metrics))
+				: await ReadExactMetricsAsync(path, measuredAnalyzer, cancellationToken)
+					.ConfigureAwait(false);
 			var file = CreateCompleteFileDocument(
 				path,
 				result,
@@ -587,13 +591,14 @@ public sealed class ProjectContextDocumentService(
 		foreach (var path in plan.IncludedFiles)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (preparedMetrics.TryGetValue(Path.GetFullPath(path), out var metrics))
+			if (preparedMetrics.TryGetValue(Path.GetFullPath(path), out var metrics) &&
+			    !metrics.IsEstimated)
 			{
 				orderedMetrics.Add(metrics);
 				continue;
 			}
 
-			var result = await analyzer.GetClassifiedMetricsAsync(path, cancellationToken)
+			var result = await ReadExactMetricsAsync(path, analyzer, cancellationToken)
 				.ConfigureAwait(false);
 			if (result.IsText && result.Metrics is { } textMetrics)
 				orderedMetrics.Add(ToContentFileMetrics(path, textMetrics));
@@ -601,6 +606,19 @@ public sealed class ProjectContextDocumentService(
 		return WithContentMetrics(
 			plan,
 			ExportOutputMetricsCalculator.FromOrderedContentFiles(orderedMetrics));
+	}
+
+	private static async ValueTask<FileContentMetricsResult> ReadExactMetricsAsync(
+		string path,
+		IFileContentAnalyzer analyzer,
+		CancellationToken cancellationToken)
+	{
+		await using var snapshot = await analyzer
+			.OpenCompleteSnapshotAsync(path, cancellationToken)
+			.ConfigureAwait(false);
+		if (snapshot.Result.Metrics is { IsEstimated: true })
+			throw new IOException($"Exact document metrics are unavailable for '{path}'.");
+		return snapshot.Result;
 	}
 
 	private static ProjectContextPlan WithContentMetrics(
