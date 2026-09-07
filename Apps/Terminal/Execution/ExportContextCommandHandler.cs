@@ -30,13 +30,31 @@ public sealed class ExportContextCommandHandler(
 				request.MaxFileBytes,
 				cancellationToken)
 			.ConfigureAwait(false);
+		var diagnosticRenderer = new ContextDiagnosticRenderer(
+			environment,
+			request.Output,
+			services.Localization);
 		if (plan.HasErrors)
 		{
-			new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
-				.Write(plan.Diagnostics);
+			diagnosticRenderer.Write(plan.Diagnostics);
 			return CommandLineExitCodes.PolicyFailure;
 		}
-		var focusSeeds = ResolveFocusSeeds(plan, request.Focus);
+		IReadOnlyList<FocusRankingSeedRequest>? focusSeeds;
+		try
+		{
+			focusSeeds = ResolveFocusSeeds(plan, request.Focus);
+		}
+		catch (ProjectContextValidationException exception) when (request.Focus is not null)
+		{
+			diagnosticRenderer.Write([
+				new ContextDiagnostic(
+					exception.Code,
+					ContextDiagnosticSeverity.Error,
+					exception.Message,
+					exception.ContextPath)
+			]);
+			return CommandLineExitCodes.PolicyFailure;
+		}
 		var ranking = request.Rank is null
 			? null
 			: focusSeeds is null
@@ -62,8 +80,7 @@ public sealed class ExportContextCommandHandler(
 				.ConfigureAwait(false);
 		if (prepared?.CompressionSnapshot is { } compressionSnapshot)
 			plan = CodeCompressionDiagnostic.Append(plan, compressionSnapshot.Availability);
-		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
-			.Write(plan.Diagnostics);
+		diagnosticRenderer.Write(plan.Diagnostics);
 
 		var outputPath = request.OutputPath is not null and not "-"
 			? ExactOutputDestinationValidator.ValidateContext(

@@ -10,6 +10,7 @@ public sealed partial class McpServerProcessTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = CreateRankingFixture(workspace);
+		workspace.CreateDirectory("project/folder");
 		var dataRoot = workspace.CreateDirectory("cli-focus-data");
 		var focused = RunFocusCli(
 			dataRoot,
@@ -49,6 +50,27 @@ public sealed partial class McpServerProcessTests
 			includeRank: true,
 			Enumerable.Repeat("A.cs", 17).ToArray());
 		Assert.Equal(CommandLineExitCodes.UsageError, tooMany.ExitCode);
+
+		foreach (var invalid in new[]
+		         {
+			         RunFocusCli(dataRoot, project, "text", includeRank: true, ""),
+			         RunFocusCli(dataRoot, project, "text", includeRank: true, "folder"),
+			         RunFocusCli(dataRoot, project, "text", includeRank: true, Path.Combine(workspace.Path, "outside.cs"))
+		         })
+		{
+			Assert.True(invalid.ExitCode is CommandLineExitCodes.UsageError or CommandLineExitCodes.PolicyFailure);
+		}
+		var filtered = RunFocusCliCore(
+			dataRoot,
+			project,
+			"text",
+			includeRank: true,
+			["A.cs"],
+			["--select", "B.cs"]);
+		Assert.True(
+			filtered.ExitCode == CommandLineExitCodes.PolicyFailure,
+			$"Expected policy failure but received {filtered.ExitCode}:{Environment.NewLine}{filtered.StandardError}");
+		Assert.Contains("DPX-SELECTION-PATH-MISSING", filtered.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -101,8 +123,8 @@ public sealed partial class McpServerProcessTests
 
 		foreach (var validFocus in new object[]
 		         {
-		         	"D\\[one\\].cs",
-		         	Path.Combine(project, "B.cs")
+			         "D\\[one\\].cs",
+			         Path.Combine(project, "B.cs")
 		         })
 		{
 			var result = await server.Client.CallToolAsync(
@@ -132,6 +154,7 @@ public sealed partial class McpServerProcessTests
 			new() { ["rank"] = "importance", ["focus"] = Enumerable.Repeat("A.cs", 17).ToArray() },
 			new() { ["rank"] = "importance", ["focus"] = "folder" },
 			new() { ["rank"] = "importance", ["focus"] = "a.cs" },
+			new() { ["rank"] = "importance", ["focus"] = new[] { "A.cs", "a.cs" } },
 			new() { ["rank"] = "importance", ["focus"] = Path.Combine(workspace.Path, "outside.cs") },
 			new()
 			{
@@ -161,7 +184,16 @@ public sealed partial class McpServerProcessTests
 		string project,
 		string format,
 		bool includeRank,
-		params string[] focus)
+		params string[] focus) =>
+		RunFocusCliCore(dataRoot, project, format, includeRank, focus, []);
+
+	private static TerminalTestProcessResult RunFocusCliCore(
+		string dataRoot,
+		string project,
+		string format,
+		bool includeRank,
+		IReadOnlyList<string> focus,
+		IReadOnlyList<string> extraArguments)
 	{
 		var startInfo = new ProcessStartInfo("dotnet")
 		{
@@ -173,9 +205,9 @@ public sealed partial class McpServerProcessTests
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		foreach (var argument in new[]
 		         {
-		         	"--language", "en", "export", "context", project,
+			         "--language", "en", "export", "context", project,
 			         "--view", "content", "--format", format,
-		         	"--git-mode", "none", "--exclude", "none", "-o", "-", "--progress", "never"
+			         "--git-mode", "none", "--exclude", "none", "-o", "-", "--progress", "never"
 		         })
 		{
 			startInfo.ArgumentList.Add(argument);
@@ -190,6 +222,8 @@ public sealed partial class McpServerProcessTests
 			startInfo.ArgumentList.Add("--focus");
 			startInfo.ArgumentList.Add(path);
 		}
+		foreach (var argument in extraArguments)
+			startInfo.ArgumentList.Add(argument);
 		startInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
 		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = dataRoot;
 		return TerminalTestProcess.Run(startInfo);
