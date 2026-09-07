@@ -5,6 +5,30 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ImportanceRankingServiceTests
 {
+	[Theory]
+	[InlineData(100, 60, 20, 20, 0.60)]
+	[InlineData(10, 5, 0, 5, 0.50)]
+	public void ExtractedFactsCoverage_DoesNotSubtractMutuallyExclusiveFailures(
+		int candidates,
+		int supported,
+		int unsupported,
+		int extractionFailed,
+		double expected)
+	{
+		var coverage = new DependencyFactsCoverage(
+			candidates,
+			supported,
+			unsupported,
+			extractionFailed,
+			new Dictionary<string, int>(),
+			new Dictionary<string, int>());
+
+		var actual = ImportanceRankingService.CalculateExtractedFactsCoverage(coverage, candidates);
+
+		Assert.Equal(expected, actual, precision: 10);
+		Assert.Equal(candidates, coverage.Supported + coverage.Unsupported + coverage.ExtractionFailed);
+	}
+
 	[Fact]
 	public void RankNormalize_UsesRanksAndPreservesMissingSignals()
 	{

@@ -41,6 +41,14 @@ public sealed record ImportanceRankingReport(
 	bool RedistributedMissingSignals,
 	string GraphVariant)
 {
+	public int ResolvedInternalReferences { get; init; }
+
+	public int InternalReferenceCandidates { get; init; }
+
+	public double ResolvedInternalReferenceCoverage { get; init; }
+
+	public int FilesWithResolvedEdges { get; init; }
+
 	internal IReadOnlyDictionary<string, RankingSourceVersion> SourceVersions { get; init; } =
 		new Dictionary<string, RankingSourceVersion>(StringComparer.Ordinal);
 }

@@ -81,13 +81,23 @@ public sealed class ImportanceRankingService(
 			static candidate => candidate.RelativePath,
 			candidate => (double?)RoleValue(roles[candidate.RelativePath]),
 			StringComparer.Ordinal));
-		var coverage = candidates.Length == 0
+		var coverage = CalculateExtractedFactsCoverage(dependency.Coverage, candidates.Length);
+		var internalReferenceCandidates = dependency.Edges.Count(static edge =>
+			edge.Status != ResolutionStatus.External);
+		var resolvedInternalReferences = dependency.Edges.Count(edge =>
+			edge.Status == ResolutionStatus.Resolved &&
+			edge.Target is { } target &&
+			!StringComparer.Ordinal.Equals(edge.Source, target));
+		var resolvedInternalReferenceCoverage = internalReferenceCandidates == 0
 			? 0
-			: Math.Clamp(
-				(double)Math.Max(0, dependency.Coverage.Supported - dependency.Coverage.ExtractionFailed) /
-				candidates.Length,
-				0,
-				1);
+			: (double)resolvedInternalReferences / internalReferenceCandidates;
+		var filesWithResolvedEdges = dependency.Edges
+			.Where(static edge => edge.Status == ResolutionStatus.Resolved &&
+				edge.Target is not null &&
+				!StringComparer.Ordinal.Equals(edge.Source, edge.Target))
+			.SelectMany(static edge => new[] { edge.Source, edge.Target! })
+			.Distinct(StringComparer.Ordinal)
+			.Count();
 		var redistributed = coverage < 1 || gitRaw.Values.Any(static value => value is null);
 
 		var scored = new List<ScoredCandidate>(candidates.Length);
@@ -143,9 +153,20 @@ public sealed class ImportanceRankingService(
 			redistributed,
 			GraphVariant)
 		{
+			ResolvedInternalReferences = resolvedInternalReferences,
+			InternalReferenceCandidates = internalReferenceCandidates,
+			ResolvedInternalReferenceCoverage = resolvedInternalReferenceCoverage,
+			FilesWithResolvedEdges = filesWithResolvedEdges,
 			SourceVersions = sourceVersions
 		};
 	}
+
+	internal static double CalculateExtractedFactsCoverage(
+		DependencyFactsCoverage coverage,
+		int candidateCount) =>
+		candidateCount <= 0
+			? 0
+			: Math.Clamp((double)coverage.Supported / candidateCount, 0, 1);
 
 	private async Task<(DependencyIndexSnapshot Snapshot, IReadOnlyDictionary<string, RankingSourceVersion> Versions)>
 		ReadStableDependencySnapshotAsync(
