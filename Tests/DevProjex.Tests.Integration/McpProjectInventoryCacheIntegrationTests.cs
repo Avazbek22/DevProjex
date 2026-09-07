@@ -15,17 +15,19 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		var project = workspace.CreateDirectory("project");
 		workspace.CreateFile("project/src/Original.cs", "original\n");
 		var buildCount = 0;
+		McpProjectService? service = null;
 		await using var harness = CreateHarness(
 			project,
 			(_, _) =>
 			{
 				Interlocked.Increment(ref buildCount);
+				DisableWatcher(service!);
 				return ValueTask.CompletedTask;
 			});
+		service = harness.Service;
 
 		var initial = await BuildAsync(harness.Service);
 		var buildsAfterInitial = buildCount;
-		DisableWatcher(harness.Service);
 		var narrow = await BuildAsync(harness.Service, includePatterns: ["src/**"]);
 
 		Assert.True(HasFile(initial, "src/Original.cs"));
