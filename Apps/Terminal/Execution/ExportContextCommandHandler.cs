@@ -35,6 +35,19 @@ public sealed class ExportContextCommandHandler(
 				request.MaxFileBytes,
 				cancellationToken)
 			.ConfigureAwait(false);
+		if (plan.HasErrors)
+		{
+			new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
+				.Write(plan.Diagnostics);
+			return CommandLineExitCodes.PolicyFailure;
+		}
+		var ranking = request.Rank is null
+			? null
+			: await (rankingService ?? new ImportanceRankingService(
+					services.DependencyFactsEngine,
+					new ProjectGitHistoryReader()))
+				.RankAsync(plan.SourceRoot, plan.IncludedFiles, cancellationToken)
+				.ConfigureAwait(false);
 		var transformationContext = CreateTransformationContext(plan, request.View);
 		await using var prepared = transformationContext is null
 			? null
@@ -45,15 +58,6 @@ public sealed class ExportContextCommandHandler(
 			plan = CodeCompressionDiagnostic.Append(plan, compressionSnapshot.Availability);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
-		if (plan.HasErrors)
-			return CommandLineExitCodes.PolicyFailure;
-		var ranking = request.Rank is null
-			? null
-			: await (rankingService ?? new ImportanceRankingService(
-					services.DependencyFactsEngine,
-					new ProjectGitHistoryReader()))
-				.RankAsync(plan.SourceRoot, plan.IncludedFiles, cancellationToken)
-				.ConfigureAwait(false);
 
 		var outputPath = request.OutputPath is not null and not "-"
 			? ExactOutputDestinationValidator.ValidateContext(

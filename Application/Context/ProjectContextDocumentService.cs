@@ -1178,20 +1178,34 @@ public sealed class ProjectContextDocumentService(
 				EstimateCompleteSnapshotRetainedBytes(path),
 				cancellationToken)
 			.ConfigureAwait(false);
+		IFileContentSnapshot? snapshot = null;
 		try
 		{
 			EnsureRankingSourceVersion(path, expectedVersion);
-			var snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
+			snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
 				.ConfigureAwait(false);
 			EnsureRankingSourceVersion(path, expectedVersion);
 			if (expectedVersion is { } version)
 				snapshot = CreateRankingValidatedSourceSnapshot(snapshot, path, version);
-			return snapshot is IUtf8FileContentSnapshot
+			IFileContentSnapshot budgeted = snapshot is IUtf8FileContentSnapshot
 				? new BudgetedUtf8CompleteSourceSnapshot(snapshot, lease)
 				: new BudgetedCompleteSourceSnapshot(snapshot, lease);
+			snapshot = null;
+			return budgeted;
 		}
 		catch
 		{
+			if (snapshot is not null)
+			{
+				try
+				{
+					await snapshot.DisposeAsync().ConfigureAwait(false);
+				}
+				catch
+				{
+					// Preserve the source-version failure while still attempting to release the handle.
+				}
+			}
 			lease.Dispose();
 			throw;
 		}
@@ -1970,7 +1984,8 @@ public sealed class ProjectContextDocumentService(
 	private static void EnsureRankingSourceVersion(string path, RankingSourceVersion? expectedVersion)
 	{
 		if (expectedVersion is { } version && !version.IsCurrent(path))
-			throw new IOException("A selected source file changed after importance facts were indexed.");
+			throw new IOException(
+				"Selected source content changed during importance ranking; repeat the export.");
 	}
 
 	private static void WriteRanking(

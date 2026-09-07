@@ -343,28 +343,46 @@ internal sealed class DevProjexMcpTools(
 				: await new ImportanceRankingService(
 						Projects.DependencyFactsEngine,
 						new ProjectGitHistoryReader())
-					.RankAsync(plan.SourceRoot, plan.IncludedFiles, cancellationToken)
+					.RankAsync(
+						plan.SourceRoot,
+						plan.IncludedFiles,
+						new Progress<ImportanceRankingProgress>(value =>
+						{
+							var total = Math.Max(1, value.Total);
+							var fraction = Math.Clamp((double)value.Completed / total, 0, 1);
+							var (start, end, label) = value.Stage switch
+							{
+								ImportanceRankingStage.IndexingFacts => (11d, 20d, "indexing ranking facts"),
+								ImportanceRankingStage.ReadingHistory => (21d, 23d, "reading ranking history"),
+								ImportanceRankingStage.ComputingPriorities => (24d, 29d, "computing priorities"),
+								_ => throw new ArgumentOutOfRangeException()
+							};
+							operationProgress.Milestone(
+								start + fraction * (end - start),
+								$"{label} {value.Completed}/{value.Total}");
+						}),
+						cancellationToken)
 					.ConfigureAwait(false);
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
-			operationProgress.Milestone(11, $"transforming content 0/{transformedFileCount}");
+			operationProgress.Milestone(30, $"transforming content 0/{transformedFileCount}");
 			await using var prepared = view == ProjectContextView.Tree
 				? null
 				: await Projects.PrepareAsync(
 						plan,
 						McpDetailLevel.Full,
-						operationProgress.Measure("transforming content", 12, 59),
+						operationProgress.Measure("transforming content", 31, 64),
 						cancellationToken)
 					.ConfigureAwait(false);
 			operationProgress.Milestone(
-				60,
+				65,
 				$"transforming content {transformedFileCount}/{transformedFileCount}");
 			var writtenFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
-			operationProgress.Milestone(61, $"writing pack 0/{writtenFileCount}");
+			operationProgress.Milestone(66, $"writing pack 0/{writtenFileCount}");
 			ProjectContextWriteResult? writeResult = null;
 			var pack = await packs.CreateAsync(
 				async (stream, token) =>
 				{
-					var writeProgress = operationProgress.Measure("writing pack", 62, 99);
+					var writeProgress = operationProgress.Measure("writing pack", 67, 99);
 					if (prepared is null)
 					{
 						writeResult = await Projects.DocumentService.WriteCompleteWithReportAsync(
@@ -1221,31 +1239,54 @@ internal sealed class DevProjexMcpTools(
 	{
 		if (report is null)
 			return null;
-		var output = new StringBuilder(1_024);
-		output.Append("[Ranking] ")
+		var status = new StringBuilder(512);
+		status.Append("[Ranking] ")
 			.Append(report.Algorithm)
 			.Append(" · graph ")
 			.Append(report.GraphVariant)
-			.Append(' ')
+			.Append(" · facts ")
 			.Append(Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
 			.Append("% of ")
 			.Append(report.CandidateCount.ToString(CultureInfo.InvariantCulture))
 			.Append(" sources · git window ")
 			.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture))
 			.Append(" commits · tests deprioritized");
-		if (report.GitUnavailableReason != ProjectGitHistoryUnavailableReason.None)
+		status.Append("\n[Ranking coverage] facts ")
+			.Append(Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
+			.Append("% · resolved internal references ")
+			.Append(report.ResolvedInternalReferences.ToString(CultureInfo.InvariantCulture))
+			.Append('/')
+			.Append(report.InternalReferenceCandidates.ToString(CultureInfo.InvariantCulture))
+			.Append(" (")
+			.Append(Math.Round(report.ResolvedInternalReferenceCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
+			.Append("%) · files with resolved edges ")
+			.Append(report.FilesWithResolvedEdges.ToString(CultureInfo.InvariantCulture));
+		if (report.HasMissingSignals)
 		{
-			output.Append(" · git unavailable: ")
-				.Append(report.GitUnavailableReason)
-				.Append("; weights redistributed");
+			status.Append(" · missing signals: ")
+				.Append(report.MissingSignalPolicy switch
+				{
+					ImportanceMissingSignalPolicy.Redistribute => "redistributed",
+					ImportanceMissingSignalPolicy.NeutralFill => "neutral fill",
+					ImportanceMissingSignalPolicy.ConfidenceLimited => "confidence limited",
+					_ => throw new ArgumentOutOfRangeException()
+				});
 		}
-		else if (report.RedistributedMissingSignals)
+		if (report.GitHistoryIsShallow && !report.GitHistoryIsComplete)
 		{
-			output.Append(" · missing signals redistributed");
+			status.Append("\n[Ranking git] read ")
+				.Append(report.GitCommitCount.ToString(CultureInfo.InvariantCulture))
+				.Append('/')
+				.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture))
+				.Append(" commits; shallow history");
 		}
+
+		var projectData = new StringBuilder(1_024);
 		foreach (var entry in report.TopEntries.Take(10))
 		{
-			output.Append("\n[Ranking top] ")
+			if (projectData.Length > 0)
+				projectData.Append('\n');
+			projectData.Append("[Ranking top] ")
 				.Append(McpTextEscaping.EscapeSingleLine(entry.Path))
 				.Append(" — dependents ")
 				.Append(entry.Dependents.ToString(CultureInfo.InvariantCulture))
@@ -1257,17 +1298,31 @@ internal sealed class DevProjexMcpTools(
 				.Append('/')
 				.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture));
 			if (entry.Role == ImportanceFileRole.TestSource)
-				output.Append(" · test source");
+				projectData.Append(" · test source");
 			else if (entry.Role == ImportanceFileRole.Manifest)
-				output.Append(" · manifest");
+				projectData.Append(" · manifest");
 			else if (entry.Role == ImportanceFileRole.EntryPoint)
-				output.Append(" · entry point");
+				projectData.Append(" · entry point");
+			else if (entry.IsCoordinator)
+				projectData.Append(" · coordinator");
+			projectData.Append(" · priority ")
+				.Append(entry.Priority.ToString(CultureInfo.InvariantCulture))
+				.Append("; graph ")
+				.Append(entry.HasGraphFacts ? "available" : "unavailable")
+				.Append("; git ")
+				.Append(entry.HasGitHistory ? "available" : "unavailable")
+				.Append("; main contribution: ")
+				.Append(entry.MainContribution.ToString().ToLowerInvariant());
+			if (entry.ConfidenceLimited)
+				projectData.Append("; confidence limited");
 		}
 		if (tokenBudget is not null)
 		{
 			foreach (var file in tokenBudget.RankedSkippedFiles ?? [])
 			{
-				output.Append("\n[Skipped] ")
+				if (projectData.Length > 0)
+					projectData.Append('\n');
+				projectData.Append("[Skipped] ")
 					.Append(McpTextEscaping.EscapeSingleLine(file.Path))
 					.Append(" — priority ")
 					.Append(file.Priority!.Value.ToString(CultureInfo.InvariantCulture))
@@ -1278,7 +1333,9 @@ internal sealed class DevProjexMcpTools(
 					.Append(" remaining: does not fit the remaining budget");
 			}
 		}
-		return output.ToString();
+		return projectData.Length == 0
+			? status.ToString()
+			: status.Append("\n\n").Append(McpSpotlight.Wrap(projectData.ToString())).ToString();
 	}
 
 	private sealed record McpSelectionResult(

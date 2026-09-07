@@ -30,7 +30,8 @@ internal enum GitOperationKind
 	ManagedWorktreePrune,
 	ManagedWorktreeList,
 	ManagedConfigWrite,
-	ReadHistoryWindow
+	ReadHistoryWindow,
+	ReadShallowRepositoryState
 }
 
 internal enum GitConfigReadKind
@@ -302,6 +303,9 @@ internal sealed record GitProcessOperation
 	public static GitProcessOperation ReadHistoryWindow() =>
 		new(GitOperationKind.ReadHistoryWindow, GitProcessProfile.LocalRead, depth: 200);
 
+	public static GitProcessOperation ReadShallowRepositoryState() =>
+		new(GitOperationKind.ReadShallowRepositoryState, GitProcessProfile.LocalRead);
+
 	internal IReadOnlyList<string> BuildArguments(GitIsolationPaths isolation)
 	{
 		ArgumentNullException.ThrowIfNull(isolation);
@@ -333,6 +337,8 @@ internal sealed record GitProcessOperation
 			GitOperationKind.ManagedConfigWrite => BuildConfigWriteArguments(),
 			GitOperationKind.ReadHistoryWindow =>
 				["log", "--topo-order", "--no-renames", "--no-decorate", "--format=%x1e%H%x00", "--name-only", "-z", "-n", Depth.ToString(CultureInfo.InvariantCulture), "--"],
+			GitOperationKind.ReadShallowRepositoryState =>
+				["rev-parse", "--is-shallow-repository"],
 			_ => throw new ArgumentOutOfRangeException()
 		};
 	}

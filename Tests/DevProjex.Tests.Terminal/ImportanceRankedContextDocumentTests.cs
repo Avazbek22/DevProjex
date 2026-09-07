@@ -26,6 +26,41 @@ public sealed class ImportanceRankedContextDocumentTests
 	}
 
 	[Fact]
+	public async Task RankingPreservesCompressedAndRedactedPayloadsAndPlaceholderIdentities()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/A.cs",
+			"class A { const string Token = \"ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\"; void Run() { int hidden = 1; } }\n");
+		workspace.WriteFile(
+			"project/B.cs",
+			"class B { const string Token = \"ghp_Q7wE9rT2yU4iO6pA8sD0fG1hJ3kL5zX7cV9b\"; void Run() { int hidden = 2; } }\n");
+		using var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				HideSecrets: true,
+				CompressCode: true),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var ranking = CreateRanking(plan, "B.cs", "A.cs");
+
+		var ordinary = await WriteJsonAsync(services.ContextDocumentService, plan, ranking: null);
+		var ranked = await WriteJsonAsync(services.ContextDocumentService, plan, ranking);
+
+		Assert.Equal(ordinary.OrderBy(static pair => pair.Key), ranked.OrderBy(static pair => pair.Key));
+		Assert.All(ranked.Values, content =>
+		{
+			Assert.Contains("DEVPROJEX_REDACTED", content, StringComparison.Ordinal);
+			Assert.DoesNotContain("ghp_", content, StringComparison.Ordinal);
+		});
+	}
+
+	[Fact]
 	public async Task RankingControlsGreedyAdmissionAndRecordsPriorityAtSkipTime()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -138,6 +173,26 @@ public sealed class ImportanceRankedContextDocumentTests
 			maximumEstimatedTokens: maximumTokens,
 			ranking: ranking);
 		return (Encoding.UTF8.GetString(destination.ToArray()), report);
+	}
+
+	private static async Task<IReadOnlyDictionary<string, string>> WriteJsonAsync(
+		ProjectContextDocumentService service,
+		ProjectContextPlan plan,
+		ImportanceRankingReport? ranking)
+	{
+		await using var destination = new MemoryStream();
+		await service.WriteCompleteWithReportAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Json,
+			destination,
+			TestContext.Current.CancellationToken,
+			ranking: ranking);
+		using var document = JsonDocument.Parse(destination.ToArray());
+		return document.RootElement.GetProperty("files").EnumerateArray().ToDictionary(
+			static file => file.GetProperty("path").GetString()!,
+			static file => file.GetProperty("content").GetString()!,
+			StringComparer.Ordinal);
 	}
 
 	private static ImportanceRankingReport CreateRanking(

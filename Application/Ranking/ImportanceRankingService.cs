@@ -11,16 +11,27 @@ public sealed class ImportanceRankingService(
 	public const double GraphWeight = 0.85;
 	public const double GitWeight = 0.10;
 	public const double RoleWeight = 0.05;
+	public const double PageRankAbsoluteQuantum = 1e-12;
+	public const ImportanceMissingSignalPolicy MissingSignalPolicy =
+		ImportanceMissingSignalPolicy.ConfidenceLimited;
 	private const int MaximumTopEntries = 10;
+	private const int PageRankIterations = 30;
 	private static readonly HashSet<string> TestFrameworks = new(StringComparer.OrdinalIgnoreCase)
 	{
 		"xunit", "nunit", "microsoft.visualstudio.testtools.unittesting",
 		"vitest", "jest", "mocha", "pytest", "unittest"
 	};
 
+	public Task<ImportanceRankingReport> RankAsync(
+		string sourceRoot,
+		IReadOnlyList<string> candidateFiles,
+		CancellationToken cancellationToken = default) =>
+		RankAsync(sourceRoot, candidateFiles, progress: null, cancellationToken);
+
 	public async Task<ImportanceRankingReport> RankAsync(
 		string sourceRoot,
 		IReadOnlyList<string> candidateFiles,
+		IProgress<ImportanceRankingProgress>? progress,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
@@ -36,76 +47,123 @@ public sealed class ImportanceRankingService(
 			return EmptyReport();
 
 		var candidatePaths = candidates.Select(static candidate => candidate.FullPath).ToArray();
-		var dependencyTask = ReadStableDependencySnapshotAsync(root, candidatePaths, cancellationToken);
-		var historyTask = gitHistoryReader.ReadAsync(
+		Report(progress, ImportanceRankingStage.IndexingFacts, 0, candidates.Length);
+		var factsProgress = new BoundedFactsProgress(progress, candidates.Length);
+		var (dependency, sourceVersions) = await ReadStableDependencySnapshotAsync(
 			root,
 			candidatePaths,
-			cancellationToken);
-		await Task.WhenAll(dependencyTask, historyTask).ConfigureAwait(false);
-		var (dependency, sourceVersions) = await dependencyTask.ConfigureAwait(false);
-		var history = await historyTask.ConfigureAwait(false);
+			factsProgress,
+			cancellationToken).ConfigureAwait(false);
+		Report(progress, ImportanceRankingStage.IndexingFacts, candidates.Length, candidates.Length);
 
+		Report(progress, ImportanceRankingStage.ReadingHistory, 0, 1);
+		var history = await gitHistoryReader.ReadAsync(root, candidatePaths, cancellationToken)
+			.ConfigureAwait(false);
+		Report(progress, ImportanceRankingStage.ReadingHistory, 1, 1);
+
+		const int computationUnits = 100;
+		Report(progress, ImportanceRankingStage.ComputingPriorities, 0, computationUnits);
 		var factsByPath = dependency.Files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
-		var graphRaw = new Dictionary<string, double?>(StringComparer.Ordinal);
-		var dependents = new Dictionary<string, int>(StringComparer.Ordinal);
-		var dependencies = new Dictionary<string, int>(StringComparer.Ordinal);
-		var roles = new Dictionary<string, ImportanceFileRole>(StringComparer.Ordinal);
-		var pageRank = CalculatePageRank(candidates, dependency);
+		var graph = BuildGraph(candidates, dependency, cancellationToken);
+		Report(progress, ImportanceRankingStage.ComputingPriorities, 10, computationUnits);
+		var pageRank = CalculatePageRank(
+			graph,
+			cancellationToken,
+			iteration => Report(
+				progress,
+				ImportanceRankingStage.ComputingPriorities,
+				10 + (iteration + 1) * 50 / PageRankIterations,
+				computationUnits));
+
+		var graphRaw = new Dictionary<string, double?>(candidates.Length, StringComparer.Ordinal);
+		var dependents = new Dictionary<string, int>(candidates.Length, StringComparer.Ordinal);
+		var dependencies = new Dictionary<string, int>(candidates.Length, StringComparer.Ordinal);
+		var roles = new Dictionary<string, ImportanceFileRole>(candidates.Length, StringComparer.Ordinal);
+		var coordinators = new Dictionary<string, bool>(candidates.Length, StringComparer.Ordinal);
 		foreach (var candidate in candidates)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			factsByPath.TryGetValue(candidate.RelativePath, out var facts);
-			var supported = facts?.Status == DependencyFileStatus.Supported;
-			var incoming = supported
-				? UniqueResolvedSources(dependency.EdgesByTarget.GetValueOrDefault(candidate.RelativePath))
-				: 0;
-			var outgoing = supported
-				? UniqueResolvedTargets(dependency.EdgesBySource.GetValueOrDefault(candidate.RelativePath))
-				: 0;
-			dependents[candidate.RelativePath] = incoming;
-			dependencies[candidate.RelativePath] = outgoing;
-			graphRaw[candidate.RelativePath] = supported
-				? pageRank.GetValueOrDefault(candidate.RelativePath)
-				: null;
-			roles[candidate.RelativePath] = ClassifyRole(candidate.RelativePath, facts, incoming, outgoing);
+			if (graph.NodeByPath.TryGetValue(candidate.RelativePath, out var node))
+			{
+				dependents[candidate.RelativePath] = graph.Dependents[node];
+				dependencies[candidate.RelativePath] = graph.Outgoing[node].Length;
+				graphRaw[candidate.RelativePath] = QuantizePageRank(pageRank[node]);
+			}
+			else
+			{
+				dependents[candidate.RelativePath] = 0;
+				dependencies[candidate.RelativePath] = 0;
+				graphRaw[candidate.RelativePath] = null;
+			}
+			roles[candidate.RelativePath] = ClassifyRole(
+				candidate.RelativePath,
+				facts,
+				dependents[candidate.RelativePath],
+				dependencies[candidate.RelativePath]);
+			coordinators[candidate.RelativePath] = IsCoordinatorCandidate(
+				roles[candidate.RelativePath],
+				dependents[candidate.RelativePath],
+				dependencies[candidate.RelativePath]);
 		}
 
-		var graphNormalized = RankNormalize(graphRaw);
-		var gitRaw = candidates.ToDictionary(
-			static candidate => candidate.RelativePath,
-			candidate => history.Files.TryGetValue(candidate.FullPath, out var activity)
-				? (double?)(activity.CommitCount + Recency(activity, history.WindowSize))
-				: null,
-			StringComparer.Ordinal);
-		var gitNormalized = RankNormalize(gitRaw);
-		var roleNormalized = RankNormalize(candidates.ToDictionary(
-			static candidate => candidate.RelativePath,
-			candidate => (double?)RoleValue(roles[candidate.RelativePath]),
-			StringComparer.Ordinal));
-		var coverage = candidates.Length == 0
-			? 0
-			: Math.Clamp(
-				(double)Math.Max(0, dependency.Coverage.Supported - dependency.Coverage.ExtractionFailed) /
-				candidates.Length,
-				0,
-				1);
-		var redistributed = coverage < 1 || gitRaw.Values.Any(static value => value is null);
-
-		var scored = new List<ScoredCandidate>(candidates.Length);
+		var graphNormalized = RankNormalize(graphRaw, cancellationToken);
+		var gitRaw = new Dictionary<string, double?>(candidates.Length, StringComparer.Ordinal);
+		var roleRaw = new Dictionary<string, double?>(candidates.Length, StringComparer.Ordinal);
 		foreach (var candidate in candidates)
 		{
-			var score = CalculateScore(
+			cancellationToken.ThrowIfCancellationRequested();
+			gitRaw[candidate.RelativePath] = history.Files.TryGetValue(candidate.FullPath, out var activity)
+				? activity.CommitCount + Recency(activity, history.WindowSize)
+				: null;
+			roleRaw[candidate.RelativePath] = RoleValue(
+				roles[candidate.RelativePath],
+				coordinators[candidate.RelativePath]);
+		}
+		var gitNormalized = RankNormalize(gitRaw, cancellationToken);
+		var roleNormalized = RankNormalize(roleRaw, cancellationToken);
+		var coverage = CalculateExtractedFactsCoverage(dependency.Coverage, candidates.Length);
+		var internalReferenceCandidates = dependency.Edges.Count(static edge =>
+			edge.Status != ResolutionStatus.External);
+		var resolvedInternalReferences = graph.EdgeCount;
+		var resolvedInternalReferenceCoverage = internalReferenceCandidates == 0
+			? 0
+			: Math.Clamp((double)resolvedInternalReferences / internalReferenceCandidates, 0, 1);
+		var hasMissingSignals = coverage < 1 || gitRaw.Values.Any(static value => value is null);
+		var gitConfidence = history.IsShallow && !history.IsComplete
+			? Math.Clamp((double)history.CommitCount / history.WindowSize, 0, 1)
+			: 1;
+
+		var scored = new List<ScoredCandidate>(candidates.Length);
+		var scoreProgressStep = Math.Max(1, candidates.Length / 25);
+		for (var index = 0; index < candidates.Length; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var candidate = candidates[index];
+			var score = CalculateScoreBreakdown(
 				graphNormalized[candidate.RelativePath],
 				gitNormalized[candidate.RelativePath],
 				roleNormalized[candidate.RelativePath] ?? 0.5,
-				coverage);
+				coverage,
+				MissingSignalPolicy,
+				gitConfidence);
 			scored.Add(new ScoredCandidate(candidate, score));
+			if ((index + 1) % scoreProgressStep == 0 || index + 1 == candidates.Length)
+			{
+				Report(
+					progress,
+					ImportanceRankingStage.ComputingPriorities,
+					70 + (index + 1) * 29 / candidates.Length,
+					computationUnits);
+			}
 		}
 
 		var ordered = scored
-			.OrderByDescending(static candidate => candidate.Score)
+			.OrderByDescending(static candidate => candidate.Score.Score)
 			.ThenBy(static candidate => candidate.Candidate.RelativePath, StringComparer.Ordinal)
 			.Select((candidate, index) =>
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var path = candidate.Candidate.RelativePath;
 				var hasHistory = history.Files.TryGetValue(candidate.Candidate.FullPath, out var activity);
 				var historyReason = hasHistory
@@ -117,7 +175,7 @@ public sealed class ImportanceRankingService(
 					candidate.Candidate.FullPath,
 					path,
 					index + 1,
-					candidate.Score,
+					candidate.Score.Score,
 					dependents[path],
 					dependencies[path],
 					hasHistory ? activity!.CommitCount : null,
@@ -125,9 +183,17 @@ public sealed class ImportanceRankingService(
 					roles[path],
 					graphRaw[path] is not null,
 					hasHistory,
-					historyReason);
+					historyReason)
+				{
+					Confidence = candidate.Score.Confidence,
+					MainContribution = candidate.Score.MainContribution,
+					ConfidenceLimited = MissingSignalPolicy == ImportanceMissingSignalPolicy.ConfidenceLimited &&
+						candidate.Score.Confidence < 1,
+					IsCoordinator = coordinators[path]
+				};
 			})
 			.ToArray();
+		Report(progress, ImportanceRankingStage.ComputingPriorities, computationUnits, computationUnits);
 
 		return new ImportanceRankingReport(
 			AlgorithmId,
@@ -140,26 +206,42 @@ public sealed class ImportanceRankingService(
 			history.WindowSize,
 			history.CommitCount,
 			history.UnavailableReason,
-			redistributed,
+			MissingSignalPolicy == ImportanceMissingSignalPolicy.Redistribute && hasMissingSignals,
 			GraphVariant)
 		{
+			ResolvedInternalReferences = resolvedInternalReferences,
+			InternalReferenceCandidates = internalReferenceCandidates,
+			ResolvedInternalReferenceCoverage = resolvedInternalReferenceCoverage,
+			FilesWithResolvedEdges = graph.FilesWithEdges,
+			GitHistoryIsShallow = history.IsShallow,
+			GitHistoryIsComplete = history.IsComplete,
+			HasMissingSignals = hasMissingSignals,
+			MissingSignalPolicy = MissingSignalPolicy,
 			SourceVersions = sourceVersions
 		};
 	}
+
+	internal static double CalculateExtractedFactsCoverage(
+		DependencyFactsCoverage coverage,
+		int candidateCount) =>
+		candidateCount <= 0
+			? 0
+			: Math.Clamp((double)coverage.Supported / candidateCount, 0, 1);
 
 	private async Task<(DependencyIndexSnapshot Snapshot, IReadOnlyDictionary<string, RankingSourceVersion> Versions)>
 		ReadStableDependencySnapshotAsync(
 			string root,
 			IReadOnlyList<string> candidatePaths,
+			IProgress<DependencyIndexProgress>? progress,
 			CancellationToken cancellationToken)
 	{
 		for (var attempt = 0; attempt < 2; attempt++)
 		{
-			var before = CaptureVersions(candidatePaths);
+			var before = CaptureVersions(candidatePaths, cancellationToken);
 			var snapshot = await dependencyFactsEngine
-				.IndexAsync(root, candidatePaths, progress: null, cancellationToken)
+				.IndexAsync(root, candidatePaths, progress, cancellationToken)
 				.ConfigureAwait(false);
-			var after = CaptureVersions(candidatePaths);
+			var after = CaptureVersions(candidatePaths, cancellationToken);
 			if (VersionsEqual(before, after))
 				return (snapshot, after);
 		}
@@ -168,11 +250,17 @@ public sealed class ImportanceRankingService(
 	}
 
 	private static IReadOnlyDictionary<string, RankingSourceVersion> CaptureVersions(
-		IReadOnlyList<string> paths) =>
-		paths.ToDictionary(
-			Path.GetFullPath,
-			RankingSourceVersion.Capture,
-			PathComparer.Default);
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken)
+	{
+		var versions = new Dictionary<string, RankingSourceVersion>(paths.Count, PathComparer.Default);
+		foreach (var path in paths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			versions[Path.GetFullPath(path)] = RankingSourceVersion.Capture(path);
+		}
+		return versions;
+	}
 
 	private static bool VersionsEqual(
 		IReadOnlyDictionary<string, RankingSourceVersion> left,
@@ -181,7 +269,8 @@ public sealed class ImportanceRankingService(
 			right.TryGetValue(pair.Key, out var version) && version == pair.Value);
 
 	internal static IReadOnlyDictionary<string, double?> RankNormalize(
-		IReadOnlyDictionary<string, double?> values)
+		IReadOnlyDictionary<string, double?> values,
+		CancellationToken cancellationToken = default)
 	{
 		var present = values
 			.Where(static pair => pair.Value is not null)
@@ -194,11 +283,15 @@ public sealed class ImportanceRankingService(
 		if (present.Length == 1)
 		{
 			foreach (var pair in present[0])
+			{
+				cancellationToken.ThrowIfCancellationRequested();
 				result[pair.Key] = 0.5;
+			}
 			return result;
 		}
 		for (var index = 0; index < present.Length; index++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var normalized = (double)index / (present.Length - 1);
 			foreach (var pair in present[index])
 				result[pair.Key] = normalized;
@@ -207,23 +300,53 @@ public sealed class ImportanceRankingService(
 	}
 
 	internal static double CalculateScore(double? graph, double? git, double role, double graphCoverage)
+		=> CalculateScoreBreakdown(
+			graph,
+			git,
+			role,
+			graphCoverage,
+			MissingSignalPolicy,
+			gitConfidence: 1).Score;
+
+	internal static ImportanceScoreBreakdown CalculateScoreBreakdown(
+		double? graph,
+		double? git,
+		double role,
+		double graphCoverage,
+		ImportanceMissingSignalPolicy policy,
+		double gitConfidence = 1)
 	{
 		var coverage = Math.Clamp(graphCoverage, 0, 1);
 		var effectiveGraphWeight = GraphWeight * coverage;
-		var graphDeficit = GraphWeight - effectiveGraphWeight;
-		var nonGraphWeight = GitWeight + RoleWeight;
-		var effectiveGitWeight = GitWeight + graphDeficit * GitWeight / nonGraphWeight;
-		var effectiveRoleWeight = RoleWeight + graphDeficit * RoleWeight / nonGraphWeight;
-		var signals = new List<(double Value, double Weight)>(3);
-		if (graph is { } graphValue)
-			signals.Add((graphValue, effectiveGraphWeight));
-		if (git is { } gitValue)
-			signals.Add((gitValue, effectiveGitWeight));
-		signals.Add((role, effectiveRoleWeight));
-		var availableWeight = signals.Sum(static signal => signal.Weight);
-		return availableWeight <= 0
-			? 0
-			: signals.Sum(static signal => signal.Value * signal.Weight) / availableWeight;
+		var effectiveGitWeight = GitWeight * Math.Clamp(gitConfidence, 0, 1);
+		var graphContribution = graph.GetValueOrDefault() * (graph is null ? 0 : effectiveGraphWeight);
+		var gitContribution = git.GetValueOrDefault() * (git is null ? 0 : effectiveGitWeight);
+		var roleContribution = role * RoleWeight;
+		var availableWeight = (graph is null ? 0 : effectiveGraphWeight) +
+		                      (git is null ? 0 : effectiveGitWeight) + RoleWeight;
+		var knownContribution = graphContribution + gitContribution + roleContribution;
+		var score = policy switch
+		{
+			ImportanceMissingSignalPolicy.Redistribute => availableWeight <= 0
+				? 0
+				: knownContribution / availableWeight,
+			ImportanceMissingSignalPolicy.NeutralFill =>
+				knownContribution + (1 - availableWeight) * 0.5,
+			ImportanceMissingSignalPolicy.ConfidenceLimited => knownContribution,
+			_ => throw new ArgumentOutOfRangeException(nameof(policy), policy, null)
+		};
+		var mainContribution = graphContribution >= gitContribution && graphContribution >= roleContribution
+			? ImportanceRankingSignal.Graph
+			: gitContribution >= roleContribution
+				? ImportanceRankingSignal.Git
+				: ImportanceRankingSignal.Role;
+		return new ImportanceScoreBreakdown(
+			score,
+			Math.Clamp(availableWeight, 0, 1),
+			graphContribution,
+			gitContribution,
+			roleContribution,
+			mainContribution);
 	}
 
 	internal static ImportanceFileRole ClassifyRole(
@@ -236,22 +359,40 @@ public sealed class ImportanceRankingService(
 			return ImportanceFileRole.Manifest;
 		if (HasTestFrameworkEvidence(facts) || HasTestPathEvidence(path) && facts?.Status == DependencyFileStatus.Supported)
 			return ImportanceFileRole.TestSource;
-		if (dependents == 0 && dependencies >= 3)
+		if (HasExplicitEntryPointEvidence(facts))
 			return ImportanceFileRole.EntryPoint;
 		return ImportanceFileRole.Source;
 	}
 
+	internal static bool IsCoordinatorCandidate(
+		ImportanceFileRole role,
+		int dependents,
+		int dependencies) =>
+		role == ImportanceFileRole.Source && dependents == 0 && dependencies >= 3;
+
 	internal static IReadOnlyDictionary<string, double> CalculatePageRank(
 		IReadOnlyList<(string FullPath, string RelativePath)> candidates,
-		DependencyIndexSnapshot snapshot) =>
-		CalculatePageRank(candidates.Select(static candidate => new Candidate(candidate.FullPath, candidate.RelativePath)).ToArray(), snapshot);
-
-	private static IReadOnlyDictionary<string, double> CalculatePageRank(
-		IReadOnlyList<Candidate> candidates,
-		DependencyIndexSnapshot snapshot)
+		DependencyIndexSnapshot snapshot,
+		CancellationToken cancellationToken = default,
+		Action<int>? iterationCompleted = null)
 	{
-		const double damping = 0.85;
-		const int iterations = 30;
+		var candidateRecords = candidates
+			.Select(static candidate => new Candidate(candidate.FullPath, candidate.RelativePath))
+			.OrderBy(static candidate => candidate.RelativePath, StringComparer.Ordinal)
+			.ToArray();
+		var graph = BuildGraph(candidateRecords, snapshot, cancellationToken);
+		var ranks = CalculatePageRank(graph, cancellationToken, iterationCompleted);
+		var result = new Dictionary<string, double>(graph.Paths.Length, StringComparer.Ordinal);
+		for (var node = 0; node < graph.Paths.Length; node++)
+			result[graph.Paths[node]] = QuantizePageRank(ranks[node]);
+		return result;
+	}
+
+	private static RankingGraph BuildGraph(
+		IReadOnlyList<Candidate> candidates,
+		DependencyIndexSnapshot snapshot,
+		CancellationToken cancellationToken)
+	{
 		var supportedPaths = snapshot.Files
 			.Where(static file => file.Status == DependencyFileStatus.Supported)
 			.Select(static file => file.Path)
@@ -262,54 +403,95 @@ public sealed class ImportanceRankingService(
 			.Distinct(StringComparer.Ordinal)
 			.Order(StringComparer.Ordinal)
 			.ToArray();
-		var pathSet = paths.ToHashSet(StringComparer.Ordinal);
-		var outgoingSets = paths.ToDictionary(static path => path, static _ => new HashSet<string>(StringComparer.Ordinal), StringComparer.Ordinal);
+		var nodeByPath = new Dictionary<string, int>(paths.Length, StringComparer.Ordinal);
+		for (var node = 0; node < paths.Length; node++)
+			nodeByPath.Add(paths[node], node);
+		var outgoingSets = new HashSet<int>[paths.Length];
+		for (var node = 0; node < outgoingSets.Length; node++)
+			outgoingSets[node] = [];
 		foreach (var edge in snapshot.Edges)
 		{
-			if (edge.Status == ResolutionStatus.Resolved &&
-			    edge.Target is { } target &&
-			    edge.Source != target &&
-			    pathSet.Contains(edge.Source) &&
-			    pathSet.Contains(target))
+			cancellationToken.ThrowIfCancellationRequested();
+			if (edge.Status != ResolutionStatus.Resolved ||
+				edge.Target is not { } target ||
+				!nodeByPath.TryGetValue(edge.Source, out var sourceNode) ||
+				!nodeByPath.TryGetValue(target, out var targetNode) ||
+				sourceNode == targetNode)
 			{
-				outgoingSets[edge.Source].Add(target);
+				continue;
+			}
+			outgoingSets[sourceNode].Add(targetNode);
+		}
+
+		var outgoing = new int[paths.Length][];
+		var dependents = new int[paths.Length];
+		var filesWithEdges = new bool[paths.Length];
+		var edgeCount = 0;
+		for (var source = 0; source < paths.Length; source++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			outgoing[source] = outgoingSets[source].Order().ToArray();
+			edgeCount += outgoing[source].Length;
+			if (outgoing[source].Length > 0)
+				filesWithEdges[source] = true;
+			foreach (var target in outgoing[source])
+			{
+				dependents[target]++;
+				filesWithEdges[target] = true;
 			}
 		}
-		var outgoing = outgoingSets.ToDictionary(
-			static pair => pair.Key,
-			static pair => pair.Value.Order(StringComparer.Ordinal).ToArray(),
-			StringComparer.Ordinal);
-		var count = paths.Length;
+		return new RankingGraph(
+			paths,
+			nodeByPath,
+			outgoing,
+			dependents,
+			edgeCount,
+			filesWithEdges.Count(static value => value));
+	}
+
+	private static double[] CalculatePageRank(
+		RankingGraph graph,
+		CancellationToken cancellationToken,
+		Action<int>? iterationCompleted = null)
+	{
+		const double damping = 0.85;
+		var count = graph.Paths.Length;
 		if (count == 0)
-			return new Dictionary<string, double>(StringComparer.Ordinal);
-		var rank = paths.ToDictionary(static path => path, _ => 1d / count, StringComparer.Ordinal);
-		for (var iteration = 0; iteration < iterations; iteration++)
+			return [];
+		var rank = new double[count];
+		var next = new double[count];
+		Array.Fill(rank, 1d / count);
+		for (var iteration = 0; iteration < PageRankIterations; iteration++)
 		{
-			var next = paths.ToDictionary(static path => path, _ => (1 - damping) / count, StringComparer.Ordinal);
-			var dangling = paths.Where(path => outgoing[path].Length == 0).Sum(path => rank[path]);
-			foreach (var path in paths)
-				next[path] += damping * dangling / count;
-			foreach (var source in paths)
+			cancellationToken.ThrowIfCancellationRequested();
+			Array.Fill(next, (1 - damping) / count);
+			var dangling = 0d;
+			for (var source = 0; source < count; source++)
 			{
-				var targets = outgoing[source];
+				if ((source & 255) == 0)
+					cancellationToken.ThrowIfCancellationRequested();
+				if (graph.Outgoing[source].Length == 0)
+					dangling += rank[source];
+			}
+			var danglingShare = damping * dangling / count;
+			for (var node = 0; node < count; node++)
+				next[node] += danglingShare;
+			for (var source = 0; source < count; source++)
+			{
+				if ((source & 255) == 0)
+					cancellationToken.ThrowIfCancellationRequested();
+				var targets = graph.Outgoing[source];
 				if (targets.Length == 0)
 					continue;
 				var share = damping * rank[source] / targets.Length;
 				foreach (var target in targets)
 					next[target] += share;
 			}
-			rank = next;
+			(rank, next) = (next, rank);
+			iterationCompleted?.Invoke(iteration);
 		}
 		return rank;
 	}
-
-	private static int UniqueResolvedSources(IReadOnlyList<DependencyEdge>? edges) =>
-		edges?.Where(static edge => edge.Status == ResolutionStatus.Resolved && edge.Target is not null && edge.Source != edge.Target)
-			.Select(static edge => edge.Source).Distinct(StringComparer.Ordinal).Count() ?? 0;
-
-	private static int UniqueResolvedTargets(IReadOnlyList<DependencyEdge>? edges) =>
-		edges?.Where(static edge => edge.Status == ResolutionStatus.Resolved && edge.Target is not null && edge.Source != edge.Target)
-			.Select(static edge => edge.Target!).Distinct(StringComparer.Ordinal).Count() ?? 0;
 
 	private static bool HasTestFrameworkEvidence(FileFacts? facts)
 	{
@@ -317,6 +499,19 @@ public sealed class ImportanceRankingService(
 			return false;
 		return facts.Imports.Any(import => TestFrameworks.Contains(NormalizeFramework(import.Specifier))) ||
 		       facts.ContextNamespaces.Any(context => TestFrameworks.Contains(NormalizeFramework(context)));
+	}
+
+	private static bool HasExplicitEntryPointEvidence(FileFacts? facts) =>
+		facts?.Declarations.Any(static declaration =>
+			declaration.Identity.SymbolKind is SymbolKind.Function or SymbolKind.Module &&
+			IsEntryPointName(declaration.Identity.QualifiedName)) == true;
+
+	private static bool IsEntryPointName(string qualifiedName)
+	{
+		var separator = qualifiedName.LastIndexOfAny(['.', ':', '/', '\\']);
+		var name = separator >= 0 ? qualifiedName[(separator + 1)..] : qualifiedName;
+		return name.Equals("Main", StringComparison.Ordinal) ||
+		       name.Equals("__main__", StringComparison.Ordinal);
 	}
 
 	private static string NormalizeFramework(string value)
@@ -351,14 +546,18 @@ public sealed class ImportanceRankingService(
 		       name.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
 	}
 
-	private static double RoleValue(ImportanceFileRole role) => role switch
+	private static double RoleValue(ImportanceFileRole role, bool isCoordinator) => role switch
 	{
 		ImportanceFileRole.Manifest => 1,
-		ImportanceFileRole.EntryPoint => 0.75,
+		ImportanceFileRole.EntryPoint => 0.9,
+		ImportanceFileRole.Source when isCoordinator => 0.65,
 		ImportanceFileRole.Source => 0.5,
 		ImportanceFileRole.TestSource => 0,
 		_ => throw new ArgumentOutOfRangeException(nameof(role), role, null)
 	};
+
+	internal static double QuantizePageRank(double value) =>
+		Math.Round(value / PageRankAbsoluteQuantum, MidpointRounding.ToEven) * PageRankAbsoluteQuantum;
 
 	private static double Recency(ProjectGitFileActivity activity, int window) =>
 		activity.MostRecentCommitPosition <= 0 || window <= 1
@@ -372,7 +571,50 @@ public sealed class ImportanceRankingService(
 		new(AlgorithmId, [], [], 0, 0, 0, 0, ProjectGitHistoryReaderWindow, 0,
 			ProjectGitHistoryUnavailableReason.NotRepository, false, GraphVariant);
 
+	private static void Report(
+		IProgress<ImportanceRankingProgress>? progress,
+		ImportanceRankingStage stage,
+		int completed,
+		int total) =>
+		progress?.Report(new ImportanceRankingProgress(stage, Math.Clamp(completed, 0, total), total));
+
 	private const int ProjectGitHistoryReaderWindow = 200;
 	private sealed record Candidate(string FullPath, string RelativePath);
-	private sealed record ScoredCandidate(Candidate Candidate, double Score);
+	private sealed record ScoredCandidate(Candidate Candidate, ImportanceScoreBreakdown Score);
+	private sealed record RankingGraph(
+		string[] Paths,
+		IReadOnlyDictionary<string, int> NodeByPath,
+		int[][] Outgoing,
+		int[] Dependents,
+		int EdgeCount,
+		int FilesWithEdges);
+
+	internal readonly record struct ImportanceScoreBreakdown(
+		double Score,
+		double Confidence,
+		double GraphContribution,
+		double GitContribution,
+		double RoleContribution,
+		ImportanceRankingSignal MainContribution);
+
+	private sealed class BoundedFactsProgress(
+		IProgress<ImportanceRankingProgress>? progress,
+		int candidateCount) : IProgress<DependencyIndexProgress>
+	{
+		private readonly int _step = Math.Max(1, candidateCount / 100);
+		private int _lastReported;
+
+		public void Report(DependencyIndexProgress value)
+		{
+			var completed = Math.Clamp(value.CompletedFiles, 0, value.TotalFiles);
+			if (completed != value.TotalFiles && completed - _lastReported < _step)
+				return;
+			_lastReported = completed;
+			ImportanceRankingService.Report(
+				progress,
+				ImportanceRankingStage.IndexingFacts,
+				completed,
+				Math.Max(1, value.TotalFiles));
+		}
+	}
 }
