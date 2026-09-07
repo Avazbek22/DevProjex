@@ -94,6 +94,48 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task CSharpFacts_CaptureOnlyExplicitTypePositions()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var source = fixture.CreateFile("Types.cs", """
+			public class Target { }
+			public sealed class TargetAttribute : System.Attribute { }
+			[Target]
+			public class Consumer<T> : Target where T : Target
+			{
+				private Target field;
+				public Target Property { get; }
+				public Target Method(Target parameter)
+				{
+					var created = new Target();
+					_ = typeof(Target);
+					_ = sizeof(Target);
+					_ = default(Target);
+					object value = parameter;
+					_ = (Target)value;
+					_ = value as Target;
+					if (value is Target named) { }
+					return created;
+				}
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(fixture.Path, [project, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var syntaxKinds = index.Files.Single(file => file.Path == "Types.cs").References
+			.Where(reference => reference.Name == "Target")
+			.Select(static reference => reference.SyntaxKind)
+			.ToHashSet(StringComparer.Ordinal);
+		Assert.All(
+			new[] { "variable_type", "property_type", "parameter_type", "return_type", "base", "constraint",
+				"attribute", "object_creation", "typeof", "sizeof", "default", "cast", "as", "pattern" },
+			syntaxKind => Assert.Contains(syntaxKind, syntaxKinds));
+	}
+
+	[Fact]
 	public async Task TypeScriptFacts_ApplyJsSubstitutionPathsAndNoBundlerIndexFallback()
 	{
 		using var fixture = new TemporaryDirectory();

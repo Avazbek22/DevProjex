@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace DevProjex.Application.Dependencies;
 
@@ -80,22 +79,6 @@ public sealed class DependencyFactsEngine : IDisposable
 			.ReadAsync(root, manifest, cancellationToken)
 			.ConfigureAwait(false);
 		var prepared = new PreparedDependencySource[manifest.Length];
-		await Parallel.ForEachAsync(
-			Enumerable.Range(0, manifest.Length),
-			new ParallelOptions
-			{
-				CancellationToken = cancellationToken,
-				MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8)
-			},
-			async (index, token) =>
-			{
-				prepared[index] = await _extractor
-					.PrepareAsync(root, manifest[index], configuration, token)
-					.ConfigureAwait(false);
-			}).ConfigureAwait(false);
-
-		var manifestGeneration = Hash(prepared.Select(source =>
-			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"));
 		var parsedBefore = _extractor.ParseCount;
 		var facts = new FileFacts[prepared.Length];
 		var completed = 0;
@@ -109,7 +92,10 @@ public sealed class DependencyFactsEngine : IDisposable
 			},
 			async (index, token) =>
 			{
-				var source = prepared[index];
+				var source = await _extractor
+					.PrepareAsync(root, manifest[index], configuration, token)
+					.ConfigureAwait(false);
+				prepared[index] = source;
 				if (source.PreparedStatus != DependencyFileStatus.Supported)
 				{
 					facts[index] = _extractor.Extract(source, _limits);
@@ -144,6 +130,8 @@ public sealed class DependencyFactsEngine : IDisposable
 					prepared.Length));
 			}).ConfigureAwait(false);
 
+		var manifestGeneration = Hash(prepared.Select(source =>
+			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"));
 		var parsedFiles = _extractor.ParseCount - parsedBefore;
 		var orderedFacts = facts.OrderBy(static fact => fact.Path, StringComparer.Ordinal).ToArray();
 		var declarations = MergeDeclarations(orderedFacts);
@@ -747,8 +735,11 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlyDictionary<SymbolLookupKey, DeclarationFact[]> _symbolsBySimpleName;
 		private readonly IReadOnlyDictionary<QualifiedSymbolLookupKey, DeclarationFact[]> _symbolsByQualifiedName;
 		private readonly DependencyResolverConfiguration _configuration;
+		private readonly IReadOnlyDictionary<string, DependencyScopeDescriptor> _scopesById;
+		private readonly IReadOnlyDictionary<string, string[]> _visibleScopesById;
 		private readonly IReadOnlyDictionary<string, string[]> _globalNamespaces;
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _globalAliases;
+		private readonly IReadOnlyDictionary<string, string[]> _contextNamespacesByFile;
 		private readonly IReadOnlySet<string> _dotNetExternalSimpleNames;
 
 		public ResolverContext(
@@ -773,6 +764,8 @@ public sealed class DependencyFactsEngine : IDisposable
 					declaration.Identity.GenericArity))
 				.ToDictionary(static group => group.Key, static group => group.ToArray());
 			_configuration = configuration;
+			_scopesById = configuration.Scopes.ToDictionary(static scope => scope.ScopeId, StringComparer.Ordinal);
+			_visibleScopesById = BuildVisibleScopes(_scopesById);
 			_globalNamespaces = files.GroupBy(static file => file.ScopeId)
 				.ToDictionary(static group => group.Key,
 					static group => group.SelectMany(static file => file.GlobalContextNamespaces)
@@ -783,6 +776,14 @@ public sealed class DependencyFactsEngine : IDisposable
 						.GroupBy(static pair => pair.Key, StringComparer.Ordinal)
 						.ToDictionary(static aliases => aliases.Key, static aliases => aliases.OrderBy(static pair => pair.Value, StringComparer.Ordinal).First().Value, StringComparer.Ordinal),
 					StringComparer.Ordinal);
+			_contextNamespacesByFile = files.ToDictionary(
+				static file => file.Path,
+				file => file.ContextNamespaces
+					.Concat(_globalNamespaces.GetValueOrDefault(file.ScopeId) ?? [])
+					.Distinct(StringComparer.Ordinal)
+					.Order(StringComparer.Ordinal)
+					.ToArray(),
+				StringComparer.Ordinal);
 			_dotNetExternalSimpleNames = configuration.DotNetExternalSymbols
 				.Select(SimpleName)
 				.ToHashSet(StringComparer.Ordinal);
@@ -798,7 +799,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolveTypeScriptImport(FileFacts source, ImportFact import)
 		{
-			var scope = _configuration.FindScope(source.ScopeId);
+			var scope = FindScope(source.ScopeId);
 			if (scope is null || !scope.HasConfiguration)
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"no owning tsconfig.json or jsconfig.json in the manifest", []);
@@ -906,7 +907,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					var values = exports ? map.Exports : map.Imports;
 					var key = exports ? (specifier.Length == 0 ? "." : "./" + specifier) : specifier;
 					if (TryMap(values, key, out var target) && target is not null)
-						return ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, target)), _configuration.FindScope(source.ScopeId));
+						return ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, target)), FindScope(source.ScopeId));
 					return [];
 				}
 				if (Path.GetFullPath(directory) == Path.GetFullPath(_root))
@@ -1027,7 +1028,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (candidates.Count == 0 && import.RelativeLevel == 0 && DependencyPlatformCatalog.IsPythonExternal(_configuration, source.ScopeId, import.Specifier))
 				return Edge(source, import, ResolutionStatus.External, null, "known Python standard-library module", []);
 			if (candidates.Count == 0 && import.RelativeLevel == 0 &&
-			    _configuration.FindScope(source.ScopeId)?.PythonExternalPackages.Contains(import.Specifier.Split('.')[0]) == true)
+			    FindScope(source.ScopeId)?.PythonExternalPackages.Contains(import.Specifier.Split('.')[0]) == true)
 				return Edge(source, import, ResolutionStatus.External, null, "declared Python package outside the manifest", []);
 			if (import.IsWildcard && candidates.Any(candidate =>
 				_files.TryGetValue(candidate, out var facts) && facts.Aliases.ContainsKey("$dynamic-all")))
@@ -1107,7 +1108,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private IEnumerable<string> PythonRootPrefixes(FileFacts source)
 		{
-			var roots = _configuration.FindScope(source.ScopeId)?.PythonRoots ?? [_root, Path.Combine(_root, "src")];
+			var roots = FindScope(source.ScopeId)?.PythonRoots ?? [_root, Path.Combine(_root, "src")];
 			return roots.Where(root => IsWithin(_root, root))
 				.Select(root => PortableRelative(_root, root) is "." ? string.Empty : PortableRelative(_root, root).Trim('/'))
 				.Distinct(StringComparer.Ordinal);
@@ -1118,7 +1119,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (reference.Name == "<target-typed-new>")
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "target-typed new has no explicit type", []);
 			var simpleName = SimpleName(reference.Name);
-			var scope = _configuration.FindScope(source.ScopeId);
+			var scope = FindScope(source.ScopeId);
 			if ((source.LanguageId is LanguageId.CSharp or LanguageId.TypeScript or LanguageId.Tsx or LanguageId.JavaScript) &&
 			    scope?.HasConfiguration != true)
 			{
@@ -1130,27 +1131,26 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (source.TypeParameters.Contains(simpleName, StringComparer.Ordinal))
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
 			var candidates = reference.Name.Contains('.')
-				? LookupQualified(source, ExpandQualifiedAlias(source, reference.Name), reference.GenericArity).ToArray()
-				: LookupSimple(source, simpleName, reference.GenericArity).ToArray();
+				? LookupQualified(source, ExpandQualifiedAlias(source, reference.Name), reference.GenericArity)
+				: LookupSimple(source, simpleName, reference.GenericArity);
 			var attributeName = reference.SyntaxKind == "attribute"
 				? reference.Name + "Attribute"
 				: null;
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
-					? LookupQualified(source, ExpandQualifiedAlias(source, attributeName), reference.GenericArity).ToArray()
-					: LookupSimple(source, attributeName, reference.GenericArity).ToArray();
+					? LookupQualified(source, ExpandQualifiedAlias(source, attributeName), reference.GenericArity)
+					: LookupSimple(source, attributeName, reference.GenericArity);
 			}
 			if (source.LanguageId == LanguageId.CSharp)
 			{
 				var globalAliases = _globalAliases.GetValueOrDefault(source.ScopeId);
 				if (source.Aliases.TryGetValue(simpleName, out var alias) ||
 				    globalAliases?.TryGetValue(simpleName, out alias) == true)
-					candidates = LookupQualified(source, alias, reference.GenericArity).ToArray();
+					candidates = LookupQualified(source, alias, reference.GenericArity);
 				else
 				{
-					var namespaces = source.ContextNamespaces.Concat(
-						_globalNamespaces.GetValueOrDefault(source.ScopeId) ?? []).Distinct(StringComparer.Ordinal);
+					var namespaces = _contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [];
 					var contextual = candidates.Where(symbol => namespaces.Any(ns =>
 						symbol.Identity.QualifiedName.StartsWith(ns + '.', StringComparison.Ordinal))).ToArray();
 					if (contextual.Length > 0)
@@ -1173,37 +1173,44 @@ public sealed class DependencyFactsEngine : IDisposable
 				: Edge(source, reference, ResolutionStatus.Ambiguous, null, "multiple visible declaration identities", files);
 		}
 
-		private IEnumerable<DeclarationFact> LookupSimple(FileFacts source, string name, int arity) =>
-			VisibleScopeIds(source).SelectMany(scope => CompatibleLanguages(source.LanguageId).SelectMany(language =>
-				_symbolsBySimpleName.GetValueOrDefault(new SymbolLookupKey(scope, language, name)) ?? []))
-				.Where(symbol => symbol.Identity.GenericArity == arity && IsVisible(source, symbol))
-				.Distinct();
-
-		private IEnumerable<DeclarationFact> LookupQualified(FileFacts source, string name, int arity) =>
-			VisibleScopeIds(source).SelectMany(scope => CompatibleLanguages(source.LanguageId).SelectMany(language =>
-				_symbolsByQualifiedName.GetValueOrDefault(new QualifiedSymbolLookupKey(scope, language, QualifiedLookupName(name), arity)) ?? []))
-				.Where(symbol => IsVisible(source, symbol))
-				.Distinct();
-
-		private IEnumerable<string> VisibleScopeIds(FileFacts source)
+		private DeclarationFact[] LookupSimple(FileFacts source, string name, int arity)
 		{
-			var pending = new Queue<string>();
-			var visited = new HashSet<string>(StringComparer.Ordinal);
-			pending.Enqueue(source.ScopeId);
-			while (pending.TryDequeue(out var scopeId))
+			List<DeclarationFact>? matches = null;
+			foreach (var scope in VisibleScopeIds(source.ScopeId))
+			foreach (var language in CompatibleLanguages(source.LanguageId))
 			{
-				if (!visited.Add(scopeId)) continue;
-				yield return scopeId;
-				if (source.LanguageId != LanguageId.CSharp) continue;
-				foreach (var projectReference in _configuration.FindScope(scopeId)?.ProjectReferences ?? [])
-					pending.Enqueue(projectReference);
+				if (!_symbolsBySimpleName.TryGetValue(new SymbolLookupKey(scope, language, name), out var candidates))
+					continue;
+				foreach (var candidate in candidates)
+					if (candidate.Identity.GenericArity == arity && IsVisible(source, candidate))
+						(matches ??= []).Add(candidate);
 			}
+			return matches?.ToArray() ?? [];
 		}
 
-		private static IEnumerable<LanguageId> CompatibleLanguages(LanguageId languageId) => languageId switch
+		private DeclarationFact[] LookupQualified(FileFacts source, string name, int arity)
 		{
-			LanguageId.TypeScript or LanguageId.Tsx or LanguageId.JavaScript =>
-				[LanguageId.TypeScript, LanguageId.Tsx, LanguageId.JavaScript],
+			List<DeclarationFact>? matches = null;
+			var lookupName = QualifiedLookupName(name);
+			foreach (var scope in VisibleScopeIds(source.ScopeId))
+			foreach (var language in CompatibleLanguages(source.LanguageId))
+			{
+				if (!_symbolsByQualifiedName.TryGetValue(
+					    new QualifiedSymbolLookupKey(scope, language, lookupName, arity), out var candidates))
+					continue;
+				foreach (var candidate in candidates)
+					if (IsVisible(source, candidate))
+						(matches ??= []).Add(candidate);
+			}
+			return matches?.ToArray() ?? [];
+		}
+
+		private IReadOnlyList<string> VisibleScopeIds(string scopeId) =>
+			_visibleScopesById.GetValueOrDefault(scopeId) ?? [scopeId];
+
+		private static IReadOnlyList<LanguageId> CompatibleLanguages(LanguageId languageId) => languageId switch
+		{
+			LanguageId.TypeScript or LanguageId.Tsx or LanguageId.JavaScript => TypeScriptLanguages,
 			_ => [languageId]
 		};
 
@@ -1218,8 +1225,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
 			return source.LanguageId == LanguageId.CSharp &&
-			       _configuration.FindScope(source.ScopeId)?.ProjectReferences.Contains(
-				       declaration.Identity.ScopeId, StringComparer.Ordinal) == true;
+			       FindScope(source.ScopeId)?.ProjectReferences.Contains(
+			       declaration.Identity.ScopeId, StringComparer.Ordinal) == true;
 		}
 
 		private DependencyEdge FinishImport(
@@ -1272,8 +1279,22 @@ public sealed class DependencyFactsEngine : IDisposable
 				: name;
 		}
 
-		private static string QualifiedLookupName(string qualified) =>
-			Regex.Replace(qualified, @"`[0-9]+", string.Empty, RegexOptions.CultureInvariant);
+		private static string QualifiedLookupName(string qualified)
+		{
+			var marker = qualified.IndexOf('`');
+			if (marker < 0) return qualified;
+			var result = new StringBuilder(qualified.Length);
+			for (var index = 0; index < qualified.Length; index++)
+			{
+				if (qualified[index] != '`')
+				{
+					result.Append(qualified[index]);
+					continue;
+				}
+				while (index + 1 < qualified.Length && char.IsAsciiDigit(qualified[index + 1])) index++;
+			}
+			return result.ToString();
+		}
 
 		private static string SimpleName(string qualified)
 		{
@@ -1291,6 +1312,32 @@ public sealed class DependencyFactsEngine : IDisposable
 			var module = Path.ChangeExtension(relative, null)!.Replace('/', '.').Replace('\\', '.');
 			return module.EndsWith(".__init__", StringComparison.Ordinal) ? module[..^".__init__".Length] : module;
 		}
+
+		private DependencyScopeDescriptor? FindScope(string scopeId) =>
+			_scopesById.GetValueOrDefault(scopeId);
+
+		private static IReadOnlyDictionary<string, string[]> BuildVisibleScopes(
+			IReadOnlyDictionary<string, DependencyScopeDescriptor> scopes)
+		{
+			var result = new Dictionary<string, string[]>(StringComparer.Ordinal);
+			foreach (var scope in scopes.Values)
+			{
+				var pending = new Queue<string>();
+				var visited = new HashSet<string>(StringComparer.Ordinal);
+				pending.Enqueue(scope.ScopeId);
+				while (pending.TryDequeue(out var scopeId))
+				{
+					if (!visited.Add(scopeId)) continue;
+					if (scope.LanguageId != LanguageId.CSharp || !scopes.TryGetValue(scopeId, out var current)) continue;
+					foreach (var projectReference in current.ProjectReferences) pending.Enqueue(projectReference);
+				}
+				result[scope.ScopeId] = visited.Order(StringComparer.Ordinal).ToArray();
+			}
+			return result;
+		}
+
+		private static readonly LanguageId[] TypeScriptLanguages =
+			[LanguageId.TypeScript, LanguageId.Tsx, LanguageId.JavaScript];
 
 		private readonly record struct SymbolLookupKey(string ScopeId, LanguageId LanguageId, string SimpleName);
 		private readonly record struct QualifiedSymbolLookupKey(

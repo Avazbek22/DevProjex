@@ -13,6 +13,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private const int MaximumRetainedWorkersPerLanguage = 2;
 	private const int MaximumPreparedSources = 8_192;
 	private const long MaximumPreparedSourceBytes = 64L * 1024 * 1024;
+	private const string DiagnosticErrorQuery = "(ERROR) @diagnostic.error";
 	private readonly IGrammarLibraryLocator _locator;
 	private readonly IReadOnlyDictionary<LanguageId, LanguageDefinition> _definitions;
 	private readonly ConcurrentDictionary<LanguageId, Lazy<LanguageRuntime>> _runtimes = [];
@@ -152,7 +153,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var definition = _definitions[id];
 			var queryHash = Hash(Encoding.UTF8.GetBytes(
 				ReadQuery(definition.QueryDirectory, "declarations.scm") + "\0" +
-				ReadQuery(definition.QueryDirectory, "references.scm")));
+				ReadQuery(definition.QueryDirectory, "references.scm") + "\0" + DiagnosticErrorQuery));
 			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}";
 		});
 
@@ -172,9 +173,10 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			using var tree = lease.Parser.Parse(source.Source) ??
 				throw new InvalidOperationException("Tree-sitter returned no syntax tree.");
 			Interlocked.Increment(ref _parseCount);
-			var declarations = Capture(runtime.Declarations, tree.RootNode, limits.MaximumFactsPerFile);
-			var references = Capture(runtime.References, tree.RootNode, limits.MaximumFactsPerFile);
-			var errorKinds = CollectErrorKinds(tree.RootNode);
+			var (declarations, references, errorKinds) = CaptureFacts(
+				runtime.Facts,
+				tree.RootNode,
+				limits.MaximumFactsPerFile);
 			var context = new DependencyExtractionContext(
 				source.RelativePath,
 				source.ScopeId,
@@ -205,18 +207,12 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				var language = new Language(_locator.Resolve(definition.Library), definition.Export);
 				try
 				{
-					var declarations = new Query(language, ReadQuery(definition.QueryDirectory, "declarations.scm"));
-					try
-					{
-						var references = new Query(language, ReadQuery(definition.QueryDirectory, "references.scm"));
-						Interlocked.Increment(ref _compiledQuerySetCount);
-						return new LanguageRuntime(language, declarations, references, definition.Adapter);
-					}
-					catch
-					{
-						declarations.Dispose();
-						throw;
-					}
+					var facts = new Query(language,
+						ReadQuery(definition.QueryDirectory, "declarations.scm") + "\n" +
+						ReadQuery(definition.QueryDirectory, "references.scm") + "\n" +
+						DiagnosticErrorQuery);
+					Interlocked.Increment(ref _compiledQuerySetCount);
+					return new LanguageRuntime(language, facts, definition.Adapter);
 				}
 				catch
 				{
@@ -236,39 +232,98 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		}
 	}
 
-	private static IReadOnlyList<DependencySyntaxCapture> Capture(Query query, Node root, int limit)
+	private static (
+		IReadOnlyList<DependencySyntaxCapture> Declarations,
+		IReadOnlyList<DependencySyntaxCapture> References,
+		IReadOnlyDictionary<string, int> ErrorKinds) CaptureFacts(Query query, Node root, int limit)
 	{
 		using var cursor = query.Execute(root);
-		return cursor.Captures.Take(limit + 1)
-			.Select(static capture => new DependencySyntaxCapture(
-				capture.Name,
-				capture.Node.Type,
-				capture.Node.Text,
-				checked((int)capture.Node.StartPosition.Row + 1),
-				checked((int)capture.Node.StartIndex),
-				checked((int)capture.Node.EndIndex)))
-			.OrderBy(static capture => capture.StartIndex)
-			.ThenBy(static capture => capture.Name, StringComparer.Ordinal)
-			.ToArray();
+		var declarations = new List<DependencySyntaxCapture>();
+		var references = new List<DependencySyntaxCapture>();
+		var errorKinds = new Dictionary<string, int>(StringComparer.Ordinal);
+		foreach (var capture in cursor.Captures)
+		{
+			if (capture.Name == "diagnostic.error")
+			{
+				var kinds = capture.Node.Children.Where(static child => child.IsNamed)
+					.Select(static child => child.Type).Distinct().ToArray();
+				if (kinds.Length == 0) kinds = ["<token>"];
+				foreach (var kind in kinds)
+					errorKinds[kind] = errorKinds.GetValueOrDefault(kind) + 1;
+				continue;
+			}
+			var target = IsDeclarationCapture(capture.Name) ? declarations : references;
+			if (target.Count <= limit)
+				target.Add(CreateCapture(capture.Name, capture.Node));
+		}
+		return (
+			declarations.OrderBy(static capture => capture.StartIndex)
+				.ThenBy(static capture => capture.Name, StringComparer.Ordinal).ToArray(),
+			references.OrderBy(static capture => capture.StartIndex)
+				.ThenBy(static capture => capture.Name, StringComparer.Ordinal).ToArray(),
+			errorKinds);
 	}
 
-	private static IReadOnlyDictionary<string, int> CollectErrorKinds(Node root)
+	private static bool IsDeclarationCapture(string captureName) =>
+		captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
+		captureName is "context.namespace" or "context.using";
+
+	private static DependencySyntaxCapture CreateCapture(string captureName, Node node)
 	{
-		if (!root.HasError) return new Dictionary<string, int>();
-		var result = new Dictionary<string, int>(StringComparer.Ordinal);
-		var stack = new Stack<Node>();
-		stack.Push(root);
-		while (stack.TryPop(out var node))
+		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
+			captureName == "context.namespace";
+		if (!isCompact)
+			return CreateCapture(captureName, node, node.Text, null, 0, false);
+
+		var capturedName = node.GetChildForField("name")?.Text;
+		var typeParameters = node.Children.FirstOrDefault(static child =>
+			child.Type is "type_parameter_list" or "type_parameters");
+		var genericArity = typeParameters is null ? 0 : CountGenericArity(typeParameters.Text);
+		var evidence = string.IsNullOrEmpty(capturedName)
+			? string.Empty
+			: capturedName + (genericArity == 0 ? string.Empty : $"`{genericArity}");
+		var isFileLocal = captureName.StartsWith("declaration.", StringComparison.Ordinal) &&
+			node.Children.Any(static child => child.Type == "modifier" && child.Text == "file");
+		return CreateCapture(captureName, node, evidence, capturedName, genericArity, isFileLocal);
+	}
+
+	private static DependencySyntaxCapture CreateCapture(
+		string captureName,
+		Node node,
+		string text,
+		string? capturedName,
+		int genericArity,
+		bool isFileLocal) =>
+		new(
+			captureName,
+			node.Type,
+			text,
+			checked((int)node.StartPosition.Row + 1),
+			checked((int)node.StartIndex),
+			checked((int)node.EndIndex),
+			capturedName,
+			genericArity,
+			isFileLocal);
+
+	private static int CountGenericArity(string text)
+	{
+		var depth = 0;
+		var arity = 1;
+		foreach (var character in text)
 		{
-			if (node.Type == "ERROR")
+			switch (character)
 			{
-				var kinds = node.Children.Where(static child => child.IsNamed).Select(static child => child.Type).Distinct().ToArray();
-				if (kinds.Length == 0) kinds = ["<token>"];
-				foreach (var kind in kinds) result[kind] = result.GetValueOrDefault(kind) + 1;
+				case '<':
+					depth++;
+					break;
+				case '>' when --depth == 0:
+					return arity;
+				case ',' when depth == 1:
+					arity++;
+					break;
 			}
-			foreach (var child in node.Children) stack.Push(child);
 		}
-		return result;
+		return 0;
 	}
 
 	private static FileFacts StatusOnly(PreparedDependencySource source, DependencyFileStatus status, string? reason) => new(
@@ -348,14 +403,12 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	private sealed class LanguageRuntime(
 		Language language,
-		Query declarations,
-		Query references,
+		Query facts,
 		IDependencyLanguageAdapter adapter) : IDisposable
 	{
 		private readonly ConcurrentBag<Parser> _parsers = [];
 		private int _retained;
-		public Query Declarations { get; } = declarations;
-		public Query References { get; } = references;
+		public Query Facts { get; } = facts;
 		public IDependencyLanguageAdapter Adapter { get; } = adapter;
 
 		public ParserLease Rent(SemaphoreSlim budget)
@@ -384,8 +437,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		public void Dispose()
 		{
 			while (_parsers.TryTake(out var parser)) parser.Dispose();
-			References.Dispose();
-			Declarations.Dispose();
+			Facts.Dispose();
 			language.Dispose();
 		}
 	}

@@ -9,7 +9,10 @@ internal sealed record DependencySyntaxCapture(
 	string Text,
 	int Line,
 	int StartIndex,
-	int EndIndex);
+	int EndIndex,
+	string? CapturedName = null,
+	int GenericArity = 0,
+	bool IsFileLocal = false);
 
 internal sealed record DependencyExtractionContext(
 	string RelativePath,
@@ -130,10 +133,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		var declarations = new List<DeclarationFact>(declarationCaptures.Length);
 		foreach (var capture in declarationCaptures)
 		{
-			var match = capture.Name == "declaration.delegate"
-				? DelegateRegex().Match(capture.Text)
-				: DeclarationRegex().Match(capture.Text);
-			if (!match.Success)
+			if (string.IsNullOrEmpty(capture.CapturedName))
 				continue;
 			var containingNamespace = namespaces
 				.Where(item => item.Start <= capture.StartIndex && item.End >= capture.EndIndex)
@@ -142,23 +142,13 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			var parents = declarationCaptures
 				.Where(item => item.StartIndex < capture.StartIndex && item.EndIndex >= capture.EndIndex)
 				.OrderBy(static item => item.StartIndex)
-				.Select(item =>
-				{
-					var parent = item.Name == "declaration.delegate"
-						? DelegateRegex().Match(item.Text)
-						: DeclarationRegex().Match(item.Text);
-					return parent.Success
-						? parent.Groups["name"].Value + AritySuffix(GenericArityAt(
-							item.Text,
-							parent.Groups["name"].Index + parent.Groups["name"].Length))
-						: null;
-				})
+				.Select(static item => string.IsNullOrEmpty(item.CapturedName)
+					? null
+					: item.CapturedName + AritySuffix(item.GenericArity))
 				.OfType<string>();
-			var name = match.Groups["name"].Value;
+			var name = capture.CapturedName;
 			var qualified = string.Join('.', new[] { containingNamespace }
-				.Concat(parents).Append(name + AritySuffix(GenericArityAt(
-					capture.Text,
-					match.Groups["name"].Index + match.Groups["name"].Length)))
+				.Concat(parents).Append(name + AritySuffix(capture.GenericArity))
 				.Where(static value => value.Length > 0));
 			declarations.Add(new DeclarationFact(
 				new SymbolIdentity(
@@ -166,8 +156,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 					context.LanguageId,
 					Kinds[capture.Name],
 					qualified,
-					GenericArityAt(capture.Text, match.Groups["name"].Index + match.Groups["name"].Length),
-					FileModifierRegex().IsMatch(capture.Text) ? context.RelativePath : null),
+					capture.GenericArity,
+					capture.IsFileLocal ? context.RelativePath : null),
 				[Site(context, capture)]));
 		}
 
@@ -196,24 +186,12 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		DependencyExtractionContext context,
 		DependencySyntaxCapture capture)
 	{
-		var text = capture.Text;
-		var typeText = capture.Name switch
-		{
-			"reference.variable_type" => VariableTypeRegex().Match(text).Groups["type"].Value,
-			"reference.property_type" => PropertyTypeRegex().Match(text).Groups["type"].Value,
-			"reference.parameter_type" => ParameterTypeRegex().Match(text).Groups["type"].Value,
-			"reference.return_type" => ReturnTypeRegex().Match(text).Groups["type"].Value,
-			"reference.base" => text.TrimStart(':', ' '),
-			"reference.constraint" => text[(text.IndexOf(':') + 1)..],
-			"reference.attribute" => AttributeRegex().Match(text).Groups["type"].Value,
-			"reference.object_creation" => NewTypeRegex().Match(text).Groups["type"].Value,
-			_ => ParenthesizedTypeRegex().Match(text).Groups["type"].Value
-		};
-		if (typeText.Length == 0 && capture.Name == "reference.object_creation" && TargetTypedNewRegex().IsMatch(text))
+		if (capture.Name == "reference.target_typed_object_creation")
 		{
 			yield return NewReference(context, capture, "<target-typed-new>", 0);
 			yield break;
 		}
+		var typeText = capture.Text;
 		foreach (Match match in TypeNameRegex().Matches(typeText))
 		{
 			var name = match.Value.Replace("global::", string.Empty, StringComparison.Ordinal)
@@ -225,7 +203,11 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 	}
 
 	private static ReferenceFact NewReference(DependencyExtractionContext context, DependencySyntaxCapture capture, string name, int arity) =>
-		new(EvidenceLayer.TypeReference, name, arity, capture.NodeType, Site(context, capture));
+		new(EvidenceLayer.TypeReference, name, arity,
+			capture.Name.StartsWith("reference.", StringComparison.Ordinal)
+				? capture.Name["reference.".Length..]
+				: capture.NodeType,
+			Site(context, capture));
 
 	private static FileFacts Failure(DependencyExtractionContext context, string reason) => new(
 		context.RelativePath, context.ScopeId, context.LanguageId, context.ContentFingerprint,
@@ -234,12 +216,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 
 	private static IReadOnlyList<NamespaceSpan> ParseNamespaces(IEnumerable<DependencySyntaxCapture> captures) =>
 		captures.Where(static capture => capture.Name == "context.namespace")
-			.Select(capture =>
-			{
-				var match = NamespaceRegex().Match(capture.Text);
-				return new NamespaceSpan(match.Success ? match.Groups["name"].Value : string.Empty,
-					capture.StartIndex, capture.EndIndex, capture.NodeType == "file_scoped_namespace_declaration");
-			})
+			.Select(static capture => new NamespaceSpan(capture.CapturedName ?? string.Empty,
+				capture.StartIndex, capture.EndIndex, capture.NodeType == "file_scoped_namespace_declaration"))
 			.Where(static item => item.Name.Length > 0).ToArray();
 
 	private static IReadOnlyDictionary<string, string> ParseUsings(
@@ -280,20 +258,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		["public", "private", "protected", "internal", "static", "readonly", "ref", "out", "in", "params", "this", "where", "new", "class", "struct", "interface", "record", "enum", "delegate", "void", "var", "get", "set", "init", "return", "true", "false", "null"],
 		StringComparer.Ordinal);
 
-	[GeneratedRegex(@"\b(?:class|struct|interface|record(?:\s+class|\s+struct)?|enum|delegate)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)", RegexOptions.CultureInvariant)] private static partial Regex DeclarationRegex();
-	[GeneratedRegex(@"\bdelegate\s+[A-Za-z_][\w.:<>,?\[\]\s]*\s+(?<name>[A-Za-z_]\w*)\s*(?:<[^>]+>)?\s*\(", RegexOptions.CultureInvariant)] private static partial Regex DelegateRegex();
-	[GeneratedRegex(@"\bnamespace\s+(?<name>[A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.CultureInvariant)] private static partial Regex NamespaceRegex();
 	[GeneratedRegex(@"\b(?:global\s+)?using\s+(?<static>static\s+)?(?:(?<alias>[A-Za-z_]\w*)\s*=\s*)?(?<target>(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*)\s*;", RegexOptions.CultureInvariant)] private static partial Regex UsingRegex();
-	[GeneratedRegex(@"\bfile\s+(?:(?:sealed|abstract|partial|readonly|unsafe)\s+)*(?:class|struct|interface|record|enum|delegate)\b", RegexOptions.CultureInvariant)] private static partial Regex FileModifierRegex();
 	[GeneratedRegex(@"(?<name>[A-Za-z_]\w*)", RegexOptions.CultureInvariant)] private static partial Regex TypeParameterRegex();
-	[GeneratedRegex(@"^(?:(?:public|private|protected|internal|static|readonly|volatile|const|ref|scoped|unsafe|new)\s+)*(?<type>[A-Za-z_][\w.:<>,?\[\]\s]*)\s+[A-Za-z_]\w*", RegexOptions.CultureInvariant)] private static partial Regex VariableTypeRegex();
-	[GeneratedRegex(@"^(?:(?:public|private|protected|internal|static|virtual|abstract|override|sealed|required|new|readonly|unsafe)\s+)*(?<type>[A-Za-z_][\w.:<>,?\[\]\s]*)\s+[A-Za-z_]\w*\s*\{", RegexOptions.CultureInvariant)] private static partial Regex PropertyTypeRegex();
-	[GeneratedRegex(@"^(?:\[[^\]]+\]\s*)*(?:(?:this|ref|out|in|params|scoped)\s+)*(?<type>[A-Za-z_][\w.:<>,?\[\]\s]*)\s+[A-Za-z_]\w*", RegexOptions.CultureInvariant)] private static partial Regex ParameterTypeRegex();
-	[GeneratedRegex(@"^(?:(?:public|private|protected|internal|static|virtual|abstract|override|sealed|async|extern|unsafe|new|partial)\s+)*(?<type>[A-Za-z_][\w.:<>,?\[\]\s]*)\s+[A-Za-z_]\w*\s*(?:<[^>]+>)?\s*\(", RegexOptions.CultureInvariant)] private static partial Regex ReturnTypeRegex();
-	[GeneratedRegex(@"^\[?\s*(?<type>[A-Za-z_][\w.:]*)", RegexOptions.CultureInvariant)] private static partial Regex AttributeRegex();
-	[GeneratedRegex(@"\bnew\s+(?<type>[A-Za-z_][\w.:]*(?:\s*<[^>;(){}]+>)?)", RegexOptions.CultureInvariant)] private static partial Regex NewTypeRegex();
-	[GeneratedRegex(@"\bnew\s*\(", RegexOptions.CultureInvariant)] private static partial Regex TargetTypedNewRegex();
-	[GeneratedRegex(@"\((?<type>[A-Za-z_][\w.:<>,?\[\]\s]*)\)", RegexOptions.CultureInvariant)] private static partial Regex ParenthesizedTypeRegex();
 	[GeneratedRegex(@"(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeNameRegex();
 }
 
@@ -315,8 +281,7 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 
 	private static DeclarationFact? ToDeclaration(DependencyExtractionContext context, DependencySyntaxCapture capture, string module)
 	{
-		var match = DeclarationRegex().Match(capture.Text);
-		if (!match.Success) return null;
+		if (string.IsNullOrEmpty(capture.CapturedName)) return null;
 		var kind = capture.Name switch
 		{
 			"declaration.class" => SymbolKind.Class,
@@ -327,8 +292,7 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 			_ => SymbolKind.Record
 		};
 		return new DeclarationFact(new SymbolIdentity(context.ScopeId, context.LanguageId, kind,
-			$"{module}#{match.Groups["name"].Value}",
-			GenericArityAt(capture.Text, match.Groups["name"].Index + match.Groups["name"].Length)), [Site(context, capture)]);
+			$"{module}#{capture.CapturedName}", capture.GenericArity), [Site(context, capture)]);
 	}
 
 	private static IEnumerable<ImportFact> ExtractImports(DependencyExtractionContext context, DependencySyntaxCapture capture)
@@ -375,7 +339,6 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
 	private static readonly HashSet<string> Keywords = new(
 		["string", "number", "boolean", "unknown", "never", "any", "void", "null", "undefined", "keyof", "typeof", "readonly", "new", "extends", "implements"], StringComparer.Ordinal);
-	[GeneratedRegex(@"\b(?:class|interface|type|enum|function|namespace|module)\s+(?<name>[A-Za-z_$][\w$]*)", RegexOptions.CultureInvariant)] private static partial Regex DeclarationRegex();
 	[GeneratedRegex("(?:from\\s+|import\\s*\\(|require\\s*\\()\\s*['\"](?<path>[^'\"]+)['\"]", RegexOptions.CultureInvariant)] private static partial Regex ModuleRegex();
 	[GeneratedRegex("""require\s*\(\s*['"](?<path>[^'"]+)['"]\s*\)""", RegexOptions.CultureInvariant)] private static partial Regex RequireRegex();
 	[GeneratedRegex(@"\{(?<names>[^}]+)\}", RegexOptions.CultureInvariant)] private static partial Regex NamedImportsRegex();
@@ -391,11 +354,10 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 		if (module.EndsWith(".__init__", StringComparison.Ordinal)) module = module[..^".__init__".Length];
 		var declarations = context.Declarations.Select(capture =>
 		{
-			var match = DeclarationRegex().Match(capture.Text);
-			if (!match.Success) return null;
+			if (string.IsNullOrEmpty(capture.CapturedName)) return null;
 			var kind = capture.Name == "declaration.class" ? SymbolKind.Class : SymbolKind.Function;
 			return new DeclarationFact(new SymbolIdentity(context.ScopeId, context.LanguageId, kind,
-				$"{module}.{match.Groups["name"].Value}", 0), [Site(context, capture)]);
+				$"{module}.{capture.CapturedName}", 0), [Site(context, capture)]);
 		}).Where(static item => item is not null).Cast<DeclarationFact>().ToArray();
 		var imports = context.References.Where(static capture => capture.Name.StartsWith("import.", StringComparison.Ordinal))
 			.SelectMany(capture => ExtractImports(context, capture)).ToArray();
@@ -442,7 +404,6 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
 	private static readonly HashSet<string> Keywords = new(
 		["def", "class", "None", "True", "False", "str", "int", "float", "bool", "bytes", "list", "dict", "tuple", "set", "object", "typing", "self", "cls"], StringComparer.Ordinal);
-	[GeneratedRegex(@"\b(?:class|def)\s+(?<name>[A-Za-z_]\w*)", RegexOptions.CultureInvariant)] private static partial Regex DeclarationRegex();
 	[GeneratedRegex(@"^from\s+(?<module>\.*(?:[A-Za-z_][\w.]*)?)\s+import\s+(?<names>.+)$", RegexOptions.CultureInvariant)] private static partial Regex FromRegex();
 	[GeneratedRegex(@"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeRegex();
 	[GeneratedRegex(@"(?m)^\s*__all__\s*=\s*[A-Za-z_]", RegexOptions.CultureInvariant)] private static partial Regex DynamicAllRegex();
