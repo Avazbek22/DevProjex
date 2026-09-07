@@ -393,6 +393,17 @@ use `[Skipped] path — priority P, T tokens, R remaining: does not fit the rema
 budget`. The existing largest-skipped report remains present. Project-derived
 paths are single-line escaped. stdout remains document-only.
 
+With one or more `--focus` values, the summary algorithm is `focus-v1` and names
+the seed count, bounded hop histogram (`0` through `7`, one `8+` bucket and
+`max hop`), unreachable count, `importance-v1` within-hop order, graph coverage,
+and Git window. A degraded seed count distinguishes resolved links, facts without
+resolved neighbors, extraction failure, and unsupported facts. A seed top line is
+`[Ranking top] PATH — seed`; other top lines add hop, canonical parent relation,
+final priority, and the original importance priority. Focus-ranked budget misses
+use `[Skipped] PATH — hop H, priority P, T tokens, R remaining: does not fit the
+remaining budget` (or `unreachable`). Existing coverage, shallow-Git, contribution,
+role, confidence, and largest-skipped output remains present.
+
 ## Context JSON
 
 The top-level shape is:
@@ -472,6 +483,31 @@ each with `path`, `priority`, `estimatedTokens`, `remainingEstimatedTokens`, and
 the stable `reason`. Ranking changes neither a file's prepared content nor its
 token cost. `role` uses `source`, `test-source`, `manifest`, or `entry-point`;
 `gitUnavailableReason` uses lowercase kebab-case tokens headed by `none`.
+
+With focus, `algorithm` is `focus-v1` and `ranking` additionally contains:
+
+```json
+{
+  "focus": {
+    "algorithm": "focus-v1",
+    "withinHop": "importance-v1",
+    "seeds": [
+      { "requested": "src/app.py", "path": "src/app.py", "state": "resolved" }
+    ],
+    "hops": { "0": 1, "1": 6 },
+    "hopsBeyond": 0,
+    "maxHop": 1,
+    "unreachable": 20
+  }
+}
+```
+
+Seed states are `resolved`, `no-resolved-neighbors`, `extraction-failed`, and
+`unsupported`. Every `top` and `skipped` entry adds `hop` (number or null) and
+`baseImportancePriority`. A reachable non-seed also adds `via` with `path` and
+relation `dependent-of`, `dependency-of`, or `linked-with`. These properties and
+the `focus` object are omitted entirely without focus; `importance-v1` JSON stays
+byte-for-byte unchanged.
 
 ## Context XML
 

@@ -658,6 +658,7 @@ Specific options:
 -n, --dry-run
 --max-tokens <N>
 --rank <importance>
+--focus <PATH>              repeatable; at most 16; requires --rank importance
 ```
 
 The format applies to the entire document. JSON and XML are parseable structured
@@ -695,6 +696,16 @@ Omitting `--rank` preserves the existing bytes and does not read Git history or
 index dependency facts. The trusted stderr report names graph coverage, the
 200-commit Git window, the top ten entries, and ranked skips.
 
+Repeated `--focus PATH` values opt into `focus-v1` within importance ranking.
+Each path may be relative to the project root or absolute inside it and must be a
+file in the already effective selection. The command validates at most 16 supplied
+values before canonical-file deduplication. Seeds keep caller order at hop 0;
+remaining files are ordered by minimum undirected dependency-graph hop, then their
+`importance-v1` priority and canonical path. Unreachable files follow in ordinary
+importance order. Focus never widens `--select`, profile, Git scope, exclusion,
+glob, submodule, or file-size filters. A seed is considered first by the same
+greedy budget pass but is not guaranteed admission when it is too large.
+
 With `--hide-secrets` or `--hide-private-data`, detector and budget failures fail closed and
 produce no complete output artifact. A text file above the supported scan limit or in an
 unsupported encoding does not abort the remaining analysis: its content is withheld from context
@@ -725,6 +736,7 @@ devprojex export context . --hide-secrets --format markdown -o ../devprojex-reda
 devprojex export context . --hide-private-data --format markdown -o ../devprojex-private.md
 devprojex export context . --compress-code --format markdown -o ../devprojex-compact.md
 $ devprojex export context . --view content --rank importance --max-tokens 16000 -o ../devprojex-ranked.md
+$ devprojex export context . --view content --rank importance --focus Application/Context/ProjectContextDocumentService.cs --max-tokens 16000 -o -
 ```
 
 ## Export Project

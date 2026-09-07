@@ -124,6 +124,41 @@ On the pinned DevProjex corpus, the beginning of the reviewed report is represen
 [Ranking top] Kernel/Models/IgnoreRules.cs — dependents 138 · dependencies 5 · commits 2/200 · priority 1; graph available; git available; main contribution: graph; confidence limited
 ```
 
+## Focus-v1 product order
+
+`pack_context` can combine `rank: "importance"` with one or more `focus` files;
+`export context` exposes the same behavior through repeated `--focus`. Focus is
+experimental in v5.2 and operates only after the effective file selection is
+complete. It cannot add a seed, dependency, intermediate node, or any other file
+excluded by paths, globs, profiles, Git scope, submodule boundaries, exclusions,
+or the file-size limit. GUI and TUI remain human-ordered surfaces and do not use it.
+
+The dependency facts are indexed once and build the same numeric, deduplicated
+resolved non-self graph used by importance PageRank. Only when focus is present,
+the reverse adjacency is built and a deterministic multi-source BFS treats the
+graph as undirected. Seeds are hop 0 in caller order after canonical-file
+deduplication. Other reachable files sort by minimum hop, original
+`importance-v1` priority, then canonical relative path; unreachable files retain
+importance order. The BFS has no depth limit. Its report bounds only the displayed
+histogram to levels 0 through 7 plus `8+` and `maxHop`.
+
+After all distances are known, a non-seed file's explanation parent is the
+hop-minus-one neighbor with the smallest canonical path. Direction is reported as
+`dependent of`, `dependency of`, or `linked with`. Seeds remain hop 0 even when
+facts are unsupported, extraction failed, or facts contain no resolved neighbor;
+the report distinguishes all four states and explains that the remaining order
+degraded to importance. Final `Priority` is admission position, while
+`BaseImportancePriority` and `Score` preserve the seedless importance result.
+Budget admission remains the existing greedy pass: an oversized seed can be
+skipped, and later files are still considered. File transformations, redaction
+placeholder identities, compression, content bytes, and token cost do not depend
+on the order.
+
+Without focus, no reverse graph, BFS, focus report, or focus JSON properties are
+created, and the `importance-v1` document and trailer contract remains unchanged.
+Personalized PageRank exists only as an evaluator comparator and is not accepted
+by any product surface.
+
 ## Focus-seeded evaluation
 
 The `focus-v1` protocol was pre-registered on 2026-09-07 in
