@@ -67,6 +67,7 @@ devprojex
 ├── mcp
 ├── open
 ├── analyze
+├── related
 ├── tree
 ├── export
 │   ├── context, ctx
@@ -148,9 +149,9 @@ to stdout and exit with code `0` without opening Desktop or Terminal Workspace.
 
 ## Common Selection Options
 
-Six commands accept the same typed path-selection options, through `--exclude`
-in the list below: `analyze`, `tree`, `export context`, `export project`, `open`,
-and `profile save`. All except `tree` also accept the five
+Seven commands accept the same typed path-selection options, through `--exclude`
+in the list below: `analyze`, `related`, `tree`, `export context`, `export project`, `open`,
+and `profile save`. All except `tree` and `related` also accept the five
 content-transformation options that follow. `open` additionally accepts the
 `auto` profile:
 
@@ -162,7 +163,7 @@ content-transformation options that follow. `open` additionally accepts the
 --select-from <FILE|->
 --git-mode <MODE>
 --exclude <NAME>             repeatable
---max-file-bytes <SIZE>      analyze, tree, and export context only
+--max-file-bytes <SIZE>      analyze, related, tree, and export context only
 --hide-secrets [<true|false|on|off>]
 --hide-private-data [<true|false|on|off>]
 --compress-code [<true|false|on|off>]
@@ -178,7 +179,7 @@ negative form: `--no-hide-secrets`, `--no-hide-private-data`,
 conflict with an existing command option.
 
 `--max-file-bytes SIZE` is an invocation-only narrowing filter for `analyze`,
-`tree`, and `export context`. Files strictly larger than SIZE are removed after
+`related`, `tree`, and `export context`. Files strictly larger than SIZE are removed after
 all profile, ignore, Git, and explicit path filters; a file exactly SIZE bytes is
 kept. SIZE may be a byte count or use a case-insensitive binary suffix:
 `k|kb|kib`, `m|mb|mib`, or `g|gb|gib`, all with a 1024 multiplier. The filter is
@@ -190,7 +191,7 @@ unambiguous discovered entry.
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
 default is `auto`. Direct selection commands (`analyze`, `tree`, both exports,
-and `profile save`) default to `standard`.
+`related`, and `profile save`) default to `standard`.
 
 Git filtering is independent from ordinary Exclusions.
 
@@ -548,6 +549,53 @@ devprojex analyze . --top-files 10
 devprojex analyze . --max-file-bytes 1m
 ```
 
+## Related
+
+```shell
+devprojex related <PATH> [--project PROJECT|URL] [options]
+```
+
+`PATH` is one project-relative seed file inside the effective selection. `--project`
+defaults to the current directory and accepts the same local-directory or Git-URL source
+as `analyze`; `--branch` remains URL-only. The seed chooses where the answer starts, while
+the dependency engine indexes the complete effective manifest produced by the selected
+profile, roots, extensions, paths, Git mode, exclusions, and file-size limit. It never
+returns a candidate outside that manifest.
+
+Specific options are:
+
+```text
+--project <PROJECT|URL>
+--direction <dependencies|dependents|both>   default: both
+-f, --format <text|json>                     default: text
+--branch <NAME>                              URL source only
+--max-file-bytes <SIZE>
+<shared path-selection options>
+<shared output options>
+```
+
+Text output contains localized `Dependencies` and `Dependents` sections. Each row has a
+portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
+and a cross-scope marker where applicable; ambiguous references stay grouped with their
+candidate paths. JSON is the deterministic `devprojex-related-files` document described in
+[CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no content-transformation
+flags and does not return source content.
+
+An unsupported seed language is a successful empty result plus
+`warning[DPX-DEPENDENCY-UNSUPPORTED]` on stderr. A supported seed with no projected edges
+reports that no related files exist. Missing seeds, paths outside the effective selection,
+invalid direction or format values, and invalid shared options use the ordinary argument
+and selection errors. See [Dependencies.md](Dependencies.md) for evidence layers, resolver
+boundaries, limits, and cache behavior.
+
+Examples:
+
+```shell
+devprojex related Application/Services/ProjectAnalysisService.cs
+devprojex related src/main.ts --direction dependencies --format json
+devprojex related tests/test_app.py --project . --select src --select tests
+```
+
 ## Tree
 
 ```shell
@@ -861,7 +909,7 @@ install it using the shell's normal completion mechanism.
 `--color`, `--plain`, `--verbosity`, and `-q`/`--quiet` are recursive root
 options and may be placed on every command. Commands without optional ANSI or
 diagnostic output accept and ignore values that do not affect their payload.
-`--progress` remains limited to `analyze`, `tree`, and exports.
+`--progress` remains limited to `analyze`, `related`, `tree`, and exports.
 
 Environment defaults sit below explicit flags and above capability detection:
 `DEVPROJEX_COLOR`, `DEVPROJEX_PROGRESS`, `DEVPROJEX_VERBOSITY`, and
