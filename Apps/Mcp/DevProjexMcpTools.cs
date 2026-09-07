@@ -281,7 +281,8 @@ internal sealed class DevProjexMcpTools(
 
 	[Description(
 		"Builds one context with tree, files, or both in Markdown, text, JSON, or XML, plus detail and token limits. Use it for many files; " +
-		"use get_file for one or search_project to find code. Over 50,000 characters, it returns a pack_id for read_pack until server exit.")]
+		"use get_file for one or search_project to find code. rank=importance can take focus seeds for graph-hop ordering. " +
+		"Over 50,000 characters, it returns a pack_id for read_pack until server exit.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -304,6 +305,7 @@ internal sealed class DevProjexMcpTools(
 					"tracked_only",
 					"git_scope",
 					"rank",
+					"focus",
 					"max_tokens",
 					"max_file_bytes"));
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
@@ -311,6 +313,19 @@ internal sealed class DevProjexMcpTools(
 			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
 			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
 			var rank = ParseRank(arguments.OptionalString("rank"));
+			var focusSpecified = request.Params.Arguments?.ContainsKey("focus") == true;
+			var focus = focusSpecified
+				? arguments.RequiredStringOrArray(
+					"focus",
+					maximumItems: 16,
+					maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength)
+				: null;
+			if (focusSpecified && rank is null)
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: focus is valid only together with rank: \"importance\".");
+			}
 			if (rank is not null && view == ProjectContextView.Tree)
 			{
 				throw new McpToolException(
@@ -325,6 +340,11 @@ internal sealed class DevProjexMcpTools(
 						format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 				.ConfigureAwait(false);
 			var plan = selection.Plan;
+			var focusSeeds = focus is null
+				? null
+				: Projects.ResolveRequestedFiles(plan, focus, cancellationToken)
+					.Select((path, index) => new FocusRankingSeedRequest(focus[index], path))
+					.ToArray();
 			// A pack is the answer many agents read instead of get_tree, so it carries the same
 			// effective-filters footer next to its tree.
 			var trustedPlanWarnings = CombineTrustedNotices(
@@ -336,31 +356,44 @@ internal sealed class DevProjexMcpTools(
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
 			plan = Projects.ApplyDetail(plan, effectiveDetail, cancellationToken);
 			var outputPlan = WithoutWarningDiagnostics(plan);
-			var ranking = rank is null
+			var rankingService = rank is null
 				? null
-				: await new ImportanceRankingService(
+				: new ImportanceRankingService(
 						Projects.DependencyFactsEngine,
-						new ProjectGitHistoryReader())
-					.RankAsync(
-						plan.SourceRoot,
-						plan.IncludedFiles,
-						new Progress<ImportanceRankingProgress>(value =>
-						{
-							var total = Math.Max(1, value.Total);
-							var fraction = Math.Clamp((double)value.Completed / total, 0, 1);
-							var (start, end, label) = value.Stage switch
-							{
-								ImportanceRankingStage.IndexingFacts => (11d, 20d, "indexing ranking facts"),
-								ImportanceRankingStage.ReadingHistory => (21d, 23d, "reading ranking history"),
-								ImportanceRankingStage.ComputingPriorities => (24d, 29d, "computing priorities"),
-								_ => throw new ArgumentOutOfRangeException()
-							};
-							operationProgress.Milestone(
-								start + fraction * (end - start),
-								$"{label} {value.Completed}/{value.Total}");
-						}),
-						cancellationToken)
-					.ConfigureAwait(false);
+						new ProjectGitHistoryReader());
+			ImportanceRankingReport? ranking = null;
+			if (rankingService is not null)
+			{
+				var rankingProgress = new Progress<ImportanceRankingProgress>(value =>
+				{
+					var total = Math.Max(1, value.Total);
+					var fraction = Math.Clamp((double)value.Completed / total, 0, 1);
+					var (start, end, label) = value.Stage switch
+					{
+						ImportanceRankingStage.IndexingFacts => (11d, 20d, "indexing ranking facts"),
+						ImportanceRankingStage.ReadingHistory => (21d, 23d, "reading ranking history"),
+						ImportanceRankingStage.ComputingPriorities => (24d, 29d, "computing priorities"),
+						_ => throw new ArgumentOutOfRangeException()
+					};
+					operationProgress.Milestone(
+						start + fraction * (end - start),
+						$"{label} {value.Completed}/{value.Total}");
+				});
+				ranking = focusSeeds is null
+					? await rankingService.RankAsync(
+							plan.SourceRoot,
+							plan.IncludedFiles,
+							rankingProgress,
+							cancellationToken)
+						.ConfigureAwait(false)
+					: await rankingService.RankAsync(
+							plan.SourceRoot,
+							plan.IncludedFiles,
+							new FocusRankingRequest(focusSeeds),
+							rankingProgress,
+							cancellationToken)
+						.ConfigureAwait(false);
+			}
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(30, $"transforming content 0/{transformedFileCount}");
 			await using var prepared = view == ProjectContextView.Tree
@@ -1237,17 +1270,22 @@ internal sealed class DevProjexMcpTools(
 		if (report is null)
 			return null;
 		var status = new StringBuilder(512);
-		status.Append("[Ranking] ")
-			.Append(report.Algorithm)
-			.Append(" · graph ")
-			.Append(report.GraphVariant)
-			.Append(" · facts ")
-			.Append(Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
-			.Append("% of ")
-			.Append(report.CandidateCount.ToString(CultureInfo.InvariantCulture))
-			.Append(" sources · git window ")
-			.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture))
-			.Append(" commits · tests deprioritized");
+		if (report.Focus is { } focus)
+			AppendFocusRankingSummary(status, report, focus);
+		else
+		{
+			status.Append("[Ranking] ")
+				.Append(report.Algorithm)
+				.Append(" · graph ")
+				.Append(report.GraphVariant)
+				.Append(" · facts ")
+				.Append(Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
+				.Append("% of ")
+				.Append(report.CandidateCount.ToString(CultureInfo.InvariantCulture))
+				.Append(" sources · git window ")
+				.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture))
+				.Append(" commits · tests deprioritized");
+		}
 		status.Append("\n[Ranking coverage] facts ")
 			.Append(Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
 			.Append("% · resolved internal references ")
@@ -1284,8 +1322,34 @@ internal sealed class DevProjexMcpTools(
 			if (projectData.Length > 0)
 				projectData.Append('\n');
 			projectData.Append("[Ranking top] ")
-				.Append(McpTextEscaping.EscapeSingleLine(entry.Path))
-				.Append(" — dependents ")
+				.Append(McpTextEscaping.EscapeSingleLine(entry.Path));
+			if (report.Focus is not null && entry.IsFocusSeed)
+			{
+				projectData.Append(" — seed");
+				continue;
+			}
+			projectData.Append(" — ");
+			if (report.Focus is not null)
+			{
+				if (entry.Hop is { } hop)
+				{
+					projectData.Append("hop ")
+						.Append(hop.ToString(CultureInfo.InvariantCulture));
+					if (entry.Via is { } via)
+					{
+						projectData.Append(" · ")
+							.Append(FocusRelationText(via.Relation))
+							.Append(' ')
+							.Append(McpTextEscaping.EscapeSingleLine(via.Path));
+					}
+					projectData.Append(" · ");
+				}
+				else
+				{
+					projectData.Append("unreachable · ");
+				}
+			}
+			projectData.Append("dependents ")
 				.Append(entry.Dependents.ToString(CultureInfo.InvariantCulture))
 				.Append(" · dependencies ")
 				.Append(entry.Dependencies.ToString(CultureInfo.InvariantCulture))
@@ -1303,7 +1367,14 @@ internal sealed class DevProjexMcpTools(
 			else if (entry.IsCoordinator)
 				projectData.Append(" · coordinator");
 			projectData.Append(" · priority ")
-				.Append(entry.Priority.ToString(CultureInfo.InvariantCulture))
+				.Append(entry.Priority.ToString(CultureInfo.InvariantCulture));
+			if (report.Focus is not null)
+			{
+				projectData.Append(" (importance ")
+					.Append(entry.BaseImportancePriority.GetValueOrDefault().ToString(CultureInfo.InvariantCulture))
+					.Append(')');
+			}
+			projectData
 				.Append("; graph ")
 				.Append(entry.HasGraphFacts ? "available" : "unavailable")
 				.Append("; git ")
@@ -1321,7 +1392,15 @@ internal sealed class DevProjexMcpTools(
 					projectData.Append('\n');
 				projectData.Append("[Skipped] ")
 					.Append(McpTextEscaping.EscapeSingleLine(file.Path))
-					.Append(" — priority ")
+					.Append(" — ");
+				if (report.Focus is not null)
+				{
+					var skippedEntry = report.Entries.FirstOrDefault(entry => entry.Priority == file.Priority);
+					projectData.Append(skippedEntry?.Hop is { } hop
+						? $"hop {hop.ToString(CultureInfo.InvariantCulture)}, "
+						: "unreachable, ");
+				}
+				projectData.Append("priority ")
 					.Append(file.Priority!.Value.ToString(CultureInfo.InvariantCulture))
 					.Append(", ")
 					.Append(file.EstimatedTokens.ToString(CultureInfo.InvariantCulture))
@@ -1334,6 +1413,76 @@ internal sealed class DevProjexMcpTools(
 			? status.ToString()
 			: status.Append("\n\n").Append(McpSpotlight.Wrap(projectData.ToString())).ToString();
 	}
+
+	private static void AppendFocusRankingSummary(
+		StringBuilder status,
+		ImportanceRankingReport report,
+		FocusRankingSummary focus)
+	{
+		status.Append("[Ranking] ")
+			.Append(focus.Algorithm)
+			.Append(" · ")
+			.Append(focus.Seeds.Count.ToString(CultureInfo.InvariantCulture))
+			.Append(focus.Seeds.Count == 1 ? " seed · hops" : " seeds · hops");
+		foreach (var hop in focus.Hops.OrderBy(static pair => pair.Key))
+		{
+			status.Append(' ')
+				.Append(hop.Key.ToString(CultureInfo.InvariantCulture))
+				.Append(':')
+				.Append(hop.Value.ToString(CultureInfo.InvariantCulture));
+		}
+		if (focus.HopsBeyond > 0)
+		{
+			status.Append(" 8+:")
+				.Append(focus.HopsBeyond.ToString(CultureInfo.InvariantCulture))
+				.Append(" · max hop ")
+				.Append(focus.MaxHop.ToString(CultureInfo.InvariantCulture));
+		}
+		status.Append(" · unreachable ")
+			.Append(focus.Unreachable.ToString(CultureInfo.InvariantCulture))
+			.Append(" · within hop ")
+			.Append(focus.WithinHop)
+			.Append(" · graph ")
+			.Append(report.GraphVariant)
+			.Append(" · facts ")
+			.Append(Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
+			.Append("% of ")
+			.Append(report.CandidateCount.ToString(CultureInfo.InvariantCulture))
+			.Append(" sources · git window ")
+			.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture))
+			.Append(" commits");
+		var degraded = focus.Seeds.Where(static seed => seed.State != FocusSeedState.Resolved).ToArray();
+		if (degraded.Length == 0)
+			return;
+		var reasons = degraded
+			.Select(static seed => FocusSeedStateText(seed.State))
+			.Distinct(StringComparer.Ordinal)
+			.ToArray();
+		status.Append(" · focus degraded: ")
+			.Append(degraded.Length.ToString(CultureInfo.InvariantCulture))
+			.Append(" of ")
+			.Append(focus.Seeds.Count.ToString(CultureInfo.InvariantCulture))
+			.Append(degraded.Length == 1 ? " seed has no resolved links (" : " seeds have no resolved links (")
+			.Append(string.Join(", ", reasons))
+			.Append(')');
+	}
+
+	private static string FocusSeedStateText(FocusSeedState state) => state switch
+	{
+		FocusSeedState.Resolved => "resolved links",
+		FocusSeedState.NoResolvedNeighbors => "facts but no resolved neighbors",
+		FocusSeedState.ExtractionFailed => "fact extraction failed",
+		FocusSeedState.Unsupported => "no supported facts",
+		_ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
+	};
+
+	private static string FocusRelationText(FocusRankingRelation relation) => relation switch
+	{
+		FocusRankingRelation.DependentOf => "dependent of",
+		FocusRankingRelation.DependencyOf => "dependency of",
+		FocusRankingRelation.LinkedWith => "linked with",
+		_ => throw new ArgumentOutOfRangeException(nameof(relation), relation, null)
+	};
 
 	private sealed record McpSelectionResult(
 		ProjectContextPlan Plan,
