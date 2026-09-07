@@ -483,6 +483,31 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(1, result.Coverage.Unsupported);
 		Assert.Equal(1, result.Coverage.ExtractionFailed);
 		Assert.Contains(result.Files, file => file.Path == "Large.cs" && file.StatusReason!.Contains("parse limit", StringComparison.Ordinal));
+		Assert.Equal(0, extractor.ParseCount);
+	}
+
+	[Fact]
+	public async Task WarmRelatedQuery_ReusesTheCanonicalFileLookupFromTheResolvedSnapshot()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var target = fixture.CreateFile("Target.cs", "public class Target { }");
+		var source = fixture.CreateFile("Source.cs", "public class Source { Target Value; }");
+		using var engine = CreateEngine();
+		var manifest = new[] { project, source, target };
+		var indexed = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var related = await engine.FindRelatedAsync(
+			fixture.Path,
+			manifest,
+			["Source.cs"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Same(indexed.FileByPath, related.Index.FileByPath);
+		Assert.Same(indexed.FileByPath["Source.cs"], related.Index.FileByPath["Source.cs"]);
 	}
 
 	[Fact]
@@ -541,6 +566,35 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task WorkLimit_AdmitsALaterSmallFileAfterRejectingAnOversizedCandidate()
+	{
+		using var fixture = new TemporaryDirectory();
+		var first = fixture.CreateFile("A.cs", "first");
+		var rejected = fixture.CreateFile("B.cs", "rejected");
+		var later = fixture.CreateFile("C.cs", "later");
+		using var engine = new DependencyFactsEngine(
+			new CostedFactExtractor(new Dictionary<string, int>(StringComparer.Ordinal)
+			{
+				["A.cs"] = 8,
+				["B.cs"] = 4,
+				["C.cs"] = 1
+			}),
+			new EmptyDependencyConfigurationProvider(),
+			new DependencyFactsLimits(MaximumWorkPerIndex: 10));
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[first, rejected, later],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(8, result.Edges.Count(edge => edge.Source == "A.cs" && edge.Reference != "<limit>"));
+		var limited = Assert.Single(result.Edges, edge => edge.Source == "B.cs");
+		Assert.Equal("<limit>", limited.Reference);
+		Assert.Contains("index work limit exceeded", limited.Reasons);
+		Assert.Single(result.Edges, edge => edge.Source == "C.cs" && edge.Reference != "<limit>");
+	}
+
+	[Fact]
 	public async Task VersionedPlatformCatalogsClassifyOnlyRecordedSymbols()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -583,5 +637,80 @@ public sealed class DependencyFactsEngineIntegrationTests
 		public IReadOnlyList<string> EnumerateLibraries() => [];
 		public string Resolve(string libraryBaseName) =>
 			throw new FileNotFoundException($"Grammar '{libraryBaseName}' is unavailable.", libraryBaseName);
+	}
+
+	private sealed class CostedFactExtractor(IReadOnlyDictionary<string, int> costs) : IDependencyFactExtractor
+	{
+		public int ParseCount { get; private set; }
+		public int CompiledQuerySetCount => 0;
+
+		public ValueTask<PreparedDependencySource> PrepareAsync(
+			string sourceRoot,
+			string fullPath,
+			DependencyResolverConfiguration configuration,
+			DependencyFactsLimits limits,
+			CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var relativePath = PathUtility.GetPortableRelativePath(sourceRoot, fullPath);
+			return ValueTask.FromResult(new PreparedDependencySource(
+				fullPath,
+				relativePath,
+				"fixture",
+				LanguageId.CSharp,
+				relativePath,
+				"costed-fixture",
+				string.Empty));
+		}
+
+		public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits)
+		{
+			ParseCount++;
+			var references = Enumerable.Range(0, costs[source.RelativePath])
+				.Select(index => new ReferenceFact(
+					EvidenceLayer.TypeReference,
+					$"Missing{index}",
+					0,
+					"type",
+					new SourceSite(source.RelativePath, index + 1, $"Missing{index}")))
+				.ToArray();
+			return new FileFacts(
+				source.RelativePath,
+				source.ScopeId,
+				source.LanguageId,
+				source.ContentFingerprint,
+				0,
+				DependencyFileStatus.Supported,
+				null,
+				HasSyntaxErrors: false,
+				new Dictionary<string, int>(StringComparer.Ordinal),
+				[],
+				[],
+				references,
+				[],
+				new Dictionary<string, string>(StringComparer.Ordinal),
+				[],
+				new Dictionary<string, string>(StringComparer.Ordinal),
+				[]);
+		}
+
+		public void Dispose()
+		{
+		}
+	}
+
+	private sealed class EmptyDependencyConfigurationProvider : IDependencyConfigurationProvider
+	{
+		public Task<DependencyResolverConfiguration> ReadAsync(
+			string sourceRoot,
+			IReadOnlyList<string> manifestFiles,
+			CancellationToken cancellationToken) =>
+			Task.FromResult(new DependencyResolverConfiguration(
+				"fixture",
+				[],
+				new Dictionary<string, PackageMapDescriptor>(StringComparer.Ordinal),
+				new HashSet<string>(StringComparer.Ordinal),
+				new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal),
+				new HashSet<string>(StringComparer.Ordinal)));
 	}
 }

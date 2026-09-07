@@ -30,15 +30,30 @@ internal static class GitTrackedPathIndexCache
 		string repositoryRootPath,
 		string gitMetadataPath,
 		CancellationToken cancellationToken,
-		out GitTrackedPathIndex trackedPathIndex)
+		out GitTrackedPathIndex trackedPathIndex) =>
+		TryLoad(
+			repositoryRootPath,
+			gitMetadataPath,
+			cancellationToken,
+			out trackedPathIndex,
+			out _);
+
+	internal static bool TryLoad(
+		string repositoryRootPath,
+		string gitMetadataPath,
+		CancellationToken cancellationToken,
+		out GitTrackedPathIndex trackedPathIndex,
+		out IReadOnlyList<ProjectControlFileIdentity> observedControlFiles)
 	{
 		trackedPathIndex = null!;
+		observedControlFiles = [];
 		cancellationToken.ThrowIfCancellationRequested();
 
 		if (!TryCreateIndexSignature(repositoryRootPath, gitMetadataPath, out var signature))
 		{
 			return false;
 		}
+		observedControlFiles = CaptureObservedControlFiles(signature);
 		if (TryGetCached(signature, out trackedPathIndex))
 			return true;
 		if (!signature.HasPhysicalIndex)
@@ -97,9 +112,17 @@ internal static class GitTrackedPathIndexCache
 	public static bool TryLoadNearest(
 		string scanRootPath,
 		CancellationToken cancellationToken,
-		out GitTrackedPathIndex trackedPathIndex)
+		out GitTrackedPathIndex trackedPathIndex) =>
+		TryLoadNearest(scanRootPath, cancellationToken, out trackedPathIndex, out _);
+
+	internal static bool TryLoadNearest(
+		string scanRootPath,
+		CancellationToken cancellationToken,
+		out GitTrackedPathIndex trackedPathIndex,
+		out IReadOnlyList<ProjectControlFileIdentity> observedControlFiles)
 	{
 		trackedPathIndex = null!;
+		observedControlFiles = [];
 		string? currentPath;
 		try
 		{
@@ -120,7 +143,8 @@ internal static class GitTrackedPathIndexCache
 					currentPath,
 					gitMetadataPath,
 					cancellationToken,
-					out trackedPathIndex))
+					out trackedPathIndex,
+					out observedControlFiles))
 				{
 					return true;
 				}
@@ -139,6 +163,23 @@ internal static class GitTrackedPathIndexCache
 		}
 
 		return false;
+	}
+
+	private static IReadOnlyList<ProjectControlFileIdentity> CaptureObservedControlFiles(
+		GitIndexSignature signature)
+	{
+		var identities = new List<ProjectControlFileIdentity>(4)
+		{
+			signature.ToIndexIdentity()
+		};
+		var gitDirectory = Path.GetDirectoryName(signature.IndexPath)!;
+		identities.Add(ProjectControlFileIdentityProbe.Capture(Path.Combine(gitDirectory, "HEAD")));
+		if (File.Exists(signature.GitMetadataPath))
+			identities.Add(ProjectControlFileIdentityProbe.Capture(signature.GitMetadataPath));
+		var commonDirectoryPath = Path.Combine(gitDirectory, "commondir");
+		if (File.Exists(commonDirectoryPath))
+			identities.Add(ProjectControlFileIdentityProbe.Capture(commonDirectoryPath));
+		return identities;
 	}
 
 	internal static bool TryFindNearestRepositoryBoundary(
@@ -705,6 +746,13 @@ internal static class GitTrackedPathIndexCache
 		long LengthBytes,
 		ulong ContentFingerprint)
 	{
+		public ProjectControlFileIdentity ToIndexIdentity() =>
+			new(
+				IndexPath,
+				HasPhysicalIndex,
+				LengthBytes,
+				LastWriteTicksUtc);
+
 		public string CreateLoadKey() =>
 			$"{RepositoryRootPath}\0{GitMetadataPath}\0{IndexPath}\0" +
 			$"{ComparisonSemantics.IgnoreCase}\0{ComparisonSemantics.NormalizeUnicode}\0" +

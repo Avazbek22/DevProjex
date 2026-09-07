@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using DevProjex.Application.Diagnostics;
+
 namespace DevProjex.Application.Compression;
 
 /// <summary>
@@ -217,6 +220,8 @@ internal sealed class WeightedByteBudget : IDisposable
 			grants = waiter.CompletionNext;
 			waiter.CompletionNext = null;
 			waiter.CompletionRegistration.Dispose();
+			ContentPipelineDiagnostics.RecordByteBudgetWait(
+				Stopwatch.GetTimestamp() - waiter.EnqueuedTimestamp);
 			waiter.Completion.TrySetResult(waiter.GrantedLease!);
 		}
 	}
@@ -230,9 +235,16 @@ internal sealed class WeightedByteBudget : IDisposable
 		{
 			_owner = owner;
 			_bytes = bytes;
+			ContentPipelineDiagnostics.RecordByteBudgetLease(bytes);
 		}
 
-		public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Release(_bytes);
+		public void Dispose()
+		{
+			if (Interlocked.Exchange(ref _owner, null) is not { } owner)
+				return;
+			ContentPipelineDiagnostics.RecordByteBudgetRelease(_bytes);
+			owner.Release(_bytes);
+		}
 	}
 
 	private sealed class Waiter(
@@ -253,6 +265,7 @@ internal sealed class WeightedByteBudget : IDisposable
 		public CancellationTokenRegistration CompletionRegistration { get; set; }
 		public WaiterState State { get; set; }
 		public bool HasRegistration { get; set; }
+		public long EnqueuedTimestamp { get; } = Stopwatch.GetTimestamp();
 	}
 
 	private enum WaiterState

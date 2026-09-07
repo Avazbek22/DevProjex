@@ -66,7 +66,7 @@ internal static class GitIgnoreMatcherFileCache
 		{
 			var initialProbe = ProbeSource(gitIgnorePath);
 			if (initialProbe.Status == SourceProbeStatus.NotFound)
-				return GitIgnoreMatcherLoadResult.NotFound;
+				return GitIgnoreMatcherLoadResult.NotFoundAt(gitIgnorePath);
 			if (initialProbe.Status == SourceProbeStatus.SymbolicLink)
 				return GitIgnoreMatcherLoadResult.SymbolicLinkSkipped;
 			if (initialProbe.Status != SourceProbeStatus.RegularFile)
@@ -103,7 +103,9 @@ internal static class GitIgnoreMatcherFileCache
 				{
 					CacheLru.Remove(cachedNode);
 					CacheLru.AddFirst(cachedNode);
-					return GitIgnoreMatcherLoadResult.Loaded(cachedNode.Value.Matcher);
+					return GitIgnoreMatcherLoadResult.Loaded(
+						cachedNode.Value.Matcher,
+						initialProbe.Stamp.ToIdentity(gitIgnorePath));
 				}
 			}
 
@@ -133,7 +135,9 @@ internal static class GitIgnoreMatcherFileCache
 				}
 			}
 
-			return GitIgnoreMatcherLoadResult.Loaded(scopedMatcher);
+			return GitIgnoreMatcherLoadResult.Loaded(
+				scopedMatcher,
+				initialProbe.Stamp.ToIdentity(gitIgnorePath));
 		}
 		catch (Exception exception) when (exception is
 		       IOException or
@@ -222,7 +226,15 @@ internal static class GitIgnoreMatcherFileCache
 	private readonly record struct SourceStamp(
 		long LengthBytes,
 		long LastWriteTicksUtc,
-		long CreationTicksUtc);
+		long CreationTicksUtc)
+	{
+		public ProjectControlFileIdentity ToIdentity(string path) =>
+			new(
+				PathUtility.Normalize(path),
+				Exists: true,
+				LengthBytes,
+				LastWriteTicksUtc);
+	}
 
 	private readonly record struct SourceProbeResult(
 		SourceProbeStatus Status,
@@ -252,7 +264,8 @@ internal enum GitIgnoreMatcherLoadStatus
 
 internal readonly record struct GitIgnoreMatcherLoadResult(
 	GitIgnoreMatcherLoadStatus Status,
-	ScopedGitIgnoreMatcher? Matcher)
+	ScopedGitIgnoreMatcher? Matcher,
+	IReadOnlyList<ProjectControlFileIdentity>? ObservedControlFiles = null)
 {
 	public static GitIgnoreMatcherLoadResult NotFound { get; } =
 		new(GitIgnoreMatcherLoadStatus.NotFound, null);
@@ -263,6 +276,14 @@ internal readonly record struct GitIgnoreMatcherLoadResult(
 	public static GitIgnoreMatcherLoadResult ReadFailure { get; } =
 		new(GitIgnoreMatcherLoadStatus.ReadFailure, null);
 
-	public static GitIgnoreMatcherLoadResult Loaded(ScopedGitIgnoreMatcher matcher) =>
-		new(GitIgnoreMatcherLoadStatus.Loaded, matcher);
+	public static GitIgnoreMatcherLoadResult NotFoundAt(string path) =>
+		new(
+			GitIgnoreMatcherLoadStatus.NotFound,
+			null,
+			[ProjectControlFileIdentityProbe.Missing(path)]);
+
+	public static GitIgnoreMatcherLoadResult Loaded(
+		ScopedGitIgnoreMatcher matcher,
+		params ProjectControlFileIdentity[] observedControlFiles) =>
+		new(GitIgnoreMatcherLoadStatus.Loaded, matcher, observedControlFiles);
 }

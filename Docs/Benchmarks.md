@@ -24,8 +24,9 @@ same cache. The operating-system page cache was not flushed. Repomix was acquire
 through `npx --yes repomix@1.17.0` before timing; registry resolution and download
 are excluded.
 
-For DevProjex, elapsed time is `analyze --format json` plus `export context` in
-two real processes; RSS is the larger main-process peak. For Repomix, elapsed
+For DevProjex, the historical `Elapsed` column is the sum of two distinct operations:
+`analyze --format json` followed by `export context` in two real processes; it is
+not the latency of either command. RSS is the larger main-process peak. For Repomix, elapsed
 time and RSS cover its one real Node pack process. RSS does not aggregate child
 processes. Output bytes are exact file sizes. DevProjex token counts come from
 its content metrics; Repomix token counts come from its summary. Those estimators
@@ -67,6 +68,150 @@ policy; for example, Repomix reported and excluded a suspicious Godot test file,
 while the DevProjex inventory reflects its own selection and redaction contract.
 The table therefore does not support a claim that either tool is faster on an
 identical corpus.
+
+### Content-pipeline optimization baseline
+
+The performance work based on `c249c309` first repeated the defensive series with
+one unprofiled control sample per corpus. Unlike the historical aggregate above,
+these columns expose the two real DevProjex operations separately. The immutable
+raw samples, including CPU time and per-operation RSS, are in
+[`baseline-c249c309.json`](../tools/ScanBenchmark/results/baseline-c249c309.json).
+The final optimization measurements use the same binary layout, corpus commits,
+arguments, machine, and harness.
+
+| Corpus | Analyze ms cold / warm | Export context ms cold / warm | Combined ms cold / warm |
+|---|---:|---:|---:|
+| Flask | 1,331 / 1,270 | 1,398 / 1,347 | 2,729 / 2,618 |
+| Repomix | 2,627 / 2,638 | 3,152 / 3,212 | 5,779 / 5,850 |
+| Godot | 27,837 / 28,379 | 33,785 / 36,737 | 61,622 / 65,117 |
+
+The optimized branch was measured once per operation after the implementation,
+using the same pinned inputs and defensive arguments. These are control runs
+without a profiler; they are not presented as three-run medians. The complete
+samples are in
+[`optimized-perf-secret-pipeline-and-engine.json`](../tools/ScanBenchmark/results/optimized-perf-secret-pipeline-and-engine.json).
+
+| Corpus | Analyze before / after ms | Analyze speedup | Export before / after ms | Export speedup | Analyze peak RSS before / after MiB | Export peak RSS before / after MiB |
+|---|---:|---:|---:|---:|---:|---:|
+| Flask | 1,331 / 1,017 | 1.31× | 1,398 / 1,104 | 1.27× | 105.6 / 101.4 | 105.0 / 100.8 |
+| Repomix | 2,627 / 1,448 | 1.81× | 3,152 / 1,520 | 2.07× | 164.1 / 155.4 | 169.9 / 156.4 |
+| Godot | 27,837 / 11,719 | 2.38× | 33,785 / 11,014 | 3.07× | 962.5 / 999.2 | 910.6 / 967.6 |
+
+The Godot export improved by 3.07× in the end-to-end harness, short of the 4×
+target. A separate unprofiled stage-attribution control reached 9,857 ms (3.43×),
+which also remains short. Peak process RSS did not improve on Godot even though
+retained source text is now bounded: the peak includes concurrent detector and
+runtime allocation churn, not only live prepared content. Both limitations are
+reported rather than hidden behind the faster stage totals.
+
+The one-run Godot export comparison above increased peak RSS from 910.6 MiB to
+967.6 MiB (+57.0 MiB). That increase is an explicit memory price of the measured
+speedup; bounded retained source text did not translate into a lower process peak.
+
+After the correctness review, the defensive series was repeated three times per
+temperature without a profiler. The table reports medians; every repetition used
+the same pinned manifest and arguments as the baseline. Compared with the earlier
+single optimized controls, the cold medians were 1,003/1,092 ms instead of
+1,017/1,104 ms for Flask, 1,451/1,541 ms instead of 1,448/1,520 ms for Repomix,
+and 9,204/10,391 ms instead of 11,719/11,014 ms for Godot (analyze/export).
+
+| Corpus | Analyze ms cold / warm | Export context ms cold / warm | Combined ms cold / warm | Analyze peak RSS MiB cold / warm | Export peak RSS MiB cold / warm |
+|---|---:|---:|---:|---:|---:|
+| Flask | 1,003 / 996 | 1,092 / 1,107 | 2,094 / 2,103 | 101.3 / 101.1 | 101.5 / 101.1 |
+| Repomix | 1,451 / 1,385 | 1,541 / 1,512 | 2,992 / 2,897 | 159.9 / 158.1 | 155.1 / 157.8 |
+| Godot | 9,204 / 8,626 | 10,391 / 10,404 | 19,595 / 19,030 | 996.4 / 816.9 | 949.5 / 969.5 |
+
+Against the original cold baseline, the reviewed Godot medians are 3.02× faster
+for analyze and 3.25× faster for export context. They still do not meet the 4×
+target. The three Godot export samples were 10,391, 10,411, and 10,377 ms cold,
+and 10,404, 12,306, and 10,224 ms warm; the slower second warm sample is retained
+rather than discarded.
+
+The reviewed harness reports 77,689,944 estimated tree-plus-content tokens for
+Godot instead of the earlier 70,191,036. This is an intentional correctness
+change: detector policy exclusions such as lock files now contribute their
+unchanged source metrics to analyze even though the detector is not invoked for
+them. The selection remains 14,261 files and the harness export remains
+327,740,310 bytes.
+
+The correctness run also pinned repeatability separately from timing. The
+canonical 14,261-path Git manifest had SHA-256
+`c77c62241832eef5b9eb96b16c3e1ace1a0831961633eacc7b19a9914fdb404b`.
+All three analyzes produced selection fingerprint
+`4d84367ec5931826c83030a9474242d8c41ac3ebcf50cab4909041052c946d11`,
+43 findings, and the same safe-findings SHA-256
+`01f35b4cfbc9f70bc16b4852c59a2d89c6b5c2cf378c313dd6e6e9cb4909ae93`.
+Their complete JSON documents shared SHA-256
+`03691ef0fa31004bf01b8b8201c7565f12dbcbf0b814951c14f0b0b2dee412bb`.
+Three exports from one fixed checkout path were each 327,543,528 bytes with
+SHA-256 `bed955722ab8cfb1f528061359dcb1970b0cba58c8cb654cbb8316b29b0dd569`.
+The document embeds its checkout root, so that last hash is a repeatability check
+for the fixed path, not a path-independent corpus digest. The Godot finding count
+therefore remains 43 after the line-range cache correction.
+
+The Godot stage trace is published as
+[`content-pipeline-godot-stages.json`](../tools/ScanBenchmark/results/content-pipeline-godot-stages.json).
+Per-file stages overlap across workers, so their values are aggregate active time
+and must not be summed as wall time.
+
+| Stage | Baseline aggregate ms | Optimized aggregate ms |
+|---|---:|---:|
+| Selection | 2,445 | 2,151 |
+| Source read | 2,458 | 2,479 |
+| Compression | 19 | 18 |
+| Detector initialization | 64 | 49 |
+| Detection | 10,909 | 7,582 |
+| Redaction and output | 7,501 | 926 |
+| Cleanup | 1,438 | 22 |
+
+The detector characterization over 306,482,455 characters measured 835 ms in
+the keyword prefilter, 4,240 ms in rule detection, and 4,689 ms combined, with
+the same 43 findings. Four file workers were retained: measurements with 1, 2,
+4, and 8 workers showed no stable gain above four, while eight doubled the
+maximum retained work window. The long-line regression uses twelve findings on
+a two-MiB single line; the range-backed implementation stays below an 8 MiB
+allocation ceiling instead of copying that line for every finding. Analyze's
+transformed-content path creates zero prepared files; export still uses an
+immutable snapshot as required for consistency.
+
+The same baseline also ran two identical narrow `get_tree` → `search_project` →
+`get_file` sequences in one initialized MCP process. Warm detector state helped,
+but the unchanged project inventory was still rebuilt for every call.
+
+| Corpus | First sequence ms | Second sequence ms | Same-process speedup |
+|---|---:|---:|---:|
+| Flask | 1,258 | 646 | 1.95× |
+| Repomix | 4,057 | 3,271 | 1.24× |
+| Godot | 37,160 | 34,004 | 1.09× |
+
+After inventory and projection reuse, the same real-process sequence produced.
+The first and second columns are consecutive executions of the identical
+`get_tree` → `search_project` → `get_file` sequence against one unchanged checkout,
+using one initialized MCP process and one DevProjex binary/version:
+
+| Corpus | First identical sequence ms | Second identical sequence ms | Same-process speedup |
+|---|---:|---:|---:|
+| Flask | 705 | 35 | 20.36× |
+| Repomix | 882 | 126 | 6.98× |
+| Godot | 1,988 | 51 | 38.66× |
+
+For Godot, the reported 38.66× denominator is specifically 1,988 ms divided by
+51 ms for those first and second consecutive sequences; it does not compare two
+versions or two different queries.
+
+The cache retains immutable inventory and path projections only while a root
+watcher and Git/control-file stamps prove the snapshot current. Source content is
+not served from that cache: every content read still uses the validated root-jail
+handle. Directory ancestor indexing now stops at an already visited ancestor.
+The scanner's root-subtree scheduler was not replaced: selection measured about
+2.15 seconds of the 9.86-second best Godot control, while transformation remained
+the dominant stage, so the extra concurrent traversal state was not justified by
+the measured bottleneck.
+
+Stage attribution uses `dotnet-trace` with `dotnet-common`, sampled thread time,
+verbose GC/allocation events, and the content-only-free `DevProjex-ContentPipeline`
+provider. Every profiled observation has a separate unprofiled control; `.nettrace`
+files are temporary and excluded from published results.
 
 Three Godot Repomix pairs in the accepted run terminated after processing with a
 Windows native access-violation or heap-corruption code. Each failed pair was

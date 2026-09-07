@@ -144,6 +144,7 @@ public sealed record ProjectContextPlan(
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);
 
 	internal bool IncludesOutputMetrics { get; init; } = true;
+	internal IReadOnlyList<ProjectControlFileIdentity> ObservedControlFiles { get; init; } = [];
 }
 
 public sealed record ProjectContextRequest(

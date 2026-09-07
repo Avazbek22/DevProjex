@@ -2,7 +2,10 @@ using DevProjex.Application.Services;
 
 namespace DevProjex.Infrastructure.FileSystem;
 
-internal sealed record GitSubmoduleManifest(IReadOnlySet<string> Paths, bool ReadFailed)
+internal sealed record GitSubmoduleManifest(
+	IReadOnlySet<string> Paths,
+	bool ReadFailed,
+	ProjectControlFileIdentity ObservedControlFile)
 {
 	private const int MaximumSubmoduleCount = 8_192;
 	public static GitSubmoduleManifest Read(string repositoryRoot, CancellationToken cancellationToken)
@@ -11,10 +14,16 @@ internal sealed record GitSubmoduleManifest(IReadOnlySet<string> Paths, bool Rea
 		try
 		{
 			var path = Path.Combine(repositoryRoot, ".gitmodules");
+			var initialIdentity = ProjectControlFileIdentityProbe.Capture(path);
 			var attributes = File.GetAttributes(path);
 			if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
-				return new(paths, true);
+				return new(paths, true, initialIdentity);
 			var source = GitIgnoreFileReader.ReadWithCancellation(path, cancellationToken);
+			if (source.LengthBytes != initialIdentity.Length ||
+			    ProjectControlFileIdentityProbe.Capture(path) != initialIdentity)
+			{
+				return new(paths, true, initialIdentity);
+			}
 			var inSubmodule = false;
 			foreach (var sourceLine in GitIgnoreFileReader.EnumerateLinesWithCancellation(source.Content, cancellationToken))
 			{
@@ -24,7 +33,7 @@ internal sealed record GitSubmoduleManifest(IReadOnlySet<string> Paths, bool Rea
 				if (line[0] == '[')
 				{
 					if (!TryReadSection(line, out inSubmodule))
-						return new(paths, true);
+						return new(paths, true, initialIdentity);
 					continue;
 				}
 				if (!inSubmodule)
@@ -33,21 +42,23 @@ internal sealed record GitSubmoduleManifest(IReadOnlySet<string> Paths, bool Rea
 				if (equals < 0 || !line[..equals].Trim().Equals("path", StringComparison.OrdinalIgnoreCase))
 					continue;
 				if (!TryReadPath(line[(equals + 1)..], out var relativePath))
-					return new(paths, true);
+					return new(paths, true, initialIdentity);
 				paths.Add(relativePath);
 				if (paths.Count > MaximumSubmoduleCount)
-					return new(paths, true);
+					return new(paths, true, initialIdentity);
 			}
-			return new(paths, false);
+			return new(paths, false, initialIdentity);
 		}
 		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
 		{
-			return new(paths, false);
+			var path = Path.Combine(repositoryRoot, ".gitmodules");
+			return new(paths, false, ProjectControlFileIdentityProbe.Missing(path));
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
 		       System.Security.SecurityException or ArgumentException or NotSupportedException)
 		{
-			return new(paths, true);
+			var path = Path.Combine(repositoryRoot, ".gitmodules");
+			return new(paths, true, ProjectControlFileIdentityProbe.Capture(path));
 		}
 	}
 

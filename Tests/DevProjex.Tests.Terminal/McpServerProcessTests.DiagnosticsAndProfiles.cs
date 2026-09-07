@@ -10,6 +10,49 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
+	public async Task RealProcess_ReusesInventoryForANarrowQueryAndInvalidatesItAfterTreeChange()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var directory = 0; directory < 40; directory++)
+		{
+			for (var file = 0; file < 50; file++)
+				workspace.WriteFile($"project/src/{directory:D2}/File{file:D2}.cs", "internal sealed class Fixture { }\n");
+		}
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+		var first = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?>(),
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var second = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "src/39/**" } },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotEqual(true, first.IsError);
+		Assert.NotEqual(true, second.IsError);
+		Assert.Contains("File49.cs", AllProcessText(second), StringComparison.Ordinal);
+
+		workspace.WriteFile("project/src/39/AddedAfterCache.cs", "internal sealed class AddedAfterCache { }\n");
+		var changed = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "src/39/**" } },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotEqual(true, changed.IsError);
+		Assert.Contains("AddedAfterCache.cs", AllProcessText(changed), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessSearchReportsASelectedFileThatCannotBeInspected()
 	{
 		using var workspace = new TemporaryDirectory();

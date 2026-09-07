@@ -435,6 +435,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					effectiveRules,
 					cancellationToken,
 					gitIgnoreLoadSession),
+				gitIgnoreLoadSession.GetObservedControlFiles(),
 				cancellationToken)
 			: null;
 		return new ScanResult<ProjectWorkspaceScanSnapshot>(
@@ -2071,6 +2072,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					discovery.Value.DiscoveredGitIgnoreMatchers,
 					discovery.Value.DiscoveredGitTrackedPathIndexes,
 					discovery.Value.DiscoveredGitRepositoryRoots,
+					gitIgnoreLoadSession.GetObservedControlFiles(),
 					cancellationToken);
 			}
 
@@ -2110,6 +2112,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IReadOnlyList<ScopedGitIgnoreMatcher> discoveredGitIgnoreMatchers,
 		IReadOnlyList<GitTrackedPathIndex> discoveredGitTrackedPathIndexes,
 		IReadOnlyList<string> discoveredGitRepositoryRoots,
+		IReadOnlyList<ProjectControlFileIdentity> observedControlFiles,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -2146,7 +2149,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			discoveredGitIgnoreMatchers,
 			discoveredGitTrackedPathIndexes,
 			hadScanFailure,
-			discoveredGitRepositoryRoots);
+			discoveredGitRepositoryRoots,
+			observedControlFiles);
 
 		int AddDirectoryShell(int sourceIndex, int parentIndex)
 		{
@@ -2305,6 +2309,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool hadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> rootFileGitIgnoreMatchers,
 		GitTrackedPathIndex? rootTrackedPathIndex,
+		IReadOnlyList<ProjectControlFileIdentity> observedControlFiles,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -2406,7 +2411,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			discoveredGitIgnoreMatchers,
 			discoveredGitTrackedPathIndexes,
 			hadScanFailure,
-			discoveredGitRepositoryRoots);
+			discoveredGitRepositoryRoots,
+			observedControlFiles);
 	}
 
 	private static IReadOnlyList<string> MergeDiscoveredGitRepositoryRoots(
@@ -3885,11 +3891,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					directoryPath,
 					gitMetadataPath!,
 					cancellationToken,
-					out trackedPathIndex)
+					out trackedPathIndex,
+					out var observedControlFiles)
 				: GitTrackedPathIndexCache.TryLoadNearest(
 					directoryPath,
 					cancellationToken,
-					out trackedPathIndex);
+					out trackedPathIndex,
+					out observedControlFiles);
+			loadSession.Observe(observedControlFiles);
 			if (loadedTrackedPathIndex)
 			{
 				if (!activeContext.ContainsTrackedPathIndex(trackedPathIndex.RepositoryRootPath) ||
@@ -3960,10 +3969,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (!activeContext.RequiresTrackedPathIndex && !candidateContext.RequiresTrackedPathIndex)
 			return (activeContext, candidateContext, null, ancestorScopes.LoadStatus);
 
-		if (!GitTrackedPathIndexCache.TryLoadNearest(
-			    scanRootPath,
-			    cancellationToken,
-			    out var trackedPathIndex))
+		var loadedTrackedPathIndex = GitTrackedPathIndexCache.TryLoadNearest(
+			scanRootPath,
+			cancellationToken,
+			out var trackedPathIndex,
+			out var observedControlFiles);
+		loadSession.Observe(observedControlFiles);
+		if (!loadedTrackedPathIndex)
 		{
 			return (activeContext, candidateContext, null, ancestorScopes.LoadStatus);
 		}
