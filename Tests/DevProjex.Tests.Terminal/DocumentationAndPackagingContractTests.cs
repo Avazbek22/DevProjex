@@ -307,11 +307,14 @@ public sealed class DocumentationAndPackagingContractTests
 
 		var workflow = File.ReadAllText(Path.Combine(
 			rootPath, ".github", "workflows", "publish-packages.yml"));
-		Assert.Contains("Test-HeadlessPackages.ps1", workflow, StringComparison.Ordinal);
-		Assert.Contains("Test-HeadlessPackageGateMutation.ps1", workflow, StringComparison.Ordinal);
-		Assert.Contains("windows-latest", workflow, StringComparison.Ordinal);
-		Assert.Contains("ubuntu-latest", workflow, StringComparison.Ordinal);
-		Assert.Contains("macos-latest", workflow, StringComparison.Ordinal);
+		var buildWorkflow = File.ReadAllText(Path.Combine(
+			rootPath, ".github", "workflows", "packages-build.yml"));
+		Assert.Contains("uses: ./.github/workflows/packages-build.yml", workflow, StringComparison.Ordinal);
+		Assert.Contains("Test-HeadlessPackages.ps1", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-HeadlessPackageGateMutation.ps1", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("windows-latest", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("ubuntu-latest", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("macos-latest", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("NuGet/login@v1", workflow, StringComparison.Ordinal);
 		Assert.Contains("inputs.dry_run == false", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("--skip-duplicate", workflow, StringComparison.Ordinal);
@@ -387,7 +390,9 @@ public sealed class DocumentationAndPackagingContractTests
 		var buildScript = File.ReadAllText(Path.Combine(rootPath, "Scripts", "build-headless-packages.ps1"));
 		var validator = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-ReleaseArtifacts.ps1"));
 		var archiveWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-headless.yml"));
+		var archiveBuildWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "headless-build.yml"));
 		var containerWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "publish-container.yml"));
+		var containerBuildWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "container-build.yml"));
 		var containerSmoke = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-HeadlessContainerSmoke.ps1"));
 		var dockerfile = File.ReadAllText(Path.Combine(rootPath, "Dockerfile"));
 		var installation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Installation.md"));
@@ -401,12 +406,13 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("release.headless.checksumFile", validator, StringComparison.Ordinal);
 
 		Assert.Contains("types: [published]", archiveWorkflow, StringComparison.Ordinal);
-		Assert.Contains("actions/checkout@v7", archiveWorkflow, StringComparison.Ordinal);
-		Assert.Contains("actions/setup-dotnet@v6", archiveWorkflow, StringComparison.Ordinal);
-		Assert.Contains("actions/upload-artifact@v7", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/headless-build.yml", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/checkout@v7", archiveBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/setup-dotnet@v6", archiveBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/upload-artifact@v7", archiveBuildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("actions/download-artifact@v8", archiveWorkflow, StringComparison.Ordinal);
 		Assert.Contains("gh release upload", archiveWorkflow, StringComparison.Ordinal);
-		Assert.Contains("if: ${{ steps.metadata.outputs.release_tag != '' }}", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("if: ${{ needs.prepare.outputs.release_tag != '' }}", archiveWorkflow, StringComparison.Ordinal);
 
 		Assert.Contains("FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0", dockerfile, StringComparison.Ordinal);
 		Assert.Contains("runtime-deps:10.0-noble-chiseled-extra", dockerfile, StringComparison.Ordinal);
@@ -421,9 +427,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Equal(["Avazbek22"], glama.RootElement.GetProperty("maintainers").EnumerateArray()
 			.Select(static item => item.GetString()!).ToArray());
 
-		Assert.Contains("ubuntu-24.04-arm", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/container-build.yml", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("ubuntu-24.04-arm", containerBuildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("linux/amd64,linux/arm64", containerWorkflow, StringComparison.Ordinal);
-		Assert.Contains("docker/setup-buildx-action@v4", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("docker/setup-buildx-action@v4", containerBuildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("docker/login-action@v4", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("docker/build-push-action@v7", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("actions/attest-build-provenance@v4", containerWorkflow, StringComparison.Ordinal);
@@ -432,7 +439,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("attestations: write", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("--read-only", containerSmoke, StringComparison.Ordinal);
 		Assert.Contains("--tmpfs /tmp", containerSmoke, StringComparison.Ordinal);
-		Assert.DoesNotContain("setup-qemu", containerWorkflow, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("setup-qemu", containerWorkflow + containerBuildWorkflow, StringComparison.OrdinalIgnoreCase);
 
 		Assert.Contains("DevProjex-headless.v<version>.<rid>", installation, StringComparison.Ordinal);
 		Assert.Contains("ghcr.io/avazbek22/devprojex", installation, StringComparison.Ordinal);
@@ -468,14 +475,34 @@ public sealed class DocumentationAndPackagingContractTests
 			"workflows",
 			"release-candidate.yml"));
 		Assert.Contains("sha:", releaseCandidate, StringComparison.Ordinal);
-		Assert.Contains("ref: ${{ inputs.sha }}", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("pull_request:", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("github.event.pull_request.head.sha", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("must equal workflow ref SHA", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("printf 'Validated release candidate `%s`.\\n'", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/dotnet.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/release-validate.yml", releaseCandidate, StringComparison.Ordinal);
-		Assert.Contains("uses: ./.github/workflows/package-headless.yml", releaseCandidate, StringComparison.Ordinal);
-		Assert.Contains("uses: ./.github/workflows/publish-container.yml", releaseCandidate, StringComparison.Ordinal);
-		Assert.Contains("uses: ./.github/workflows/publish-packages.yml", releaseCandidate, StringComparison.Ordinal);
-		Assert.Contains("dry_run: true", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/headless-build.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/container-build.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/packages-build.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("Release candidate report", releaseCandidate, StringComparison.Ordinal);
+		Assert.DoesNotContain(": write", releaseCandidate, StringComparison.Ordinal);
+
+		foreach (var buildWorkflowName in new[]
+		         {
+			         "headless-build.yml",
+			         "container-build.yml",
+			         "packages-build.yml"
+		         })
+		{
+			var buildWorkflow = File.ReadAllText(Path.Combine(
+				rootPath,
+				".github",
+				"workflows",
+				buildWorkflowName));
+			Assert.Contains("workflow_call:", buildWorkflow, StringComparison.Ordinal);
+			Assert.Contains("contents: read", buildWorkflow, StringComparison.Ordinal);
+			Assert.DoesNotContain(": write", buildWorkflow, StringComparison.Ordinal);
+		}
 	}
 
 	[Fact]

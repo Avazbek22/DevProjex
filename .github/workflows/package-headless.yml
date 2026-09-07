@@ -5,6 +5,7 @@ on:
     branches: [v5.2, master]
     paths:
       - '.github/workflows/package-headless.yml'
+      - '.github/workflows/headless-build.yml'
       - 'Apps/Terminal/**'
       - 'Apps/TerminalHost/**'
       - 'Apps/Mcp/**'
@@ -53,29 +54,17 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  package:
-    name: Build and gate six headless archives
+  prepare:
+    name: Resolve headless archive version
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.metadata.outputs.version }}
       release_tag: ${{ steps.metadata.outputs.release_tag }}
-
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
-
-      - name: Setup .NET 10
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Setup Node 24
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-
       - name: Resolve release metadata
         id: metadata
         shell: bash
@@ -110,82 +99,18 @@ jobs:
           -EventName '${{ github.event_name }}'
           -ReleaseTag '${{ github.event.release.tag_name }}'
 
-      - name: Build packages and release archives from one publish output
-        shell: pwsh
-        run: ./Scripts/build-headless-packages.ps1 -Version '${{ steps.metadata.outputs.version }}' -DryRun
-
-      - name: Prove release receipt mutations fail closed
-        shell: pwsh
-        run: >
-          ./Scripts/Test-ReleaseArtifactGateMutation.ps1
-          -PublishRoot artifacts/headless/release
-          -Version '${{ steps.metadata.outputs.version }}'
-          -Channels headless
-
-      - name: Functional smoke of the host RID archive payload
-        shell: pwsh
-        env:
-          VERSION: ${{ steps.metadata.outputs.version }}
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $false
-          $binary = Resolve-Path 'artifacts/headless/publish/linux-x64/devprojex'
-          chmod +x $binary
-          $actualVersion = (& $binary --version).Trim()
-          if ($actualVersion -cne $env:VERSION) { throw "Version mismatch: expected '$env:VERSION', found '$actualVersion'." }
-
-          $sample = Join-Path $env:RUNNER_TEMP 'devprojex-headless-release-smoke'
-          New-Item -ItemType Directory -Path $sample -Force | Out-Null
-          @'
-          namespace Sample;
-          public static class Program {
-              public static int Compute(int value) {
-                  var implementationMustDisappear = value * 2;
-                  return implementationMustDisappear;
-              }
-          }
-          '@ | Set-Content -LiteralPath (Join-Path $sample 'Program.cs') -Encoding utf8NoBOM
-          $secret = 'ghp_123456789012345678901234567890123456'
-          "token=$secret" | Set-Content -LiteralPath (Join-Path $sample 'settings.txt') -Encoding utf8NoBOM
-
-          $tree = & $binary tree $sample --git-mode none --exclude none
-          if ($LASTEXITCODE -ne 0 -or -not (($tree -join "`n").Contains('Program.cs', [StringComparison]::Ordinal))) {
-            throw 'Headless archive tree smoke failed.'
-          }
-          $full = & $binary analyze $sample --format json --git-mode none --exclude none -o - | ConvertFrom-Json
-          $compressed = & $binary analyze $sample --format json --git-mode none --exclude none --compress-code -o - | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or $compressed.metrics.content.chars -ge $full.metrics.content.chars) {
-            throw 'Headless archive compression smoke failed.'
-          }
-          $findings = & $binary analyze $sample --format json --git-mode none --exclude none --findings --fail-on-findings -o -
-          $findingsText = $findings -join "`n"
-          if ($LASTEXITCODE -ne 3 -or $findingsText.Contains($secret, [StringComparison]::Ordinal)) {
-            throw 'Headless archive secret gate smoke failed.'
-          }
-          node Scripts/smoke-headless-mcp.mjs $binary $sample
-          if ($LASTEXITCODE -ne 0) { throw 'Headless archive MCP initialize smoke failed.' }
-
-      - name: Report archive sizes
-        shell: pwsh
-        run: |
-          "### Headless release archives" >> $env:GITHUB_STEP_SUMMARY
-          Get-ChildItem 'artifacts/headless/release/headless/v${{ steps.metadata.outputs.version }}' -File |
-            Where-Object Name -Like 'DevProjex-headless.*' | Sort-Object Name | ForEach-Object {
-              "- ``$($_.Name)``: $($_.Length) bytes" >> $env:GITHUB_STEP_SUMMARY
-            }
-
-      - name: Stage release assets
-        if: ${{ steps.metadata.outputs.release_tag != '' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: headless-release-assets
-          path: artifacts/headless/release/headless/v${{ steps.metadata.outputs.version }}
-          if-no-files-found: error
-          retention-days: 1
+  build:
+    name: Read-only headless archive gates
+    needs: prepare
+    uses: ./.github/workflows/headless-build.yml
+    with:
+      checkout_ref: ${{ inputs.checkout_ref || github.ref }}
+      version: ${{ needs.prepare.outputs.version }}
 
   release-upload:
     name: Upload complete headless set to GitHub release
-    if: ${{ needs.package.outputs.release_tag != '' }}
-    needs: package
+    if: ${{ needs.prepare.outputs.release_tag != '' }}
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -200,7 +125,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.package.outputs.release_tag }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
           gh release upload "${RELEASE_TAG}" artifacts/headless-release/* --clobber

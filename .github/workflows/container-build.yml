@@ -1,0 +1,112 @@
+name: Headless Container Build
+
+on:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: true
+        type: string
+      version:
+        description: Image version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-gate:
+    name: Cross-build, validate, and smoke container payloads
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build both architectures without compiler emulation
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/container-images
+          docker buildx build --platform linux/amd64 --load \
+            --build-arg "DEVPROJEX_VERSION=${VERSION}" \
+            --tag devprojex-ci:amd64 .
+          docker buildx build --platform linux/arm64 --load \
+            --build-arg "DEVPROJEX_VERSION=${VERSION}" \
+            --tag devprojex-ci:arm64 .
+          docker save devprojex-ci:amd64 | gzip -9 > artifacts/container-images/devprojex-amd64.tar.gz
+          docker save devprojex-ci:arm64 | gzip -9 > artifacts/container-images/devprojex-arm64.tar.gz
+
+      - name: Validate image payload receipts and mutation gates
+        shell: pwsh
+        run: |
+          ./Scripts/Test-HeadlessContainer.ps1 -Image devprojex-ci:amd64 -Version '${{ inputs.version }}' -Rid linux-x64
+          ./Scripts/Test-HeadlessContainer.ps1 -Image devprojex-ci:arm64 -Version '${{ inputs.version }}' -Rid linux-arm64
+
+      - name: Smoke amd64 with a read-only root
+        shell: pwsh
+        run: ./Scripts/Test-HeadlessContainerSmoke.ps1 -Image devprojex-ci:amd64 -Version '${{ inputs.version }}'
+
+      - name: Report compressed image sizes
+        shell: pwsh
+        run: |
+          "### Headless container images" >> $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem artifacts/container-images/*.tar.gz | Sort-Object Name | ForEach-Object {
+            "- ``$($_.Name)``: $($_.Length) bytes compressed" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload arm64 image for native smoke
+        uses: actions/upload-artifact@v7
+        with:
+          name: devprojex-container-arm64
+          path: artifacts/container-images/devprojex-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  smoke-arm64:
+    name: Smoke arm64 image on a native runner
+    needs: build-gate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref }}
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: devprojex-container-arm64
+          path: artifacts/container-images
+
+      - name: Load and smoke arm64 with a read-only root
+        shell: pwsh
+        run: |
+          docker load -i artifacts/container-images/devprojex-arm64.tar.gz
+          if ($LASTEXITCODE -ne 0) { throw 'Could not load the arm64 image.' }
+          ./Scripts/Test-HeadlessContainerSmoke.ps1 -Image devprojex-ci:arm64 -Version '${{ inputs.version }}'

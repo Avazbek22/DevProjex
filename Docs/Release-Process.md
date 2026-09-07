@@ -31,15 +31,23 @@ Before creating a release tag, dispatch `.github/workflows/release-candidate.yml
 with the full 40-character commit SHA that will be tagged:
 
 ```shell
-gh workflow run release-candidate.yml --ref v5.2 -f sha=<commit-sha>
+candidate_sha=$(git rev-parse origin/v5.2)
+gh workflow run release-candidate.yml --ref "$candidate_sha" -f sha="$candidate_sha"
 ```
 
-This gate checks out that exact SHA and runs the reusable `.NET CI`, Release
-Validation, headless archive, container, and headless-package workflows. The
-container and package paths remain dry-runs: no image or NuGet/npm package is
-published. The final job writes one table covering all five gates and fails if
-any called workflow was skipped, canceled, or unsuccessful. A green release
-candidate report for the exact commit is required before the tag is created.
+For a manual dispatch, the input SHA must equal `github.sha` for the selected
+workflow ref. This keeps the workflow definition and source tree on one commit;
+both identities are printed in the summary. Pull requests that change the RC or
+one of its three read-only build workflows also run the complete chain against
+the pull-request head SHA.
+
+The gate checks out that exact SHA and runs reusable `.NET CI`, Release
+Validation, read-only headless archive, container, and headless-package builds.
+The container and package paths never publish from the RC: write and OIDC
+permissions exist only in the outer release workflows. The final job writes one
+table covering all five gates and fails if any called workflow was skipped,
+canceled, or unsuccessful. A green manually dispatched release-candidate report
+for the exact commit is required before the tag is created.
 
 ## Local channel model
 
