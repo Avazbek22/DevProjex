@@ -1,9 +1,44 @@
 using ModelContextProtocol.Protocol;
+using System.Diagnostics;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed partial class McpServerProcessTests
 {
+	[Fact]
+	public void RealCliProcessExportsFocusOrderAndValidatesTheRankPair()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateRankingFixture(workspace);
+		var dataRoot = workspace.CreateDirectory("cli-focus-data");
+		var focused = RunFocusCli(
+			dataRoot,
+			project,
+			includeRank: true,
+			"A.cs",
+			Path.Combine(project, "A.cs"));
+
+		Assert.Equal(0, focused.ExitCode);
+		Assert.True(
+			focused.StandardOutput.IndexOf("A.cs:", StringComparison.Ordinal) <
+			focused.StandardOutput.IndexOf("B.cs:", StringComparison.Ordinal),
+			focused.StandardOutput);
+		Assert.Contains("[Ranking] focus-v1 · 1 seed", focused.StandardError, StringComparison.Ordinal);
+		Assert.Contains("[Ranking top] A.cs — seed", focused.StandardError, StringComparison.Ordinal);
+
+		var withoutRank = RunFocusCli(dataRoot, project, includeRank: false, "A.cs");
+		Assert.Equal(CommandLineExitCodes.UsageError, withoutRank.ExitCode);
+		Assert.Contains("--focus", withoutRank.StandardError, StringComparison.Ordinal);
+		Assert.Contains("--rank", withoutRank.StandardError, StringComparison.Ordinal);
+
+		var tooMany = RunFocusCli(
+			dataRoot,
+			project,
+			includeRank: true,
+			Enumerable.Repeat("A.cs", 17).ToArray());
+		Assert.Equal(CommandLineExitCodes.UsageError, tooMany.ExitCode);
+	}
+
 	[Fact]
 	public async Task RealMcpProcessPublishesAndEnforcesFocusRankingContract()
 	{
@@ -107,5 +142,43 @@ public sealed partial class McpServerProcessTests
 			if (invalidArguments.ContainsKey("focus") && !invalidArguments.ContainsKey("rank"))
 				Assert.Contains("focus", error, StringComparison.Ordinal);
 		}
+	}
+
+	private static TerminalTestProcessResult RunFocusCli(
+		string dataRoot,
+		string project,
+		bool includeRank,
+		params string[] focus)
+	{
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		foreach (var argument in new[]
+		         {
+		         	"--language", "en", "export", "context", project,
+		         	"--view", "content", "--format", "text",
+		         	"--git-mode", "none", "--exclude", "none", "-o", "-", "--progress", "never"
+		         })
+		{
+			startInfo.ArgumentList.Add(argument);
+		}
+		if (includeRank)
+		{
+			startInfo.ArgumentList.Add("--rank");
+			startInfo.ArgumentList.Add("importance");
+		}
+		foreach (var path in focus)
+		{
+			startInfo.ArgumentList.Add("--focus");
+			startInfo.ArgumentList.Add(path);
+		}
+		startInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
+		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = dataRoot;
+		return TerminalTestProcess.Run(startInfo);
 	}
 }
