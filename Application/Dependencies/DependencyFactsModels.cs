@@ -142,7 +142,11 @@ public sealed record DependencyIndexSnapshot(
 	IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> EdgesBySource,
 	IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> EdgesByTarget,
 	DependencyFactsCoverage Coverage,
-	DependencyIndexMetrics Metrics);
+	DependencyIndexMetrics Metrics)
+{
+	public IReadOnlyDictionary<string, FileFacts> FileByPath { get; init; } =
+		new Dictionary<string, FileFacts>(StringComparer.Ordinal);
+}
 
 public sealed record RelatedFile(
 	string Path,

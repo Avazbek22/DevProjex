@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Numerics;
 using System.Security.Cryptography;
@@ -26,6 +27,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private const string GitleaksAllowSignature = "gitleaks:allow";
 	private const string GenericApiKeyRuleId = "generic-api-key";
 	private const string PrivateKeyRuleId = "private-key";
+	private static readonly SearchValues<char> GenericDelimiters = SearchValues.Create("=>|:?,");
 	// Reviewed override for the upstream private-key rule. The upstream body pattern accepts any
 	// character, so in a file that merely mentions PEM markers - test fixtures, documentation -
 	// a match can start at one marker and run across arbitrary source code to the next "KEY-----"
@@ -177,6 +179,68 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return ids;
 	}
 
+	internal IReadOnlyList<string> InspectCandidateRuleIdsByLinearSearch(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
+		var configuration = _configuration.Value;
+		var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
+		var ids = new List<string>();
+		foreach (var rule in configuration.Rules)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (rule.ContentRegex is null || !rule.AppliesToPath(normalizedPath))
+				continue;
+			var matches = rule.Keywords.Count == 0;
+			foreach (var keyword in rule.Keywords)
+			{
+				if (!ContainsCaseFolded(content, keyword.AsSpan()))
+					continue;
+				matches = true;
+				break;
+			}
+			if (matches)
+			{
+				ids.Add(rule.Id);
+			}
+		}
+		return ids;
+	}
+
+	internal GitleaksKeywordPrefilterStatistics InspectKeywordPrefilterStatistics() =>
+		_configuration.Value.KeywordPrefilter.GetStatistics();
+
+	internal IReadOnlyList<string> InspectRuleKeywords(string ruleId) =>
+		_configuration.Value.Rules
+			.Single(rule => rule.Id.Equals(ruleId, StringComparison.Ordinal))
+			.Keywords;
+
+	internal IReadOnlyList<string> InspectRuleIds() =>
+		_configuration.Value.Rules.Select(static rule => rule.Id).ToArray();
+
+	internal bool InspectRuleSpecificEvidence(string ruleId, ReadOnlySpan<char> content) =>
+		HasRuleSpecificEvidence(ruleId, content);
+
+	internal GitleaksRuleMatchProbe InspectRuleMatch(string ruleId, string content)
+	{
+		var rule = _configuration.Value.Rules.Single(candidate =>
+			candidate.Id.Equals(ruleId, StringComparison.Ordinal));
+		if (rule.ContentRegex?.Value.Match(content) is not { Success: true } match ||
+		    !TryExtractSecret(rule, match, out var secret))
+		{
+			return default;
+		}
+
+		return new GitleaksRuleMatchProbe(
+			IsMatch: true,
+			match.Index,
+			match.Length,
+			secret.Index,
+			secret.Length);
+	}
+
 	internal IReadOnlyList<string> InspectRunnableRuleIds(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
@@ -266,6 +330,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		configuration.KeywordPrefilter.FindCandidates(content, candidateRules, cancellationToken);
 
 		var findings = new List<DetectedSecret>();
+		var lineIndex = new LineRangeIndex(content);
 		foreach (var ruleOrder in EnumerateCandidateRuleOrders(candidateRules, configuration.Rules.Count))
 		{
 			var rule = configuration.Rules[ruleOrder];
@@ -301,7 +366,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 					    !TryExtractSecret(rule, captureMatch, out var secretGroup))
 						continue;
 
-					var line = GetContainingLine(content, valueMatch.Index, valueMatch.Length);
+					var lineRange = lineIndex.GetContainingLine(valueMatch.Index, valueMatch.Length);
+					var line = content.Slice(lineRange.Start, lineRange.Length);
 					if (line.Contains(GitleaksAllowSignature, StringComparison.Ordinal))
 						continue;
 					var secret = secretGroup.Value;
@@ -310,11 +376,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 					var context = new AllowlistContext(
 						normalizedPath,
-						secret,
-						matchText,
+						secret.AsSpan(),
+						matchText.AsSpan(),
 						line);
-					if (configuration.GlobalAllowlists.Any(allowlist => allowlist.Allows(context)) ||
-					    rule.Allowlists.Any(allowlist => allowlist.Allows(context)))
+					if (Allows(configuration.GlobalAllowlists, context) ||
+					    Allows(rule.Allowlists, context))
 					{
 						continue;
 					}
@@ -353,8 +419,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static bool HasGenericApiKeyEvidence(ReadOnlySpan<char> content)
 	{
-		for (var delimiterStart = 0; delimiterStart < content.Length; delimiterStart++)
+		var searchStart = 0;
+		while (searchStart < content.Length)
 		{
+			var relativeDelimiter = content[searchStart..].IndexOfAny(GenericDelimiters);
+			if (relativeDelimiter < 0)
+				return false;
+			var delimiterStart = searchStart + relativeDelimiter;
+			searchStart = delimiterStart + 1;
 			var delimiterLength = GetGenericDelimiterLength(content, delimiterStart);
 			if (delimiterLength == 0)
 				continue;
@@ -514,9 +586,64 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private static bool IsGenericBase64Character(char character) =>
 		char.IsAsciiLetterOrDigit(character) || character is '+' or '/';
 
+	private static bool ContainsCaseFolded(ReadOnlySpan<char> content, ReadOnlySpan<char> value)
+	{
+		if (value.Length == 0)
+			return content.Length > 0;
+		for (var offset = 0; offset <= content.Length - value.Length; offset++)
+		{
+			var matches = true;
+			for (var index = 0; index < value.Length; index++)
+			{
+				if (char.ToLowerInvariant(content[offset + index]) ==
+				    char.ToLowerInvariant(value[index]))
+				{
+					continue;
+				}
+				matches = false;
+				break;
+			}
+			if (matches)
+				return true;
+		}
+		return false;
+	}
+
 	private static bool HasRuleSpecificEvidence(string ruleId, ReadOnlySpan<char> content) =>
 		ruleId switch
 		{
+			"authress-service-client-access-key" =>
+				content.Contains(".acc_", StringComparison.Ordinal) ||
+				content.Contains(".acc-", StringComparison.Ordinal),
+			"databricks-api-token" =>
+				HasPrefixedRun(content, "dapi", 32, 32, char.IsAsciiHexDigit),
+			"gocardless-api-token" =>
+				HasPrefixedRun(
+					content,
+					"live_",
+					40,
+					40,
+					IsWordHyphenOrEquals,
+					comparison: StringComparison.OrdinalIgnoreCase),
+			"harness-api-key" => HasHarnessApiKeyEvidence(content),
+			"intra42-client-secret" =>
+				HasPrefixedRun(content, "s-s4t2ud-", 64, 64, char.IsAsciiHexDigit) ||
+				HasPrefixedRun(content, "s-s4t2af-", 64, 64, char.IsAsciiHexDigit),
+			"lob-api-key" =>
+				HasPrefixedRun(
+					content,
+					"test_",
+					35,
+					35,
+					char.IsAsciiHexDigit,
+					comparison: StringComparison.OrdinalIgnoreCase) ||
+				HasPrefixedRun(
+					content,
+					"live_",
+					35,
+					35,
+					char.IsAsciiHexDigit,
+					comparison: StringComparison.OrdinalIgnoreCase),
 			"1password-secret-key" => HasOnePasswordSecretKeyEvidence(content),
 			"1password-service-account-token" =>
 				HasPrefixedRun(content, "ops_", 250, int.MaxValue, IsBase64Character),
@@ -528,21 +655,27 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				HasPrefixedRun(content, "SG.", 66, 66, IsProviderTokenCharacter),
 			"sentry-access-token" => HasRun(content, 64, char.IsAsciiHexDigit),
 			"square-access-token" =>
-				HasPrefixedRun(content, "EAAA", 22, 60, IsWordOrHyphen) ||
-				HasPrefixedRun(content, "sq0atp-", 22, 60, IsWordOrHyphen),
+				HasPrefixedRun(content, "EAAA", 22, 60, IsRegexWordOrHyphen) ||
+				HasPrefixedRun(content, "sq0atp-", 22, 60, IsRegexWordOrHyphen),
 			"telegram-bot-api-token" => HasTelegramTokenEvidence(content),
 			"twitter-access-secret" => HasRun(content, 45, char.IsAsciiLetterOrDigit),
 			"twitter-access-token" => HasTwitterAccessTokenEvidence(content),
 			"twitter-api-key" => HasRun(content, 25, char.IsAsciiLetterOrDigit),
 			"twitter-api-secret" => HasRun(content, 50, char.IsAsciiLetterOrDigit),
 			"twitter-bearer-token" =>
-				HasPrefixedRun(content, TwitterBearerPrefix, 80, 100, IsTwitterBearerCharacter),
+				HasPrefixedRun(
+					content,
+					TwitterBearerPrefix,
+					80,
+					100,
+					IsTwitterBearerCharacter,
+					comparison: StringComparison.OrdinalIgnoreCase),
 			"vault-service-token" =>
-				HasPrefixedRun(content, "hvs.", 90, 120, IsVaultTokenCharacter, IsGitleaksValueTerminator) ||
+				HasPrefixedRun(content, "hvs.", 90, 120, IsRegexWordOrHyphen, IsGitleaksValueTerminator) ||
 				HasPrefixedRun(content, "s.", 24, 24, char.IsAsciiLetterOrDigit, IsGitleaksValueTerminator),
-			"twilio-api-key" => HasPrefixedRun(content, "SK", 32, 32, char.IsAsciiHexDigit),
+			"twilio-api-key" => HasPrefixedRun(content, "SK", 32, int.MaxValue, char.IsAsciiHexDigit),
 			"jwt" => HasJwtEvidence(content),
-			"yandex-access-token" => content.Contains("t1.", StringComparison.Ordinal),
+			"yandex-access-token" => content.Contains("t1.", StringComparison.OrdinalIgnoreCase),
 			"yandex-api-key" =>
 				HasPrefixedRun(
 					content,
@@ -579,6 +712,48 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				HasPrefixedRun(content, "API-", 26, 26, char.IsAsciiLetterOrDigit),
 			_ => true
 		};
+
+	private static bool HasHarnessApiKeyEvidence(ReadOnlySpan<char> content) =>
+		HasSegmentedToken(content, "pat.") || HasSegmentedToken(content, "sat.");
+
+	private static bool HasSegmentedToken(ReadOnlySpan<char> content, string prefix)
+	{
+		var searchStart = 0;
+		while (searchStart <= content.Length - prefix.Length - 68)
+		{
+			var relativeStart = content[searchStart..].IndexOf(prefix, StringComparison.Ordinal);
+			if (relativeStart < 0)
+				return false;
+			var cursor = searchStart + relativeStart + prefix.Length;
+			if (HasExactRun(content, ref cursor, 22, IsWordOrHyphen) &&
+			    Consume(content, ref cursor, '.') &&
+			    HasExactRun(content, ref cursor, 24, char.IsAsciiLetterOrDigit) &&
+			    Consume(content, ref cursor, '.') &&
+			    HasExactRun(content, ref cursor, 20, char.IsAsciiLetterOrDigit))
+			{
+				return true;
+			}
+			searchStart += relativeStart + prefix.Length;
+		}
+		return false;
+	}
+
+	private static bool HasExactRun(
+		ReadOnlySpan<char> content,
+		ref int cursor,
+		int length,
+		Func<char, bool> isAllowed)
+	{
+		if (cursor > content.Length - length)
+			return false;
+		for (var index = 0; index < length; index++)
+		{
+			if (!isAllowed(content[cursor + index]))
+				return false;
+		}
+		cursor += length;
+		return true;
+	}
 
 	private static bool HasPrefixedRun(
 		ReadOnlySpan<char> content,
@@ -792,9 +967,6 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return false;
 	}
 
-	private static bool IsVaultTokenCharacter(char character) =>
-		char.IsAsciiLetterOrDigit(character) || character is '_' or '-';
-
 	private static bool IsGitleaksValueTerminator(char character) =>
 		character is '`' or '\'' or '"' or ';' or '\\' || char.IsWhiteSpace(character);
 
@@ -809,6 +981,20 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static bool IsWordOrHyphen(char character) =>
 		char.IsAsciiLetterOrDigit(character) || character is '_' or '-';
+
+	private static bool IsRegexWordOrHyphen(char character) =>
+		character == '-' || IsRegexWordCharacter(character);
+
+	private static bool IsRegexWordCharacter(char character) =>
+		char.GetUnicodeCategory(character) is
+			UnicodeCategory.UppercaseLetter or
+			UnicodeCategory.LowercaseLetter or
+			UnicodeCategory.TitlecaseLetter or
+			UnicodeCategory.ModifierLetter or
+			UnicodeCategory.OtherLetter or
+			UnicodeCategory.NonSpacingMark or
+			UnicodeCategory.DecimalDigitNumber or
+			UnicodeCategory.ConnectorPunctuation;
 
 	private static bool IsWordHyphenOrEquals(char character) =>
 		IsWordOrHyphen(character) || character == '=';
@@ -877,13 +1063,85 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return secretGroup.Length > 0;
 	}
 
-	private static string GetContainingLine(ReadOnlySpan<char> content, int matchStart, int matchLength)
+	private static bool Allows(IReadOnlyList<CompiledAllowlist> allowlists, AllowlistContext context)
 	{
-		var lineStart = content[..Math.Max(0, matchStart)].LastIndexOfAny('\r', '\n') + 1;
-		var matchEnd = Math.Min(content.Length, matchStart + matchLength);
-		var relativeLineEnd = content[matchEnd..].IndexOfAny('\r', '\n');
-		var lineEnd = relativeLineEnd < 0 ? content.Length : matchEnd + relativeLineEnd;
-		return content[lineStart..lineEnd].ToString();
+		foreach (var allowlist in allowlists)
+		{
+			if (allowlist.Allows(context))
+				return true;
+		}
+		return false;
+	}
+
+	internal ref struct LineRangeIndex(ReadOnlySpan<char> content)
+	{
+		private const int IndexedContentThreshold = 64 * 1024;
+		private readonly ReadOnlySpan<char> _content = content;
+		private int[]? _lineStarts;
+		private int _cachedStart = -1;
+		private int _cachedEnd;
+		private bool _cachedRangeIsSingleLine;
+
+		public LineRange GetContainingLine(int matchStart, int matchLength)
+		{
+			var matchEnd = Math.Min(_content.Length, checked(matchStart + matchLength));
+			if (_cachedRangeIsSingleLine &&
+			    _cachedStart >= 0 &&
+			    matchStart >= _cachedStart &&
+			    matchEnd <= _cachedEnd)
+				return new LineRange(_cachedStart, _cachedEnd - _cachedStart);
+
+			LineRange range;
+			if (_content.Length >= IndexedContentThreshold)
+			{
+				_lineStarts ??= BuildLineStarts(_content);
+				var startLine = FindLine(_lineStarts, matchStart);
+				var endLine = FindLine(_lineStarts, matchEnd);
+				var start = _lineStarts[startLine];
+				var end = endLine + 1 < _lineStarts.Length ? _lineStarts[endLine + 1] : _content.Length;
+				while (end > start && _content[end - 1] is '\r' or '\n')
+					end--;
+				range = new LineRange(start, end - start);
+			}
+			else
+			{
+				var start = _content[..Math.Max(0, matchStart)].LastIndexOfAny('\r', '\n') + 1;
+				var relativeEnd = _content[matchEnd..].IndexOfAny('\r', '\n');
+				var end = relativeEnd < 0 ? _content.Length : matchEnd + relativeEnd;
+				range = new LineRange(start, end - start);
+			}
+
+			_cachedStart = range.Start;
+			_cachedEnd = range.End;
+			_cachedRangeIsSingleLine = _content.Slice(range.Start, range.Length).IndexOfAny('\r', '\n') < 0;
+			return range;
+		}
+
+		private static int[] BuildLineStarts(ReadOnlySpan<char> text)
+		{
+			var starts = new List<int> { 0 };
+			for (var index = 0; index < text.Length; index++)
+			{
+				if (text[index] == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
+					index++;
+				else if (text[index] is not ('\r' or '\n'))
+					continue;
+				if (index + 1 < text.Length)
+					starts.Add(index + 1);
+			}
+			return starts.ToArray();
+		}
+
+		private static int FindLine(int[] starts, int offset)
+		{
+			var found = Array.BinarySearch(starts, Math.Clamp(offset, 0, int.MaxValue));
+			return found >= 0 ? found : Math.Max(0, ~found - 1);
+		}
+	}
+
+	internal readonly record struct LineRange(int Start, int Length)
+	{
+		public int End => checked(Start + Length);
 	}
 
 	internal static double CalculateShannonEntropy(string value) =>
@@ -1144,24 +1402,41 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	/// </summary>
 	private sealed class KeywordPrefilter
 	{
-		private readonly List<Node> _nodes;
-		private readonly IReadOnlyList<int> _rulesWithoutKeywords;
+		private readonly RuleMask[] _outputs;
+		private readonly ushort[] _transitions;
+		private readonly ushort[] _asciiSymbols;
+		private readonly char[] _alphabet;
+		private readonly RuleMask _rulesWithoutKeywords;
+		private readonly int _transitionCount;
 
-		private KeywordPrefilter(List<Node> nodes, IReadOnlyList<int> rulesWithoutKeywords)
+		private KeywordPrefilter(
+			RuleMask[] outputs,
+			ushort[] transitions,
+			ushort[] asciiSymbols,
+			char[] alphabet,
+			RuleMask rulesWithoutKeywords,
+			int transitionCount)
 		{
-			_nodes = nodes;
+			_outputs = outputs;
+			_transitions = transitions;
+			_asciiSymbols = asciiSymbols;
+			_alphabet = alphabet;
 			_rulesWithoutKeywords = rulesWithoutKeywords;
+			_transitionCount = transitionCount;
 		}
 
 		public static KeywordPrefilter Build(IReadOnlyList<CompiledRule> rules)
 		{
-			var nodes = new List<Node> { new() };
-			var rulesWithoutKeywords = new List<int>();
+			if (rules.Count > RuleMask.Capacity)
+				throw new SecretDetectionException(
+					$"The keyword prefilter supports at most {RuleMask.Capacity} rules.");
+			var nodes = new List<MutableNode> { new() };
+			var rulesWithoutKeywords = default(RuleMask);
 			foreach (var rule in rules)
 			{
 				if (rule.Keywords.Count == 0)
 				{
-					rulesWithoutKeywords.Add(rule.Order);
+					rulesWithoutKeywords = rulesWithoutKeywords.Add(rule.Order);
 					continue;
 				}
 
@@ -1175,19 +1450,21 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 						{
 							next = nodes.Count;
 							nodes[state].Transitions.Add(normalized, next);
-							nodes.Add(new Node());
+							nodes.Add(new MutableNode());
 						}
 						state = next;
 					}
-					nodes[state].RuleOrders.Add(rule.Order);
+					nodes[state].Outputs = nodes[state].Outputs.Add(rule.Order);
 				}
 			}
 
 			var queue = new Queue<int>();
+			var breadthFirstOrder = new List<int>(nodes.Count - 1);
 			foreach (var child in nodes[0].Transitions.Values)
 				queue.Enqueue(child);
 			while (queue.TryDequeue(out var state))
 			{
+				breadthFirstOrder.Add(state);
 				foreach (var (character, next) in nodes[state].Transitions)
 				{
 					queue.Enqueue(next);
@@ -1196,11 +1473,47 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 						fallback = nodes[fallback].Failure;
 					if (nodes[fallback].Transitions.TryGetValue(character, out var target) && target != next)
 						nodes[next].Failure = target;
-					nodes[next].RuleOrders.AddRange(nodes[nodes[next].Failure].RuleOrders);
+					nodes[next].Outputs = nodes[next].Outputs.Or(nodes[nodes[next].Failure].Outputs);
 				}
 			}
 
-			return new KeywordPrefilter(nodes, rulesWithoutKeywords);
+			var alphabet = nodes.SelectMany(static node => node.Transitions.Keys)
+				.Distinct().Order().ToArray();
+			if (alphabet.Length > ushort.MaxValue)
+				throw new SecretDetectionException("The keyword prefilter alphabet is too large.");
+			var symbolByCharacter = alphabet
+				.Select((character, index) => (character, index))
+				.ToDictionary(static item => item.character, static item => checked((ushort)item.index));
+			var asciiSymbols = new ushort[128];
+			for (var character = 0; character < asciiSymbols.Length; character++)
+			{
+				if (symbolByCharacter.TryGetValue((char)character, out var symbol))
+					asciiSymbols[character] = checked((ushort)(symbol + 1));
+			}
+			var transitionCount = 0;
+			foreach (var node in nodes)
+				transitionCount += node.Transitions.Count;
+			var transitions = new ushort[checked(nodes.Count * alphabet.Length)];
+			foreach (var (character, target) in nodes[0].Transitions)
+				transitions[symbolByCharacter[character]] = checked((ushort)target);
+			foreach (var state in breadthFirstOrder)
+			{
+				var row = state * alphabet.Length;
+				var fallbackRow = nodes[state].Failure * alphabet.Length;
+				for (var symbol = 0; symbol < alphabet.Length; symbol++)
+				{
+					transitions[row + symbol] = nodes[state].Transitions.TryGetValue(alphabet[symbol], out var target)
+						? checked((ushort)target)
+						: transitions[fallbackRow + symbol];
+				}
+			}
+			return new KeywordPrefilter(
+				nodes.Select(static node => node.Outputs).ToArray(),
+				transitions,
+				asciiSymbols,
+				alphabet,
+				rulesWithoutKeywords,
+				transitionCount);
 		}
 
 		public void FindCandidates(
@@ -1209,32 +1522,111 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			CancellationToken cancellationToken)
 		{
 			candidates.Clear();
-			foreach (var ruleOrder in _rulesWithoutKeywords)
-				MarkCandidate(candidates, ruleOrder);
+			_rulesWithoutKeywords.Apply(candidates);
 
 			var state = 0;
 			for (var index = 0; index < content.Length; index++)
 			{
 				if ((index & 0xFFF) == 0)
 					cancellationToken.ThrowIfCancellationRequested();
-				var character = char.ToLowerInvariant(content[index]);
-				while (state != 0 && !_nodes[state].Transitions.ContainsKey(character))
-					state = _nodes[state].Failure;
-				if (_nodes[state].Transitions.TryGetValue(character, out var next))
-					state = next;
-				foreach (var ruleOrder in _nodes[state].RuleOrders)
-					MarkCandidate(candidates, ruleOrder);
+				var symbol = FindSymbol(content[index]);
+				if (symbol < 0)
+				{
+					state = 0;
+					continue;
+				}
+				state = _transitions[state * _alphabet.Length + symbol];
+				var outputs = _outputs[state];
+				if (!outputs.IsEmpty)
+					outputs.Apply(candidates);
 			}
 		}
 
-		private static void MarkCandidate(Span<ulong> candidates, int ruleOrder) =>
-			candidates[ruleOrder >> 6] |= 1UL << (ruleOrder & 63);
+		public GitleaksKeywordPrefilterStatistics GetStatistics()
+		{
+			var estimatedBytes =
+				(long)_alphabet.Length * sizeof(char) +
+				(long)_asciiSymbols.Length * sizeof(ushort) +
+				(long)_outputs.Length * RuleMask.ByteSize +
+				(long)_transitions.Length * sizeof(ushort);
+			return new GitleaksKeywordPrefilterStatistics(
+				_outputs.Length,
+				_transitionCount,
+				_alphabet.Length,
+				estimatedBytes,
+				(long)_outputs.Length * Math.Max(128, _alphabet.Length) * sizeof(int),
+				(long)_outputs.Length * (char.MaxValue + 1L) * sizeof(int));
+		}
 
-		private sealed class Node
+		private int FindSymbol(char character)
+		{
+			char normalized;
+			if (character < 128)
+			{
+				normalized = character is >= 'A' and <= 'Z'
+					? (char)(character + ('a' - 'A'))
+					: character;
+			}
+			else
+			{
+				normalized = char.ToLowerInvariant(character);
+			}
+			if (normalized < 128)
+				return _asciiSymbols[normalized] - 1;
+			return BinarySearch(_alphabet, normalized);
+		}
+
+		private static int BinarySearch(char[] values, char value)
+		{
+			var low = 0;
+			var high = values.Length - 1;
+			while (low <= high)
+			{
+				var middle = (low + high) >>> 1;
+				var comparison = values[middle].CompareTo(value);
+				if (comparison == 0) return middle;
+				if (comparison < 0) low = middle + 1;
+				else high = middle - 1;
+			}
+			return -1;
+		}
+
+		private sealed class MutableNode
 		{
 			public Dictionary<char, int> Transitions { get; } = [];
-			public List<int> RuleOrders { get; } = [];
+			public RuleMask Outputs { get; set; }
 			public int Failure { get; set; }
+		}
+
+		private readonly record struct RuleMask(ulong Word0, ulong Word1, ulong Word2, ulong Word3)
+		{
+			public const int Capacity = 256;
+			public const int ByteSize = 4 * sizeof(ulong);
+
+			public RuleMask Add(int ruleOrder) => (ruleOrder >> 6) switch
+			{
+				0 => this with { Word0 = Word0 | 1UL << ruleOrder },
+				1 => this with { Word1 = Word1 | 1UL << (ruleOrder & 63) },
+				2 => this with { Word2 = Word2 | 1UL << (ruleOrder & 63) },
+				3 => this with { Word3 = Word3 | 1UL << (ruleOrder & 63) },
+				_ => throw new ArgumentOutOfRangeException(nameof(ruleOrder))
+			};
+
+			public RuleMask Or(RuleMask other) => new(
+				Word0 | other.Word0,
+				Word1 | other.Word1,
+				Word2 | other.Word2,
+				Word3 | other.Word3);
+
+			public bool IsEmpty => (Word0 | Word1 | Word2 | Word3) == 0;
+
+			public void Apply(Span<ulong> candidates)
+			{
+				if (candidates.Length > 0) candidates[0] |= Word0;
+				if (candidates.Length > 1) candidates[1] |= Word1;
+				if (candidates.Length > 2) candidates[2] |= Word2;
+				if (candidates.Length > 3) candidates[3] |= Word3;
+			}
 		}
 	}
 
@@ -1323,7 +1715,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		public bool Allows(AllowlistContext context)
 		{
-			var target = RegexTarget switch
+			ReadOnlySpan<char> target = RegexTarget switch
 			{
 				AllowlistRegexTarget.Match => context.Match,
 				AllowlistRegexTarget.Line => context.Line,
@@ -1332,9 +1724,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			if (!RequireAll)
 			{
 				return Paths.Count > 0 && AllowsPath(context.Path) ||
-				       Stopwords.Count > 0 && Stopwords.Any(stopword =>
-					       context.Secret.Contains(stopword, StringComparison.OrdinalIgnoreCase)) ||
-				       Regexes.Count > 0 && Regexes.Any(regex => regex.Value.IsMatch(target));
+				       Stopwords.Count > 0 && ContainsAny(context.Secret, Stopwords) ||
+				       Regexes.Count > 0 && MatchesAny(target, Regexes);
 			}
 
 			var hasCriterion = false;
@@ -1347,8 +1738,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			if (Stopwords.Count > 0)
 			{
 				hasCriterion = true;
-				if (!Stopwords.Any(stopword =>
-					    context.Secret.Contains(stopword, StringComparison.OrdinalIgnoreCase)))
+				if (!ContainsAny(context.Secret, Stopwords))
 				{
 					return false;
 				}
@@ -1356,18 +1746,44 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			if (Regexes.Count > 0)
 			{
 				hasCriterion = true;
-				if (!Regexes.Any(regex => regex.Value.IsMatch(target)))
+				if (!MatchesAny(target, Regexes))
 					return false;
 			}
 			return hasCriterion;
 		}
+
+		private static bool ContainsAny(ReadOnlySpan<char> value, IReadOnlyList<string> candidates)
+		{
+			foreach (var candidate in candidates)
+			{
+				if (value.Contains(candidate, StringComparison.OrdinalIgnoreCase))
+					return true;
+			}
+			return false;
+		}
+
+		private static bool MatchesAny(ReadOnlySpan<char> value, IReadOnlyList<Lazy<Regex>> regexes)
+		{
+			foreach (var regex in regexes)
+			{
+				if (regex.Value.IsMatch(value))
+					return true;
+			}
+			return false;
+		}
 	}
 
-	private sealed record AllowlistContext(
-		string Path,
-		string Secret,
-		string Match,
-		string Line);
+	private readonly ref struct AllowlistContext(
+		string path,
+		ReadOnlySpan<char> secret,
+		ReadOnlySpan<char> match,
+		ReadOnlySpan<char> line)
+	{
+		public string Path { get; } = path;
+		public ReadOnlySpan<char> Secret { get; } = secret;
+		public ReadOnlySpan<char> Match { get; } = match;
+		public ReadOnlySpan<char> Line { get; } = line;
+	}
 
 	private enum AllowlistRegexTarget
 	{
@@ -1378,3 +1794,18 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 }
 
 internal readonly record struct GitleaksCandidateStatistics(int CandidateRuleCount);
+
+internal readonly record struct GitleaksKeywordPrefilterStatistics(
+	int NodeCount,
+	int TransitionCount,
+	int AlphabetSize,
+	long EstimatedStorageBytes,
+	long DenseAlphabetStorageBytes,
+	long DenseUnicodeStorageBytes);
+
+internal readonly record struct GitleaksRuleMatchProbe(
+	bool IsMatch,
+	int MatchStart,
+	int MatchLength,
+	int SecretStart,
+	int SecretLength);

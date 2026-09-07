@@ -1,6 +1,7 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -21,17 +22,21 @@ public sealed class AnalyzeCommandHandler(
 			: metrics => topFileRanking.Add(
 				metrics.Path,
 				CodeCompressionSnapshot.EstimateTokens(metrics.CharCount));
-		var plan = await new StatusRenderer(environment, request.Output)
-			.RunAsync(
-				services.Localization["Terminal.Status.AnalyzingProject"],
-				() => services.ContextFactory.BuildAsync(
-					request.ProjectPath,
-					request.Selection,
-					includeOutputMetrics: true,
-					cancellationToken: cancellationToken,
-					includeContentOutputMetrics: includeSourceContentMetrics && topFileRanking is null,
-					repositorySourceUrl: request.RepositorySourceUrl))
-			.ConfigureAwait(false);
+		ProjectContextPlan plan;
+		using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Selection))
+		{
+			plan = await new StatusRenderer(environment, request.Output)
+				.RunAsync(
+					services.Localization["Terminal.Status.AnalyzingProject"],
+					() => services.ContextFactory.BuildAsync(
+						request.ProjectPath,
+						request.Selection,
+						includeOutputMetrics: true,
+						cancellationToken: cancellationToken,
+						includeContentOutputMetrics: includeSourceContentMetrics && topFileRanking is null,
+						repositorySourceUrl: request.RepositorySourceUrl))
+				.ConfigureAwait(false);
+		}
 		plan = await ProjectFileSizeFilter.ApplyAsync(
 				services.ContextPlanner,
 				plan,
@@ -60,13 +65,12 @@ public sealed class AnalyzeCommandHandler(
 		if (transformationContext is not null)
 		{
 			await using var prepared = await services.SecretRedactionOutputPreparer
-				.PrepareAsync(
+				.MeasureAsync(
 					transformationContext,
 					plan.IncludedFiles,
 					request.IncludeFindings && plan.Selection.HideSecrets == true,
-					cancellationToken)
+					cancellationToken: cancellationToken)
 				.ConfigureAwait(false);
-			var transformedAnalyzer = services.SecretRedactionOutputPreparer.CreatePreparedAnalyzer(prepared);
 			if (findingsRequested && plan.Selection.HideSecrets == true)
 			{
 				effectiveFindingCount = prepared.Snapshot?.DetectedCount ?? 0;
@@ -77,14 +81,9 @@ public sealed class AnalyzeCommandHandler(
 				}
 				findingsCapturedByOutput = true;
 			}
-			var transformedMetrics = await ProjectContentMetricsCalculator
-				.CalculateAsync(
-					transformedAnalyzer,
-					plan.IncludedFiles,
-					topFileObserver,
-					progress: null,
-					cancellationToken)
-				.ConfigureAwait(false);
+			foreach (var fileMetrics in prepared.TransformedFileMetrics)
+				topFileObserver?.Invoke(fileMetrics);
+			var transformedMetrics = prepared.GetTransformedMetrics();
 			plan = plan with
 			{
 				Analysis = plan.Analysis with

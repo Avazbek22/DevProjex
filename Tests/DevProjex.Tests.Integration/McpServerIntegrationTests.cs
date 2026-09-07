@@ -1736,8 +1736,9 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(2, metrics.GetProperty("files").GetInt32());
 		Assert.True(metrics.GetProperty("characters").GetInt64() > 0);
 		Assert.True(metrics.GetProperty("tokens").GetInt64() > 0);
+		// Transformed analysis now measures the prepared stream directly, so it reads each source once.
 		Assert.Equal(
-			metrics.GetProperty("files").GetInt32() * 2L,
+			metrics.GetProperty("files").GetInt32(),
 			afterAnalysis.FullFileReads);
 		Assert.True(afterAnalysis.FullFileReadBytes > 0);
 	}

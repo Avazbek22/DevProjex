@@ -241,6 +241,7 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				detector.Detect(file.RelativePath, file.Content.AsSpan(), token).Count);
 			var smartMeasurement = Measure(files, (file, token) =>
 				smartScope.Detect(file.FullPath, file.RelativePath, file.Content.AsSpan(), token).Count);
+			var prefilter = detector.InspectKeywordPrefilterStatistics();
 			TestContext.Current.TestOutputHelper?.WriteLine(
 				$"{Path.GetFileName(root)}: manifest={manifestIdentity}, files={files.Count:N0}, " +
 				$"chars={totalCharacters:N0}, " +
@@ -260,6 +261,8 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				$"cached={cachedStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"selectionOnly={selectionOnlyStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"candidate={candidateMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
+				$"prefilter={prefilter.NodeCount:N0} nodes/{prefilter.TransitionCount:N0} transitions/" +
+				$"{prefilter.AlphabetSize:N0} symbols/{prefilter.EstimatedStorageBytes:N0} B, " +
 				$"detect={detectionMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"smart={smartMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"throughput={ToMegabytes(totalCharacters) / smartMeasurement.Elapsed.TotalSeconds:F1} MB/s, " +

@@ -358,6 +358,51 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task LargeRedactedProjectCopyStreamsEachPreparedFileWithoutReadingAcrossSnapshotSlices()
+	{
+		const string secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("Sample");
+		var destination = Path.Combine(temporary.CreateDirectory("exports"), "redacted");
+		var files = Enumerable.Range(0, 256)
+			.Select(index => temporary.CreateFile($"Sample/File{index:D3}.txt", $"token={secret}\n"))
+			.ToArray();
+		var tree = new TreeNodeDescriptor(
+			"Sample",
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			files.Select(path => new TreeNodeDescriptor(Path.GetFileName(path), path, false, false, "file", []))
+				.ToArray());
+		using var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		var service = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			new FileContentAnalyzer(),
+			session);
+
+		var result = await service.ExportAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot,
+				"Sample",
+				tree,
+				new HashSet<string>(PathComparer.Default),
+				destination,
+				ProjectCopyExportFormat.Folder,
+				ProjectCopyDestinationMode.Exact,
+				RedactSecrets: true),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(files.Length, result.CopiedFileCount);
+		Assert.Equal(files.Length, result.RedactedValueCount);
+		var last = await File.ReadAllTextAsync(
+			Path.Combine(destination, "File255.txt"),
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(secret, last, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED", last, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task FolderExport_SelectedFileCopiesOnlyFileAndRequiredDirectories()
 	{
 		using var workspace = ProjectCopyWorkspace.Create();

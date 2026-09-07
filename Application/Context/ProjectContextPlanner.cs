@@ -212,7 +212,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			IgnoreOptionCounts: loaded.IgnoreOptionCounts,
 			IgnoreControllerImpactCounts: loaded.IgnoreControllerImpactCounts)
 		{
-			IncludesOutputMetrics = includeTreeOutputMetrics && includeContentOutputMetrics
+			IncludesOutputMetrics = includeTreeOutputMetrics && includeContentOutputMetrics,
+			ObservedControlFiles = loaded.TreeInventory?.ObservedControlFiles ?? []
 		};
 		if (loaded.TreeInventory is not null && loaded.EffectiveRules is not null)
 		{

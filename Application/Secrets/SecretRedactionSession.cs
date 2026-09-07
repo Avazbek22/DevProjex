@@ -2576,6 +2576,30 @@ public sealed class SecretRedactionScope
 		return ProcessFindings(filePath, entry, transformMap);
 	}
 
+	internal SecretScanCacheEntry? DetectTransformedContent(
+		string filePath,
+		string content,
+		ContentTransformMap? transformMap,
+		SecretFileMetadata metadata,
+		ContentFingerprint? knownFingerprint,
+		CancellationToken cancellationToken) =>
+		DetectTransformed(
+			filePath,
+			content,
+			transformMap,
+			metadata,
+			knownFingerprint,
+			cancellationToken);
+
+	internal SecretFileRedactionPlan CreatePlanFromDetectedContent(
+		string filePath,
+		SecretScanCacheEntry? entry,
+		ContentTransformMap? transformMap)
+	{
+		EnsureActive();
+		return ProcessFindings(filePath, entry, transformMap);
+	}
+
 	internal void AnalyzeTransformed(
 		string filePath,
 		string content,

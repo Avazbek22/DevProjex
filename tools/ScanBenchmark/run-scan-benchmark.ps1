@@ -13,6 +13,12 @@ param(
     [Parameter()]
     [string]$CorpusName,
 
+	[Parameter()]
+	[bool]$MeasureMcpWarm = $true,
+
+	[Parameter()]
+	[switch]$SkipRepomix,
+
     [Parameter()]
     [switch]$KeepWorkspace
 )
@@ -38,22 +44,30 @@ $npxPath = if ($IsWindows) {
 } else {
     (Get-Command npx -CommandType Application -ErrorAction Stop).Source
 }
+$npmPath = if ($IsWindows) {
+    (Get-Command npm.cmd -CommandType Application -ErrorAction Stop).Source
+} else {
+    (Get-Command npm -CommandType Application -ErrorAction Stop).Source
+}
 
 $corpora = @(
     [pscustomobject]@{
         Name = 'pallets/flask'
         Url = 'https://github.com/pallets/flask.git'
         Sha = 'd318b683471101618febed18996405ad26462110'
+        McpSeed = 'src/flask/sessions.py'
     },
     [pscustomobject]@{
         Name = 'yamadashy/repomix'
         Url = 'https://github.com/yamadashy/repomix.git'
         Sha = '85e3969b010c72b905203812d1a3f5beb84a2102'
+        McpSeed = 'src/core/packager.ts'
     },
     [pscustomobject]@{
         Name = 'godotengine/godot'
         Url = 'https://github.com/godotengine/godot.git'
         Sha = '34d06658a85845111a50db9e485ec4a0701d4298'
+        McpSeed = 'core/object/object.cpp'
     }
 )
 if (-not [string]::IsNullOrWhiteSpace($CorpusName)) {
@@ -134,6 +148,7 @@ function Invoke-MeasuredProcess {
     }
     $process.Refresh()
     $peakWorkingSet = [Math]::Max($peakWorkingSet, $process.PeakWorkingSet64)
+    $processorTime = $process.TotalProcessorTime
     $stopwatch.Stop()
     $stdout = $stdoutTask.GetAwaiter().GetResult()
     $stderr = $stderrTask.GetAwaiter().GetResult()
@@ -144,6 +159,7 @@ function Invoke-MeasuredProcess {
     }
     [pscustomobject]@{
         ElapsedMilliseconds = [Math]::Round($stopwatch.Elapsed.TotalMilliseconds, 3)
+        CpuMilliseconds = [Math]::Round($processorTime.TotalMilliseconds, 3)
         PeakRssBytes = $peakWorkingSet
         StandardOutput = $stdout
         StandardError = $stderr
@@ -209,6 +225,10 @@ function Invoke-DevProjexPair {
             ElapsedMilliseconds = [Math]::Round($analysis.ElapsedMilliseconds + $export.ElapsedMilliseconds, 3)
             AnalyzeMilliseconds = $analysis.ElapsedMilliseconds
             ExportMilliseconds = $export.ElapsedMilliseconds
+            AnalyzeCpuMilliseconds = $analysis.CpuMilliseconds
+            ExportCpuMilliseconds = $export.CpuMilliseconds
+            AnalyzePeakRssBytes = $analysis.PeakRssBytes
+            ExportPeakRssBytes = $export.PeakRssBytes
             PeakRssBytes = [Math]::Max($analysis.PeakRssBytes, $export.PeakRssBytes)
             IncludedFiles = [long]$analysisJson.inventory.files
             OutputBytes = (Get-Item -LiteralPath $outputFile).Length
@@ -244,6 +264,10 @@ function Invoke-RepomixPair {
             ElapsedMilliseconds = $measurement.ElapsedMilliseconds
             AnalyzeMilliseconds = $null
             ExportMilliseconds = $measurement.ElapsedMilliseconds
+            AnalyzeCpuMilliseconds = $null
+            ExportCpuMilliseconds = $measurement.CpuMilliseconds
+            AnalyzePeakRssBytes = $null
+            ExportPeakRssBytes = $measurement.PeakRssBytes
             PeakRssBytes = $measurement.PeakRssBytes
             IncludedFiles = Get-RepomixMetric $console 'Total Files'
             OutputBytes = (Get-Item -LiteralPath $outputFile).Length
@@ -263,23 +287,38 @@ if (-not $workspace.StartsWith($systemTemp, [StringComparison]::OrdinalIgnoreCas
 [System.IO.Directory]::CreateDirectory($workspace) | Out-Null
 
 try {
-    $npmCache = Join-Path $workspace 'npm-cache'
-    [System.IO.Directory]::CreateDirectory($npmCache) | Out-Null
-    Invoke-CheckedProcess $npxPath @('--yes', '--cache', $npmCache, 'repomix@1.17.0', '--version') $workspace
-    $repomixCli = Get-ChildItem -LiteralPath (Join-Path $npmCache '_npx') -Recurse -File -Filter 'repomix.cjs' |
-        Where-Object { $_.FullName -match '[\\/]node_modules[\\/]repomix[\\/]bin[\\/]repomix\.cjs$' } |
-        Select-Object -First 1 -ExpandProperty FullName
-    if ([string]::IsNullOrWhiteSpace($repomixCli)) {
-        throw 'Could not locate the npx-acquired Repomix 1.17.0 entry point.'
-    }
-    $repomixPackage = Get-Content -LiteralPath (Join-Path (Split-Path (Split-Path $repomixCli)) 'package.json') -Raw | ConvertFrom-Json
-    if ($repomixPackage.version -ne '1.17.0') {
-        throw "Expected Repomix 1.17.0, found '$($repomixPackage.version)'."
-    }
-    $emptyConfig = Join-Path $workspace 'repomix.empty.json'
-    [System.IO.File]::WriteAllText($emptyConfig, "{}`n", [System.Text.UTF8Encoding]::new($false))
+	$mcpHarness = $null
+	if ($MeasureMcpWarm) {
+		$mcpHarness = Join-Path $workspace 'mcp-harness'
+		[System.IO.Directory]::CreateDirectory($mcpHarness) | Out-Null
+		Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'package.json') -Destination $mcpHarness
+		Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'package-lock.json') -Destination $mcpHarness
+		Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'measure-mcp-warm.mjs') -Destination $mcpHarness
+		Invoke-CheckedProcess $npmPath @('ci', '--ignore-scripts', '--prefix', $mcpHarness) $workspace
+	}
+	$repomixCli = $null
+	$repomixPackage = $null
+	$emptyConfig = $null
+	if (-not $SkipRepomix) {
+		$npmCache = Join-Path $workspace 'npm-cache'
+		[System.IO.Directory]::CreateDirectory($npmCache) | Out-Null
+		Invoke-CheckedProcess $npxPath @('--yes', '--cache', $npmCache, 'repomix@1.17.0', '--version') $workspace
+		$repomixCli = Get-ChildItem -LiteralPath (Join-Path $npmCache '_npx') -Recurse -File -Filter 'repomix.cjs' |
+			Where-Object { $_.FullName -match '[\\/]node_modules[\\/]repomix[\\/]bin[\\/]repomix\.cjs$' } |
+			Select-Object -First 1 -ExpandProperty FullName
+		if ([string]::IsNullOrWhiteSpace($repomixCli)) {
+			throw 'Could not locate the npx-acquired Repomix 1.17.0 entry point.'
+		}
+		$repomixPackage = Get-Content -LiteralPath (Join-Path (Split-Path (Split-Path $repomixCli)) 'package.json') -Raw | ConvertFrom-Json
+		if ($repomixPackage.version -ne '1.17.0') {
+			throw "Expected Repomix 1.17.0, found '$($repomixPackage.version)'."
+		}
+		$emptyConfig = Join-Path $workspace 'repomix.empty.json'
+		[System.IO.File]::WriteAllText($emptyConfig, "{}`n", [System.Text.UTF8Encoding]::new($false))
+	}
 
     $rawResults = @()
+	$mcpWarmResults = @()
     $retryEvents = @()
     $corpusMetadata = @()
     foreach ($corpus in $corpora) {
@@ -300,7 +339,8 @@ try {
 
         foreach ($currentSeries in $series) {
             foreach ($repetition in 1..$Repetitions) {
-                foreach ($tool in @('devprojex', 'repomix')) {
+				$tools = if ($SkipRepomix) { @('devprojex') } else { @('devprojex', 'repomix') }
+                foreach ($tool in $tools) {
                     $worktree = Join-Path $workspace ("worktree-{0}-{1}-{2}-{3}" -f $slug, $currentSeries.Name, $repetition, $tool)
                     Invoke-CheckedProcess $gitPath @('--git-dir', $bare, 'worktree', 'add', '--quiet', '--detach', $worktree, $corpus.Sha) $workspace
                     try {
@@ -343,6 +383,10 @@ try {
                                 ElapsedMilliseconds = $measurement.ElapsedMilliseconds
                                 AnalyzeMilliseconds = $measurement.AnalyzeMilliseconds
                                 ExportMilliseconds = $measurement.ExportMilliseconds
+                                AnalyzeCpuMilliseconds = $measurement.AnalyzeCpuMilliseconds
+                                ExportCpuMilliseconds = $measurement.ExportCpuMilliseconds
+                                AnalyzePeakRssBytes = $measurement.AnalyzePeakRssBytes
+                                ExportPeakRssBytes = $measurement.ExportPeakRssBytes
                                 PeakRssBytes = $measurement.PeakRssBytes
                                 IncludedFiles = $measurement.IncludedFiles
                                 OutputBytes = $measurement.OutputBytes
@@ -356,6 +400,37 @@ try {
                 Write-Host "Measured $($corpus.Name), $($currentSeries.Name), repetition $repetition/$Repetitions."
             }
         }
+
+		if ($MeasureMcpWarm) {
+			foreach ($repetition in 1..$Repetitions) {
+				$worktree = Join-Path $workspace ("worktree-{0}-mcp-{1}" -f $slug, $repetition)
+				Invoke-CheckedProcess $gitPath @('--git-dir', $bare, 'worktree', 'add', '--quiet', '--detach', $worktree, $corpus.Sha) $workspace
+				try {
+					$runRoot = Join-Path $workspace ("run-{0}-mcp-{1}" -f $slug, $repetition)
+					[System.IO.Directory]::CreateDirectory($runRoot) | Out-Null
+					$outputFile = Join-Path $runRoot 'mcp-warm.json'
+					Invoke-CheckedProcess $nodePath @(
+						(Join-Path $mcpHarness 'measure-mcp-warm.mjs'),
+						$DevProjexPath,
+						$worktree,
+						$corpus.McpSeed,
+						$outputFile) $runRoot
+					$mcpResult = Get-Content -LiteralPath $outputFile -Raw | ConvertFrom-Json
+					foreach ($pass in $mcpResult.passes) {
+						$mcpWarmResults += [pscustomobject]@{
+							Corpus = $corpus.Name
+							Sha = $corpus.Sha
+							Repetition = $repetition
+							Pass = [int]$pass.ordinal
+							ElapsedMilliseconds = [double]$pass.elapsedMilliseconds
+							Calls = $pass.calls
+						}
+					}
+				} finally {
+					Invoke-CheckedProcess $gitPath @('--git-dir', $bare, 'worktree', 'remove', '--force', $worktree) $workspace
+				}
+			}
+		}
     }
 
     $medians = @($rawResults |
@@ -372,27 +447,48 @@ try {
                     Get-Median ([double[]]$items.AnalyzeMilliseconds)
                 } else { $null }
                 ExportMilliseconds = Get-Median ([double[]]$items.ExportMilliseconds)
+                AnalyzeCpuMilliseconds = if ($items[0].AnalyzeCpuMilliseconds -is [double]) {
+                    Get-Median ([double[]]$items.AnalyzeCpuMilliseconds)
+                } else { $null }
+                ExportCpuMilliseconds = Get-Median ([double[]]$items.ExportCpuMilliseconds)
+                AnalyzePeakRssBytes = if ($items[0].AnalyzePeakRssBytes -is [long]) {
+                    [long](Get-Median ([double[]]$items.AnalyzePeakRssBytes)
+                    )
+                } else { $null }
+                ExportPeakRssBytes = [long](Get-Median ([double[]]$items.ExportPeakRssBytes))
                 PeakRssBytes = [long](Get-Median ([double[]]$items.PeakRssBytes))
                 IncludedFiles = [long](Get-Median ([double[]]$items.IncludedFiles))
                 OutputBytes = [long](Get-Median ([double[]]$items.OutputBytes))
                 EstimatedTokens = [long](Get-Median ([double[]]$items.EstimatedTokens))
             }
         })
+	$mcpWarmMedians = @($mcpWarmResults |
+		Group-Object Corpus, Pass |
+		ForEach-Object {
+			$items = @($_.Group)
+			[pscustomobject]@{
+				Corpus = $items[0].Corpus
+				Pass = $items[0].Pass
+				ElapsedMilliseconds = Get-Median ([double[]]$items.ElapsedMilliseconds)
+			}
+		})
 
     $output = [pscustomobject]@{
-        SchemaVersion = 1
+        SchemaVersion = 2
         MeasuredUtc = [DateTimeOffset]::UtcNow.ToString('O')
         Platform = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
         Repetitions = $Repetitions
         DevProjexVersion = (& $DevProjexPath --version).Trim()
-        RepomixVersion = [string]$repomixPackage.version
+		RepomixVersion = if ($repomixPackage) { [string]$repomixPackage.version } else { $null }
         ColdDefinition = 'new process, fresh worktree path, and fresh per-tool application/config cache; operating-system page cache is not flushed'
-        TimingDefinition = 'DevProjex elapsed time is analyze plus export context; Repomix elapsed time is one pack command'
+        TimingDefinition = 'DevProjex records analyze and export context separately and also their sum; Repomix elapsed time is one pack command'
         FailurePolicy = 'discard a failed tool pair and retry once with a clean application cache; fail without writing a partial report after a second failure'
         Retries = $retryEvents
         Corpora = $corpusMetadata
         Medians = $medians
         Raw = $rawResults
+		McpWarmSessionMedians = $mcpWarmMedians
+		McpWarmSessionRaw = $mcpWarmResults
     }
     $resolvedOutput = if ([System.IO.Path]::IsPathRooted($OutputPath)) {
         [System.IO.Path]::GetFullPath($OutputPath)

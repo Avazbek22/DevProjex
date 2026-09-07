@@ -1,7 +1,10 @@
+using System.Buffers;
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using DevProjex.Application.Dependencies;
+using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Compression;
 using TreeSitter;
 
@@ -15,6 +18,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private const long MaximumPreparedSourceBytes = 64L * 1024 * 1024;
 	private const string DiagnosticErrorQuery = "(ERROR) @diagnostic.error";
 	private readonly IGrammarLibraryLocator _locator;
+	private readonly IFileContentAnalyzer _contentAnalyzer = new FileContentAnalyzer();
 	private readonly IReadOnlyDictionary<LanguageId, LanguageDefinition> _definitions;
 	private readonly ConcurrentDictionary<LanguageId, Lazy<LanguageRuntime>> _runtimes = [];
 	private readonly ConcurrentDictionary<LanguageId, string> _extractorIdentities = [];
@@ -46,6 +50,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string sourceRoot,
 		string fullPath,
 		DependencyResolverConfiguration configuration,
+		DependencyFactsLimits limits,
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
@@ -75,9 +80,10 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				info.Length,
 				info.LastWriteTimeUtc.Ticks,
 				info.CreationTimeUtc.Ticks,
-				language);
+				language,
+				limits.MaximumCharactersPerFile);
 			var created = new Lazy<Task<PreparedSourceContent>>(
-				() => ReadPreparedSourceAsync(fullPath, language, cancellationToken),
+				() => ReadPreparedSourceAsync(fullPath, language, limits.MaximumCharactersPerFile, cancellationToken),
 				LazyThreadSafetyMode.ExecutionAndPublication);
 			var lazy = _preparedSources.GetOrAdd(key, created);
 			if (ReferenceEquals(lazy, created))
@@ -101,7 +107,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				language,
 				content.Fingerprint,
 				content.ExtractorIdentity,
-				content.Source);
+				content.Source,
+				content.Status,
+				content.StatusReason);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
 		{
@@ -115,12 +123,72 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private async Task<PreparedSourceContent> ReadPreparedSourceAsync(
 		string fullPath,
 		LanguageId language,
+		int maximumCharacters,
 		CancellationToken cancellationToken)
 	{
-		var bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken).ConfigureAwait(false);
-		var source = Encoding.UTF8.GetString(bytes);
-		if (source.Length > 0 && source[0] == '\uFEFF') source = source[1..];
-		return new PreparedSourceContent(Hash(bytes), GetExtractorIdentity(language), source);
+		await using var snapshot = await _contentAnalyzer
+			.OpenCompleteSnapshotAsync(fullPath, cancellationToken)
+			.ConfigureAwait(false);
+		var result = snapshot.Result;
+		var extractorIdentity = GetExtractorIdentity(language);
+		if (result.Classification != FileContentClassification.Text || result.Metrics is null)
+		{
+			return new PreparedSourceContent(
+				FingerprintForUnavailableFile(fullPath, result.Classification),
+				extractorIdentity,
+				string.Empty,
+				DependencyFileStatus.ExtractionFailed,
+				$"source is {result.Classification.ToString().ToLowerInvariant()}");
+		}
+		if (result.Metrics.CharCount > maximumCharacters)
+		{
+			return new PreparedSourceContent(
+				FingerprintForUnavailableFile(fullPath, result.Classification),
+				extractorIdentity,
+				string.Empty,
+				DependencyFileStatus.ExtractionFailed,
+				$"file exceeds the {maximumCharacters} character parse limit");
+		}
+
+		if (result.Metrics.CharCount == 0)
+			return new PreparedSourceContent(Hash([]), extractorIdentity, string.Empty);
+
+		var rented = ArrayPool<char>.Shared.Rent(result.Metrics.CharCount);
+		var written = 0;
+		try
+		{
+			await snapshot.CopyTextToAsync(
+				result.Metrics.CharCount,
+				(chunk, token) =>
+				{
+					token.ThrowIfCancellationRequested();
+					if (written > maximumCharacters - chunk.Length)
+						throw new IOException("The source exceeded its character limit while being decoded.");
+					chunk.Span.CopyTo(rented.AsSpan(written));
+					written += chunk.Length;
+					return ValueTask.CompletedTask;
+				},
+				cancellationToken).ConfigureAwait(false);
+			var source = new string(rented, 0, written);
+			return new PreparedSourceContent(
+				ContentFingerprint.Compute(source.AsSpan()).ToHexString().ToLowerInvariant(),
+				extractorIdentity,
+				source);
+		}
+		finally
+		{
+			CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(rented.AsSpan(0, written)));
+			ArrayPool<char>.Shared.Return(rented);
+		}
+	}
+
+	private static string FingerprintForUnavailableFile(
+		string fullPath,
+		FileContentClassification classification)
+	{
+		var info = new FileInfo(fullPath);
+		return Hash(Encoding.UTF8.GetBytes(
+			$"{classification}:{info.Length}:{info.LastWriteTimeUtc.Ticks}:{info.CreationTimeUtc.Ticks}"));
 	}
 
 	private void RegisterPreparedSourceWeight(
@@ -377,12 +445,15 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		long Length,
 		long LastWriteTimeUtcTicks,
 		long CreationTimeUtcTicks,
-		LanguageId LanguageId);
+		LanguageId LanguageId,
+		int MaximumCharacters);
 
 	private sealed record PreparedSourceContent(
 		string Fingerprint,
 		string ExtractorIdentity,
-		string Source);
+		string Source,
+		DependencyFileStatus Status = DependencyFileStatus.Supported,
+		string? StatusReason = null);
 
 	private sealed record LanguageDefinition(
 		string Library,
