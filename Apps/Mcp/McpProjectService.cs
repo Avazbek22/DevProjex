@@ -11,19 +11,19 @@ internal sealed class McpProjectService(
 	bool hidePrivateData,
 	GitFilteringMode? serverGitMode,
 	IReadOnlyCollection<ProjectExclusion>? serverExclusions = null,
-	bool agentExclusions = false) : IDisposable
+	bool agentExclusions = false,
+	Func<string, CancellationToken, ValueTask>? inventoryBuilt = null) : IDisposable
 {
 	internal const int MaximumRequestedPaths = 256;
 	internal const int MaximumRequestedPathLength = 4096;
 	private const int MaximumCachedInventories = 8;
 	private const int MaximumCachedProjections = 16;
 	private const int MaximumRootMonitors = 8;
-	private readonly ConcurrentDictionary<McpInventoryCacheKey, Lazy<Task<CachedInventoryPlan>>> inventoryCache = [];
-	private readonly ConcurrentQueue<McpInventoryCacheKey> inventoryCacheOrder = [];
+	private readonly ConcurrentDictionary<McpInventoryCacheKey, CachedInventoryEntry> inventoryCache = [];
 	private readonly ConcurrentDictionary<McpProjectionCacheKey, CachedProjectionPlan> projectionCache = [];
-	private readonly ConcurrentQueue<McpProjectionCacheKey> projectionCacheOrder = [];
 	private readonly Dictionary<string, RootChangeMonitor> rootMonitors = new(PathComparer.Default);
 	private readonly object rootMonitorSync = new();
+	private long cacheGeneration;
 	private int disposed;
 
 	/// <summary>The Git baseline every call starts from when it names no profile.</summary>
@@ -142,8 +142,11 @@ internal sealed class McpProjectService(
 				"Fix the reported project access or Git state and retry.");
 		}
 		ValidateRequestedPathCasing(plan, requested);
+		if (maximumFileBytes is not null)
+			plan = RefreshEffectiveFileSizes(plan);
 		var allowProjectionReuse = parsedScope is null &&
 		                           profileReference.Kind != ProjectProfileSourceKind.Local &&
+		                           maximumFileBytes is null &&
 		                           CanMonitorRepositoryState(projectRoot);
 		var projectionKey = new McpProjectionCacheKey(
 			RuntimeHelpers.GetHashCode(plan),
@@ -257,9 +260,12 @@ internal sealed class McpProjectService(
 		ValidatePlanContainment(roots, projectRoot, final.IncludedFiles, cancellationToken);
 		if (allowProjectionReuse)
 		{
-			if (projectionCache.TryAdd(projectionKey, new CachedProjectionPlan(plan, final)))
+			var projection = new CachedProjectionPlan(
+				plan,
+				final,
+				Interlocked.Increment(ref cacheGeneration));
+			if (projectionCache.TryAdd(projectionKey, projection))
 			{
-				projectionCacheOrder.Enqueue(projectionKey);
 				TrimProjectionCache();
 			}
 		}
@@ -287,38 +293,45 @@ internal sealed class McpProjectService(
 				PathUtility.Normalize(request.ProjectPath),
 				BuildSelectionIdentity(request),
 				includeOutputMetrics);
-			var created = new Lazy<Task<CachedInventoryPlan>>(
+			var created = new CachedInventoryEntry(
+				Interlocked.Increment(ref cacheGeneration),
+				new Lazy<Task<CachedInventoryPlan>>(
 				async () =>
 				{
+					var revisionBeforeBuild = monitor.Revision;
+					var controlStampsBeforeBuild = CaptureBuildControlStamps(request.ProjectPath);
 					var built = await BuildUncachedAsync().ConfigureAwait(false);
+					if (inventoryBuilt is not null)
+						await inventoryBuilt(request.ProjectPath, cancellationToken).ConfigureAwait(false);
+					var builtCoherently = controlStampsBeforeBuild is not null &&
+					                      controlStampsBeforeBuild.All(static stamp => stamp.IsCurrent()) &&
+					                      monitor.Revision == revisionBeforeBuild &&
+					                      monitor.IsReliable;
 					var stamps = CapturePlanStamps(built);
 					return new CachedInventoryPlan(
 						built,
-						monitor.Revision,
-						stamps);
+						revisionBeforeBuild,
+						stamps,
+						builtCoherently);
 				},
-				LazyThreadSafetyMode.ExecutionAndPublication);
-			var lazy = inventoryCache.GetOrAdd(key, created);
-			if (ReferenceEquals(lazy, created))
-			{
-				inventoryCacheOrder.Enqueue(key);
+				LazyThreadSafetyMode.ExecutionAndPublication));
+			var entry = inventoryCache.GetOrAdd(key, created);
+			if (ReferenceEquals(entry, created))
 				TrimInventoryCache();
-			}
 
 			CachedInventoryPlan cached;
 			try
 			{
-				cached = await lazy.Value.ConfigureAwait(false);
+				cached = await entry.Value.Value.ConfigureAwait(false);
 			}
 			catch
 			{
-				inventoryCache.TryRemove(new KeyValuePair<McpInventoryCacheKey, Lazy<Task<CachedInventoryPlan>>>(
-					key,
-					lazy));
+				RemoveInventoryEntry(key, entry);
 				throw;
 			}
 			var beforeValidation = monitor.Revision;
-			var isCurrent = cached.Stamps is not null &&
+			var isCurrent = cached.BuiltCoherently &&
+			                cached.Stamps is not null &&
 			                cached.Revision == beforeValidation &&
 			                cached.Stamps.All(static stamp => stamp.IsCurrent()) &&
 			                monitor.Revision == beforeValidation &&
@@ -327,9 +340,7 @@ internal sealed class McpProjectService(
 			if (isCurrent)
 				return cached.Plan;
 
-			inventoryCache.TryRemove(new KeyValuePair<McpInventoryCacheKey, Lazy<Task<CachedInventoryPlan>>>(
-				key,
-				lazy));
+			RemoveInventoryEntry(key, entry);
 		}
 
 		return await BuildUncachedAsync().ConfigureAwait(false);
@@ -337,6 +348,25 @@ internal sealed class McpProjectService(
 		Task<ProjectContextPlan> BuildUncachedAsync() => includeOutputMetrics
 			? services.Planner.BuildAsync(request, cancellationToken)
 			: services.Planner.BuildStructureAsync(request, cancellationToken);
+	}
+
+	private static ProjectContextPlan RefreshEffectiveFileSizes(ProjectContextPlan plan)
+	{
+		var sizes = new Dictionary<string, long>(plan.IncludedFiles.Count, ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var path in plan.IncludedFiles)
+		{
+			try
+			{
+				sizes[path] = Math.Max(0, new FileInfo(path).Length);
+			}
+			catch (Exception exception) when (exception is
+			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
+			       NotSupportedException or ArgumentException)
+			{
+				sizes[path] = 0;
+			}
+		}
+		return plan with { EffectiveFileSizes = sizes };
 	}
 
 	private static bool CanMonitorRepositoryState(string projectRoot)
@@ -377,6 +407,12 @@ internal sealed class McpProjectService(
 			{
 				if (paths.Add(directory))
 					stamps.Add(CachedPathStamp.Capture(directory, expectDirectory: true));
+				var nestedIgnore = Path.Combine(directory, ".gitignore");
+				if (File.Exists(nestedIgnore) && paths.Add(nestedIgnore))
+					stamps.Add(CachedPathStamp.Capture(nestedIgnore, expectDirectory: false));
+				var nestedModules = Path.Combine(directory, ".gitmodules");
+				if (File.Exists(nestedModules) && paths.Add(nestedModules))
+					stamps.Add(CachedPathStamp.Capture(nestedModules, expectDirectory: false));
 			}
 			var metadataPath = Path.Combine(plan.SourceRoot, ".git");
 			var hasGitDirectories = GitRepositoryBoundaryProbe.TryResolveMetadataDirectories(
@@ -404,6 +440,45 @@ internal sealed class McpProjectService(
 				yield return Path.Combine(gitDirectory, "config.worktree");
 				yield return Path.Combine(commonDirectory, "config");
 				yield return Path.Combine(commonDirectory, "info", "exclude");
+			}
+		}
+		catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or System.Security.SecurityException or
+		       NotSupportedException or ArgumentException)
+		{
+			return null;
+		}
+	}
+
+	private static IReadOnlyList<CachedPathStamp>? CaptureBuildControlStamps(string projectRoot)
+	{
+		try
+		{
+			var paths = new HashSet<string>(PathComparer.Default);
+			var stamps = new List<CachedPathStamp>();
+			Add(projectRoot, expectDirectory: true);
+			Add(Path.Combine(projectRoot, ".gitignore"), expectDirectory: false);
+			Add(Path.Combine(projectRoot, ".gitmodules"), expectDirectory: false);
+			var metadataPath = Path.Combine(projectRoot, ".git");
+			Add(metadataPath, expectDirectory: Directory.Exists(metadataPath));
+			if (GitRepositoryBoundaryProbe.TryResolveMetadataDirectories(
+				    projectRoot,
+				    out var gitDirectory,
+				    out var commonDirectory))
+			{
+				Add(Path.Combine(gitDirectory, "index"), expectDirectory: false);
+				Add(Path.Combine(gitDirectory, "HEAD"), expectDirectory: false);
+				Add(Path.Combine(gitDirectory, "commondir"), expectDirectory: false);
+				Add(Path.Combine(gitDirectory, "config.worktree"), expectDirectory: false);
+				Add(Path.Combine(commonDirectory, "config"), expectDirectory: false);
+				Add(Path.Combine(commonDirectory, "info", "exclude"), expectDirectory: false);
+			}
+			return stamps;
+
+			void Add(string path, bool expectDirectory)
+			{
+				if (paths.Add(path))
+					stamps.Add(CachedPathStamp.Capture(path, expectDirectory));
 			}
 		}
 		catch (Exception exception) when (exception is
@@ -465,8 +540,30 @@ internal sealed class McpProjectService(
 
 	private void TrimInventoryCache()
 	{
-		while (inventoryCache.Count > MaximumCachedInventories && inventoryCacheOrder.TryDequeue(out var oldest))
-			inventoryCache.TryRemove(oldest, out _);
+		while (inventoryCache.Count > MaximumCachedInventories)
+		{
+			var oldest = inventoryCache.MinBy(static pair => pair.Value.Generation);
+			if (oldest.Value is null || !RemoveInventoryEntry(oldest.Key, oldest.Value))
+				break;
+		}
+	}
+
+	private bool RemoveInventoryEntry(McpInventoryCacheKey key, CachedInventoryEntry entry)
+	{
+		if (!inventoryCache.TryRemove(new KeyValuePair<McpInventoryCacheKey, CachedInventoryEntry>(key, entry)))
+			return false;
+		if (entry.Value.IsValueCreated && entry.Value.Value.IsCompletedSuccessfully)
+			RemoveProjectionsForBasePlan(entry.Value.Value.Result.Plan);
+		return true;
+	}
+
+	private void RemoveProjectionsForBasePlan(ProjectContextPlan plan)
+	{
+		foreach (var pair in projectionCache)
+		{
+			if (ReferenceEquals(pair.Value.BasePlan, plan))
+				projectionCache.TryRemove(pair);
+		}
 	}
 
 	private static string BuildProjectionIdentity(
@@ -499,10 +596,11 @@ internal sealed class McpProjectService(
 
 	private void TrimProjectionCache()
 	{
-		while (projectionCache.Count > MaximumCachedProjections &&
-		       projectionCacheOrder.TryDequeue(out var oldest))
+		while (projectionCache.Count > MaximumCachedProjections)
 		{
-			projectionCache.TryRemove(oldest, out _);
+			var oldest = projectionCache.MinBy(static pair => pair.Value.Generation);
+			if (oldest.Value is null || !projectionCache.TryRemove(oldest))
+				break;
 		}
 	}
 
@@ -1057,12 +1155,18 @@ internal sealed class McpProjectService(
 
 	private sealed record CachedProjectionPlan(
 		ProjectContextPlan BasePlan,
-		ProjectContextPlan Plan);
+		ProjectContextPlan Plan,
+		long Generation);
+
+	private sealed record CachedInventoryEntry(
+		long Generation,
+		Lazy<Task<CachedInventoryPlan>> Value);
 
 	private sealed record CachedInventoryPlan(
 		ProjectContextPlan Plan,
 		long Revision,
-		IReadOnlyList<CachedPathStamp>? Stamps);
+		IReadOnlyList<CachedPathStamp>? Stamps,
+		bool BuiltCoherently);
 
 	private readonly record struct CachedPathStamp(
 		string Path,
