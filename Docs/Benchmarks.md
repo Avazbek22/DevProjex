@@ -104,6 +104,51 @@ retained source text is now bounded: the peak includes concurrent detector and
 runtime allocation churn, not only live prepared content. Both limitations are
 reported rather than hidden behind the faster stage totals.
 
+The one-run Godot export comparison above increased peak RSS from 910.6 MiB to
+967.6 MiB (+57.0 MiB). That increase is an explicit memory price of the measured
+speedup; bounded retained source text did not translate into a lower process peak.
+
+After the correctness review, the defensive series was repeated three times per
+temperature without a profiler. The table reports medians; every repetition used
+the same pinned manifest and arguments as the baseline. Compared with the earlier
+single optimized controls, the cold medians were 1,003/1,092 ms instead of
+1,017/1,104 ms for Flask, 1,451/1,541 ms instead of 1,448/1,520 ms for Repomix,
+and 9,204/10,391 ms instead of 11,719/11,014 ms for Godot (analyze/export).
+
+| Corpus | Analyze ms cold / warm | Export context ms cold / warm | Combined ms cold / warm | Analyze peak RSS MiB cold / warm | Export peak RSS MiB cold / warm |
+|---|---:|---:|---:|---:|---:|
+| Flask | 1,003 / 996 | 1,092 / 1,107 | 2,094 / 2,103 | 101.3 / 101.1 | 101.5 / 101.1 |
+| Repomix | 1,451 / 1,385 | 1,541 / 1,512 | 2,992 / 2,897 | 159.9 / 158.1 | 155.1 / 157.8 |
+| Godot | 9,204 / 8,626 | 10,391 / 10,404 | 19,595 / 19,030 | 996.4 / 816.9 | 949.5 / 969.5 |
+
+Against the original cold baseline, the reviewed Godot medians are 3.02× faster
+for analyze and 3.25× faster for export context. They still do not meet the 4×
+target. The three Godot export samples were 10,391, 10,411, and 10,377 ms cold,
+and 10,404, 12,306, and 10,224 ms warm; the slower second warm sample is retained
+rather than discarded.
+
+The reviewed harness reports 77,689,944 estimated tree-plus-content tokens for
+Godot instead of the earlier 70,191,036. This is an intentional correctness
+change: detector policy exclusions such as lock files now contribute their
+unchanged source metrics to analyze even though the detector is not invoked for
+them. The selection remains 14,261 files and the harness export remains
+327,740,310 bytes.
+
+The correctness run also pinned repeatability separately from timing. The
+canonical 14,261-path Git manifest had SHA-256
+`c77c62241832eef5b9eb96b16c3e1ace1a0831961633eacc7b19a9914fdb404b`.
+All three analyzes produced selection fingerprint
+`4d84367ec5931826c83030a9474242d8c41ac3ebcf50cab4909041052c946d11`,
+43 findings, and the same safe-findings SHA-256
+`01f35b4cfbc9f70bc16b4852c59a2d89c6b5c2cf378c313dd6e6e9cb4909ae93`.
+Their complete JSON documents shared SHA-256
+`03691ef0fa31004bf01b8b8201c7565f12dbcbf0b814951c14f0b0b2dee412bb`.
+Three exports from one fixed checkout path were each 327,543,528 bytes with
+SHA-256 `bed955722ab8cfb1f528061359dcb1970b0cba58c8cb654cbb8316b29b0dd569`.
+The document embeds its checkout root, so that last hash is a repeatability check
+for the fixed path, not a path-independent corpus digest. The Godot finding count
+therefore remains 43 after the line-range cache correction.
+
 The Godot stage trace is published as
 [`content-pipeline-godot-stages.json`](../tools/ScanBenchmark/results/content-pipeline-godot-stages.json).
 Per-file stages overlap across workers, so their values are aggregate active time
@@ -139,13 +184,20 @@ but the unchanged project inventory was still rebuilt for every call.
 | Repomix | 4,057 | 3,271 | 1.24× |
 | Godot | 37,160 | 34,004 | 1.09× |
 
-After inventory and projection reuse, the same real-process sequence produced:
+After inventory and projection reuse, the same real-process sequence produced.
+The first and second columns are consecutive executions of the identical
+`get_tree` → `search_project` → `get_file` sequence against one unchanged checkout,
+using one initialized MCP process and one DevProjex binary/version:
 
-| Corpus | First sequence ms | Second sequence ms | Same-process speedup |
+| Corpus | First identical sequence ms | Second identical sequence ms | Same-process speedup |
 |---|---:|---:|---:|
 | Flask | 705 | 35 | 20.36× |
 | Repomix | 882 | 126 | 6.98× |
 | Godot | 1,988 | 51 | 38.66× |
+
+For Godot, the reported 38.66× denominator is specifically 1,988 ms divided by
+51 ms for those first and second consecutive sequences; it does not compare two
+versions or two different queries.
 
 The cache retains immutable inventory and path projections only while a root
 watcher and Git/control-file stamps prove the snapshot current. Source content is
