@@ -1165,18 +1165,32 @@ public sealed class ProjectContextDocumentService(
 				EstimateCompleteSnapshotRetainedBytes(path),
 				cancellationToken)
 			.ConfigureAwait(false);
+		IFileContentSnapshot? snapshot = null;
 		try
 		{
 			EnsureRankingSourceVersion(path, expectedVersion);
-			var snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
+			snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
 				.ConfigureAwait(false);
 			EnsureRankingSourceVersion(path, expectedVersion);
 			if (expectedVersion is { } version)
 				snapshot = new RankingValidatedSourceSnapshot(snapshot, path, version);
-			return new BudgetedCompleteSourceSnapshot(snapshot, lease);
+			var budgeted = new BudgetedCompleteSourceSnapshot(snapshot, lease);
+			snapshot = null;
+			return budgeted;
 		}
 		catch
 		{
+			if (snapshot is not null)
+			{
+				try
+				{
+					await snapshot.DisposeAsync().ConfigureAwait(false);
+				}
+				catch
+				{
+					// Preserve the source-version failure while still attempting to release the handle.
+				}
+			}
 			lease.Dispose();
 			throw;
 		}
