@@ -1,12 +1,16 @@
 using ModelContextProtocol.Protocol;
 using System.Diagnostics;
+using System.Text;
+using System.Xml.Linq;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed partial class McpServerProcessTests
 {
-	[Fact]
-	public void RealCliProcessRedactsAnAbsoluteFocusSeedEverywhereInJson()
+	[Theory]
+	[InlineData("text")]
+	[InlineData("json")]
+	public void RealCliProcessRedactsAnAbsoluteFocusSeedEverywhere(string format)
 	{
 		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 		if (string.IsNullOrWhiteSpace(userProfile))
@@ -18,20 +22,22 @@ public sealed partial class McpServerProcessTests
 		var result = RunFocusCliCore(
 			workspace.CreateDirectory("cli-private-focus-data"),
 			project,
-			"json",
+			format,
 			includeRank: true,
 			[Path.Combine(project, "A.cs")],
 			["--hide-private-data"]);
 
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.DoesNotContain(new DirectoryInfo(userProfile).Name, result.StandardOutput, StringComparison.Ordinal);
-		Assert.True(
-			result.StandardOutput.Split(OutputRootPathPresentation.LocalUserPlaceholder, StringSplitOptions.None).Length >= 3,
-			result.StandardOutput);
+		var placeholderCount = result.StandardOutput
+			.Split(OutputRootPathPresentation.LocalUserPlaceholder, StringSplitOptions.None).Length - 1;
+		Assert.True(placeholderCount >= (format == "json" ? 2 : 1), result.StandardOutput);
 	}
 
-	[Fact]
-	public async Task RealMcpProcessRedactsAnAbsoluteFocusSeedEverywhereInJson()
+	[Theory]
+	[InlineData("text")]
+	[InlineData("json")]
+	public async Task RealMcpProcessRedactsAnAbsoluteFocusSeedEverywhere(string format)
 	{
 		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 		if (string.IsNullOrWhiteSpace(userProfile))
@@ -50,7 +56,7 @@ public sealed partial class McpServerProcessTests
 			new Dictionary<string, object?>
 			{
 				["view"] = "content",
-				["format"] = "json",
+				["format"] = format,
 				["rank"] = "importance",
 				["focus"] = Path.Combine(project, "A.cs")
 			},
@@ -61,9 +67,103 @@ public sealed partial class McpServerProcessTests
 
 		Assert.NotEqual(true, result.IsError);
 		Assert.DoesNotContain(new DirectoryInfo(userProfile).Name, text, StringComparison.Ordinal);
-		Assert.True(
-			text.Split(OutputRootPathPresentation.LocalUserPlaceholder, StringSplitOptions.None).Length >= 3,
-			text);
+		var placeholderCount = text
+			.Split(OutputRootPathPresentation.LocalUserPlaceholder, StringSplitOptions.None).Length - 1;
+		Assert.True(placeholderCount >= (format == "json" ? 2 : 1), text);
+	}
+
+	[Fact]
+	public void RealCliFocusPreservesPayloadAcrossConsolidatedStorageBoundary()
+	{
+		using var workspace = new TemporaryDirectory();
+		var separate = CreateStorageThresholdFixture(workspace, "separate", 255);
+		var consolidated = CreateStorageThresholdFixture(workspace, "consolidated", 256);
+		var dataRoot = workspace.CreateDirectory("cli-storage-data");
+
+		foreach (var format in new[] { "markdown", "text", "json", "xml" })
+		{
+			var separateResult = RunFocusCliCore(dataRoot, separate, format, true, ["A.cs"], ["--hide-secrets"]);
+			var consolidatedResult = RunFocusCliCore(dataRoot, consolidated, format, true, ["A.cs"], ["--hide-secrets"]);
+
+			Assert.Equal(CommandLineExitCodes.Success, separateResult.ExitCode);
+			Assert.Equal(CommandLineExitCodes.Success, consolidatedResult.ExitCode);
+			Assert.Equal(StoragePayload, ExtractFileContent(separateResult.StandardOutput, format, "A.cs"));
+			Assert.Equal(StoragePayload, ExtractFileContent(consolidatedResult.StandardOutput, format, "A.cs"));
+		}
+	}
+
+	[Fact]
+	public async Task RealMcpFocusPreservesPayloadAcrossConsolidatedStorageBoundary()
+	{
+		using var workspace = new TemporaryDirectory();
+		var separate = CreateStorageThresholdFixture(workspace, "separate", 255);
+		var consolidated = CreateStorageThresholdFixture(workspace, "consolidated", 256);
+		await using var separateServer = await ActualMcpProcess.StartAsync(
+			separate,
+			workspace.CreateDirectory("mcp-storage-separate"));
+		await using var consolidatedServer = await ActualMcpProcess.StartAsync(
+			consolidated,
+			workspace.CreateDirectory("mcp-storage-consolidated"));
+
+		foreach (var format in new[] { "markdown", "text", "json", "xml" })
+		{
+			var separateResult = await CallFocusPackAsync(separateServer, format, ["A.cs"]);
+			var consolidatedResult = await CallFocusPackAsync(consolidatedServer, format, ["A.cs"]);
+
+			Assert.NotEqual(true, separateResult.IsError);
+			Assert.NotEqual(true, consolidatedResult.IsError);
+			var separateDocument = await ReadStoredPackIfNeededAsync(separateServer, separateResult);
+			var consolidatedDocument = await ReadStoredPackIfNeededAsync(consolidatedServer, consolidatedResult);
+			Assert.Equal(StoragePayload, ExtractFileContent(separateDocument, format, "A.cs"));
+			Assert.Equal(StoragePayload, ExtractFileContent(consolidatedDocument, format, "A.cs"));
+		}
+	}
+
+	[Fact]
+	public async Task FocusRedactionPayloadIsIndependentOfSeedOrderAcrossCliAndMcp()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateRedactionFixture(workspace);
+		var dataRoot = workspace.CreateDirectory("seed-order-data");
+		var cliFirst = RunFocusCliCore(dataRoot, project, "json", true, ["A.cs", "B.cs"], ["--hide-secrets"]);
+		var cliSecond = RunFocusCliCore(dataRoot, project, "json", true, ["B.cs", "A.cs"], ["--hide-secrets"]);
+		Assert.Equal(CommandLineExitCodes.Success, cliFirst.ExitCode);
+		Assert.Equal(CommandLineExitCodes.Success, cliSecond.ExitCode);
+		AssertPayloadsEqual(JsonPayloads(cliFirst.StandardOutput), JsonPayloads(cliSecond.StandardOutput));
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("seed-order-mcp-data"));
+		var mcpFirst = await CallFocusPackAsync(server, "json", ["A.cs", "B.cs"]);
+		var mcpSecond = await CallFocusPackAsync(server, "json", ["B.cs", "A.cs"]);
+		Assert.NotEqual(true, mcpFirst.IsError);
+		Assert.NotEqual(true, mcpSecond.IsError);
+		AssertPayloadsEqual(
+			JsonPayloads(ExtractJsonDocument(AllProcessText(mcpFirst))),
+			JsonPayloads(ExtractJsonDocument(AllProcessText(mcpSecond))));
+	}
+
+	[Fact]
+	public async Task FocusBudgetMetadataStaysBoundToSkippedFilesAcrossCliAndMcp()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateBudgetFixture(workspace);
+		var cli = RunFocusCliCore(
+			workspace.CreateDirectory("budget-cli-data"),
+			project,
+			"json",
+			true,
+			["A.cs"],
+			["--max-tokens", "10"]);
+		Assert.Equal(CommandLineExitCodes.Success, cli.ExitCode);
+		AssertSkippedBudgetMetadata(cli.StandardOutput);
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("budget-mcp-data"));
+		var mcp = await CallFocusPackAsync(server, "json", ["A.cs"], maximumTokens: 10);
+		Assert.NotEqual(true, mcp.IsError);
+		AssertSkippedBudgetMetadata(ExtractJsonDocument(AllProcessText(mcp)));
 	}
 
 	[Fact]
@@ -322,5 +422,207 @@ public sealed partial class McpServerProcessTests
 		startInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
 		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = dataRoot;
 		return TerminalTestProcess.Run(startInfo);
+	}
+
+	private const string StoragePayload = "namespace Fixture; public sealed class A { B Value = new(); } // STORAGE_PAYLOAD";
+
+	private static string CreateStorageThresholdFixture(
+		TemporaryDirectory workspace,
+		string name,
+		int fileCount)
+	{
+		var project = workspace.CreateDirectory(name);
+		workspace.WriteFile($"{name}/A.cs", StoragePayload);
+		workspace.WriteFile($"{name}/B.cs", "namespace Fixture; public sealed class B { }");
+		for (var index = 2; index < fileCount; index++)
+			workspace.WriteFile($"{name}/dummy-{index:D3}.txt", $"payload-{index:D3}");
+		return project;
+	}
+
+	private static string CreateRedactionFixture(TemporaryDirectory workspace)
+	{
+		var project = workspace.CreateDirectory("redaction-project");
+		workspace.WriteFile(
+			"redaction-project/A.cs",
+			"class A { const string Token = \"ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\"; B Value = new(); }");
+		workspace.WriteFile(
+			"redaction-project/B.cs",
+			"class B { const string Token = \"ghp_Q7wE9rT2yU4iO6pA8sD0fG1hJ3kL5zX7cV9b\"; }");
+		return project;
+	}
+
+	private static string CreateBudgetFixture(TemporaryDirectory workspace)
+	{
+		var project = workspace.CreateDirectory("budget-project");
+		workspace.WriteFile(
+			"budget-project/A.cs",
+			"public sealed class A { B Value = new(); } // " + new string('a', 400));
+		workspace.WriteFile(
+			"budget-project/B.cs",
+			"public sealed class B { } // " + new string('b', 400));
+		workspace.WriteFile(
+			"budget-project/Fixture.csproj",
+			"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+		return project;
+	}
+
+	private static ValueTask<CallToolResult> CallFocusPackAsync(
+		ActualMcpProcess server,
+		string format,
+		IReadOnlyList<string> focus,
+		long? maximumTokens = null)
+	{
+		var arguments = new Dictionary<string, object?>
+		{
+			["view"] = "content",
+			["format"] = format,
+			["rank"] = "importance",
+			["focus"] = focus.ToArray()
+		};
+		if (maximumTokens is not null)
+			arguments["max_tokens"] = maximumTokens.Value;
+		return server.Client.CallToolAsync(
+			"pack_context",
+			arguments,
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+	}
+
+	private static string ExtractFileContent(string document, string format, string path)
+	{
+		var normalized = document.Replace("\r\n", "\n", StringComparison.Ordinal);
+		if (format == "json")
+		{
+			using var json = JsonDocument.Parse(ExtractJsonDocument(normalized));
+			return json.RootElement.GetProperty("files").EnumerateArray()
+				.Single(file => Path.GetFileName(file.GetProperty("path").GetString()) == path)
+				.GetProperty("content").GetString()!;
+		}
+		if (format == "xml")
+		{
+			var start = normalized.IndexOf("<?xml", StringComparison.Ordinal);
+			var end = normalized.IndexOf("</devprojexContext>", start, StringComparison.Ordinal);
+			Assert.True(start >= 0 && end >= start, normalized);
+			var xml = XDocument.Parse(normalized[start..(end + "</devprojexContext>".Length)]);
+			return xml.Root!.Element("files")!.Elements("file")
+				.Single(file => Path.GetFileName(file.Attribute("path")?.Value) == path)
+				.Element("content")!.Value;
+		}
+		if (format == "markdown")
+		{
+			var marker = $"## `{path}`\n\n```";
+			var start = normalized.IndexOf(marker, StringComparison.Ordinal);
+			Assert.True(start >= 0, normalized);
+			start = normalized.IndexOf('\n', start + marker.Length);
+			Assert.True(start >= 0, normalized);
+			start++;
+			var end = normalized.IndexOf("\n```", start, StringComparison.Ordinal);
+			Assert.True(end >= start, normalized);
+			return normalized[start..end];
+		}
+
+		var textMarker = $"{path}:\n\n";
+		var textStart = normalized.IndexOf(textMarker, StringComparison.Ordinal);
+		Assert.True(textStart >= 0, normalized);
+		textStart += textMarker.Length;
+		var textEnd = normalized.IndexOf('\n', textStart);
+		return textEnd < 0 ? normalized[textStart..] : normalized[textStart..textEnd];
+	}
+
+	private static async Task<string> ReadStoredPackIfNeededAsync(
+		ActualMcpProcess server,
+		CallToolResult result)
+	{
+		var response = AllProcessText(result);
+		if (!response.Contains("Pack stored as '", StringComparison.Ordinal))
+			return response;
+
+		var lineCountStart = response.IndexOf(" characters, ", StringComparison.Ordinal);
+		var lineCountEnd = response.IndexOf(" lines).", lineCountStart, StringComparison.Ordinal);
+		Assert.True(lineCountStart >= 0 && lineCountEnd > lineCountStart, response);
+		lineCountStart += " characters, ".Length;
+		Assert.True(int.TryParse(response[lineCountStart..lineCountEnd], out var lineCount), response);
+
+		var packId = ExtractPackId(response);
+		var document = new StringBuilder();
+		const int pageSize = 200;
+		for (var startLine = 1; startLine <= lineCount; startLine += pageSize)
+		{
+			var page = await server.Client.CallToolAsync(
+				"read_pack",
+				new Dictionary<string, object?>
+				{
+					["pack_id"] = packId,
+					["start_line"] = startLine,
+					["end_line"] = Math.Min(startLine + pageSize - 1, lineCount)
+				},
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			Assert.NotEqual(true, page.IsError);
+			var pageText = AllProcessText(page).Replace("\r\n", "\n", StringComparison.Ordinal);
+			var opening = pageText.IndexOf("<untrusted-data-", StringComparison.Ordinal);
+			var payloadStart = pageText.IndexOf('\n', opening);
+			var payloadEnd = pageText.IndexOf("</untrusted-data-", payloadStart, StringComparison.Ordinal);
+			Assert.True(opening >= 0 && payloadStart >= 0 && payloadEnd >= payloadStart, pageText);
+			if (document.Length > 0 && document[^1] != '\n')
+				document.Append('\n');
+			document.Append(pageText.AsSpan(payloadStart + 1, payloadEnd - payloadStart - 1).TrimEnd('\n'));
+		}
+
+		return document.ToString();
+	}
+
+	private static Dictionary<string, string> JsonPayloads(string document)
+	{
+		using var json = JsonDocument.Parse(ExtractJsonDocument(document));
+		return json.RootElement.GetProperty("files").EnumerateArray().ToDictionary(
+			static file => file.GetProperty("path").GetString()!,
+			static file => file.GetProperty("content").ValueKind == JsonValueKind.String
+				? file.GetProperty("content").GetString()!
+				: string.Empty,
+			StringComparer.Ordinal);
+	}
+
+	private static void AssertPayloadsEqual(
+		IReadOnlyDictionary<string, string> expected,
+		IReadOnlyDictionary<string, string> actual) =>
+		Assert.Equal(
+			expected.OrderBy(static pair => pair.Key, StringComparer.Ordinal),
+			actual.OrderBy(static pair => pair.Key, StringComparer.Ordinal));
+
+	private static string ExtractJsonDocument(string text)
+	{
+		var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+		var schema = normalized.IndexOf("\"schemaVersion\"", StringComparison.Ordinal);
+		Assert.True(schema >= 0, normalized);
+		var start = normalized.LastIndexOf('{', schema);
+		var end = normalized.IndexOf("\n}", schema, StringComparison.Ordinal);
+		Assert.True(start >= 0 && end >= start, normalized);
+		return normalized[start..(end + 2)];
+	}
+
+	private static void AssertSkippedBudgetMetadata(string document)
+	{
+		using var json = JsonDocument.Parse(ExtractJsonDocument(document));
+		var skipped = json.RootElement.GetProperty("ranking").GetProperty("skipped").EnumerateArray()
+			.ToDictionary(
+				file => Path.GetFileName(file.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar)),
+				StringComparer.Ordinal);
+		var seed = skipped["A.cs"];
+		Assert.Equal(1, seed.GetProperty("priority").GetInt32());
+		Assert.Equal(0, seed.GetProperty("hop").GetInt32());
+		Assert.True(seed.GetProperty("baseImportancePriority").GetInt32() > 0);
+		Assert.Equal(10, seed.GetProperty("remainingEstimatedTokens").GetInt64());
+		Assert.False(seed.TryGetProperty("via", out _));
+
+		var dependency = skipped["B.cs"];
+		Assert.Equal(2, dependency.GetProperty("priority").GetInt32());
+		Assert.Equal(1, dependency.GetProperty("hop").GetInt32());
+		Assert.True(dependency.GetProperty("baseImportancePriority").GetInt32() > 0);
+		Assert.Equal(10, dependency.GetProperty("remainingEstimatedTokens").GetInt64());
+		Assert.Equal("A.cs", dependency.GetProperty("via").GetProperty("path").GetString());
+		Assert.Equal("dependency-of", dependency.GetProperty("via").GetProperty("relation").GetString());
 	}
 }
