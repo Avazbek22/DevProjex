@@ -23,6 +23,10 @@ public sealed record ProjectGitHistorySnapshot(
 	string? Detail = null)
 {
 	public bool IsAvailable => UnavailableReason == ProjectGitHistoryUnavailableReason.None;
+
+	public bool IsShallow { get; init; }
+
+	public bool IsComplete { get; init; } = true;
 }
 
 public interface IProjectGitHistoryReader

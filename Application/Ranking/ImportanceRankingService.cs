@@ -157,6 +157,8 @@ public sealed class ImportanceRankingService(
 			InternalReferenceCandidates = internalReferenceCandidates,
 			ResolvedInternalReferenceCoverage = resolvedInternalReferenceCoverage,
 			FilesWithResolvedEdges = filesWithResolvedEdges,
+			GitHistoryIsShallow = history.IsShallow,
+			GitHistoryIsComplete = history.IsComplete,
 			SourceVersions = sourceVersions
 		};
 	}

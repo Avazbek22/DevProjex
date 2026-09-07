@@ -51,6 +51,10 @@ public sealed record ImportanceRankingReport(
 
 	public int FilesWithResolvedEdges { get; init; }
 
+	public bool GitHistoryIsShallow { get; init; }
+
+	public bool GitHistoryIsComplete { get; init; } = true;
+
 	internal IReadOnlyDictionary<string, RankingSourceVersion> SourceVersions { get; init; } =
 		new Dictionary<string, RankingSourceVersion>(StringComparer.Ordinal);
 }

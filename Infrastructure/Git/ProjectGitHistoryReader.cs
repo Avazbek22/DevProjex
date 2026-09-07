@@ -37,69 +37,32 @@ public sealed class ProjectGitHistoryReader : IProjectGitHistoryReader
 		if (safety.OldGitPromisorRepository)
 			return Unavailable(ProjectGitHistoryUnavailableReason.OldGitPromisorRepository);
 
-		var operation = GitProcessOperation.ReadHistoryWindow();
-		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-		deadline.CancelAfter(operation.Deadline);
-		using var process = new Process
-		{
-			StartInfo = GitProcessStartInfoFactory.Create(repositoryRoot, operation)
-		};
-		try
-		{
-			if (!process.Start())
-				return Unavailable(ProjectGitHistoryUnavailableReason.ProcessFailed);
-			process.StandardInput.Close();
-		}
-		catch (Win32Exception)
-		{
-			return Unavailable(ProjectGitHistoryUnavailableReason.GitUnavailable);
-		}
-		catch (InvalidOperationException exception)
-		{
-			return Unavailable(ProjectGitHistoryUnavailableReason.ProcessFailed, exception.Message);
-		}
+		var shallowResult = await RunLocalReadAsync(
+			repositoryRoot,
+			GitProcessOperation.ReadShallowRepositoryState(),
+			maximumOutputCharacters: 64,
+			cancellationToken).ConfigureAwait(false);
+		if (!shallowResult.IsSuccess)
+			return Unavailable(shallowResult.FailureReason, shallowResult.Detail);
+		var shallowText = shallowResult.Output.TrimEnd('\r', '\n');
+		if (!bool.TryParse(shallowText, out var isShallow))
+			return Unavailable(ProjectGitHistoryUnavailableReason.InvalidOutput);
 
-		var outputTask = GitProcessOutputReader.ReadAsync(
-			process.StandardOutput,
+		var historyResult = await RunLocalReadAsync(
+			repositoryRoot,
+			GitProcessOperation.ReadHistoryWindow(),
 			MaximumOutputCharacters,
-			deadline.Token);
-		var errorTask = GitProcessOutputReader.ReadAsync(
-			process.StandardError,
-			GitProcessOutputReader.MaximumOutputCharacters,
-			deadline.Token);
-		try
-		{
-			await GitRepositoryService.WaitForExitOrTerminateAsync(process, deadline.Token)
-				.ConfigureAwait(false);
-			if (!await GitProcessOutputReader
-				    .WaitForCompletionAfterExitAsync(process, outputTask, errorTask)
-				    .ConfigureAwait(false))
-			{
-				return Unavailable(ProjectGitHistoryUnavailableReason.ProcessFailed);
-			}
-			var output = await outputTask.ConfigureAwait(false);
-			var error = await errorTask.ConfigureAwait(false);
-			if (output.ExceededLimit || error.ExceededLimit)
-				return Unavailable(ProjectGitHistoryUnavailableReason.OutputLimitExceeded);
-			if (process.ExitCode != 0)
-				return Unavailable(ProjectGitHistoryUnavailableReason.ProcessFailed, FirstLine(error.Text));
-			return Parse(repositoryRoot, candidateFiles, output.Text);
-		}
-		catch (OperationCanceledException)
-		{
-			await GitProcessOutputReader
-				.ObserveAfterTerminationAsync(process, outputTask, errorTask)
-				.ConfigureAwait(false);
-			if (cancellationToken.IsCancellationRequested)
-				throw;
-			return Unavailable(ProjectGitHistoryUnavailableReason.ProcessFailed, "Git history read exceeded its safety deadline.");
-		}
+			cancellationToken).ConfigureAwait(false);
+		if (!historyResult.IsSuccess)
+			return Unavailable(historyResult.FailureReason, historyResult.Detail);
+		return Parse(repositoryRoot, candidateFiles, historyResult.Output, isShallow);
 	}
 
 	internal static ProjectGitHistorySnapshot Parse(
 		string repositoryRoot,
 		IReadOnlyList<string> candidateFiles,
-		string output)
+		string output,
+		bool isShallow = false)
 	{
 		var root = Path.GetFullPath(repositoryRoot);
 		var canonicalCandidates = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -151,7 +114,79 @@ public sealed class ProjectGitHistoryReader : IProjectGitHistoryReader
 			CommitWindow,
 			commitPosition,
 			files,
-			unavailable);
+			unavailable)
+		{
+			IsShallow = isShallow,
+			IsComplete = !isShallow || commitPosition >= CommitWindow
+		};
+	}
+
+	private static async Task<LocalReadResult> RunLocalReadAsync(
+		string repositoryRoot,
+		GitProcessOperation operation,
+		int maximumOutputCharacters,
+		CancellationToken cancellationToken)
+	{
+		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		deadline.CancelAfter(operation.Deadline);
+		using var process = new Process
+		{
+			StartInfo = GitProcessStartInfoFactory.Create(repositoryRoot, operation)
+		};
+		try
+		{
+			if (!process.Start())
+				return LocalReadResult.Failed(ProjectGitHistoryUnavailableReason.ProcessFailed);
+			process.StandardInput.Close();
+		}
+		catch (Win32Exception)
+		{
+			return LocalReadResult.Failed(ProjectGitHistoryUnavailableReason.GitUnavailable);
+		}
+		catch (InvalidOperationException exception)
+		{
+			return LocalReadResult.Failed(ProjectGitHistoryUnavailableReason.ProcessFailed, exception.Message);
+		}
+
+		var outputTask = GitProcessOutputReader.ReadAsync(
+			process.StandardOutput,
+			maximumOutputCharacters,
+			deadline.Token);
+		var errorTask = GitProcessOutputReader.ReadAsync(
+			process.StandardError,
+			GitProcessOutputReader.MaximumOutputCharacters,
+			deadline.Token);
+		try
+		{
+			await GitRepositoryService.WaitForExitOrTerminateAsync(process, deadline.Token)
+				.ConfigureAwait(false);
+			if (!await GitProcessOutputReader
+				    .WaitForCompletionAfterExitAsync(process, outputTask, errorTask)
+				    .ConfigureAwait(false))
+			{
+				return LocalReadResult.Failed(ProjectGitHistoryUnavailableReason.ProcessFailed);
+			}
+			var output = await outputTask.ConfigureAwait(false);
+			var error = await errorTask.ConfigureAwait(false);
+			if (output.ExceededLimit || error.ExceededLimit)
+				return LocalReadResult.Failed(ProjectGitHistoryUnavailableReason.OutputLimitExceeded);
+			return process.ExitCode == 0
+				? LocalReadResult.Succeeded(output.Text)
+				: LocalReadResult.Failed(
+					ProjectGitHistoryUnavailableReason.ProcessFailed,
+					FirstLine(error.Text));
+		}
+		catch (OperationCanceledException)
+		{
+			await GitProcessOutputReader
+				.ObserveAfterTerminationAsync(process, outputTask, errorTask)
+				.ConfigureAwait(false);
+			if (cancellationToken.IsCancellationRequested)
+				throw;
+			return LocalReadResult.Failed(
+				ProjectGitHistoryUnavailableReason.ProcessFailed,
+				"Git history read exceeded its safety deadline.");
+		}
 	}
 
 	private static bool TryReadRecordHeader(string field, out string hash)
@@ -223,5 +258,20 @@ public sealed class ProjectGitHistoryReader : IProjectGitHistoryReader
 	{
 		public int CommitCount { get; set; }
 		public int MostRecentCommitPosition { get; set; }
+	}
+
+	private readonly record struct LocalReadResult(
+		bool IsSuccess,
+		string Output,
+		ProjectGitHistoryUnavailableReason FailureReason,
+		string? Detail)
+	{
+		public static LocalReadResult Succeeded(string output) =>
+			new(true, output, ProjectGitHistoryUnavailableReason.None, null);
+
+		public static LocalReadResult Failed(
+			ProjectGitHistoryUnavailableReason reason,
+			string? detail = null) =>
+			new(false, string.Empty, reason, detail);
 	}
 }

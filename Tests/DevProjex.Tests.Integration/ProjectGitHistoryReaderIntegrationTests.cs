@@ -109,6 +109,55 @@ public sealed class ProjectGitHistoryReaderIntegrationTests
 		Assert.Equal(new ProjectGitFileActivity(1, 3), history.Files[ordinaryPath]);
 	}
 
+	[Fact]
+	public async Task ReadAsync_ReportsShallowHistoryAsIncomplete()
+	{
+		using var source = new HistoryRepositoryFixture();
+		source.Write("source.cs", "class Source;\n");
+		source.Commit("initial");
+		using var cloneDirectory = new TemporaryDirectory();
+		var clone = cloneDirectory.CreateDirectory("shallow");
+		RunGitOutsideRepository(
+			"clone",
+			"--quiet",
+			"--depth",
+			"1",
+			new Uri(source.RepositoryPath).AbsoluteUri,
+			clone);
+		var path = Path.Combine(clone, "source.cs");
+
+		var history = await new ProjectGitHistoryReader().ReadAsync(
+			clone,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.True(history.IsAvailable, history.Detail);
+		Assert.True(history.IsShallow);
+		Assert.False(history.IsComplete);
+		Assert.Equal(1, history.CommitCount);
+		Assert.Equal(200, history.WindowSize);
+	}
+
+	private static void RunGitOutsideRepository(params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo(GitRuntime.GitExecutable)
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		using var process = Process.Start(startInfo);
+		Assert.NotNull(process);
+		process.StandardInput.Close();
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		Assert.True(process.WaitForExit(30_000), "Fixture Git command timed out.");
+		Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error}{output}");
+	}
+
 	private sealed class HistoryRepositoryFixture : IDisposable
 	{
 		private readonly TemporaryDirectory _temporary = new();
