@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Mcp;
@@ -9,10 +11,20 @@ internal sealed class McpProjectService(
 	bool hidePrivateData,
 	GitFilteringMode? serverGitMode,
 	IReadOnlyCollection<ProjectExclusion>? serverExclusions = null,
-	bool agentExclusions = false)
+	bool agentExclusions = false) : IDisposable
 {
 	internal const int MaximumRequestedPaths = 256;
 	internal const int MaximumRequestedPathLength = 4096;
+	private const int MaximumCachedInventories = 8;
+	private const int MaximumCachedProjections = 16;
+	private const int MaximumRootMonitors = 8;
+	private readonly ConcurrentDictionary<McpInventoryCacheKey, Lazy<Task<CachedInventoryPlan>>> inventoryCache = [];
+	private readonly ConcurrentQueue<McpInventoryCacheKey> inventoryCacheOrder = [];
+	private readonly ConcurrentDictionary<McpProjectionCacheKey, CachedProjectionPlan> projectionCache = [];
+	private readonly ConcurrentQueue<McpProjectionCacheKey> projectionCacheOrder = [];
+	private readonly Dictionary<string, RootChangeMonitor> rootMonitors = new(PathComparer.Default);
+	private readonly object rootMonitorSync = new();
+	private int disposed;
 
 	/// <summary>The Git baseline every call starts from when it names no profile.</summary>
 	public GitFilteringMode ServerGitMode => serverGitMode ?? McpServerBaseline.DefaultGitMode;
@@ -99,10 +111,15 @@ internal sealed class McpProjectService(
 		}
 
 		var request = new ProjectContextRequest(projectRoot, selection, source.Identity);
-		var plan = await (includeOutputMetrics
-				? services.Planner.BuildAsync(request, cancellationToken)
-				: services.Planner.BuildStructureAsync(request, cancellationToken))
-			.ConfigureAwait(false);
+		// Local profiles carry complete checkbox maps in storage outside the watched project root.
+		// Rebuild them until that store can supply a coherent revision for the cache key.
+		var plan = await BuildBasePlanAsync(
+			request,
+			includeOutputMetrics,
+			allowInventoryReuse:
+				parsedScope is null &&
+				profileReference.Kind != ProjectProfileSourceKind.Local,
+			cancellationToken).ConfigureAwait(false);
 		if ((trackedOnly || parsedScope is not null) && !plan.GitReadiness.HasRepositoryBoundary)
 		{
 			var constraint = (trackedOnly, parsedScope is not null) switch
@@ -124,7 +141,25 @@ internal sealed class McpProjectService(
 				$"{McpErrorCodes.ProjectUnavailable}: project preparation failed ({diagnostic.Code}: {diagnostic.Message}). " +
 				"Fix the reported project access or Git state and retry.");
 		}
-		ValidatePlanContainment(roots, projectRoot, plan.IncludedFiles, cancellationToken);
+		ValidateRequestedPathCasing(plan, requested);
+		var allowProjectionReuse = parsedScope is null &&
+		                           profileReference.Kind != ProjectProfileSourceKind.Local &&
+		                           CanMonitorRepositoryState(projectRoot);
+		var projectionKey = new McpProjectionCacheKey(
+			RuntimeHelpers.GetHashCode(plan),
+			BuildProjectionIdentity(
+				requested,
+				includePatterns,
+				excludePatterns,
+				maximumFileBytes));
+		if (allowProjectionReuse &&
+		    projectionCache.TryGetValue(projectionKey, out var cachedProjection) &&
+		    ReferenceEquals(cachedProjection.BasePlan, plan))
+		{
+			// The immutable projection only contains paths from the validated base plan. Content
+			// consumers still open every source through the root-jail handle validator.
+			return cachedProjection.Plan;
+		}
 		var selectionFrontier = BuildSelectionFrontier(
 			projectRoot,
 			plan.IncludedFiles,
@@ -133,7 +168,6 @@ internal sealed class McpProjectService(
 			globs,
 			hasSelectionFilters,
 			cancellationToken);
-		ValidateRequestedPathCasing(plan, requested);
 		if (parsedScope is { } scope)
 		{
 			string? resolvedDiffRange = null;
@@ -217,9 +251,254 @@ internal sealed class McpProjectService(
 			}
 		}
 
-		return await ProjectFileSizeFilter
+		var final = await ProjectFileSizeFilter
 			.ApplyAsync(services.Planner, narrowed, maximumFileBytes, cancellationToken)
 			.ConfigureAwait(false);
+		ValidatePlanContainment(roots, projectRoot, final.IncludedFiles, cancellationToken);
+		if (allowProjectionReuse)
+		{
+			if (projectionCache.TryAdd(projectionKey, new CachedProjectionPlan(plan, final)))
+			{
+				projectionCacheOrder.Enqueue(projectionKey);
+				TrimProjectionCache();
+			}
+		}
+		return final;
+	}
+
+	private async Task<ProjectContextPlan> BuildBasePlanAsync(
+		ProjectContextRequest request,
+		bool includeOutputMetrics,
+		bool allowInventoryReuse,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+		if (!allowInventoryReuse || !CanMonitorRepositoryState(request.ProjectPath))
+			return await BuildUncachedAsync().ConfigureAwait(false);
+
+		var monitor = GetOrCreateRootMonitor(request.ProjectPath);
+		if (monitor is null || !monitor.IsReliable)
+			return await BuildUncachedAsync().ConfigureAwait(false);
+
+		for (var attempt = 0; attempt < 2; attempt++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var key = new McpInventoryCacheKey(
+				PathUtility.Normalize(request.ProjectPath),
+				BuildSelectionIdentity(request),
+				includeOutputMetrics);
+			var created = new Lazy<Task<CachedInventoryPlan>>(
+				async () =>
+				{
+					var built = await BuildUncachedAsync().ConfigureAwait(false);
+					var stamps = CapturePlanStamps(built);
+					return new CachedInventoryPlan(
+						built,
+						monitor.Revision,
+						stamps);
+				},
+				LazyThreadSafetyMode.ExecutionAndPublication);
+			var lazy = inventoryCache.GetOrAdd(key, created);
+			if (ReferenceEquals(lazy, created))
+			{
+				inventoryCacheOrder.Enqueue(key);
+				TrimInventoryCache();
+			}
+
+			CachedInventoryPlan cached;
+			try
+			{
+				cached = await lazy.Value.ConfigureAwait(false);
+			}
+			catch
+			{
+				inventoryCache.TryRemove(new KeyValuePair<McpInventoryCacheKey, Lazy<Task<CachedInventoryPlan>>>(
+					key,
+					lazy));
+				throw;
+			}
+			var beforeValidation = monitor.Revision;
+			var isCurrent = cached.Stamps is not null &&
+			                cached.Revision == beforeValidation &&
+			                cached.Stamps.All(static stamp => stamp.IsCurrent()) &&
+			                monitor.Revision == beforeValidation &&
+			                monitor.IsReliable &&
+			                !cached.Plan.HasErrors;
+			if (isCurrent)
+				return cached.Plan;
+
+			inventoryCache.TryRemove(new KeyValuePair<McpInventoryCacheKey, Lazy<Task<CachedInventoryPlan>>>(
+				key,
+				lazy));
+		}
+
+		return await BuildUncachedAsync().ConfigureAwait(false);
+
+		Task<ProjectContextPlan> BuildUncachedAsync() => includeOutputMetrics
+			? services.Planner.BuildAsync(request, cancellationToken)
+			: services.Planner.BuildStructureAsync(request, cancellationToken);
+	}
+
+	private static bool CanMonitorRepositoryState(string projectRoot)
+	{
+		var gitMetadataPath = Path.Combine(projectRoot, ".git");
+		if (Directory.Exists(gitMetadataPath))
+			return true;
+		if (File.Exists(gitMetadataPath))
+			return GitRepositoryBoundaryProbe.TryResolveMetadataDirectories(projectRoot, out _, out _);
+		return !GitRepositoryBoundaryProbe.ExistsAtOrAbove(projectRoot);
+	}
+
+	private RootChangeMonitor? GetOrCreateRootMonitor(string projectRoot)
+	{
+		var normalizedRoot = PathUtility.Normalize(projectRoot);
+		lock (rootMonitorSync)
+		{
+			if (rootMonitors.TryGetValue(normalizedRoot, out var existing))
+				return existing;
+			if (rootMonitors.Count >= MaximumRootMonitors)
+				return null;
+			var created = RootChangeMonitor.TryCreate(normalizedRoot);
+			if (created is not null)
+				rootMonitors.Add(normalizedRoot, created);
+			return created;
+		}
+	}
+
+	private static IReadOnlyList<CachedPathStamp>? CapturePlanStamps(ProjectContextPlan plan)
+	{
+		try
+		{
+			var stamps = new List<CachedPathStamp>(8);
+			var paths = new HashSet<string>(PathComparer.Default);
+			paths.Add(plan.SourceRoot);
+			stamps.Add(CachedPathStamp.Capture(plan.SourceRoot, expectDirectory: true));
+			var metadataPath = Path.Combine(plan.SourceRoot, ".git");
+			var hasGitDirectories = GitRepositoryBoundaryProbe.TryResolveMetadataDirectories(
+				plan.SourceRoot,
+				out var gitDirectory,
+				out var commonDirectory);
+			foreach (var controlPath in EnumerateControlPaths())
+			{
+				if (paths.Add(controlPath))
+					stamps.Add(CachedPathStamp.Capture(controlPath, expectDirectory: false));
+			}
+			return stamps;
+
+			IEnumerable<string> EnumerateControlPaths()
+			{
+				yield return Path.Combine(plan.SourceRoot, ".gitignore");
+				yield return Path.Combine(plan.SourceRoot, ".gitmodules");
+				if (File.Exists(metadataPath))
+					yield return metadataPath;
+				if (!hasGitDirectories)
+					yield break;
+				yield return Path.Combine(gitDirectory, "index");
+				yield return Path.Combine(gitDirectory, "HEAD");
+				yield return Path.Combine(gitDirectory, "commondir");
+				yield return Path.Combine(gitDirectory, "config.worktree");
+				yield return Path.Combine(commonDirectory, "config");
+				yield return Path.Combine(commonDirectory, "info", "exclude");
+			}
+		}
+		catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or System.Security.SecurityException or
+		       NotSupportedException or ArgumentException)
+		{
+			return null;
+		}
+	}
+
+	private static string BuildSelectionIdentity(ProjectContextRequest request)
+	{
+		var value = new StringBuilder();
+		Append(value, request.SourceIdentity?.DisplayName);
+		Append(value, request.SourceIdentity?.SourceType.ToString());
+		Append(value, request.SourceIdentity?.SourceReference);
+		Append(value, request.SourceIdentity?.RepositoryUrl);
+		Append(value, request.SourceIdentity?.Branch);
+		Append(value, request.SourceIdentity?.CommitHash);
+		Append(value, request.SourceIdentity?.IsCachedRepository.ToString());
+		var selection = request.Selection;
+		AppendCollection(value, selection.Roots, ProjectTreePathIdentity.CanonicalComparer);
+		AppendCollection(value, selection.Extensions, StringComparer.OrdinalIgnoreCase);
+		AppendCollection(value, selection.SelectedPaths, ProjectTreePathIdentity.CanonicalComparer);
+		Append(value, selection.GitMode?.ToString());
+		AppendCollection(value, selection.Exclusions?.Select(static exclusion => exclusion.ToString()), StringComparer.Ordinal);
+		Append(value, selection.HideSecrets?.ToString());
+		Append(value, selection.HidePrivateData?.ToString());
+		Append(value, selection.CompressCode?.ToString());
+		Append(value, selection.StripComments?.ToString());
+		Append(value, selection.StripBlankLines?.ToString());
+		Append(value, selection.ProfileSource?.Kind.ToString());
+		Append(value, selection.ProfileSource?.Path);
+		Append(value, selection.GitDiffRange);
+		Append(value, selection.ApplicationIntent?.ToString());
+		return value.ToString();
+
+		static void Append(StringBuilder builder, string? item)
+		{
+			builder.Append(item?.Length ?? -1).Append(':').Append(item).Append(';');
+		}
+
+		static void AppendCollection(
+			StringBuilder builder,
+			IEnumerable<string>? items,
+			IComparer<string> comparer)
+		{
+			if (items is null)
+			{
+				Append(builder, null);
+				return;
+			}
+			var ordered = items.Order(comparer).ToArray();
+			Append(builder, ordered.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+			foreach (var item in ordered)
+				Append(builder, item);
+		}
+	}
+
+	private void TrimInventoryCache()
+	{
+		while (inventoryCache.Count > MaximumCachedInventories && inventoryCacheOrder.TryDequeue(out var oldest))
+			inventoryCache.TryRemove(oldest, out _);
+	}
+
+	private static string BuildProjectionIdentity(
+		RequestedPathSelection requested,
+		IReadOnlyList<string>? includePatterns,
+		IReadOnlyList<string>? excludePatterns,
+		long? maximumFileBytes)
+	{
+		var value = new StringBuilder();
+		Append(requested.Paths, ProjectTreePathIdentity.CanonicalComparer);
+		Append(requested.Directories, ProjectTreePathIdentity.CanonicalComparer);
+		Append(requested.Tokens.Select(static token => token.Value), StringComparer.Ordinal);
+		Append(includePatterns, StringComparer.Ordinal);
+		Append(excludePatterns, StringComparer.Ordinal);
+		value.Append(maximumFileBytes?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-");
+		return value.ToString();
+
+		void Append(IEnumerable<string>? items, IComparer<string> comparer)
+		{
+			if (items is null)
+			{
+				value.Append("-;");
+				return;
+			}
+			foreach (var item in items.Order(comparer))
+				value.Append(item.Length).Append(':').Append(item).Append(';');
+			value.Append('|');
+		}
+	}
+
+	private void TrimProjectionCache()
+	{
+		while (projectionCache.Count > MaximumCachedProjections &&
+		       projectionCacheOrder.TryDequeue(out var oldest))
+		{
+			projectionCache.TryRemove(oldest, out _);
+		}
 	}
 
 	private static McpSelectionFrontier? BuildSelectionFrontier(
@@ -279,7 +558,8 @@ internal sealed class McpProjectService(
 			while (!string.IsNullOrEmpty(directory) &&
 			       !StringComparer.Ordinal.Equals(directory, projectRoot))
 			{
-				directories.Add(directory);
+				if (!directories.Add(directory))
+					break;
 				var parent = Path.GetDirectoryName(directory);
 				if (StringComparer.Ordinal.Equals(parent, directory))
 					break;
@@ -760,6 +1040,156 @@ internal sealed class McpProjectService(
 		string? ResolvedPath,
 		bool IsDirectory,
 		McpToolException? ResolutionError);
+
+	private readonly record struct McpInventoryCacheKey(
+		string ProjectRoot,
+		string SelectionIdentity,
+		bool IncludeOutputMetrics);
+
+	private readonly record struct McpProjectionCacheKey(
+		int BasePlanIdentity,
+		string ProjectionIdentity);
+
+	private sealed record CachedProjectionPlan(
+		ProjectContextPlan BasePlan,
+		ProjectContextPlan Plan);
+
+	private sealed record CachedInventoryPlan(
+		ProjectContextPlan Plan,
+		long Revision,
+		IReadOnlyList<CachedPathStamp>? Stamps);
+
+	private readonly record struct CachedPathStamp(
+		string Path,
+		bool ExpectDirectory,
+		bool Exists,
+		long Length,
+		long LastWriteTimeUtcTicks,
+		long CreationTimeUtcTicks,
+		FileAttributes Attributes)
+	{
+		public static CachedPathStamp Capture(string path, bool expectDirectory)
+		{
+			try
+			{
+				var attributes = File.GetAttributes(path);
+				var isDirectory = attributes.HasFlag(FileAttributes.Directory);
+				if (isDirectory)
+				{
+					var directory = new DirectoryInfo(path);
+					directory.Refresh();
+					return new CachedPathStamp(
+						path,
+						expectDirectory,
+						true,
+						0,
+						directory.LastWriteTimeUtc.Ticks,
+						directory.CreationTimeUtc.Ticks,
+						attributes);
+				}
+
+				var file = new FileInfo(path);
+				file.Refresh();
+				return new CachedPathStamp(
+					path,
+					expectDirectory,
+					true,
+					file.Length,
+					file.LastWriteTimeUtc.Ticks,
+					file.CreationTimeUtc.Ticks,
+					attributes);
+			}
+			catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+			{
+				return new CachedPathStamp(path, expectDirectory, false, 0, 0, 0, 0);
+			}
+		}
+
+		public bool IsCurrent()
+		{
+			try
+			{
+				var current = Capture(Path, ExpectDirectory);
+				return current == this &&
+				       (!Exists || current.Attributes.HasFlag(FileAttributes.Directory) == ExpectDirectory);
+			}
+			catch (Exception exception) when (exception is
+			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
+			       NotSupportedException or ArgumentException)
+			{
+				return false;
+			}
+		}
+	}
+
+	private sealed class RootChangeMonitor : IDisposable
+	{
+		private readonly FileSystemWatcher watcher;
+		private long revision;
+		private int reliable = 1;
+
+		private RootChangeMonitor(FileSystemWatcher watcher)
+		{
+			this.watcher = watcher;
+			watcher.Changed += OnChanged;
+			watcher.Created += OnChanged;
+			watcher.Deleted += OnChanged;
+			watcher.Renamed += OnChanged;
+			watcher.Error += OnError;
+			watcher.EnableRaisingEvents = true;
+		}
+
+		public long Revision => Volatile.Read(ref revision);
+		public bool IsReliable => Volatile.Read(ref reliable) != 0;
+
+		public static RootChangeMonitor? TryCreate(string root)
+		{
+			try
+			{
+				return new RootChangeMonitor(new FileSystemWatcher(root)
+				{
+					IncludeSubdirectories = true,
+					NotifyFilter = NotifyFilters.FileName |
+					               NotifyFilters.DirectoryName |
+					               NotifyFilters.Attributes |
+					               NotifyFilters.Size |
+					               NotifyFilters.LastWrite |
+					               NotifyFilters.Security
+				});
+			}
+			catch (Exception exception) when (exception is
+			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
+			       PlatformNotSupportedException or ArgumentException)
+			{
+				return null;
+			}
+		}
+
+		private void OnChanged(object sender, FileSystemEventArgs eventArgs) =>
+			Interlocked.Increment(ref revision);
+
+		private void OnError(object sender, ErrorEventArgs eventArgs)
+		{
+			Volatile.Write(ref reliable, 0);
+			Interlocked.Increment(ref revision);
+		}
+
+		public void Dispose() => watcher.Dispose();
+	}
+
+	public void Dispose()
+	{
+		if (Interlocked.Exchange(ref disposed, 1) != 0)
+			return;
+		inventoryCache.Clear();
+		projectionCache.Clear();
+		lock (rootMonitorSync)
+		{
+			foreach (var monitor in rootMonitors.Values)
+				monitor.Dispose();
+			rootMonitors.Clear();
+		}
+	}
 
 	internal static string ToRelative(string root, string path) =>
 		PathUtility.GetPortableRelativePath(root, path);

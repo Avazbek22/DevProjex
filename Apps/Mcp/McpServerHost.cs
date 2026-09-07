@@ -135,6 +135,8 @@ public static class McpServerHost
 		}
 		finally
 		{
+			if (projectService.IsValueCreated)
+				projectService.Value.Dispose();
 			if (services.IsValueCreated)
 				services.Value.Dispose();
 		}

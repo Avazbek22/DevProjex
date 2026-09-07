@@ -267,7 +267,7 @@ public sealed class ProjectCopyExportService(
 			CreateRedactionContext(plan.ProjectRootPath, request));
 		return context is null
 			? null
-			: await preparer.PrepareAsync(context, files, cancellationToken).ConfigureAwait(false);
+			: await preparer.PrepareForProjectCopyAsync(context, files, cancellationToken).ConfigureAwait(false);
 	}
 
 	private static string ResolveUnscannableReason(

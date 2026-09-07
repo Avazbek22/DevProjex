@@ -684,10 +684,11 @@ internal sealed class DevProjexMcpTools(
 					"end_line"));
 			// get_file honors the delegated set too: a file revealed by get_tree or
 			// search_project under a per-call exclusions value must stay readable.
+			var requestedPath = arguments.RequiredString("path", allowWhitespace: true);
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
-				paths: null,
+				paths: [requestedPath],
 				includePatterns: null,
 				excludePatterns: null,
 				profile: null,
@@ -697,7 +698,7 @@ internal sealed class DevProjexMcpTools(
 				cancellationToken,
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
-			var file = Projects.ResolveFile(plan, arguments.RequiredString("path", allowWhitespace: true));
+			var file = Projects.ResolveFile(plan, requestedPath);
 			await using var prepared = await Projects.PrepareAsync(plan with { IncludedFiles = [file] }, cancellationToken)
 				.ConfigureAwait(false);
 			var content = await Projects.CreatePreparedAnalyzer(prepared)

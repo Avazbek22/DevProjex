@@ -13,6 +13,10 @@ npm install --prefix tools/ScanBenchmark --ignore-scripts
 node tools/ScanBenchmark/measure-mcp.mjs <devprojex> <flask-root> <result.json>
 ```
 
+Use `-SkipRepomix` for a DevProjex-only optimization measurement when the pinned
+comparator is unavailable or unstable. The resulting JSON records a null
+`RepomixVersion` and contains no comparator samples.
+
 The scan report keeps `analyze` and `export context` wall time, CPU time, and
 peak RSS as separate measurements, then also reports their sum for compatibility
 with the historical comparison. It additionally runs two identical narrow

@@ -16,6 +16,9 @@ param(
 	[Parameter()]
 	[bool]$MeasureMcpWarm = $true,
 
+	[Parameter()]
+	[switch]$SkipRepomix,
+
     [Parameter()]
     [switch]$KeepWorkspace
 )
@@ -293,21 +296,26 @@ try {
 		Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'measure-mcp-warm.mjs') -Destination $mcpHarness
 		Invoke-CheckedProcess $npmPath @('ci', '--ignore-scripts', '--prefix', $mcpHarness) $workspace
 	}
-    $npmCache = Join-Path $workspace 'npm-cache'
-    [System.IO.Directory]::CreateDirectory($npmCache) | Out-Null
-    Invoke-CheckedProcess $npxPath @('--yes', '--cache', $npmCache, 'repomix@1.17.0', '--version') $workspace
-    $repomixCli = Get-ChildItem -LiteralPath (Join-Path $npmCache '_npx') -Recurse -File -Filter 'repomix.cjs' |
-        Where-Object { $_.FullName -match '[\\/]node_modules[\\/]repomix[\\/]bin[\\/]repomix\.cjs$' } |
-        Select-Object -First 1 -ExpandProperty FullName
-    if ([string]::IsNullOrWhiteSpace($repomixCli)) {
-        throw 'Could not locate the npx-acquired Repomix 1.17.0 entry point.'
-    }
-    $repomixPackage = Get-Content -LiteralPath (Join-Path (Split-Path (Split-Path $repomixCli)) 'package.json') -Raw | ConvertFrom-Json
-    if ($repomixPackage.version -ne '1.17.0') {
-        throw "Expected Repomix 1.17.0, found '$($repomixPackage.version)'."
-    }
-    $emptyConfig = Join-Path $workspace 'repomix.empty.json'
-    [System.IO.File]::WriteAllText($emptyConfig, "{}`n", [System.Text.UTF8Encoding]::new($false))
+	$repomixCli = $null
+	$repomixPackage = $null
+	$emptyConfig = $null
+	if (-not $SkipRepomix) {
+		$npmCache = Join-Path $workspace 'npm-cache'
+		[System.IO.Directory]::CreateDirectory($npmCache) | Out-Null
+		Invoke-CheckedProcess $npxPath @('--yes', '--cache', $npmCache, 'repomix@1.17.0', '--version') $workspace
+		$repomixCli = Get-ChildItem -LiteralPath (Join-Path $npmCache '_npx') -Recurse -File -Filter 'repomix.cjs' |
+			Where-Object { $_.FullName -match '[\\/]node_modules[\\/]repomix[\\/]bin[\\/]repomix\.cjs$' } |
+			Select-Object -First 1 -ExpandProperty FullName
+		if ([string]::IsNullOrWhiteSpace($repomixCli)) {
+			throw 'Could not locate the npx-acquired Repomix 1.17.0 entry point.'
+		}
+		$repomixPackage = Get-Content -LiteralPath (Join-Path (Split-Path (Split-Path $repomixCli)) 'package.json') -Raw | ConvertFrom-Json
+		if ($repomixPackage.version -ne '1.17.0') {
+			throw "Expected Repomix 1.17.0, found '$($repomixPackage.version)'."
+		}
+		$emptyConfig = Join-Path $workspace 'repomix.empty.json'
+		[System.IO.File]::WriteAllText($emptyConfig, "{}`n", [System.Text.UTF8Encoding]::new($false))
+	}
 
     $rawResults = @()
 	$mcpWarmResults = @()
@@ -331,7 +339,8 @@ try {
 
         foreach ($currentSeries in $series) {
             foreach ($repetition in 1..$Repetitions) {
-                foreach ($tool in @('devprojex', 'repomix')) {
+				$tools = if ($SkipRepomix) { @('devprojex') } else { @('devprojex', 'repomix') }
+                foreach ($tool in $tools) {
                     $worktree = Join-Path $workspace ("worktree-{0}-{1}-{2}-{3}" -f $slug, $currentSeries.Name, $repetition, $tool)
                     Invoke-CheckedProcess $gitPath @('--git-dir', $bare, 'worktree', 'add', '--quiet', '--detach', $worktree, $corpus.Sha) $workspace
                     try {
@@ -470,7 +479,7 @@ try {
         Platform = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
         Repetitions = $Repetitions
         DevProjexVersion = (& $DevProjexPath --version).Trim()
-        RepomixVersion = [string]$repomixPackage.version
+		RepomixVersion = if ($repomixPackage) { [string]$repomixPackage.version } else { $null }
         ColdDefinition = 'new process, fresh worktree path, and fresh per-tool application/config cache; operating-system page cache is not flushed'
         TimingDefinition = 'DevProjex records analyze and export context separately and also their sum; Repomix elapsed time is one pack command'
         FailurePolicy = 'discard a failed tool pair and retry once with a clean application cache; fail without writing a partial report after a second failure'

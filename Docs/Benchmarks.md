@@ -85,6 +85,50 @@ arguments, machine, and harness.
 | Repomix | 2,627 / 2,638 | 3,152 / 3,212 | 5,779 / 5,850 |
 | Godot | 27,837 / 28,379 | 33,785 / 36,737 | 61,622 / 65,117 |
 
+The optimized branch was measured once per operation after the implementation,
+using the same pinned inputs and defensive arguments. These are control runs
+without a profiler; they are not presented as three-run medians. The complete
+samples are in
+[`optimized-perf-secret-pipeline-and-engine.json`](../tools/ScanBenchmark/results/optimized-perf-secret-pipeline-and-engine.json).
+
+| Corpus | Analyze before / after ms | Analyze speedup | Export before / after ms | Export speedup | Analyze peak RSS before / after MiB | Export peak RSS before / after MiB |
+|---|---:|---:|---:|---:|---:|---:|
+| Flask | 1,331 / 1,017 | 1.31× | 1,398 / 1,104 | 1.27× | 105.6 / 101.4 | 105.0 / 100.8 |
+| Repomix | 2,627 / 1,448 | 1.81× | 3,152 / 1,520 | 2.07× | 164.1 / 155.4 | 169.9 / 156.4 |
+| Godot | 27,837 / 11,719 | 2.38× | 33,785 / 11,014 | 3.07× | 962.5 / 999.2 | 910.6 / 967.6 |
+
+The Godot export improved by 3.07× in the end-to-end harness, short of the 4×
+target. A separate unprofiled stage-attribution control reached 9,857 ms (3.43×),
+which also remains short. Peak process RSS did not improve on Godot even though
+retained source text is now bounded: the peak includes concurrent detector and
+runtime allocation churn, not only live prepared content. Both limitations are
+reported rather than hidden behind the faster stage totals.
+
+The Godot stage trace is published as
+[`content-pipeline-godot-stages.json`](../tools/ScanBenchmark/results/content-pipeline-godot-stages.json).
+Per-file stages overlap across workers, so their values are aggregate active time
+and must not be summed as wall time.
+
+| Stage | Baseline aggregate ms | Optimized aggregate ms |
+|---|---:|---:|
+| Selection | 2,445 | 2,151 |
+| Source read | 2,458 | 2,479 |
+| Compression | 19 | 18 |
+| Detector initialization | 64 | 49 |
+| Detection | 10,909 | 7,582 |
+| Redaction and output | 7,501 | 926 |
+| Cleanup | 1,438 | 22 |
+
+The detector characterization over 306,482,455 characters measured 835 ms in
+the keyword prefilter, 4,240 ms in rule detection, and 4,689 ms combined, with
+the same 43 findings. Four file workers were retained: measurements with 1, 2,
+4, and 8 workers showed no stable gain above four, while eight doubled the
+maximum retained work window. The long-line regression uses twelve findings on
+a two-MiB single line; the range-backed implementation stays below an 8 MiB
+allocation ceiling instead of copying that line for every finding. Analyze's
+transformed-content path creates zero prepared files; export still uses an
+immutable snapshot as required for consistency.
+
 The same baseline also ran two identical narrow `get_tree` → `search_project` →
 `get_file` sequences in one initialized MCP process. Warm detector state helped,
 but the unchanged project inventory was still rebuilt for every call.
@@ -94,6 +138,23 @@ but the unchanged project inventory was still rebuilt for every call.
 | Flask | 1,258 | 646 | 1.95× |
 | Repomix | 4,057 | 3,271 | 1.24× |
 | Godot | 37,160 | 34,004 | 1.09× |
+
+After inventory and projection reuse, the same real-process sequence produced:
+
+| Corpus | First sequence ms | Second sequence ms | Same-process speedup |
+|---|---:|---:|---:|
+| Flask | 705 | 35 | 20.36× |
+| Repomix | 882 | 126 | 6.98× |
+| Godot | 1,988 | 51 | 38.66× |
+
+The cache retains immutable inventory and path projections only while a root
+watcher and Git/control-file stamps prove the snapshot current. Source content is
+not served from that cache: every content read still uses the validated root-jail
+handle. Directory ancestor indexing now stops at an already visited ancestor.
+The scanner's root-subtree scheduler was not replaced: selection measured about
+2.15 seconds of the 9.86-second best Godot control, while transformation remained
+the dominant stage, so the extra concurrent traversal state was not justified by
+the measured bottleneck.
 
 Stage attribution uses `dotnet-trace` with `dotnet-common`, sampled thread time,
 verbose GC/allocation events, and the content-only-free `DevProjex-ContentPipeline`

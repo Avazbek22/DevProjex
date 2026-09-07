@@ -722,12 +722,25 @@ public sealed class ProjectContextDocumentService(
 							ResolveFenceLanguage(file.Path),
 							cancellationToken)
 						.ConfigureAwait(false);
-					await snapshot.CopyTextToAsync(
-							file.Metrics?.CharCount ?? 0,
-							(chunk, token) => new ValueTask(
-								writer.WriteAsync(chunk, token)),
-							cancellationToken)
-						.ConfigureAwait(false);
+					var characterCount = file.Metrics?.CharCount ?? 0;
+					if (snapshot is IUtf8FileContentSnapshot utf8Snapshot)
+					{
+						await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+						await utf8Snapshot.CopyUtf8ToAsync(
+								characterCount,
+								(chunk, token) => destination.WriteAsync(chunk, token),
+								cancellationToken)
+							.ConfigureAwait(false);
+					}
+					else
+					{
+						await snapshot.CopyTextToAsync(
+								characterCount,
+								(chunk, token) => new ValueTask(
+									writer.WriteAsync(chunk, token)),
+								cancellationToken)
+							.ConfigureAwait(false);
+					}
 					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 					await writer.WriteAsync(fence.AsMemory(), cancellationToken).ConfigureAwait(false);
 				}
@@ -1080,7 +1093,9 @@ public sealed class ProjectContextDocumentService(
 		{
 			var snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
 				.ConfigureAwait(false);
-			return new BudgetedCompleteSourceSnapshot(snapshot, lease);
+			return snapshot is IUtf8FileContentSnapshot
+				? new BudgetedUtf8CompleteSourceSnapshot(snapshot, lease)
+				: new BudgetedCompleteSourceSnapshot(snapshot, lease);
 		}
 		catch
 		{
@@ -1132,6 +1147,15 @@ public sealed class ProjectContextDocumentService(
 		string path,
 		CancellationToken cancellationToken)
 	{
+		if (contentAnalyzer is PreparedSecretFileContentAnalyzer)
+		{
+			// Prepared content was read through this policy and is an immutable, already-inspected
+			// snapshot. Rewalking the mutable source path cannot make that captured content safer.
+			return await contentAnalyzer
+				.OpenCompleteSnapshotAsync(path, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
 		var classification = ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
 		if (classification is { } unavailable)
 			return new UnavailableSourceSnapshot(unavailable);
@@ -2419,6 +2443,42 @@ public sealed class ProjectContextDocumentService(
 			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
 			CancellationToken cancellationToken = default) =>
 			inner.CopyTextToAsync(maximumCharacters, writeChunk, cancellationToken);
+
+		public async ValueTask DisposeAsync()
+		{
+			if (Interlocked.Exchange(ref _disposed, 1) != 0)
+				return;
+			try
+			{
+				await inner.DisposeAsync().ConfigureAwait(false);
+			}
+			finally
+			{
+				lease.Dispose();
+			}
+		}
+	}
+
+	private sealed class BudgetedUtf8CompleteSourceSnapshot(
+		IFileContentSnapshot inner,
+		WeightedByteBudget.Lease lease) : IFileContentSnapshot, IUtf8FileContentSnapshot
+	{
+		private int _disposed;
+
+		public FileContentMetricsResult Result => inner.Result;
+
+		public ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default) =>
+			inner.CopyTextToAsync(maximumCharacters, writeChunk, cancellationToken);
+
+		public ValueTask CopyUtf8ToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default) =>
+			((IUtf8FileContentSnapshot)inner)
+			.CopyUtf8ToAsync(maximumCharacters, writeChunk, cancellationToken);
 
 		public async ValueTask DisposeAsync()
 		{

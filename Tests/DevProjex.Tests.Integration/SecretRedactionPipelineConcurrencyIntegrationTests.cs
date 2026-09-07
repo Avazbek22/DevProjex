@@ -6,6 +6,50 @@ namespace DevProjex.Tests.Integration;
 public sealed class SecretRedactionPipelineConcurrencyIntegrationTests
 {
 	[Fact]
+	public async Task PrepareAsync_LargeSelectionUsesOneImmutableSnapshotWithoutChangingContent()
+	{
+		const string secret = "snapshot-secret-value-42";
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("project");
+		var paths = Enumerable.Range(0, 256)
+			.Select(index => temporary.CreateFile(
+				$"project/{index:D3}.txt",
+				$"line-{index:D3}\r\n{secret}\n"))
+			.ToArray();
+		using var session = new SecretRedactionSession(new ExactSecretDetector(secret));
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(
+				Compression: null,
+				new SecretRedactionContext(projectRoot, session)),
+			paths,
+			TestContext.Current.CancellationToken);
+
+		var contentPaths = paths.Select(path => prepared.GetFile(path).ContentPath).Distinct().ToArray();
+		Assert.Single(contentPaths);
+		Assert.EndsWith("prepared-content.snapshot", contentPaths[0], StringComparison.Ordinal);
+		var analyzer = preparer.CreatePreparedAnalyzer(prepared);
+		for (var index = 0; index < paths.Length; index++)
+		{
+			var metrics = await analyzer.GetTextFileMetricsAsync(
+				paths[index],
+				TestContext.Current.CancellationToken);
+			var content = await analyzer.TryReadAsTextAsync(
+				paths[index],
+				TestContext.Current.CancellationToken);
+
+			Assert.NotNull(metrics);
+			Assert.NotNull(content);
+			Assert.Equal(content.Content.Length, metrics.CharCount);
+			Assert.Equal(3, metrics.LineCount);
+			Assert.Equal(1, metrics.CrLfPairCount);
+			Assert.DoesNotContain(secret, content.Content, StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[snapshot-test#1]", content.Content, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public async Task PrepareAsync_EarliestBlockedEntryRetainsCapacityAndCompletesInSelectionOrder()
 	{
 		if (Environment.ProcessorCount < 2)
@@ -42,6 +86,27 @@ public sealed class SecretRedactionPipelineConcurrencyIntegrationTests
 				$"DEVPROJEX_REDACTED[parallel-test#{index + 1}]",
 				content.Content,
 				StringComparison.Ordinal);
+		}
+	}
+
+	private sealed class ExactSecretDetector(string value) : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) =>
+			Detect(repositoryRelativePath, content.AsSpan(), cancellationToken);
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			ReadOnlySpan<char> content,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var start = content.IndexOf(value.AsSpan(), StringComparison.Ordinal);
+			return start < 0
+				? []
+				: [new DetectedSecret("snapshot-test", start, value.Length, value, 1)];
 		}
 	}
 

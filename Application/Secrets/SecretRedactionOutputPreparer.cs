@@ -28,6 +28,7 @@ public sealed class SecretRedactionOutputPreparer
 	private const long MaximumParallelScanFileBytes = 1024 * 1024;
 	private const long MaximumTransformationInFlightBytes = 96L * 1024 * 1024;
 	private const int MaximumTransformationWorkers = 4;
+	private const int ConsolidatedSnapshotFileThreshold = 256;
 	// Parallel scanning applies only to files at or below the per-file parallel limit, so the
 	// worst-case buffered content is MaximumParallelScans * 1 MiB. Scaling with the machine keeps
 	// wide desktops from idling behind a fixed cap while small machines are not oversubscribed.
@@ -84,8 +85,25 @@ public sealed class SecretRedactionOutputPreparer
 			captureEffectiveFindings,
 			materializeTransformedContent: true,
 			captureTransformedMetrics: false,
+			allowConsolidatedSnapshot: true,
 			cancellationToken,
 			progress);
+
+	internal Task<PreparedSecretRedactionOutput> PrepareForProjectCopyAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		CancellationToken cancellationToken = default) =>
+		PrepareCoreAsync(
+			context,
+			orderedFilePaths,
+			captureEffectiveFindings: false,
+			materializeTransformedContent: true,
+			captureTransformedMetrics: false,
+			// Project-copy writers stream each prepared file path directly. Keeping separate
+			// immutable files preserves that contract without reopening mutable sources.
+			allowConsolidatedSnapshot: false,
+			cancellationToken,
+			progress: null);
 
 	public Task<PreparedSecretRedactionOutput> InspectAsync(
 		ContentTransformationContext context,
@@ -98,6 +116,7 @@ public sealed class SecretRedactionOutputPreparer
 			captureEffectiveFindings,
 			materializeTransformedContent: false,
 			captureTransformedMetrics: false,
+			allowConsolidatedSnapshot: false,
 			cancellationToken,
 			progress: null);
 
@@ -113,6 +132,7 @@ public sealed class SecretRedactionOutputPreparer
 			captureEffectiveFindings,
 			materializeTransformedContent: false,
 			captureTransformedMetrics: true,
+			allowConsolidatedSnapshot: false,
 			cancellationToken,
 			progress);
 
@@ -122,12 +142,12 @@ public sealed class SecretRedactionOutputPreparer
 		bool captureEffectiveFindings,
 		bool materializeTransformedContent,
 		bool captureTransformedMetrics,
+		bool allowConsolidatedSnapshot,
 		CancellationToken cancellationToken,
 		IProgress<ProjectCopyExportProgress>? progress)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
-		EnsureSourcePathsAvailable(context, orderedFilePaths);
 		if (materializeTransformedContent && context is { Compression: not null, Redaction: null })
 		{
 			return await PrepareCompressionOnlyAsync(
@@ -149,6 +169,11 @@ public sealed class SecretRedactionOutputPreparer
 		}
 
 		SecretRedactionTempDirectory? workingDirectory = null;
+		PreparedContentStore? contentStore = null;
+		var useConsolidatedSnapshot =
+			allowConsolidatedSnapshot &&
+			materializeTransformedContent &&
+			orderedFilePaths.Count >= ConsolidatedSnapshotFileThreshold;
 		var preparedFiles = new Dictionary<string, PreparedSecretFile>(ProjectTreePathIdentity.CanonicalComparer);
 		var transformedFileMetrics = captureTransformedMetrics
 			? new Dictionary<string, ContentFileMetrics>(ProjectTreePathIdentity.CanonicalComparer)
@@ -293,21 +318,49 @@ public sealed class SecretRedactionOutputPreparer
 
 					var encoding = result.Encoding ?? TextFileEncoding.Utf8;
 					workingDirectory ??= CreateWorkingDirectory();
-					var preparedPath = Path.Combine(workingDirectory.Path, $"{prepared.Index:D8}.redacted.txt");
-					await WritePreparedTextAsync(
+					if (useConsolidatedSnapshot)
+					{
+						contentStore ??= new PreparedContentStore(
+							Path.Combine(workingDirectory.Path, "prepared-content.snapshot"));
+						PreparedContentSlice slice;
+						using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.RedactionAndOutput))
+						{
+							slice = await contentStore.AppendAsync(
+									transformedText,
+									plan,
+									ResolveEncoding(encoding),
+									cancellationToken)
+								.ConfigureAwait(false);
+						}
+						preparedFiles[sourcePath] = new PreparedSecretFile(
+							sourcePath,
+							contentStore.Path,
+							FileContentClassification.Text,
+							encoding,
+							redactions,
+							findings)
+						{
+							ContentSlice = slice
+						};
+					}
+					else
+					{
+						var preparedPath = Path.Combine(workingDirectory.Path, $"{prepared.Index:D8}.redacted.txt");
+						await WritePreparedTextAsync(
+								preparedPath,
+								transformedText,
+								plan,
+								ResolveEncoding(encoding),
+								cancellationToken)
+							.ConfigureAwait(false);
+						preparedFiles[sourcePath] = new PreparedSecretFile(
+							sourcePath,
 							preparedPath,
-							transformedText,
-							plan,
-							ResolveEncoding(encoding),
-							cancellationToken)
-						.ConfigureAwait(false);
-					preparedFiles[sourcePath] = new PreparedSecretFile(
-						sourcePath,
-						preparedPath,
-						FileContentClassification.Text,
-						encoding,
-						redactions,
-						findings);
+							FileContentClassification.Text,
+							encoding,
+							redactions,
+							findings);
+					}
 					completed = true;
 				}
 				finally
@@ -330,6 +383,8 @@ public sealed class SecretRedactionOutputPreparer
 						cancellationToken)
 					.ConfigureAwait(false);
 			}
+			if (contentStore is not null)
+				await contentStore.CompleteAsync(cancellationToken).ConfigureAwait(false);
 			return new PreparedSecretRedactionOutput(
 				workingDirectory,
 				preparedFiles,
@@ -341,10 +396,12 @@ public sealed class SecretRedactionOutputPreparer
 					: orderedFilePaths
 						.Where(transformedFileMetrics.ContainsKey)
 						.Select(path => transformedFileMetrics[path])
-						.ToArray());
+						.ToArray(),
+				contentStore);
 		}
 		catch
 		{
+			contentStore?.Dispose();
 			workingDirectory?.Dispose();
 			throw;
 		}
@@ -372,9 +429,7 @@ public sealed class SecretRedactionOutputPreparer
 		if (scheduled.Count == 0)
 			yield break;
 
-		var workerCount = Math.Min(
-			Math.Min(MaximumTransformationWorkers, Math.Max(1, Environment.ProcessorCount)),
-			scheduled.Count);
+		var workerCount = Math.Min(MaximumTransformationWorkers, scheduled.Count);
 		using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		using var retainedBytes = new WeightedByteBudget(MaximumTransformationInFlightBytes);
 		using var lookAhead = new SemaphoreSlim(workerCount * 2, workerCount * 2);
@@ -648,9 +703,6 @@ public sealed class SecretRedactionOutputPreparer
 		CompressionWorkItem item,
 		CancellationToken cancellationToken)
 	{
-		if (IsUnsupportedNonRegularSource(context, item.SourcePath))
-			return CreateUnreadableTransformationEntry(item);
-		EnsureSourcePathAvailable(context, item.SourcePath);
 		CoherentSecretContentRead coherentRead;
 		using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.SourceRead))
 		{
@@ -857,9 +909,6 @@ public sealed class SecretRedactionOutputPreparer
 		CancellationToken cancellationToken)
 	{
 		var sourcePath = workItem.SourcePath;
-		if (IsUnsupportedNonRegularSource(context, sourcePath))
-			return PreparedSecretFile.Unscannable(sourcePath, FileContentClassification.Unreadable);
-		EnsureSourcePathAvailable(context, sourcePath);
 		CoherentSecretContentRead coherentRead;
 		using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.SourceRead))
 		{
@@ -928,17 +977,6 @@ public sealed class SecretRedactionOutputPreparer
 			FileContentClassification.Text,
 			encoding,
 			[]);
-	}
-
-	private static void EnsureSourcePathsAvailable(
-		ContentTransformationContext context,
-		IReadOnlyList<string> orderedFilePaths)
-	{
-		foreach (var sourcePath in orderedFilePaths)
-		{
-			if (!IsUnsupportedNonRegularSource(context, sourcePath))
-				EnsureSourcePathAvailable(context, sourcePath);
-		}
 	}
 
 	private static void EnsureSourcePathAvailable(
@@ -2055,6 +2093,216 @@ public sealed class SecretRedactionOutputPreparer
 
 }
 
+internal readonly record struct PreparedContentSlice(
+	long Offset,
+	int StoredLength,
+	TextFileMetrics Metrics);
+
+internal interface IUtf8FileContentSnapshot
+{
+	ValueTask CopyUtf8ToAsync(
+		int maximumCharacters,
+		Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> writeChunk,
+		CancellationToken cancellationToken = default);
+}
+
+internal sealed class PreparedContentStore : IDisposable
+{
+	private const int StreamBufferSize = 64 * 1024;
+	private static readonly Encoding StorageEncoding = new UTF8Encoding(false, true);
+	private readonly FileStream stream;
+	private readonly StreamWriter storageWriter;
+	private long nextOffset;
+	private bool completed;
+	private bool disposed;
+
+	public PreparedContentStore(string path)
+	{
+		Path = path;
+		var options = new FileStreamOptions
+		{
+			Access = FileAccess.ReadWrite,
+			Mode = FileMode.CreateNew,
+			Share = FileShare.Read,
+			BufferSize = StreamBufferSize,
+			Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+		};
+		if (!OperatingSystem.IsWindows())
+			options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		stream = new FileStream(path, options);
+		storageWriter = new StreamWriter(stream, StorageEncoding, StreamBufferSize, leaveOpen: true);
+	}
+
+	public string Path { get; }
+
+	public async Task<PreparedContentSlice> AppendAsync(
+		string content,
+		SecretFileRedactionPlan? plan,
+		Encoding logicalEncoding,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(disposed, this);
+		if (completed)
+			throw new InvalidOperationException("The prepared content store is already complete.");
+
+		var offset = nextOffset;
+		var writer = new PreparedContentStoreTextWriter(storageWriter, logicalEncoding);
+		if (plan is null)
+			await writer.WriteAsync(content.AsMemory(), cancellationToken).ConfigureAwait(false);
+		else
+			await plan.WriteToAsync(writer, content, cancellationToken).ConfigureAwait(false);
+		var (metrics, storedLength) = writer.BuildMetrics();
+		nextOffset = checked(nextOffset + storedLength);
+		ContentPipelineDiagnostics.RecordPreparedWrite(storedLength);
+		return new PreparedContentSlice(offset, storedLength, metrics);
+	}
+
+	public async Task CompleteAsync(CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(disposed, this);
+		if (completed)
+			return;
+		await storageWriter.FlushAsync(cancellationToken).ConfigureAwait(false);
+		if (stream.Position != nextOffset)
+			throw new InvalidDataException("The prepared content snapshot length does not match its recorded slices.");
+		completed = true;
+	}
+
+	public async ValueTask<string> ReadTextAsync(
+		PreparedContentSlice slice,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(disposed, this);
+		if (!completed)
+			throw new InvalidOperationException("The prepared content store is not complete.");
+		if (slice.StoredLength == 0)
+			return string.Empty;
+
+		var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(slice.StoredLength);
+		try
+		{
+			var read = 0;
+			while (read < slice.StoredLength)
+			{
+				var received = await RandomAccess.ReadAsync(
+						stream.SafeFileHandle,
+						rented.AsMemory(read, slice.StoredLength - read),
+						slice.Offset + read,
+						cancellationToken)
+					.ConfigureAwait(false);
+				if (received == 0)
+					throw new EndOfStreamException("The prepared content snapshot ended before its recorded slice.");
+				read += received;
+			}
+
+			ContentPipelineDiagnostics.RecordPreparedRead(slice.StoredLength);
+			var text = StorageEncoding.GetString(rented, 0, slice.StoredLength);
+			if (text.Length != slice.Metrics.CharCount)
+				throw new InvalidDataException("The prepared content snapshot does not match its recorded metrics.");
+			return text;
+		}
+		finally
+		{
+			Array.Clear(rented);
+			System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+		}
+	}
+
+	public async ValueTask CopyUtf8ToAsync(
+		PreparedContentSlice slice,
+		Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> writeChunk,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(disposed, this);
+		ArgumentNullException.ThrowIfNull(writeChunk);
+		if (!completed)
+			throw new InvalidOperationException("The prepared content store is not complete.");
+
+		var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(StreamBufferSize);
+		try
+		{
+			var read = 0;
+			while (read < slice.StoredLength)
+			{
+				var requested = Math.Min(rented.Length, slice.StoredLength - read);
+				var received = await RandomAccess.ReadAsync(
+						stream.SafeFileHandle,
+						rented.AsMemory(0, requested),
+						slice.Offset + read,
+						cancellationToken)
+					.ConfigureAwait(false);
+				if (received == 0)
+					throw new EndOfStreamException("The prepared content snapshot ended before its recorded slice.");
+				await writeChunk(rented.AsMemory(0, received), cancellationToken).ConfigureAwait(false);
+				read += received;
+			}
+			ContentPipelineDiagnostics.RecordPreparedRead(slice.StoredLength);
+		}
+		finally
+		{
+			Array.Clear(rented);
+			System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+		}
+	}
+
+	public void Dispose()
+	{
+		if (disposed)
+			return;
+		disposed = true;
+		try
+		{
+			storageWriter.Dispose();
+		}
+		finally
+		{
+			stream.Dispose();
+		}
+	}
+
+	private sealed class PreparedContentStoreTextWriter(
+		TextWriter storageWriter,
+		Encoding logicalEncoding) : TextWriter
+	{
+		private readonly Encoder logicalEncoder = logicalEncoding.GetEncoder();
+		private readonly Encoder storageEncoder = StorageEncoding.GetEncoder();
+		private FileContentAnalyzer.TextMetricsCounter counter = new();
+		private long logicalBytes = logicalEncoding.GetPreamble().Length;
+		private long storedBytes;
+		private bool built;
+
+		public override Encoding Encoding => StorageEncoding;
+
+		public override async Task WriteAsync(
+			ReadOnlyMemory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			AppendMetrics(buffer.Span);
+			await storageWriter.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+		}
+
+		private void AppendMetrics(ReadOnlySpan<char> buffer)
+		{
+			if (built)
+				throw new InvalidOperationException("Prepared content metrics were already completed.");
+			if (!counter.Append(buffer))
+				throw new InvalidOperationException("Prepared transformed text unexpectedly contained a null character.");
+			logicalBytes = checked(logicalBytes + logicalEncoder.GetByteCount(buffer, flush: false));
+			storedBytes = checked(storedBytes + storageEncoder.GetByteCount(buffer, flush: false));
+		}
+
+		public (TextFileMetrics Metrics, int StoredLength) BuildMetrics()
+		{
+			if (built)
+				throw new InvalidOperationException("Prepared content metrics were already completed.");
+			built = true;
+			logicalBytes = checked(logicalBytes + logicalEncoder.GetByteCount([], flush: true));
+			storedBytes = checked(storedBytes + storageEncoder.GetByteCount([], flush: true));
+			return (counter.Build(logicalBytes), checked((int)storedBytes));
+		}
+	}
+}
+
 public sealed record PreparedSecretFile(
 	string SourcePath,
 	string ContentPath,
@@ -2091,6 +2339,7 @@ public sealed record PreparedSecretFile(
 	public int RedactedCount => Redactions.Count;
 	public IReadOnlyList<EffectiveRedactionFinding> Findings => EffectiveFindings ?? [];
 	internal SecretFileMetadata? SourceMetadata { get; init; }
+	internal PreparedContentSlice? ContentSlice { get; init; }
 
 	public int ClampLengthToCompleteRedactions(int requestedLength)
 	{
@@ -2172,6 +2421,7 @@ public sealed record PreparedSecretSpan(int Start, int Length)
 public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 {
 	private readonly SecretRedactionTempDirectory? _workingDirectory;
+	private readonly PreparedContentStore? _contentStore;
 	private readonly IReadOnlyDictionary<string, PreparedSecretFile> _files;
 	private bool _disposed;
 
@@ -2181,9 +2431,11 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 		SecretRedactionSnapshot? snapshot,
 		Compression.CodeCompressionSnapshot? compressionSnapshot = null,
 		IReadOnlyList<UnscannableFile>? unscannableFiles = null,
-		IReadOnlyList<ContentFileMetrics>? transformedFileMetrics = null)
+		IReadOnlyList<ContentFileMetrics>? transformedFileMetrics = null,
+		PreparedContentStore? contentStore = null)
 	{
 		_workingDirectory = workingDirectory;
+		_contentStore = contentStore;
 		_files = files;
 		Snapshot = snapshot;
 		CompressionSnapshot = compressionSnapshot;
@@ -2216,6 +2468,8 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 
 	public IReadOnlyList<ContentFileMetrics> TransformedFileMetrics { get; }
 
+	internal PreparedContentStore? ContentStore => _contentStore;
+
 	public ExportOutputMetrics GetTransformedMetrics() =>
 		ExportOutputMetricsCalculator.FromOrderedContentFiles(TransformedFileMetrics);
 
@@ -2240,6 +2494,7 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 		if (_disposed)
 			return ValueTask.CompletedTask;
 		_disposed = true;
+		_contentStore?.Dispose();
 		if (_workingDirectory is not null)
 		{
 			using var stage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Cleanup);
@@ -2281,6 +2536,36 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 		ProjectTreePathIdentity.CanonicalComparer.Equals(file.SourcePath, file.ContentPath)
 			? sourceAnalyzer
 			: preparedContentAnalyzer;
+
+	private bool TryResolveStoredSlice(
+		PreparedSecretFile file,
+		out PreparedContentStore store,
+		out PreparedContentSlice slice)
+	{
+		if (file.ContentSlice is { } value && prepared.ContentStore is { } contentStore)
+		{
+			store = contentStore;
+			slice = value;
+			return true;
+		}
+		store = null!;
+		slice = default;
+		return false;
+	}
+
+	private static TextFileContent ToTextFileContent(string content, TextFileMetrics metrics) =>
+		new(
+			content,
+			metrics.SizeBytes,
+			metrics.LineCount,
+			metrics.CharCount,
+			metrics.IsEmpty,
+			metrics.IsWhitespaceOnly,
+			metrics.IsEstimated,
+			metrics.TrailingNewlineChars,
+			metrics.TrailingNewlineLineBreaks);
+
+	private static TextFileMetrics AsEstimated(TextFileMetrics metrics) => metrics with { IsEstimated = true };
 
 	private static void RecordPreparedRead(PreparedSecretFile file)
 	{
@@ -2325,6 +2610,22 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 			return new FileContentReadResult(FileContentClassification.Binary);
 
 		file.EnsureSourceVersion();
+		if (TryResolveStoredSlice(file, out var store, out var slice))
+		{
+			if (slice.Metrics.SizeBytes > maxSizeForFullRead)
+			{
+				var estimated = AsEstimated(slice.Metrics);
+				return new FileContentReadResult(
+					FileContentClassification.TooLarge,
+					ToTextFileContent(string.Empty, estimated),
+					file.Encoding);
+			}
+			var content = await store.ReadTextAsync(slice, cancellationToken).ConfigureAwait(false);
+			return new FileContentReadResult(
+				FileContentClassification.Text,
+				ToTextFileContent(content, slice.Metrics),
+				file.Encoding);
+		}
 		RecordPreparedRead(file);
 		var result = await ResolveAnalyzer(file).ReadClassifiedAsync(
 				file.ContentPath,
@@ -2342,6 +2643,8 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 		var file = prepared.GetFile(path);
 		if (!file.IsText && !file.IsUnscannable)
 			return false;
+		if (file.ContentSlice is not null)
+			return true;
 
 		file.EnsureSourceVersion();
 		RecordPreparedRead(file);
@@ -2358,6 +2661,8 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 		var file = prepared.GetFile(path);
 		if (!file.IsText && !file.IsUnscannable)
 			return null;
+		if (file.ContentSlice is { } slice)
+			return slice.Metrics;
 
 		file.EnsureSourceVersion();
 		RecordPreparedRead(file);
@@ -2374,6 +2679,8 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 		var file = prepared.GetFile(path);
 		if (!file.IsText && !file.IsUnscannable)
 			return new FileContentMetricsResult(FileContentClassification.Binary);
+		if (file.ContentSlice is { } slice)
+			return new FileContentMetricsResult(FileContentClassification.Text, slice.Metrics);
 
 		file.EnsureSourceVersion();
 		RecordPreparedRead(file);
@@ -2402,6 +2709,8 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 				file.Classification,
 				metrics);
 		}
+		if (TryResolveStoredSlice(file, out var store, out var slice))
+			return new ConsolidatedSnapshot(store, slice);
 
 		file.EnsureSourceVersion();
 		RecordPreparedRead(file);
@@ -2437,6 +2746,11 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 
 		if (!file.IsText)
 			return null;
+		if (TryResolveStoredSlice(file, out var store, out var slice))
+		{
+			var content = await store.ReadTextAsync(slice, cancellationToken).ConfigureAwait(false);
+			return ToTextFileContent(content, slice.Metrics);
+		}
 
 		file.EnsureSourceVersion();
 		RecordPreparedRead(file);
@@ -2454,6 +2768,13 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 		var file = prepared.GetFile(path);
 		if (!file.IsText && !file.IsUnscannable)
 			return null;
+		if (TryResolveStoredSlice(file, out var store, out var slice))
+		{
+			if (slice.Metrics.SizeBytes > maxSizeForFullRead)
+				return ToTextFileContent(string.Empty, AsEstimated(slice.Metrics));
+			var content = await store.ReadTextAsync(slice, cancellationToken).ConfigureAwait(false);
+			return ToTextFileContent(content, slice.Metrics);
+		}
 
 		file.EnsureSourceVersion();
 		RecordPreparedRead(file);
@@ -2481,6 +2802,50 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 				new IOException("The file could not be inspected for content redaction and was withheld."));
 
 		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	private sealed class ConsolidatedSnapshot(
+		PreparedContentStore store,
+		PreparedContentSlice slice) : IFileContentSnapshot, IUtf8FileContentSnapshot
+	{
+		private const int ChunkSize = 8192;
+
+		public FileContentMetricsResult Result { get; } =
+			new(FileContentClassification.Text, slice.Metrics);
+
+		public async ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default)
+		{
+			ArgumentOutOfRangeException.ThrowIfNegative(maximumCharacters);
+			ArgumentNullException.ThrowIfNull(writeChunk);
+			if (maximumCharacters > slice.Metrics.CharCount)
+				throw new IOException("The snapshot contains fewer characters than expected.");
+
+			var content = await store.ReadTextAsync(slice, cancellationToken).ConfigureAwait(false);
+			for (var offset = 0; offset < maximumCharacters; offset += ChunkSize)
+			{
+				var length = Math.Min(ChunkSize, maximumCharacters - offset);
+				await writeChunk(content.AsMemory(offset, length), cancellationToken).ConfigureAwait(false);
+			}
+		}
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+		public ValueTask CopyUtf8ToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default)
+		{
+			ArgumentOutOfRangeException.ThrowIfNegative(maximumCharacters);
+			if (maximumCharacters != slice.Metrics.CharCount)
+			{
+				return ValueTask.FromException(
+					new IOException("Direct UTF-8 snapshot copying requires the complete text."));
+			}
+			return store.CopyUtf8ToAsync(slice, writeChunk, cancellationToken);
+		}
 	}
 
 	private sealed class BinarySnapshot : IFileContentSnapshot

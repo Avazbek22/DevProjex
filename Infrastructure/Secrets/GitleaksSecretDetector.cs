@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Numerics;
 using System.Security.Cryptography;
@@ -26,6 +27,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private const string GitleaksAllowSignature = "gitleaks:allow";
 	private const string GenericApiKeyRuleId = "generic-api-key";
 	private const string PrivateKeyRuleId = "private-key";
+	private static readonly SearchValues<char> GenericDelimiters = SearchValues.Create("=>|:?,");
 	// Reviewed override for the upstream private-key rule. The upstream body pattern accepts any
 	// character, so in a file that merely mentions PEM markers - test fixtures, documentation -
 	// a match can start at one marker and run across arbitrary source code to the next "KEY-----"
@@ -388,8 +390,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static bool HasGenericApiKeyEvidence(ReadOnlySpan<char> content)
 	{
-		for (var delimiterStart = 0; delimiterStart < content.Length; delimiterStart++)
+		var searchStart = 0;
+		while (searchStart < content.Length)
 		{
+			var relativeDelimiter = content[searchStart..].IndexOfAny(GenericDelimiters);
+			if (relativeDelimiter < 0)
+				return false;
+			var delimiterStart = searchStart + relativeDelimiter;
+			searchStart = delimiterStart + 1;
 			var delimiterLength = GetGenericDelimiterLength(content, delimiterStart);
 			if (delimiterLength == 0)
 				continue;
@@ -575,6 +583,32 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private static bool HasRuleSpecificEvidence(string ruleId, ReadOnlySpan<char> content) =>
 		ruleId switch
 		{
+			"authress-service-client-access-key" =>
+				content.Contains(".acc_", StringComparison.Ordinal) ||
+				content.Contains(".acc-", StringComparison.Ordinal),
+			"databricks-api-token" =>
+				HasPrefixedRun(content, "dapi", 32, 32, char.IsAsciiHexDigit),
+			"gocardless-api-token" =>
+				HasPrefixedRun(content, "live_", 40, 40, IsWordHyphenOrEquals),
+			"harness-api-key" => HasHarnessApiKeyEvidence(content),
+			"intra42-client-secret" =>
+				HasPrefixedRun(content, "s-s4t2ud-", 64, 64, char.IsAsciiHexDigit) ||
+				HasPrefixedRun(content, "s-s4t2af-", 64, 64, char.IsAsciiHexDigit),
+			"lob-api-key" =>
+				HasPrefixedRun(
+					content,
+					"test_",
+					35,
+					35,
+					char.IsAsciiHexDigit,
+					comparison: StringComparison.OrdinalIgnoreCase) ||
+				HasPrefixedRun(
+					content,
+					"live_",
+					35,
+					35,
+					char.IsAsciiHexDigit,
+					comparison: StringComparison.OrdinalIgnoreCase),
 			"1password-secret-key" => HasOnePasswordSecretKeyEvidence(content),
 			"1password-service-account-token" =>
 				HasPrefixedRun(content, "ops_", 250, int.MaxValue, IsBase64Character),
@@ -637,6 +671,48 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				HasPrefixedRun(content, "API-", 26, 26, char.IsAsciiLetterOrDigit),
 			_ => true
 		};
+
+	private static bool HasHarnessApiKeyEvidence(ReadOnlySpan<char> content) =>
+		HasSegmentedToken(content, "pat.") || HasSegmentedToken(content, "sat.");
+
+	private static bool HasSegmentedToken(ReadOnlySpan<char> content, string prefix)
+	{
+		var searchStart = 0;
+		while (searchStart <= content.Length - prefix.Length - 68)
+		{
+			var relativeStart = content[searchStart..].IndexOf(prefix, StringComparison.Ordinal);
+			if (relativeStart < 0)
+				return false;
+			var cursor = searchStart + relativeStart + prefix.Length;
+			if (HasExactRun(content, ref cursor, 22, IsWordOrHyphen) &&
+			    Consume(content, ref cursor, '.') &&
+			    HasExactRun(content, ref cursor, 24, char.IsAsciiLetterOrDigit) &&
+			    Consume(content, ref cursor, '.') &&
+			    HasExactRun(content, ref cursor, 20, char.IsAsciiLetterOrDigit))
+			{
+				return true;
+			}
+			searchStart += relativeStart + prefix.Length;
+		}
+		return false;
+	}
+
+	private static bool HasExactRun(
+		ReadOnlySpan<char> content,
+		ref int cursor,
+		int length,
+		Func<char, bool> isAllowed)
+	{
+		if (cursor > content.Length - length)
+			return false;
+		for (var index = 0; index < length; index++)
+		{
+			if (!isAllowed(content[cursor + index]))
+				return false;
+		}
+		cursor += length;
+		return true;
+	}
 
 	private static bool HasPrefixedRun(
 		ReadOnlySpan<char> content,
@@ -1269,23 +1345,23 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	/// </summary>
 	private sealed class KeywordPrefilter
 	{
-		private readonly FrozenNode[] _nodes;
-		private readonly int[] _rootTransitions;
+		private readonly RuleMask[] _outputs;
+		private readonly ushort[] _transitions;
 		private readonly ushort[] _asciiSymbols;
 		private readonly char[] _alphabet;
 		private readonly RuleMask _rulesWithoutKeywords;
 		private readonly int _transitionCount;
 
 		private KeywordPrefilter(
-			FrozenNode[] nodes,
-			int[] rootTransitions,
+			RuleMask[] outputs,
+			ushort[] transitions,
 			ushort[] asciiSymbols,
 			char[] alphabet,
 			RuleMask rulesWithoutKeywords,
 			int transitionCount)
 		{
-			_nodes = nodes;
-			_rootTransitions = rootTransitions;
+			_outputs = outputs;
+			_transitions = transitions;
 			_asciiSymbols = asciiSymbols;
 			_alphabet = alphabet;
 			_rulesWithoutKeywords = rulesWithoutKeywords;
@@ -1326,10 +1402,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			}
 
 			var queue = new Queue<int>();
+			var breadthFirstOrder = new List<int>(nodes.Count - 1);
 			foreach (var child in nodes[0].Transitions.Values)
 				queue.Enqueue(child);
 			while (queue.TryDequeue(out var state))
 			{
+				breadthFirstOrder.Add(state);
 				foreach (var (character, next) in nodes[state].Transitions)
 				{
 					queue.Enqueue(next);
@@ -1355,27 +1433,26 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				if (symbolByCharacter.TryGetValue((char)character, out var symbol))
 					asciiSymbols[character] = checked((ushort)(symbol + 1));
 			}
-			var rootTransitions = new int[alphabet.Length];
-			foreach (var (character, target) in nodes[0].Transitions)
-				rootTransitions[symbolByCharacter[character]] = target;
 			var transitionCount = 0;
-			var frozen = new FrozenNode[nodes.Count];
-			for (var index = 0; index < nodes.Count; index++)
+			foreach (var node in nodes)
+				transitionCount += node.Transitions.Count;
+			var transitions = new ushort[checked(nodes.Count * alphabet.Length)];
+			foreach (var (character, target) in nodes[0].Transitions)
+				transitions[symbolByCharacter[character]] = checked((ushort)target);
+			foreach (var state in breadthFirstOrder)
 			{
-				var transitions = nodes[index].Transitions
-					.Select(pair => new SymbolTransition(symbolByCharacter[pair.Key], pair.Value))
-					.OrderBy(static transition => transition.Symbol)
-					.ToArray();
-				transitionCount += transitions.Length;
-				frozen[index] = new FrozenNode(
-					transitions.Select(static transition => transition.Symbol).ToArray(),
-					transitions.Select(static transition => transition.Target).ToArray(),
-					nodes[index].Failure,
-					nodes[index].Outputs);
+				var row = state * alphabet.Length;
+				var fallbackRow = nodes[state].Failure * alphabet.Length;
+				for (var symbol = 0; symbol < alphabet.Length; symbol++)
+				{
+					transitions[row + symbol] = nodes[state].Transitions.TryGetValue(alphabet[symbol], out var target)
+						? checked((ushort)target)
+						: transitions[fallbackRow + symbol];
+				}
 			}
 			return new KeywordPrefilter(
-				frozen,
-				rootTransitions,
+				nodes.Select(static node => node.Outputs).ToArray(),
+				transitions,
 				asciiSymbols,
 				alphabet,
 				rulesWithoutKeywords,
@@ -1401,14 +1478,10 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 					state = 0;
 					continue;
 				}
-				var next = FindTransition(state, symbol);
-				while (state != 0 && next == 0)
-				{
-					state = _nodes[state].Failure;
-					next = FindTransition(state, symbol);
-				}
-				state = next;
-				_nodes[state].Outputs.Apply(candidates);
+				state = _transitions[state * _alphabet.Length + symbol];
+				var outputs = _outputs[state];
+				if (!outputs.IsEmpty)
+					outputs.Apply(candidates);
 			}
 		}
 
@@ -1417,16 +1490,15 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			var estimatedBytes =
 				(long)_alphabet.Length * sizeof(char) +
 				(long)_asciiSymbols.Length * sizeof(ushort) +
-				(long)_rootTransitions.Length * sizeof(int) +
-				(long)_nodes.Length * (sizeof(int) + RuleMask.ByteSize) +
-				(long)_transitionCount * (sizeof(ushort) + sizeof(int));
+				(long)_outputs.Length * RuleMask.ByteSize +
+				(long)_transitions.Length * sizeof(ushort);
 			return new GitleaksKeywordPrefilterStatistics(
-				_nodes.Length,
+				_outputs.Length,
 				_transitionCount,
 				_alphabet.Length,
 				estimatedBytes,
-				(long)_nodes.Length * Math.Max(128, _alphabet.Length) * sizeof(int),
-				(long)_nodes.Length * (char.MaxValue + 1L) * sizeof(int));
+				(long)_outputs.Length * Math.Max(128, _alphabet.Length) * sizeof(int),
+				(long)_outputs.Length * (char.MaxValue + 1L) * sizeof(int));
 		}
 
 		private int FindSymbol(char character)
@@ -1447,15 +1519,6 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			return BinarySearch(_alphabet, normalized);
 		}
 
-		private int FindTransition(int state, int symbol)
-		{
-			if (state == 0)
-				return _rootTransitions[symbol];
-			var node = _nodes[state];
-			var index = BinarySearch(node.Symbols, checked((ushort)symbol));
-			return index < 0 ? 0 : node.Targets[index];
-		}
-
 		private static int BinarySearch(char[] values, char value)
 		{
 			var low = 0;
@@ -1471,35 +1534,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			return -1;
 		}
 
-		private static int BinarySearch(ushort[] values, ushort value)
-		{
-			var low = 0;
-			var high = values.Length - 1;
-			while (low <= high)
-			{
-				var middle = (low + high) >>> 1;
-				var candidate = values[middle];
-				if (candidate == value) return middle;
-				if (candidate < value) low = middle + 1;
-				else high = middle - 1;
-			}
-			return -1;
-		}
-
 		private sealed class MutableNode
 		{
 			public Dictionary<char, int> Transitions { get; } = [];
 			public RuleMask Outputs { get; set; }
 			public int Failure { get; set; }
 		}
-
-		private sealed record FrozenNode(
-			ushort[] Symbols,
-			int[] Targets,
-			int Failure,
-			RuleMask Outputs);
-
-		private readonly record struct SymbolTransition(ushort Symbol, int Target);
 
 		private readonly record struct RuleMask(ulong Word0, ulong Word1, ulong Word2, ulong Word3)
 		{
@@ -1520,6 +1560,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				Word1 | other.Word1,
 				Word2 | other.Word2,
 				Word3 | other.Word3);
+
+			public bool IsEmpty => (Word0 | Word1 | Word2 | Word3) == 0;
 
 			public void Apply(Span<ulong> candidates)
 			{
