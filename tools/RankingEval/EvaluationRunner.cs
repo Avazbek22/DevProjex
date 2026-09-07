@@ -277,7 +277,7 @@ internal sealed class EvaluationRunner(
 			throw new InvalidOperationException($"Evaluator child failed ({repositoryId}/{mode}/{order}): {error}");
 		var result = JsonSerializer.Deserialize<MeasureOneResult>(output, EvaluationRegistry.JsonOptions) ??
 		             throw new InvalidDataException("Evaluator child returned no measurement.");
-		return result with { PeakWorkingSetBytes = Math.Max(result.PeakWorkingSetBytes, process.PeakWorkingSet64) };
+		return result;
 	}
 
 	internal static async Task<MeasureOneResult> MeasureOneAsync(
