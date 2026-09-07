@@ -305,6 +305,7 @@ internal sealed class McpProjectService(
 						await inventoryBuilt(request.ProjectPath, cancellationToken).ConfigureAwait(false);
 					var builtCoherently = controlStampsBeforeBuild is not null &&
 					                      controlStampsBeforeBuild.All(static stamp => stamp.IsCurrent()) &&
+					                      ObservedControlFilesAreCurrent(built.ObservedControlFiles) &&
 					                      monitor.Revision == revisionBeforeBuild &&
 					                      monitor.IsReliable;
 					var stamps = CapturePlanStamps(built);
@@ -334,6 +335,7 @@ internal sealed class McpProjectService(
 			                cached.Stamps is not null &&
 			                cached.Revision == beforeValidation &&
 			                cached.Stamps.All(static stamp => stamp.IsCurrent()) &&
+			                ObservedControlFilesAreCurrent(cached.Plan.ObservedControlFiles) &&
 			                monitor.Revision == beforeValidation &&
 			                monitor.IsReliable &&
 			                !cached.Plan.HasErrors;
@@ -407,40 +409,8 @@ internal sealed class McpProjectService(
 			{
 				if (paths.Add(directory))
 					stamps.Add(CachedPathStamp.Capture(directory, expectDirectory: true));
-				var nestedIgnore = Path.Combine(directory, ".gitignore");
-				if (File.Exists(nestedIgnore) && paths.Add(nestedIgnore))
-					stamps.Add(CachedPathStamp.Capture(nestedIgnore, expectDirectory: false));
-				var nestedModules = Path.Combine(directory, ".gitmodules");
-				if (File.Exists(nestedModules) && paths.Add(nestedModules))
-					stamps.Add(CachedPathStamp.Capture(nestedModules, expectDirectory: false));
-			}
-			var metadataPath = Path.Combine(plan.SourceRoot, ".git");
-			var hasGitDirectories = GitRepositoryBoundaryProbe.TryResolveMetadataDirectories(
-				plan.SourceRoot,
-				out var gitDirectory,
-				out var commonDirectory);
-			foreach (var controlPath in EnumerateControlPaths())
-			{
-				if (paths.Add(controlPath))
-					stamps.Add(CachedPathStamp.Capture(controlPath, expectDirectory: false));
 			}
 			return stamps;
-
-			IEnumerable<string> EnumerateControlPaths()
-			{
-				yield return Path.Combine(plan.SourceRoot, ".gitignore");
-				yield return Path.Combine(plan.SourceRoot, ".gitmodules");
-				if (File.Exists(metadataPath))
-					yield return metadataPath;
-				if (!hasGitDirectories)
-					yield break;
-				yield return Path.Combine(gitDirectory, "index");
-				yield return Path.Combine(gitDirectory, "HEAD");
-				yield return Path.Combine(gitDirectory, "commondir");
-				yield return Path.Combine(gitDirectory, "config.worktree");
-				yield return Path.Combine(commonDirectory, "config");
-				yield return Path.Combine(commonDirectory, "info", "exclude");
-			}
 		}
 		catch (Exception exception) when (exception is
 		       IOException or UnauthorizedAccessException or System.Security.SecurityException or
@@ -448,6 +418,32 @@ internal sealed class McpProjectService(
 		{
 			return null;
 		}
+	}
+
+	private static bool ObservedControlFilesAreCurrent(
+		IReadOnlyList<ProjectControlFileIdentity> observedControlFiles)
+	{
+		foreach (var observed in observedControlFiles)
+		{
+			try
+			{
+				var file = new FileInfo(observed.Path);
+				file.Refresh();
+				if (file.Exists != observed.Exists ||
+				    file.Exists && (file.Length != observed.Length ||
+				                    file.LastWriteTimeUtc.Ticks != observed.LastWriteTimeUtcTicks))
+				{
+					return false;
+				}
+			}
+			catch (Exception exception) when (exception is
+			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
+			       NotSupportedException or ArgumentException)
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private static IReadOnlyList<CachedPathStamp>? CaptureBuildControlStamps(string projectRoot)

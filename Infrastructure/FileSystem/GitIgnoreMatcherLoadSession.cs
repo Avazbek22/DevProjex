@@ -17,6 +17,8 @@ internal sealed class GitIgnoreMatcherLoadSession
 		new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly ConcurrentDictionary<string, Lazy<GitSubmoduleManifest>> _submodules =
 		new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly ConcurrentDictionary<string, ProjectControlFileIdentity> _observedControlFiles =
+		new(ProjectTreePathIdentity.CanonicalComparer);
 
 	public GitIgnoreMatcherLoadResult LoadScope(string directoryPath, string? gitIgnorePath,
 		string? gitMetadataPath, string? owner, CancellationToken cancellationToken)
@@ -28,6 +30,7 @@ internal sealed class GitIgnoreMatcherLoadSession
 		if (owner is not null && !PathComparer.Default.Equals(directoryPath, owner))
 		{
 			var manifest = GetOrLoad(_submodules, owner, () => GitSubmoduleManifest.Read(owner, cancellationToken));
+			Observe(manifest.ObservedControlFile);
 			if (manifest.ReadFailed)
 				return RepositoryFailure(directoryPath, opaque: true);
 			if (!manifest.Paths.Contains(PathUtility.GetPortableRelativePath(owner, directoryPath)))
@@ -44,20 +47,45 @@ internal sealed class GitIgnoreMatcherLoadSession
 		string repositoryRoot, string gitMetadataPath, string? gitIgnorePath, CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		return GetOrLoad(_repositoryScopes, repositoryRoot, () =>
+		var result = GetOrLoad(_repositoryScopes, repositoryRoot, () =>
 		{
 			try
 			{
+				var metadataIdentity = File.Exists(gitMetadataPath)
+					? ProjectControlFileIdentityProbe.Capture(gitMetadataPath)
+					: (ProjectControlFileIdentity?)null;
 				if (!GitLocalConfigSemanticsReader.TryResolveGitDirectory(repositoryRoot, gitMetadataPath, out var gitDirectory) ||
 				    !GitLocalConfigSemanticsReader.TryResolveCommonDirectory(gitDirectory, out var commonDirectory))
-					return RepositoryFailure(repositoryRoot);
+					return RepositoryFailure(repositoryRoot, observedControlFiles: CollectMetadataIdentities());
 				var exclude = LoadWithCancellation(repositoryRoot, Path.Combine(commonDirectory, "info", "exclude"), cancellationToken);
 				var ignore = LoadWithCancellation(repositoryRoot, gitIgnorePath ?? Path.Combine(repositoryRoot, ".gitignore"), cancellationToken);
 				if (exclude.Status == GitIgnoreMatcherLoadStatus.ReadFailure || ignore.Status == GitIgnoreMatcherLoadStatus.ReadFailure)
-					return RepositoryFailure(repositoryRoot);
+					return RepositoryFailure(repositoryRoot, observedControlFiles: CollectObservedIdentities());
 				return GitIgnoreMatcherLoadResult.Loaded(new ScopedGitIgnoreMatcher(repositoryRoot,
 					GitIgnoreMatcher.Combine(exclude.Matcher?.Matcher ?? GitIgnoreMatcher.Empty,
-						ignore.Matcher?.Matcher ?? GitIgnoreMatcher.Empty)) { IsRepositoryBoundary = true });
+						ignore.Matcher?.Matcher ?? GitIgnoreMatcher.Empty)) { IsRepositoryBoundary = true },
+					CollectObservedIdentities());
+
+				ProjectControlFileIdentity[] CollectMetadataIdentities()
+				{
+					var identities = new List<ProjectControlFileIdentity>(2);
+					if (metadataIdentity is { } metadata)
+						identities.Add(metadata);
+					if (!string.IsNullOrWhiteSpace(gitDirectory))
+					{
+						var commonDirectoryPath = Path.Combine(gitDirectory, "commondir");
+						if (File.Exists(commonDirectoryPath))
+							identities.Add(ProjectControlFileIdentityProbe.Capture(commonDirectoryPath));
+					}
+					return [.. identities];
+				}
+
+				ProjectControlFileIdentity[] CollectObservedIdentities() =>
+				[
+					.. CollectMetadataIdentities(),
+					.. exclude.ObservedControlFiles ?? [],
+					.. ignore.ObservedControlFiles ?? []
+				];
 			}
 			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
 			       System.Security.SecurityException or ArgumentException or NotSupportedException)
@@ -65,13 +93,18 @@ internal sealed class GitIgnoreMatcherLoadSession
 				return RepositoryFailure(repositoryRoot);
 			}
 		});
+		Observe(result.ObservedControlFiles);
+		return result;
 	}
 
-	private static GitIgnoreMatcherLoadResult RepositoryFailure(string root, bool opaque = false) =>
+	private static GitIgnoreMatcherLoadResult RepositoryFailure(
+		string root,
+		bool opaque = false,
+		IReadOnlyList<ProjectControlFileIdentity>? observedControlFiles = null) =>
 		new(GitIgnoreMatcherLoadStatus.ReadFailure, new ScopedGitIgnoreMatcher(root, GitIgnoreMatcher.Empty)
 		{
 			IsRepositoryBoundary = true, IsOpaqueRepository = opaque
-		});
+		}, observedControlFiles);
 
 	private static T GetOrLoad<T>(ConcurrentDictionary<string, Lazy<T>> cache, string path, Func<T> loader)
 	{
@@ -119,6 +152,7 @@ internal sealed class GitIgnoreMatcherLoadSession
 			{
 				sourcePath = Path.GetFullPath(Path.Combine(matcher.ScopeRootPath, ".gitignore"));
 				cacheKey = GitIgnoreMatcherFileCache.CreateCacheKey(matcher.ScopeRootPath, sourcePath);
+				Observe(ProjectControlFileIdentityProbe.Capture(sourcePath));
 			}
 			catch (Exception exception) when (exception is
 			       NotSupportedException or
@@ -165,14 +199,18 @@ internal sealed class GitIgnoreMatcherLoadSession
 		       ArgumentException or
 		       System.Security.SecurityException)
 		{
-			return Execute(scopeRootPath, gitIgnorePath, cancellationToken);
+			var direct = Execute(scopeRootPath, gitIgnorePath, cancellationToken);
+			Observe(direct.ObservedControlFiles);
+			return direct;
 		}
 
 		if (_loads.TryGetValue(cacheKey, out var cached))
 		{
 			IgnorePipelineDiagnostics.RecordGitIgnoreLoadReuse();
 			cancellationToken.ThrowIfCancellationRequested();
-			return GetValueOrRemoveCanceled(cacheKey, cached);
+			var reused = GetValueOrRemoveCanceled(cacheKey, cached);
+			Observe(reused.ObservedControlFiles);
+			return reused;
 		}
 
 		var candidate = new Lazy<GitIgnoreMatcherLoadResult>(
@@ -189,8 +227,26 @@ internal sealed class GitIgnoreMatcherLoadSession
 			cancellationToken.ThrowIfCancellationRequested();
 		}
 
-		return GetValueOrRemoveCanceled(cacheKey, selected);
+		var result = GetValueOrRemoveCanceled(cacheKey, selected);
+		Observe(result.ObservedControlFiles);
+		return result;
 	}
+
+	internal void Observe(IReadOnlyList<ProjectControlFileIdentity>? identities)
+	{
+		if (identities is null)
+			return;
+		foreach (var identity in identities)
+			Observe(identity);
+	}
+
+	internal IReadOnlyList<ProjectControlFileIdentity> GetObservedControlFiles() =>
+		_observedControlFiles.Values
+			.OrderBy(static identity => identity.Path, ProjectTreePathIdentity.CanonicalComparer)
+			.ToArray();
+
+	private void Observe(ProjectControlFileIdentity identity) =>
+		_observedControlFiles.TryAdd(identity.Path, identity);
 
 	private GitIgnoreMatcherLoadResult GetValueOrRemoveCanceled(
 		string normalizedPath,

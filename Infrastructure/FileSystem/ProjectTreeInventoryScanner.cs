@@ -117,18 +117,24 @@ internal static class ProjectTreeInventoryScanner
 					hadAccessDenied: true,
 					discoveredGitIgnoreMatchers.Items,
 					discoveredGitTrackedPathIndexes,
-					discoveredGitRepositoryRoots: discoveredGitRepositoryRoots);
+					discoveredGitRepositoryRoots: discoveredGitRepositoryRoots,
+					observedControlFiles: gitIgnoreLoadSession.GetObservedControlFiles());
 			}
 		}
-		if (inheritedGitIgnoreContexts.RequiresTrackedPathIndex &&
-		    GitTrackedPathIndexCache.TryLoadNearest(
-			    rootPath,
-			    cancellationToken,
-			    out var inheritedTrackedPathIndex))
+		if (inheritedGitIgnoreContexts.RequiresTrackedPathIndex)
 		{
-			discoveredGitTrackedPathIndexes.Add(inheritedTrackedPathIndex);
-			inheritedGitIgnoreContexts = inheritedGitIgnoreContexts.WithTrackedPathIndex(
-				inheritedTrackedPathIndex);
+			var loadedInheritedIndex = GitTrackedPathIndexCache.TryLoadNearest(
+				rootPath,
+				cancellationToken,
+				out var inheritedTrackedPathIndex,
+				out var observedControlFiles);
+			gitIgnoreLoadSession.Observe(observedControlFiles);
+			if (loadedInheritedIndex)
+			{
+				discoveredGitTrackedPathIndexes.Add(inheritedTrackedPathIndex);
+				inheritedGitIgnoreContexts = inheritedGitIgnoreContexts.WithTrackedPathIndex(
+					inheritedTrackedPathIndex);
+			}
 		}
 
 		var rootGitControlPaths = FindGitControlPaths(rootChildren);
@@ -151,7 +157,8 @@ internal static class ProjectTreeInventoryScanner
 				hadAccessDenied: true,
 				discoveredGitIgnoreMatchers.Items,
 				discoveredGitTrackedPathIndexes,
-				discoveredGitRepositoryRoots: discoveredGitRepositoryRoots);
+				discoveredGitRepositoryRoots: discoveredGitRepositoryRoots,
+				observedControlFiles: gitIgnoreLoadSession.GetObservedControlFiles());
 		}
 		var rootDirectoryChildren = AddProjectRootChildren(
 			entries,
@@ -168,7 +175,8 @@ internal static class ProjectTreeInventoryScanner
 				hadAccessDenied,
 				discoveredGitIgnoreMatchers.Items,
 				discoveredGitTrackedPathIndexes,
-				discoveredGitRepositoryRoots: discoveredGitRepositoryRoots);
+				discoveredGitRepositoryRoots: discoveredGitRepositoryRoots,
+				observedControlFiles: gitIgnoreLoadSession.GetObservedControlFiles());
 		}
 
 		var subtreeResults = new SubtreeScanResult[rootDirectoryChildren.Count];
@@ -245,7 +253,8 @@ internal static class ProjectTreeInventoryScanner
 			uniqueMatchers,
 			uniqueTrackedPathIndexes,
 			hadScanFailure,
-			uniqueRepositoryRoots);
+			uniqueRepositoryRoots,
+			gitIgnoreLoadSession.GetObservedControlFiles());
 	}
 
 	private static List<int> AddProjectRootChildren(
@@ -742,11 +751,14 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 					directoryPath,
 					gitMetadataPath!,
 					cancellationToken,
-					out trackedPathIndex)
+					out trackedPathIndex,
+					out var observedControlFiles)
 				: GitTrackedPathIndexCache.TryLoadNearest(
 					directoryPath,
 					cancellationToken,
-					out trackedPathIndex);
+					out trackedPathIndex,
+					out observedControlFiles);
+		gitIgnoreLoadSession.Observe(observedControlFiles);
 			if (loadedTrackedPathIndex)
 			{
 				if (!primaryContext.ContainsTrackedPathIndex(trackedPathIndex.RepositoryRootPath) ||

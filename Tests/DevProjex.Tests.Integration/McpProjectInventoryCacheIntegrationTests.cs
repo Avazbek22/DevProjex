@@ -41,35 +41,62 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	}
 
 	[Fact(Timeout = 30_000)]
-	public async Task BuildPlan_ChangeAfterTraversalCannotPublishAStalePlanUnderANewRevision()
+	public async Task BuildPlan_NestedIgnoreChangedAfterItWasReadCannotBePublishedWithDelayedWatcherDelivery()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.CreateDirectory("project/nested");
 		workspace.CreateFile("project/nested/Hidden.cs", "hidden\n");
 		var ignore = workspace.CreateFile("project/nested/.gitignore", string.Empty);
-		var buildReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-		var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 		var buildCount = 0;
+		McpProjectService? service = null;
 		await using var harness = CreateHarness(
 			project,
-			async (_, cancellationToken) =>
+			(_, _) =>
 			{
 				if (Interlocked.Increment(ref buildCount) != 1)
-					return;
-				buildReached.TrySetResult();
-				await resume.Task.WaitAsync(cancellationToken);
+					return ValueTask.CompletedTask;
+				DisableWatcher(service!);
+				File.WriteAllText(ignore, "Hidden.cs\n");
+				File.SetLastWriteTimeUtc(ignore, DateTime.UtcNow.AddSeconds(2));
+				return ValueTask.CompletedTask;
 			});
+		service = harness.Service;
 
-		var pending = BuildAsync(harness.Service);
-		await buildReached.Task.WaitAsync(TestContext.Current.CancellationToken);
-		File.WriteAllText(ignore, "Hidden.cs\n");
-		File.SetLastWriteTimeUtc(ignore, DateTime.UtcNow.AddSeconds(2));
-		resume.TrySetResult();
-		var plan = await pending;
+		var plan = await BuildAsync(harness.Service);
 
 		Assert.True(buildCount >= 2);
 		Assert.False(HasFile(plan, "nested/Hidden.cs"));
+	}
+
+	[Fact(Timeout = 30_000)]
+	public async Task BuildPlan_NestedGitmodulesChangedAfterItWasReadCannotPublishAnOpaqueChild()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/owner/.git");
+		var modules = workspace.CreateFile("project/owner/.gitmodules", string.Empty);
+		workspace.CreateDirectory("project/owner/child/.git");
+		workspace.CreateFile("project/owner/child/Visible.cs", "visible\n");
+		var buildCount = 0;
+		McpProjectService? service = null;
+		await using var harness = CreateHarness(
+			project,
+			(_, _) =>
+			{
+				if (Interlocked.Increment(ref buildCount) != 1)
+					return ValueTask.CompletedTask;
+				DisableWatcher(service!);
+				File.WriteAllText(modules, "[submodule \"child\"]\n path = child\n");
+				File.SetLastWriteTimeUtc(modules, DateTime.UtcNow.AddSeconds(2));
+				return ValueTask.CompletedTask;
+			});
+		service = harness.Service;
+
+		var plan = await BuildAsync(harness.Service);
+
+		Assert.True(buildCount >= 2);
+		Assert.True(HasFile(plan, "owner/child/Visible.cs"));
 	}
 
 	[Fact]
@@ -138,6 +165,37 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		var changed = await BuildAsync(harness.Service, trackedOnly: true);
 
 		Assert.True(HasFile(changed, "Staged.cs"));
+		Assert.NotSame(initial, changed);
+	}
+
+	[Fact]
+	public async Task BuildPlan_NestedWorktreeIndexOutsideTheWatchedRootInvalidatesThePlan()
+	{
+		if (!IsGitAvailable())
+			Assert.Skip("Git is unavailable.");
+
+		using var workspace = new TemporaryDirectory();
+		var repository = workspace.CreateDirectory("repository");
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("repository/Anchor.cs", "anchor\n");
+		RunGit(repository, "init", "--quiet");
+		RunGit(repository, "config", "user.email", "tests@example.invalid");
+		RunGit(repository, "config", "user.name", "DevProjex Tests");
+		RunGit(repository, "add", "Anchor.cs");
+		RunGit(repository, "commit", "--quiet", "-m", "fixture");
+		var worktree = Path.Combine(project, "nested");
+		RunGit(repository, "worktree", "add", "--quiet", "--detach", worktree, "HEAD");
+		File.WriteAllText(Path.Combine(worktree, "Staged.cs"), "staged\n");
+		await using var harness = CreateHarness(project);
+
+		var initial = await BuildAsync(harness.Service, trackedOnly: true);
+		Assert.False(HasFile(initial, "nested/Staged.cs"));
+		DisableWatcher(harness.Service);
+		RunGit(worktree, "add", "Staged.cs");
+
+		var changed = await BuildAsync(harness.Service, trackedOnly: true);
+
+		Assert.True(HasFile(changed, "nested/Staged.cs"));
 		Assert.NotSame(initial, changed);
 	}
 
