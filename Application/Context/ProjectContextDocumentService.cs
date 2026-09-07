@@ -1419,13 +1419,26 @@ public sealed class ProjectContextDocumentService(
 		{
 			var isApplicationOwnedImmutable = contentAnalyzer is PreparedSecretFileContentAnalyzer preparedAnalyzer &&
 			                                  preparedAnalyzer.IsApplicationOwnedImmutableContent(path);
-			snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
+			snapshot = await OpenSourceSnapshotAsync(
+					projectRoot,
+					path,
+					captureRawContentIdentity: !isApplicationOwnedImmutable && expectedVersion is not null,
+					cancellationToken)
 				.ConfigureAwait(false);
 			if (!isApplicationOwnedImmutable && expectedVersion is { } version)
 			{
 				if (validateDuringUtf8Copy && snapshot is IUtf8FileContentSnapshot)
 				{
 					snapshot = new RankingValidatedUtf8SourceSnapshot(snapshot, path, version);
+				}
+				else if (snapshot is IRawContentIdentitySnapshot identitySnapshot)
+				{
+					if (!version.HasMatchingContentHash(identitySnapshot.RawContentHash.Span))
+					{
+						throw new IOException(
+							"A selected source file changed after importance facts were indexed; repeat the export.");
+					}
+					snapshot = new RankingMetadataValidatedSourceSnapshot(snapshot, path, version);
 				}
 				else if (!await version.IsCurrentAsync(path, cancellationToken).ConfigureAwait(false))
 				{
@@ -1502,6 +1515,7 @@ public sealed class ProjectContextDocumentService(
 	private async ValueTask<IFileContentSnapshot> OpenSourceSnapshotAsync(
 		string projectRoot,
 		string path,
+		bool captureRawContentIdentity,
 		CancellationToken cancellationToken)
 	{
 		if (contentAnalyzer is PreparedSecretFileContentAnalyzer preparedAnalyzer &&
@@ -1518,9 +1532,13 @@ public sealed class ProjectContextDocumentService(
 		if (classification is { } unavailable)
 			return new UnavailableSourceSnapshot(unavailable);
 
-		var snapshot = await contentAnalyzer
-			.OpenCompleteSnapshotAsync(path, cancellationToken)
-			.ConfigureAwait(false);
+		var snapshot = captureRawContentIdentity &&
+		               contentAnalyzer is IRawContentIdentityFileContentAnalyzer identityAnalyzer
+			? await identityAnalyzer
+				.OpenCompleteSnapshotWithRawContentIdentityAsync(path, cancellationToken)
+				.ConfigureAwait(false)
+			: await contentAnalyzer.OpenCompleteSnapshotAsync(path, cancellationToken)
+				.ConfigureAwait(false);
 		classification = ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
 		if (classification is null)
 			return snapshot;

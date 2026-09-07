@@ -114,6 +114,66 @@ public sealed class RankingUtf8SnapshotTests
 		Assert.InRange(diagnostics.SourceVersionHashBytes, 1, new FileInfo(path).Length - 1);
 	}
 
+	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Markdown, true)]
+	[InlineData(ProjectContextDocumentFormat.Json, false)]
+	public async Task RankedExportValidatesBytesFromTheOpenedSnapshotAfterAtomicPathReplacement(
+		ProjectContextDocumentFormat format,
+		bool useUtf8Snapshot)
+	{
+		using var workspace = new TemporaryDirectory();
+		const string expectedContent = "bravo\n";
+		const string staleContent = "alpha\n";
+		var sourcePath = workspace.CreateFile("project/A.txt", expectedContent);
+		var replacementPath = workspace.CreateFile("replacement/A.txt", expectedContent);
+		var expectedWriteTime = File.GetLastWriteTimeUtc(sourcePath);
+		File.SetLastWriteTimeUtc(replacementPath, expectedWriteTime);
+		var projectRoot = Path.GetDirectoryName(sourcePath)!;
+		var expectedVersion = RankingSourceVersion.Capture(sourcePath);
+		IFileContentAnalyzer analyzer = useUtf8Snapshot
+			? new RestoringUtf8Analyzer(
+				sourcePath,
+				replacementPath,
+				staleContent,
+				expectedWriteTime)
+			: new FileContentAnalyzer((path, bufferSize, fileShare, asynchronous) =>
+			{
+				File.WriteAllText(path, staleContent);
+				File.SetLastWriteTimeUtc(path, expectedWriteTime);
+				var staleHandle = new FileStream(
+					path,
+					FileMode.Open,
+					FileAccess.Read,
+					fileShare,
+					bufferSize,
+					FileOptions.SequentialScan |
+					(asynchronous ? FileOptions.Asynchronous : FileOptions.None));
+				File.Replace(replacementPath, path, destinationBackupFileName: null);
+				File.SetLastWriteTimeUtc(path, expectedWriteTime);
+				return staleHandle;
+			});
+		var service = new ProjectContextDocumentService(new TreeExportService(), analyzer);
+		var plan = CreatePlan(projectRoot, sourcePath);
+		var ranking = CreateRanking(sourcePath, expectedVersion);
+		await using var destination = new MemoryStream();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		var exception = await Assert.ThrowsAsync<IOException>(async () =>
+			await service.WriteCompleteWithReportAsync(
+				plan,
+				ProjectContextView.Content,
+				format,
+				destination,
+				TestContext.Current.CancellationToken,
+				ranking: ranking));
+		var diagnostics = measurement.Capture();
+
+		Assert.Contains("changed after importance facts were indexed", exception.Message, StringComparison.Ordinal);
+		Assert.Equal(expectedVersion, RankingSourceVersion.Capture(sourcePath));
+		Assert.Equal(1, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(Encoding.UTF8.GetByteCount(staleContent), diagnostics.SourceVersionHashBytes);
+	}
+
 	private static ProjectContextPlan CreatePlan(string projectRoot, string sourcePath)
 	{
 		var selection = new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []);
@@ -223,7 +283,10 @@ public sealed class RankingUtf8SnapshotTests
 			ValueTask.FromResult<TextFileContent?>(snapshot.Content);
 	}
 
-	private sealed class TrackingUtf8Snapshot(string sourcePath, string content) :
+	private sealed class TrackingUtf8Snapshot(
+		string sourcePath,
+		string content,
+		bool mutateAfterUtf8Copy = true) :
 		IFileContentSnapshot,
 		IUtf8FileContentSnapshot
 	{
@@ -268,7 +331,8 @@ public sealed class RankingUtf8SnapshotTests
 		{
 			Utf8CopyCount++;
 			await writeChunk(utf8, cancellationToken).ConfigureAwait(false);
-			File.AppendAllText(sourcePath, "changed");
+			if (mutateAfterUtf8Copy)
+				File.AppendAllText(sourcePath, "changed");
 		}
 
 		public ValueTask DisposeAsync()
@@ -276,5 +340,48 @@ public sealed class RankingUtf8SnapshotTests
 			IsDisposed = true;
 			return ValueTask.CompletedTask;
 		}
+	}
+
+	private sealed class RestoringUtf8Analyzer(
+		string sourcePath,
+		string replacementPath,
+		string staleContent,
+		DateTime expectedWriteTime) : IFileContentAnalyzer
+	{
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(true);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileMetrics?>(CreateSnapshot().Result.Metrics);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			File.WriteAllText(sourcePath, staleContent);
+			File.SetLastWriteTimeUtc(sourcePath, expectedWriteTime);
+			var snapshot = CreateSnapshot();
+			File.Move(replacementPath, sourcePath, overwrite: true);
+			File.SetLastWriteTimeUtc(sourcePath, expectedWriteTime);
+			return ValueTask.FromResult<IFileContentSnapshot>(snapshot);
+		}
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileContent?>(CreateSnapshot().Content);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			TryReadAsTextAsync(path, cancellationToken);
+
+		private TrackingUtf8Snapshot CreateSnapshot() =>
+			new(sourcePath, staleContent, mutateAfterUtf8Copy: false);
 	}
 }

@@ -121,6 +121,14 @@ internal readonly record struct RankingSourceVersion(
 	long LastWriteTimeUtcTicks,
 	string? ContentHash)
 {
+	internal bool HasMatchingContentHash(ReadOnlySpan<byte> contentHash)
+	{
+		if (ContentHash is null)
+			return false;
+		var expectedHash = Convert.FromHexString(ContentHash);
+		return CryptographicOperations.FixedTimeEquals(contentHash, expectedHash);
+	}
+
 	internal static RankingSourceVersion Capture(string path)
 	{
 		try

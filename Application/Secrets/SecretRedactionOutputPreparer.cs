@@ -2282,6 +2282,18 @@ internal interface IUtf8FileContentSnapshot
 		CancellationToken cancellationToken = default);
 }
 
+internal interface IRawContentIdentitySnapshot
+{
+	ReadOnlyMemory<byte> RawContentHash { get; }
+}
+
+internal interface IRawContentIdentityFileContentAnalyzer
+{
+	ValueTask<IFileContentSnapshot> OpenCompleteSnapshotWithRawContentIdentityAsync(
+		string path,
+		CancellationToken cancellationToken = default);
+}
+
 internal sealed class PreparedContentStore : IDisposable
 {
 	private const int StreamBufferSize = 64 * 1024;
@@ -2684,7 +2696,9 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 /// Presents prepared text under its original path identity. Document serializers continue to use
 /// source-relative headers while all content reads are redirected to the redacted snapshot.
 /// </summary>
-public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
+public sealed class PreparedSecretFileContentAnalyzer :
+	IFileContentAnalyzer,
+	IRawContentIdentityFileContentAnalyzer
 {
 	private readonly IFileContentAnalyzer sourceAnalyzer;
 	private readonly IFileContentAnalyzer preparedContentAnalyzer;
@@ -2875,7 +2889,20 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 
 	public async ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
 		string path,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default) =>
+		await OpenCompleteSnapshotCoreAsync(path, captureRawContentIdentity: false, cancellationToken)
+			.ConfigureAwait(false);
+
+	ValueTask<IFileContentSnapshot>
+		IRawContentIdentityFileContentAnalyzer.OpenCompleteSnapshotWithRawContentIdentityAsync(
+			string path,
+			CancellationToken cancellationToken) =>
+		OpenCompleteSnapshotCoreAsync(path, captureRawContentIdentity: true, cancellationToken);
+
+	private async ValueTask<IFileContentSnapshot> OpenCompleteSnapshotCoreAsync(
+		string path,
+		bool captureRawContentIdentity,
+		CancellationToken cancellationToken)
 	{
 		var file = prepared.GetFile(path);
 		if (!file.IsText && !file.IsUnscannable)
@@ -2897,8 +2924,14 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 
 		file.EnsureSourceVersion();
 		RecordPreparedRead(file);
-		var snapshot = await ResolveAnalyzer(file).OpenCompleteSnapshotAsync(file.ContentPath, cancellationToken)
-			.ConfigureAwait(false);
+		var resolvedAnalyzer = ResolveAnalyzer(file);
+		var snapshot = captureRawContentIdentity &&
+		               resolvedAnalyzer is IRawContentIdentityFileContentAnalyzer identityAnalyzer
+			? await identityAnalyzer
+				.OpenCompleteSnapshotWithRawContentIdentityAsync(file.ContentPath, cancellationToken)
+				.ConfigureAwait(false)
+			: await resolvedAnalyzer.OpenCompleteSnapshotAsync(file.ContentPath, cancellationToken)
+				.ConfigureAwait(false);
 		try
 		{
 			file.EnsureSourceVersion();

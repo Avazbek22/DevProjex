@@ -1400,7 +1400,10 @@ entries; context JSON adds an optional `ranking` object. The algorithm, weights,
 coverage semantics, and frozen evaluation are specified in
 [Ranking.md](Ranking.md). Per-file source-version guards fail the operation if
 facts and the coherent emitted-content snapshot no longer describe the same
-file version.
+file version. For source-backed ranked exports, the raw SHA-256 identity is
+calculated from the same opened handle that supplies decoded output; path metadata
+remains a second guard. Non-ranked exports retain the existing metadata-coherence
+semantics and do not add content hashing.
 
 Analysis v1 contains inventory, effective selection, metrics, diagnostics, and
 fingerprint. Either findings option adds `findingCount`. With `--findings`, it

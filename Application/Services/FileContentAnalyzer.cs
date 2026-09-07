@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Cryptography;
 using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Application.Services;
 
@@ -27,7 +28,8 @@ public delegate FileStream FileContentReadStreamOpener(
 public sealed class FileContentAnalyzer :
 	IFileContentAnalyzer,
 	IPrewarmFileContentAnalyzer,
-	ICoherentFileContentAnalyzer
+	ICoherentFileContentAnalyzer,
+	IRawContentIdentityFileContentAnalyzer
 {
 	// 512 bytes is sufficient - all binary formats have null bytes in first 512 bytes
 	private const int BinaryCheckBufferSize = 512;
@@ -243,7 +245,19 @@ public sealed class FileContentAnalyzer :
 	public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
 		string path,
 		CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(OpenCompleteSnapshotSync(path, cancellationToken));
+		ValueTask.FromResult(OpenCompleteSnapshotSync(
+			path,
+			captureRawContentIdentity: false,
+			cancellationToken));
+
+	ValueTask<IFileContentSnapshot>
+		IRawContentIdentityFileContentAnalyzer.OpenCompleteSnapshotWithRawContentIdentityAsync(
+			string path,
+			CancellationToken cancellationToken) =>
+		ValueTask.FromResult(OpenCompleteSnapshotSync(
+			path,
+			captureRawContentIdentity: true,
+			cancellationToken));
 
 	public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
 		string path,
@@ -497,6 +511,8 @@ public sealed class FileContentAnalyzer :
 				encoding ?? StrictUtf8,
 				cancellationToken,
 				calculateFingerprint: false,
+				out _,
+				calculateRawContentHash: false,
 				out _);
 			return Identified(
 				stream,
@@ -553,6 +569,7 @@ public sealed class FileContentAnalyzer :
 
 	private IFileContentSnapshot OpenCompleteSnapshotSync(
 		string path,
+		bool captureRawContentIdentity,
 		CancellationToken cancellationToken)
 	{
 		FileStream? stream = null;
@@ -583,7 +600,12 @@ public sealed class FileContentAnalyzer :
 						IsEmpty: true,
 						IsWhitespaceOnly: false,
 						IsEstimated: false),
-					SHA256.HashData(ReadOnlySpan<byte>.Empty));
+					SHA256.HashData(ReadOnlySpan<byte>.Empty),
+					captureRawContentIdentity
+						? SHA256.HashData(ReadOnlySpan<byte>.Empty)
+						: null);
+				if (captureRawContentIdentity)
+					ContentPipelineDiagnostics.RecordSourceVersionHashPass();
 				stream = null;
 				return emptySnapshot;
 			}
@@ -601,7 +623,9 @@ public sealed class FileContentAnalyzer :
 				encoding ?? StrictUtf8,
 				cancellationToken,
 				calculateFingerprint: true,
-				out var contentFingerprint);
+				out var contentFingerprint,
+				captureRawContentIdentity,
+				out var rawContentHash);
 			if (metrics is null)
 			{
 				return new ClassifiedFileContentSnapshot(
@@ -614,7 +638,8 @@ public sealed class FileContentAnalyzer :
 				stream,
 				encoding ?? StrictUtf8,
 				metrics,
-				contentFingerprint!);
+				contentFingerprint!,
+				rawContentHash);
 			stream = null;
 			return snapshot;
 		}
@@ -914,15 +939,21 @@ public sealed class FileContentAnalyzer :
 		Encoding encoding,
 		CancellationToken cancellationToken,
 		bool calculateFingerprint,
-		out byte[]? contentFingerprint)
+		out byte[]? contentFingerprint,
+		bool calculateRawContentHash,
+		out byte[]? rawContentHash)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		ContentPipelineDiagnostics.RecordFullFileRead(sizeBytes);
 		contentFingerprint = null;
+		rawContentHash = null;
 
 		byte[]? byteBuffer = null;
 		char[]? charBuffer = null;
 		using var fingerprint = calculateFingerprint
+			? IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
+			: null;
+		using var rawContentIdentity = calculateRawContentHash
 			? IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
 			: null;
 		try
@@ -936,7 +967,17 @@ public sealed class FileContentAnalyzer :
 			byteBuffer = ArrayPool<byte>.Shared.Rent(StreamingBufferSize);
 			charBuffer = ArrayPool<char>.Shared.Rent(
 				Math.Max(1, effectiveEncoding.GetMaxCharCount(StreamingBufferSize)));
-			stream.Position = GetPreambleLength(bomEncoding);
+			var preambleLength = GetPreambleLength(bomEncoding);
+			stream.Position = 0;
+			if (preambleLength > 0)
+			{
+				stream.ReadExactly(byteBuffer.AsSpan(0, preambleLength));
+				rawContentIdentity?.AppendData(byteBuffer.AsSpan(0, preambleLength));
+				if (calculateRawContentHash)
+					ContentPipelineDiagnostics.RecordSourceVersionHashBytes(preambleLength);
+			}
+			if (calculateRawContentHash)
+				ContentPipelineDiagnostics.RecordSourceVersionHashPass();
 
 			while (true)
 			{
@@ -944,6 +985,9 @@ public sealed class FileContentAnalyzer :
 				var bytesRead = stream.Read(byteBuffer, 0, StreamingBufferSize);
 				if (bytesRead == 0)
 					break;
+				rawContentIdentity?.AppendData(byteBuffer.AsSpan(0, bytesRead));
+				if (calculateRawContentHash)
+					ContentPipelineDiagnostics.RecordSourceVersionHashBytes(bytesRead);
 
 				var bytesConsumed = 0;
 				while (bytesConsumed < bytesRead)
@@ -991,6 +1035,7 @@ public sealed class FileContentAnalyzer :
 			}
 
 			contentFingerprint = fingerprint?.GetHashAndReset();
+			rawContentHash = rawContentIdentity?.GetHashAndReset();
 			if (calculateFingerprint)
 				ContentPipelineDiagnostics.RecordContentFingerprint();
 			return counter.Build(sizeBytes);
@@ -1485,12 +1530,15 @@ public sealed class FileContentAnalyzer :
 		FileStream stream,
 		Encoding encoding,
 		TextFileMetrics metrics,
-		byte[] contentFingerprint) : IFileContentSnapshot
+		byte[] contentFingerprint,
+		byte[]? rawContentHash) : IFileContentSnapshot, IRawContentIdentitySnapshot
 	{
 		private FileStream? _stream = stream;
 
 		public FileContentMetricsResult Result { get; } =
 			new(FileContentClassification.Text, metrics);
+
+		public ReadOnlyMemory<byte> RawContentHash { get; } = rawContentHash ?? [];
 
 		public async ValueTask CopyTextToAsync(
 			int maximumCharacters,
