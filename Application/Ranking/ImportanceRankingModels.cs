@@ -24,7 +24,8 @@ public sealed record ImportanceRankingEntry(
 	int? MostRecentCommitPosition,
 	ImportanceFileRole Role,
 	bool HasGraphFacts,
-	bool HasGitHistory);
+	bool HasGitHistory,
+	ProjectGitHistoryUnavailableReason? GitUnavailableReason = null);
 
 public sealed record ImportanceRankingReport(
 	string Algorithm,
@@ -38,7 +39,32 @@ public sealed record ImportanceRankingReport(
 	int GitCommitCount,
 	ProjectGitHistoryUnavailableReason GitUnavailableReason,
 	bool RedistributedMissingSignals,
-	string GraphVariant);
+	string GraphVariant)
+{
+	internal IReadOnlyDictionary<string, RankingSourceVersion> SourceVersions { get; init; } =
+		new Dictionary<string, RankingSourceVersion>(StringComparer.Ordinal);
+}
+
+internal readonly record struct RankingSourceVersion(bool Exists, long Length, long LastWriteTimeUtcTicks)
+{
+	internal static RankingSourceVersion Capture(string path)
+	{
+		try
+		{
+			var file = new FileInfo(path);
+			return file.Exists
+				? new RankingSourceVersion(true, file.Length, file.LastWriteTimeUtc.Ticks)
+				: default;
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+		{
+			return default;
+		}
+	}
+
+	internal bool IsCurrent(string path) => Equals(Capture(path));
+}
 
 public interface IImportanceRankingService
 {

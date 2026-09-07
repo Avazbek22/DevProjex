@@ -84,13 +84,19 @@ public sealed class ImportanceRankedContextDocumentTests
 			ProjectContextDocumentFormat.Json,
 			destination,
 			TestContext.Current.CancellationToken,
+			maximumEstimatedTokens: 1,
 			ranking: ranking);
 
 		using var json = JsonDocument.Parse(destination.ToArray());
 		var report = json.RootElement.GetProperty("ranking");
 		Assert.Equal(ImportanceRankingService.AlgorithmId, report.GetProperty("algorithm").GetString());
+		Assert.Equal("pagerank", report.GetProperty("graphVariant").GetString());
 		Assert.Equal(2, report.GetProperty("top").GetArrayLength());
 		Assert.Equal("B.txt", report.GetProperty("top")[0].GetProperty("path").GetString());
+		var skipped = Assert.Single(report.GetProperty("skipped").EnumerateArray());
+		Assert.Equal("A.txt", skipped.GetProperty("path").GetString());
+		Assert.Equal(2, skipped.GetProperty("priority").GetInt32());
+		Assert.Equal("does not fit the remaining budget", skipped.GetProperty("reason").GetString());
 	}
 
 	private static async Task<(ProjectContextDocumentService Service, ProjectContextPlan Plan)> CreateContextAsync(

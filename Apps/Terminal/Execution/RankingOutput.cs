@@ -15,22 +15,25 @@ internal static class RankingOutput
 		if (report is null)
 			return;
 		var percentage = Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero);
-		var historySuffix = report.GitUnavailableReason == ProjectGitHistoryUnavailableReason.None
-			? string.Empty
-			: localization.Format(
+		var historySuffix = report.GitUnavailableReason != ProjectGitHistoryUnavailableReason.None
+			? localization.Format(
 				"Terminal.Ranking.GitUnavailableSuffix",
-				report.GitUnavailableReason.ToString());
+				report.GitUnavailableReason.ToString())
+			: report.RedistributedMissingSignals
+				? localization["Terminal.Ranking.RedistributedSuffix"]
+				: string.Empty;
 		writer.WriteLine(localization.Format(
 			"Terminal.Ranking.Summary",
 			report.Algorithm,
 			percentage,
 			report.CandidateCount,
 			report.GitWindow,
-			historySuffix));
+			historySuffix,
+			report.GraphVariant));
 		foreach (var entry in report.TopEntries.Take(10))
 		{
 			var commits = entry.Commits?.ToString(CultureInfo.InvariantCulture) ??
-			              localization["Terminal.Ranking.Unavailable"];
+			              $"{localization["Terminal.Ranking.Unavailable"]}: {entry.GitUnavailableReason}";
 			writer.WriteLine(localization.Format(
 				"Terminal.Ranking.Top",
 				TerminalTextEscaping.EscapeSingleLine(entry.Path),

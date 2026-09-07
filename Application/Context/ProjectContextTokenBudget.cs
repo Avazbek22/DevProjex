@@ -15,13 +15,16 @@ public sealed record ProjectContextTokenBudgetReport(
 	long IncludedEstimatedTokens,
 	long SkippedEstimatedTokens,
 	IReadOnlyList<ProjectContextTokenBudgetSkippedFile> LargestSkippedFiles,
-	int AdditionalSkippedFileCount);
+	int AdditionalSkippedFileCount,
+	IReadOnlyList<ProjectContextTokenBudgetSkippedFile>? RankedSkippedFiles = null);
 
 internal sealed class ProjectContextTokenBudgetAccumulator
 {
 	internal const int MaximumReportedSkippedFiles = 25;
+	internal const int MaximumReportedRankedSkippedFiles = 10;
 	private readonly long _maximumEstimatedTokens;
 	private List<ProjectContextTokenBudgetSkippedFile>? _largestSkippedFiles;
+	private List<ProjectContextTokenBudgetSkippedFile>? _rankedSkippedFiles;
 	private long _remainingEstimatedTokens;
 	private int _includedFileCount;
 	private int _skippedFileCount;
@@ -51,6 +54,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		_skippedEstimatedTokens += estimatedTokens;
 		_skippedFileCount++;
 		RetainLargestSkippedFile(path, estimatedTokens, priority, _remainingEstimatedTokens);
+		if (priority is not null)
+			RetainRankedSkippedFile(path, estimatedTokens, priority.Value, _remainingEstimatedTokens);
 		return false;
 	}
 
@@ -64,7 +69,32 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_includedEstimatedTokens,
 			_skippedEstimatedTokens,
 			largestSkippedFiles,
-			_skippedFileCount - largestSkippedFiles.Length);
+			_skippedFileCount - largestSkippedFiles.Length,
+			_rankedSkippedFiles?.ToArray() ?? []);
+	}
+
+	private void RetainRankedSkippedFile(
+		string path,
+		long estimatedTokens,
+		int priority,
+		long remainingEstimatedTokens)
+	{
+		var ranked = _rankedSkippedFiles ??=
+			new List<ProjectContextTokenBudgetSkippedFile>(MaximumReportedRankedSkippedFiles);
+		var index = ranked.FindIndex(item =>
+			item.Priority > priority ||
+			item.Priority == priority && ProjectTreePathIdentity.CanonicalComparer.Compare(item.Path, path) > 0);
+		if (index < 0)
+			index = ranked.Count;
+		if (index >= MaximumReportedRankedSkippedFiles)
+			return;
+		ranked.Insert(index, new ProjectContextTokenBudgetSkippedFile(
+			path,
+			estimatedTokens,
+			priority,
+			remainingEstimatedTokens));
+		if (ranked.Count > MaximumReportedRankedSkippedFiles)
+			ranked.RemoveAt(MaximumReportedRankedSkippedFiles);
 	}
 
 	private void RetainLargestSkippedFile(

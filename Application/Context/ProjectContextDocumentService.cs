@@ -206,6 +206,7 @@ public sealed class ProjectContextDocumentService(
 						writeProgress,
 						tokenBudget,
 						orderedPaths,
+						ranking,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -220,6 +221,7 @@ public sealed class ProjectContextDocumentService(
 						writeProgress,
 						tokenBudget,
 						orderedPaths,
+						ranking,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -249,6 +251,7 @@ public sealed class ProjectContextDocumentService(
 						writeProgress,
 						tokenBudget,
 						orderedPaths,
+						ranking,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -330,6 +333,7 @@ public sealed class ProjectContextDocumentService(
 					format,
 					tokenBudget,
 					orderedPaths,
+					ranking,
 					cancellationToken)
 				.ConfigureAwait(false);
 			return new ProjectContextWriteResult([], tokenBudget.CreateReport(), ranking);
@@ -353,6 +357,7 @@ public sealed class ProjectContextDocumentService(
 				format,
 				tokenBudget,
 				orderedPaths,
+				ranking,
 				cancellationToken)
 			.ConfigureAwait(false);
 		return new ProjectContextWriteResult(prepared.UnscannableFiles, tokenBudget.CreateReport(), ranking);
@@ -364,6 +369,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextDocumentFormat format,
 		ProjectContextTokenBudgetAccumulator tokenBudget,
 		IReadOnlyList<string> orderedPaths,
+		ImportanceRankingReport? ranking,
 		CancellationToken cancellationToken)
 	{
 		var effectivePathRedaction = outputPathRedactionDecision ??
@@ -376,6 +382,7 @@ public sealed class ProjectContextDocumentService(
 		await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 			               plan.SourceRoot,
 			               orderedPaths,
+			               ranking?.SourceVersions,
 			               cancellationToken).ConfigureAwait(false))
 		{
 			await using var snapshot = source.Snapshot;
@@ -384,7 +391,10 @@ public sealed class ProjectContextDocumentService(
 				snapshot.Result,
 				contentPathMapper,
 				effectivePathRedaction);
-			tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0, source.Index + 1);
+			tokenBudget.TryInclude(
+				file.Path,
+				file.Metrics?.CharCount ?? 0,
+				ranking is null ? null : source.Index + 1);
 		}
 	}
 
@@ -571,6 +581,7 @@ public sealed class ProjectContextDocumentService(
 		IProgress<ProjectCopyExportProgress>? writeProgress,
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		IReadOnlyList<string> orderedPaths,
+		ImportanceRankingReport? ranking,
 		CancellationToken cancellationToken)
 	{
 		await using var streamWriter = CreateStreamWriter(destination);
@@ -604,6 +615,7 @@ public sealed class ProjectContextDocumentService(
 			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 				               plan.SourceRoot,
 				               orderedPaths,
+				               ranking?.SourceVersions,
 				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -616,7 +628,10 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0, index + 1))
+				    !tokenBudget.TryInclude(
+					    file.Path,
+					    file.Metrics?.CharCount ?? 0,
+					    ranking is null ? null : index + 1))
 				{
 					ReportProgress(writeProgress, index + 1, orderedPaths.Count);
 					continue;
@@ -674,6 +689,7 @@ public sealed class ProjectContextDocumentService(
 		IProgress<ProjectCopyExportProgress>? writeProgress,
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		IReadOnlyList<string> orderedPaths,
+		ImportanceRankingReport? ranking,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -728,6 +744,7 @@ public sealed class ProjectContextDocumentService(
 			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 				               plan.SourceRoot,
 				               orderedPaths,
+				               ranking?.SourceVersions,
 				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -739,7 +756,10 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0, source.Index + 1))
+				    !tokenBudget.TryInclude(
+					    file.Path,
+					    file.Metrics?.CharCount ?? 0,
+					    ranking is null ? null : source.Index + 1))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
@@ -833,6 +853,7 @@ public sealed class ProjectContextDocumentService(
 			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 				               plan.SourceRoot,
 				               orderedPaths,
+				               ranking?.SourceVersions,
 				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -844,7 +865,10 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0, source.Index + 1))
+				    !tokenBudget.TryInclude(
+					    file.Path,
+					    file.Metrics?.CharCount ?? 0,
+					    ranking is null ? null : source.Index + 1))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
@@ -881,7 +905,7 @@ public sealed class ProjectContextDocumentService(
 		}
 		writer.WriteEndArray();
 		if (ranking is not null)
-			WriteRanking(writer, ranking);
+			WriteRanking(writer, ranking, tokenBudget?.CreateReport());
 		if (tokenBudget is not null)
 			WriteTokenBudget(writer, tokenBudget.CreateReport());
 		var mapDiagnosticPaths = ShouldMapDiagnosticPathsToSource(plan, useSourceMappedStructuredPaths);
@@ -905,6 +929,7 @@ public sealed class ProjectContextDocumentService(
 		IProgress<ProjectCopyExportProgress>? writeProgress,
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		IReadOnlyList<string> orderedPaths,
+		ImportanceRankingReport? ranking,
 		CancellationToken cancellationToken)
 	{
 		using var writer = XmlWriter.Create(destination, new XmlWriterSettings
@@ -948,6 +973,7 @@ public sealed class ProjectContextDocumentService(
 			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 				               plan.SourceRoot,
 				               orderedPaths,
+				               ranking?.SourceVersions,
 				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -959,7 +985,10 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0, source.Index + 1))
+				    !tokenBudget.TryInclude(
+					    file.Path,
+					    file.Metrics?.CharCount ?? 0,
+					    ranking is null ? null : source.Index + 1))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
@@ -1053,6 +1082,7 @@ public sealed class ProjectContextDocumentService(
 	private async IAsyncEnumerable<CompleteSourceSnapshot> OpenSourceSnapshotsInOrderAsync(
 		string projectRoot,
 		IReadOnlyList<string> orderedPaths,
+		IReadOnlyDictionary<string, RankingSourceVersion>? sourceVersions,
 		[EnumeratorCancellation] CancellationToken cancellationToken)
 	{
 		if (orderedPaths.Count == 0)
@@ -1072,6 +1102,12 @@ public sealed class ProjectContextDocumentService(
 			{
 				var index = nextPathIndex++;
 				var path = orderedPaths[index];
+				RankingSourceVersion? expectedVersion = null;
+				if (sourceVersions is not null &&
+				    sourceVersions.TryGetValue(Path.GetFullPath(path), out var capturedVersion))
+				{
+					expectedVersion = capturedVersion;
+				}
 				pendingReads.Enqueue(new PendingCompleteSnapshotRead(
 					index,
 					path,
@@ -1079,6 +1115,7 @@ public sealed class ProjectContextDocumentService(
 						projectRoot,
 						path,
 						retainedBytes,
+						expectedVersion,
 						readCancellation.Token)));
 			}
 		}
@@ -1119,6 +1156,7 @@ public sealed class ProjectContextDocumentService(
 		string projectRoot,
 		string path,
 		WeightedByteBudget retainedBytes,
+		RankingSourceVersion? expectedVersion,
 		CancellationToken cancellationToken)
 	{
 		// Start these methods in source order so a full-budget request cannot be
@@ -1129,8 +1167,12 @@ public sealed class ProjectContextDocumentService(
 			.ConfigureAwait(false);
 		try
 		{
+			EnsureRankingSourceVersion(path, expectedVersion);
 			var snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
 				.ConfigureAwait(false);
+			EnsureRankingSourceVersion(path, expectedVersion);
+			if (expectedVersion is { } version)
+				snapshot = new RankingValidatedSourceSnapshot(snapshot, path, version);
 			return new BudgetedCompleteSourceSnapshot(snapshot, lease);
 		}
 		catch
@@ -1901,7 +1943,16 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteEndObject();
 	}
 
-	private static void WriteRanking(Utf8JsonWriter writer, ImportanceRankingReport report)
+	private static void EnsureRankingSourceVersion(string path, RankingSourceVersion? expectedVersion)
+	{
+		if (expectedVersion is { } version && !version.IsCurrent(path))
+			throw new IOException("A selected source file changed after importance facts were indexed.");
+	}
+
+	private static void WriteRanking(
+		Utf8JsonWriter writer,
+		ImportanceRankingReport report,
+		ProjectContextTokenBudgetReport? tokenBudget)
 	{
 		writer.WriteStartObject("ranking");
 		writer.WriteString("algorithm", report.Algorithm);
@@ -1912,7 +1963,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteNumber("graphCoverage", report.GraphCoverage);
 		writer.WriteNumber("gitWindow", report.GitWindow);
 		writer.WriteNumber("gitCommits", report.GitCommitCount);
-		writer.WriteString("gitUnavailableReason", report.GitUnavailableReason.ToString());
+		writer.WriteString("gitUnavailableReason", RankingHistoryReasonToken(report.GitUnavailableReason));
 		writer.WriteBoolean("redistributedMissingSignals", report.RedistributedMissingSignals);
 		writer.WriteStartArray("top");
 		foreach (var entry in report.TopEntries)
@@ -1927,12 +1978,48 @@ public sealed class ProjectContextDocumentService(
 				writer.WriteNumber("commits", commits);
 			if (entry.MostRecentCommitPosition is { } position)
 				writer.WriteNumber("mostRecentCommitPosition", position);
-			writer.WriteString("role", entry.Role.ToString());
+			if (entry.GitUnavailableReason is { } historyReason)
+				writer.WriteString("gitUnavailableReason", RankingHistoryReasonToken(historyReason));
+			writer.WriteString("role", RankingRoleToken(entry.Role));
+			writer.WriteEndObject();
+		}
+		writer.WriteEndArray();
+		writer.WriteStartArray("skipped");
+		foreach (var file in tokenBudget?.RankedSkippedFiles ?? [])
+		{
+			writer.WriteStartObject();
+			writer.WriteString("path", NormalizePath(file.Path));
+			writer.WriteNumber("priority", file.Priority.GetValueOrDefault());
+			writer.WriteNumber("estimatedTokens", file.EstimatedTokens);
+			writer.WriteNumber("remainingEstimatedTokens", file.RemainingEstimatedTokens.GetValueOrDefault());
+			writer.WriteString("reason", "does not fit the remaining budget");
 			writer.WriteEndObject();
 		}
 		writer.WriteEndArray();
 		writer.WriteEndObject();
 	}
+
+	private static string RankingHistoryReasonToken(ProjectGitHistoryUnavailableReason reason) => reason switch
+	{
+		ProjectGitHistoryUnavailableReason.None => "none",
+		ProjectGitHistoryUnavailableReason.GitUnavailable => "git-unavailable",
+		ProjectGitHistoryUnavailableReason.NotRepository => "not-repository",
+		ProjectGitHistoryUnavailableReason.NestedRepository => "nested-repository",
+		ProjectGitHistoryUnavailableReason.OldGitPromisorRepository => "old-git-promisor-repository",
+		ProjectGitHistoryUnavailableReason.ProcessFailed => "process-failed",
+		ProjectGitHistoryUnavailableReason.OutputLimitExceeded => "output-limit-exceeded",
+		ProjectGitHistoryUnavailableReason.InvalidOutput => "invalid-output",
+		_ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null)
+	};
+
+	private static string RankingRoleToken(ImportanceFileRole role) => role switch
+	{
+		ImportanceFileRole.Source => "source",
+		ImportanceFileRole.TestSource => "test-source",
+		ImportanceFileRole.Manifest => "manifest",
+		ImportanceFileRole.EntryPoint => "entry-point",
+		_ => throw new ArgumentOutOfRangeException(nameof(role), role, null)
+	};
 
 	private static void WriteTreeNode(
 		Utf8JsonWriter writer,
@@ -2520,6 +2607,46 @@ public sealed class ProjectContextDocumentService(
 			{
 				lease.Dispose();
 			}
+		}
+	}
+
+	private sealed class RankingValidatedSourceSnapshot(
+		IFileContentSnapshot inner,
+		string sourcePath,
+		RankingSourceVersion expectedVersion) : IFileContentSnapshot
+	{
+		private int _disposed;
+
+		public FileContentMetricsResult Result => inner.Result;
+
+		public async ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default)
+		{
+			await inner.CopyTextToAsync(maximumCharacters, writeChunk, cancellationToken)
+				.ConfigureAwait(false);
+			EnsureCurrent();
+		}
+
+		public async ValueTask DisposeAsync()
+		{
+			if (Interlocked.Exchange(ref _disposed, 1) != 0)
+				return;
+			try
+			{
+				EnsureCurrent();
+			}
+			finally
+			{
+				await inner.DisposeAsync().ConfigureAwait(false);
+			}
+		}
+
+		private void EnsureCurrent()
+		{
+			if (!expectedVersion.IsCurrent(sourcePath))
+				throw new IOException("A selected source file changed after importance facts were indexed.");
 		}
 	}
 

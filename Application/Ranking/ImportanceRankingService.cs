@@ -7,10 +7,10 @@ public sealed class ImportanceRankingService(
 	IProjectGitHistoryReader gitHistoryReader) : IImportanceRankingService
 {
 	public const string AlgorithmId = "importance-v1";
-	public const string GraphVariant = "degree";
-	public const double GraphWeight = 0.65;
-	public const double GitWeight = 0.25;
-	public const double RoleWeight = 0.10;
+	public const string GraphVariant = "pagerank";
+	public const double GraphWeight = 0.85;
+	public const double GitWeight = 0.10;
+	public const double RoleWeight = 0.05;
 	private const int MaximumTopEntries = 10;
 	private static readonly HashSet<string> TestFrameworks = new(StringComparer.OrdinalIgnoreCase)
 	{
@@ -35,17 +35,14 @@ public sealed class ImportanceRankingService(
 		if (candidates.Length == 0)
 			return EmptyReport();
 
-		var dependencyTask = dependencyFactsEngine.IndexAsync(
-			root,
-			candidates.Select(static candidate => candidate.FullPath).ToArray(),
-			progress: null,
-			cancellationToken);
+		var candidatePaths = candidates.Select(static candidate => candidate.FullPath).ToArray();
+		var dependencyTask = ReadStableDependencySnapshotAsync(root, candidatePaths, cancellationToken);
 		var historyTask = gitHistoryReader.ReadAsync(
 			root,
-			candidates.Select(static candidate => candidate.FullPath).ToArray(),
+			candidatePaths,
 			cancellationToken);
 		await Task.WhenAll(dependencyTask, historyTask).ConfigureAwait(false);
-		var dependency = await dependencyTask.ConfigureAwait(false);
+		var (dependency, sourceVersions) = await dependencyTask.ConfigureAwait(false);
 		var history = await historyTask.ConfigureAwait(false);
 
 		var factsByPath = dependency.Files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
@@ -53,6 +50,7 @@ public sealed class ImportanceRankingService(
 		var dependents = new Dictionary<string, int>(StringComparer.Ordinal);
 		var dependencies = new Dictionary<string, int>(StringComparer.Ordinal);
 		var roles = new Dictionary<string, ImportanceFileRole>(StringComparer.Ordinal);
+		var pageRank = CalculatePageRank(candidates, dependency);
 		foreach (var candidate in candidates)
 		{
 			factsByPath.TryGetValue(candidate.RelativePath, out var facts);
@@ -65,11 +63,12 @@ public sealed class ImportanceRankingService(
 				: 0;
 			dependents[candidate.RelativePath] = incoming;
 			dependencies[candidate.RelativePath] = outgoing;
-			graphRaw[candidate.RelativePath] = supported ? incoming + 0.35 * outgoing : null;
+			graphRaw[candidate.RelativePath] = supported
+				? pageRank.GetValueOrDefault(candidate.RelativePath)
+				: null;
 			roles[candidate.RelativePath] = ClassifyRole(candidate.RelativePath, facts, incoming, outgoing);
 		}
 
-		var pageRank = CalculatePageRank(candidates, dependency);
 		var graphNormalized = RankNormalize(graphRaw);
 		var gitRaw = candidates.ToDictionary(
 			static candidate => candidate.RelativePath,
@@ -109,6 +108,11 @@ public sealed class ImportanceRankingService(
 			{
 				var path = candidate.Candidate.RelativePath;
 				var hasHistory = history.Files.TryGetValue(candidate.Candidate.FullPath, out var activity);
+				var historyReason = hasHistory
+					? (ProjectGitHistoryUnavailableReason?)null
+					: history.UnavailableFiles.TryGetValue(candidate.Candidate.FullPath, out var unavailableReason)
+						? unavailableReason
+						: history.UnavailableReason;
 				return new ImportanceRankingEntry(
 					candidate.Candidate.FullPath,
 					path,
@@ -120,11 +124,11 @@ public sealed class ImportanceRankingService(
 					hasHistory ? activity!.MostRecentCommitPosition : null,
 					roles[path],
 					graphRaw[path] is not null,
-					hasHistory);
+					hasHistory,
+					historyReason);
 			})
 			.ToArray();
 
-		_ = pageRank; // Retained as the frozen evaluation comparator; importance-v1 selected degree.
 		return new ImportanceRankingReport(
 			AlgorithmId,
 			ordered,
@@ -137,8 +141,44 @@ public sealed class ImportanceRankingService(
 			history.CommitCount,
 			history.UnavailableReason,
 			redistributed,
-			GraphVariant);
+			GraphVariant)
+		{
+			SourceVersions = sourceVersions
+		};
 	}
+
+	private async Task<(DependencyIndexSnapshot Snapshot, IReadOnlyDictionary<string, RankingSourceVersion> Versions)>
+		ReadStableDependencySnapshotAsync(
+			string root,
+			IReadOnlyList<string> candidatePaths,
+			CancellationToken cancellationToken)
+	{
+		for (var attempt = 0; attempt < 2; attempt++)
+		{
+			var before = CaptureVersions(candidatePaths);
+			var snapshot = await dependencyFactsEngine
+				.IndexAsync(root, candidatePaths, progress: null, cancellationToken)
+				.ConfigureAwait(false);
+			var after = CaptureVersions(candidatePaths);
+			if (VersionsEqual(before, after))
+				return (snapshot, after);
+		}
+
+		throw new IOException("Selected source files changed while dependency facts were being indexed.");
+	}
+
+	private static IReadOnlyDictionary<string, RankingSourceVersion> CaptureVersions(
+		IReadOnlyList<string> paths) =>
+		paths.ToDictionary(
+			Path.GetFullPath,
+			RankingSourceVersion.Capture,
+			PathComparer.Default);
+
+	private static bool VersionsEqual(
+		IReadOnlyDictionary<string, RankingSourceVersion> left,
+		IReadOnlyDictionary<string, RankingSourceVersion> right) =>
+		left.Count == right.Count && left.All(pair =>
+			right.TryGetValue(pair.Key, out var version) && version == pair.Value);
 
 	internal static IReadOnlyDictionary<string, double?> RankNormalize(
 		IReadOnlyDictionary<string, double?> values)
@@ -212,34 +252,49 @@ public sealed class ImportanceRankingService(
 	{
 		const double damping = 0.85;
 		const int iterations = 30;
-		var paths = candidates.Select(static candidate => candidate.RelativePath).ToHashSet(StringComparer.Ordinal);
-		var outgoing = paths.ToDictionary(static path => path, static _ => new HashSet<string>(StringComparer.Ordinal), StringComparer.Ordinal);
+		var supportedPaths = snapshot.Files
+			.Where(static file => file.Status == DependencyFileStatus.Supported)
+			.Select(static file => file.Path)
+			.ToHashSet(StringComparer.Ordinal);
+		var paths = candidates
+			.Select(static candidate => candidate.RelativePath)
+			.Where(supportedPaths.Contains)
+			.Distinct(StringComparer.Ordinal)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var pathSet = paths.ToHashSet(StringComparer.Ordinal);
+		var outgoingSets = paths.ToDictionary(static path => path, static _ => new HashSet<string>(StringComparer.Ordinal), StringComparer.Ordinal);
 		foreach (var edge in snapshot.Edges)
 		{
 			if (edge.Status == ResolutionStatus.Resolved &&
 			    edge.Target is { } target &&
 			    edge.Source != target &&
-			    paths.Contains(edge.Source) &&
-			    paths.Contains(target))
+			    pathSet.Contains(edge.Source) &&
+			    pathSet.Contains(target))
 			{
-				outgoing[edge.Source].Add(target);
+				outgoingSets[edge.Source].Add(target);
 			}
 		}
-		var count = paths.Count;
+		var outgoing = outgoingSets.ToDictionary(
+			static pair => pair.Key,
+			static pair => pair.Value.Order(StringComparer.Ordinal).ToArray(),
+			StringComparer.Ordinal);
+		var count = paths.Length;
 		if (count == 0)
 			return new Dictionary<string, double>(StringComparer.Ordinal);
 		var rank = paths.ToDictionary(static path => path, _ => 1d / count, StringComparer.Ordinal);
 		for (var iteration = 0; iteration < iterations; iteration++)
 		{
 			var next = paths.ToDictionary(static path => path, _ => (1 - damping) / count, StringComparer.Ordinal);
-			var dangling = outgoing.Where(static pair => pair.Value.Count == 0).Sum(pair => rank[pair.Key]);
+			var dangling = paths.Where(path => outgoing[path].Length == 0).Sum(path => rank[path]);
 			foreach (var path in paths)
 				next[path] += damping * dangling / count;
-			foreach (var (source, targets) in outgoing)
+			foreach (var source in paths)
 			{
-				if (targets.Count == 0)
+				var targets = outgoing[source];
+				if (targets.Length == 0)
 					continue;
-				var share = damping * rank[source] / targets.Count;
+				var share = damping * rank[source] / targets.Length;
 				foreach (var target in targets)
 					next[target] += share;
 			}

@@ -1204,7 +1204,8 @@ internal sealed class DevProjexMcpTools(
 
 		if (report.SkippedFileCount > 0)
 		{
-			output.Append(report.LargestSkippedFiles.Any(file => file.EstimatedTokens > report.MaximumEstimatedTokens)
+			output.Append(report.RankedSkippedFiles is { Count: > 0 } &&
+			              report.LargestSkippedFiles.Any(file => file.EstimatedTokens > report.MaximumEstimatedTokens)
 				? "Tip: increase max_tokens or lower detail for a file that is larger than the entire budget."
 				: "Tip: use detail=compact or detail=signatures, narrow the selection, or increase max_tokens.");
 		}
@@ -1221,6 +1222,8 @@ internal sealed class DevProjexMcpTools(
 		output.Append("[Ranking] ")
 			.Append(report.Algorithm)
 			.Append(" · graph ")
+			.Append(report.GraphVariant)
+			.Append(' ')
 			.Append(Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
 			.Append("% of ")
 			.Append(report.CandidateCount.ToString(CultureInfo.InvariantCulture))
@@ -1233,6 +1236,10 @@ internal sealed class DevProjexMcpTools(
 				.Append(report.GitUnavailableReason)
 				.Append("; weights redistributed");
 		}
+		else if (report.RedistributedMissingSignals)
+		{
+			output.Append(" · missing signals redistributed");
+		}
 		foreach (var entry in report.TopEntries.Take(10))
 		{
 			output.Append("\n[Ranking top] ")
@@ -1242,7 +1249,8 @@ internal sealed class DevProjexMcpTools(
 				.Append(" · dependencies ")
 				.Append(entry.Dependencies.ToString(CultureInfo.InvariantCulture))
 				.Append(" · commits ")
-				.Append(entry.Commits?.ToString(CultureInfo.InvariantCulture) ?? "unavailable")
+				.Append(entry.Commits?.ToString(CultureInfo.InvariantCulture) ??
+				        $"unavailable: {entry.GitUnavailableReason}")
 				.Append('/')
 				.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture));
 			if (entry.Role == ImportanceFileRole.TestSource)
@@ -1254,7 +1262,7 @@ internal sealed class DevProjexMcpTools(
 		}
 		if (tokenBudget is not null)
 		{
-			foreach (var file in tokenBudget.LargestSkippedFiles.Where(static file => file.Priority is not null))
+			foreach (var file in tokenBudget.RankedSkippedFiles ?? [])
 			{
 				output.Append("\n[Skipped] ")
 					.Append(McpTextEscaping.EscapeSingleLine(file.Path))

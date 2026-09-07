@@ -91,6 +91,40 @@ public sealed class ImportanceRankingServiceTests
 		Assert.Equal(ranks["a.cs"], ranks["c.cs"], precision: 10);
 	}
 
+	[Fact]
+	public void CalculatePageRank_IsDeterministicAcrossInputOrderAndOmitsUnsupportedFiles()
+	{
+		var edges = new[] { Edge("a.cs", "b.cs"), Edge("c.cs", "b.cs"), Edge("b.cs", "a.cs") };
+		var firstSnapshot = Snapshot(edges) with
+		{
+			Files =
+			[
+				CreateFacts("a.cs", null),
+				CreateFacts("b.cs", null),
+				CreateFacts("c.cs", null),
+				CreateFacts("notes.md", null) with { Status = DependencyFileStatus.Unsupported }
+			]
+		};
+		var secondSnapshot = firstSnapshot with
+		{
+			Files = firstSnapshot.Files.Reverse().ToArray(),
+			Edges = firstSnapshot.Edges.Reverse().ToArray()
+		};
+		var candidates = new[]
+		{
+			(FullPath: "notes.md", RelativePath: "notes.md"),
+			(FullPath: "c.cs", RelativePath: "c.cs"),
+			(FullPath: "b.cs", RelativePath: "b.cs"),
+			(FullPath: "a.cs", RelativePath: "a.cs")
+		};
+
+		var first = ImportanceRankingService.CalculatePageRank(candidates, firstSnapshot);
+		var second = ImportanceRankingService.CalculatePageRank(candidates.Reverse().ToArray(), secondSnapshot);
+
+		Assert.DoesNotContain("notes.md", first.Keys);
+		Assert.Equal(first.OrderBy(static pair => pair.Key), second.OrderBy(static pair => pair.Key));
+	}
+
 	private static FileFacts CreateFacts(string path, string? importedFramework)
 	{
 		var imports = importedFramework is null
@@ -145,7 +179,7 @@ public sealed class ImportanceRankingServiceTests
 			"root",
 			"manifest",
 			"declarations",
-			[],
+			[CreateFacts("a.cs", null), CreateFacts("b.cs", null), CreateFacts("c.cs", null)],
 			[],
 			edges,
 			edges.GroupBy(static edge => edge.Source).ToDictionary(
