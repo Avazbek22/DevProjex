@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using DevProjex.Application.Dependencies;
 
 namespace DevProjex.Application.Ranking;
 
@@ -108,6 +109,8 @@ public sealed record ImportanceRankingReport(
 
 	internal IReadOnlyDictionary<string, RankingSourceVersion> SourceVersions { get; init; } =
 		new Dictionary<string, RankingSourceVersion>(StringComparer.Ordinal);
+
+	internal DependencyIndexMetrics? DependencyMetrics { get; init; }
 }
 
 internal readonly record struct RankingSourceVersion(

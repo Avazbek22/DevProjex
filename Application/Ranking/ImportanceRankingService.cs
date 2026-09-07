@@ -233,7 +233,8 @@ public sealed class ImportanceRankingService(
 			GitHistoryIsComplete = history.IsComplete,
 			HasMissingSignals = hasMissingSignals,
 			MissingSignalPolicy = MissingSignalPolicy,
-			SourceVersions = sourceVersions
+			SourceVersions = sourceVersions,
+			DependencyMetrics = dependency.Metrics
 		};
 		return focus is null
 			? report
@@ -257,8 +258,18 @@ public sealed class ImportanceRankingService(
 		for (var attempt = 0; attempt < 2; attempt++)
 		{
 			var before = CaptureVersions(candidatePaths, cancellationToken);
+			var contentIdentities = new DependencyManifestContentIdentities(
+				before.ToDictionary(
+					static pair => pair.Key,
+					static pair => pair.Value.ContentHash ?? string.Empty,
+					PathComparer.Default));
 			var snapshot = await dependencyFactsEngine
-				.IndexAsync(root, candidatePaths, progress, cancellationToken)
+				.IndexAsync(
+					root,
+					candidatePaths,
+					progress,
+					cancellationToken,
+					contentIdentities)
 				.ConfigureAwait(false);
 			var after = CaptureVersions(candidatePaths, cancellationToken);
 			if (VersionsEqual(before, after))

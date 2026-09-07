@@ -105,6 +105,15 @@ Concurrent requests share one lazy computation. The default caches are bounded b
 and estimated retained size: 64 MiB for compact file facts and 128 MiB for resolved edges. Eviction
 changes latency, not results.
 
+The engine has two metadata shortcuts above those content-fingerprinted facts: the extractor retains
+prepared decoded text, and the engine retains resolved snapshots for a manifest. Importance ranking
+supplies the SHA-256 identity it already captured from each source to both shortcuts, so a cache hit
+requires matching file metadata and the same opaque content identity. `related_files` and
+`devprojex related` do not compute those hashes; their warm calls intentionally keep the metadata-only
+length, modification-time, and creation-time compromise. A same-length replacement whose timestamps
+are deliberately restored can therefore remain cached for those two related-file surfaces until the
+entry is evicted or its metadata changes.
+
 Changing one source reparses that source. Changing resolver configuration invalidates resolution but
 reuses file facts, so no source parse is required. Before every result is exposed, it is gated against
 the current manifest. Files, declarations, edges, candidates, reasons, and output groups are ordered
