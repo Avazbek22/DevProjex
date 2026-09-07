@@ -14,6 +14,7 @@ public sealed partial class McpServerProcessTests
 		var focused = RunFocusCli(
 			dataRoot,
 			project,
+			"text",
 			includeRank: true,
 			"A.cs",
 			Path.Combine(project, "A.cs"));
@@ -25,8 +26,18 @@ public sealed partial class McpServerProcessTests
 			focused.StandardOutput);
 		Assert.Contains("[Ranking] focus-v1 · 1 seed", focused.StandardError, StringComparison.Ordinal);
 		Assert.Contains("[Ranking top] A.cs — seed", focused.StandardError, StringComparison.Ordinal);
+		var json = RunFocusCli(dataRoot, project, "json", includeRank: true, "A.cs");
+		Assert.Equal(0, json.ExitCode);
+		using (var document = JsonDocument.Parse(json.StandardOutput))
+		{
+			var ranking = document.RootElement.GetProperty("ranking");
+			Assert.Equal("focus-v1", ranking.GetProperty("algorithm").GetString());
+			Assert.Equal("focus-v1", ranking.GetProperty("focus").GetProperty("algorithm").GetString());
+			Assert.Equal(0, ranking.GetProperty("top")[0].GetProperty("hop").GetInt32());
+			Assert.True(ranking.GetProperty("top")[0].GetProperty("baseImportancePriority").GetInt32() > 0);
+		}
 
-		var withoutRank = RunFocusCli(dataRoot, project, includeRank: false, "A.cs");
+		var withoutRank = RunFocusCli(dataRoot, project, "text", includeRank: false, "A.cs");
 		Assert.Equal(CommandLineExitCodes.UsageError, withoutRank.ExitCode);
 		Assert.Contains("--focus", withoutRank.StandardError, StringComparison.Ordinal);
 		Assert.Contains("--rank", withoutRank.StandardError, StringComparison.Ordinal);
@@ -34,6 +45,7 @@ public sealed partial class McpServerProcessTests
 		var tooMany = RunFocusCli(
 			dataRoot,
 			project,
+			"text",
 			includeRank: true,
 			Enumerable.Repeat("A.cs", 17).ToArray());
 		Assert.Equal(CommandLineExitCodes.UsageError, tooMany.ExitCode);
@@ -147,6 +159,7 @@ public sealed partial class McpServerProcessTests
 	private static TerminalTestProcessResult RunFocusCli(
 		string dataRoot,
 		string project,
+		string format,
 		bool includeRank,
 		params string[] focus)
 	{
@@ -161,7 +174,7 @@ public sealed partial class McpServerProcessTests
 		foreach (var argument in new[]
 		         {
 		         	"--language", "en", "export", "context", project,
-		         	"--view", "content", "--format", "text",
+			         "--view", "content", "--format", format,
 		         	"--git-mode", "none", "--exclude", "none", "-o", "-", "--progress", "never"
 		         })
 		{

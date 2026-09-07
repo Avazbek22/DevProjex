@@ -48,16 +48,40 @@ public sealed class ImportanceRankedContextDocumentTests
 				CompressCode: true),
 			cancellationToken: TestContext.Current.CancellationToken);
 		var ranking = CreateRanking(plan, "B.cs", "A.cs");
+		var focused = CreateFocusRanking(plan, "B.cs", "A.cs");
 
 		var ordinary = await WriteJsonAsync(services.ContextDocumentService, plan, ranking: null);
 		var ranked = await WriteJsonAsync(services.ContextDocumentService, plan, ranking);
+		var focusRanked = await WriteJsonAsync(services.ContextDocumentService, plan, focused);
 
 		Assert.Equal(ordinary.OrderBy(static pair => pair.Key), ranked.OrderBy(static pair => pair.Key));
+		Assert.Equal(ordinary.OrderBy(static pair => pair.Key), focusRanked.OrderBy(static pair => pair.Key));
 		Assert.All(ranked.Values, content =>
 		{
 			Assert.Contains("DEVPROJEX_REDACTED", content, StringComparison.Ordinal);
 			Assert.DoesNotContain("ghp_", content, StringComparison.Ordinal);
 		});
+	}
+
+	[Fact]
+	public async Task FocusSeedIsConsideredFirstButAnOversizedSeedIsSkipped()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/A.txt", "aaaa");
+		workspace.WriteFile("project/B.txt", "bbbbbbbbbbbbbbbbbbbb");
+		var (service, plan) = await CreateContextAsync(workspace, project);
+		var ranking = CreateFocusRanking(plan, "B.txt", "A.txt");
+
+		var result = await WriteWithReportAsync(service, plan, ranking, maximumTokens: 1);
+
+		Assert.DoesNotContain("B.txt:", result.Content, StringComparison.Ordinal);
+		Assert.Contains("A.txt:", result.Content, StringComparison.Ordinal);
+		var seed = result.Report.TokenBudget!.RankedSkippedFiles!.First();
+		Assert.Equal("B.txt", seed.Path);
+		Assert.Equal(1, seed.Priority);
+		Assert.Equal(0, seed.Hop);
+		Assert.Equal(2, seed.BaseImportancePriority);
 	}
 
 	[Fact]
@@ -132,6 +156,77 @@ public sealed class ImportanceRankedContextDocumentTests
 		Assert.Equal("A.txt", skipped.GetProperty("path").GetString());
 		Assert.Equal(2, skipped.GetProperty("priority").GetInt32());
 		Assert.Equal("does not fit the remaining budget", skipped.GetProperty("reason").GetString());
+		Assert.False(report.TryGetProperty("focus", out _));
+		Assert.False(report.GetProperty("top")[0].TryGetProperty("hop", out _));
+	}
+
+	[Fact]
+	public async Task JsonFocusReportContainsSeedsHopsParentsAndFinalPriorities()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/A.txt", "alpha");
+		workspace.WriteFile("project/B.txt", "beta");
+		workspace.WriteFile("project/C.txt", "charlie");
+		var (service, plan) = await CreateContextAsync(workspace, project);
+		var baseRanking = CreateRanking(plan, "A.txt", "B.txt", "C.txt");
+		var byPath = baseRanking.Entries.ToDictionary(static entry => entry.Path, StringComparer.Ordinal);
+		var entries = new[]
+		{
+			byPath["B.txt"] with { Priority = 1, BaseImportancePriority = 2, Hop = 0, IsFocusSeed = true },
+			byPath["A.txt"] with
+			{
+				Priority = 2,
+				BaseImportancePriority = 1,
+				Hop = 1,
+				Via = new FocusRankingVia("B.txt", FocusRankingRelation.DependentOf)
+			},
+			byPath["C.txt"] with { Priority = 3, BaseImportancePriority = 3 }
+		};
+		var ranking = baseRanking with
+		{
+			Algorithm = "focus-v1",
+			Entries = entries,
+			TopEntries = entries,
+			Focus = new FocusRankingSummary(
+				"focus-v1",
+				"importance-v1",
+				[new FocusRankingSeed("./B.txt", "B.txt", FocusSeedState.Resolved)],
+				new SortedDictionary<int, int> { [0] = 1, [1] = 1 },
+				0,
+				1,
+				1)
+		};
+		await using var destination = new MemoryStream();
+
+		await service.WriteCompleteWithReportAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Json,
+			destination,
+			TestContext.Current.CancellationToken,
+			maximumEstimatedTokens: 2,
+			ranking: ranking);
+
+		using var json = JsonDocument.Parse(destination.ToArray());
+		var report = json.RootElement.GetProperty("ranking");
+		Assert.Equal("focus-v1", report.GetProperty("algorithm").GetString());
+		var focus = report.GetProperty("focus");
+		Assert.Equal("importance-v1", focus.GetProperty("withinHop").GetString());
+		Assert.Equal("./B.txt", focus.GetProperty("seeds")[0].GetProperty("requested").GetString());
+		Assert.Equal("resolved", focus.GetProperty("seeds")[0].GetProperty("state").GetString());
+		Assert.Equal(1, focus.GetProperty("hops").GetProperty("1").GetInt32());
+		Assert.Equal(1, focus.GetProperty("maxHop").GetInt32());
+		Assert.Equal(1, focus.GetProperty("unreachable").GetInt32());
+		var parented = report.GetProperty("top")[1];
+		Assert.Equal(1, parented.GetProperty("hop").GetInt32());
+		Assert.Equal(1, parented.GetProperty("baseImportancePriority").GetInt32());
+		Assert.Equal("B.txt", parented.GetProperty("via").GetProperty("path").GetString());
+		Assert.Equal("dependent-of", parented.GetProperty("via").GetProperty("relation").GetString());
+		var skipped = report.GetProperty("skipped")[0];
+		Assert.Equal(2, skipped.GetProperty("priority").GetInt32());
+		Assert.Equal(1, skipped.GetProperty("hop").GetInt32());
+		Assert.Equal(1, skipped.GetProperty("baseImportancePriority").GetInt32());
 	}
 
 	private static async Task<(ProjectContextDocumentService Service, ProjectContextPlan Plan)> CreateContextAsync(
@@ -231,5 +326,42 @@ public sealed class ImportanceRankedContextDocumentTests
 			ProjectGitHistoryUnavailableReason.None,
 			false,
 			ImportanceRankingService.GraphVariant);
+	}
+
+	private static ImportanceRankingReport CreateFocusRanking(
+		ProjectContextPlan plan,
+		params string[] focusOrder)
+	{
+		var importanceOrder = focusOrder.Reverse().ToArray();
+		var importance = CreateRanking(plan, importanceOrder);
+		var basePriorities = importance.Entries.ToDictionary(
+			static entry => entry.Path,
+			static entry => entry.Priority,
+			StringComparer.Ordinal);
+		var entries = focusOrder.Select((path, index) => importance.Entries
+			.Single(entry => entry.Path == path) with
+			{
+				Priority = index + 1,
+				BaseImportancePriority = basePriorities[path],
+				Hop = index,
+				IsFocusSeed = index == 0,
+				Via = index == 0
+					? null
+					: new FocusRankingVia(focusOrder[index - 1], FocusRankingRelation.LinkedWith)
+			}).ToArray();
+		return importance with
+		{
+			Algorithm = "focus-v1",
+			Entries = entries,
+			TopEntries = entries,
+			Focus = new FocusRankingSummary(
+				"focus-v1",
+				"importance-v1",
+				[new FocusRankingSeed(focusOrder[0], focusOrder[0], FocusSeedState.Resolved)],
+				entries.ToDictionary(static entry => entry.Hop!.Value, static _ => 1),
+				0,
+				entries.Length - 1,
+				0)
+		};
 	}
 }

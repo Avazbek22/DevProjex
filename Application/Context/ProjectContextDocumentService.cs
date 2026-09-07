@@ -391,10 +391,12 @@ public sealed class ProjectContextDocumentService(
 				snapshot.Result,
 				contentPathMapper,
 				effectivePathRedaction);
-			tokenBudget.TryInclude(
+			TryIncludeInBudget(
+				tokenBudget,
 				file.Path,
 				file.Metrics?.CharCount ?? 0,
-				ranking is null ? null : source.Index + 1);
+				ranking,
+				source.Index);
 		}
 	}
 
@@ -403,6 +405,25 @@ public sealed class ProjectContextDocumentService(
 		maximumEstimatedTokens is null
 			? null
 			: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value);
+
+	private static bool TryIncludeInBudget(
+		ProjectContextTokenBudgetAccumulator tokenBudget,
+		string path,
+		int transformedCharacterCount,
+		ImportanceRankingReport? ranking,
+		int index)
+	{
+		var entry = ranking is not null && index < ranking.Entries.Count
+			? ranking.Entries[index]
+			: null;
+		return tokenBudget.TryInclude(
+			path,
+			transformedCharacterCount,
+			entry?.Priority,
+			entry?.Hop,
+			entry?.BaseImportancePriority,
+			entry?.Via);
+	}
 
 	internal static IReadOnlyList<string> ResolveOrderedPaths(
 		IReadOnlyList<string> includedFiles,
@@ -628,10 +649,12 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !tokenBudget.TryInclude(
+				    !TryIncludeInBudget(
+					    tokenBudget,
 					    file.Path,
 					    file.Metrics?.CharCount ?? 0,
-					    ranking is null ? null : index + 1))
+					    ranking,
+					    index))
 				{
 					ReportProgress(writeProgress, index + 1, orderedPaths.Count);
 					continue;
@@ -756,10 +779,12 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !tokenBudget.TryInclude(
+				    !TryIncludeInBudget(
+					    tokenBudget,
 					    file.Path,
 					    file.Metrics?.CharCount ?? 0,
-					    ranking is null ? null : source.Index + 1))
+					    ranking,
+					    source.Index))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
@@ -865,10 +890,12 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !tokenBudget.TryInclude(
+				    !TryIncludeInBudget(
+					    tokenBudget,
 					    file.Path,
 					    file.Metrics?.CharCount ?? 0,
-					    ranking is null ? null : source.Index + 1))
+					    ranking,
+					    source.Index))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
@@ -985,10 +1012,12 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !tokenBudget.TryInclude(
+				    !TryIncludeInBudget(
+					    tokenBudget,
 					    file.Path,
 					    file.Metrics?.CharCount ?? 0,
-					    ranking is null ? null : source.Index + 1))
+					    ranking,
+					    source.Index))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
@@ -1980,6 +2009,30 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteNumber("gitCommits", report.GitCommitCount);
 		writer.WriteString("gitUnavailableReason", RankingHistoryReasonToken(report.GitUnavailableReason));
 		writer.WriteBoolean("redistributedMissingSignals", report.RedistributedMissingSignals);
+		if (report.Focus is { } focus)
+		{
+			writer.WriteStartObject("focus");
+			writer.WriteString("algorithm", focus.Algorithm);
+			writer.WriteString("withinHop", focus.WithinHop);
+			writer.WriteStartArray("seeds");
+			foreach (var seed in focus.Seeds)
+			{
+				writer.WriteStartObject();
+				writer.WriteString("requested", seed.Requested);
+				writer.WriteString("path", NormalizePath(seed.Path));
+				writer.WriteString("state", FocusSeedStateToken(seed.State));
+				writer.WriteEndObject();
+			}
+			writer.WriteEndArray();
+			writer.WriteStartObject("hops");
+			foreach (var hop in focus.Hops.OrderBy(static pair => pair.Key))
+				writer.WriteNumber(hop.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), hop.Value);
+			writer.WriteEndObject();
+			writer.WriteNumber("hopsBeyond", focus.HopsBeyond);
+			writer.WriteNumber("maxHop", focus.MaxHop);
+			writer.WriteNumber("unreachable", focus.Unreachable);
+			writer.WriteEndObject();
+		}
 		writer.WriteStartArray("top");
 		foreach (var entry in report.TopEntries)
 		{
@@ -1989,6 +2042,21 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteNumber("score", entry.Score);
 			writer.WriteNumber("dependents", entry.Dependents);
 			writer.WriteNumber("dependencies", entry.Dependencies);
+			if (report.Focus is not null)
+			{
+				if (entry.Hop is { } hop)
+					writer.WriteNumber("hop", hop);
+				else
+					writer.WriteNull("hop");
+				writer.WriteNumber("baseImportancePriority", entry.BaseImportancePriority.GetValueOrDefault());
+				if (!entry.IsFocusSeed && entry.Hop is > 0 && entry.Via is { } via)
+				{
+					writer.WriteStartObject("via");
+					writer.WriteString("path", NormalizePath(via.Path));
+					writer.WriteString("relation", FocusRelationToken(via.Relation));
+					writer.WriteEndObject();
+				}
+			}
 			if (entry.Commits is { } commits)
 				writer.WriteNumber("commits", commits);
 			if (entry.MostRecentCommitPosition is { } position)
@@ -2007,12 +2075,44 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteNumber("priority", file.Priority.GetValueOrDefault());
 			writer.WriteNumber("estimatedTokens", file.EstimatedTokens);
 			writer.WriteNumber("remainingEstimatedTokens", file.RemainingEstimatedTokens.GetValueOrDefault());
+			if (report.Focus is not null)
+			{
+				if (file.Hop is { } hop)
+					writer.WriteNumber("hop", hop);
+				else
+					writer.WriteNull("hop");
+				writer.WriteNumber("baseImportancePriority", file.BaseImportancePriority.GetValueOrDefault());
+				if (file.Hop is > 0 && file.Via is { } via)
+				{
+					writer.WriteStartObject("via");
+					writer.WriteString("path", NormalizePath(via.Path));
+					writer.WriteString("relation", FocusRelationToken(via.Relation));
+					writer.WriteEndObject();
+				}
+			}
 			writer.WriteString("reason", "does not fit the remaining budget");
 			writer.WriteEndObject();
 		}
 		writer.WriteEndArray();
 		writer.WriteEndObject();
 	}
+
+	private static string FocusSeedStateToken(FocusSeedState state) => state switch
+	{
+		FocusSeedState.Resolved => "resolved",
+		FocusSeedState.NoResolvedNeighbors => "no-resolved-neighbors",
+		FocusSeedState.ExtractionFailed => "extraction-failed",
+		FocusSeedState.Unsupported => "unsupported",
+		_ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
+	};
+
+	private static string FocusRelationToken(FocusRankingRelation relation) => relation switch
+	{
+		FocusRankingRelation.DependentOf => "dependent-of",
+		FocusRankingRelation.DependencyOf => "dependency-of",
+		FocusRankingRelation.LinkedWith => "linked-with",
+		_ => throw new ArgumentOutOfRangeException(nameof(relation), relation, null)
+	};
 
 	private static string RankingHistoryReasonToken(ProjectGitHistoryUnavailableReason reason) => reason switch
 	{
