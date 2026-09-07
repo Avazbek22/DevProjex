@@ -80,6 +80,10 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--rank"
 			},
 			{
+				["export", "context", ".", "--rank", "importance", "--focus=", "src/App.cs"],
+				"--focus"
+			},
+			{
 				["tui", ".", "--screen=", "inline"],
 				"--screen"
 			},
@@ -152,6 +156,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--exclude",
 		"--extension",
 		"--filter",
+		"--focus",
 		"--format",
 		"--git-mode",
 		"--instance",
