@@ -627,6 +627,11 @@ public sealed class DevProjexCommandTree
 			Description = L("Terminal.Option.MaxTokens"),
 			HelpName = "N"
 		};
+		var rank = CliChoiceSymbols.NullableOption(
+			"--rank",
+			L("Terminal.Option.Rank"),
+			CliChoiceSets.ContextRank,
+			_localization);
 		var branch = BranchOption();
 		var selection = new SelectionOptions(
 			_localization,
@@ -639,6 +644,7 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(force);
 		command.Options.Add(dryRun);
 		command.Options.Add(maximumEstimatedTokens);
+		command.Options.Add(rank);
 		command.Options.Add(branch);
 		selection.AddTo(command);
 		_output.AddProgressTo(command);
@@ -665,6 +671,11 @@ public sealed class DevProjexCommandTree
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.MaxTokens")));
+			}
+			if (result.GetValue(rank) is not null && result.GetValue(view) == ProjectContextView.Tree)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.RankRequiresContent")));
 			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
@@ -706,6 +717,7 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(dryRun),
 								parseResult.GetValue(maximumEstimatedTokens),
 								outputOptions,
+								Rank: parseResult.GetValue(rank),
 								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
 								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
