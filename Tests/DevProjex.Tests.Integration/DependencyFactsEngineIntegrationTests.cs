@@ -434,6 +434,63 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task CSharpResolution_UsesLanguageVisibilityWithoutProjectWideNameFallback()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var hiddenTask = fixture.CreateFile("CompanyTask.cs", "namespace Company.Internal; public sealed class Task { }\n");
+		var nestedWidget = fixture.CreateFile("NestedWidget.cs", "namespace Parent.Child; public sealed class Widget { }\n");
+		var enclosing = fixture.CreateFile("Envelope.cs", "namespace Parent; public sealed class Envelope { }\n");
+		var consumer = fixture.CreateFile("Consumer.cs", """
+			using System.Threading.Tasks;
+			using Parent;
+			namespace App;
+			public sealed class Consumer
+			{
+				public Task ExternalTask { get; }
+				public Widget HiddenChild { get; }
+				public Company.Internal.Task Qualified { get; }
+			}
+			""");
+		var childConsumer = fixture.CreateFile(
+			"ChildConsumer.cs",
+			"namespace Parent.Child; public sealed class Consumer { public Envelope Value { get; } }\n");
+		var nestedConsumer = fixture.CreateFile(
+			"NestedConsumer.cs",
+			"""
+			namespace Nest;
+			public class Outer
+			{
+				public class Inner { }
+				public class Consumer
+				{
+					public Inner Value { get; }
+				}
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[project, hiddenTask, nestedWidget, enclosing, consumer, childConsumer, nestedConsumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var externalTask = Assert.Single(index.Edges, edge => edge.Source == "Consumer.cs" && edge.Reference == "Task");
+		Assert.Equal(ResolutionStatus.External, externalTask.Status);
+		Assert.Null(externalTask.Target);
+		Assert.Empty(externalTask.Candidates);
+		var hiddenChild = Assert.Single(index.Edges, edge => edge.Source == "Consumer.cs" && edge.Reference == "Widget");
+		Assert.Equal(ResolutionStatus.Unresolved, hiddenChild.Status);
+		Assert.Null(hiddenChild.Target);
+		Assert.Contains(index.Edges, edge => edge.Source == "Consumer.cs" &&
+			edge.Reference == "Company.Internal.Task" && edge.Target == "CompanyTask.cs");
+		Assert.Contains(index.Edges, edge => edge.Source == "ChildConsumer.cs" &&
+			edge.Reference == "Envelope" && edge.Target == "Envelope.cs");
+		Assert.Contains(index.Edges, edge => edge.Source == "NestedConsumer.cs" &&
+			edge.Reference == "Inner" && edge.Target == "NestedConsumer.cs");
+	}
+
+	[Fact]
 	public async Task TransientExtractionFailure_IsRetriedAtThePreparedAndManifestCacheLayers()
 	{
 		using var fixture = new TemporaryDirectory();

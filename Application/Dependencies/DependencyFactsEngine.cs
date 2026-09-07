@@ -359,7 +359,11 @@ public sealed class DependencyFactsEngine : IDisposable
 					.Distinct()
 					.OrderBy(static site => site.File, StringComparer.Ordinal)
 					.ThenBy(static site => site.Line)
-					.ToArray()))
+					.ToArray())
+			{
+				ContainingNamespace = group.Select(static item => item.ContainingNamespace)
+					.Order(StringComparer.Ordinal).FirstOrDefault() ?? string.Empty
+			})
 			.OrderBy(static declaration => declaration.Identity.ScopeId, StringComparer.Ordinal)
 			.ThenBy(static declaration => declaration.Identity.QualifiedName, StringComparer.Ordinal)
 			.ThenBy(static declaration => declaration.Identity.GenericArity)
@@ -523,12 +527,13 @@ public sealed class DependencyFactsEngine : IDisposable
 		facts.ErrorNodeKinds.Sum(static pair => StringBytes(pair.Key) + 16) +
 		facts.Declarations.Sum(static declaration => 160 + StringBytes(declaration.Identity.ScopeId) +
 			StringBytes(declaration.Identity.QualifiedName) + StringBytes(declaration.Identity.FileScope) +
+			StringBytes(declaration.ContainingNamespace) +
 			declaration.DeclarationSites.Sum(SiteBytes)) +
 		facts.Imports.Sum(static import => 128 + StringBytes(import.Specifier) + StringBytes(import.ImportedName) +
 			StringBytes(import.Alias) + SiteBytes(import.Site)) +
 		facts.References.Sum(static reference => 160 + StringBytes(reference.Name) + StringBytes(reference.SyntaxKind) +
 			StringBytes(reference.Reason) + StringBytes(reference.Target) + (reference.Candidates?.Sum(StringBytes) ?? 0) +
-			SiteBytes(reference.Site)) +
+			StringBytes(reference.ContainingNamespace) + StringBytes(reference.ContainingType) + SiteBytes(reference.Site)) +
 		facts.ContextNamespaces.Sum(StringBytes) + facts.Aliases.Sum(static pair => StringBytes(pair.Key) + StringBytes(pair.Value)) +
 		facts.GlobalContextNamespaces.Sum(StringBytes) + facts.GlobalAliases.Sum(static pair => StringBytes(pair.Key) + StringBytes(pair.Value)) +
 		facts.TypeParameters.Sum(StringBytes);
@@ -1283,14 +1288,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (source.Aliases.TryGetValue(simpleName, out var alias) ||
 				    globalAliases?.TryGetValue(simpleName, out alias) == true)
 					candidates = LookupQualified(source, alias, reference.GenericArity);
-				else
-				{
-					var namespaces = _contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [];
-					var contextual = candidates.Where(symbol => namespaces.Any(ns =>
-						symbol.Identity.QualifiedName.StartsWith(ns + '.', StringComparison.Ordinal))).ToArray();
-					if (contextual.Length > 0)
-						candidates = contextual;
-				}
+				else if (!reference.Name.Contains('.'))
+					candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
 			}
 			if (candidates.Length == 0)
 			{
@@ -1338,6 +1337,44 @@ public sealed class DependencyFactsEngine : IDisposable
 						(matches ??= []).Add(candidate);
 			}
 			return matches?.ToArray() ?? [];
+		}
+
+		private DeclarationFact[] SelectVisibleCSharpCandidates(
+			FileFacts source,
+			ReferenceFact reference,
+			IReadOnlyList<DeclarationFact> candidates)
+		{
+			if (reference.ContainingType is { Length: > 0 } containingType)
+			{
+				var nested = candidates.Where(candidate =>
+				{
+					var separator = candidate.Identity.QualifiedName.LastIndexOf('.');
+					if (separator < 0) return false;
+					var parent = candidate.Identity.QualifiedName[..separator];
+					return parent == containingType || containingType.StartsWith(parent + '.', StringComparison.Ordinal);
+				}).ToArray();
+				if (nested.Length > 0)
+					return nested;
+			}
+
+			var namespaceName = reference.ContainingNamespace;
+			while (namespaceName.Length > 0)
+			{
+				var lexical = candidates.Where(candidate =>
+					candidate.ContainingNamespace.Equals(namespaceName, StringComparison.Ordinal)).ToArray();
+				if (lexical.Length > 0)
+					return lexical;
+				var separator = namespaceName.LastIndexOf('.');
+				namespaceName = separator < 0 ? string.Empty : namespaceName[..separator];
+			}
+
+			var importedNamespaces = _contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [];
+			var imported = candidates.Where(candidate =>
+				importedNamespaces.Contains(candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
+			if (imported.Length > 0)
+				return imported;
+
+			return candidates.Where(static candidate => candidate.ContainingNamespace.Length == 0).ToArray();
 		}
 
 		private IReadOnlyList<string> VisibleScopeIds(string scopeId) =>

@@ -122,7 +122,6 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			out var usingNamespaces,
 			out var globalNamespaces,
 			out var globalAliases);
-		usingNamespaces.UnionWith(namespaces.Select(static item => item.Name));
 		var typeParameters = context.References
 			.Where(static capture => capture.Name == "context.type_parameters")
 			.SelectMany(static capture => TypeParameterRegex().Matches(capture.Text)
@@ -158,12 +157,15 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 					qualified,
 					capture.GenericArity,
 					capture.IsFileLocal ? context.RelativePath : null),
-				[Site(context, capture)]));
+				[Site(context, capture)])
+			{
+				ContainingNamespace = containingNamespace
+			});
 		}
 
 		var references = context.References
 			.Where(static capture => capture.Name.StartsWith("reference.", StringComparison.Ordinal))
-			.SelectMany(capture => ExtractReferences(context, capture))
+			.SelectMany(capture => ExtractReferences(context, capture, declarationCaptures, namespaces))
 			.Where(reference => !declarations.Any(declaration =>
 				declaration.DeclarationSites[0].Line == reference.Site.Line &&
 				SimpleName(declaration.Identity.QualifiedName) == reference.Name))
@@ -184,11 +186,29 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 
 	private static IEnumerable<ReferenceFact> ExtractReferences(
 		DependencyExtractionContext context,
-		DependencySyntaxCapture capture)
+		DependencySyntaxCapture capture,
+		IReadOnlyList<DependencySyntaxCapture> declarationCaptures,
+		IReadOnlyList<NamespaceSpan> namespaces)
 	{
+		var containingNamespace = namespaces
+			.Where(item => item.Start <= capture.StartIndex && item.End >= capture.EndIndex)
+			.OrderBy(item => item.End - item.Start).Select(static item => item.Name)
+			.FirstOrDefault() ?? namespaces.FirstOrDefault(static item => item.FileScoped)?.Name ?? string.Empty;
+		var containingTypes = declarationCaptures
+			.Where(item => item.StartIndex < capture.StartIndex && item.EndIndex >= capture.EndIndex)
+			.OrderBy(static item => item.StartIndex)
+			.Select(static item => string.IsNullOrEmpty(item.CapturedName)
+				? null
+				: item.CapturedName + AritySuffix(item.GenericArity))
+			.OfType<string>()
+			.ToArray();
+		var containingType = containingTypes.Length == 0
+			? null
+			: string.Join('.', new[] { containingNamespace }.Concat(containingTypes)
+				.Where(static value => value.Length > 0));
 		if (capture.Name == "reference.target_typed_object_creation")
 		{
-			yield return NewReference(context, capture, "<target-typed-new>", 0);
+			yield return NewReference(context, capture, "<target-typed-new>", 0, containingNamespace, containingType);
 			yield break;
 		}
 		var typeText = capture.Text;
@@ -198,16 +218,32 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				.Replace("::", ".", StringComparison.Ordinal);
 			var simpleName = name.Split('.', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? name;
 			if (!Keywords.Contains(simpleName))
-				yield return NewReference(context, capture, name, GenericArityAt(typeText, match.Index + match.Length));
+				yield return NewReference(
+					context,
+					capture,
+					name,
+					GenericArityAt(typeText, match.Index + match.Length),
+					containingNamespace,
+					containingType);
 		}
 	}
 
-	private static ReferenceFact NewReference(DependencyExtractionContext context, DependencySyntaxCapture capture, string name, int arity) =>
+	private static ReferenceFact NewReference(
+		DependencyExtractionContext context,
+		DependencySyntaxCapture capture,
+		string name,
+		int arity,
+		string containingNamespace,
+		string? containingType) =>
 		new(EvidenceLayer.TypeReference, name, arity,
 			capture.Name.StartsWith("reference.", StringComparison.Ordinal)
 				? capture.Name["reference.".Length..]
 				: capture.NodeType,
-			Site(context, capture));
+			Site(context, capture))
+		{
+			ContainingNamespace = containingNamespace,
+			ContainingType = containingType
+		};
 
 	private static FileFacts Failure(DependencyExtractionContext context, string reason) => new(
 		context.RelativePath, context.ScopeId, context.LanguageId, context.ContentFingerprint,
