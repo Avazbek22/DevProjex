@@ -111,7 +111,8 @@ internal static class RankingOutput
 				.Append(degraded.Length.ToString(CultureInfo.InvariantCulture))
 				.Append(" of ")
 				.Append(focus.Seeds.Count.ToString(CultureInfo.InvariantCulture))
-				.Append(degraded.Length == 1 ? " seed has no resolved links (" : " seeds have no resolved links (")
+				.Append(focus.Seeds.Count == 1 ? " seed" : " seeds")
+				.Append(degraded.Length == 1 ? " has no resolved links (" : " have no resolved links (")
 				.Append(string.Join(", ", reasons))
 				.Append(')');
 		}
