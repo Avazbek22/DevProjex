@@ -206,7 +206,7 @@ public static class ContentPipelineDiagnostics
 				CpuTimeTicks = Math.Max(0, (process.TotalProcessorTime - _initialCpuTime).Ticks),
 				AllocatedBytes = Math.Max(0, GC.GetTotalAllocatedBytes(precise: false) - _initialAllocatedBytes),
 				GcPauseTimeTicks = Math.Max(0, (GC.GetTotalPauseDuration() - _initialGcPauseTime).Ticks),
-				PeakWorkingSetBytes = process.PeakWorkingSet64,
+				PeakWorkingSetBytes = Math.Max(process.PeakWorkingSet64, process.WorkingSet64),
 				PeakInFlightBytes = Volatile.Read(ref PeakInFlightBytes),
 				SourceReadBytes = Volatile.Read(ref SourceReadBytes),
 				PreparedReadBytes = Volatile.Read(ref PreparedReadBytes),
