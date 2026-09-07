@@ -28,6 +28,7 @@ public sealed class ProjectContextTokenBudgetAccumulatorTests
 		Assert.Equal(0, report.IncludedFileCount);
 		Assert.Equal(0, report.SkippedFileCount);
 		Assert.Empty(report.LargestSkippedFiles);
+		Assert.Empty(report.RankedSkippedFiles!);
 	}
 
 	[Fact]
@@ -68,5 +69,26 @@ public sealed class ProjectContextTokenBudgetAccumulatorTests
 		Assert.Equal(
 			["Foo.cs", "foo.cs"],
 			budget.CreateReport().LargestSkippedFiles.Select(static file => file.Path));
+	}
+
+	[Fact]
+	public void CreateReport_KeepsHighestPrioritySkipsSeparateFromLargestSkips()
+	{
+		var budget = new ProjectContextTokenBudgetAccumulator(1);
+		for (var priority = 1; priority <= 30; priority++)
+		{
+			Assert.False(budget.TryInclude(
+				$"priority-{priority:D2}.cs",
+				transformedCharacterCount: 8 + priority * 4,
+				priority: priority));
+		}
+
+		var report = budget.CreateReport();
+		var ranked = Assert.IsAssignableFrom<IReadOnlyList<ProjectContextTokenBudgetSkippedFile>>(
+			report.RankedSkippedFiles);
+
+		Assert.Equal("priority-30.cs", report.LargestSkippedFiles[0].Path);
+		Assert.Equal(Enumerable.Range(1, 10), ranked.Select(static file => file.Priority.GetValueOrDefault()));
+		Assert.Equal("priority-01.cs", ranked[0].Path);
 	}
 }

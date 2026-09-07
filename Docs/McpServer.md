@@ -230,7 +230,7 @@ open-world.
 | `list_projects` | none | Allowed local roots with path, name, type, and available local profiles, plus the server `baseline` (`git` mode, `exclusions`, and whether `agentExclusions` is enabled). Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. |
-| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. `rank: "importance"` opts into importance-aware admission and document order. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). Results larger than 50,000 characters are stored and returned with a `pack_id` for `read_pack`. |
@@ -410,6 +410,22 @@ untrusted-data boundary to skipped file names. The report states the budget,
 included and skipped file counts, estimated tokens for both groups, up to the 25
 largest skipped files, and `and X more` when the list is longer. It recommends
 `detail=compact` or `detail=signatures` when additional files are needed.
+
+`pack_context` accepts the single optional ranking value `rank: "importance"`.
+It applies experimental `importance-v1` only after the effective selection has
+been resolved, so it cannot widen `paths`, patterns, profiles, exclusions, Git
+scope, or submodule boundaries. With `max_tokens`, importance controls the
+existing greedy admission pass; without a budget, all candidates are serialized
+in descending importance. A tree-only pack rejects `rank`, and `get_tree` does
+not expose it. Unknown values return `DPX-MCP-INVALID-ARGUMENTS`.
+
+The ranking uses resolved dependency PageRank, a safe offline 200-commit Git
+history window, and a small file-role signal. Its bounded trusted trailer follows
+the untrusted project block and reports graph coverage, unavailable signals, up
+to ten top entries, and ranked skips. Omitting `rank` retains the ordinary order
+and performs neither dependency indexing nor Git history work. See
+[Ranking.md](Ranking.md) for the algorithm, fixed weights, evaluation protocol,
+and measured limitations.
 
 Future tools must declare `outputSchema` only when their useful result is
 genuinely structured and can be returned completely in `structuredContent`.

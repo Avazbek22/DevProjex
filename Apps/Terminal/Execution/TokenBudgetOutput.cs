@@ -21,6 +21,15 @@ internal static class TokenBudgetOutput
 			report.SkippedEstimatedTokens));
 		if (report.LargestSkippedFiles.Count > 0)
 		{
+			foreach (var file in report.RankedSkippedFiles ?? [])
+			{
+				writer.WriteLine(localization.Format(
+					"Terminal.TokenBudget.RankedSkipped",
+					TerminalTextEscaping.EscapeSingleLine(file.Path),
+					file.Priority.GetValueOrDefault(),
+					file.EstimatedTokens,
+					file.RemainingEstimatedTokens.GetValueOrDefault()));
+			}
 			writer.WriteLine(localization["Terminal.TokenBudget.SkippedFiles"]);
 			foreach (var file in report.LargestSkippedFiles)
 			{
@@ -36,6 +45,9 @@ internal static class TokenBudgetOutput
 					report.AdditionalSkippedFileCount));
 			}
 		}
-		writer.WriteLine(localization["Terminal.TokenBudget.Hint"]);
+		writer.WriteLine(report.RankedSkippedFiles is { Count: > 0 } &&
+		                 report.LargestSkippedFiles.Any(file => file.EstimatedTokens > report.MaximumEstimatedTokens)
+			? localization["Terminal.TokenBudget.OversizedHint"]
+			: localization["Terminal.TokenBudget.Hint"]);
 	}
 }

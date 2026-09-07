@@ -189,6 +189,14 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string RankProperty = """
+	"rank": {
+	  "type": "string",
+	  "enum": ["importance"],
+	  "description": "Order the effective file selection by explainable importance-v1 signals. With max_tokens this controls greedy admission; without a budget it controls document order. Omit it to preserve the ordinary order and avoid dependency or Git history work."
+	}
+	""";
+
 	private const string GitScopeProperty = """
 	"git_scope": {
 	  "description": "Further restrict selected paths to staged files, all current changes (including untracked files), or files changed between two Git refs. This selects paths only; file content is always read from the current working tree.",
@@ -280,6 +288,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{DetailProperty}},
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
+	    {{RankProperty}},
 	    {{MaximumTokensProperty}},
 	    {{MaxFileBytesProperty}},
 	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Choose whether the pack contains only the tree, only selected file content, or both." },

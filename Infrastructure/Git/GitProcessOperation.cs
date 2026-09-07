@@ -29,7 +29,8 @@ internal enum GitOperationKind
 	ManagedWorktreeRemove,
 	ManagedWorktreePrune,
 	ManagedWorktreeList,
-	ManagedConfigWrite
+	ManagedConfigWrite,
+	ReadHistoryWindow
 }
 
 internal enum GitConfigReadKind
@@ -298,6 +299,9 @@ internal sealed record GitProcessOperation
 			configWriteKind: kind);
 	}
 
+	public static GitProcessOperation ReadHistoryWindow() =>
+		new(GitOperationKind.ReadHistoryWindow, GitProcessProfile.LocalRead, depth: 200);
+
 	internal IReadOnlyList<string> BuildArguments(GitIsolationPaths isolation)
 	{
 		ArgumentNullException.ThrowIfNull(isolation);
@@ -327,6 +331,8 @@ internal sealed record GitProcessOperation
 			GitOperationKind.ManagedWorktreePrune => ["worktree", "prune"],
 			GitOperationKind.ManagedWorktreeList => ["worktree", "list", "--porcelain"],
 			GitOperationKind.ManagedConfigWrite => BuildConfigWriteArguments(),
+			GitOperationKind.ReadHistoryWindow =>
+				["log", "--topo-order", "--no-renames", "--no-decorate", "--format=%x1e%H%x00", "--name-only", "-z", "-n", Depth.ToString(CultureInfo.InvariantCulture), "--"],
 			_ => throw new ArgumentOutOfRangeException()
 		};
 	}

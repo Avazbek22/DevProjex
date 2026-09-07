@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using DevProjex.Application.Ranking;
 
 namespace DevProjex.Terminal.CommandLine;
 
@@ -138,6 +139,9 @@ internal static class CliChoiceSets
 			.Select(static descriptor =>
 				new CliChoiceSet<ProjectContextDocumentFormat>.Choice(descriptor.Token, descriptor.Id))
 			.ToArray());
+
+	public static CliChoiceSet<ProjectContextRank> ContextRank { get; } = new(
+		new CliChoiceSet<ProjectContextRank>.Choice("importance", ProjectContextRank.Importance));
 
 	public static CliChoiceSet<ProjectCopyExportFormat> ProjectExportFormat { get; } = new(
 		new("folder", ProjectCopyExportFormat.Folder),

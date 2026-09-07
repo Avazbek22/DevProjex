@@ -1,12 +1,14 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Application.Ranking;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
 
 public sealed class ExportContextCommandHandler(
 	TerminalServices services,
-	ITerminalEnvironment environment)
+	ITerminalEnvironment environment,
+	IImportanceRankingService? rankingService = null)
 {
 	public async Task<int> ExecuteAsync(
 		ExportContextCommandRequest request,
@@ -40,6 +42,13 @@ public sealed class ExportContextCommandHandler(
 			.Write(plan.Diagnostics);
 		if (plan.HasErrors)
 			return CommandLineExitCodes.PolicyFailure;
+		var ranking = request.Rank is null
+			? null
+			: await (rankingService ?? new ImportanceRankingService(
+					services.DependencyFactsEngine,
+					new ProjectGitHistoryReader()))
+				.RankAsync(plan.SourceRoot, plan.IncludedFiles, cancellationToken)
+				.ConfigureAwait(false);
 
 		var outputPath = request.OutputPath is not null and not "-"
 			? ExactOutputDestinationValidator.ValidateContext(
@@ -63,7 +72,8 @@ public sealed class ExportContextCommandHandler(
 							request.View,
 							request.Format,
 							maximumEstimatedTokens,
-							cancellationToken)
+							cancellationToken,
+							ranking)
 						.ConfigureAwait(false)
 					: await services.ContextDocumentService.WritePreparedCompleteAsync(
 							plan,
@@ -72,7 +82,8 @@ public sealed class ExportContextCommandHandler(
 							Stream.Null,
 							prepared,
 							cancellationToken,
-							maximumEstimatedTokens: maximumEstimatedTokens)
+							maximumEstimatedTokens: maximumEstimatedTokens,
+							ranking: ranking)
 						.ConfigureAwait(false);
 			}
 			else if (prepared is null)
@@ -109,6 +120,11 @@ public sealed class ExportContextCommandHandler(
 					unscannableFiles,
 					services.Localization);
 			}
+			RankingOutput.Write(
+				environment.Error,
+				ranking,
+				budgetResult?.TokenBudget,
+				services.Localization);
 			TokenBudgetOutput.Write(
 				environment.Error,
 				budgetResult?.TokenBudget,
@@ -134,7 +150,8 @@ public sealed class ExportContextCommandHandler(
 									cancellationToken,
 									plain: request.Output.Plain,
 									useSourceMappedStructuredPaths: true,
-									maximumEstimatedTokens: request.MaximumEstimatedTokens)
+									maximumEstimatedTokens: request.MaximumEstimatedTokens,
+									ranking: ranking)
 								.ConfigureAwait(false)
 							: await services.ContextDocumentService.WritePreparedCompleteAsync(
 									plan,
@@ -145,7 +162,8 @@ public sealed class ExportContextCommandHandler(
 									cancellationToken,
 									plain: request.Output.Plain,
 									useSourceMappedStructuredPaths: true,
-									maximumEstimatedTokens: request.MaximumEstimatedTokens)
+									maximumEstimatedTokens: request.MaximumEstimatedTokens,
+									ranking: ranking)
 								.ConfigureAwait(false);
 						await destination.CompleteAsync(cancellationToken).ConfigureAwait(false);
 						return writeResult;
@@ -157,6 +175,7 @@ public sealed class ExportContextCommandHandler(
 				plan.SourceRoot,
 				report.UnscannableFiles,
 				services.Localization);
+			RankingOutput.Write(environment.Error, ranking, report.TokenBudget, services.Localization);
 			TokenBudgetOutput.Write(environment.Error, report.TokenBudget, services.Localization);
 			return CommandLineExitCodes.Success;
 		}
@@ -178,7 +197,8 @@ public sealed class ExportContextCommandHandler(
 									token,
 									plain: request.Output.Plain,
 									useSourceMappedStructuredPaths: true,
-									maximumEstimatedTokens: request.MaximumEstimatedTokens)
+									maximumEstimatedTokens: request.MaximumEstimatedTokens,
+									ranking: ranking)
 								.ConfigureAwait(false)
 							: await services.ContextDocumentService.WritePreparedCompleteAsync(
 									plan,
@@ -189,7 +209,8 @@ public sealed class ExportContextCommandHandler(
 									token,
 									plain: request.Output.Plain,
 									useSourceMappedStructuredPaths: true,
-									maximumEstimatedTokens: request.MaximumEstimatedTokens)
+									maximumEstimatedTokens: request.MaximumEstimatedTokens,
+									ranking: ranking)
 								.ConfigureAwait(false);
 					},
 					cancellationToken,
@@ -205,6 +226,11 @@ public sealed class ExportContextCommandHandler(
 				environment.Error,
 				plan.SourceRoot,
 				writeReport.UnscannableFiles,
+				services.Localization);
+			RankingOutput.Write(
+				environment.Error,
+				ranking,
+				writeReport.TokenBudget,
 				services.Localization);
 			TokenBudgetOutput.Write(
 				environment.Error,
