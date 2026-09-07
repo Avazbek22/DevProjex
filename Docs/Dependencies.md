@@ -83,6 +83,12 @@ per file, and 5,000,000 units of resolver work per index pass. A limit produces 
 `Unresolved` fact or extraction status with a reason; it is never reported as an empty successful
 analysis.
 
+The resolver work limit is an admission budget applied in canonical file order, not a latch that
+stops all later files after one rejection. A file is admitted only when all of its known import and
+reference work fits the remaining budget. For example, with a limit of 10 and file costs 8, 4, and
+1, the first file is resolved, the second is marked `Unresolved` with `index work limit exceeded`,
+and the third is resolved from the two remaining units. Rejected work is never executed.
+
 The pinned C# grammar can report `ERROR` nodes for syntax it only partially recognizes. The engine
 counts affected files and the named child-node kinds found below each `ERROR`. An error node is not
 itself an extraction failure: facts outside the unsupported construct remain usable. In particular,
