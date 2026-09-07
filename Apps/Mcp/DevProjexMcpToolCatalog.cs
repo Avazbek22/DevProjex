@@ -197,6 +197,16 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string FocusProperty = """
+	"focus": {
+	  "description": "One to 16 selected files that seed focus-v1 ordering. Requires rank=importance. Seeds are considered first; graph hops order the remaining effective selection without widening it.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 4096 },
+	    { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	  ]
+	}
+	""";
+
 	private const string GitScopeProperty = """
 	"git_scope": {
 	  "description": "Further restrict selected paths to staged files, all current changes (including untracked files), or files changed between two Git refs. This selects paths only; file content is always read from the current working tree.",
@@ -289,6 +299,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
 	    {{RankProperty}},
+	    {{FocusProperty}},
 	    {{MaximumTokensProperty}},
 	    {{MaxFileBytesProperty}},
 	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Choose whether the pack contains only the tree, only selected file content, or both." },

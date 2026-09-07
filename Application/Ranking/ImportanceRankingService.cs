@@ -26,13 +26,29 @@ public sealed class ImportanceRankingService(
 		string sourceRoot,
 		IReadOnlyList<string> candidateFiles,
 		CancellationToken cancellationToken = default) =>
-		RankAsync(sourceRoot, candidateFiles, progress: null, cancellationToken);
+		RankCoreAsync(sourceRoot, candidateFiles, focus: null, progress: null, cancellationToken);
 
-	public async Task<ImportanceRankingReport> RankAsync(
+	public Task<ImportanceRankingReport> RankAsync(
 		string sourceRoot,
 		IReadOnlyList<string> candidateFiles,
 		IProgress<ImportanceRankingProgress>? progress,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default) =>
+		RankCoreAsync(sourceRoot, candidateFiles, focus: null, progress, cancellationToken);
+
+	public Task<ImportanceRankingReport> RankAsync(
+		string sourceRoot,
+		IReadOnlyList<string> candidateFiles,
+		FocusRankingRequest focus,
+		IProgress<ImportanceRankingProgress>? progress = null,
+		CancellationToken cancellationToken = default) =>
+		RankCoreAsync(sourceRoot, candidateFiles, focus, progress, cancellationToken);
+
+	private async Task<ImportanceRankingReport> RankCoreAsync(
+		string sourceRoot,
+		IReadOnlyList<string> candidateFiles,
+		FocusRankingRequest? focus,
+		IProgress<ImportanceRankingProgress>? progress,
+		CancellationToken cancellationToken)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
 		ArgumentNullException.ThrowIfNull(candidateFiles);
@@ -195,7 +211,7 @@ public sealed class ImportanceRankingService(
 			.ToArray();
 		Report(progress, ImportanceRankingStage.ComputingPriorities, computationUnits, computationUnits);
 
-		return new ImportanceRankingReport(
+		var report = new ImportanceRankingReport(
 			AlgorithmId,
 			ordered,
 			ordered.Take(MaximumTopEntries).ToArray(),
@@ -217,8 +233,12 @@ public sealed class ImportanceRankingService(
 			GitHistoryIsComplete = history.IsComplete,
 			HasMissingSignals = hasMissingSignals,
 			MissingSignalPolicy = MissingSignalPolicy,
-			SourceVersions = sourceVersions
+			SourceVersions = sourceVersions,
+			DependencyMetrics = dependency.Metrics
 		};
+		return focus is null
+			? report
+			: FocusRankingEngine.Apply(report, focus, graph, dependency, cancellationToken);
 	}
 
 	internal static double CalculateExtractedFactsCoverage(
@@ -238,8 +258,18 @@ public sealed class ImportanceRankingService(
 		for (var attempt = 0; attempt < 2; attempt++)
 		{
 			var before = CaptureVersions(candidatePaths, cancellationToken);
+			var contentIdentities = new DependencyManifestContentIdentities(
+				before.ToDictionary(
+					static pair => pair.Key,
+					static pair => pair.Value.ContentHash ?? string.Empty,
+					PathComparer.Default));
 			var snapshot = await dependencyFactsEngine
-				.IndexAsync(root, candidatePaths, progress, cancellationToken)
+				.IndexAsync(
+					root,
+					candidatePaths,
+					progress,
+					cancellationToken,
+					contentIdentities)
 				.ConfigureAwait(false);
 			var after = CaptureVersions(candidatePaths, cancellationToken);
 			if (VersionsEqual(before, after))
@@ -388,7 +418,7 @@ public sealed class ImportanceRankingService(
 		return result;
 	}
 
-	private static RankingGraph BuildGraph(
+	internal static RankingGraph BuildGraph(
 		IReadOnlyList<Candidate> candidates,
 		DependencyIndexSnapshot snapshot,
 		CancellationToken cancellationToken)
@@ -579,16 +609,8 @@ public sealed class ImportanceRankingService(
 		progress?.Report(new ImportanceRankingProgress(stage, Math.Clamp(completed, 0, total), total));
 
 	private const int ProjectGitHistoryReaderWindow = 200;
-	private sealed record Candidate(string FullPath, string RelativePath);
+	internal sealed record Candidate(string FullPath, string RelativePath);
 	private sealed record ScoredCandidate(Candidate Candidate, ImportanceScoreBreakdown Score);
-	private sealed record RankingGraph(
-		string[] Paths,
-		IReadOnlyDictionary<string, int> NodeByPath,
-		int[][] Outgoing,
-		int[] Dependents,
-		int EdgeCount,
-		int FilesWithEdges);
-
 	internal readonly record struct ImportanceScoreBreakdown(
 		double Score,
 		double Confidence,

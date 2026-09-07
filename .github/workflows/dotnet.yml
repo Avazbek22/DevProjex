@@ -432,6 +432,26 @@ jobs:
         run: |
           dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~DocumentationAndPackagingContractTests|FullyQualifiedName~DocumentationExecutionRegressionTests"
 
+  ranking-eval-tests:
+    name: Ranking Evaluator Tests
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build and test RankingEval
+        shell: pwsh
+        run: |
+          dotnet build tools/RankingEval/RankingEval.csproj -c Release
+          dotnet test tools/RankingEval/Tests/RankingEval.Tests.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~EvaluationMetricsTests"
+
   ci-gate:
     name: CI Gate
     needs:
@@ -440,6 +460,7 @@ jobs:
       - terminal-command-cross-platform
       - ignore-scanner-cross-platform
       - documentation-contracts
+      - ranking-eval-tests
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -453,6 +474,7 @@ jobs:
           TERMINAL_COMMAND_RESULT: ${{ needs.terminal-command-cross-platform.result }}
           IGNORE_SCANNER_RESULT: ${{ needs.ignore-scanner-cross-platform.result }}
           DOCUMENTATION_RESULT: ${{ needs.documentation-contracts.result }}
+          RANKING_EVAL_RESULT: ${{ needs.ranking-eval-tests.result }}
         run: |
           $results = @{
             plan = $env:PREPARE_RESULT
@@ -460,6 +482,7 @@ jobs:
             terminalCommand = $env:TERMINAL_COMMAND_RESULT
             ignoreScanner = $env:IGNORE_SCANNER_RESULT
             documentation = $env:DOCUMENTATION_RESULT
+            rankingEval = $env:RANKING_EVAL_RESULT
           }
           $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
           if ($failed.Count -gt 0) {

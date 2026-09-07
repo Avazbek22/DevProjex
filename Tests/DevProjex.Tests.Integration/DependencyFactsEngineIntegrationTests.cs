@@ -360,6 +360,157 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task ManifestSnapshotBuiltWithoutIdentitiesIsNotReusedByIdentityAwareRequest()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var source = fixture.CreateFile("Source.cs", "public class Source { }");
+		var provider = new CountingConfigurationProvider();
+		using var engine = new DependencyFactsEngine(new TreeSitterDependencyFactExtractor(), provider);
+		var manifest = new[] { project, source };
+
+		_ = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var identityAware = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken,
+			contentIdentities: Identities((project, "project-v1"), (source, "source-v1")));
+
+		Assert.Equal(2, provider.ReadCount);
+		Assert.True(identityAware.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
+	public async Task ManifestSnapshotIdentityIsOptionalForLaterMetadataOnlyRequest()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var source = fixture.CreateFile("Source.cs", "public class Source { }");
+		var provider = new CountingConfigurationProvider();
+		using var engine = new DependencyFactsEngine(new TreeSitterDependencyFactExtractor(), provider);
+		var manifest = new[] { project, source };
+
+		_ = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken,
+			contentIdentities: Identities((project, "project-v1"), (source, "source-v1")));
+		var metadataOnly = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, provider.ReadCount);
+		Assert.True(metadataOnly.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
+	public async Task ManifestSnapshotIdentityAwareHotPathReusesUnchangedResolution()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var source = fixture.CreateFile("Source.cs", "public class Source { }");
+		var provider = new CountingConfigurationProvider();
+		using var engine = new DependencyFactsEngine(new TreeSitterDependencyFactExtractor(), provider);
+		var manifest = new[] { project, source };
+		var identities = Identities((project, "project-v1"), (source, "source-v1"));
+
+		_ = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken,
+			contentIdentities: identities);
+		var warm = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken,
+			contentIdentities: identities);
+
+		Assert.Equal(1, provider.ReadCount);
+		Assert.True(warm.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
+	public async Task PreparedSourceCacheIdentityMismatchReadsSameStampReplacement()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		const string original = "public class Use { Alpha Value; }";
+		const string replacement = "public class Use { Bravo Value; }";
+		var source = fixture.CreateFile("Use.cs", original);
+		var provider = new FileDependencyConfigurationProvider();
+		var configuration = await provider.ReadAsync(
+			fixture.Path,
+			[project, source],
+			TestContext.Current.CancellationToken);
+		using var extractor = new TreeSitterDependencyFactExtractor();
+
+		var first = await extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken,
+			"source-v1");
+		var warm = await extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken,
+			"source-v1");
+		ReplaceWithSameFileStampOrSkip(source, replacement);
+		var changed = await extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken,
+			"source-v2");
+
+		Assert.Equal(original, first.Source);
+		Assert.Same(first.Source, warm.Source);
+		Assert.Equal(replacement, changed.Source);
+		Assert.NotEqual(first.ContentFingerprint, changed.ContentFingerprint);
+	}
+
+	[Fact]
+	public async Task PreparedSourceCacheWithoutIdentityKeepsMetadataOnlyBehavior()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		const string original = "public class Use { Alpha Value; }";
+		const string replacement = "public class Use { Bravo Value; }";
+		var source = fixture.CreateFile("Use.cs", original);
+		var provider = new FileDependencyConfigurationProvider();
+		var configuration = await provider.ReadAsync(
+			fixture.Path,
+			[project, source],
+			TestContext.Current.CancellationToken);
+		using var extractor = new TreeSitterDependencyFactExtractor();
+
+		var first = await extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken);
+		ReplaceWithSameFileStampOrSkip(source, replacement);
+		var metadataOnly = await extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(original, first.Source);
+		Assert.Same(first.Source, metadataOnly.Source);
+	}
+
+	[Fact]
 	public async Task Cache_RebindsFactsWhenConfigurationChangesFileOwnershipWithoutParsingSource()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -631,6 +782,58 @@ public sealed class DependencyFactsEngineIntegrationTests
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());
 
+	private static DependencyManifestContentIdentities Identities(
+		params (string Path, string Identity)[] values) =>
+		new(values.ToDictionary(
+			static value => value.Path,
+			static value => value.Identity,
+			PathComparer.Default));
+
+	private static void ReplaceWithSameFileStampOrSkip(string path, string replacement)
+	{
+		var before = new FileInfo(path);
+		var length = before.Length;
+		var lastWrite = before.LastWriteTimeUtc;
+		var creation = before.CreationTimeUtc;
+		try
+		{
+			File.WriteAllText(path, replacement, new UTF8Encoding(false));
+			File.SetLastWriteTimeUtc(path, lastWrite);
+			File.SetCreationTimeUtc(path, creation);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			Assert.Skip($"The file system cannot restore creation and write timestamps: {exception.Message}");
+			return;
+		}
+
+		var after = new FileInfo(path);
+		if (after.Length != length || after.LastWriteTimeUtc != lastWrite || after.CreationTimeUtc != creation)
+		{
+			Assert.Skip(
+				$"The file system did not preserve the complete file stamp: " +
+				$"length {length}/{after.Length}, mtime {lastWrite:o}/{after.LastWriteTimeUtc:o}, " +
+				$"creation {creation:o}/{after.CreationTimeUtc:o}.");
+		}
+	}
+
+	private sealed class CountingConfigurationProvider : IDependencyConfigurationProvider
+	{
+		private readonly FileDependencyConfigurationProvider _inner = new();
+
+		public int ReadCount { get; private set; }
+
+		public Task<DependencyResolverConfiguration> ReadAsync(
+			string sourceRoot,
+			IReadOnlyList<string> manifestFiles,
+			CancellationToken cancellationToken)
+		{
+			ReadCount++;
+			return _inner.ReadAsync(sourceRoot, manifestFiles, cancellationToken);
+		}
+	}
+
 	private sealed class MissingGrammarLocator : IGrammarLibraryLocator
 	{
 		public string StrategyName => "missing-test-grammar";
@@ -649,7 +852,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 			string fullPath,
 			DependencyResolverConfiguration configuration,
 			DependencyFactsLimits limits,
-			CancellationToken cancellationToken)
+			CancellationToken cancellationToken,
+			string? contentIdentity = null)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var relativePath = PathUtility.GetPortableRelativePath(sourceRoot, fullPath);

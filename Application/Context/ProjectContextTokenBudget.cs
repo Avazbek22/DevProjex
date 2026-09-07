@@ -1,4 +1,5 @@
 using DevProjex.Application.Compression;
+using DevProjex.Application.Ranking;
 
 namespace DevProjex.Application.Context;
 
@@ -6,7 +7,10 @@ public sealed record ProjectContextTokenBudgetSkippedFile(
 	string Path,
 	long EstimatedTokens,
 	int? Priority = null,
-	long? RemainingEstimatedTokens = null);
+	long? RemainingEstimatedTokens = null,
+	int? Hop = null,
+	int? BaseImportancePriority = null,
+	FocusRankingVia? Via = null);
 
 public sealed record ProjectContextTokenBudgetReport(
 	long MaximumEstimatedTokens,
@@ -38,7 +42,13 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		_remainingEstimatedTokens = maximumEstimatedTokens;
 	}
 
-	public bool TryInclude(string path, int transformedCharacterCount, int? priority = null)
+	public bool TryInclude(
+		string path,
+		int transformedCharacterCount,
+		int? priority = null,
+		int? hop = null,
+		int? baseImportancePriority = null,
+		FocusRankingVia? via = null)
 	{
 		ArgumentNullException.ThrowIfNull(path);
 		var estimatedTokens = CodeCompressionSnapshot.EstimateTokens(
@@ -53,9 +63,23 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 
 		_skippedEstimatedTokens += estimatedTokens;
 		_skippedFileCount++;
-		RetainLargestSkippedFile(path, estimatedTokens, priority, _remainingEstimatedTokens);
+		RetainLargestSkippedFile(
+			path,
+			estimatedTokens,
+			priority,
+			_remainingEstimatedTokens,
+			hop,
+			baseImportancePriority,
+			via);
 		if (priority is not null)
-			RetainRankedSkippedFile(path, estimatedTokens, priority.Value, _remainingEstimatedTokens);
+			RetainRankedSkippedFile(
+				path,
+				estimatedTokens,
+				priority.Value,
+				_remainingEstimatedTokens,
+				hop,
+				baseImportancePriority,
+				via);
 		return false;
 	}
 
@@ -77,7 +101,10 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		string path,
 		long estimatedTokens,
 		int priority,
-		long remainingEstimatedTokens)
+		long remainingEstimatedTokens,
+		int? hop,
+		int? baseImportancePriority,
+		FocusRankingVia? via)
 	{
 		var ranked = _rankedSkippedFiles ??=
 			new List<ProjectContextTokenBudgetSkippedFile>(MaximumReportedRankedSkippedFiles);
@@ -92,7 +119,10 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			path,
 			estimatedTokens,
 			priority,
-			remainingEstimatedTokens));
+			remainingEstimatedTokens,
+			hop,
+			baseImportancePriority,
+			via));
 		if (ranked.Count > MaximumReportedRankedSkippedFiles)
 			ranked.RemoveAt(MaximumReportedRankedSkippedFiles);
 	}
@@ -101,7 +131,10 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		string path,
 		long estimatedTokens,
 		int? priority,
-		long? remainingEstimatedTokens)
+		long? remainingEstimatedTokens,
+		int? hop,
+		int? baseImportancePriority,
+		FocusRankingVia? via)
 	{
 		var largestSkippedFiles = _largestSkippedFiles ??=
 			new List<ProjectContextTokenBudgetSkippedFile>(MaximumReportedSkippedFiles);
@@ -111,7 +144,14 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 
 		largestSkippedFiles.Insert(
 			insertionIndex,
-			new ProjectContextTokenBudgetSkippedFile(path, estimatedTokens, priority, remainingEstimatedTokens));
+			new ProjectContextTokenBudgetSkippedFile(
+				path,
+				estimatedTokens,
+				priority,
+				remainingEstimatedTokens,
+				hop,
+				baseImportancePriority,
+				via));
 		if (largestSkippedFiles.Count > MaximumReportedSkippedFiles)
 			largestSkippedFiles.RemoveAt(MaximumReportedSkippedFiles);
 	}

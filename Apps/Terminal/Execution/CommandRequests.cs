@@ -54,6 +54,7 @@ public sealed record ExportContextCommandRequest(
 	long? MaximumEstimatedTokens,
 	TerminalOutputOptions Output,
 	ProjectContextRank? Rank = null,
+	IReadOnlyList<string>? Focus = null,
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null);
 

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using DevProjex.Application.Dependencies;
 
 namespace DevProjex.Application.Ranking;
 
@@ -63,6 +64,14 @@ public sealed record ImportanceRankingEntry(
 	public bool ConfidenceLimited { get; init; }
 
 	public bool IsCoordinator { get; init; }
+
+	public int? Hop { get; init; }
+
+	public int? BaseImportancePriority { get; init; }
+
+	public FocusRankingVia? Via { get; init; }
+
+	public bool IsFocusSeed { get; init; }
 }
 
 public sealed record ImportanceRankingReport(
@@ -96,8 +105,12 @@ public sealed record ImportanceRankingReport(
 	public ImportanceMissingSignalPolicy MissingSignalPolicy { get; init; } =
 		ImportanceMissingSignalPolicy.ConfidenceLimited;
 
+	public FocusRankingSummary? Focus { get; init; }
+
 	internal IReadOnlyDictionary<string, RankingSourceVersion> SourceVersions { get; init; } =
 		new Dictionary<string, RankingSourceVersion>(StringComparer.Ordinal);
+
+	internal DependencyIndexMetrics? DependencyMetrics { get; init; }
 }
 
 internal readonly record struct RankingSourceVersion(
@@ -145,4 +158,12 @@ public interface IImportanceRankingService
 		IProgress<ImportanceRankingProgress>? progress,
 		CancellationToken cancellationToken = default) =>
 		RankAsync(sourceRoot, candidateFiles, cancellationToken);
+
+	Task<ImportanceRankingReport> RankAsync(
+		string sourceRoot,
+		IReadOnlyList<string> candidateFiles,
+		FocusRankingRequest focus,
+		IProgress<ImportanceRankingProgress>? progress = null,
+		CancellationToken cancellationToken = default) =>
+		throw new NotSupportedException("This ranking service does not support focus ordering.");
 }

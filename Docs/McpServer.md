@@ -230,7 +230,7 @@ open-world.
 | `list_projects` | none | Allowed local roots with path, name, type, and available local profiles, plus the server `baseline` (`git` mode, `exclusions`, and whether `agentExclusions` is enabled). Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. |
-| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. `rank: "importance"` opts into importance-aware admission and document order. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). Results larger than 50,000 characters are stored and returned with a `pack_id` for `read_pack`. |
@@ -419,6 +419,36 @@ existing greedy admission pass; without a budget, all candidates are serialized
 in descending importance. A tree-only pack rejects `rank`, and `get_tree` does
 not expose it. Unknown values return `DPX-MCP-INVALID-ARGUMENTS`.
 
+With `rank: "importance"`, `focus` accepts one non-empty path string or an array
+of one to 16 strings. The input count is enforced before canonical-file
+deduplication. Each value is resolved with the same root-jail, Markdown-unescaping,
+case, directory, and effective-selection rules as `get_file` and `paths`.
+`focus` without rank, null, an empty string/array, a non-string item, or more than
+16 values returns `DPX-MCP-INVALID-ARGUMENTS`; a missing, outside-root, directory,
+case-mismatched, or filtered file returns the established path diagnostic.
+For JSON packs, `ranking.focus.seeds[].requested` keeps the submitted spelling
+only after applying the same safe output-path policy and local-user occurrence
+decision as the document root.
+
+Valid seeds keep caller order at hop 0. A multi-source BFS over the same unique,
+resolved, non-self file graph used by importance ranking orders reachable files
+by minimum undirected hop, then `importance-v1` priority and canonical path.
+Unreachable files follow in importance order. Excluded intermediate files cannot
+bridge two visible files, and focus never expands the manifest. A seed is first
+for greedy admission, not guaranteed inclusion. Seed state, the bounded hop
+histogram, parent relation, original importance priority, and degraded fact state
+are reported as `focus-v1`; path-bearing explanation lines remain inside the
+standard untrusted-data block. Personalized PageRank is evaluation-only and is
+not exposed. GUI and TUI selection are human-controlled and do not apply focus.
+
+The registered evaluation showed the same RecallNew and AllRequired outcomes for
+focus and an explicitly assembled `directed-from-seed` context in all nine
+repository/budget aggregates; directed context used a smaller irrelevant-token
+share in each. Focus is a one-call convenience for prioritizing a known file's
+neighborhood while keeping a broad effective selection and fallback, not a claim
+of superiority over directed `related_files` plus `paths` workflows. Reported
+performance numbers measure ranking only, not the complete `pack_context` call.
+
 The ranking uses quantized resolved-dependency PageRank, a safe offline
 200-commit Git history window, and a small file-role signal. Missing evidence
 limits confidence instead of being renormalized into an advantage. A shallow
@@ -457,6 +487,7 @@ Defaults:
 - `pack_context.format`: `markdown`
 - `pack_context.detail`: `full`
 - `pack_context.max_tokens`: unlimited
+- `pack_context.focus`: absent
 - `analyze.detail`: `full`
 - `analyze.top_files`: `10` (`1..1000`)
 - `tracked_only`: `false`

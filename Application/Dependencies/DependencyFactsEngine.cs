@@ -41,7 +41,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		string sourceRoot,
 		IReadOnlyList<string> manifestFiles,
 		IProgress<DependencyIndexProgress>? progress = null,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		DependencyManifestContentIdentities? contentIdentities = null)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
@@ -58,9 +59,11 @@ public sealed class DependencyFactsEngine : IDisposable
 			root,
 			Hash(manifest.Select(path => PortableRelative(root, path))));
 		var initialStamps = TryCaptureFileStamps(manifest);
+		var alignedContentIdentities = AlignContentIdentities(manifest, contentIdentities);
 		if (initialStamps is not null &&
 		    _manifestSnapshots.TryGetValue(manifestRequestKey, out var cachedSnapshot) &&
 		    cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
+		    ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 		    _indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
 		{
 			var snapshot = cachedSnapshot.Snapshot;
@@ -92,8 +95,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			},
 			async (index, token) =>
 			{
+				var contentIdentity = alignedContentIdentities?[index];
 				var source = await _extractor
-					.PrepareAsync(root, manifest[index], configuration, _limits, token)
+					.PrepareAsync(root, manifest[index], configuration, _limits, token, contentIdentity)
 					.ConfigureAwait(false);
 				prepared[index] = new PreparedDependencyIdentity(
 					source.RelativePath,
@@ -194,7 +198,12 @@ public sealed class DependencyFactsEngine : IDisposable
 		if (initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps))
 		{
 			if (_indexCache.ContainsKey(cacheKey))
-				StoreManifestSnapshot(manifestRequestKey, initialStamps, cacheKey, result);
+				StoreManifestSnapshot(
+					manifestRequestKey,
+					initialStamps,
+					alignedContentIdentities,
+					cacheKey,
+					result);
 		}
 		return result;
 	}
@@ -411,13 +420,14 @@ public sealed class DependencyFactsEngine : IDisposable
 	private void StoreManifestSnapshot(
 		ManifestRequestKey key,
 		IReadOnlyList<FileStamp> stamps,
+		IReadOnlyList<string>? contentIdentities,
 		IndexCacheKey indexCacheKey,
 		DependencyIndexSnapshot snapshot)
 	{
 		lock (_cacheTrimSync)
 		{
 			if (!_indexCache.ContainsKey(indexCacheKey)) return;
-			var entry = new ManifestSnapshotCacheEntry(stamps, indexCacheKey, snapshot);
+			var entry = new ManifestSnapshotCacheEntry(stamps, contentIdentities, indexCacheKey, snapshot);
 			if (_manifestSnapshots.TryAdd(key, entry))
 				_manifestSnapshotOrder.Enqueue(key);
 			else
@@ -455,6 +465,35 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			return null;
 		}
+	}
+
+	private static IReadOnlyList<string>? AlignContentIdentities(
+		IReadOnlyList<string> manifest,
+		DependencyManifestContentIdentities? contentIdentities)
+	{
+		if (contentIdentities is null)
+			return null;
+		var aligned = new string[manifest.Count];
+		for (var index = 0; index < manifest.Count; index++)
+		{
+			if (!contentIdentities.ByFullPath.TryGetValue(manifest[index], out var identity))
+			{
+				throw new ArgumentException(
+					$"A content identity is required for manifest file '{manifest[index]}'.",
+					nameof(contentIdentities));
+			}
+			aligned[index] = identity;
+		}
+		return aligned;
+	}
+
+	private static bool ContentIdentitiesMatch(
+		IReadOnlyList<string>? cached,
+		IReadOnlyList<string>? requested)
+	{
+		if (requested is null)
+			return true;
+		return cached is not null && cached.SequenceEqual(requested, StringComparer.Ordinal);
 	}
 
 	private static long EstimateFileFactsBytes(FileFacts facts) =>
@@ -608,6 +647,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private sealed record ManifestSnapshotCacheEntry(
 		IReadOnlyList<FileStamp> Stamps,
+		IReadOnlyList<string>? ContentIdentities,
 		IndexCacheKey IndexCacheKey,
 		DependencyIndexSnapshot Snapshot);
 

@@ -650,6 +650,8 @@ devprojex export context|ctx [PROJECT|URL]
   --force
   -n, --dry-run
   --max-tokens <N>                    integer >= 1; default: unlimited
+  --rank <importance>                 default: absent
+  --focus <PATH>                      repeatable; at most 16; requires --rank importance
   --branch <NAME>                     URL source only
   <shared selection options>
   <shared output options>
@@ -930,6 +932,7 @@ that prevents an accepted option from becoming a no-op.
 | `export context` | `--dry-run` | off | runs plan and destination preflight without document generation | creates no parent, staging, or output | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
 | `export context` | `--max-tokens` | unlimited | greedily limits included transformed file content by estimated tokens while preserving deterministic path order | integer `>= 1`; skipped files do not stop consideration of later files; document structure is outside the budget | document stays on stdout/file; localized budget report is written to stderr; JSON/XML add `tokenBudget` | parser, serializer, handler, process |
 | `export context` | `--rank importance` | absent | reorders only the effective content candidates by `importance-v1`; with a budget this is admission priority, without one it is serialization order | invalid with `--view tree`; unknown values exit `2`; no rank performs no ranking work | trusted stderr ranking report; context JSON adds `ranking` | parser, serializer, handler, process |
+| `export context` | `--focus PATH` | absent | with `--rank importance`, places caller-ordered seeds at hop 0, then orders the unchanged effective selection by minimum undirected resolved-graph hop and `importance-v1` within each hop | repeatable; 1..16 supplied non-empty values before deduplication; each is a relative path or absolute file inside the root and effective selection; without rank exits `2`; missing/filtered seed is `DPX-SELECTION-PATH-MISSING` and exit `3` | `focus-v1` stderr report; context JSON adds `ranking.focus` and per-entry hop provenance | parser, resolver, serializer, handler, process |
 | `export project` | `--as` | required | selects exact folder or ZIP export | missing/invalid value exits `2` | real absolute created destination on stdout | parser, handler, process |
 | `export project` | `-o`, `--output` | required | selects the exact destination | folder must be absent; ZIP path ends in `.zip`; destination outside source; `-` is valid only with `--as zip` | folder/file success returns its real absolute path; ZIP stdout is the raw archive byte stream | parser, destination, integration |
 | `export project` | `--force` | off | atomically replaces an existing ZIP file | invalid for folder output and ZIP stdout | success path on stdout; invalid combination exits `2` | parser, destination, integration |

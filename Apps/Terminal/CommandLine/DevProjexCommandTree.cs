@@ -632,6 +632,17 @@ public sealed class DevProjexCommandTree
 			L("Terminal.Option.Rank"),
 			CliChoiceSets.ContextRank,
 			_localization);
+		var focus = new Option<string[]>("--focus")
+		{
+			Description = L("Terminal.Option.Focus"),
+			HelpName = "PATH",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
+		focus.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.FilesAndDirectories,
+			FileSystemCompletionSource.ResolveProjectDirectory(context)));
 		var branch = BranchOption();
 		var selection = new SelectionOptions(
 			_localization,
@@ -645,6 +656,7 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(dryRun);
 		command.Options.Add(maximumEstimatedTokens);
 		command.Options.Add(rank);
+		command.Options.Add(focus);
 		command.Options.Add(branch);
 		selection.AddTo(command);
 		_output.AddProgressTo(command);
@@ -679,6 +691,24 @@ public sealed class DevProjexCommandTree
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.RankRequiresContent")));
+			}
+			var focusValues = result.GetResult(focus) is null
+				? null
+				: result.GetValue(focus) ?? [];
+			if (focusValues is not null && result.GetValue(rank) is null)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.FocusRequiresRank")));
+			}
+			if (focusValues is { Length: > 16 })
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.FocusLimit")));
+			}
+			if (focusValues?.Any(string.IsNullOrWhiteSpace) == true)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.FocusEmpty")));
 			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
@@ -721,6 +751,9 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(maximumEstimatedTokens),
 								outputOptions,
 								Rank: parseResult.GetValue(rank),
+								Focus: parseResult.GetResult(focus) is null
+									? null
+									: parseResult.GetValue(focus) ?? [],
 								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
 								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)

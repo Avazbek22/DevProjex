@@ -35,19 +35,48 @@ public sealed class ExportContextCommandHandler(
 				request.MaxFileBytes,
 				cancellationToken)
 			.ConfigureAwait(false);
+		var diagnosticRenderer = new ContextDiagnosticRenderer(
+			environment,
+			request.Output,
+			services.Localization);
 		if (plan.HasErrors)
 		{
-			new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
-				.Write(plan.Diagnostics);
+			diagnosticRenderer.Write(plan.Diagnostics);
+			return CommandLineExitCodes.PolicyFailure;
+		}
+		IReadOnlyList<FocusRankingSeedRequest>? focusSeeds;
+		try
+		{
+			focusSeeds = ResolveFocusSeeds(plan, request.Focus);
+		}
+		catch (ProjectContextValidationException exception) when (request.Focus is not null)
+		{
+			diagnosticRenderer.Write([
+				new ContextDiagnostic(
+					exception.Code,
+					ContextDiagnosticSeverity.Error,
+					exception.Message,
+					exception.ContextPath)
+			]);
 			return CommandLineExitCodes.PolicyFailure;
 		}
 		var ranking = request.Rank is null
 			? null
-			: await (rankingService ?? new ImportanceRankingService(
+			: focusSeeds is null
+				? await (rankingService ?? new ImportanceRankingService(
 					services.DependencyFactsEngine,
 					new ProjectGitHistoryReader()))
-				.RankAsync(plan.SourceRoot, plan.IncludedFiles, cancellationToken)
-				.ConfigureAwait(false);
+					.RankAsync(plan.SourceRoot, plan.IncludedFiles, cancellationToken)
+					.ConfigureAwait(false)
+				: await (rankingService ?? new ImportanceRankingService(
+						services.DependencyFactsEngine,
+						new ProjectGitHistoryReader()))
+					.RankAsync(
+						plan.SourceRoot,
+						plan.IncludedFiles,
+						new FocusRankingRequest(focusSeeds),
+						cancellationToken: cancellationToken)
+					.ConfigureAwait(false);
 		var transformationContext = CreateTransformationContext(plan, request.View);
 		await using var prepared = transformationContext is null
 			? null
@@ -56,8 +85,7 @@ public sealed class ExportContextCommandHandler(
 				.ConfigureAwait(false);
 		if (prepared?.CompressionSnapshot is { } compressionSnapshot)
 			plan = CodeCompressionDiagnostic.Append(plan, compressionSnapshot.Availability);
-		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
-			.Write(plan.Diagnostics);
+		diagnosticRenderer.Write(plan.Diagnostics);
 
 		var outputPath = request.OutputPath is not null and not "-"
 			? ExactOutputDestinationValidator.ValidateContext(
@@ -137,7 +165,8 @@ public sealed class ExportContextCommandHandler(
 			TokenBudgetOutput.Write(
 				environment.Error,
 				budgetResult?.TokenBudget,
-				services.Localization);
+				services.Localization,
+				ranking);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -185,7 +214,7 @@ public sealed class ExportContextCommandHandler(
 				report.UnscannableFiles,
 				services.Localization);
 			RankingOutput.Write(environment.Error, ranking, report.TokenBudget, services.Localization);
-			TokenBudgetOutput.Write(environment.Error, report.TokenBudget, services.Localization);
+			TokenBudgetOutput.Write(environment.Error, report.TokenBudget, services.Localization, ranking);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -244,9 +273,50 @@ public sealed class ExportContextCommandHandler(
 			TokenBudgetOutput.Write(
 				environment.Error,
 				writeReport.TokenBudget,
-				services.Localization);
+				services.Localization,
+				ranking);
 		}
 		return CommandLineExitCodes.Success;
+	}
+
+	private static IReadOnlyList<FocusRankingSeedRequest>? ResolveFocusSeeds(
+		ProjectContextPlan plan,
+		IReadOnlyList<string>? requested)
+	{
+		if (requested is null)
+			return null;
+		var resolved = new List<FocusRankingSeedRequest>(requested.Count);
+		foreach (var value in requested)
+		{
+			var validationPath = value;
+			if (Path.IsPathFullyQualified(value))
+			{
+				var fullPath = Path.GetFullPath(value);
+				if (!PathUtility.IsPathInside(fullPath, plan.SourceRoot))
+				{
+					throw new ProjectContextValidationException(
+						"DPX-SELECTION-PATH-MISSING",
+						"The focus seed is outside the project root.",
+						value);
+				}
+				validationPath = PathUtility.GetPortableRelativePath(plan.SourceRoot, fullPath);
+			}
+			SelectedPathExistenceValidator.Validate(plan.SourceRoot, [validationPath]);
+			var relative = ProjectSelectionPath.NormalizeRelative(validationPath);
+			var full = Path.GetFullPath(Path.Combine(
+				plan.SourceRoot,
+				relative.Replace('/', Path.DirectorySeparatorChar)));
+			var exact = plan.IncludedFiles.FirstOrDefault(candidate => PathComparer.Default.Equals(candidate, full));
+			if (exact is null)
+			{
+				throw new ProjectContextValidationException(
+					"DPX-SELECTION-PATH-MISSING",
+					"The focus seed is outside the effective selection.",
+					value);
+			}
+			resolved.Add(new FocusRankingSeedRequest(value, exact));
+		}
+		return resolved;
 	}
 
 	private ContentTransformationContext? CreateTransformationContext(
