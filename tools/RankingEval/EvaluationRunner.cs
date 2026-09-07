@@ -16,6 +16,9 @@ internal sealed class EvaluationRunner(
 	string productRoot,
 	string workspace)
 {
+	private static readonly TimeSpan MeasurementProcessDeadline = TimeSpan.FromMinutes(15);
+	private static readonly TimeSpan GitProcessDeadline = TimeSpan.FromMinutes(5);
+	private const int MaximumProcessOutputCharacters = 4 * 1024 * 1024;
 	private static readonly string[] ExpectedOrders =
 	[
 		"current",
@@ -30,13 +33,17 @@ internal sealed class EvaluationRunner(
 	{
 		ValidateRegistry();
 		Directory.CreateDirectory(workspace);
-		var productSha = RunGit(productRoot, "rev-parse", "HEAD").Trim();
+		var productSha = (await RunGitAsync(
+			productRoot,
+			cancellationToken,
+			"rev-parse",
+			"HEAD").ConfigureAwait(false)).Trim();
 		var repositories = new List<RepositoryEvaluationResult>(registry.Repositories.Count);
 		foreach (var repository in registry.Repositories)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			Console.Error.WriteLine($"[eval] preparing {repository.Id} at {repository.Commit}");
-			var root = EnsurePinnedClone(repository);
+			var root = await EnsurePinnedCloneAsync(repository, cancellationToken).ConfigureAwait(false);
 			var evaluation = await EvaluateRepositoryAsync(repository, root, cancellationToken)
 				.ConfigureAwait(false);
 			var performance = await MeasurePerformanceAsync(repository, root, cancellationToken)
@@ -96,6 +103,17 @@ internal sealed class EvaluationRunner(
 			plan.SourceRoot,
 			plan.IncludedFiles,
 			cancellationToken).ConfigureAwait(false);
+		var dependency = await services.DependencyFactsEngine.IndexAsync(
+			plan.SourceRoot,
+			plan.IncludedFiles,
+			cancellationToken: cancellationToken).ConfigureAwait(false);
+		var graph = ImportanceRankingService.BuildGraph(
+			plan.IncludedFiles.Select(path => new ImportanceRankingService.Candidate(
+				Path.GetFullPath(path),
+				PortableRelative(plan.SourceRoot, path))).ToArray(),
+			dependency,
+			cancellationToken);
+		var evaluationGraph = EvaluationRankingGraph.Create(graph, cancellationToken);
 		var importanceOrder = importance.Entries.Select(static entry => entry.Path).ToArray();
 		var importancePriority = importance.Entries.ToDictionary(
 			static entry => entry.Path,
@@ -107,23 +125,18 @@ internal sealed class EvaluationRunner(
 			cancellationToken.ThrowIfCancellationRequested();
 			Console.Error.WriteLine($"[eval] {repository.Id}: {task.Id}");
 			var seedRequest = new FocusRankingSeedRequest(task.Seed, fullByRelative[task.Seed]);
-			var seedFirst = await ranking.RankAsync(
-				plan.SourceRoot,
-				plan.IncludedFiles,
-				FocusRankingRequest.ForEvaluation([seedRequest], FocusRankingStrategy.SeedFirst),
-				cancellationToken: cancellationToken).ConfigureAwait(false);
-			var focus = await ranking.RankAsync(
-				plan.SourceRoot,
-				plan.IncludedFiles,
+			var seedFirst = EvaluationFocusComparators.SeedFirst(importance, [seedRequest]);
+			var focus = FocusRankingEngine.Apply(
+				importance,
 				new FocusRankingRequest([seedRequest]),
-				cancellationToken: cancellationToken).ConfigureAwait(false);
-			var ppr = await ranking.RankAsync(
-				plan.SourceRoot,
-				plan.IncludedFiles,
-				FocusRankingRequest.ForEvaluation([seedRequest], FocusRankingStrategy.PersonalizedPageRank),
-				cancellationToken: cancellationToken).ConfigureAwait(false);
-			var pprAvailable = ppr.Focus!.Seeds.Any(static seed =>
-				seed.State is FocusSeedState.Resolved or FocusSeedState.NoResolvedNeighbors);
+				graph,
+				dependency,
+				cancellationToken);
+			var ppr = EvaluationFocusComparators.PersonalizedPageRank(
+				importance,
+				[seedRequest],
+				evaluationGraph,
+				cancellationToken);
 			var related = await services.DependencyFactsEngine.FindRelatedAsync(
 				plan.SourceRoot,
 				plan.IncludedFiles,
@@ -145,9 +158,9 @@ internal sealed class EvaluationRunner(
 			{
 				["current"] = (true, catalog.CurrentOrder),
 				["importance-v1"] = (true, importanceOrder),
-				["seed-first"] = (true, seedFirst.Entries.Select(static entry => entry.Path).ToArray()),
+				["seed-first"] = (seedFirst.Available, seedFirst.Paths),
 				["focus-v1"] = (true, focus.Entries.Select(static entry => entry.Path).ToArray()),
-				["focus-ppr"] = (pprAvailable, ppr.Entries.Select(static entry => entry.Path).ToArray()),
+				["focus-ppr"] = (ppr.Available, ppr.Paths),
 				["directed-from-seed"] = (true, directed)
 			};
 
@@ -267,15 +280,15 @@ internal sealed class EvaluationRunner(
 			         "--root", root, "--data", data, "--mode", mode, "--order", order
 		         })
 			start.ArgumentList.Add(argument);
-		using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start evaluator child process.");
-		var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-		var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-		await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-		var output = await outputTask.ConfigureAwait(false);
-		var error = await errorTask.ConfigureAwait(false);
+		var process = await BoundedProcessRunner.RunAsync(
+			start,
+			MeasurementProcessDeadline,
+			MaximumProcessOutputCharacters,
+			cancellationToken).ConfigureAwait(false);
 		if (process.ExitCode != 0)
-			throw new InvalidOperationException($"Evaluator child failed ({repositoryId}/{mode}/{order}): {error}");
-		var result = JsonSerializer.Deserialize<MeasureOneResult>(output, EvaluationRegistry.JsonOptions) ??
+			throw new InvalidOperationException(
+				$"Evaluator child failed ({repositoryId}/{mode}/{order}): {process.StandardError}");
+		var result = JsonSerializer.Deserialize<MeasureOneResult>(process.StandardOutput, EvaluationRegistry.JsonOptions) ??
 		             throw new InvalidDataException("Evaluator child returned no measurement.");
 		return result;
 	}
@@ -416,16 +429,35 @@ internal sealed class EvaluationRunner(
 			recallPassed && allRequiredPassed && timePassed && memoryPassed);
 	}
 
-	private string EnsurePinnedClone(RegistryRepository repository)
+	private async Task<string> EnsurePinnedCloneAsync(
+		RegistryRepository repository,
+		CancellationToken cancellationToken)
 	{
 		var root = Path.Combine(workspace, "corpora", repository.Id);
 		if (!Directory.Exists(Path.Combine(root, ".git")))
 		{
 			Directory.CreateDirectory(Path.GetDirectoryName(root)!);
-			RunGit(workspace, "clone", "--quiet", "--no-checkout", repository.Url, root);
+			_ = await RunGitAsync(
+				workspace,
+				cancellationToken,
+				"clone",
+				"--quiet",
+				"--no-checkout",
+				repository.Url,
+				root).ConfigureAwait(false);
 		}
-		RunGit(root, "checkout", "--quiet", "--detach", repository.Commit);
-		var actual = RunGit(root, "rev-parse", "HEAD").Trim();
+		_ = await RunGitAsync(
+			root,
+			cancellationToken,
+			"checkout",
+			"--quiet",
+			"--detach",
+			repository.Commit).ConfigureAwait(false);
+		var actual = (await RunGitAsync(
+			root,
+			cancellationToken,
+			"rev-parse",
+			"HEAD").ConfigureAwait(false)).Trim();
 		if (!actual.Equals(repository.Commit, StringComparison.OrdinalIgnoreCase))
 			throw new InvalidDataException($"Pinned commit mismatch for {repository.Id}: {actual}");
 		return root;
@@ -462,7 +494,10 @@ internal sealed class EvaluationRunner(
 			: (sorted[sorted.Length / 2 - 1] + sorted[sorted.Length / 2]) / 2;
 	}
 
-	private static string RunGit(string workingDirectory, params string[] arguments)
+	private static async Task<string> RunGitAsync(
+		string workingDirectory,
+		CancellationToken cancellationToken,
+		params string[] arguments)
 	{
 		var start = new ProcessStartInfo("git")
 		{
@@ -474,13 +509,15 @@ internal sealed class EvaluationRunner(
 		};
 		foreach (var argument in arguments)
 			start.ArgumentList.Add(argument);
-		using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start git.");
-		var output = process.StandardOutput.ReadToEnd();
-		var error = process.StandardError.ReadToEnd();
-		process.WaitForExit();
+		var process = await BoundedProcessRunner.RunAsync(
+			start,
+			GitProcessDeadline,
+			MaximumProcessOutputCharacters,
+			cancellationToken).ConfigureAwait(false);
 		if (process.ExitCode != 0)
-			throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed: {error}");
-		return output;
+			throw new InvalidOperationException(
+				$"git {string.Join(' ', arguments)} failed: {process.StandardError}");
+		return process.StandardOutput;
 	}
 
 	private static string PortableRelative(string root, string path) =>

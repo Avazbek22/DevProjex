@@ -5,13 +5,8 @@ namespace DevProjex.Application.Ranking;
 internal static class FocusRankingEngine
 {
 	internal const string AlgorithmId = "focus-v1";
-	internal const string PersonalizedPageRankAlgorithmId = "focus-ppr";
-	internal const string SeedFirstAlgorithmId = "seed-first";
 	private const int MaximumReportedHop = 7;
 	private const int MaximumTopEntries = 10;
-	private const int PersonalizedPageRankIterations = 100;
-	private const double PersonalizedPageRankDamping = 0.85;
-	private const double PersonalizedPageRankConvergence = 1e-12;
 
 	public static ImportanceRankingReport Apply(
 		ImportanceRankingReport importance,
@@ -36,9 +31,6 @@ internal static class FocusRankingEngine
 		var seedOrder = seeds
 			.Select((seed, index) => (Path.GetFullPath(seed.FullPath), index))
 			.ToDictionary(static item => item.Item1, static item => item.index, PathComparer.Default);
-		if (request.Strategy == FocusRankingStrategy.SeedFirst)
-			return ApplySeedFirst(importance, seeds, seedOrder, snapshot, cancellationToken);
-
 		var undirected = graph.BuildUndirected(cancellationToken);
 		var distances = CalculateDistances(
 			graph,
@@ -47,29 +39,16 @@ internal static class FocusRankingEngine
 			relativeByFullPath,
 			cancellationToken);
 		var viaByPath = SelectParents(graph, undirected, distances, cancellationToken);
-		var entries = request.Strategy == FocusRankingStrategy.PersonalizedPageRank
-			? OrderByPersonalizedPageRank(
-				importance,
-				seeds,
-				seedOrder,
-				graph,
-				undirected,
-				distances,
-				viaByPath,
-				relativeByFullPath,
-				cancellationToken)
-			: OrderByHop(
-				importance,
-				seedOrder,
-				graph,
-				distances,
-				viaByPath,
-				cancellationToken);
+		var entries = OrderByHop(
+			importance,
+			seedOrder,
+			graph,
+			distances,
+			viaByPath,
+			cancellationToken);
 		return BuildReport(
 			importance,
-			request.Strategy == FocusRankingStrategy.PersonalizedPageRank
-				? PersonalizedPageRankAlgorithmId
-				: AlgorithmId,
+			AlgorithmId,
 			entries,
 			BuildSeedReports(seeds, entriesByFullPath, graph, undirected, snapshot),
 			cancellationToken);
@@ -141,10 +120,7 @@ internal static class FocusRankingEngine
 			var hop = distances[node];
 			if (hop <= 0)
 				continue;
-			var parent = undirected[node]
-				.Where(neighbor => distances[neighbor] == hop - 1)
-				.OrderBy(neighbor => graph.Paths[neighbor], StringComparer.Ordinal)
-				.First();
+			var parent = undirected[node].First(neighbor => distances[neighbor] == hop - 1);
 			var nodeDependsOnParent = Array.BinarySearch(graph.Outgoing[node], parent) >= 0;
 			var parentDependsOnNode = Array.BinarySearch(graph.Outgoing[parent], node) >= 0;
 			var relation = nodeDependsOnParent && parentDependsOnNode
@@ -177,90 +153,6 @@ internal static class FocusRankingEngine
 			})
 			.ToArray();
 
-	private static ImportanceRankingEntry[] OrderByPersonalizedPageRank(
-		ImportanceRankingReport importance,
-		IReadOnlyList<FocusRankingSeedRequest> seeds,
-		IReadOnlyDictionary<string, int> seedOrder,
-		RankingGraph graph,
-		int[][] undirected,
-		IReadOnlyList<int> distances,
-		IReadOnlyDictionary<string, FocusRankingVia> viaByPath,
-		IReadOnlyDictionary<string, string> relativeByFullPath,
-		CancellationToken cancellationToken)
-	{
-		var scores = CalculatePersonalizedPageRank(
-			graph,
-			undirected,
-			seeds,
-			relativeByFullPath,
-			cancellationToken);
-		return importance.Entries
-			.Select(entry => Decorate(entry, seedOrder, graph, distances, viaByPath))
-			.OrderBy(entry => entry.IsFocusSeed ? 0 : 1)
-			.ThenBy(entry => entry.IsFocusSeed ? seedOrder[Path.GetFullPath(entry.FullPath)] : 0)
-			.ThenByDescending(entry => graph.NodeByPath.TryGetValue(entry.Path, out var node) ? scores[node] : 0)
-			.ThenBy(entry => entry.IsFocusSeed ? 0 : entry.BaseImportancePriority)
-			.ThenBy(static entry => entry.Path, StringComparer.Ordinal)
-			.Select((entry, index) => entry with { Priority = index + 1 })
-			.ToArray();
-	}
-
-	private static double[] CalculatePersonalizedPageRank(
-		RankingGraph graph,
-		int[][] undirected,
-		IReadOnlyList<FocusRankingSeedRequest> seeds,
-		IReadOnlyDictionary<string, string> relativeByFullPath,
-		CancellationToken cancellationToken)
-	{
-		var seedNodes = seeds
-			.Select(seed => relativeByFullPath.GetValueOrDefault(Path.GetFullPath(seed.FullPath)))
-			.Where(static path => path is not null)
-			.Select(path => graph.NodeByPath[path!])
-			.Distinct()
-			.Order()
-			.ToArray();
-		var result = new double[graph.Paths.Length];
-		if (seedNodes.Length == 0)
-			return result;
-		var teleport = new double[graph.Paths.Length];
-		foreach (var seed in seedNodes)
-			teleport[seed] = 1d / seedNodes.Length;
-		var rank = (double[])teleport.Clone();
-		var next = new double[rank.Length];
-		for (var iteration = 0; iteration < PersonalizedPageRankIterations; iteration++)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var dangling = 0d;
-			for (var node = 0; node < rank.Length; node++)
-			{
-				if (undirected[node].Length == 0)
-					dangling += rank[node];
-			}
-			for (var node = 0; node < rank.Length; node++)
-				next[node] = (1 - PersonalizedPageRankDamping) * teleport[node] +
-				             PersonalizedPageRankDamping * dangling * teleport[node];
-			for (var source = 0; source < rank.Length; source++)
-			{
-				if ((source & 255) == 0)
-					cancellationToken.ThrowIfCancellationRequested();
-				if (undirected[source].Length == 0)
-					continue;
-				var share = PersonalizedPageRankDamping * rank[source] / undirected[source].Length;
-				foreach (var target in undirected[source])
-					next[target] += share;
-			}
-			var delta = 0d;
-			for (var node = 0; node < rank.Length; node++)
-				delta += Math.Abs(next[node] - rank[node]);
-			(rank, next) = (next, rank);
-			if (delta < PersonalizedPageRankConvergence)
-				break;
-		}
-		for (var node = 0; node < rank.Length; node++)
-			result[node] = ImportanceRankingService.QuantizePageRank(rank[node]);
-		return result;
-	}
-
 	private static ImportanceRankingEntry Decorate(
 		ImportanceRankingEntry entry,
 		IReadOnlyDictionary<string, int> seedOrder,
@@ -281,34 +173,6 @@ internal static class FocusRankingEngine
 			Via = hop > 0 && viaByPath.TryGetValue(entry.Path, out var via) ? via : null,
 			IsFocusSeed = isSeed
 		};
-	}
-
-	private static ImportanceRankingReport ApplySeedFirst(
-		ImportanceRankingReport importance,
-		IReadOnlyList<FocusRankingSeedRequest> seeds,
-		IReadOnlyDictionary<string, int> seedOrder,
-		DependencyIndexSnapshot snapshot,
-		CancellationToken cancellationToken)
-	{
-		var entries = importance.Entries
-			.Select(entry => entry with
-			{
-				BaseImportancePriority = entry.Priority,
-				Hop = seedOrder.ContainsKey(Path.GetFullPath(entry.FullPath)) ? 0 : null,
-				IsFocusSeed = seedOrder.ContainsKey(Path.GetFullPath(entry.FullPath))
-			})
-			.OrderBy(entry => entry.IsFocusSeed ? 0 : 1)
-			.ThenBy(entry => entry.IsFocusSeed ? seedOrder[Path.GetFullPath(entry.FullPath)] : entry.BaseImportancePriority)
-			.ThenBy(static entry => entry.Path, StringComparer.Ordinal)
-			.Select((entry, index) => entry with { Priority = index + 1 })
-			.ToArray();
-		var seedReports = seeds.Select(seed =>
-		{
-			var path = importance.Entries.Single(entry => PathComparer.Default.Equals(entry.FullPath, seed.FullPath)).Path;
-			var facts = snapshot.Files.FirstOrDefault(file => file.Path.Equals(path, StringComparison.Ordinal));
-			return new FocusRankingSeed(seed.Requested, path, StateWithoutGraph(facts), facts?.StatusReason);
-		}).ToArray();
-		return BuildReport(importance, SeedFirstAlgorithmId, entries, seedReports, cancellationToken);
 	}
 
 	private static ImportanceRankingReport BuildReport(
@@ -381,12 +245,5 @@ internal static class FocusRankingEngine
 			return new FocusRankingSeed(seed.Requested, path, state, reason);
 		}).ToArray();
 	}
-
-	private static FocusSeedState StateWithoutGraph(FileFacts? facts) => facts?.Status switch
-	{
-		DependencyFileStatus.ExtractionFailed => FocusSeedState.ExtractionFailed,
-		DependencyFileStatus.Unsupported or null => FocusSeedState.Unsupported,
-		_ => FocusSeedState.NoResolvedNeighbors
-	};
 
 }

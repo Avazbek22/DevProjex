@@ -17,6 +17,7 @@ internal static class Program
 			{
 				"run" => await RunAsync(args[1..]).ConfigureAwait(false),
 				"measure-one" => await MeasureOneAsync(args[1..]).ConfigureAwait(false),
+				"hang" => await HangAsync().ConfigureAwait(false),
 				_ => throw new ArgumentException($"Unknown command '{args[0]}'.")
 			};
 		}
@@ -65,6 +66,12 @@ internal static class Program
 		if (index < 0 || index + 1 >= args.Length)
 			throw new ArgumentException($"Missing required option {name}.");
 		return args[index + 1];
+	}
+
+	private static async Task<int> HangAsync()
+	{
+		await Task.Delay(Timeout.InfiniteTimeSpan).ConfigureAwait(false);
+		return 0;
 	}
 
 	private static void PrintHelp() => Console.WriteLine("""

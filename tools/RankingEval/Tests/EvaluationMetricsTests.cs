@@ -1,9 +1,87 @@
+using DevProjex.Application.Ranking;
+using System.Diagnostics;
 using Xunit;
 
 namespace DevProjex.RankingEval.Tests;
 
 public sealed class EvaluationMetricsTests
 {
+	[Fact]
+	public async Task BoundedProcessRunnerKillsAHungChildWhenCancelled()
+	{
+		var start = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		start.ArgumentList.Add(typeof(EvaluationRunner).Assembly.Location);
+		start.ArgumentList.Add("hang");
+		var started = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var cancellation = new CancellationTokenSource();
+		var run = BoundedProcessRunner.RunAsync(
+			start,
+			TimeSpan.FromMinutes(1),
+			maximumOutputCharacters: 1024,
+			cancellation.Token,
+			processId => started.TrySetResult(processId));
+		var processId = await started.Task.WaitAsync(
+			TimeSpan.FromSeconds(10),
+			TestContext.Current.CancellationToken);
+
+		cancellation.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+		Assert.Throws<ArgumentException>(() => Process.GetProcessById(processId));
+	}
+
+	[Fact]
+	public void PersonalizedPageRankUsesGraphSeedsFromAMixedSupportedSet()
+	{
+		var report = Ranking("README.md", "A.cs", "B.cs");
+		var graph = Graph(["A.cs", "B.cs"], [[1], [0]]);
+		var result = EvaluationFocusComparators.PersonalizedPageRank(
+			report,
+			[
+				new FocusRankingSeedRequest("README.md", report.Entries[0].FullPath),
+				new FocusRankingSeedRequest("A.cs", report.Entries[1].FullPath)
+			],
+			graph,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.Available);
+		Assert.Equal(["README.md", "A.cs", "B.cs"], result.Paths);
+	}
+
+	[Fact]
+	public void PersonalizedPageRankTreatsANonGraphOnlySeedAsUnavailable()
+	{
+		var report = Ranking("README.md", "A.cs");
+		var result = EvaluationFocusComparators.PersonalizedPageRank(
+			report,
+			[new FocusRankingSeedRequest("README.md", report.Entries[0].FullPath)],
+			Graph(["A.cs"], [[]]),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(result.Available);
+		Assert.Empty(result.Paths);
+	}
+
+	[Fact]
+	public void PersonalizedPageRankKeepsASupportedIsolatedSeedAvailable()
+	{
+		var report = Ranking("B.cs", "A.cs");
+		var result = EvaluationFocusComparators.PersonalizedPageRank(
+			report,
+			[new FocusRankingSeedRequest("A.cs", report.Entries[1].FullPath)],
+			Graph(["A.cs", "B.cs"], [[], []]),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.Available);
+		Assert.Equal("A.cs", result.Paths[0]);
+	}
+
 	[Fact]
 	public void SeedOnlyTaskReportsRecallNewAsNotApplicable()
 	{
@@ -91,4 +169,43 @@ public sealed class EvaluationMetricsTests
 
 	private static IReadOnlyDictionary<string, long> Costs(params (string Path, long Tokens)[] values) =>
 		values.ToDictionary(static value => value.Path, static value => value.Tokens, StringComparer.Ordinal);
+
+	private static ImportanceRankingReport Ranking(params string[] paths)
+	{
+		var root = Path.GetFullPath(Path.Combine("ranking-eval-tests", Guid.NewGuid().ToString("N")));
+		var entries = paths.Select((path, index) => new ImportanceRankingEntry(
+			Path.Combine(root, path),
+			path,
+			index + 1,
+			1d - index * 0.1,
+			0,
+			0,
+			null,
+			null,
+			ImportanceFileRole.Source,
+			true,
+			false)).ToArray();
+		return new ImportanceRankingReport(
+			ImportanceRankingService.AlgorithmId,
+			entries,
+			entries,
+			entries.Length,
+			entries.Length,
+			0,
+			1,
+			200,
+			0,
+			ProjectGitHistoryUnavailableReason.NotRepository,
+			false,
+			ImportanceRankingService.GraphVariant);
+	}
+
+	private static EvaluationRankingGraph Graph(string[] paths, int[][] undirected) =>
+		new(
+			paths,
+			paths.Select((path, index) => (path, index)).ToDictionary(
+				static item => item.path,
+				static item => item.index,
+				StringComparer.Ordinal),
+			undirected);
 }
