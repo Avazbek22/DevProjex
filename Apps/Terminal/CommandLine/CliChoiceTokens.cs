@@ -36,6 +36,13 @@ internal enum CliDeveloperScenario
 	ProjectMemoryLifecycle
 }
 
+internal enum CliDependencyDirection
+{
+	Dependencies,
+	Dependents,
+	Both
+}
+
 internal enum CliProfileSource
 {
 	Invalid = -1,
@@ -107,6 +114,11 @@ internal static class CliChoiceSets
 	public static CliChoiceSet<CliTextJsonFormat> TextJson { get; } = new(
 		new("text", CliTextJsonFormat.Text),
 		new("json", CliTextJsonFormat.Json));
+
+	public static CliChoiceSet<CliDependencyDirection> DependencyDirection { get; } = new(
+		new("dependencies", CliDependencyDirection.Dependencies),
+		new("dependents", CliDependencyDirection.Dependents),
+		new("both", CliDependencyDirection.Both));
 
 	public static CliChoiceSet<CliRecentKind> RecentKind { get; } = new(
 		new("all", CliRecentKind.All),

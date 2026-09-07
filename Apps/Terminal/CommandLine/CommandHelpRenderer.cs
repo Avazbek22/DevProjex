@@ -104,7 +104,7 @@ public sealed class CommandHelpRenderer(
 		return path switch
 		{
 			"open" => [0, 1, 2, 3, 4, 5, 130],
-			"analyze" or "tree" or "export context" or "export project" or
+			"analyze" or "related" or "tree" or "export context" or "export project" or
 				"profile export" => [0, 1, 2, 3, 4, 130],
 			"profile import" or "profile save" or
 				"cache list" or "cache remove" or "cache clear" or "cache update" or

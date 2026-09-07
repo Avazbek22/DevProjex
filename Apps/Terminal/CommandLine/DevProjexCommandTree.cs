@@ -73,6 +73,7 @@ public sealed class DevProjexCommandTree
 		root.Subcommands.Add(BuildMcpCommand());
 		root.Subcommands.Add(BuildOpenCommand());
 		root.Subcommands.Add(BuildAnalyzeCommand());
+		root.Subcommands.Add(BuildRelatedCommand());
 		root.Subcommands.Add(BuildTreeCommand());
 		root.Subcommands.Add(BuildExportCommand());
 		root.Subcommands.Add(BuildProfileCommand());
@@ -477,6 +478,105 @@ public sealed class DevProjexCommandTree
 								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
 						.ConfigureAwait(false);
+				},
+				_localization).ConfigureAwait(false);
+		});
+		return command;
+	}
+
+	private Command BuildRelatedCommand()
+	{
+		var command = new Command("related", L("Terminal.Command.Related"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex related Application/Services/ProjectAnalysisService.cs",
+			"devprojex related src/main.ts --direction dependencies --format json");
+		var seed = RequiredArgument("PATH");
+		seed.Description = L("Terminal.Argument.RelatedPath");
+		seed.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.FilesAndDirectories,
+			FileSystemCompletionSource.ResolveProjectDirectory(context)));
+		var project = new Option<string?>("--project")
+		{
+			Description = L("Terminal.Option.RelatedProject"),
+			HelpName = "PROJECT",
+			DefaultValueFactory = _ => Directory.GetCurrentDirectory()
+		};
+		project.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.Directories));
+		var direction = CliChoiceSymbols.Option(
+			"--direction",
+			L("Terminal.Option.RelatedDirection"),
+			CliDependencyDirection.Both,
+			CliChoiceSets.DependencyDirection,
+			_localization);
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		format.Aliases.Add("-f");
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeContentTransformations: false,
+			includeMaxFileBytes: true);
+		command.Arguments.Add(seed);
+		command.Options.Add(project);
+		command.Options.Add(direction);
+		command.Options.Add(format);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var output = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				output,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							output)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(parseResult, cancellationToken)
+						.ConfigureAwait(false);
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
+					return await new RelatedCommandHandler(services, environment).ExecuteAsync(
+						new RelatedCommandRequest(
+							resolvedSource.ProjectPath,
+							parseResult.GetValue(seed) ??
+								throw new InvalidOperationException("The required related seed was not parsed."),
+							spec,
+							parseResult.GetValue(direction) switch
+							{
+								CliDependencyDirection.Dependencies => DependencyDirection.Dependencies,
+								CliDependencyDirection.Dependents => DependencyDirection.Dependents,
+								CliDependencyDirection.Both => DependencyDirection.Both,
+								_ => throw new ArgumentOutOfRangeException()
+							},
+							parseResult.GetValue(format) == CliTextJsonFormat.Json
+								? AnalysisOutputFormat.Json
+								: AnalysisOutputFormat.Text,
+							output,
+							selection.GetMaxFileBytes(parseResult),
+							resolvedSource.RepositorySourceUrl),
+						cancellationToken).ConfigureAwait(false);
 				},
 				_localization).ConfigureAwait(false);
 		});
