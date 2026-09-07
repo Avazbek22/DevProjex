@@ -124,6 +124,37 @@ public sealed class GitleaksSecretDetectorTests
 		Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
 	}
 
+	[Fact(Timeout = 30_000)]
+	public void KeywordPrefilter_MatchesLinearOracleAcrossCaseAndSeparatorVariants()
+	{
+		var separatorContexts = new[]
+		{
+			(string.Empty, string.Empty), (" ", " "), ("\t", "\t"), ("\r", "\n"),
+			("=", ";"), (":", ","), ("/", "/"), (".", "."), ("_", "_"), ("-", "-")
+		};
+		foreach (var ruleId in Detector.InspectRuleIds())
+		{
+			foreach (var keyword in Detector.InspectRuleKeywords(ruleId))
+			{
+				foreach (var spelling in GenerateCaseVariants(keyword))
+				foreach (var (before, after) in separatorContexts)
+				{
+					var content = string.Concat(before, spelling, after);
+					var expected = Detector.InspectCandidateRuleIdsByLinearSearch(
+						"src/keyword.txt",
+						content.AsSpan(),
+						TestContext.Current.CancellationToken);
+					var actual = Detector.InspectCandidateRuleIds(
+						"src/keyword.txt",
+						content.AsSpan(),
+						TestContext.Current.CancellationToken);
+
+					Assert.Equal(expected, actual);
+				}
+			}
+		}
+	}
+
 	[Fact]
 	public void KeywordPrefilter_HybridStorageStaysBelowDenseAlternatives()
 	{

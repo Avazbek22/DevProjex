@@ -212,6 +212,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	internal GitleaksKeywordPrefilterStatistics InspectKeywordPrefilterStatistics() =>
 		_configuration.Value.KeywordPrefilter.GetStatistics();
 
+	internal IReadOnlyList<string> InspectRuleKeywords(string ruleId) =>
+		_configuration.Value.Rules
+			.Single(rule => rule.Id.Equals(ruleId, StringComparison.Ordinal))
+			.Keywords;
+
+	internal IReadOnlyList<string> InspectRuleIds() =>
+		_configuration.Value.Rules.Select(static rule => rule.Id).ToArray();
+
 	internal bool InspectRuleSpecificEvidence(string ruleId, ReadOnlySpan<char> content) =>
 		HasRuleSpecificEvidence(ruleId, content);
 
