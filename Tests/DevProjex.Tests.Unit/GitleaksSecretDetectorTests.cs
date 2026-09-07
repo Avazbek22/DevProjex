@@ -274,6 +274,54 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void Detect_MultilineAllowMarkerDoesNotSuppressANestedFindingFromALaterRule()
+	{
+		var pulumiToken = "pul-" + string.Concat(Enumerable.Repeat("a7d9b3c5", 5));
+		var content =
+			"-----BEGIN " + "PRIVATE KEY-----\n" +
+			"MIIEvQIBADANBgkq" + "hkiG9w0BAQEFAASCBKcwggSjAgEAAoIB\n" +
+			pulumiToken + "\n" +
+			"Ks14IReLcYgADhoXk56ZzXI=\n" +
+			"-----END " + "PRIVATE KEY----- // gitleaks:allow";
+
+		var findings = Detector.Detect("src/key.pem", content, TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(findings, static finding => finding.RuleId == "private-key");
+		var nested = Assert.Single(findings, static finding => finding.RuleId == "pulumi-api-token");
+		Assert.Equal(pulumiToken, nested.Value);
+	}
+
+	[Theory]
+	[InlineData("\n", false)]
+	[InlineData("\r", false)]
+	[InlineData("\r\n", false)]
+	[InlineData("\n", true)]
+	[InlineData("\r", true)]
+	[InlineData("\r\n", true)]
+	public void LineRangeIndex_MultilineCacheNeverBecomesTheLineContextOfANestedMatch(
+		string newline,
+		bool exceedsIndexThreshold)
+	{
+		var prefix = exceedsIndexThreshold ? new string('x', 64 * 1024) + newline : string.Empty;
+		var first = "outer-start";
+		var nested = "apiKey=A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h";
+		var last = "--mount=type=secret, gitleaks:allow";
+		var block = first + newline + nested + newline + last;
+		var content = prefix + block;
+		var blockStart = prefix.Length;
+		var nestedStart = content.IndexOf(nested, StringComparison.Ordinal);
+		var index = new GitleaksSecretDetector.LineRangeIndex(content.AsSpan());
+
+		var multiline = index.GetContainingLine(blockStart, block.Length);
+		var nestedLine = index.GetContainingLine(nestedStart, nested.Length);
+
+		Assert.Contains(newline, content.AsSpan(multiline.Start, multiline.Length).ToString(), StringComparison.Ordinal);
+		Assert.Equal(nested, content.AsSpan(nestedLine.Start, nestedLine.Length).ToString());
+		Assert.DoesNotContain("gitleaks:allow", content.AsSpan(nestedLine.Start, nestedLine.Length).ToString(), StringComparison.Ordinal);
+		Assert.DoesNotContain("--mount=type=secret,", content.AsSpan(nestedLine.Start, nestedLine.Length).ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void Detect_ManyMatchesOnOneLongLine_DoesNotCopyTheLinePerFinding()
 	{
 		Detector.WarmUp(TestContext.Current.CancellationToken);

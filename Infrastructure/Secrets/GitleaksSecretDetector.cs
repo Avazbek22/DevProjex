@@ -1021,18 +1021,22 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return false;
 	}
 
-	private ref struct LineRangeIndex(ReadOnlySpan<char> content)
+	internal ref struct LineRangeIndex(ReadOnlySpan<char> content)
 	{
 		private const int IndexedContentThreshold = 64 * 1024;
 		private readonly ReadOnlySpan<char> _content = content;
 		private int[]? _lineStarts;
 		private int _cachedStart = -1;
 		private int _cachedEnd;
+		private bool _cachedRangeIsSingleLine;
 
 		public LineRange GetContainingLine(int matchStart, int matchLength)
 		{
 			var matchEnd = Math.Min(_content.Length, checked(matchStart + matchLength));
-			if (_cachedStart >= 0 && matchStart >= _cachedStart && matchEnd <= _cachedEnd)
+			if (_cachedRangeIsSingleLine &&
+			    _cachedStart >= 0 &&
+			    matchStart >= _cachedStart &&
+			    matchEnd <= _cachedEnd)
 				return new LineRange(_cachedStart, _cachedEnd - _cachedStart);
 
 			LineRange range;
@@ -1057,6 +1061,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 			_cachedStart = range.Start;
 			_cachedEnd = range.End;
+			_cachedRangeIsSingleLine = _content.Slice(range.Start, range.Length).IndexOfAny('\r', '\n') < 0;
 			return range;
 		}
 
@@ -1082,7 +1087,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		}
 	}
 
-	private readonly record struct LineRange(int Start, int Length)
+	internal readonly record struct LineRange(int Start, int Length)
 	{
 		public int End => checked(Start + Length);
 	}
