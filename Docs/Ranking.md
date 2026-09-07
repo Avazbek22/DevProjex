@@ -123,3 +123,61 @@ On the pinned DevProjex corpus, the beginning of the reviewed report is represen
 [Ranking coverage] facts 64% · resolved internal references 5,138/11,567 (44%) · files with resolved edges 1,221
 [Ranking top] Kernel/Models/IgnoreRules.cs — dependents 138 · dependencies 5 · commits 2/200 · priority 1; graph available; git available; main contribution: graph; confidence limited
 ```
+
+## Focus-seeded evaluation
+
+The `focus-v1` protocol was pre-registered on 2026-09-07 in
+`tools/RankingEval/registry.json` before the first successful evaluation run. It reuses the
+same standard-profile manifest, full-detail transformed content, per-file estimate, and
+greedy admission pass for every comparator. The one seed for each of the existing 15 tasks
+was selected from the task wording, not from its required-file set or ranked output. The
+complete machine-readable result is
+`tools/RankingEval/results/2026-09-07-focus-v1.json`; the product and evaluator SHA for the
+run are both `ced479a3f4e0ecf7ce1903e7815bc35800772e03`.
+
+The six frozen orders are current manifest order, `importance-v1`, seed first without graph
+traversal, `focus-v1` minimum undirected graph hop, evaluation-only personalized PageRank,
+and an explicit seed plus `related_files` in both directions. Personalized PageRank uses
+the registered damping, teleport, dangling-mass, convergence, and quantization rules; it is
+not a product feature. All seeded orders consider the same registered seed first.
+
+Each table cell is `mean RecallNew · AllRequired/oracle/oracle-after-seeds · mean irrelevant-token share`.
+RecallNew excludes the registered seed and is averaged only where the remaining sufficient
+set is non-empty; a seed-only task stays `N/A` rather than becoming perfect recall. Both
+oracles are counts over the five tasks at that repository and budget.
+
+| Repository / budget | Current | Importance | Seed-first | Focus-v1 | Focus-PPR | Directed-from-seed |
+|---|---:|---:|---:|---:|---:|---:|
+| DevProjex / 4,000 | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 0.8628` | `0.1000 · 0/1/1 · 0.8482` | `0.1000 · 0/1/1 · 0.8481` | `0.1000 · 0/1/1 · 0.7511` |
+| DevProjex / 8,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.7997` | `0.2000 · 0/2/2 · 0.7409` | `0.1000 · 0/2/2 · 0.7924` | `0.2000 · 0/2/2 · 0.5611` |
+| DevProjex / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.8999` | `0.1000 · 0/2/2 · 0.8962` | `0.2000 · 0/2/2 · 0.7574` | `0.1000 · 0/2/2 · 0.7375` |
+| Repomix / 4,000 | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 0.4111` | `0.0000 · 0/1/1 · 0.4110` | `0.0000 · 0/1/1 · 0.4109` | `0.0000 · 0/1/1 · 0.3883` |
+| Repomix / 8,000 | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 0.7055` | `0.2000 · 1/3/3 · 0.6202` | `0.3000 · 1/3/3 · 0.5349` | `0.2000 · 1/3/3 · 0.5965` |
+| Repomix / 16,000 | `0.0000 · 0/5/5 · 1.0000` | `0.0000 · 0/5/5 · 1.0000` | `0.0000 · 0/5/5 · 0.8528` | `0.4000 · 2/5/5 · 0.7538` | `0.3000 · 1/5/5 · 0.7675` | `0.4000 · 2/5/5 · 0.7013` |
+| Flask / 4,000 | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 0.7098` | `0.0000 · 0/0/0 · 0.7097` | `0.0000 · 0/0/0 · 0.7097` | `0.0000 · 0/0/0 · 0.6845` |
+| Flask / 8,000 | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5262` |
+| Flask / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.9412` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5368` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5310` |
+
+### Focus cost and release decision
+
+Timing and peak working set use seven independent process repetitions and the median. Cold
+repetitions use fresh application data; warm repetitions prime the same manifest and
+application caches once before the measured invocation. RSS columns are
+`importance-v1 / focus-v1` in MiB. Maximum RSS growth is the greater cold or warm median
+growth for the corpus.
+
+| Repository | Cold ms (importance / focus) | Warm ms (importance / focus) | Warm focus addition | Cold RSS MiB | Warm RSS MiB | Maximum RSS growth |
+|---|---:|---:|---:|---:|---:|---:|
+| DevProjex | `2730.19 / 2724.33` | `901.93 / 912.95` | `+11.02 ms (1.22%)` | `282.34 / 283.85` | `291.89 / 297.72` | `2.00%` |
+| Repomix | `815.47 / 848.59` | `424.31 / 417.79` | `-6.52 ms (-1.54%)` | `109.83 / 109.89` | `107.22 / 107.47` | `0.23%` |
+| Flask | `587.95 / 588.12` | `275.44 / 294.17` | `+18.73 ms (6.80%)` | `84.15 / 84.17` | `84.95 / 85.17` | `0.25%` |
+
+Fifteen of the 45 task-budget cells had a feasible oracle after the real seed admission and
+a defined RecallNew. Across those cells, `focus-v1 - seed-first` mean RecallNew was
+`+0.3000`; the repository deltas were DevProjex `+0.1000`, Repomix `+0.3333`, and Flask
+`+1.0000`. There were zero cells where focus regressed a seed-first `AllRequired` success.
+Every warm increment was below `max(5% of importance time, 100 ms)`, and maximum median RSS
+growth was below 10% on every corpus. All three pre-registered gates therefore pass, so the
+public `focus`/`--focus` input is eligible for v5.2. This is still experimental: the protocol
+shows improved file admission around a known seed, not better model attention or task
+correctness.
