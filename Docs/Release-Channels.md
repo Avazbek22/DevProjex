@@ -15,29 +15,25 @@ Perform these steps in order:
    `@devprojex/cli-win32-x64`, `@devprojex/cli-win32-arm64`,
    `@devprojex/cli-linux-x64`, `@devprojex/cli-linux-arm64`,
    `@devprojex/cli-darwin-x64`, and `@devprojex/cli-darwin-arm64`.
-3. Create a short-lived granular npm access token that can publish exactly those
-   seven packages.
-4. Download the already gated artifacts from a successful dry run. Publish the six
-   platform tarballs first with the granular token, then publish the `devprojex`
-   launcher tarball. This bootstrap is required because npm trusted publishers can
-   be configured only for existing packages.
-5. On each of the seven npm packages, configure the GitHub Actions trusted publisher
+3. Download the already gated artifacts from a successful dry run. From a clean local
+   directory, use `npm login` with two-factor authentication, publish the six platform
+   tarballs first with `npm publish`, then publish the `devprojex` launcher tarball.
+   This bootstrap is required because npm trusted publishers can be configured only
+   for existing packages; it does not require an npm access token.
+4. On each of the seven npm packages, configure the GitHub Actions trusted publisher
    with repository `Avazbek22/DevProjex`, workflow filename
    `publish-packages.yml`, and environment `npm`.
-6. Delete the granular npm access token and verify that no repository or environment
-   secret contains it.
-7. Reserve the NuGet package IDs `devprojex`, `devprojex.win-x64`,
-   `devprojex.win-arm64`, `devprojex.linux-x64`, `devprojex.linux-arm64`,
-   `devprojex.osx-x64`, and `devprojex.osx-arm64`.
-8. In the NuGet account, configure trusted publishing for repository
+5. In the NuGet account, configure trusted publishing for repository
    `Avazbek22/DevProjex`, workflow filename `publish-packages.yml`, environment
-   `nuget`, and the seven package IDs.
-9. Add the GitHub repository variable `NUGET_USER` with the NuGet account username;
+   `nuget`, and package scope **new packages** with the glob `devprojex*`. This policy
+   creates the seven package IDs on their first workflow push; no separate reservation
+   is needed.
+6. Add the GitHub repository variable `NUGET_USER` with the NuGet account username;
    do not add a long-lived NuGet API-key secret.
-10. Run **Publish Headless Packages** on the release branch with the intended
+7. Run **Publish Headless Packages** on the release branch with the intended
     `version`, `channels=both`, and `dry_run=true`. Confirm that build, static gate,
     mutation gate, and all three OS smoke jobs are green.
-11. Re-run the same workflow and version with `channels=both` and `dry_run=false`.
+8. Re-run the same workflow and version with `channels=both` and `dry_run=false`.
     The workflow publishes six NuGet RID packages before the pointer, and six npm
     platform packages before the launcher; it does not use skip-duplicate behavior.
 

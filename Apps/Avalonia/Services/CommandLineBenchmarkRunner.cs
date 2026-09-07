@@ -2,9 +2,11 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DevProjex.Application.Context;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Infrastructure.Reports;
 using DevProjex.Terminal.DesktopControl;
+using DevProjex.Terminal.Execution;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -108,7 +110,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		CommandLineBenchmarkRunConfiguration configuration,
 		CancellationToken cancellationToken)
 	{
-		var services = context.ServicesFactory();
+		using var services = context.ServicesFactory();
 		var runs = new List<CommandLineBenchmarkPipelineRun>(configuration.TotalRuns);
 		for (var index = 0; index < configuration.TotalRuns; index++)
 		{
@@ -150,6 +152,9 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		using var ignoreMeasurement = captureDiagnostics
 			? IgnorePipelineDiagnostics.BeginMeasurement()
 			: null;
+		using var contentMeasurement = captureDiagnostics
+			? ContentPipelineDiagnostics.BeginMeasurement()
+			: null;
 		using var process = Process.GetCurrentProcess();
 		var cpuBefore = TryGetTotalProcessorTime(process);
 		var managedBefore = GC.GetTotalMemory(forceFullCollection: false);
@@ -161,6 +166,8 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		var stopwatch = Stopwatch.StartNew();
 		var stdout = string.Empty;
 		ProjectAnalysisReport? analysisReport = null;
+		var exportMilliseconds = (double?)null;
+		var exportBytes = 0L;
 		string? error = null;
 		var exitCode = CommandLineExitCodes.Success;
 
@@ -180,6 +187,25 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			await services.ReportWriter.WriteAsync(analysisReport, writer, cancellationToken)
 				.ConfigureAwait(false);
 			stdout = writer.ToString();
+
+			var exportStopwatch = Stopwatch.StartNew();
+			var exportPlan = await services.ContextFactory.BuildAsync(
+					targetPath,
+					ProjectSelectionSpec.Standard,
+					cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+			await using var exportOutput = new MemoryStream();
+			await services.ContextDocumentService.WriteCompleteAsync(
+					exportPlan,
+					ProjectContextView.TreeContent,
+					ProjectContextDocumentFormat.Markdown,
+					exportOutput,
+					cancellationToken,
+					plain: true)
+				.ConfigureAwait(false);
+			exportStopwatch.Stop();
+			exportMilliseconds = exportStopwatch.Elapsed.TotalMilliseconds;
+			exportBytes = exportOutput.Length;
 		}
 		catch (OperationCanceledException)
 		{
@@ -223,8 +249,11 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			LoadingMilliseconds: analysisReport?.Timing.LoadingMilliseconds,
 			AnalysisMilliseconds: analysisReport?.Timing.AnalysisMilliseconds,
 			ReportedTotalMilliseconds: analysisReport?.Timing.TotalMilliseconds,
+			ExportMilliseconds: exportMilliseconds,
+			ExportBytes: exportBytes,
 			Workload: workload,
 			Diagnostics: ignoreMeasurement?.Capture() ?? IgnorePipelineDiagnosticSnapshot.Empty,
+			ContentDiagnostics: contentMeasurement?.Capture() ?? new ContentPipelineDiagnosticSnapshot(0, 0, 0, 0, 0),
 			ExitCode: exitCode,
 			Error: error);
 	}
@@ -350,6 +379,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 	private async Task WriteSummaryAsync(CommandLineBenchmarkReport report, CancellationToken cancellationToken)
 	{
 		var diagnostics = report.WarmPipelineDiagnostics.Median;
+		var contentDiagnostics = report.WarmContentPipelineDiagnostics.Median;
 		var lines = new[]
 		{
 			"DevProjex benchmark",
@@ -366,7 +396,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			$"  median cpu: {FormatMilliseconds(report.ColdProcess.Summary.MedianCpuMilliseconds)}",
 			$"  peak memory: {FormatMegabytes(report.ColdProcess.Summary.PeakWorkingSetBytes)}",
 			string.Empty,
-			"Warm pipeline:",
+			"Warm pipeline (analyze + export context):",
 			$"  avg wall: {FormatMilliseconds(report.WarmPipeline.Summary.AvgWallMilliseconds)}",
 			$"  median wall: {FormatMilliseconds(report.WarmPipeline.Summary.MedianWallMilliseconds)}",
 			$"  min/max: {FormatMilliseconds(report.WarmPipeline.Summary.MinWallMilliseconds)} / {FormatMilliseconds(report.WarmPipeline.Summary.MaxWallMilliseconds)}",
@@ -378,6 +408,9 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			$"  median loading: {FormatMilliseconds(report.WarmPipeline.Summary.MedianLoadingMilliseconds)}",
 			$"  avg analysis: {FormatMilliseconds(report.WarmPipeline.Summary.AvgAnalysisMilliseconds)}",
 			$"  median analysis: {FormatMilliseconds(report.WarmPipeline.Summary.MedianAnalysisMilliseconds)}",
+			$"  avg export: {FormatMilliseconds(report.WarmPipeline.Summary.AvgExportMilliseconds)}",
+			$"  median export: {FormatMilliseconds(report.WarmPipeline.Summary.MedianExportMilliseconds)}",
+			$"  avg export bytes: {report.WarmPipeline.Summary.AvgExportBytes?.ToString(CultureInfo.InvariantCulture) ?? "n/a"}",
 			$"  managed memory: {FormatMegabytes(report.WarmPipeline.Summary.ManagedMemoryAfterBytes)}",
 			$"  workload stable: {report.WorkloadConsistent.ToString(CultureInfo.InvariantCulture)}",
 			$"  selection stable: {report.SelectionConsistent.ToString(CultureInfo.InvariantCulture)}",
@@ -394,6 +427,14 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			$"  gitignore loads: requests={diagnostics.GitIgnoreLoadRequests}, executions={diagnostics.GitIgnoreLoadExecutions}, reuses={diagnostics.GitIgnoreLoadReuses}",
 			$"  gitignore reads: requests={diagnostics.GitIgnoreSourceReadRequests}, bytes={diagnostics.GitIgnoreSourceBytes}",
 			$"  diagnostics stable: {report.WarmPipelineDiagnostics.Consistent.ToString(CultureInfo.InvariantCulture)}",
+			string.Empty,
+			"Content pipeline (post-measurement diagnostic probes):",
+			$"  full file reads: {contentDiagnostics.FullFileReads}",
+			$"  full file read bytes: {contentDiagnostics.FullFileReadBytes}",
+			$"  content fingerprints: {contentDiagnostics.ContentFingerprintComputations}",
+			$"  plan applications: {contentDiagnostics.PlanApplications}",
+			$"  occurrence IDs: {contentDiagnostics.OccurrenceIdComputations}",
+			$"  diagnostics stable: {report.WarmContentPipelineDiagnostics.Consistent.ToString(CultureInfo.InvariantCulture)}",
 			string.Empty,
 			"Result:",
 			$"  {report.OutputPath}"
@@ -563,24 +604,6 @@ internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBen
 				ExitCode: CommandLineExitCodes.RuntimeError,
 				Error: ex.Message);
 		}
-		finally
-		{
-			DeleteConsumedInternalRequest(request);
-		}
-	}
-
-	private static void DeleteConsumedInternalRequest(CommandLineBenchmarkProcessRequest request)
-	{
-		if (request.Environment is null ||
-		    !request.Environment.TryGetValue(
-			    DesktopDiagnosticRequestStore.EnvironmentVariable,
-			    out var path) ||
-		    string.IsNullOrWhiteSpace(path))
-		{
-			return;
-		}
-
-		DesktopDiagnosticRequestStore.Delete(path);
 	}
 
 	private static ProcessStartInfo BuildStartInfo(CommandLineBenchmarkProcessRequest request)
@@ -712,16 +735,45 @@ internal sealed record CommandLineBenchmarkContext(
 	ICommandLineBenchmarkProcessRunner ProcessRunner,
 	Func<string> LocalAppDataProvider);
 
-internal sealed record BenchmarkAnalysisServices(
+internal sealed class BenchmarkAnalysisServices(
 	ProjectAnalysisService AnalysisService,
-	ProjectAnalysisReportWriter ReportWriter);
+	ProjectAnalysisReportWriter ReportWriter,
+	TerminalProjectContextFactory ContextFactory,
+	ProjectContextDocumentService ContextDocumentService,
+	IDisposable ownedLifetime) : IDisposable
+{
+	private IDisposable? _ownedLifetime = ownedLifetime;
+
+	public ProjectAnalysisService AnalysisService { get; } = AnalysisService;
+	public ProjectAnalysisReportWriter ReportWriter { get; } = ReportWriter;
+	public TerminalProjectContextFactory ContextFactory { get; } = ContextFactory;
+	public ProjectContextDocumentService ContextDocumentService { get; } = ContextDocumentService;
+
+	public void Dispose() => Interlocked.Exchange(ref _ownedLifetime, null)?.Dispose();
+}
 
 internal sealed record CommandLineBenchmarkProcessRequest(
 	string FileName,
 	IReadOnlyList<string> Arguments,
 	string WorkingDirectory,
 	string CommandLine,
-	IReadOnlyDictionary<string, string?>? Environment = null);
+	IReadOnlyDictionary<string, string?>? Environment = null) : IDisposable
+{
+	private int _disposed;
+
+	public void Dispose()
+	{
+		if (Interlocked.Exchange(ref _disposed, 1) != 0 ||
+		    Environment is null ||
+		    !Environment.TryGetValue(DesktopDiagnosticRequestStore.EnvironmentVariable, out var path) ||
+		    string.IsNullOrWhiteSpace(path))
+		{
+			return;
+		}
+
+		DesktopDiagnosticRequestStore.Delete(path);
+	}
+}
 
 internal sealed record CommandLineBenchmarkRunConfiguration(
 	int Runs,
@@ -753,6 +805,7 @@ internal sealed record CommandLineBenchmarkReport(
 	CommandLineBenchmarkSection<CommandLineBenchmarkProcessRun> ColdProcess,
 	CommandLineBenchmarkSection<CommandLineBenchmarkPipelineRun> WarmPipeline,
 	CommandLineBenchmarkDiagnosticSummary WarmPipelineDiagnostics,
+	CommandLineBenchmarkContentDiagnosticSummary WarmContentPipelineDiagnostics,
 	IReadOnlyList<CommandLineBenchmarkPipelineRun> WarmPipelineDiagnosticRuns,
 	bool HasFailures,
 	string OutputPath)
@@ -798,7 +851,7 @@ internal sealed record CommandLineBenchmarkReport(
 		var workloadConsistent = selectionConsistent && inventoryConsistent && metricsConsistent;
 
 		return new CommandLineBenchmarkReport(
-			SchemaVersion: 3,
+			SchemaVersion: 4,
 			CreatedAt: createdAt,
 			TargetPath: Path.GetFullPath(targetPath).Replace('\\', '/'),
 			ApplicationVersion: applicationVersion,
@@ -822,6 +875,10 @@ internal sealed record CommandLineBenchmarkReport(
 				WarmupRuns: warmRuns.Where(static run => run.IsWarmup).ToArray(),
 				Runs: warmMeasuredRuns),
 			WarmPipelineDiagnostics: CommandLineBenchmarkDiagnosticSummary.FromRuns(
+				warmDiagnosticRuns
+					.Where(static run => run.ExitCode == CommandLineExitCodes.Success)
+					.ToArray()),
+			WarmContentPipelineDiagnostics: CommandLineBenchmarkContentDiagnosticSummary.FromRuns(
 				warmDiagnosticRuns
 					.Where(static run => run.ExitCode == CommandLineExitCodes.Success)
 					.ToArray()),
@@ -1066,6 +1123,56 @@ internal sealed record CommandLineBenchmarkDiagnosticSummary(
 	}
 }
 
+internal sealed record CommandLineBenchmarkContentDiagnosticSummary(
+	int Count,
+	bool Consistent,
+	ContentPipelineDiagnosticSnapshot Minimum,
+	ContentPipelineDiagnosticSnapshot Median,
+	ContentPipelineDiagnosticSnapshot Maximum)
+{
+	public static CommandLineBenchmarkContentDiagnosticSummary FromRuns(
+		IReadOnlyList<CommandLineBenchmarkPipelineRun> runs)
+	{
+		if (runs.Count == 0)
+		{
+			var empty = new ContentPipelineDiagnosticSnapshot(0, 0, 0, 0, 0);
+			return new CommandLineBenchmarkContentDiagnosticSummary(0, true, empty, empty, empty);
+		}
+
+		var first = runs[0].ContentDiagnostics;
+		return new CommandLineBenchmarkContentDiagnosticSummary(
+			runs.Count,
+			Consistent: runs.Skip(1).All(run => run.ContentDiagnostics == first),
+			Minimum: Aggregate(runs, static values => values.Min()),
+			Median: Aggregate(runs, MedianValue),
+			Maximum: Aggregate(runs, static values => values.Max()));
+	}
+
+	private static ContentPipelineDiagnosticSnapshot Aggregate(
+		IReadOnlyList<CommandLineBenchmarkPipelineRun> runs,
+		Func<long[], long> aggregate)
+	{
+		long Read(Func<ContentPipelineDiagnosticSnapshot, long> selector) =>
+			aggregate(runs.Select(run => selector(run.ContentDiagnostics)).ToArray());
+
+		return new ContentPipelineDiagnosticSnapshot(
+			Read(static value => value.FullFileReads),
+			Read(static value => value.FullFileReadBytes),
+			Read(static value => value.ContentFingerprintComputations),
+			Read(static value => value.PlanApplications),
+			Read(static value => value.OccurrenceIdComputations));
+	}
+
+	private static long MedianValue(long[] values)
+	{
+		Array.Sort(values);
+		var middle = values.Length / 2;
+		return values.Length % 2 == 0
+			? (long)Math.Round(values[middle - 1] / 2d + values[middle] / 2d, MidpointRounding.AwayFromZero)
+			: values[middle];
+	}
+}
+
 internal sealed record CommandLineBenchmarkSummary(
 	int Count,
 	int SuccessfulCount,
@@ -1086,7 +1193,10 @@ internal sealed record CommandLineBenchmarkSummary(
 	double? AvgAnalysisMilliseconds,
 	double? MedianAnalysisMilliseconds,
 	double? AvgReportedTotalMilliseconds,
-	long? AvgStdoutBytes)
+	long? AvgStdoutBytes,
+	double? AvgExportMilliseconds,
+	double? MedianExportMilliseconds,
+	long? AvgExportBytes)
 {
 	public static CommandLineBenchmarkSummary FromProcessRuns(IReadOnlyList<CommandLineBenchmarkProcessRun> runs)
 	{
@@ -1104,7 +1214,9 @@ internal sealed record CommandLineBenchmarkSummary(
 			loadingMilliseconds: null,
 			analysisMilliseconds: null,
 			reportedTotalMilliseconds: null,
-			stdoutBytes: successfulRuns.Select(static run => (long?)run.StdoutBytes).ToArray());
+			stdoutBytes: successfulRuns.Select(static run => (long?)run.StdoutBytes).ToArray(),
+			exportMilliseconds: null,
+			exportBytes: null);
 	}
 
 	public static CommandLineBenchmarkSummary FromPipelineRuns(IReadOnlyList<CommandLineBenchmarkPipelineRun> runs)
@@ -1123,7 +1235,9 @@ internal sealed record CommandLineBenchmarkSummary(
 			loadingMilliseconds: successfulRuns.Select(static run => run.LoadingMilliseconds).ToArray(),
 			analysisMilliseconds: successfulRuns.Select(static run => run.AnalysisMilliseconds).ToArray(),
 			reportedTotalMilliseconds: successfulRuns.Select(static run => run.ReportedTotalMilliseconds).ToArray(),
-			stdoutBytes: successfulRuns.Select(static run => (long?)run.StdoutBytes).ToArray());
+			stdoutBytes: successfulRuns.Select(static run => (long?)run.StdoutBytes).ToArray(),
+			exportMilliseconds: successfulRuns.Select(static run => run.ExportMilliseconds).ToArray(),
+			exportBytes: successfulRuns.Select(static run => (long?)run.ExportBytes).ToArray());
 	}
 
 	private static CommandLineBenchmarkSummary Create(
@@ -1139,7 +1253,9 @@ internal sealed record CommandLineBenchmarkSummary(
 		IReadOnlyList<double?>? loadingMilliseconds,
 		IReadOnlyList<double?>? analysisMilliseconds,
 		IReadOnlyList<double?>? reportedTotalMilliseconds,
-		IReadOnlyList<long?> stdoutBytes)
+		IReadOnlyList<long?> stdoutBytes,
+		IReadOnlyList<double?>? exportMilliseconds,
+		IReadOnlyList<long?>? exportBytes)
 	{
 		return new CommandLineBenchmarkSummary(
 			Count: count,
@@ -1163,7 +1279,10 @@ internal sealed record CommandLineBenchmarkSummary(
 			AvgReportedTotalMilliseconds: reportedTotalMilliseconds is null
 				? null
 				: AverageNullable(reportedTotalMilliseconds),
-			AvgStdoutBytes: AverageNullableLong(stdoutBytes));
+			AvgStdoutBytes: AverageNullableLong(stdoutBytes),
+			AvgExportMilliseconds: exportMilliseconds is null ? null : AverageNullable(exportMilliseconds),
+			MedianExportMilliseconds: exportMilliseconds is null ? null : MedianNullable(exportMilliseconds),
+			AvgExportBytes: exportBytes is null ? null : AverageNullableLong(exportBytes));
 	}
 
 	private static double Average(IReadOnlyList<double> values) =>
@@ -1258,7 +1377,10 @@ internal sealed record CommandLineBenchmarkPipelineRun(
 	double? LoadingMilliseconds,
 	double? AnalysisMilliseconds,
 	double? ReportedTotalMilliseconds,
+	double? ExportMilliseconds,
+	long ExportBytes,
 	CommandLineBenchmarkWorkload? Workload,
 	IgnorePipelineDiagnosticSnapshot Diagnostics,
+	ContentPipelineDiagnosticSnapshot ContentDiagnostics,
 	int ExitCode,
 	string? Error);

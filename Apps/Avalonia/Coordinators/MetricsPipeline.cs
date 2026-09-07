@@ -17,7 +17,8 @@ internal sealed class MetricsPipeline(
     Func<ExportPathPresentation?> exportPathPresentationProvider,
     Func<double> boundsWidthProvider,
     Action<MemoryCleanupReason>? scheduleMemoryCleanup = null,
-    Func<ContentTransformationContext?>? transformationContextProvider = null) : IDisposable
+    Func<ContentTransformationContext?>? transformationContextProvider = null,
+    BackgroundTaskRegistry? backgroundTasks = null) : IDisposable
 {
     private readonly record struct TreeMetricsCacheKey(
         int TreeIdentity,
@@ -100,6 +101,8 @@ internal sealed class MetricsPipeline(
     private readonly Dictionary<string, FileMetricsCacheEntry> _fileMetricsCache =
         new(ProjectTreePathIdentity.CanonicalComparer);
     private readonly CodeCompressionPrewarmer _compressionPrewarmer = new(fileContentAnalyzer);
+	private readonly BackgroundTaskRegistry _backgroundTasks = backgroundTasks ?? new();
+	private readonly bool _ownsBackgroundTasks = backgroundTasks is null;
 
     private CancellationTokenSource? _metricsCalculationCts;
     private CancellationTokenSource? _compressionPrewarmCts;
@@ -284,7 +287,7 @@ internal sealed class MetricsPipeline(
 
         if (!hasCompleteMetricsBaseline)
         {
-            _ = RecalculateIncompleteBaselineMetricsAsync(
+            _backgroundTasks.Register(RecalculateIncompleteBaselineMetricsAsync(
                 recalcCts,
                 token,
                 recalcVersion,
@@ -293,7 +296,8 @@ internal sealed class MetricsPipeline(
                 treeFormat,
                 currentTree,
                 currentPath,
-                cleanupAfterCompletion);
+                cleanupAfterCompletion),
+			nameof(RecalculateIncompleteBaselineMetricsAsync));
             return;
         }
 
@@ -305,7 +309,7 @@ internal sealed class MetricsPipeline(
             return;
         }
 
-        _ = RecalculateMetricsCoreAsync(
+        _backgroundTasks.Register(RecalculateMetricsCoreAsync(
             recalcCts,
             token,
             recalcVersion,
@@ -314,7 +318,8 @@ internal sealed class MetricsPipeline(
             treeFormat,
             currentTree,
             currentPath,
-            cleanupAfterCompletion);
+            cleanupAfterCompletion),
+			nameof(RecalculateMetricsCoreAsync));
     }
 
     public async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
@@ -635,6 +640,9 @@ internal sealed class MetricsPipeline(
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
+
+		if (_ownsBackgroundTasks)
+			_backgroundTasks.Dispose();
 
         CancelAndDispose(ref _metricsCalculationCts);
         CancelAndDispose(ref _recalculateMetricsCts);
@@ -1272,6 +1280,7 @@ internal sealed class MetricsPipeline(
             Trace.TraceError(
                 "File metrics recovery failed: {0}",
                 exception);
+			throw;
         }
         finally
         {
@@ -1829,9 +1838,11 @@ internal sealed class MetricsPipeline(
         }
     }
 
-    private static CancellationTokenSource ReplaceCancellationSource(ref CancellationTokenSource? target)
+    private CancellationTokenSource ReplaceCancellationSource(ref CancellationTokenSource? target)
     {
-        var cts = new CancellationTokenSource();
+		var cts = _backgroundTasks.LifetimeToken.CanBeCanceled
+			? CancellationTokenSource.CreateLinkedTokenSource(_backgroundTasks.LifetimeToken)
+			: new CancellationTokenSource();
         var previous = Interlocked.Exchange(ref target, cts);
         previous?.Cancel();
         previous?.Dispose();

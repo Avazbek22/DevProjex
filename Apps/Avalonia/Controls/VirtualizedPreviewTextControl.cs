@@ -2956,7 +2956,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var hit = HitTestSelectionPosition(point);
 		if (TryGetRedactionAt(hit, out var redaction))
 		{
-			if (redaction.Source.HasFlag(SecretFindingSource.Detector))
+			if (IsActiveDetectorCandidate(redaction))
 				_contextDetectorRedaction = redaction;
 			if (HasManualMarkIdentity(redaction))
 			{
@@ -2989,7 +2989,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 		_contextRuleOccurrenceIds = [];
 		_contextFileOccurrenceIds = [];
-		var visible = _contextDetectorRedaction is not null && Document is not null;
+		var visible = _contextDetectorRedaction is { } detectorRedaction &&
+		              IsActiveDetectorCandidate(detectorRedaction) &&
+		              Document is not null;
 		_bulkRuleRedactionMenuItem.IsVisible = visible;
 		_bulkFileRedactionMenuItem.IsVisible = visible;
 		if (!visible)
@@ -3020,7 +3022,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var fileOccurrenceIds = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var span in document.Redactions)
 		{
-			if (!span.Source.HasFlag(SecretFindingSource.Detector))
+			if (!IsActiveDetectorCandidate(span))
 				continue;
 
 			if (string.Equals(span.RuleId, target.RuleId, StringComparison.Ordinal))
@@ -3128,6 +3130,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private static bool HasManualMarkIdentity(PreviewRedactionSpan redaction) =>
 		redaction.PersistentMarkHash is { Length: > 0 } ||
 		redaction.SessionMarkId is { Length: > 0 };
+
+	private static bool IsActiveDetectorCandidate(PreviewRedactionSpan redaction) =>
+		redaction.Source.HasFlag(SecretFindingSource.Detector) &&
+		!HasManualMarkIdentity(redaction);
 
 	private bool IsFileContentSelection(PreviewSelectionRange selection)
 	{

@@ -966,6 +966,7 @@ public partial class MainWindow
     private readonly IReadOnlyList<string> _startupErrors;
     private readonly ITerminalCommandSetupService _terminalCommandSetupService;
     private readonly SessionMetricsRecorder _sessionMetrics;
+	private readonly BackgroundTaskRegistry _backgroundTasks;
 	private readonly SecretRedactionSession _secretRedactionSession;
 	private readonly CodeCompressionSession _codeCompressionSession;
 	private CodeCompressionSnapshot? _codeCompressionSnapshot;
@@ -1030,6 +1031,9 @@ public partial class MainWindow
         _terminalCommandSetupService = services.TerminalCommandSetupService;
 		_desktopControlServerFactory = services.DesktopControlServerFactory;
         _sessionMetrics = services.SessionMetricsRecorder;
+		_backgroundTasks = new BackgroundTaskRegistry(
+			_windowLifetimeCts.Token,
+			ReportBackgroundTaskFailure);
 		_secretRedactionSession = services.SecretRedactionSession;
 		_codeCompressionSession = services.CodeCompressionSession;
 		_secretRedactionPreparer = new SecretRedactionOutputPreparer(services.FileContentAnalyzer);
@@ -1066,7 +1070,8 @@ public partial class MainWindow
             CreateExportPathPresentation,
             () => Bounds.Width,
             ScheduleBackgroundMemoryCleanup,
-            () => PublishedTransformationContext);
+            () => PublishedTransformationContext,
+			_backgroundTasks);
         _previewPipeline = new PreviewWorkspacePipeline(
             this,
             // 350ms delay ensures thumb animation (250ms) completes fully before loading.
@@ -1360,7 +1365,8 @@ public partial class MainWindow
             SettingsPanelAnimationDuration,
             () => new MemoryCleanupRetentionSnapshot(
                 _codeCompressionSession.Diagnostics.RetainedCacheBytes,
-                _metrics.RetainedReadFactBytes));
+                _metrics.RetainedReadFactBytes),
+			_backgroundTasks);
         _treeViewport = new TreeViewportController(
             _viewModel,
             new TreeViewportControls(

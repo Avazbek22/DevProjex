@@ -16,6 +16,7 @@ on:
       - 'Scripts/*Headless*'
       - 'Scripts/*Release*'
       - 'Scripts/release-archive-helpers.ps1'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
       - 'Directory.Build.*'
   workflow_dispatch:
     inputs:
@@ -63,6 +64,14 @@ jobs:
             exit 1
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate release version metadata
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ReleaseVersion.ps1
+          -ResolvedVersion '${{ steps.version.outputs.version }}'
+          -EventName '${{ github.event_name }}'
+          -ReleaseTag '${{ github.event.release.tag_name }}'
 
   build-gate:
     name: Cross-build, validate, and smoke container payloads

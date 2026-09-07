@@ -1905,6 +1905,9 @@ public partial class MainWindow : Window
             await AnimateSettingsPanelAsync(true);
     }
 
+    private static void ReportBackgroundTaskFailure(string operationName, Exception exception) =>
+		Debug.WriteLine($"[WARN] Background task '{operationName}' failed: {exception}");
+
     private static async void ObserveDetachedTask(Task task, string operationName)
     {
         try
@@ -1921,7 +1924,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[WARN] Background task '{operationName}' failed: {ex}");
+			ReportBackgroundTaskFailure(operationName, ex);
         }
     }
 

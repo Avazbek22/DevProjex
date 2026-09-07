@@ -3,6 +3,7 @@ using System.IO.Compression;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Application.Context;
 using DevProjex.Application.Presentation;
+using DevProjex.Application.Preview;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Services;
@@ -3865,6 +3866,31 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			if (border.Background is ISolidColorBrush background)
 				yield return background;
 		}
+	}
+
+	[AvaloniaFact]
+	public void ManualMarkMatchingDetector_DoesNotOfferDetectorBulkActions()
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[manual-secret#1]";
+		using var document = new InMemoryPreviewTextDocument(
+			placeholder,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					"manual-over-detector",
+					"manual-secret",
+					1,
+					0,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					Source: SecretFindingSource.PersistentMark | SecretFindingSource.Detector,
+					PersistentMarkHash: "manual-hash",
+					RelativePath: "src/Secrets.cs")
+			]);
+		var control = new VirtualizedPreviewTextControl { Document = document };
+		Assert.Equal(
+			(false, false),
+			UiTestDriver.GetBulkRedactionMenuVisibility(control, "manual-over-detector"));
 	}
 
 	[AvaloniaFact]

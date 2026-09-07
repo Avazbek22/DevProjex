@@ -130,6 +130,53 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		Assert.Contains("DevProjex.Assets.Localization.en.json", result.StandardOutput, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void ReleaseVersionGateNamesTagAndRepositoryVersionsOnMismatch()
+	{
+		using var workspace = new TemporaryDirectory();
+		var propsPath = Path.Combine(workspace.Path, "Directory.Build.props");
+		File.WriteAllText(propsPath,
+			"<Project><PropertyGroup><DevProjexVersion>5.2</DevProjexVersion></PropertyGroup></Project>",
+			new UTF8Encoding(false));
+
+		var result = RunPowerShell(Path.Combine(RepoRoot.Value, "Scripts", "ci", "Test-ReleaseVersion.ps1"),
+			["-ResolvedVersion", "5.3", "-EventName", "release", "-ReleaseTag", "v5.3", "-PropsPath", propsPath]);
+
+		Assert.NotEqual(0, result.ExitCode);
+		Assert.Contains(
+			"Release tag version '5.3' does not match DevProjexVersion '5.2' in Directory.Build.props.",
+			result.StandardOutput + result.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void AppImageValidatorChecksTheSingleFilePublishAgainstItsReceipt()
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateAppImagePublishFixture(workspace.Path);
+
+		var result = RunValidator(workspace.Path, "appimage", "linux-x64");
+
+		Assert.True(result.ExitCode == 0, result.StandardOutput + result.StandardError);
+		Assert.Contains("Channel appimage: VALIDATED; PARTIAL RID set", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void AppImageMutationGateRejectsADamagedEmbeddedResource()
+	{
+		using var workspace = new TemporaryDirectory();
+		CreateAppImagePublishFixture(workspace.Path);
+
+		var result = RunPowerShell(
+			Path.Combine(RepoRoot.Value, "Scripts", "Test-ReleaseArtifactGateMutation.ps1"),
+			["-PublishRoot", Path.Combine(workspace.Path, "publish"), "-Version", Version,
+				"-Channels", "appimage", "-Rids", "linux-x64"]);
+
+		Assert.True(result.ExitCode == 0, result.StandardOutput + result.StandardError);
+		Assert.Contains("AppImage publish:linux-x64", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("DevProjex.Assets.Localization.en.json", result.StandardOutput, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData(null, null)]
 	[InlineData("missing-file", "receipt-only.dat")]
@@ -442,6 +489,17 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 		}
 		if (mutation == "extra-file") File.WriteAllText(Path.Combine(payloadDirectory, "unexpected.dat"), "extra");
 		WriteReceipt(Path.Combine(releaseDirectory, "publish-payload.linux-x64.json"), "linux-x64", receiptFiles);
+	}
+
+	private static void CreateAppImagePublishFixture(string workspaceRoot)
+	{
+		var releaseDirectory = Path.Combine(workspaceRoot, "publish", "appimage", $"v{Version}");
+		var payloadDirectory = Path.Combine(releaseDirectory, "linux-x64");
+		Directory.CreateDirectory(payloadDirectory);
+		var payload = CreateFixturePayload();
+		File.WriteAllBytes(Path.Combine(payloadDirectory, "DevProjex"), CreateBundle(payload));
+		WriteReceipt(Path.Combine(releaseDirectory, "publish-payload.linux-x64.json"),
+			"linux-x64", payload.Select(ToReceiptFile).ToArray());
 	}
 
 	private static void ApplyPayloadMutation(

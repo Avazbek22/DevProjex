@@ -7,6 +7,24 @@ release workflows. NuGet and npm are built and published only by
 `.github/workflows/publish-packages.yml`; the local desktop script never publishes
 any CI-owned channel.
 
+## Release metadata and AppImage receipts
+
+Every workflow triggered by `release: published` verifies the release tag before
+any build begins. After removing the conventional leading `v`, the tag must match
+`DevProjexVersion` in `Directory.Build.props` exactly. AppImage, headless archive,
+container, and NuGet/npm workflow runs all use
+`Scripts/ci/Test-ReleaseVersion.ps1`, so a mismatch stops with the same diagnostic.
+A `workflow_dispatch` run may use an explicit version instead; the selected
+override and the repository version are then written to the job summary.
+
+The AppImage workflow enables the same SDK-generated single-file payload receipt
+used by the desktop and headless channels. Before AppDir assembly, the common
+release validator compares the published executable with that receipt in both
+directions, including embedded resources, paths, sizes, and hashes. A mutation
+gate damages a copy of an embedded resource and proves that validation fails while
+naming the AppImage publish payload and the changed entry. Packaging continues
+only after both checks pass.
+
 ## Local channel model
 
 The default invocation selects both local channels:
@@ -116,6 +134,8 @@ The static gate checks, without running foreign-RID binaries:
   Store resource languages. The Store directory must contain exactly the
   versioned `.msixupload`, x64|arm64 `.msixbundle`, x64 `.msix`, and the two
   Windows RID receipts emitted by the existing packaging layout.
+- the AppImage input single-file bundle against its RID receipt before AppDir
+  assembly; the AppImage workflow runs the common receipt mutation gate as well.
 
 Store compares every application-package file and managed resource in both
 directions. The only channel-generated additions are `AppxManifest.xml`,

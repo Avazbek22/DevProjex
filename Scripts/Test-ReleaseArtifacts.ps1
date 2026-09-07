@@ -512,6 +512,34 @@ function Test-ContainerArtifacts([object[]] $SelectedRids) {
     return [pscustomobject]@{ Channel = 'container'; Directory = $directory; Status = $status; Artifacts = @() }
 }
 
+function Test-AppImageArtifacts([object[]] $SelectedRids) {
+	$directory = Join-Path $script:PublishPath "appimage/v$Version"
+	Assert-Artifact (Test-Path -LiteralPath $directory -PathType Container) $directory "missing AppImage publish channel directory"
+	$expectedNames = @($SelectedRids | ForEach-Object { [string]$_.rid }) +
+		@($SelectedRids | ForEach-Object { Get-PayloadReceiptName -Rid ([string]$_.rid) })
+	$actualNames = @(Get-ChildItem -LiteralPath $directory | ForEach-Object Name)
+	Assert-ExactNames -Expected $expectedNames -Actual $actualNames -ArtifactName $directory -Kind 'AppImage publish payload set'
+
+	$receiptNames = New-Object 'System.Collections.Generic.List[string]'
+	foreach ($rid in $SelectedRids) {
+		$ridName = [string]$rid.rid
+		$artifactName = "AppImage publish:$ridName"
+		$payloadDirectory = Join-Path $directory $ridName
+		Assert-Artifact (Test-Path -LiteralPath $payloadDirectory -PathType Container) $artifactName "missing publish directory '$ridName'"
+		$binaryName = [string]$rid.releaseBinary
+		$payloadNames = @(Get-ChildItem -LiteralPath $payloadDirectory -File | ForEach-Object Name)
+		Assert-ExactNames -Expected @($binaryName) -Actual $payloadNames -ArtifactName $artifactName -Kind 'AppImage publish file set'
+		$binaryPath = Join-Path $payloadDirectory $binaryName
+		$receipt = Read-PayloadReceipt -DirectoryPath $directory -Rid $ridName -ArtifactName $artifactName
+		Assert-SingleFilePayload -Bytes ([System.IO.File]::ReadAllBytes($binaryPath)) -Receipt $receipt -ArtifactName $artifactName
+		$receiptNames.Add((Get-PayloadReceiptName -Rid $ridName))
+	}
+
+	$partial = $SelectedRids.Count -ne 2
+	$status = if ($partial) { 'VALIDATED; PARTIAL RID set' } else { 'VALIDATED; COMPLETE' }
+	return [pscustomobject]@{ Channel = 'appimage'; Directory = $directory; Status = $status; Artifacts = $receiptNames.ToArray() }
+}
+
 function Expand-Zip([string] $ArchivePath, [string] $DestinationPath) {
     [System.IO.Directory]::CreateDirectory($DestinationPath) | Out-Null
     [System.IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $DestinationPath)
@@ -727,7 +755,7 @@ Assert-Artifact ($script:Manifest.schemaVersion -eq 1) $manifestPath "unsupporte
 Assert-Artifact ($null -ne $script:Manifest.release) $manifestPath "missing release contract"
 $script:StorePackageVersion = Get-StorePackageVersion -DisplayVersion $Version
 $script:PublishPath = [System.IO.Path]::GetFullPath($(if ([string]::IsNullOrWhiteSpace($PublishRoot)) { Join-Path $repoRoot 'publish' } else { $PublishRoot }))
-$allowedChannels = @('github', 'store', 'headless', 'container')
+$allowedChannels = @('github', 'store', 'headless', 'container', 'appimage')
 $allowedRids = @($script:Manifest.rids | ForEach-Object { [string]$_.rid })
 $selectedChannels = @(ConvertTo-Selection -Values $Channels -Allowed $allowedChannels -Kind 'channel')
 $selectedRidNames = @(ConvertTo-Selection -Values $Rids -Allowed $allowedRids -Kind 'RID')
@@ -747,6 +775,11 @@ if ('container' -in $selectedChannels) {
     $containerRids = @($selectedRids | Where-Object { $_.rid -in @('linux-x64', 'linux-arm64') })
     Assert-Artifact ($containerRids.Count -eq $selectedRids.Count) 'container' 'non-Linux RID selection'
     $results.Add((Test-ContainerArtifacts -SelectedRids $containerRids))
+}
+if ('appimage' -in $selectedChannels) {
+	$appImageRids = @($selectedRids | Where-Object { $_.rid -in @('linux-x64', 'linux-arm64') })
+	Assert-Artifact ($appImageRids.Count -eq $selectedRids.Count) 'appimage' 'non-Linux RID selection'
+	$results.Add((Test-AppImageArtifacts -SelectedRids $appImageRids))
 }
 if ('store' -in $selectedChannels) {
     $results.Add((Test-StoreArtifacts))
