@@ -483,6 +483,31 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(1, result.Coverage.Unsupported);
 		Assert.Equal(1, result.Coverage.ExtractionFailed);
 		Assert.Contains(result.Files, file => file.Path == "Large.cs" && file.StatusReason!.Contains("parse limit", StringComparison.Ordinal));
+		Assert.Equal(0, extractor.ParseCount);
+	}
+
+	[Fact]
+	public async Task WarmRelatedQuery_ReusesTheCanonicalFileLookupFromTheResolvedSnapshot()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var target = fixture.CreateFile("Target.cs", "public class Target { }");
+		var source = fixture.CreateFile("Source.cs", "public class Source { Target Value; }");
+		using var engine = CreateEngine();
+		var manifest = new[] { project, source, target };
+		var indexed = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var related = await engine.FindRelatedAsync(
+			fixture.Path,
+			manifest,
+			["Source.cs"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Same(indexed.FileByPath, related.Index.FileByPath);
+		Assert.Same(indexed.FileByPath["Source.cs"], related.Index.FileByPath["Source.cs"]);
 	}
 
 	[Fact]

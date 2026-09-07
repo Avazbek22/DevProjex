@@ -78,7 +78,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		var configuration = await _configurationProvider
 			.ReadAsync(root, manifest, cancellationToken)
 			.ConfigureAwait(false);
-		var prepared = new PreparedDependencySource[manifest.Length];
+		var prepared = new PreparedDependencyIdentity[manifest.Length];
 		var parsedBefore = _extractor.ParseCount;
 		var facts = new FileFacts[prepared.Length];
 		var completed = 0;
@@ -93,9 +93,12 @@ public sealed class DependencyFactsEngine : IDisposable
 			async (index, token) =>
 			{
 				var source = await _extractor
-					.PrepareAsync(root, manifest[index], configuration, token)
+					.PrepareAsync(root, manifest[index], configuration, _limits, token)
 					.ConfigureAwait(false);
-				prepared[index] = source;
+				prepared[index] = new PreparedDependencyIdentity(
+					source.RelativePath,
+					source.ContentFingerprint,
+					source.LanguageId);
 				if (source.PreparedStatus != DependencyFileStatus.Supported)
 				{
 					facts[index] = _extractor.Extract(source, _limits);
@@ -148,13 +151,23 @@ public sealed class DependencyFactsEngine : IDisposable
 					orderedFacts,
 					declarations,
 					configuration,
-					_limits),
+					_limits,
+					cancellationToken),
 				allowed)),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var cachedIndex = _indexCache.GetOrAdd(cacheKey, createdIndex);
 		if (ReferenceEquals(cachedIndex, createdIndex))
 			_indexCacheOrder.Enqueue(cacheKey);
-		var resolved = await cachedIndex.Value.ConfigureAwait(false);
+		ResolvedIndex resolved;
+		try
+		{
+			resolved = await cachedIndex.Value.ConfigureAwait(false);
+		}
+		catch
+		{
+			_indexCache.TryRemove(new KeyValuePair<IndexCacheKey, Lazy<Task<ResolvedIndex>>>(cacheKey, cachedIndex));
+			throw;
+		}
 		if (ReferenceEquals(cachedIndex, createdIndex))
 			RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		var coverage = BuildCoverage(resolved.Files);
@@ -173,7 +186,10 @@ public sealed class DependencyFactsEngine : IDisposable
 				reusedFiles,
 				ReferenceEquals(cachedIndex, createdIndex) ? orderedFacts.Length : 0,
 				started.ElapsedMilliseconds,
-				!ReferenceEquals(cachedIndex, createdIndex)));
+				!ReferenceEquals(cachedIndex, createdIndex)))
+		{
+			FileByPath = resolved.FileByPath
+		};
 		var finalStamps = TryCaptureFileStamps(manifest);
 		if (initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps))
 		{
@@ -193,7 +209,7 @@ public sealed class DependencyFactsEngine : IDisposable
 	{
 		var index = await IndexAsync(sourceRoot, manifestFiles, progress, cancellationToken)
 			.ConfigureAwait(false);
-		var fileByPath = index.Files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+		var fileByPath = index.FileByPath;
 		var seeds = new List<SeedRelatedFiles>(seedRelativePaths.Count);
 		foreach (var rawSeed in seedRelativePaths)
 		{
@@ -484,7 +500,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			(edge.Target is null || allowed.Contains(edge.Target) || edge.Target.StartsWith("namespace:", StringComparison.Ordinal)) &&
 			edge.Candidates.All(allowed.Contains)).ToArray();
 		var (bySource, byTarget) = BuildEdgeIndexes(edges);
-		return index with { Files = files, Edges = edges, EdgesBySource = bySource, EdgesByTarget = byTarget };
+		return index with
+		{
+			Files = files,
+			FileByPath = files.ToDictionary(static file => file.Path, StringComparer.Ordinal),
+			Edges = edges,
+			EdgesBySource = bySource,
+			EdgesByTarget = byTarget
+		};
 	}
 
 	private static IReadOnlyList<ImportFact> GateImports(
@@ -564,6 +587,11 @@ public sealed class DependencyFactsEngine : IDisposable
 		LanguageId LanguageId,
 		string ExtractorIdentity);
 
+	private readonly record struct PreparedDependencyIdentity(
+		string RelativePath,
+		string ContentFingerprint,
+		LanguageId LanguageId);
+
 	private readonly record struct IndexCacheKey(
 		string ManifestGeneration,
 		string DeclarationRevision,
@@ -586,6 +614,7 @@ public sealed class DependencyFactsEngine : IDisposable
 	private sealed record ResolvedIndex(
 		IReadOnlyList<DependencyEdge> Edges,
 		IReadOnlyList<FileFacts> Files,
+		IReadOnlyDictionary<string, FileFacts> FileByPath,
 		IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> EdgesBySource,
 		IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> EdgesByTarget);
 
@@ -596,7 +625,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			IReadOnlyList<FileFacts> files,
 			IReadOnlyList<DeclarationFact> declarations,
 			DependencyResolverConfiguration configuration,
-			DependencyFactsLimits limits)
+			DependencyFactsLimits limits,
+			CancellationToken cancellationToken)
 		{
 			var context = new ResolverContext(root, files, declarations, configuration);
 			var resolved = new List<DependencyEdge>();
@@ -604,47 +634,52 @@ public sealed class DependencyFactsEngine : IDisposable
 			var referencesByFile = new Dictionary<string, IReadOnlyList<ReferenceFact>>(StringComparer.Ordinal);
 			var supportedFiles = files.Where(static file => file.Status == DependencyFileStatus.Supported).ToArray();
 			var parallelism = Math.Clamp(Environment.ProcessorCount, 1, 8);
-			var work = 0;
-			for (var offset = 0; offset < supportedFiles.Length; offset += parallelism)
+			var plans = CreateWorkPlans(supportedFiles, limits, cancellationToken);
+			var completed = new ResolvedFileWork[plans.Length];
+			Parallel.For(0, plans.Length, new ParallelOptions
 			{
-				var count = Math.Min(parallelism, supportedFiles.Length - offset);
-				var batch = new ResolvedFileWork[count];
-				Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = parallelism }, index =>
+				MaxDegreeOfParallelism = parallelism,
+				CancellationToken = cancellationToken
+			}, index =>
+			{
+				var plan = plans[index];
+				if (plan.LimitReason is { } limitReason)
 				{
-					var file = supportedFiles[offset + index];
-					var importPairs = file.Imports
-						.Select(import => (Fact: import, Edge: context.ResolveImport(file, import))).ToArray();
-					var referencePairs = file.References
-						.Select(reference => (Fact: reference, Edge: context.ResolveType(file, reference))).ToArray();
-					batch[index] = new ResolvedFileWork(
-						file,
-						importPairs,
-						referencePairs,
-						importPairs.Select(static pair => pair.Edge)
-							.Concat(referencePairs.Select(static pair => pair.Edge)).ToArray());
-				});
-				foreach (var fileWork in batch)
-				{
-					var file = fileWork.File;
-					if (fileWork.Edges.Length > limits.MaximumEdgesPerFile)
-					{
-						resolved.Add(LimitEdge(file, "edge limit exceeded"));
-						importsByFile[file.Path] = file.Imports.Select(static fact => Limit(fact, "edge limit exceeded")).ToArray();
-						referencesByFile[file.Path] = file.References.Select(static fact => Limit(fact, "edge limit exceeded")).ToArray();
-						continue;
-					}
-					work += fileWork.Edges.Length;
-					if (work > limits.MaximumWorkPerIndex)
-					{
-						resolved.Add(LimitEdge(file, "index work limit exceeded"));
-						importsByFile[file.Path] = file.Imports.Select(static fact => Limit(fact, "index work limit exceeded")).ToArray();
-						referencesByFile[file.Path] = file.References.Select(static fact => Limit(fact, "index work limit exceeded")).ToArray();
-						continue;
-					}
-					resolved.AddRange(fileWork.Edges);
-					importsByFile[file.Path] = fileWork.Imports.Select(static pair => Resolve(pair.Fact, pair.Edge)).ToArray();
-					referencesByFile[file.Path] = fileWork.References.Select(static pair => Resolve(pair.Fact, pair.Edge)).ToArray();
+					completed[index] = new ResolvedFileWork(
+						plan.File,
+						plan.File.Imports.Select(fact => Limit(fact, limitReason)).ToArray(),
+						plan.File.References.Select(fact => Limit(fact, limitReason)).ToArray(),
+						[LimitEdge(plan.File, limitReason)]);
+					return;
 				}
+
+				var imports = new ImportFact[plan.File.Imports.Count];
+				var references = new ReferenceFact[plan.File.References.Count];
+				var edges = new DependencyEdge[imports.Length + references.Length];
+				for (var factIndex = 0; factIndex < imports.Length; factIndex++)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					var fact = plan.File.Imports[factIndex];
+					var edge = context.ResolveImport(plan.File, fact);
+					imports[factIndex] = Resolve(fact, edge);
+					edges[factIndex] = edge;
+				}
+				for (var factIndex = 0; factIndex < references.Length; factIndex++)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					var fact = plan.File.References[factIndex];
+					var edge = context.ResolveType(plan.File, fact);
+					references[factIndex] = Resolve(fact, edge);
+					edges[imports.Length + factIndex] = edge;
+				}
+				completed[index] = new ResolvedFileWork(plan.File, imports, references, edges);
+			});
+			foreach (var fileWork in completed)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				resolved.AddRange(fileWork.Edges);
+				importsByFile[fileWork.File.Path] = fileWork.Imports;
+				referencesByFile[fileWork.File.Path] = fileWork.References;
 			}
 			var resolvedFiles = files.Select(file => file.Status != DependencyFileStatus.Supported
 				? file
@@ -656,14 +691,41 @@ public sealed class DependencyFactsEngine : IDisposable
 			return new ResolvedIndex(
 				Aggregate(resolved),
 				resolvedFiles,
+				resolvedFiles.ToDictionary(static file => file.Path, StringComparer.Ordinal),
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal),
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal));
 		}
 
+		private static ResolutionWorkPlan[] CreateWorkPlans(
+			IReadOnlyList<FileFacts> files,
+			DependencyFactsLimits limits,
+			CancellationToken cancellationToken)
+		{
+			var plans = new ResolutionWorkPlan[files.Count];
+			long acceptedWork = 0;
+			for (var index = 0; index < files.Count; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var file = files[index];
+				var requestedWork = (long)file.Imports.Count + file.References.Count;
+				string? limitReason = null;
+				if (requestedWork > limits.MaximumEdgesPerFile)
+					limitReason = "edge limit exceeded";
+				else if (requestedWork > limits.MaximumWorkPerIndex - acceptedWork)
+					limitReason = "index work limit exceeded";
+				else
+					acceptedWork += requestedWork;
+				plans[index] = new ResolutionWorkPlan(file, limitReason);
+			}
+			return plans;
+		}
+
+		private sealed record ResolutionWorkPlan(FileFacts File, string? LimitReason);
+
 		private sealed record ResolvedFileWork(
 			FileFacts File,
-			IReadOnlyList<(ImportFact Fact, DependencyEdge Edge)> Imports,
-			IReadOnlyList<(ReferenceFact Fact, DependencyEdge Edge)> References,
+			IReadOnlyList<ImportFact> Imports,
+			IReadOnlyList<ReferenceFact> References,
 			DependencyEdge[] Edges);
 
 		private static ImportFact Resolve(ImportFact fact, DependencyEdge edge) => fact with

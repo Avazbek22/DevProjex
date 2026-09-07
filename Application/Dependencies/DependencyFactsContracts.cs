@@ -51,6 +51,7 @@ public interface IDependencyFactExtractor : IDisposable
 		string sourceRoot,
 		string fullPath,
 		DependencyResolverConfiguration configuration,
+		DependencyFactsLimits limits,
 		CancellationToken cancellationToken);
 
 	FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits);
