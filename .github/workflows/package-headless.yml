@@ -2,18 +2,22 @@ name: Package Headless Release Archives
 
 on:
   pull_request:
-    branches: [v5.2]
+    branches: [v5.2, master]
     paths:
       - '.github/workflows/package-headless.yml'
       - 'Apps/Terminal/**'
       - 'Apps/TerminalHost/**'
+      - 'Apps/Mcp/**'
+      - 'Application/**'
       - 'Infrastructure/**'
+      - 'Kernel/**'
       - 'Packaging/Headless/**'
       - 'Scripts/*Headless*'
       - 'Scripts/*Release*'
       - 'Scripts/release-archive-helpers.ps1'
       - 'Scripts/ci/Test-ReleaseVersion.ps1'
       - 'Directory.Build.*'
+      - 'Directory.Packages.props'
   workflow_dispatch:
     inputs:
       version:
@@ -22,6 +26,20 @@ on:
         type: string
       release_tag:
         description: Existing GitHub release tag to receive the archives
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: false
+        type: string
+      version:
+        description: Optional archive version; defaults to Directory.Build.props
+        required: false
+        type: string
+      release_tag:
+        description: Existing release tag; omit for validation-only runs
         required: false
         type: string
   release:
@@ -45,6 +63,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
@@ -68,7 +88,7 @@ jobs:
           if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
             version="${PUBLISHED_RELEASE_TAG#v}"
             release_tag="${PUBLISHED_RELEASE_TAG}"
-          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" || -z "${DISPATCH_VERSION}" ]]; then
             version="$(sed -n 's:.*<DevProjexVersion[^>]*>\([^<]*\)</DevProjexVersion>.*:\1:p' Directory.Build.props)"
             release_tag=""
           else

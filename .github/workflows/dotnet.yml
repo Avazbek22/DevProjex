@@ -6,6 +6,12 @@ on:
       - master
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -36,6 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
           fetch-depth: 0
 
       - name: Validate CI planner contracts
@@ -67,6 +74,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
@@ -204,6 +213,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
@@ -345,6 +356,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
@@ -412,6 +425,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
@@ -440,6 +455,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6

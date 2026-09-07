@@ -25,6 +25,22 @@ gate damages a copy of an embedded resource and proves that validation fails whi
 naming the AppImage publish payload and the changed entry. Packaging continues
 only after both checks pass.
 
+## Release candidate gate
+
+Before creating a release tag, dispatch `.github/workflows/release-candidate.yml`
+with the full 40-character commit SHA that will be tagged:
+
+```shell
+gh workflow run release-candidate.yml --ref v5.2 -f sha=<commit-sha>
+```
+
+This gate checks out that exact SHA and runs the reusable `.NET CI`, Release
+Validation, headless archive, container, and headless-package workflows. The
+container and package paths remain dry-runs: no image or NuGet/npm package is
+published. The final job writes one table covering all five gates and fails if
+any called workflow was skipped, canceled, or unsuccessful. A green release
+candidate report for the exact commit is required before the tag is created.
+
 ## Local channel model
 
 The default invocation selects both local channels:

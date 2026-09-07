@@ -440,6 +440,45 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void HeadlessWorkflowsCoverMasterCoreChangesAndReleaseCandidatePinsOneSha()
+	{
+		var rootPath = FindRepositoryRoot();
+		foreach (var workflowName in new[]
+		         {
+			         "publish-packages.yml",
+			         "package-headless.yml",
+			         "publish-container.yml"
+		         })
+		{
+			var workflow = File.ReadAllText(Path.Combine(
+				rootPath,
+				".github",
+				"workflows",
+				workflowName));
+			Assert.Contains("master", workflow, StringComparison.Ordinal);
+			Assert.Contains("'Apps/Mcp/**'", workflow, StringComparison.Ordinal);
+			Assert.Contains("'Application/**'", workflow, StringComparison.Ordinal);
+			Assert.Contains("'Kernel/**'", workflow, StringComparison.Ordinal);
+			Assert.Contains("'Directory.Packages.props'", workflow, StringComparison.Ordinal);
+		}
+
+		var releaseCandidate = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"release-candidate.yml"));
+		Assert.Contains("sha:", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("ref: ${{ inputs.sha }}", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/dotnet.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/release-validate.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/package-headless.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/publish-container.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/publish-packages.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("dry_run: true", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("Release candidate report", releaseCandidate, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void ReleaseWorkflowsShareVersionAndAppImageReceiptGates()
 	{
 		var rootPath = FindRepositoryRoot();
