@@ -419,11 +419,19 @@ existing greedy admission pass; without a budget, all candidates are serialized
 in descending importance. A tree-only pack rejects `rank`, and `get_tree` does
 not expose it. Unknown values return `DPX-MCP-INVALID-ARGUMENTS`.
 
-The ranking uses resolved dependency PageRank, a safe offline 200-commit Git
-history window, and a small file-role signal. Its bounded trusted trailer follows
-the untrusted project block and reports graph coverage, unavailable signals, up
-to ten top entries, and ranked skips. Omitting `rank` retains the ordinary order
-and performs neither dependency indexing nor Git history work. See
+The ranking uses quantized resolved-dependency PageRank, a safe offline
+200-commit Git history window, and a small file-role signal. Missing evidence
+limits confidence instead of being renormalized into an advantage. A shallow
+window reports the number of commits actually read. Progress has three bounded
+stages: fact indexing, history reading, and priority computation.
+
+The bounded trailer follows the untrusted project block. Trusted status lines
+report facts coverage, resolved internal-link coverage, files touching an edge,
+history completeness, and the missing-signal policy. The up-to-ten top entries
+and ranked skips contain project-derived paths, so they are placed in a separate
+standard spotlighted `untrusted-data` block rather than being trusted as control
+text. Omitting `rank` retains the ordinary order and performs neither dependency
+indexing, Git history work, nor ranking content hashes. See
 [Ranking.md](Ranking.md) for the algorithm, fixed weights, evaluation protocol,
 and measured limitations.
 
