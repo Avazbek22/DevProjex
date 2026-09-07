@@ -15,6 +15,21 @@ public enum ImportanceFileRole
 	EntryPoint
 }
 
+public enum ImportanceMissingSignalPolicy
+{
+	Redistribute,
+	NeutralFill,
+	ConfidenceLimited
+}
+
+public enum ImportanceRankingSignal
+{
+	None,
+	Graph,
+	Git,
+	Role
+}
+
 public enum ImportanceRankingStage
 {
 	IndexingFacts,
@@ -39,7 +54,16 @@ public sealed record ImportanceRankingEntry(
 	ImportanceFileRole Role,
 	bool HasGraphFacts,
 	bool HasGitHistory,
-	ProjectGitHistoryUnavailableReason? GitUnavailableReason = null);
+	ProjectGitHistoryUnavailableReason? GitUnavailableReason = null)
+{
+	public double Confidence { get; init; } = 1;
+
+	public ImportanceRankingSignal MainContribution { get; init; }
+
+	public bool ConfidenceLimited { get; init; }
+
+	public bool IsCoordinator { get; init; }
+}
 
 public sealed record ImportanceRankingReport(
 	string Algorithm,
@@ -66,6 +90,11 @@ public sealed record ImportanceRankingReport(
 	public bool GitHistoryIsShallow { get; init; }
 
 	public bool GitHistoryIsComplete { get; init; } = true;
+
+	public bool HasMissingSignals { get; init; }
+
+	public ImportanceMissingSignalPolicy MissingSignalPolicy { get; init; } =
+		ImportanceMissingSignalPolicy.ConfidenceLimited;
 
 	internal IReadOnlyDictionary<string, RankingSourceVersion> SourceVersions { get; init; } =
 		new Dictionary<string, RankingSourceVersion>(StringComparer.Ordinal);

@@ -11,6 +11,9 @@ public sealed class ImportanceRankingService(
 	public const double GraphWeight = 0.85;
 	public const double GitWeight = 0.10;
 	public const double RoleWeight = 0.05;
+	public const double PageRankAbsoluteQuantum = 1e-12;
+	public const ImportanceMissingSignalPolicy MissingSignalPolicy =
+		ImportanceMissingSignalPolicy.ConfidenceLimited;
 	private const int MaximumTopEntries = 10;
 	private const int PageRankIterations = 30;
 	private static readonly HashSet<string> TestFrameworks = new(StringComparer.OrdinalIgnoreCase)
@@ -76,6 +79,7 @@ public sealed class ImportanceRankingService(
 		var dependents = new Dictionary<string, int>(candidates.Length, StringComparer.Ordinal);
 		var dependencies = new Dictionary<string, int>(candidates.Length, StringComparer.Ordinal);
 		var roles = new Dictionary<string, ImportanceFileRole>(candidates.Length, StringComparer.Ordinal);
+		var coordinators = new Dictionary<string, bool>(candidates.Length, StringComparer.Ordinal);
 		foreach (var candidate in candidates)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -84,7 +88,7 @@ public sealed class ImportanceRankingService(
 			{
 				dependents[candidate.RelativePath] = graph.Dependents[node];
 				dependencies[candidate.RelativePath] = graph.Outgoing[node].Length;
-				graphRaw[candidate.RelativePath] = pageRank[node];
+				graphRaw[candidate.RelativePath] = QuantizePageRank(pageRank[node]);
 			}
 			else
 			{
@@ -95,6 +99,10 @@ public sealed class ImportanceRankingService(
 			roles[candidate.RelativePath] = ClassifyRole(
 				candidate.RelativePath,
 				facts,
+				dependents[candidate.RelativePath],
+				dependencies[candidate.RelativePath]);
+			coordinators[candidate.RelativePath] = IsCoordinatorCandidate(
+				roles[candidate.RelativePath],
 				dependents[candidate.RelativePath],
 				dependencies[candidate.RelativePath]);
 		}
@@ -108,7 +116,9 @@ public sealed class ImportanceRankingService(
 			gitRaw[candidate.RelativePath] = history.Files.TryGetValue(candidate.FullPath, out var activity)
 				? activity.CommitCount + Recency(activity, history.WindowSize)
 				: null;
-			roleRaw[candidate.RelativePath] = RoleValue(roles[candidate.RelativePath]);
+			roleRaw[candidate.RelativePath] = RoleValue(
+				roles[candidate.RelativePath],
+				coordinators[candidate.RelativePath]);
 		}
 		var gitNormalized = RankNormalize(gitRaw, cancellationToken);
 		var roleNormalized = RankNormalize(roleRaw, cancellationToken);
@@ -119,7 +129,10 @@ public sealed class ImportanceRankingService(
 		var resolvedInternalReferenceCoverage = internalReferenceCandidates == 0
 			? 0
 			: Math.Clamp((double)resolvedInternalReferences / internalReferenceCandidates, 0, 1);
-		var redistributed = coverage < 1 || gitRaw.Values.Any(static value => value is null);
+		var hasMissingSignals = coverage < 1 || gitRaw.Values.Any(static value => value is null);
+		var gitConfidence = history.IsShallow && !history.IsComplete
+			? Math.Clamp((double)history.CommitCount / history.WindowSize, 0, 1)
+			: 1;
 
 		var scored = new List<ScoredCandidate>(candidates.Length);
 		var scoreProgressStep = Math.Max(1, candidates.Length / 25);
@@ -127,11 +140,13 @@ public sealed class ImportanceRankingService(
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var candidate = candidates[index];
-			var score = CalculateScore(
+			var score = CalculateScoreBreakdown(
 				graphNormalized[candidate.RelativePath],
 				gitNormalized[candidate.RelativePath],
 				roleNormalized[candidate.RelativePath] ?? 0.5,
-				coverage);
+				coverage,
+				MissingSignalPolicy,
+				gitConfidence);
 			scored.Add(new ScoredCandidate(candidate, score));
 			if ((index + 1) % scoreProgressStep == 0 || index + 1 == candidates.Length)
 			{
@@ -144,7 +159,7 @@ public sealed class ImportanceRankingService(
 		}
 
 		var ordered = scored
-			.OrderByDescending(static candidate => candidate.Score)
+			.OrderByDescending(static candidate => candidate.Score.Score)
 			.ThenBy(static candidate => candidate.Candidate.RelativePath, StringComparer.Ordinal)
 			.Select((candidate, index) =>
 			{
@@ -160,7 +175,7 @@ public sealed class ImportanceRankingService(
 					candidate.Candidate.FullPath,
 					path,
 					index + 1,
-					candidate.Score,
+					candidate.Score.Score,
 					dependents[path],
 					dependencies[path],
 					hasHistory ? activity!.CommitCount : null,
@@ -168,7 +183,14 @@ public sealed class ImportanceRankingService(
 					roles[path],
 					graphRaw[path] is not null,
 					hasHistory,
-					historyReason);
+					historyReason)
+				{
+					Confidence = candidate.Score.Confidence,
+					MainContribution = candidate.Score.MainContribution,
+					ConfidenceLimited = MissingSignalPolicy == ImportanceMissingSignalPolicy.ConfidenceLimited &&
+						candidate.Score.Confidence < 1,
+					IsCoordinator = coordinators[path]
+				};
 			})
 			.ToArray();
 		Report(progress, ImportanceRankingStage.ComputingPriorities, computationUnits, computationUnits);
@@ -184,7 +206,7 @@ public sealed class ImportanceRankingService(
 			history.WindowSize,
 			history.CommitCount,
 			history.UnavailableReason,
-			redistributed,
+			MissingSignalPolicy == ImportanceMissingSignalPolicy.Redistribute && hasMissingSignals,
 			GraphVariant)
 		{
 			ResolvedInternalReferences = resolvedInternalReferences,
@@ -193,6 +215,8 @@ public sealed class ImportanceRankingService(
 			FilesWithResolvedEdges = graph.FilesWithEdges,
 			GitHistoryIsShallow = history.IsShallow,
 			GitHistoryIsComplete = history.IsComplete,
+			HasMissingSignals = hasMissingSignals,
+			MissingSignalPolicy = MissingSignalPolicy,
 			SourceVersions = sourceVersions
 		};
 	}
@@ -276,23 +300,53 @@ public sealed class ImportanceRankingService(
 	}
 
 	internal static double CalculateScore(double? graph, double? git, double role, double graphCoverage)
+		=> CalculateScoreBreakdown(
+			graph,
+			git,
+			role,
+			graphCoverage,
+			MissingSignalPolicy,
+			gitConfidence: 1).Score;
+
+	internal static ImportanceScoreBreakdown CalculateScoreBreakdown(
+		double? graph,
+		double? git,
+		double role,
+		double graphCoverage,
+		ImportanceMissingSignalPolicy policy,
+		double gitConfidence = 1)
 	{
 		var coverage = Math.Clamp(graphCoverage, 0, 1);
 		var effectiveGraphWeight = GraphWeight * coverage;
-		var graphDeficit = GraphWeight - effectiveGraphWeight;
-		var nonGraphWeight = GitWeight + RoleWeight;
-		var effectiveGitWeight = GitWeight + graphDeficit * GitWeight / nonGraphWeight;
-		var effectiveRoleWeight = RoleWeight + graphDeficit * RoleWeight / nonGraphWeight;
-		var signals = new List<(double Value, double Weight)>(3);
-		if (graph is { } graphValue)
-			signals.Add((graphValue, effectiveGraphWeight));
-		if (git is { } gitValue)
-			signals.Add((gitValue, effectiveGitWeight));
-		signals.Add((role, effectiveRoleWeight));
-		var availableWeight = signals.Sum(static signal => signal.Weight);
-		return availableWeight <= 0
-			? 0
-			: signals.Sum(static signal => signal.Value * signal.Weight) / availableWeight;
+		var effectiveGitWeight = GitWeight * Math.Clamp(gitConfidence, 0, 1);
+		var graphContribution = graph.GetValueOrDefault() * (graph is null ? 0 : effectiveGraphWeight);
+		var gitContribution = git.GetValueOrDefault() * (git is null ? 0 : effectiveGitWeight);
+		var roleContribution = role * RoleWeight;
+		var availableWeight = (graph is null ? 0 : effectiveGraphWeight) +
+		                      (git is null ? 0 : effectiveGitWeight) + RoleWeight;
+		var knownContribution = graphContribution + gitContribution + roleContribution;
+		var score = policy switch
+		{
+			ImportanceMissingSignalPolicy.Redistribute => availableWeight <= 0
+				? 0
+				: knownContribution / availableWeight,
+			ImportanceMissingSignalPolicy.NeutralFill =>
+				knownContribution + (1 - availableWeight) * 0.5,
+			ImportanceMissingSignalPolicy.ConfidenceLimited => knownContribution,
+			_ => throw new ArgumentOutOfRangeException(nameof(policy), policy, null)
+		};
+		var mainContribution = graphContribution >= gitContribution && graphContribution >= roleContribution
+			? ImportanceRankingSignal.Graph
+			: gitContribution >= roleContribution
+				? ImportanceRankingSignal.Git
+				: ImportanceRankingSignal.Role;
+		return new ImportanceScoreBreakdown(
+			score,
+			Math.Clamp(availableWeight, 0, 1),
+			graphContribution,
+			gitContribution,
+			roleContribution,
+			mainContribution);
 	}
 
 	internal static ImportanceFileRole ClassifyRole(
@@ -305,10 +359,16 @@ public sealed class ImportanceRankingService(
 			return ImportanceFileRole.Manifest;
 		if (HasTestFrameworkEvidence(facts) || HasTestPathEvidence(path) && facts?.Status == DependencyFileStatus.Supported)
 			return ImportanceFileRole.TestSource;
-		if (dependents == 0 && dependencies >= 3)
+		if (HasExplicitEntryPointEvidence(facts))
 			return ImportanceFileRole.EntryPoint;
 		return ImportanceFileRole.Source;
 	}
+
+	internal static bool IsCoordinatorCandidate(
+		ImportanceFileRole role,
+		int dependents,
+		int dependencies) =>
+		role == ImportanceFileRole.Source && dependents == 0 && dependencies >= 3;
 
 	internal static IReadOnlyDictionary<string, double> CalculatePageRank(
 		IReadOnlyList<(string FullPath, string RelativePath)> candidates,
@@ -324,7 +384,7 @@ public sealed class ImportanceRankingService(
 		var ranks = CalculatePageRank(graph, cancellationToken, iterationCompleted);
 		var result = new Dictionary<string, double>(graph.Paths.Length, StringComparer.Ordinal);
 		for (var node = 0; node < graph.Paths.Length; node++)
-			result[graph.Paths[node]] = ranks[node];
+			result[graph.Paths[node]] = QuantizePageRank(ranks[node]);
 		return result;
 	}
 
@@ -441,6 +501,19 @@ public sealed class ImportanceRankingService(
 		       facts.ContextNamespaces.Any(context => TestFrameworks.Contains(NormalizeFramework(context)));
 	}
 
+	private static bool HasExplicitEntryPointEvidence(FileFacts? facts) =>
+		facts?.Declarations.Any(static declaration =>
+			declaration.Identity.SymbolKind is SymbolKind.Function or SymbolKind.Module &&
+			IsEntryPointName(declaration.Identity.QualifiedName)) == true;
+
+	private static bool IsEntryPointName(string qualifiedName)
+	{
+		var separator = qualifiedName.LastIndexOfAny(['.', ':', '/', '\\']);
+		var name = separator >= 0 ? qualifiedName[(separator + 1)..] : qualifiedName;
+		return name.Equals("Main", StringComparison.Ordinal) ||
+		       name.Equals("__main__", StringComparison.Ordinal);
+	}
+
 	private static string NormalizeFramework(string value)
 	{
 		var normalized = value.Trim().TrimStart('@').Replace("::", ".", StringComparison.Ordinal).ToLowerInvariant();
@@ -473,14 +546,18 @@ public sealed class ImportanceRankingService(
 		       name.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
 	}
 
-	private static double RoleValue(ImportanceFileRole role) => role switch
+	private static double RoleValue(ImportanceFileRole role, bool isCoordinator) => role switch
 	{
 		ImportanceFileRole.Manifest => 1,
-		ImportanceFileRole.EntryPoint => 0.75,
+		ImportanceFileRole.EntryPoint => 0.9,
+		ImportanceFileRole.Source when isCoordinator => 0.65,
 		ImportanceFileRole.Source => 0.5,
 		ImportanceFileRole.TestSource => 0,
 		_ => throw new ArgumentOutOfRangeException(nameof(role), role, null)
 	};
+
+	internal static double QuantizePageRank(double value) =>
+		Math.Round(value / PageRankAbsoluteQuantum, MidpointRounding.ToEven) * PageRankAbsoluteQuantum;
 
 	private static double Recency(ProjectGitFileActivity activity, int window) =>
 		activity.MostRecentCommitPosition <= 0 || window <= 1
@@ -503,7 +580,7 @@ public sealed class ImportanceRankingService(
 
 	private const int ProjectGitHistoryReaderWindow = 200;
 	private sealed record Candidate(string FullPath, string RelativePath);
-	private sealed record ScoredCandidate(Candidate Candidate, double Score);
+	private sealed record ScoredCandidate(Candidate Candidate, ImportanceScoreBreakdown Score);
 	private sealed record RankingGraph(
 		string[] Paths,
 		IReadOnlyDictionary<string, int> NodeByPath,
@@ -511,6 +588,14 @@ public sealed class ImportanceRankingService(
 		int[] Dependents,
 		int EdgeCount,
 		int FilesWithEdges);
+
+	internal readonly record struct ImportanceScoreBreakdown(
+		double Score,
+		double Confidence,
+		double GraphContribution,
+		double GitContribution,
+		double RoleContribution,
+		ImportanceRankingSignal MainContribution);
 
 	private sealed class BoundedFactsProgress(
 		IProgress<ImportanceRankingProgress>? progress,

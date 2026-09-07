@@ -51,7 +51,7 @@ public sealed class ImportanceRankingServiceTests
 	}
 
 	[Fact]
-	public void CalculateScore_ScalesGraphWeightByCoverageAndRedistributesMissingSignals()
+	public void CalculateScore_ConfidenceLimitsMissingSignals()
 	{
 		var fullCoverage = ImportanceRankingService.CalculateScore(graph: 1, git: 0, role: 0, graphCoverage: 1);
 		var halfCoverage = ImportanceRankingService.CalculateScore(graph: 1, git: 0, role: 0, graphCoverage: 0.5);
@@ -59,11 +59,42 @@ public sealed class ImportanceRankingServiceTests
 
 		Assert.Equal(ImportanceRankingService.GraphWeight, fullCoverage, precision: 10);
 		Assert.True(halfCoverage < fullCoverage);
-		Assert.Equal(
-			ImportanceRankingService.GitWeight /
-			(ImportanceRankingService.GitWeight + ImportanceRankingService.RoleWeight),
-			noGraph,
-			precision: 10);
+		Assert.Equal(ImportanceRankingService.GitWeight, noGraph, precision: 10);
+	}
+
+	[Fact]
+	public void MissingSignalPolicies_DoNotLetUnknownSignalsMasqueradeAsEvidence()
+	{
+		var redistributed = ImportanceRankingService.CalculateScoreBreakdown(
+			graph: null,
+			git: null,
+			role: 1,
+			graphCoverage: 0.9,
+			ImportanceMissingSignalPolicy.Redistribute);
+		var neutral = ImportanceRankingService.CalculateScoreBreakdown(
+			graph: null,
+			git: null,
+			role: 1,
+			graphCoverage: 0.9,
+			ImportanceMissingSignalPolicy.NeutralFill);
+		var limited = ImportanceRankingService.CalculateScoreBreakdown(
+			graph: null,
+			git: null,
+			role: 1,
+			graphCoverage: 0.9,
+			ImportanceMissingSignalPolicy.ConfidenceLimited);
+		var strongGraph = ImportanceRankingService.CalculateScoreBreakdown(
+			graph: 1,
+			git: 0,
+			role: 0.5,
+			graphCoverage: 0.9,
+			ImportanceMissingSignalPolicy.ConfidenceLimited);
+
+		Assert.Equal(1, redistributed.Score, precision: 10);
+		Assert.True(neutral.Score < strongGraph.Score);
+		Assert.True(limited.Score < neutral.Score);
+		Assert.Equal(ImportanceRankingService.RoleWeight, limited.Score, precision: 10);
+		Assert.Equal(ImportanceRankingService.RoleWeight, limited.Confidence, precision: 10);
 	}
 
 	[Theory]
@@ -73,7 +104,7 @@ public sealed class ImportanceRankingServiceTests
 	[InlineData("src/service.cs", "NUnit.Framework", ImportanceFileRole.TestSource)]
 	[InlineData("src/App.csproj", null, ImportanceFileRole.Manifest)]
 	[InlineData("package.json", null, ImportanceFileRole.Manifest)]
-	[InlineData("src/main.cs", null, ImportanceFileRole.EntryPoint)]
+	[InlineData("src/main.cs", null, ImportanceFileRole.Source)]
 	[InlineData("src/model.cs", null, ImportanceFileRole.Source)]
 	public void ClassifyRole_UsesFactsBeforePathConventions(
 		string path,
@@ -84,10 +115,38 @@ public sealed class ImportanceRankingServiceTests
 		var role = ImportanceRankingService.ClassifyRole(
 			path,
 			facts,
-			dependents: expected == ImportanceFileRole.EntryPoint ? 0 : 1,
-			dependencies: expected == ImportanceFileRole.EntryPoint ? 3 : 0);
+			dependents: path == "src/main.cs" ? 0 : 1,
+			dependencies: path == "src/main.cs" ? 3 : 0);
 
 		Assert.Equal(expected, role);
+		Assert.Equal(
+			path == "src/main.cs",
+			ImportanceRankingService.IsCoordinatorCandidate(
+				role,
+				path == "src/main.cs" ? 0 : 1,
+				path == "src/main.cs" ? 3 : 0));
+	}
+
+	[Fact]
+	public void ClassifyRole_ReservesEntryPointForExplicitMainEvidence()
+	{
+		var facts = CreateFacts("src/Program.cs", null) with
+		{
+			Declarations =
+			[
+				new DeclarationFact(
+					new SymbolIdentity("scope", LanguageId.CSharp, SymbolKind.Function, "Program.Main", 0),
+					[new SourceSite("src/Program.cs", 1, "method")])
+			]
+		};
+
+		var role = ImportanceRankingService.ClassifyRole(
+			"src/Program.cs",
+			facts,
+			dependents: 4,
+			dependencies: 2);
+
+		Assert.Equal(ImportanceFileRole.EntryPoint, role);
 	}
 
 	[Fact]
@@ -155,6 +214,25 @@ public sealed class ImportanceRankingServiceTests
 
 		Assert.DoesNotContain("notes.md", first.Keys);
 		Assert.Equal(first.OrderBy(static pair => pair.Key), second.OrderBy(static pair => pair.Key));
+	}
+
+	[Fact]
+	public void PageRankQuantization_GivesSymmetricNodesOneDenseRank()
+	{
+		var values = new Dictionary<string, double?>
+		{
+			["left.cs"] = ImportanceRankingService.QuantizePageRank(0.25),
+			["right.cs"] = ImportanceRankingService.QuantizePageRank(0.25 + 1e-17),
+			["higher.cs"] = ImportanceRankingService.QuantizePageRank(0.5)
+		};
+
+		var normalized = ImportanceRankingService.RankNormalize(
+			values,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(normalized["left.cs"], normalized["right.cs"]);
+		Assert.Equal(0, normalized["left.cs"]);
+		Assert.Equal(1, normalized["higher.cs"]);
 	}
 
 	[Fact]
