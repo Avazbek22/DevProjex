@@ -27,6 +27,40 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void KeywordPrefilter_MatchesTheLinearCandidateOracleAcrossPinnedCasesAndUnicodeCaseFolding()
+	{
+		var cases = LoadUpstreamCorpus()
+			.Select(static item => (item.Path, item.Content))
+			.Append(("src/overlap.txt", "GITHUB github_pat TOKEN api KEY aws \u212Aey"));
+
+		foreach (var (path, content) in cases)
+		{
+			var expected = Detector.InspectCandidateRuleIdsByLinearSearch(
+				path,
+				content.AsSpan(),
+				TestContext.Current.CancellationToken);
+			var actual = Detector.InspectCandidateRuleIds(
+				path,
+				content.AsSpan(),
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(expected, actual);
+		}
+	}
+
+	[Fact]
+	public void KeywordPrefilter_HybridStorageStaysBelowDenseAlternatives()
+	{
+		var statistics = Detector.InspectKeywordPrefilterStatistics();
+
+		Assert.True(statistics.NodeCount > 1_000);
+		Assert.True(statistics.TransitionCount >= statistics.NodeCount - 1);
+		Assert.InRange(statistics.AlphabetSize, 1, 128);
+		Assert.True(statistics.EstimatedStorageBytes < statistics.DenseAlphabetStorageBytes);
+		Assert.True(statistics.DenseAlphabetStorageBytes < statistics.DenseUnicodeStorageBytes);
+	}
+
+	[Fact]
 	public void Detect_BundledConfigurationPath_DoesNotReportRuleExamplesAsSecrets()
 	{
 		var ruleExample = "bedrock-api-" + "key-YmVkcm9jay5hbWF6b25hd3MuY29t";

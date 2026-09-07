@@ -177,6 +177,39 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return ids;
 	}
 
+	internal IReadOnlyList<string> InspectCandidateRuleIdsByLinearSearch(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
+		var configuration = _configuration.Value;
+		var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
+		var ids = new List<string>();
+		foreach (var rule in configuration.Rules)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (rule.ContentRegex is null || !rule.AppliesToPath(normalizedPath))
+				continue;
+			var matches = rule.Keywords.Count == 0;
+			foreach (var keyword in rule.Keywords)
+			{
+				if (!ContainsCaseFolded(content, keyword.AsSpan()))
+					continue;
+				matches = true;
+				break;
+			}
+			if (matches)
+			{
+				ids.Add(rule.Id);
+			}
+		}
+		return ids;
+	}
+
+	internal GitleaksKeywordPrefilterStatistics InspectKeywordPrefilterStatistics() =>
+		_configuration.Value.KeywordPrefilter.GetStatistics();
+
 	internal IReadOnlyList<string> InspectRunnableRuleIds(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
@@ -515,6 +548,29 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static bool IsGenericBase64Character(char character) =>
 		char.IsAsciiLetterOrDigit(character) || character is '+' or '/';
+
+	private static bool ContainsCaseFolded(ReadOnlySpan<char> content, ReadOnlySpan<char> value)
+	{
+		if (value.Length == 0)
+			return content.Length > 0;
+		for (var offset = 0; offset <= content.Length - value.Length; offset++)
+		{
+			var matches = true;
+			for (var index = 0; index < value.Length; index++)
+			{
+				if (char.ToLowerInvariant(content[offset + index]) ==
+				    char.ToLowerInvariant(value[index]))
+				{
+					continue;
+				}
+				matches = false;
+				break;
+			}
+			if (matches)
+				return true;
+		}
+		return false;
+	}
 
 	private static bool HasRuleSpecificEvidence(string ruleId, ReadOnlySpan<char> content) =>
 		ruleId switch
@@ -1213,24 +1269,41 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	/// </summary>
 	private sealed class KeywordPrefilter
 	{
-		private readonly List<Node> _nodes;
-		private readonly IReadOnlyList<int> _rulesWithoutKeywords;
+		private readonly FrozenNode[] _nodes;
+		private readonly int[] _rootTransitions;
+		private readonly ushort[] _asciiSymbols;
+		private readonly char[] _alphabet;
+		private readonly RuleMask _rulesWithoutKeywords;
+		private readonly int _transitionCount;
 
-		private KeywordPrefilter(List<Node> nodes, IReadOnlyList<int> rulesWithoutKeywords)
+		private KeywordPrefilter(
+			FrozenNode[] nodes,
+			int[] rootTransitions,
+			ushort[] asciiSymbols,
+			char[] alphabet,
+			RuleMask rulesWithoutKeywords,
+			int transitionCount)
 		{
 			_nodes = nodes;
+			_rootTransitions = rootTransitions;
+			_asciiSymbols = asciiSymbols;
+			_alphabet = alphabet;
 			_rulesWithoutKeywords = rulesWithoutKeywords;
+			_transitionCount = transitionCount;
 		}
 
 		public static KeywordPrefilter Build(IReadOnlyList<CompiledRule> rules)
 		{
-			var nodes = new List<Node> { new() };
-			var rulesWithoutKeywords = new List<int>();
+			if (rules.Count > RuleMask.Capacity)
+				throw new SecretDetectionException(
+					$"The keyword prefilter supports at most {RuleMask.Capacity} rules.");
+			var nodes = new List<MutableNode> { new() };
+			var rulesWithoutKeywords = default(RuleMask);
 			foreach (var rule in rules)
 			{
 				if (rule.Keywords.Count == 0)
 				{
-					rulesWithoutKeywords.Add(rule.Order);
+					rulesWithoutKeywords = rulesWithoutKeywords.Add(rule.Order);
 					continue;
 				}
 
@@ -1244,11 +1317,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 						{
 							next = nodes.Count;
 							nodes[state].Transitions.Add(normalized, next);
-							nodes.Add(new Node());
+							nodes.Add(new MutableNode());
 						}
 						state = next;
 					}
-					nodes[state].RuleOrders.Add(rule.Order);
+					nodes[state].Outputs = nodes[state].Outputs.Add(rule.Order);
 				}
 			}
 
@@ -1265,11 +1338,48 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 						fallback = nodes[fallback].Failure;
 					if (nodes[fallback].Transitions.TryGetValue(character, out var target) && target != next)
 						nodes[next].Failure = target;
-					nodes[next].RuleOrders.AddRange(nodes[nodes[next].Failure].RuleOrders);
+					nodes[next].Outputs = nodes[next].Outputs.Or(nodes[nodes[next].Failure].Outputs);
 				}
 			}
 
-			return new KeywordPrefilter(nodes, rulesWithoutKeywords);
+			var alphabet = nodes.SelectMany(static node => node.Transitions.Keys)
+				.Distinct().Order().ToArray();
+			if (alphabet.Length > ushort.MaxValue)
+				throw new SecretDetectionException("The keyword prefilter alphabet is too large.");
+			var symbolByCharacter = alphabet
+				.Select((character, index) => (character, index))
+				.ToDictionary(static item => item.character, static item => checked((ushort)item.index));
+			var asciiSymbols = new ushort[128];
+			for (var character = 0; character < asciiSymbols.Length; character++)
+			{
+				if (symbolByCharacter.TryGetValue((char)character, out var symbol))
+					asciiSymbols[character] = checked((ushort)(symbol + 1));
+			}
+			var rootTransitions = new int[alphabet.Length];
+			foreach (var (character, target) in nodes[0].Transitions)
+				rootTransitions[symbolByCharacter[character]] = target;
+			var transitionCount = 0;
+			var frozen = new FrozenNode[nodes.Count];
+			for (var index = 0; index < nodes.Count; index++)
+			{
+				var transitions = nodes[index].Transitions
+					.Select(pair => new SymbolTransition(symbolByCharacter[pair.Key], pair.Value))
+					.OrderBy(static transition => transition.Symbol)
+					.ToArray();
+				transitionCount += transitions.Length;
+				frozen[index] = new FrozenNode(
+					transitions.Select(static transition => transition.Symbol).ToArray(),
+					transitions.Select(static transition => transition.Target).ToArray(),
+					nodes[index].Failure,
+					nodes[index].Outputs);
+			}
+			return new KeywordPrefilter(
+				frozen,
+				rootTransitions,
+				asciiSymbols,
+				alphabet,
+				rulesWithoutKeywords,
+				transitionCount);
 		}
 
 		public void FindCandidates(
@@ -1278,32 +1388,146 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			CancellationToken cancellationToken)
 		{
 			candidates.Clear();
-			foreach (var ruleOrder in _rulesWithoutKeywords)
-				MarkCandidate(candidates, ruleOrder);
+			_rulesWithoutKeywords.Apply(candidates);
 
 			var state = 0;
 			for (var index = 0; index < content.Length; index++)
 			{
 				if ((index & 0xFFF) == 0)
 					cancellationToken.ThrowIfCancellationRequested();
-				var character = char.ToLowerInvariant(content[index]);
-				while (state != 0 && !_nodes[state].Transitions.ContainsKey(character))
+				var symbol = FindSymbol(content[index]);
+				if (symbol < 0)
+				{
+					state = 0;
+					continue;
+				}
+				var next = FindTransition(state, symbol);
+				while (state != 0 && next == 0)
+				{
 					state = _nodes[state].Failure;
-				if (_nodes[state].Transitions.TryGetValue(character, out var next))
-					state = next;
-				foreach (var ruleOrder in _nodes[state].RuleOrders)
-					MarkCandidate(candidates, ruleOrder);
+					next = FindTransition(state, symbol);
+				}
+				state = next;
+				_nodes[state].Outputs.Apply(candidates);
 			}
 		}
 
-		private static void MarkCandidate(Span<ulong> candidates, int ruleOrder) =>
-			candidates[ruleOrder >> 6] |= 1UL << (ruleOrder & 63);
+		public GitleaksKeywordPrefilterStatistics GetStatistics()
+		{
+			var estimatedBytes =
+				(long)_alphabet.Length * sizeof(char) +
+				(long)_asciiSymbols.Length * sizeof(ushort) +
+				(long)_rootTransitions.Length * sizeof(int) +
+				(long)_nodes.Length * (sizeof(int) + RuleMask.ByteSize) +
+				(long)_transitionCount * (sizeof(ushort) + sizeof(int));
+			return new GitleaksKeywordPrefilterStatistics(
+				_nodes.Length,
+				_transitionCount,
+				_alphabet.Length,
+				estimatedBytes,
+				(long)_nodes.Length * Math.Max(128, _alphabet.Length) * sizeof(int),
+				(long)_nodes.Length * (char.MaxValue + 1L) * sizeof(int));
+		}
 
-		private sealed class Node
+		private int FindSymbol(char character)
+		{
+			char normalized;
+			if (character < 128)
+			{
+				normalized = character is >= 'A' and <= 'Z'
+					? (char)(character + ('a' - 'A'))
+					: character;
+			}
+			else
+			{
+				normalized = char.ToLowerInvariant(character);
+			}
+			if (normalized < 128)
+				return _asciiSymbols[normalized] - 1;
+			return BinarySearch(_alphabet, normalized);
+		}
+
+		private int FindTransition(int state, int symbol)
+		{
+			if (state == 0)
+				return _rootTransitions[symbol];
+			var node = _nodes[state];
+			var index = BinarySearch(node.Symbols, checked((ushort)symbol));
+			return index < 0 ? 0 : node.Targets[index];
+		}
+
+		private static int BinarySearch(char[] values, char value)
+		{
+			var low = 0;
+			var high = values.Length - 1;
+			while (low <= high)
+			{
+				var middle = (low + high) >>> 1;
+				var comparison = values[middle].CompareTo(value);
+				if (comparison == 0) return middle;
+				if (comparison < 0) low = middle + 1;
+				else high = middle - 1;
+			}
+			return -1;
+		}
+
+		private static int BinarySearch(ushort[] values, ushort value)
+		{
+			var low = 0;
+			var high = values.Length - 1;
+			while (low <= high)
+			{
+				var middle = (low + high) >>> 1;
+				var candidate = values[middle];
+				if (candidate == value) return middle;
+				if (candidate < value) low = middle + 1;
+				else high = middle - 1;
+			}
+			return -1;
+		}
+
+		private sealed class MutableNode
 		{
 			public Dictionary<char, int> Transitions { get; } = [];
-			public List<int> RuleOrders { get; } = [];
+			public RuleMask Outputs { get; set; }
 			public int Failure { get; set; }
+		}
+
+		private sealed record FrozenNode(
+			ushort[] Symbols,
+			int[] Targets,
+			int Failure,
+			RuleMask Outputs);
+
+		private readonly record struct SymbolTransition(ushort Symbol, int Target);
+
+		private readonly record struct RuleMask(ulong Word0, ulong Word1, ulong Word2, ulong Word3)
+		{
+			public const int Capacity = 256;
+			public const int ByteSize = 4 * sizeof(ulong);
+
+			public RuleMask Add(int ruleOrder) => (ruleOrder >> 6) switch
+			{
+				0 => this with { Word0 = Word0 | 1UL << ruleOrder },
+				1 => this with { Word1 = Word1 | 1UL << (ruleOrder & 63) },
+				2 => this with { Word2 = Word2 | 1UL << (ruleOrder & 63) },
+				3 => this with { Word3 = Word3 | 1UL << (ruleOrder & 63) },
+				_ => throw new ArgumentOutOfRangeException(nameof(ruleOrder))
+			};
+
+			public RuleMask Or(RuleMask other) => new(
+				Word0 | other.Word0,
+				Word1 | other.Word1,
+				Word2 | other.Word2,
+				Word3 | other.Word3);
+
+			public void Apply(Span<ulong> candidates)
+			{
+				if (candidates.Length > 0) candidates[0] |= Word0;
+				if (candidates.Length > 1) candidates[1] |= Word1;
+				if (candidates.Length > 2) candidates[2] |= Word2;
+				if (candidates.Length > 3) candidates[3] |= Word3;
+			}
 		}
 	}
 
@@ -1471,3 +1695,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 }
 
 internal readonly record struct GitleaksCandidateStatistics(int CandidateRuleCount);
+
+internal readonly record struct GitleaksKeywordPrefilterStatistics(
+	int NodeCount,
+	int TransitionCount,
+	int AlphabetSize,
+	long EstimatedStorageBytes,
+	long DenseAlphabetStorageBytes,
+	long DenseUnicodeStorageBytes);
