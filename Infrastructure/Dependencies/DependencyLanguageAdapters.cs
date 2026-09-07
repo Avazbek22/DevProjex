@@ -128,53 +128,44 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				.Select(static match => match.Groups["name"].Value))
 			.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 		var declarationCaptures = context.Declarations
-			.Where(capture => Kinds.ContainsKey(capture.Name)).ToArray();
+			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrEmpty(capture.CapturedName))
+			.ToArray();
+		var declarationScopes = BuildDeclarationScopes(declarationCaptures, namespaces);
 		var declarations = new List<DeclarationFact>(declarationCaptures.Length);
 		foreach (var capture in declarationCaptures)
 		{
-			if (string.IsNullOrEmpty(capture.CapturedName))
-				continue;
-			var containingNamespace = namespaces
-				.Where(item => item.Start <= capture.StartIndex && item.End >= capture.EndIndex)
-				.OrderBy(item => item.End - item.Start).Select(static item => item.Name)
-				.FirstOrDefault() ?? namespaces.FirstOrDefault(static item => item.FileScoped)?.Name ?? string.Empty;
-			var parents = declarationCaptures
-				.Where(item => item.StartIndex < capture.StartIndex && item.EndIndex >= capture.EndIndex)
-				.OrderBy(static item => item.StartIndex)
-				.Select(static item => string.IsNullOrEmpty(item.CapturedName)
-					? null
-					: item.CapturedName + AritySuffix(item.GenericArity))
-				.OfType<string>()
-				.ToArray();
-			var name = capture.CapturedName;
-			var qualified = string.Join('.', new[] { containingNamespace }
-				.Concat(parents).Append(name + AritySuffix(capture.GenericArity))
-				.Where(static value => value.Length > 0));
-			var containingType = parents.Length == 0
-				? null
-				: string.Join('.', new[] { containingNamespace }.Concat(parents)
-					.Where(static value => value.Length > 0));
+			var declarationScope = declarationScopes.ByCapture[capture];
 			declarations.Add(new DeclarationFact(
 				new SymbolIdentity(
 					context.ScopeId,
 					context.LanguageId,
 					Kinds[capture.Name],
-					qualified,
+					declarationScope.QualifiedName,
 					capture.GenericArity,
 					capture.IsFileLocal ? context.RelativePath : null),
 				[Site(context, capture)])
 			{
-				ContainingNamespace = containingNamespace,
-				ContainingType = containingType
+				ContainingNamespace = declarationScope.ContainingNamespace,
+				ContainingType = declarationScope.ContainingType
 			});
 		}
 
-		var references = context.References
+		var referenceCaptures = context.References
 			.Where(static capture => capture.Name.StartsWith("reference.", StringComparison.Ordinal))
-			.SelectMany(capture => ExtractReferences(context, capture, declarationCaptures, namespaces))
-			.Where(reference => !declarations.Any(declaration =>
-				declaration.DeclarationSites[0].Line == reference.Site.Line &&
-				SimpleName(declaration.Identity.QualifiedName) == reference.Name))
+			.ToArray();
+		var referenceScopes = BuildReferenceScopes(referenceCaptures, declarationScopes.Ordered);
+		var declarationSites = declarations
+			.Select(static declaration => (
+				declaration.DeclarationSites[0].Line,
+				Name: SimpleName(declaration.Identity.QualifiedName)))
+			.ToHashSet();
+		var references = referenceCaptures
+			.SelectMany(capture => ExtractReferences(
+				context,
+				capture,
+				referenceScopes.GetValueOrDefault(capture),
+				namespaces))
+			.Where(reference => !declarationSites.Contains((reference.Site.Line, reference.Name)))
 			.Take(limits.MaximumFactsPerFile + 1).ToArray();
 		if (declarations.Count + references.Length > limits.MaximumFactsPerFile)
 			return Failure(context, "fact limit exceeded");
@@ -193,25 +184,11 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 	private static IEnumerable<ReferenceFact> ExtractReferences(
 		DependencyExtractionContext context,
 		DependencySyntaxCapture capture,
-		IReadOnlyList<DependencySyntaxCapture> declarationCaptures,
+		DeclarationScope? declarationScope,
 		IReadOnlyList<NamespaceSpan> namespaces)
 	{
-		var containingNamespace = namespaces
-			.Where(item => item.Start <= capture.StartIndex && item.End >= capture.EndIndex)
-			.OrderBy(item => item.End - item.Start).Select(static item => item.Name)
-			.FirstOrDefault() ?? namespaces.FirstOrDefault(static item => item.FileScoped)?.Name ?? string.Empty;
-		var containingTypes = declarationCaptures
-			.Where(item => item.StartIndex < capture.StartIndex && item.EndIndex >= capture.EndIndex)
-			.OrderBy(static item => item.StartIndex)
-			.Select(static item => string.IsNullOrEmpty(item.CapturedName)
-				? null
-				: item.CapturedName + AritySuffix(item.GenericArity))
-			.OfType<string>()
-			.ToArray();
-		var containingType = containingTypes.Length == 0
-			? null
-			: string.Join('.', new[] { containingNamespace }.Concat(containingTypes)
-				.Where(static value => value.Length > 0));
+		var containingNamespace = declarationScope?.ContainingNamespace ?? FindContainingNamespace(capture, namespaces);
+		var containingType = declarationScope?.QualifiedName;
 		if (capture.Name == "reference.target_typed_object_creation")
 		{
 			yield return NewReference(context, capture, "<target-typed-new>", 0, containingNamespace, containingType);
@@ -233,6 +210,73 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 					containingType);
 		}
 	}
+
+	private static DeclarationScopeIndex BuildDeclarationScopes(
+		IReadOnlyList<DependencySyntaxCapture> declarations,
+		IReadOnlyList<NamespaceSpan> namespaces)
+	{
+		var byCapture = new Dictionary<DependencySyntaxCapture, DeclarationScope>(ReferenceEqualityComparer.Instance);
+		var orderedScopes = new List<DeclarationScope>(declarations.Count);
+		var active = new Stack<DeclarationScope>();
+		foreach (var capture in declarations
+			         .OrderBy(static item => item.StartIndex)
+			         .ThenByDescending(static item => item.EndIndex)
+			         .ThenBy(static item => item.CapturedName, StringComparer.Ordinal))
+		{
+			while (active.TryPeek(out var current) && !Contains(current.Capture, capture))
+				active.Pop();
+			var containingNamespace = FindContainingNamespace(capture, namespaces);
+			var containingType = active.TryPeek(out var parent) ? parent.QualifiedName : null;
+			var qualifiedName = string.Join('.', new[]
+				{
+					containingType ?? containingNamespace,
+					capture.CapturedName + AritySuffix(capture.GenericArity)
+				}.Where(static value => value.Length > 0));
+			var scope = new DeclarationScope(capture, containingNamespace, qualifiedName, containingType);
+			byCapture.Add(capture, scope);
+			orderedScopes.Add(scope);
+			active.Push(scope);
+		}
+		return new DeclarationScopeIndex(byCapture, orderedScopes);
+	}
+
+	private static IReadOnlyDictionary<DependencySyntaxCapture, DeclarationScope?> BuildReferenceScopes(
+		IReadOnlyList<DependencySyntaxCapture> references,
+		IReadOnlyList<DeclarationScope> declarations)
+	{
+		var result = new Dictionary<DependencySyntaxCapture, DeclarationScope?>(ReferenceEqualityComparer.Instance);
+		var active = new Stack<DeclarationScope>();
+		var declarationIndex = 0;
+		foreach (var reference in references
+			         .OrderBy(static item => item.StartIndex)
+			         .ThenBy(static item => item.EndIndex))
+		{
+			while (declarationIndex < declarations.Count &&
+			       declarations[declarationIndex].Capture.StartIndex < reference.StartIndex)
+			{
+				var declaration = declarations[declarationIndex++];
+				while (active.TryPeek(out var current) && !Contains(current.Capture, declaration.Capture))
+					active.Pop();
+				active.Push(declaration);
+			}
+			while (active.TryPeek(out var current) && !Contains(current.Capture, reference))
+				active.Pop();
+			result[reference] = active.TryPeek(out var containing) ? containing : null;
+		}
+		return result;
+	}
+
+	private static bool Contains(DependencySyntaxCapture container, DependencySyntaxCapture item) =>
+		container.StartIndex < item.StartIndex && container.EndIndex >= item.EndIndex;
+
+	private static string FindContainingNamespace(
+		DependencySyntaxCapture capture,
+		IReadOnlyList<NamespaceSpan> namespaces) =>
+		namespaces
+			.Where(item => item.Start <= capture.StartIndex && item.End >= capture.EndIndex)
+			.OrderBy(item => item.End - item.Start)
+			.Select(static item => item.Name)
+			.FirstOrDefault() ?? namespaces.FirstOrDefault(static item => item.FileScoped)?.Name ?? string.Empty;
 
 	private static ReferenceFact NewReference(
 		DependencyExtractionContext context,
@@ -295,6 +339,14 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		return arity < 0 ? value : value[..arity];
 	}
 	private static string AritySuffix(int arity) => arity == 0 ? string.Empty : $"`{arity}";
+	private sealed record DeclarationScope(
+		DependencySyntaxCapture Capture,
+		string ContainingNamespace,
+		string QualifiedName,
+		string? ContainingType);
+	private sealed record DeclarationScopeIndex(
+		IReadOnlyDictionary<DependencySyntaxCapture, DeclarationScope> ByCapture,
+		IReadOnlyList<DeclarationScope> Ordered);
 	private sealed record NamespaceSpan(string Name, int Start, int End, bool FileScoped);
 	private static readonly HashSet<string> Keywords = new(
 		["public", "private", "protected", "internal", "static", "readonly", "ref", "out", "in", "params", "this", "where", "new", "class", "struct", "interface", "record", "enum", "delegate", "void", "var", "get", "set", "init", "return", "true", "false", "null"],
