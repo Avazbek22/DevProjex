@@ -281,7 +281,7 @@ internal sealed class DevProjexMcpTools(
 
 	[Description(
 		"Builds one context from a tree, files, or both in Markdown, text, JSON, or XML with detail, token, importance, and focus controls. " +
-		"Use get_file for one file or search_project first. Results over 50,000 characters return a pack_id for read_pack until server exit.")]
+		"Use get_file for one file or search_project first. Over 50,000 characters, results return a pack_id for read_pack until server exit.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>

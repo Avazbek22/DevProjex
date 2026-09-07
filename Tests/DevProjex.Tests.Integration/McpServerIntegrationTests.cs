@@ -1901,7 +1901,7 @@ public sealed class McpServerIntegrationTests
 			["list_projects"] = [],
 			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "max_depth", "format"],
 			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "top_files", "max_file_bytes"],
-			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "rank", "max_tokens", "max_file_bytes", "view", "format"],
+			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "rank", "focus", "max_tokens", "max_file_bytes", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line"],
 			["search_project"] = ["project", "branch", "pattern", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "max_results"],
 			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
