@@ -78,7 +78,14 @@ internal sealed class EvaluationRunner(
 			foreach (var required in task.SufficientSets.SelectMany(static set => set))
 			{
 				if (!catalog.CharacterCounts.ContainsKey(required))
-					throw new InvalidDataException($"Registered required path is outside the standard selection: {repository.Id}/{task.Id}/{required}");
+				{
+					var matching = catalog.CharacterCounts.Keys
+						.Where(path => path.EndsWith(Path.GetFileName(required), StringComparison.Ordinal))
+						.Take(5);
+					throw new InvalidDataException(
+						$"Registered required path is outside the standard selection: {repository.Id}/{task.Id}/{required}; " +
+						$"serialized candidates: {string.Join(", ", matching)}");
+				}
 			}
 		}
 
@@ -335,7 +342,11 @@ internal sealed class EvaluationRunner(
 		var tokens = new Dictionary<string, long>(StringComparer.Ordinal);
 		foreach (var file in document.RootElement.GetProperty("files").EnumerateArray())
 		{
-			var path = file.GetProperty("path").GetString() ?? throw new InvalidDataException("Context file has no path.");
+			var serializedPath = file.GetProperty("path").GetString() ??
+			                     throw new InvalidDataException("Context file has no path.");
+			var path = Path.IsPathFullyQualified(serializedPath)
+				? PortableRelative(plan.SourceRoot, serializedPath)
+				: serializedPath.Replace('\\', '/');
 			var count = file.GetProperty("content").ValueKind == JsonValueKind.String
 				? file.GetProperty("content").GetString()!.Length
 				: 0;
