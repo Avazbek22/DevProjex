@@ -76,6 +76,88 @@ public sealed class ProjectGitHistoryReaderIntegrationTests
 		Assert.False(File.Exists(markerPath), "Protected history read executed a repository program.");
 	}
 
+	[Fact]
+	public async Task ReadAsync_PreservesNewlineAndRecordSeparatorInGitPaths()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var fixture = new HistoryRepositoryFixture();
+		const string newlineName = "\nleading.cs";
+		const string separatorName = "unit\x1erecord.cs";
+		const string ordinaryName = "ordinary.cs";
+		fixture.Write(newlineName, "one\n");
+		fixture.Write(separatorName, "one\n");
+		fixture.Write(ordinaryName, "one\n");
+		fixture.Commit("initial");
+		fixture.Write(newlineName, "two\n");
+		fixture.Commit("update newline name");
+		fixture.Write(separatorName, "two\n");
+		fixture.Commit("update record separator name");
+		var newlinePath = Path.Combine(fixture.RepositoryPath, newlineName);
+		var separatorPath = Path.Combine(fixture.RepositoryPath, separatorName);
+		var ordinaryPath = Path.Combine(fixture.RepositoryPath, ordinaryName);
+
+		var history = await new ProjectGitHistoryReader().ReadAsync(
+			fixture.RepositoryPath,
+			[newlinePath, separatorPath, ordinaryPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.True(history.IsAvailable, history.Detail);
+		Assert.Equal(new ProjectGitFileActivity(2, 2), history.Files[newlinePath]);
+		Assert.Equal(new ProjectGitFileActivity(2, 1), history.Files[separatorPath]);
+		Assert.Equal(new ProjectGitFileActivity(1, 3), history.Files[ordinaryPath]);
+	}
+
+	[Fact]
+	public async Task ReadAsync_ReportsShallowHistoryAsIncomplete()
+	{
+		using var source = new HistoryRepositoryFixture();
+		source.Write("source.cs", "class Source;\n");
+		source.Commit("initial");
+		using var cloneDirectory = new TemporaryDirectory();
+		var clone = cloneDirectory.CreateDirectory("shallow");
+		RunGitOutsideRepository(
+			"clone",
+			"--quiet",
+			"--depth",
+			"1",
+			new Uri(source.RepositoryPath).AbsoluteUri,
+			clone);
+		var path = Path.Combine(clone, "source.cs");
+
+		var history = await new ProjectGitHistoryReader().ReadAsync(
+			clone,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.True(history.IsAvailable, history.Detail);
+		Assert.True(history.IsShallow);
+		Assert.False(history.IsComplete);
+		Assert.Equal(1, history.CommitCount);
+		Assert.Equal(200, history.WindowSize);
+	}
+
+	private static void RunGitOutsideRepository(params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo(GitRuntime.GitExecutable)
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		using var process = Process.Start(startInfo);
+		Assert.NotNull(process);
+		process.StandardInput.Close();
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		Assert.True(process.WaitForExit(30_000), "Fixture Git command timed out.");
+		Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error}{output}");
+	}
+
 	private sealed class HistoryRepositoryFixture : IDisposable
 	{
 		private readonly TemporaryDirectory _temporary = new();

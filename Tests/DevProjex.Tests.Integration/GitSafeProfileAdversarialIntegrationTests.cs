@@ -76,6 +76,33 @@ public sealed class GitSafeProfileAdversarialIntegrationTests
 	}
 
 	[Fact]
+	public async Task RankingHistoryUsesLocalReadWithoutExecutingHostileRepositoryPrograms()
+	{
+		using var fixture = await HostileGitFixture.CreateAsync(TestContext.Current.CancellationToken);
+		fixture.RunGit("config", "core.fsmonitor", fixture.CreateMarkerCommand("fsmonitor"));
+		fixture.RunGit("config", "diff.external", fixture.CreateMarkerCommand("diff-external"));
+		fixture.RunGit("config", "diff.hostile.command", fixture.CreateMarkerCommand("diff-command"));
+		fixture.RunGit("config", "diff.hostile.textconv", fixture.CreateMarkerCommand("textconv"));
+		fixture.RunGit("config", "log.showSignature", "true");
+		fixture.RunGit("config", "gpg.program", fixture.CreateMarkerCommand("gpg"));
+		fixture.RunGit("config", "core.pager", fixture.CreateMarkerCommand("pager"));
+		fixture.RunGit("config", "alias.rev-parse", "!" + fixture.CreateMarkerCommand("alias-rev-parse"));
+		fixture.RunGit("config", "credential.helper", fixture.CreateMarkerCommand("credential"));
+		fixture.RunGit("config", "core.gitProxy", fixture.CreateMarkerCommand("proxy"));
+		fixture.RunGit("config", "core.sshCommand", fixture.CreateMarkerCommand("ssh-command"));
+		var tracked = Path.Combine(fixture.RepositoryPath, "tracked.txt");
+
+		var history = await new ProjectGitHistoryReader().ReadAsync(
+			fixture.RepositoryPath,
+			[tracked],
+			TestContext.Current.CancellationToken);
+
+		Assert.True(history.IsAvailable, history.Detail);
+		Assert.True(history.Files[tracked].CommitCount > 0);
+		Assert.Empty(Directory.EnumerateFiles(fixture.MarkersDirectory));
+	}
+
+	[Fact]
 	public async Task ManagedCheckoutAndWorktreeUseEmptyHooksAndFilterOverrides()
 	{
 		using var fixture = await HostileGitFixture.CreateAsync(TestContext.Current.CancellationToken);

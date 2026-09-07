@@ -46,62 +46,80 @@ Pinned inputs:
 
 ## Protocol
 
-For every repository, the effective manifest, source bytes, `full` detail, per-file estimated cost, and existing greedy admission pass are held constant. The compared orders are current path order, Git activity only, unique resolved graph degree only, PageRank over the same deduplicated graph, and the combined candidate. Budgets are 4,000, 8,000, and 16,000 estimated tokens.
+The review run was frozen before execution and performed on 2026-09-07. Every order reused one standard-profile manifest, the same source bytes, `full` detail, the existing `(characters + 3) / 4` per-file estimate, and the unchanged greedy admission pass. Budgets were 4,000, 8,000, and 16,000 estimated tokens. The compared global orders were tree order, Git activity, unique resolved graph degree, PageRank, and the combined product order.
 
-This recorded run is the protocol's primary `full`-detail series. Compact and signatures output were not used to select `importance-v1`: changing detail can change whether a required body is present and would therefore test a different gold condition.
+For each task and budget the protocol records `Recall@B`, `AllRequired@B`, irrelevant-token share, and the oracle-feasible ceiling. `Recall@B` is the best fraction admitted from a sufficient set. `AllRequired@B` is one only when one complete sufficient set is admitted. The oracle is feasible when the total cost of at least one sufficient set fits the budget; an individually oversized required file is therefore not charged to an ordering strategy.
 
-For each task and budget the protocol records `Recall@B`, `AllRequired@B`, irrelevant-token share, and the oracle-feasible ceiling. `Recall@B` is the fraction of a task's smallest sufficient set admitted. `AllRequired@B` is one only when at least one complete sufficient set is admitted. A required file larger than the entire budget lowers the oracle ceiling rather than being counted as a ranking failure.
+The localization series also records a directed baseline. Its search vocabulary was fixed before the run from the task wording, never from ranked output: `LargestSkippedFiles`/`remaining budget`, `mandatory`/`SecretRedactionFeatures`, `GitScopeSelection`/`NestedRepository`, `pack_id`/`read_pack`, `repositorySourceUrl`/`RepoCache`; `gitSort`/`git log`, `symlink`/`path scope`, `remote config`/`trust`, `processFiles`/`generate output`, `pack_codebase`/`mcpToolRuntime`; `error_handler_spec`/`register_error_handler`, `save_session`/`SESSION_COOKIE`, `find_best_app`/`ScriptInfo`, `open_session`/`do_teardown`, and `json_provider_class`/`JSONProvider`. The scripted workflow performs search, takes its first five deterministic hits, follows resolved dependencies and dependents, then packs only those paths. It uses the same search and dependency services as the MCP tools, but the evaluation harness calls the service contracts directly rather than measuring JSON-RPC transport.
 
-Weights are chosen on two repositories and evaluated on the held-out third, rotating the held-out repository. The fifteen task-budget rows are not treated as independent observations when one global order produces them. Gold paths never enter a scoring function. Historical fix commits are not used as labels, compressed output is not credited when the required body is absent, and Flask is not presented as a mixed-monorepo sample.
+Gold paths never enter a score or search query. Historical fixes are not labels, one global order is not treated as 15 independent samples, compressed output is not credited when a required body is absent, and Flask is not described as a mixed monorepo. The three repository registries are used as groups; the original leave-one-repository-out weight selection remains the guard against answer leakage and pseudoreplication.
 
-## Product algorithm
+## Product algorithm after review
 
-The frozen run was performed on 2026-09-07. The full-detail effective selection was built with the ordinary standard profile. For every repository, all five orders reused that one file manifest and exact `FileContentAnalyzer` character counts; the cost was the existing per-file `(characters + 3) / 4` estimate. No gold path was supplied to the ranker. Git used the last 200 commits by position. The graph included only unique, resolved, non-self edges.
+The `importance-v1` constants remain graph `0.85`, Git `0.10`, and role `0.05`; v5.2 is not released, so the corrected implementation retains the algorithm id. The graph is built once as canonical numeric node ids and sorted adjacency arrays. Only unique resolved non-self file pairs participate. The same graph supplies PageRank, dependents, dependencies, and coverage counts. PageRank uses 30 deterministic sequential iterations on two `double[]` buffers. Before dense-rank normalization, values are quantized to an absolute `1e-12` grid with midpoint-to-even rounding. This is a transitive equivalence relation; pairwise epsilon comparison is deliberately not used. At the graph sizes in this protocol, `1e-12` is well below a meaningful rank separation while absorbing observed symmetric-node noise near `1e-17`.
 
-The graph variant comparison tied at zero complete sufficient sets. PageRank won the next metric, aggregate mean `Recall@B`: `0.0519` against degree's `0.0444`. Degree had a nearly identical mean irrelevant-token share (`0.9789` against `0.9792`). Under the predeclared priority of `AllRequired@B`, then `Recall@B`, PageRank therefore became the `importance-v1` graph signal. Unsupported and extraction-failed files receive no PageRank signal.
+Extracted-facts coverage is `Supported / candidates`. `Supported`, `Unsupported`, and `ExtractionFailed` are mutually exclusive, so failures are not subtracted from `Supported`. Reports separately state facts coverage, unique resolved internal references over all non-external reference records, and the number of files touching a resolved edge. A high facts percentage can no longer be presented as high link coverage when the graph is sparse.
 
-The weight grid kept graph strictly larger than Git and limited role to `0.05`, `0.10`, or `0.15`. Selection on two repositories and evaluation on the third produced:
+Git activity is commit count plus recency by position in a safe 200-commit LocalRead window. History is cached only after success, by repository identity, pinned HEAD, window, shallow state, and completeness. An incomplete shallow window has confidence `commits read / 200`; it is reported as, for example, `read 1/200 commits; shallow history`, and is not treated as evidence of low activity. Candidate repository boundaries are indexed once per operation. History paths are parsed as NUL-delimited fields; one Git-generated framing LF is removed from the first path field, while newline and `0x1e` bytes belonging to a filename are preserved.
 
-| Held-out repository | Training choice graph / Git / role | Held-out AllRequired / oracle-feasible | Mean Recall | Mean irrelevant tokens |
-|---|---:|---:|---:|---:|
-| DevProjex | `0.55 / 0.40 / 0.05` | `0 / 5` | `0.0000` | `1.0000` |
-| Repomix | `0.85 / 0.10 / 0.05` | `0 / 9` | `0.0000` | `1.0000` |
-| Flask | `0.85 / 0.10 / 0.05` | `0 / 2` | `0.0667` | `0.9412` |
+Manifests and explicit `Main` or executable-module evidence are entry points. A source with no dependents and at least three dependencies is only a `coordinator`, not an inferred entry point. Tests are deprioritized but never excluded. The final tie-break is the canonical relative path.
 
-After the leave-one-repository-out check, fitting the same constrained grid to all three registries selected graph `0.85`, Git `0.10`, and role `0.05`. These are the frozen `importance-v1` constants. The weak held-out results are recorded rather than described as a win: generic project-wide ranking did not admit a complete task set in this deliberately small full-detail budget range. Only 16 of 45 task-budget rows were oracle-feasible, chiefly because several required files individually cost more than 16,000 estimated tokens.
+Facts, preparation, cost, and emitted bytes are bound to one source identity. SHA-256 content plus length and last-write metadata are captured around fact indexing and checked while the coherent output snapshot is opened, copied, and disposed. A mismatch fails closed with guidance to repeat the export. Ranking still never widens the effective selection. Without `rank`, it performs no fact indexing, Git work, or content hashing and preserves the existing bytes.
 
-The product always uses rank normalization within the effective selection, scales the graph contribution by `(supported - extraction-failed) / candidates`, redistributes unavailable signal weight, and uses canonical relative path as the final tie-break. Git activity combines commit count and most-recent position in the fixed window. Manifests and inferred entry points receive a small lift; test sources receive a visible penalty but are never excluded.
+### Missing-signal ablation
 
-Facts and emitted content are guarded as one per-file source version. Length and
-last-write metadata are captured around indexing and checked when the coherent
-content snapshot is opened, copied, and disposed. A concurrent change fails the
-pack instead of combining scores from one version with bytes from another; this
-uses the same metadata-freshness tradeoff as the existing content pipeline.
+The fixed `0.85 / 0.10 / 0.05` weights were rerun under all three policies. Each row aggregates the nine repository/budget groups; `AllRequired` and oracle counts cover the underlying 45 task-budget cases.
 
-## Full-detail results
+| Policy | AllRequired / oracle-feasible | Mean Recall | Mean irrelevant tokens |
+|---|---:|---:|---:|
+| Renormalize available weights | `0 / 16` | `0.0333` | `0.9784` |
+| Fill unavailable signals with neutral `0.5` | `0 / 16` | `0.0111` | `0.9935` |
+| Limit score by available confidence | `0 / 16` | `0.0111` | `0.9935` |
 
-Each cell is `mean Recall · AllRequired/oracle-feasible · mean irrelevant-token share`, averaged over the five frozen tasks for that repository and budget. `Combined` uses the final `0.85 / 0.10 / 0.05` weights. Oracle feasibility is reported independently of the order.
+Renormalization had better recall in this small sample, but it also reproduced the correctness defect: a manifest with only its role signal becomes `1.0`, above a strongly linked file whose graph confidence is 90%. Neutral fill avoids that exact maximum but still manufactures evidence. `importance-v1` therefore uses confidence limitation: missing weight contributes zero and the score cannot exceed available signal weight. The report names the policy and marks affected top entries `confidence limited`. This is a semantic choice favoring honest uncertainty over the `0.0222` aggregate recall advantage of renormalization; it is not presented as an empirical quality win.
 
-| Repository / budget | Current | Git only | Degree only | PageRank only | Combined |
+## Architecture overview series
+
+Before the run, a human central-file checklist was recorded for each repository: eight orchestration and boundary files in DevProjex, seven packing/config/MCP files in Repomix, and eight application/context/session/CLI files in Flask. The table counts checklist members in the first 15 non-test files; it is a manual sanity check, not task-completion evidence.
+
+| Repository | Tree | Git only | Degree only | PageRank only | Combined |
 |---|---:|---:|---:|---:|---:|
-| DevProjex / 4,000 | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` |
-| DevProjex / 8,000 | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0667 · 0/2 · 0.9769` | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` |
-| DevProjex / 16,000 | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0667 · 0/2 · 0.8612` |
-| Repomix / 4,000 | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` |
-| Repomix / 8,000 | `0.0000 · 0/3 · 1.0000` | `0.0667 · 0/3 · 0.9041` | `0.0000 · 0/3 · 1.0000` | `0.0000 · 0/3 · 1.0000` | `0.0000 · 0/3 · 1.0000` |
-| Repomix / 16,000 | `0.0000 · 0/5 · 1.0000` | `0.0667 · 0/5 · 0.9520` | `0.2333 · 0/5 · 0.8694` | `0.1667 · 0/5 · 0.9147` | `0.0000 · 0/5 · 1.0000` |
-| Flask / 4,000 | `0.0000 · 0/0 · 1.0000` | `0.0000 · 0/0 · 1.0000` | `0.0000 · 0/0 · 1.0000` | `0.0000 · 0/0 · 1.0000` | `0.0000 · 0/0 · 1.0000` |
-| Flask / 8,000 | `0.0000 · 0/0 · 1.0000` | `0.1000 · 0/0 · 0.8825` | `0.1000 · 0/0 · 0.9640` | `0.1000 · 0/0 · 0.9640` | `0.1000 · 0/0 · 0.8825` |
-| Flask / 16,000 | `0.0000 · 0/2 · 1.0000` | `0.1667 · 0/2 · 0.7468` | `0.0000 · 0/2 · 1.0000` | `0.2000 · 0/2 · 0.9340` | `0.1000 · 0/2 · 0.9412` |
+| DevProjex | `1/15` | `1/15` | `1/15` | `0/15` | `2/15` |
+| Repomix | `0/15` | `0/15` | `3/15` | `1/15` | `1/15` |
+| Flask | `0/15` | `6/15` | `7/15` | `6/15` | `7/15` |
 
-Coverage was `1,471 / 2,299` supported candidates for DevProjex (`63.98%`), `389 / 951` for Repomix (`40.90%`), and `80 / 212` for Flask (`37.74%`); all three extractions had zero failures and a complete 200-commit Git window. The low coverage is why graph weight is reduced at run time and the report names the measured share.
+The manual review calls the Flask combined list credible: it contains `app.py`, `sansio/app.py`, `ctx.py`, `sessions.py`, `cli.py`, helpers, wrappers, and JSON/application boundaries. DevProjex improves only modestly, surfacing `TerminalServiceFactory.cs` and `GitRepositoryService.cs` but missing several central files. Repomix is the counterexample: degree alone finds three checklist files, while PageRank and combined find only `mcpToolRuntime.ts`. Thus the combined order is not uniformly better even for seedless architecture review.
 
-On the pinned DevProjex input the resulting report starts:
+Measured coverage was:
+
+| Repository | Facts-supported candidates | Resolved internal references | Files with resolved edges |
+|---|---:|---:|---:|
+| DevProjex | `1,471 / 2,299 (63.98%)` | `5,138 / 11,567 (44.42%)` | `1,221` |
+| Repomix | `389 / 951 (40.90%)` | `1,025 / 2,612 (39.24%)` | `359` |
+| Flask | `80 / 212 (37.74%)` | `175 / 512 (34.18%)` | `75` |
+
+## Localization-task budget series
+
+Each cell is `mean Recall · AllRequired/oracle-feasible · mean irrelevant-token share`, averaged over the five frozen tasks for that repository and budget. `Combined` is the confidence-limited product order. `Directed` varies by task because its explicit `paths` are the result of that task's fixed search and related-files workflow.
+
+| Repository / budget | Tree | Git only | Degree only | PageRank only | Combined | Directed |
+|---|---:|---:|---:|---:|---:|---:|
+| DevProjex / 4,000 | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.2000 · 0/1 · 0.9202` |
+| DevProjex / 8,000 | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.2000 · 0/2 · 0.9600` |
+| DevProjex / 16,000 | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.0000 · 0/2 · 1.0000` | `0.1333 · 0/2 · 0.8189` |
+| Repomix / 4,000 | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` | `0.0000 · 0/1 · 1.0000` |
+| Repomix / 8,000 | `0.0000 · 0/3 · 1.0000` | `0.0667 · 0/3 · 0.9041` | `0.0000 · 0/3 · 1.0000` | `0.0000 · 0/3 · 1.0000` | `0.0000 · 0/3 · 1.0000` | `0.0000 · 0/3 · 1.0000` |
+| Repomix / 16,000 | `0.0000 · 0/5 · 1.0000` | `0.0667 · 0/5 · 0.9520` | `0.0667 · 0/5 · 0.9547` | `0.1667 · 0/5 · 0.9147` | `0.0000 · 0/5 · 1.0000` | `0.1667 · 0/5 · 0.9662` |
+| Flask / 4,000 | `0.0000 · 0/0 · 1.0000` | `0.0000 · 0/0 · 1.0000` | `0.0000 · 0/0 · 1.0000` | `0.0000 · 0/0 · 1.0000` | `0.0000 · 0/0 · 1.0000` | `0.2000 · 0/0 · 0.7001` |
+| Flask / 8,000 | `0.0000 · 0/0 · 1.0000` | `0.1000 · 0/0 · 0.8825` | `0.0000 · 0/0 · 1.0000` | `0.1000 · 0/0 · 0.9640` | `0.0000 · 0/0 · 1.0000` | `0.2000 · 0/0 · 0.8520` |
+| Flask / 16,000 | `0.0000 · 0/2 · 1.0000` | `0.1667 · 0/2 · 0.7468` | `0.1667 · 0/2 · 0.7468` | `0.2000 · 0/2 · 0.9340` | `0.1000 · 0/2 · 0.9412` | `0.6000 · 2/2 · 0.6201` |
+
+Across the nine groups, combined mean recall is `0.0111`, below Git-only `0.0444`, PageRank-only `0.0519`, and directed `0.1889`. Combined admits no complete sufficient set; directed admits both oracle-feasible Flask sets at 16,000. This is a clear loss for generic ranking on localized tasks. The cause is not hidden: global importance rewards broadly connected and recently active infrastructure, while a task asks for a narrow semantic slice. Use `search_project` → `related_files` → `pack_context(paths: ...)` when a seed is known; importance ranking is an experimental seedless overview order.
+
+On the pinned DevProjex corpus, the beginning of the reviewed report is representative:
 
 ```text
-[Ranking] importance-v1 · graph pagerank 64% of 2,299 sources · git window 200 commits · tests deprioritized
-[Ranking top] Infrastructure/Git/GitRepositoryService.cs — dependents 21 · dependencies 6 · commits 7/200
-[Ranking top] Apps/Terminal/Execution/TerminalServiceFactory.cs — dependents 40 · dependencies 60 · commits 3/200
+[Ranking] importance-v1 · graph pagerank · facts 64% of 2,299 sources · git window 200 commits · tests deprioritized · missing signals: confidence limited
+[Ranking coverage] facts 64% · resolved internal references 5,138/11,567 (44%) · files with resolved edges 1,221
+[Ranking top] Kernel/Models/IgnoreRules.cs — dependents 138 · dependencies 5 · commits 2/200 · priority 1; graph available; git available; main contribution: graph; confidence limited
 ```
-
-These results are experimental. They show that importance order can recover individual required files that path order misses, but they do not establish better task completion. Callers with a seed should continue to use `search_project`, `get_file`, and `related_files`, then pass explicit `paths`; importance ranking is intended for seedless overview packs.

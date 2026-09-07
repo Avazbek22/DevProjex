@@ -32,9 +32,16 @@ public sealed partial class McpServerProcessTests
 		Assert.True(text.IndexOf("B.cs:", StringComparison.Ordinal) < text.IndexOf("A.cs:", StringComparison.Ordinal), text);
 		Assert.Contains("[Ranking] importance-v1", text, StringComparison.Ordinal);
 		Assert.Contains("[Ranking top] B.cs", text, StringComparison.Ordinal);
+		var rankingIndex = text.IndexOf("[Ranking] importance-v1", StringComparison.Ordinal);
+		var rankingTopIndex = text.IndexOf("[Ranking top] B.cs", StringComparison.Ordinal);
+		var mainDataClose = text.IndexOf("</untrusted-data-", StringComparison.Ordinal);
+		var rankingDataOpen = text.LastIndexOf("<untrusted-data-", rankingTopIndex, StringComparison.Ordinal);
+		var rankingDataClose = text.IndexOf("</untrusted-data-", rankingTopIndex, StringComparison.Ordinal);
 		Assert.True(
-			text.IndexOf("[Ranking] importance-v1", StringComparison.Ordinal) >
-			text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal),
+			rankingIndex > mainDataClose,
+			text);
+		Assert.True(
+			rankingDataOpen > rankingIndex && rankingTopIndex > rankingDataOpen && rankingDataClose > rankingTopIndex,
 			text);
 
 		foreach (var invalidArguments in new[]
