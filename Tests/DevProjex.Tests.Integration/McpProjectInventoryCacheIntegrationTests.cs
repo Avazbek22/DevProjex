@@ -8,6 +8,38 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class McpProjectInventoryCacheIntegrationTests
 {
+	[Fact]
+	public async Task BuildPlan_NarrowProjectionReusesInventoryAndTreeChangeRebuildsIt()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/src/Original.cs", "original\n");
+		var buildCount = 0;
+		await using var harness = CreateHarness(
+			project,
+			(_, _) =>
+			{
+				Interlocked.Increment(ref buildCount);
+				return ValueTask.CompletedTask;
+			});
+
+		var initial = await BuildAsync(harness.Service);
+		var buildsAfterInitial = buildCount;
+		DisableWatcher(harness.Service);
+		var narrow = await BuildAsync(harness.Service, includePatterns: ["src/**"]);
+
+		Assert.True(HasFile(initial, "src/Original.cs"));
+		Assert.True(HasFile(narrow, "src/Original.cs"));
+		Assert.Equal(buildsAfterInitial, buildCount);
+
+		workspace.CreateFile("project/src/AddedAfterCache.cs", "added\n");
+		RaiseWatcherChange(harness.Service, "src/AddedAfterCache.cs");
+		var changed = await BuildAsync(harness.Service, includePatterns: ["src/**"]);
+
+		Assert.True(HasFile(changed, "src/AddedAfterCache.cs"));
+		Assert.Equal(buildsAfterInitial + 1, buildCount);
+	}
+
 	[Fact(Timeout = 30_000)]
 	public async Task BuildPlan_ChangeAfterTraversalCannotPublishAStalePlanUnderANewRevision()
 	{
@@ -202,12 +234,12 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		watcher.EnableRaisingEvents = false;
 	}
 
-	private static void RaiseWatcherChange(McpProjectService service)
+	private static void RaiseWatcherChange(McpProjectService service, string name = "Anchor.cs")
 	{
 		var monitor = GetMonitor(service);
 		monitor.GetType()
 			.GetMethod("OnChanged", BindingFlags.Instance | BindingFlags.NonPublic)!
-			.Invoke(monitor, [monitor, new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", "Anchor.cs")]);
+			.Invoke(monitor, [monitor, new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name)]);
 	}
 
 	private static void RaiseWatcherError(McpProjectService service)
