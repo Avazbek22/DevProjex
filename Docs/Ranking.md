@@ -168,7 +168,7 @@ greedy admission pass for every comparator. The one seed for each of the existin
 was selected from the task wording, not from its required-file set or ranked output. The
 complete machine-readable result is
 `tools/RankingEval/results/2026-09-07-focus-v1.json`; the product and evaluator SHA for the
-run are both `ced479a3f4e0ecf7ce1903e7815bc35800772e03`.
+run are both `533e796de6360cab1b7deef9fdc6622399c8bbc6`.
 
 The six frozen orders are current manifest order, `importance-v1`, seed first without graph
 traversal, `focus-v1` minimum undirected graph hop, evaluation-only personalized PageRank,

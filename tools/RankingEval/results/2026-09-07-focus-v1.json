@@ -1,8 +1,8 @@
 {
   "protocol": "focus-v1",
   "runDate": "2026-09-07",
-  "productSha": "ced479a3f4e0ecf7ce1903e7815bc35800772e03",
-  "evaluatorSha": "ced479a3f4e0ecf7ce1903e7815bc35800772e03",
+  "productSha": "533e796de6360cab1b7deef9fdc6622399c8bbc6",
+  "evaluatorSha": "533e796de6360cab1b7deef9fdc6622399c8bbc6",
   "repositories": [
     {
       "id": "devprojex",
