@@ -212,6 +212,27 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	internal GitleaksKeywordPrefilterStatistics InspectKeywordPrefilterStatistics() =>
 		_configuration.Value.KeywordPrefilter.GetStatistics();
 
+	internal bool InspectRuleSpecificEvidence(string ruleId, ReadOnlySpan<char> content) =>
+		HasRuleSpecificEvidence(ruleId, content);
+
+	internal GitleaksRuleMatchProbe InspectRuleMatch(string ruleId, string content)
+	{
+		var rule = _configuration.Value.Rules.Single(candidate =>
+			candidate.Id.Equals(ruleId, StringComparison.Ordinal));
+		if (rule.ContentRegex?.Value.Match(content) is not { Success: true } match ||
+		    !TryExtractSecret(rule, match, out var secret))
+		{
+			return default;
+		}
+
+		return new GitleaksRuleMatchProbe(
+			IsMatch: true,
+			match.Index,
+			match.Length,
+			secret.Index,
+			secret.Length);
+	}
+
 	internal IReadOnlyList<string> InspectRunnableRuleIds(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
@@ -589,7 +610,13 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			"databricks-api-token" =>
 				HasPrefixedRun(content, "dapi", 32, 32, char.IsAsciiHexDigit),
 			"gocardless-api-token" =>
-				HasPrefixedRun(content, "live_", 40, 40, IsWordHyphenOrEquals),
+				HasPrefixedRun(
+					content,
+					"live_",
+					40,
+					40,
+					IsWordHyphenOrEquals,
+					comparison: StringComparison.OrdinalIgnoreCase),
 			"harness-api-key" => HasHarnessApiKeyEvidence(content),
 			"intra42-client-secret" =>
 				HasPrefixedRun(content, "s-s4t2ud-", 64, 64, char.IsAsciiHexDigit) ||
@@ -628,13 +655,19 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			"twitter-api-key" => HasRun(content, 25, char.IsAsciiLetterOrDigit),
 			"twitter-api-secret" => HasRun(content, 50, char.IsAsciiLetterOrDigit),
 			"twitter-bearer-token" =>
-				HasPrefixedRun(content, TwitterBearerPrefix, 80, 100, IsTwitterBearerCharacter),
+				HasPrefixedRun(
+					content,
+					TwitterBearerPrefix,
+					80,
+					100,
+					IsTwitterBearerCharacter,
+					comparison: StringComparison.OrdinalIgnoreCase),
 			"vault-service-token" =>
 				HasPrefixedRun(content, "hvs.", 90, 120, IsVaultTokenCharacter, IsGitleaksValueTerminator) ||
 				HasPrefixedRun(content, "s.", 24, 24, char.IsAsciiLetterOrDigit, IsGitleaksValueTerminator),
-			"twilio-api-key" => HasPrefixedRun(content, "SK", 32, 32, char.IsAsciiHexDigit),
+			"twilio-api-key" => HasPrefixedRun(content, "SK", 32, int.MaxValue, char.IsAsciiHexDigit),
 			"jwt" => HasJwtEvidence(content),
-			"yandex-access-token" => content.Contains("t1.", StringComparison.Ordinal),
+			"yandex-access-token" => content.Contains("t1.", StringComparison.OrdinalIgnoreCase),
 			"yandex-api-key" =>
 				HasPrefixedRun(
 					content,
@@ -942,7 +975,18 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		char.IsAsciiLetterOrDigit(character) || character is '=' or '_' or '-' or '.';
 
 	private static bool IsWordOrHyphen(char character) =>
-		char.IsAsciiLetterOrDigit(character) || character is '_' or '-';
+		character == '-' || IsRegexWordCharacter(character);
+
+	private static bool IsRegexWordCharacter(char character) =>
+		char.GetUnicodeCategory(character) is
+			UnicodeCategory.UppercaseLetter or
+			UnicodeCategory.LowercaseLetter or
+			UnicodeCategory.TitlecaseLetter or
+			UnicodeCategory.ModifierLetter or
+			UnicodeCategory.OtherLetter or
+			UnicodeCategory.NonSpacingMark or
+			UnicodeCategory.DecimalDigitNumber or
+			UnicodeCategory.ConnectorPunctuation;
 
 	private static bool IsWordHyphenOrEquals(char character) =>
 		IsWordOrHyphen(character) || character == '=';
@@ -1750,3 +1794,10 @@ internal readonly record struct GitleaksKeywordPrefilterStatistics(
 	long EstimatedStorageBytes,
 	long DenseAlphabetStorageBytes,
 	long DenseUnicodeStorageBytes);
+
+internal readonly record struct GitleaksRuleMatchProbe(
+	bool IsMatch,
+	int MatchStart,
+	int MatchLength,
+	int SecretStart,
+	int SecretLength);
