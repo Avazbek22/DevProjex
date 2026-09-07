@@ -14,6 +14,7 @@ internal sealed class McpServices : IDisposable
 		IGitScopePathProvider gitScopePathProvider,
 		SecretRedactionSession redactionSession,
 		CodeCompressionSession compressionSession,
+		DependencyFactsEngine dependencyFactsEngine,
 		SecretRedactionOutputPreparer outputPreparer)
 	{
 		Planner = planner;
@@ -25,6 +26,7 @@ internal sealed class McpServices : IDisposable
 		GitScopePathProvider = gitScopePathProvider;
 		RedactionSession = redactionSession;
 		CompressionSession = compressionSession;
+		DependencyFactsEngine = dependencyFactsEngine;
 		OutputPreparer = outputPreparer;
 	}
 
@@ -37,6 +39,7 @@ internal sealed class McpServices : IDisposable
 	public IGitScopePathProvider GitScopePathProvider { get; }
 	public SecretRedactionSession RedactionSession { get; }
 	public CodeCompressionSession CompressionSession { get; }
+	public DependencyFactsEngine DependencyFactsEngine { get; }
 	public SecretRedactionOutputPreparer OutputPreparer { get; }
 
 	public static McpServices Create(
@@ -101,6 +104,19 @@ internal sealed class McpServices : IDisposable
 			redactionSession.Dispose();
 			throw;
 		}
+		DependencyFactsEngine dependencyFactsEngine;
+		try
+		{
+			dependencyFactsEngine = new DependencyFactsEngine(
+				new TreeSitterDependencyFactExtractor(),
+				new FileDependencyConfigurationProvider());
+		}
+		catch
+		{
+			compressionSession.Dispose();
+			redactionSession.Dispose();
+			throw;
+		}
 		var analysis = new ProjectAnalysisService(
 			new ScanOptionsUseCase(scanner),
 			new BuildTreeUseCase(treeBuilder, treePresenter),
@@ -132,10 +148,12 @@ internal sealed class McpServices : IDisposable
 				new GitScopePathProvider(gitPathComparisonSemanticsResolver),
 				redactionSession,
 				compressionSession,
+				dependencyFactsEngine,
 				new SecretRedactionOutputPreparer(contentAnalyzer, preparedContentAnalyzer));
 		}
 		catch
 		{
+			dependencyFactsEngine.Dispose();
 			compressionSession.Dispose();
 			redactionSession.Dispose();
 			throw;
@@ -146,5 +164,6 @@ internal sealed class McpServices : IDisposable
 	{
 		RedactionSession.Dispose();
 		CompressionSession.Dispose();
+		DependencyFactsEngine.Dispose();
 	}
 }
