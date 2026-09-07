@@ -266,6 +266,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		configuration.KeywordPrefilter.FindCandidates(content, candidateRules, cancellationToken);
 
 		var findings = new List<DetectedSecret>();
+		var lineIndex = new LineRangeIndex(content);
 		foreach (var ruleOrder in EnumerateCandidateRuleOrders(candidateRules, configuration.Rules.Count))
 		{
 			var rule = configuration.Rules[ruleOrder];
@@ -301,7 +302,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 					    !TryExtractSecret(rule, captureMatch, out var secretGroup))
 						continue;
 
-					var line = GetContainingLine(content, valueMatch.Index, valueMatch.Length);
+					var lineRange = lineIndex.GetContainingLine(valueMatch.Index, valueMatch.Length);
+					var line = content.Slice(lineRange.Start, lineRange.Length);
 					if (line.Contains(GitleaksAllowSignature, StringComparison.Ordinal))
 						continue;
 					var secret = secretGroup.Value;
@@ -310,11 +312,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 					var context = new AllowlistContext(
 						normalizedPath,
-						secret,
-						matchText,
+						secret.AsSpan(),
+						matchText.AsSpan(),
 						line);
-					if (configuration.GlobalAllowlists.Any(allowlist => allowlist.Allows(context)) ||
-					    rule.Allowlists.Any(allowlist => allowlist.Allows(context)))
+					if (Allows(configuration.GlobalAllowlists, context) ||
+					    Allows(rule.Allowlists, context))
 					{
 						continue;
 					}
@@ -877,13 +879,80 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return secretGroup.Length > 0;
 	}
 
-	private static string GetContainingLine(ReadOnlySpan<char> content, int matchStart, int matchLength)
+	private static bool Allows(IReadOnlyList<CompiledAllowlist> allowlists, AllowlistContext context)
 	{
-		var lineStart = content[..Math.Max(0, matchStart)].LastIndexOfAny('\r', '\n') + 1;
-		var matchEnd = Math.Min(content.Length, matchStart + matchLength);
-		var relativeLineEnd = content[matchEnd..].IndexOfAny('\r', '\n');
-		var lineEnd = relativeLineEnd < 0 ? content.Length : matchEnd + relativeLineEnd;
-		return content[lineStart..lineEnd].ToString();
+		foreach (var allowlist in allowlists)
+		{
+			if (allowlist.Allows(context))
+				return true;
+		}
+		return false;
+	}
+
+	private ref struct LineRangeIndex(ReadOnlySpan<char> content)
+	{
+		private const int IndexedContentThreshold = 64 * 1024;
+		private readonly ReadOnlySpan<char> _content = content;
+		private int[]? _lineStarts;
+		private int _cachedStart = -1;
+		private int _cachedEnd;
+
+		public LineRange GetContainingLine(int matchStart, int matchLength)
+		{
+			var matchEnd = Math.Min(_content.Length, checked(matchStart + matchLength));
+			if (_cachedStart >= 0 && matchStart >= _cachedStart && matchEnd <= _cachedEnd)
+				return new LineRange(_cachedStart, _cachedEnd - _cachedStart);
+
+			LineRange range;
+			if (_content.Length >= IndexedContentThreshold)
+			{
+				_lineStarts ??= BuildLineStarts(_content);
+				var startLine = FindLine(_lineStarts, matchStart);
+				var endLine = FindLine(_lineStarts, matchEnd);
+				var start = _lineStarts[startLine];
+				var end = endLine + 1 < _lineStarts.Length ? _lineStarts[endLine + 1] : _content.Length;
+				while (end > start && _content[end - 1] is '\r' or '\n')
+					end--;
+				range = new LineRange(start, end - start);
+			}
+			else
+			{
+				var start = _content[..Math.Max(0, matchStart)].LastIndexOfAny('\r', '\n') + 1;
+				var relativeEnd = _content[matchEnd..].IndexOfAny('\r', '\n');
+				var end = relativeEnd < 0 ? _content.Length : matchEnd + relativeEnd;
+				range = new LineRange(start, end - start);
+			}
+
+			_cachedStart = range.Start;
+			_cachedEnd = range.End;
+			return range;
+		}
+
+		private static int[] BuildLineStarts(ReadOnlySpan<char> text)
+		{
+			var starts = new List<int> { 0 };
+			for (var index = 0; index < text.Length; index++)
+			{
+				if (text[index] == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
+					index++;
+				else if (text[index] is not ('\r' or '\n'))
+					continue;
+				if (index + 1 < text.Length)
+					starts.Add(index + 1);
+			}
+			return starts.ToArray();
+		}
+
+		private static int FindLine(int[] starts, int offset)
+		{
+			var found = Array.BinarySearch(starts, Math.Clamp(offset, 0, int.MaxValue));
+			return found >= 0 ? found : Math.Max(0, ~found - 1);
+		}
+	}
+
+	private readonly record struct LineRange(int Start, int Length)
+	{
+		public int End => checked(Start + Length);
 	}
 
 	internal static double CalculateShannonEntropy(string value) =>
@@ -1323,7 +1392,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		public bool Allows(AllowlistContext context)
 		{
-			var target = RegexTarget switch
+			ReadOnlySpan<char> target = RegexTarget switch
 			{
 				AllowlistRegexTarget.Match => context.Match,
 				AllowlistRegexTarget.Line => context.Line,
@@ -1332,9 +1401,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			if (!RequireAll)
 			{
 				return Paths.Count > 0 && AllowsPath(context.Path) ||
-				       Stopwords.Count > 0 && Stopwords.Any(stopword =>
-					       context.Secret.Contains(stopword, StringComparison.OrdinalIgnoreCase)) ||
-				       Regexes.Count > 0 && Regexes.Any(regex => regex.Value.IsMatch(target));
+				       Stopwords.Count > 0 && ContainsAny(context.Secret, Stopwords) ||
+				       Regexes.Count > 0 && MatchesAny(target, Regexes);
 			}
 
 			var hasCriterion = false;
@@ -1347,8 +1415,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			if (Stopwords.Count > 0)
 			{
 				hasCriterion = true;
-				if (!Stopwords.Any(stopword =>
-					    context.Secret.Contains(stopword, StringComparison.OrdinalIgnoreCase)))
+				if (!ContainsAny(context.Secret, Stopwords))
 				{
 					return false;
 				}
@@ -1356,18 +1423,44 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			if (Regexes.Count > 0)
 			{
 				hasCriterion = true;
-				if (!Regexes.Any(regex => regex.Value.IsMatch(target)))
+				if (!MatchesAny(target, Regexes))
 					return false;
 			}
 			return hasCriterion;
 		}
+
+		private static bool ContainsAny(ReadOnlySpan<char> value, IReadOnlyList<string> candidates)
+		{
+			foreach (var candidate in candidates)
+			{
+				if (value.Contains(candidate, StringComparison.OrdinalIgnoreCase))
+					return true;
+			}
+			return false;
+		}
+
+		private static bool MatchesAny(ReadOnlySpan<char> value, IReadOnlyList<Lazy<Regex>> regexes)
+		{
+			foreach (var regex in regexes)
+			{
+				if (regex.Value.IsMatch(value))
+					return true;
+			}
+			return false;
+		}
 	}
 
-	private sealed record AllowlistContext(
-		string Path,
-		string Secret,
-		string Match,
-		string Line);
+	private readonly ref struct AllowlistContext(
+		string path,
+		ReadOnlySpan<char> secret,
+		ReadOnlySpan<char> match,
+		ReadOnlySpan<char> line)
+	{
+		public string Path { get; } = path;
+		public ReadOnlySpan<char> Secret { get; } = secret;
+		public ReadOnlySpan<char> Match { get; } = match;
+		public ReadOnlySpan<char> Line { get; } = line;
+	}
 
 	private enum AllowlistRegexTarget
 	{

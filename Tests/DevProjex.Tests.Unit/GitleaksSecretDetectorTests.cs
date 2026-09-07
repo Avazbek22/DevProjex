@@ -225,6 +225,46 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void Detect_GitleaksAllowMarker_AppliesToTheFullMultilineMatchContext()
+	{
+		const string content =
+			"-----BEGIN " + "PRIVATE KEY-----\n" +
+			"MIIEvQIBADANBgkq" + "hkiG9w0BAQEFAASC" +
+			"BKcwggSjAgEAAoIB" + "AQDAC4AWkdwKYSd8\n" +
+			"Ks14IReLcYgA" + "DhoXk56ZzXI=\n" +
+			"-----END " + "PRIVATE KEY----- // gitleaks:allow";
+
+		Assert.DoesNotContain(
+			Detector.Detect("src/key.pem", content, TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "private-key");
+	}
+
+	[Fact]
+	public void Detect_ManyMatchesOnOneLongLine_DoesNotCopyTheLinePerFinding()
+	{
+		Detector.WarmUp(TestContext.Current.CancellationToken);
+		const int findingCount = 12;
+		var token = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		var content = new string('x', 1024 * 1024) +
+		              string.Concat(Enumerable.Range(0, findingCount).Select(index =>
+			              $" token{index}=\"{token}\";")) +
+		              new string('y', 1024 * 1024);
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var findings = Detector.Detect(
+			"src/minified.js",
+			content,
+			new SecretFileInspectionBudget(TimeSpan.FromSeconds(10)),
+			TestContext.Current.CancellationToken);
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.Equal(findingCount, findings.Count(static finding => finding.RuleId == "github-pat"));
+		Assert.True(
+			allocatedBytes < 8L * 1024 * 1024,
+			$"Expected range-backed line contexts to allocate under 8 MiB, actual: {allocatedBytes:N0} bytes.");
+	}
+
+	[Fact]
 	public void Detect_GlobalPathAllowlist_IsAppliedBeforeRules()
 	{
 		const string content = "const token = \"ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\";";
