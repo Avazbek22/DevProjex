@@ -176,11 +176,11 @@ public sealed class ImportanceRankingService(
 	{
 		for (var attempt = 0; attempt < 2; attempt++)
 		{
-			var before = CaptureVersions(candidatePaths);
+			var before = CaptureVersions(candidatePaths, cancellationToken);
 			var snapshot = await dependencyFactsEngine
 				.IndexAsync(root, candidatePaths, progress: null, cancellationToken)
 				.ConfigureAwait(false);
-			var after = CaptureVersions(candidatePaths);
+			var after = CaptureVersions(candidatePaths, cancellationToken);
 			if (VersionsEqual(before, after))
 				return (snapshot, after);
 		}
@@ -189,11 +189,17 @@ public sealed class ImportanceRankingService(
 	}
 
 	private static IReadOnlyDictionary<string, RankingSourceVersion> CaptureVersions(
-		IReadOnlyList<string> paths) =>
-		paths.ToDictionary(
-			Path.GetFullPath,
-			RankingSourceVersion.Capture,
-			PathComparer.Default);
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken)
+	{
+		var versions = new Dictionary<string, RankingSourceVersion>(paths.Count, PathComparer.Default);
+		foreach (var path in paths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			versions[Path.GetFullPath(path)] = RankingSourceVersion.Capture(path);
+		}
+		return versions;
+	}
 
 	private static bool VersionsEqual(
 		IReadOnlyDictionary<string, RankingSourceVersion> left,

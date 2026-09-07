@@ -1946,7 +1946,8 @@ public sealed class ProjectContextDocumentService(
 	private static void EnsureRankingSourceVersion(string path, RankingSourceVersion? expectedVersion)
 	{
 		if (expectedVersion is { } version && !version.IsCurrent(path))
-			throw new IOException("A selected source file changed after importance facts were indexed.");
+			throw new IOException(
+				"Selected source content changed during importance ranking; repeat the export.");
 	}
 
 	private static void WriteRanking(

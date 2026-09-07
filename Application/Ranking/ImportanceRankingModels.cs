@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace DevProjex.Application.Ranking;
 
 public enum ProjectContextRank
@@ -53,16 +55,27 @@ public sealed record ImportanceRankingReport(
 		new Dictionary<string, RankingSourceVersion>(StringComparer.Ordinal);
 }
 
-internal readonly record struct RankingSourceVersion(bool Exists, long Length, long LastWriteTimeUtcTicks)
+internal readonly record struct RankingSourceVersion(
+	bool Exists,
+	long Length,
+	long LastWriteTimeUtcTicks,
+	string? ContentHash)
 {
 	internal static RankingSourceVersion Capture(string path)
 	{
 		try
 		{
 			var file = new FileInfo(path);
-			return file.Exists
-				? new RankingSourceVersion(true, file.Length, file.LastWriteTimeUtc.Ticks)
-				: default;
+			if (!file.Exists)
+				return default;
+			using var stream = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete);
+			var hash = Convert.ToHexString(SHA256.HashData(stream));
+			file.Refresh();
+			return new RankingSourceVersion(true, file.Length, file.LastWriteTimeUtc.Ticks, hash);
 		}
 		catch (Exception exception) when (
 			exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
