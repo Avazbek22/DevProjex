@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
+using System.Threading.Channels;
 using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Secrets;
@@ -24,6 +26,8 @@ public sealed class SecretRedactionOutputPreparer
 
 	public const long MaximumScannableFileBytes = 16 * 1024 * 1024;
 	private const long MaximumParallelScanFileBytes = 1024 * 1024;
+	private const long MaximumTransformationInFlightBytes = 96L * 1024 * 1024;
+	private const int MaximumTransformationWorkers = 4;
 	// Parallel scanning applies only to files at or below the per-file parallel limit, so the
 	// worst-case buffered content is MaximumParallelScans * 1 MiB. Scaling with the machine keeps
 	// wide desktops from idling behind a fixed cap while small machines are not oversubscribed.
@@ -233,17 +237,12 @@ public sealed class SecretRedactionOutputPreparer
 					var compressed = prepared.Compression;
 					var transformedText = compressed.Text;
 					SecretFileRedactionPlan? plan;
-					using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Detection))
+					using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.RedactionAndOutput))
 					{
-						plan = scope?.CreatePlan(
+						plan = scope?.CreatePlanFromDetectedContent(
 							sourcePath,
-							transformedText,
-							compressed.Map,
-							prepared.Metadata,
-							compressed.Map.IsIdentity
-								? prepared.SourceFingerprint
-								: null,
-							cancellationToken);
+							prepared.DetectionEntry,
+							compressed.Map);
 					}
 					var redactions = plan?.Spans
 						.Where(static span => span.State == SecretPreviewSpanState.Redacted)
@@ -358,7 +357,7 @@ public sealed class SecretRedactionOutputPreparer
 		[EnumeratorCancellation] CancellationToken cancellationToken,
 		SecretRedactionScope? requiredInspectionScope = null)
 	{
-		var batch = new List<CompressionWorkItem>(MaximumParallelScans);
+		var scheduled = new List<CompressionWorkItem>(orderedFilePaths.Count);
 		for (var index = 0; index < orderedFilePaths.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -368,110 +367,180 @@ public sealed class SecretRedactionOutputPreparer
 			{
 				continue;
 			}
-			if (IsUnsupportedNonRegularSource(context, item.SourcePath))
-			{
-				await foreach (var prepared in PrepareTransformationBatchAsync(
-				                   context,
-				                   transformationScope,
-				                   batch,
-				                   cancellationToken).ConfigureAwait(false))
-				{
-					yield return prepared;
-				}
-				batch.Clear();
-				yield return CreateUnreadableTransformationEntry(item);
-				continue;
-			}
-			if (SecretFileMetadata.Capture(item.SourcePath).Length > MaximumParallelScanFileBytes)
-			{
-				await foreach (var prepared in PrepareTransformationBatchAsync(
-				                   context,
-				                   transformationScope,
-				                   batch,
-				                   cancellationToken).ConfigureAwait(false))
-				{
-					yield return prepared;
-				}
-				batch.Clear();
-				yield return await PrepareTransformationEntryAsync(
-					context,
-					transformationScope,
-					item,
-					cancellationToken).ConfigureAwait(false);
-				continue;
-			}
-
-			batch.Add(item);
-			if (batch.Count < MaximumParallelScans)
-				continue;
-			await foreach (var prepared in PrepareTransformationBatchAsync(
-			                   context,
-			                   transformationScope,
-			                   batch,
-			                   cancellationToken).ConfigureAwait(false))
-			{
-				yield return prepared;
-			}
-			batch.Clear();
+			scheduled.Add(item);
 		}
-
-		await foreach (var prepared in PrepareTransformationBatchAsync(
-		                   context,
-		                   transformationScope,
-		                   batch,
-		                   cancellationToken).ConfigureAwait(false))
-		{
-			yield return prepared;
-		}
-	}
-
-	private async IAsyncEnumerable<PreparedTransformationEntry> PrepareTransformationBatchAsync(
-		ContentTransformationContext context,
-		ContentTransformationScope transformationScope,
-		IReadOnlyList<CompressionWorkItem> items,
-		[EnumeratorCancellation] CancellationToken cancellationToken)
-	{
-		if (items.Count == 0)
+		if (scheduled.Count == 0)
 			yield break;
 
-		var tasks = items
-			.Select(item => Task.Run(
-				() => PrepareTransformationEntryAsync(
-					context,
-					transformationScope,
-					item,
-					cancellationToken),
-				cancellationToken))
-			.ToArray();
-		PreparedTransformationEntry[] entries;
-		try
+		var workerCount = Math.Min(
+			Math.Min(MaximumTransformationWorkers, Math.Max(1, Environment.ProcessorCount)),
+			scheduled.Count);
+		using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		using var retainedBytes = new WeightedByteBudget(MaximumTransformationInFlightBytes);
+		using var lookAhead = new SemaphoreSlim(workerCount * 2, workerCount * 2);
+		var input = Channel.CreateBounded<CompressionWorkItem>(new BoundedChannelOptions(workerCount * 2)
 		{
-			entries = await Task.WhenAll(tasks).ConfigureAwait(false);
-		}
-		catch
+			SingleWriter = true,
+			SingleReader = false,
+			FullMode = BoundedChannelFullMode.Wait,
+			AllowSynchronousContinuations = false
+		});
+		var output = Channel.CreateBounded<PreparedTransformationEntry>(new BoundedChannelOptions(workerCount * 2)
 		{
-			foreach (var task in tasks)
-			{
-				if (task.IsCompletedSuccessfully)
-					task.Result.Dispose();
-			}
-			throw;
-		}
+			SingleWriter = false,
+			SingleReader = true,
+			FullMode = BoundedChannelFullMode.Wait,
+			AllowSynchronousContinuations = false
+		});
 
-		var next = 0;
+		var producer = ProduceAsync();
+		var workers = Enumerable.Range(0, workerCount)
+			.Select(_ => Task.Run(ConsumeAsync, linkedCancellation.Token))
+			.ToArray();
+		var completion = CompleteAsync();
+		var pending = new Dictionary<int, PreparedTransformationEntry>();
+		var nextScheduledIndex = 0;
 		try
 		{
-			for (; next < entries.Length; next++)
+			await foreach (var entry in output.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
 			{
-				yield return entries[next];
-				entries[next].Dispose();
+				pending.Add(entry.Index, entry);
+				while (nextScheduledIndex < scheduled.Count &&
+				       pending.Remove(scheduled[nextScheduledIndex].Index, out var next))
+				{
+					nextScheduledIndex++;
+					try
+					{
+						yield return next;
+					}
+					finally
+					{
+						next.Dispose();
+					}
+				}
 			}
+			await completion.ConfigureAwait(false);
 		}
 		finally
 		{
-			for (; next < entries.Length; next++)
-				entries[next].Dispose();
+			linkedCancellation.Cancel();
+			try
+			{
+				await completion.ConfigureAwait(false);
+			}
+			catch when (cancellationToken.IsCancellationRequested)
+			{
+			}
+			foreach (var entry in pending.Values)
+				entry.Dispose();
+			while (input.Reader.TryRead(out var abandoned))
+				abandoned.DisposeReservations();
 		}
+
+		async Task ProduceAsync()
+		{
+			try
+			{
+				foreach (var template in scheduled)
+				{
+					linkedCancellation.Token.ThrowIfCancellationRequested();
+					await lookAhead.WaitAsync(linkedCancellation.Token).ConfigureAwait(false);
+					var windowLease = new WorkWindowLease(lookAhead);
+					WeightedByteBudget.Lease? byteLease = null;
+					try
+					{
+						if (!IsUnsupportedNonRegularSource(context, template.SourcePath))
+						{
+							var size = SecretFileMetadata.Capture(template.SourcePath).Length;
+							byteLease = await retainedBytes.AcquireAsync(
+								EstimateRetainedTransformationBytes(size),
+								linkedCancellation.Token).ConfigureAwait(false);
+						}
+						await WriteWithQueueTimingAsync(
+							input.Writer,
+							template with { RetainedBudget = byteLease, WindowLease = windowLease },
+							linkedCancellation.Token).ConfigureAwait(false);
+						byteLease = null;
+						windowLease = null!;
+					}
+					finally
+					{
+						byteLease?.Dispose();
+						windowLease?.Dispose();
+					}
+				}
+				input.Writer.TryComplete();
+			}
+			catch (Exception exception)
+			{
+				input.Writer.TryComplete(exception);
+				throw;
+			}
+		}
+
+		async Task ConsumeAsync()
+		{
+			await foreach (var item in input.Reader.ReadAllAsync(linkedCancellation.Token).ConfigureAwait(false))
+			{
+				PreparedTransformationEntry? entry = null;
+				try
+				{
+					entry = IsUnsupportedNonRegularSource(context, item.SourcePath)
+						? CreateUnreadableTransformationEntry(item)
+						: await PrepareTransformationEntryAsync(
+							context,
+							transformationScope,
+							item,
+							linkedCancellation.Token).ConfigureAwait(false);
+					await WriteWithQueueTimingAsync(
+						output.Writer,
+						entry,
+						linkedCancellation.Token).ConfigureAwait(false);
+					entry = null;
+				}
+				finally
+				{
+					entry?.Dispose();
+				}
+			}
+		}
+
+		async Task CompleteAsync()
+		{
+			try
+			{
+				await producer.ConfigureAwait(false);
+				await Task.WhenAll(workers).ConfigureAwait(false);
+				output.Writer.TryComplete();
+			}
+			catch (Exception exception)
+			{
+				linkedCancellation.Cancel();
+				output.Writer.TryComplete(exception);
+				throw;
+			}
+		}
+	}
+
+	private static long EstimateRetainedTransformationBytes(long sourceBytes) =>
+		Math.Clamp(
+			sourceBytes > (MaximumTransformationInFlightBytes - 256) / 6
+				? MaximumTransformationInFlightBytes
+				: sourceBytes * 6 + 256,
+			1,
+			MaximumTransformationInFlightBytes);
+
+	private static async ValueTask WriteWithQueueTimingAsync<T>(
+		ChannelWriter<T> writer,
+		T item,
+		CancellationToken cancellationToken)
+	{
+		var write = writer.WriteAsync(item, cancellationToken);
+		if (write.IsCompletedSuccessfully)
+			return;
+		var started = Stopwatch.GetTimestamp();
+		await write.ConfigureAwait(false);
+		ContentPipelineDiagnostics.RecordQueueWait(Stopwatch.GetTimestamp() - started);
 	}
 
 	private async Task<PreparedTransformationEntry> PrepareTransformationEntryAsync(
@@ -568,7 +637,10 @@ public sealed class SecretRedactionOutputPreparer
 			new FileContentReadResult(FileContentClassification.UnsupportedEncoding),
 			new CodeCompressionResult(string.Empty, ContentTransformMap.Identity),
 			sourceFingerprint: null,
-			contentLease: null);
+			contentLease: null,
+			detectionEntry: null,
+			item.RetainedBudget,
+			item.WindowLease);
 
 	private async Task<PreparedTransformationEntry> PrepareTransformationEntryCoreAsync(
 		ContentTransformationContext context,
@@ -621,6 +693,20 @@ public sealed class SecretRedactionOutputPreparer
 				}
 			}
 
+			SecretScanCacheEntry? detectionEntry = null;
+			if (transformationScope.Redaction is { } redactionScope &&
+			    result.Classification == FileContentClassification.Text)
+			{
+				using var detectionStage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Detection);
+				detectionEntry = redactionScope.DetectTransformedContent(
+					item.SourcePath,
+					compression.Text,
+					compression.Map,
+					coherentRead.Metadata,
+					compression.Map.IsIdentity ? readFact.Fingerprint : null,
+					cancellationToken);
+			}
+
 			return new PreparedTransformationEntry(
 				item.Index,
 				item.SourcePath,
@@ -628,11 +714,16 @@ public sealed class SecretRedactionOutputPreparer
 				result,
 				compression,
 				readFact.Fingerprint,
-				contentLease);
+				contentLease,
+				detectionEntry,
+				item.RetainedBudget,
+				item.WindowLease);
 		}
 		catch
 		{
 			contentLease?.Dispose();
+			item.RetainedBudget?.Dispose();
+			item.WindowLease?.Dispose();
 			throw;
 		}
 	}
@@ -899,9 +990,30 @@ public sealed class SecretRedactionOutputPreparer
 			new FileContentReadResult(FileContentClassification.Unreadable),
 			new CodeCompressionResult(string.Empty, ContentTransformMap.Identity),
 			sourceFingerprint: null,
-			contentLease: null);
+			contentLease: null,
+			detectionEntry: null,
+			item.RetainedBudget,
+			item.WindowLease);
 
-	private readonly record struct CompressionWorkItem(int Index, string SourcePath);
+	private readonly record struct CompressionWorkItem(
+		int Index,
+		string SourcePath,
+		WeightedByteBudget.Lease? RetainedBudget = null,
+		WorkWindowLease? WindowLease = null)
+	{
+		public void DisposeReservations()
+		{
+			RetainedBudget?.Dispose();
+			WindowLease?.Dispose();
+		}
+	}
+
+	private sealed class WorkWindowLease(SemaphoreSlim window) : IDisposable
+	{
+		private SemaphoreSlim? _window = window;
+
+		public void Dispose() => Interlocked.Exchange(ref _window, null)?.Release();
+	}
 
 	private sealed class PreparedTransformationEntry(
 		int index,
@@ -910,9 +1022,14 @@ public sealed class SecretRedactionOutputPreparer
 		FileContentReadResult readResult,
 		CodeCompressionResult compression,
 		ContentFingerprint? sourceFingerprint,
-		IDisposable? contentLease) : IDisposable
+		IDisposable? contentLease,
+		SecretScanCacheEntry? detectionEntry = null,
+		IDisposable? retainedBudget = null,
+		IDisposable? windowLease = null) : IDisposable
 	{
 		private IDisposable? _contentLease = contentLease;
+		private IDisposable? _retainedBudget = retainedBudget;
+		private IDisposable? _windowLease = windowLease;
 
 		public int Index { get; } = index;
 		public string SourcePath { get; } = sourcePath;
@@ -920,8 +1037,14 @@ public sealed class SecretRedactionOutputPreparer
 		public FileContentReadResult ReadResult { get; } = readResult;
 		public CodeCompressionResult Compression { get; } = compression;
 		public ContentFingerprint? SourceFingerprint { get; } = sourceFingerprint;
+		public SecretScanCacheEntry? DetectionEntry { get; } = detectionEntry;
 
-		public void Dispose() => Interlocked.Exchange(ref _contentLease, null)?.Dispose();
+		public void Dispose()
+		{
+			Interlocked.Exchange(ref _contentLease, null)?.Dispose();
+			Interlocked.Exchange(ref _retainedBudget, null)?.Dispose();
+			Interlocked.Exchange(ref _windowLease, null)?.Dispose();
+		}
 	}
 
 	public async Task<SecretRedactionSnapshot> AnalyzeAsync(
