@@ -1,6 +1,10 @@
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("DevProjex.RankingEval")]
+
 namespace DevProjex.Application.Ranking;
 
-public enum FocusRankingStrategy
+internal enum FocusRankingStrategy
 {
 	Hop,
 	PersonalizedPageRank,
@@ -24,9 +28,15 @@ public enum FocusRankingRelation
 
 public sealed record FocusRankingSeedRequest(string Requested, string FullPath);
 
-public sealed record FocusRankingRequest(
-	IReadOnlyList<FocusRankingSeedRequest> Seeds,
-	FocusRankingStrategy Strategy = FocusRankingStrategy.Hop);
+public sealed record FocusRankingRequest(IReadOnlyList<FocusRankingSeedRequest> Seeds)
+{
+	internal FocusRankingStrategy Strategy { get; init; } = FocusRankingStrategy.Hop;
+
+	internal static FocusRankingRequest ForEvaluation(
+		IReadOnlyList<FocusRankingSeedRequest> seeds,
+		FocusRankingStrategy strategy) =>
+		new(seeds) { Strategy = strategy };
+}
 
 public sealed record FocusRankingSeed(
 	string Requested,

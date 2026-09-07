@@ -153,6 +153,25 @@ public sealed class FocusRankingEngineTests
 			right.Entries.Select(static entry => (entry.Path, entry.Hop, entry.Via, entry.Priority)));
 	}
 
+	[Fact]
+	public void Apply_ReportsBidirectionalEdgesAndHonorsCancellation()
+	{
+		var fixture = CreateFixture(
+			["a.cs", "b.cs"],
+			[Edge("a.cs", "b.cs"), Edge("b.cs", "a.cs")]);
+		var result = Apply(fixture, [Seed(fixture, "a.cs")]);
+		Assert.Equal(FocusRankingRelation.LinkedWith, result.Entries[1].Via?.Relation);
+
+		using var cancelled = new CancellationTokenSource();
+		cancelled.Cancel();
+		Assert.Throws<OperationCanceledException>(() => FocusRankingEngine.Apply(
+			fixture.Report,
+			new FocusRankingRequest([Seed(fixture, "a.cs")]),
+			fixture.Graph,
+			fixture.Snapshot,
+			cancelled.Token));
+	}
+
 	private static ImportanceRankingReport Apply(
 		Fixture fixture,
 		IReadOnlyList<FocusRankingSeedRequest> seeds) =>

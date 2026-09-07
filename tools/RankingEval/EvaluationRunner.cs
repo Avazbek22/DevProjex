@@ -110,7 +110,7 @@ internal sealed class EvaluationRunner(
 			var seedFirst = await ranking.RankAsync(
 				plan.SourceRoot,
 				plan.IncludedFiles,
-				new FocusRankingRequest([seedRequest], FocusRankingStrategy.SeedFirst),
+				FocusRankingRequest.ForEvaluation([seedRequest], FocusRankingStrategy.SeedFirst),
 				cancellationToken: cancellationToken).ConfigureAwait(false);
 			var focus = await ranking.RankAsync(
 				plan.SourceRoot,
@@ -120,7 +120,7 @@ internal sealed class EvaluationRunner(
 			var ppr = await ranking.RankAsync(
 				plan.SourceRoot,
 				plan.IncludedFiles,
-				new FocusRankingRequest([seedRequest], FocusRankingStrategy.PersonalizedPageRank),
+				FocusRankingRequest.ForEvaluation([seedRequest], FocusRankingStrategy.PersonalizedPageRank),
 				cancellationToken: cancellationToken).ConfigureAwait(false);
 			var pprAvailable = ppr.Focus!.Seeds.Any(static seed =>
 				seed.State is FocusSeedState.Resolved or FocusSeedState.NoResolvedNeighbors);
