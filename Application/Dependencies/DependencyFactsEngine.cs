@@ -614,31 +614,49 @@ public sealed class DependencyFactsEngine : IDisposable
 			var resolved = new List<DependencyEdge>();
 			var importsByFile = new Dictionary<string, IReadOnlyList<ImportFact>>(StringComparer.Ordinal);
 			var referencesByFile = new Dictionary<string, IReadOnlyList<ReferenceFact>>(StringComparer.Ordinal);
+			var supportedFiles = files.Where(static file => file.Status == DependencyFileStatus.Supported).ToArray();
+			var parallelism = Math.Clamp(Environment.ProcessorCount, 1, 8);
 			var work = 0;
-			foreach (var file in files.Where(static file => file.Status == DependencyFileStatus.Supported))
+			for (var offset = 0; offset < supportedFiles.Length; offset += parallelism)
 			{
-				var importPairs = file.Imports.Select(import => (Fact: import, Edge: context.ResolveImport(file, import))).ToArray();
-				var referencePairs = file.References.Select(reference => (Fact: reference, Edge: context.ResolveType(file, reference))).ToArray();
-				var fileEdges = importPairs.Select(static pair => pair.Edge)
-					.Concat(referencePairs.Select(static pair => pair.Edge)).ToArray();
-				if (fileEdges.Length > limits.MaximumEdgesPerFile)
+				var count = Math.Min(parallelism, supportedFiles.Length - offset);
+				var batch = new ResolvedFileWork[count];
+				Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = parallelism }, index =>
 				{
-					resolved.Add(LimitEdge(file, "edge limit exceeded"));
-					importsByFile[file.Path] = file.Imports.Select(static fact => Limit(fact, "edge limit exceeded")).ToArray();
-					referencesByFile[file.Path] = file.References.Select(static fact => Limit(fact, "edge limit exceeded")).ToArray();
-					continue;
-				}
-				work += fileEdges.Length;
-				if (work > limits.MaximumWorkPerIndex)
+					var file = supportedFiles[offset + index];
+					var importPairs = file.Imports
+						.Select(import => (Fact: import, Edge: context.ResolveImport(file, import))).ToArray();
+					var referencePairs = file.References
+						.Select(reference => (Fact: reference, Edge: context.ResolveType(file, reference))).ToArray();
+					batch[index] = new ResolvedFileWork(
+						file,
+						importPairs,
+						referencePairs,
+						importPairs.Select(static pair => pair.Edge)
+							.Concat(referencePairs.Select(static pair => pair.Edge)).ToArray());
+				});
+				foreach (var fileWork in batch)
 				{
-					resolved.Add(LimitEdge(file, "index work limit exceeded"));
-					importsByFile[file.Path] = file.Imports.Select(static fact => Limit(fact, "index work limit exceeded")).ToArray();
-					referencesByFile[file.Path] = file.References.Select(static fact => Limit(fact, "index work limit exceeded")).ToArray();
-					continue;
+					var file = fileWork.File;
+					if (fileWork.Edges.Length > limits.MaximumEdgesPerFile)
+					{
+						resolved.Add(LimitEdge(file, "edge limit exceeded"));
+						importsByFile[file.Path] = file.Imports.Select(static fact => Limit(fact, "edge limit exceeded")).ToArray();
+						referencesByFile[file.Path] = file.References.Select(static fact => Limit(fact, "edge limit exceeded")).ToArray();
+						continue;
+					}
+					work += fileWork.Edges.Length;
+					if (work > limits.MaximumWorkPerIndex)
+					{
+						resolved.Add(LimitEdge(file, "index work limit exceeded"));
+						importsByFile[file.Path] = file.Imports.Select(static fact => Limit(fact, "index work limit exceeded")).ToArray();
+						referencesByFile[file.Path] = file.References.Select(static fact => Limit(fact, "index work limit exceeded")).ToArray();
+						continue;
+					}
+					resolved.AddRange(fileWork.Edges);
+					importsByFile[file.Path] = fileWork.Imports.Select(static pair => Resolve(pair.Fact, pair.Edge)).ToArray();
+					referencesByFile[file.Path] = fileWork.References.Select(static pair => Resolve(pair.Fact, pair.Edge)).ToArray();
 				}
-				resolved.AddRange(fileEdges);
-				importsByFile[file.Path] = importPairs.Select(static pair => Resolve(pair.Fact, pair.Edge)).ToArray();
-				referencesByFile[file.Path] = referencePairs.Select(static pair => Resolve(pair.Fact, pair.Edge)).ToArray();
 			}
 			var resolvedFiles = files.Select(file => file.Status != DependencyFileStatus.Supported
 				? file
@@ -653,6 +671,12 @@ public sealed class DependencyFactsEngine : IDisposable
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal),
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal));
 		}
+
+		private sealed record ResolvedFileWork(
+			FileFacts File,
+			IReadOnlyList<(ImportFact Fact, DependencyEdge Edge)> Imports,
+			IReadOnlyList<(ReferenceFact Fact, DependencyEdge Edge)> References,
+			DependencyEdge[] Edges);
 
 		private static ImportFact Resolve(ImportFact fact, DependencyEdge edge) => fact with
 		{
