@@ -2282,18 +2282,6 @@ internal interface IUtf8FileContentSnapshot
 		CancellationToken cancellationToken = default);
 }
 
-internal interface IRawContentIdentitySnapshot
-{
-	ReadOnlyMemory<byte> RawContentHash { get; }
-}
-
-internal interface IRawContentIdentityFileContentAnalyzer
-{
-	ValueTask<IFileContentSnapshot> OpenCompleteSnapshotWithRawContentIdentityAsync(
-		string path,
-		CancellationToken cancellationToken = default);
-}
-
 internal sealed class PreparedContentStore : IDisposable
 {
 	private const int StreamBufferSize = 64 * 1024;

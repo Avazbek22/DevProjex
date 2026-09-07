@@ -6,9 +6,20 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Cryptography;
 using DevProjex.Application.Diagnostics;
-using DevProjex.Application.Secrets;
 
 namespace DevProjex.Application.Services;
+
+internal interface IRawContentIdentitySnapshot
+{
+	ReadOnlyMemory<byte> RawContentHash { get; }
+}
+
+internal interface IRawContentIdentityFileContentAnalyzer
+{
+	ValueTask<IFileContentSnapshot> OpenCompleteSnapshotWithRawContentIdentityAsync(
+		string path,
+		CancellationToken cancellationToken = default);
+}
 
 public delegate FileStream FileContentReadStreamOpener(
 	string path,
