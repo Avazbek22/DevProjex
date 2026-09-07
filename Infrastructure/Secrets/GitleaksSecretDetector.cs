@@ -440,8 +440,10 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 			// Values reject the overwhelming majority of source-code delimiters. Only a
 			// plausible literal pays for the bounded key-vocabulary probe.
-			var lineStart = content[..delimiterStart].LastIndexOfAny('\r', '\n') + 1;
-			var keyWindowStart = Math.Max(lineStart, delimiterStart - 40);
+			// The pinned rule permits up to three whitespace or quote characters between the
+			// key expression and delimiter, including CR and LF. Keep that grammar visible to
+			// the fast gate instead of treating a physical line as a semantic boundary.
+			var keyWindowStart = Math.Max(0, delimiterStart - 40);
 			var keyWindow = content[keyWindowStart..delimiterStart];
 			if (!HasCompatibleGenericKey(keyWindow))
 				continue;
