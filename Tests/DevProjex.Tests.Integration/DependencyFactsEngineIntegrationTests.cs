@@ -737,6 +737,32 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task StableConfigurationSyntaxFailure_RemainsCacheable()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{");
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		var reader = new CountingControlFileReader();
+		using var engine = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(),
+			new FileDependencyConfigurationProvider(reader));
+
+		var first = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var second = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(first.Coverage.ConfigurationDiagnostics, item => item.Path == "tsconfig.json");
+		Assert.Equal(1, reader.CountFor(config));
+		Assert.True(second.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
 	public async Task WindowsSharingViolationOnControlFile_IsRetriedAfterTheFileIsReleased()
 	{
 		if (!OperatingSystem.IsWindows())
@@ -917,13 +943,10 @@ public sealed class DependencyFactsEngineIntegrationTests
 			[config, initializer, model, consumer],
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		var moduleImports = result.Edges.Where(item => item.Source == "pkg/consumer.py" && item.Reference == "model").ToArray();
-		Assert.Equal(2, moduleImports.Length);
-		Assert.All(moduleImports, edge =>
-		{
-			Assert.Equal(ResolutionStatus.Resolved, edge.Status);
-			Assert.Equal("pkg/model.py", edge.Target);
-		});
+		var moduleImport = Assert.Single(result.Edges, item => item.Source == "pkg/consumer.py" && item.Reference == "model");
+		Assert.Equal(ResolutionStatus.Resolved, moduleImport.Status);
+		Assert.Equal("pkg/model.py", moduleImport.Target);
+		Assert.Equal(2, moduleImport.Evidence.Count);
 		var directImport = Assert.Single(result.Edges, item => item.Source == "pkg/consumer.py" && item.Reference == "pkg.model");
 		Assert.Equal("pkg/model.py", directImport.Target);
 	}

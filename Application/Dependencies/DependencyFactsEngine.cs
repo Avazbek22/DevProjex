@@ -1393,6 +1393,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				? import.Specifier
 				: string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
 			var candidates = ProbePythonModule(source, module).ToList();
+			var moduleEntityExists = candidates.Count > 0;
 			if (import.ImportedName is { Length: > 0 } and not "*")
 			{
 				var provided = candidates
@@ -1414,7 +1415,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				else
 					candidates.Clear();
 			}
-			if (candidates.Count == 0)
+			if (candidates.Count == 0 && !moduleEntityExists)
 			{
 				var portions = ProbePythonNamespace(source, module).ToArray();
 				if (portions.Length > 0)
