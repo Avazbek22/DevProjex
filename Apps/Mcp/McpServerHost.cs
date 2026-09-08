@@ -72,7 +72,8 @@ public static class McpServerHost
 		Func<McpRemoteProjectServices>? remoteServicesFactory = null,
 		GitFilteringMode? gitMode = null,
 		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
-		bool agentExclusions = false)
+		bool agentExclusions = false,
+		Action<McpProjectService>? projectServiceCreated = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
@@ -92,14 +93,19 @@ public static class McpServerHost
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		await using var packs = new McpPackRegistry(tempRoot);
 		var projectService = new Lazy<McpProjectService>(
-			() => new McpProjectService(
-				projectSources,
-				rootJail,
-				services.Value,
-				hidePrivateData,
-				gitMode,
-				exclusions,
-				agentExclusions),
+			() =>
+			{
+				var created = new McpProjectService(
+					projectSources,
+					rootJail,
+					services.Value,
+					hidePrivateData,
+					gitMode,
+					exclusions,
+					agentExclusions);
+				projectServiceCreated?.Invoke(created);
+				return created;
+			},
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs, agentExclusions);
 		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions);

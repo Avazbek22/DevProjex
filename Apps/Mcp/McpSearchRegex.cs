@@ -46,26 +46,39 @@ internal sealed class McpSearchRegex
 		string input,
 		int start,
 		int length,
-		IReadOnlyList<McpProtectedTextRange> protectedRanges)
+		IReadOnlyList<TransformedTextRange> protectedRanges,
+		ref int protectedRangeIndex,
+		ref long protectedRangeComparisons,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(input);
 		ArgumentNullException.ThrowIfNull(protectedRanges);
+		ArgumentOutOfRangeException.ThrowIfNegative(protectedRangeIndex);
 		try
 		{
 			foreach (var match in _regex.EnumerateMatches(input.AsSpan(start, length)))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var absoluteStart = checked(start + match.Index);
 				var absoluteEnd = checked(absoluteStart + match.Length);
-				var overlapsProtectedText = false;
-				foreach (var range in protectedRanges)
+				while (protectedRangeIndex < protectedRanges.Count)
 				{
-					if (match.Length == 0
-						    ? absoluteStart >= range.Start && absoluteStart < range.End
-						    : absoluteStart < range.End && absoluteEnd > range.Start)
-					{
-						overlapsProtectedText = true;
+					protectedRangeComparisons++;
+					if ((protectedRangeComparisons & 0xFF) == 0)
+						cancellationToken.ThrowIfCancellationRequested();
+					if (protectedRanges[protectedRangeIndex].End > absoluteStart)
 						break;
-					}
+					protectedRangeIndex++;
+				}
+
+				var overlapsProtectedText = false;
+				if (protectedRangeIndex < protectedRanges.Count)
+				{
+					protectedRangeComparisons++;
+					var range = protectedRanges[protectedRangeIndex];
+					overlapsProtectedText = match.Length == 0
+						? absoluteStart >= range.Start && absoluteStart < range.End
+						: absoluteStart < range.End && absoluteEnd > range.Start;
 				}
 				if (!overlapsProtectedText)
 					return true;

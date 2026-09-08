@@ -134,6 +134,14 @@ Tool descriptions remain self-contained because some clients do not display
 server instructions; each description states the tool's purpose, when to use a
 named alternative, its result, and its key limit.
 
+Use `list_projects` first to obtain the unique project name or absolute path that
+the other tools accept. Use `get_tree` for structure without content, `analyze`
+for transformed size and token estimates before packing, `search_project` for
+textual locations, `related_files` for statically evidenced relationships,
+`get_file` for one file page, and `pack_context` for multi-file context. A large
+pack returns an id that `read_pack` pages; `read_pack` does not recreate expired
+packs.
+
 ## Security Model
 
 - Every local project is pinned when the process starts. With `--allow-remote`, a
@@ -227,13 +235,13 @@ open-world.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
-| `list_projects` | none | Allowed local roots with path, name, type, and available local profiles, plus the server `baseline` (`git` mode, `exclusions`, and whether `agentExclusions` is enabled). Remote projects are addressed by URL and are not added to this list. |
+| `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call `pack_context` again after server restart. |
-| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. Files withheld by the mandatory inspection limit are counted in the partial-result warning rather than silently treated as searched. |
-| `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). Results larger than 50,000 characters are stored and returned with a `pack_id` for `read_pack`. |
+| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches are still counted. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
+| `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
 | `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. A non-empty file that cannot be inspected under the 16 MiB mandatory-redaction boundary returns `DPX-MCP-PAYLOAD-TRUNCATED` with its byte size and the limit; it never returns an empty success. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
@@ -273,8 +281,11 @@ Apps/Terminal/Execution/AnalyzeCommandHandler.cs — one visible declaration ide
 
 Project-derived paths and evidence remain inside the random `untrusted-data` block.
 Outside that block, the server appends `[Facts coverage] files=N, supported=N,
-unsupported=N, extraction-failed=N`, `[Search scope] files=N`, and the ordinary
-`[Effective filters]` trailer. An unsupported seed is a successful empty result with
+unsupported=N, extraction-failed=N` with a short explanation that supported files
+produced facts for a recognized language while unsupported files had no extractor.
+Each configuration problem adds `[Facts configuration] scopes=N · type=<state> ·
+path=<safe-relative-path> · <reason>`. `[Search scope] files=N` and the ordinary
+`[Effective filters]` trailer follow. An unsupported seed is a successful empty result with
 trusted `[No facts] <language> is not supported by the dependency engine yet.`; a
 supported seed without projected edges receives trusted `[No related files] in the
 effective selection.` No trailer names a file hidden by the manifest. See
@@ -333,8 +344,11 @@ For the single-file `get_file` operation the same state is an error, because a
 successful empty payload must mean that the inspected source file is genuinely
 empty. Line ranges are evaluated only after the complete source passed mandatory
 inspection. Search consumes each transformed, redacted file directly from the
-bounded pipeline; generated `DEVPROJEX_REDACTED[...]` placeholders themselves
-are excluded from pattern matches, and no intermediate export is written or read.
+bounded pipeline. The redaction preparer supplies the exact ranges it inserted in
+the final text; only those ranges are excluded from pattern matches. Placeholder-like
+source text, including an unfinished `DEVPROJEX_REDACTED[` prefix, remains searchable.
+The search is streamed: no intermediate export is written or read. Context windows that overlap or touch
+are emitted once as a merged grep-style group, with `--` between separate groups.
 
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append
@@ -416,6 +430,9 @@ untrusted-data boundary to skipped file names. The report states the budget,
 included and skipped file counts, estimated tokens for both groups, up to the 25
 largest skipped files, and `and X more` when the list is longer. It recommends
 `detail=compact` or `detail=signatures` when additional files are needed.
+The trusted trailer also includes `[Budget accounting] content ≈ N tokens of
+budget M; report ≈ K tokens`. This separates greedily admitted content from the
+diagnostic report, which is deliberately outside the content budget.
 
 `pack_context` accepts the single optional ranking value `rank: "importance"`.
 It applies experimental `importance-v1` only after the effective selection has
@@ -486,6 +503,14 @@ tool argument, so tool input schemas are unchanged. Progress is monotonic and
 intermediate file-count updates are rate-limited; the other five tools do not
 report progress.
 
+After the first successful `list_projects` or local `get_tree`, the server queues
+one cancellable, single-worker dependency-index warm-up per local root. It uses the
+same effective baseline and the dependency engine's existing file, edge, memory, and
+cache limits, yields before work, does not delay the discovery response, and is
+cancelled and joined when the server stops. A later `related_files` call can reuse
+that warm index; failures are not permanently cached and a later discovery call may
+retry them.
+
 Defaults:
 
 - `get_tree.format`: `markdown`
@@ -552,7 +577,10 @@ does not apply to `get_file`, which addresses one already-effective file. Its
 value is echoed in the effective-filter diagnostics of every tool that accepts
 the parameter.
 
-For the six project tools, `project` may be a Git URL only when the server was
+For the six project tools, `project` accepts a unique `name` from `list_projects`
+or that entry's absolute `path`. An ambiguous name returns
+`DPX-MCP-UNKNOWN-PROJECT` and asks for one of the listed paths; every unknown-project
+error names both accepted local forms. `project` may be a Git URL only when the server was
 started with `--allow-remote`. The optional `branch` is valid only with a URL.
 Remote checkouts are reused from RepoCache and remain pinned for this server
 session. `list_projects` continues to report only configured local roots.

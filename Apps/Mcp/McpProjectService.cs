@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Mcp;
@@ -23,6 +24,17 @@ internal sealed class McpProjectService(
 	private readonly ConcurrentDictionary<McpProjectionCacheKey, CachedProjectionPlan> projectionCache = [];
 	private readonly Dictionary<string, RootChangeMonitor> rootMonitors = new(PathComparer.Default);
 	private readonly object rootMonitorSync = new();
+	private readonly Channel<DependencyWarmRequest> dependencyWarmQueue =
+		Channel.CreateUnbounded<DependencyWarmRequest>(new UnboundedChannelOptions
+		{
+			SingleReader = true,
+			SingleWriter = false,
+			AllowSynchronousContinuations = false
+		});
+	private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> scheduledDependencyWarmRoots = new(PathComparer.Default);
+	private readonly CancellationTokenSource dependencyWarmCancellation = new();
+	private readonly object dependencyWarmSync = new();
+	private Task? dependencyWarmWorker;
 	private long cacheGeneration;
 	private int disposed;
 
@@ -890,6 +902,106 @@ internal sealed class McpProjectService(
 	public ProjectContextDocumentService DocumentService => services.DocumentService;
 	public DependencyFactsEngine DependencyFactsEngine => services.DependencyFactsEngine;
 
+	public void ScheduleDependencyWarmup(string projectRoot) =>
+		ScheduleDependencyWarmup(new DependencyWarmRequest(projectRoot, null));
+
+	public void ScheduleDependencyWarmup(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		if (!projectSources.TryGetRemoteRoot(plan.SourceRoot, out _))
+			ScheduleDependencyWarmup(new DependencyWarmRequest(plan.SourceRoot, plan));
+	}
+
+	private void ScheduleDependencyWarmup(DependencyWarmRequest request)
+	{
+		var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		if (Volatile.Read(ref disposed) != 0 ||
+		    !scheduledDependencyWarmRoots.TryAdd(request.ProjectRoot, completion))
+			return;
+
+		EnsureDependencyWarmWorker();
+		if (!dependencyWarmQueue.Writer.TryWrite(request with { Completion = completion }))
+		{
+			scheduledDependencyWarmRoots.TryRemove(request.ProjectRoot, out _);
+			completion.TrySetResult(false);
+		}
+	}
+
+	internal async Task<bool> WaitForDependencyWarmupsAsync(CancellationToken cancellationToken)
+	{
+		var pending = scheduledDependencyWarmRoots.Values.Select(static value => value.Task).ToArray();
+		return pending.Length == 0 || (await Task.WhenAll(pending).WaitAsync(cancellationToken).ConfigureAwait(false)).All(static value => value);
+	}
+
+	private void EnsureDependencyWarmWorker()
+	{
+		if (dependencyWarmWorker is not null)
+			return;
+		lock (dependencyWarmSync)
+		{
+			if (dependencyWarmWorker is not null)
+				return;
+			using (ExecutionContext.SuppressFlow())
+				dependencyWarmWorker = Task.Run(ProcessDependencyWarmupsAsync);
+		}
+	}
+
+	private async Task ProcessDependencyWarmupsAsync()
+	{
+		var cancellationToken = dependencyWarmCancellation.Token;
+		try
+		{
+			await foreach (var request in dependencyWarmQueue.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+			{
+				try
+				{
+					// One cooperative worker keeps warm-up below interactive work and preserves the
+					// dependency engine's existing per-index bounds.
+					await Task.Yield();
+					var plan = request.Plan ?? await BuildDependencyWarmPlanAsync(
+						request.ProjectRoot,
+						cancellationToken).ConfigureAwait(false);
+					await services.DependencyFactsEngine.IndexAsync(
+						plan.SourceRoot,
+						plan.IncludedFiles,
+						progress: null,
+						cancellationToken).ConfigureAwait(false);
+					request.Completion!.TrySetResult(true);
+				}
+				catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+				{
+					return;
+				}
+				catch
+				{
+					scheduledDependencyWarmRoots.TryRemove(request.ProjectRoot, out _);
+					request.Completion!.TrySetResult(false);
+				}
+			}
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+	}
+
+	private async Task<ProjectContextPlan> BuildDependencyWarmPlanAsync(
+		string projectRoot,
+		CancellationToken cancellationToken)
+	{
+		var selection = await services.SelectionResolver.ResolveAsync(
+			projectRoot,
+			ProjectProfileReference.Standard,
+			new ProjectSelectionSpec(
+				GitMode: ServerGitMode,
+				Exclusions: ServerExclusions,
+				HideSecrets: true,
+				HidePrivateData: hidePrivateData),
+			cancellationToken).ConfigureAwait(false);
+		return await services.Planner.BuildStructureAsync(
+			new ProjectContextRequest(projectRoot, selection),
+			cancellationToken).ConfigureAwait(false);
+	}
+
 	private ProjectProfileReference ResolveProfile(string projectRoot, string? profile)
 	{
 		if (string.IsNullOrEmpty(profile) ||
@@ -1300,6 +1412,18 @@ internal sealed class McpProjectService(
 	{
 		if (Interlocked.Exchange(ref disposed, 1) != 0)
 			return;
+		dependencyWarmQueue.Writer.TryComplete();
+		dependencyWarmCancellation.Cancel();
+		try
+		{
+			dependencyWarmWorker?.GetAwaiter().GetResult();
+		}
+		catch (OperationCanceledException)
+		{
+		}
+		dependencyWarmCancellation.Dispose();
+		foreach (var completion in scheduledDependencyWarmRoots.Values)
+			completion.TrySetResult(false);
 		inventoryCache.Clear();
 		projectionCache.Clear();
 		lock (rootMonitorSync)
@@ -1309,6 +1433,11 @@ internal sealed class McpProjectService(
 			rootMonitors.Clear();
 		}
 	}
+
+	private sealed record DependencyWarmRequest(
+		string ProjectRoot,
+		ProjectContextPlan? Plan,
+		TaskCompletionSource<bool>? Completion = null);
 
 	internal static string ToRelative(string root, string path) =>
 		PathUtility.GetPortableRelativePath(root, path);

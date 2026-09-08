@@ -99,7 +99,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string ProjectProperty = """
 	"project": {
 	  "type": "string",
-	  "description": "Absolute root path returned by list_projects, or a Git URL when the server allows remote sources. Optional only when one local root is configured."
+	  "description": "Unique project name or absolute path returned by list_projects, or a Git URL when the server allows remote sources. Optional only when one local root is configured."
 	}
 	""";
 
@@ -170,7 +170,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "string",
 	  "enum": ["full", "compact", "signatures"],
 	  "default": "full",
-	  "description": "Collapse code to signatures or strip comments/blank lines to fit large projects into a budget; unsupported languages are returned unchanged."
+	  "description": "Content detail: full keeps text, compact strips comments and blank lines, signatures keeps code signatures where supported; unsupported languages remain unchanged."
 	}
 	""";
 
@@ -184,7 +184,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private const string MaximumTokensProperty = """
 	"max_tokens": {
-	  "description": "Maximum estimated content tokens to include; accepts an integer or numeric string. Document structure is outside this budget.",
+	  "description": "Maximum estimated content tokens admitted by the greedy file pass; accepts an integer or numeric string. Document structure and the budget report are outside this content budget.",
 	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
 	}
 	""";
@@ -193,13 +193,13 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	"rank": {
 	  "type": "string",
 	  "enum": ["importance"],
-	  "description": "Order the effective file selection by explainable importance-v1 signals. With max_tokens this controls greedy admission; without a budget it controls document order. Omit it to preserve the ordinary order and avoid dependency or Git history work."
+	  "description": "Ranking mode; the only value is importance. It orders the effective selection by importance-v1, controls greedy admission with max_tokens, and otherwise controls document order. Omit it to preserve ordinary order and avoid dependency or Git-history work."
 	}
 	""";
 
 	private const string FocusProperty = """
 	"focus": {
-	  "description": "One to 16 selected files that seed focus-v1 ordering. Requires rank=importance. Seeds are considered first; graph hops order the remaining effective selection without widening it.",
+	  "description": "One selected path or an array of 1..16 selected paths that seed focus-v1 ordering. Requires rank=importance. Seeds are considered first; graph hops order the remaining effective selection without widening it.",
 	  "oneOf": [
 	    { "type": "string", "minLength": 1, "maxLength": 4096 },
 	    { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
@@ -209,7 +209,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private const string GitScopeProperty = """
 	"git_scope": {
-	  "description": "Further restrict selected paths to staged files, all current changes (including untracked files), or files changed between two Git refs. This selects paths only; file content is always read from the current working tree.",
+	  "description": "Git path scope: staged, changes (including untracked files), or diff:<ref>..<ref>. It only narrows selected paths; content always comes from the current working tree.",
 	  "maxLength": 4096,
 	  "oneOf": [
 	    { "type": "string", "enum": ["staged", "changes"] },
@@ -302,8 +302,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{FocusProperty}},
 	    {{MaximumTokensProperty}},
 	    {{MaxFileBytesProperty}},
-	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Choose whether the pack contains only the tree, only selected file content, or both." },
-	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown", "description": "Pack representation. Markdown is the readable default; text is plain human-readable output, while JSON and XML are structured machine-readable forms." }
+	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Pack view: tree includes structure only, content includes files only, tree-content includes both." },
+	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown", "description": "Pack format: markdown or text for readable output; json or xml for structured output." }
 	  },
 	  "additionalProperties": false
 	}
@@ -328,15 +328,15 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    {{ProjectProperty}},
 	    {{BranchProperty}},
-	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression evaluated with a 2-second timeout after secrets are replaced with DEVPROJEX_REDACTED[<category>#<n>] placeholders." },
+	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression, limited to 4,096 characters and a 2-second evaluation timeout, applied after redaction. Text inserted by redaction never matches." },
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
 	    {{MaxFileBytesProperty}},
-	    "context_lines": { "description": "Context lines from 0 to 20; default 2; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
+	    "context_lines": { "description": "Lines before and after each match, 0..20, default 2; overlapping windows are merged. Accepts an integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
 	    "ignore_case": { "description": "Case-insensitive matching; accepts a boolean or the string 'true' or 'false'.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
-	    "max_results": { "description": "Maximum matches from 1 to 200; default 50; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "max_results": { "description": "Maximum displayed matching lines, 1..200, default 50; all selected text is still scanned so additional matches are counted. Accepts an integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
 	  "required": ["pattern"],
 	  "additionalProperties": false
@@ -371,7 +371,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
 	      ]
 	    },
-	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Which direction of statically evidenced file relationships to return." },
+	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Static relationship direction: dependencies are files the seed references, dependents are files that reference the seed, both returns both sections." },
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{ProfileProperty}},

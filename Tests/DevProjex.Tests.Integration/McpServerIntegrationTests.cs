@@ -1872,18 +1872,21 @@ public sealed class McpServerIntegrationTests
 		// The old contract repeated the full redaction policy in four descriptions.
 		// Tool-search descriptions now keep only behavior that distinguishes each tool.
 		Assert.Contains(
-			"pack_id for read_pack until server exit",
+			"pack_id plus a preview",
 			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"Over 50,000 characters",
+			"50,000 characters",
 			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
 			StringComparison.Ordinal);
-		foreach (var toolName in new[] { "search_project", "get_file" })
-		{
-			var description = tools.Single(tool => tool.Name == toolName).ProtocolTool.Description;
-			Assert.Contains("DEVPROJEX_REDACTED[<category>#<n>]", description, StringComparison.Ordinal);
-		}
+		Assert.Contains(
+			"generated redaction replacements never match",
+			tools.Single(static tool => tool.Name == "search_project").ProtocolTool.Description,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"mandatory secret and configured private-data replacement",
+			tools.Single(static tool => tool.Name == "get_file").ProtocolTool.Description,
+			StringComparison.Ordinal);
 		Assert.DoesNotContain(
 			"DEVPROJEX_REDACTED",
 			tools.Single(static tool => tool.Name == "analyze").ProtocolTool.Description,
@@ -1939,7 +1942,7 @@ public sealed class McpServerIntegrationTests
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("pattern");
 		Assert.Equal(4096, searchPattern.GetProperty("maxLength").GetInt32());
 		Assert.Contains(
-			"DEVPROJEX_REDACTED[<category>#<n>]",
+			"Text inserted by redaction never matches",
 			searchPattern.GetProperty("description").GetString(),
 			StringComparison.Ordinal);
 		var filePath = tools.Single(static tool => tool.Name == "get_file")
@@ -5698,6 +5701,137 @@ public sealed class McpServerIntegrationTests
 				System.Globalization.CultureInfo.InvariantCulture));
 	}
 
+	[Fact]
+	public async Task SearchProjectUsesOnlyActualReplacementRangesAndKeepsAdjacentSourceVisible()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Markers.cs"),
+			"const string Prefix = \"DEVPROJEX_REDACTED[\";\n" +
+			"var value = array[index];\n" +
+			$"var secrets = \"{Secret}{Secret}\"; var visibleAfter = true;\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		foreach (var pattern in new[] { "Prefix", "array", "visibleAfter" })
+		{
+			var result = await server.CallAsync(
+				"search_project",
+				new Dictionary<string, object?>
+				{
+					["pattern"] = pattern,
+					["context_lines"] = 0,
+					["ignore_case"] = false
+				});
+			Assert.NotEqual(true, result.IsError);
+			Assert.Contains("Markers.cs:", Text(result), StringComparison.Ordinal);
+		}
+
+		var placeholder = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "DEVPROJEX_REDACTED\\[github-pat#[0-9]+\\]",
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			});
+		Assert.NotEqual(true, placeholder.IsError);
+		Assert.DoesNotContain("Markers.cs:", Text(placeholder), StringComparison.Ordinal);
+		Assert.Contains("[No matches]", Text(placeholder), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchProjectMergesOverlappingContextGroupsWithoutRepeatingLines()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Context.txt"),
+			"before\nneedle one\nbetween\nneedle two\nafter\ngap one\ngap two\nneedle three\ntail\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "needle",
+				["context_lines"] = 1,
+				["ignore_case"] = false,
+				["max_results"] = 50
+			});
+		var text = Text(result).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.True(Regex.Matches(text, "Context\\.txt:[248]:").Count == 3);
+		foreach (var line in new[] { 1, 2, 3, 4, 5, 7, 8, 9 })
+			Assert.True(Regex.Matches(text, $"Context\\.txt[:-]{line}[:-]").Count == 1);
+		Assert.DoesNotContain("Context.txt-6-", text, StringComparison.Ordinal);
+		Assert.Single(Regex.Matches(text, "\n--\n").Cast<Match>());
+		Assert.DoesNotContain("additional matches", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RelatedFilesReportsLanguageCoverageAndConfigurationDiagnostics()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "tsconfig.json"), "{\"compilerOptions\":null}");
+		File.WriteAllText(Path.Combine(project, "main.ts"), "import value from './target.js';\n");
+		File.WriteAllText(Path.Combine(project, "target.ts"), "export default 1;\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = "main.ts" });
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("supported means facts were extracted for a recognized language", text, StringComparison.Ordinal);
+		Assert.Contains("unsupported means no supported extractor was available", text, StringComparison.Ordinal);
+		Assert.Contains("[Facts configuration] scopes=", text, StringComparison.Ordinal);
+		Assert.Contains("· type=corrupt · path=tsconfig.json ·", text, StringComparison.Ordinal);
+		Assert.Contains("compilerOptions must be an object", text, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Theory]
+	[InlineData("list_projects")]
+	[InlineData("get_tree")]
+	public async Task FirstProjectDiscoveryCallWarmsDependencyFactsWithoutDelayingItsResponse(string toolName)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "target.ts"), "export default 1;\n");
+		File.WriteAllText(Path.Combine(project, "main.ts"), "import value from './target';\n");
+		McpProjectService? projectService = null;
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			projectServiceCreated: created => projectService = created);
+
+		var discovery = await server.CallAsync(toolName);
+		Assert.NotEqual(true, discovery.IsError);
+		var service = Assert.IsType<McpProjectService>(projectService);
+		Assert.True(await service.WaitForDependencyWarmupsAsync(TestContext.Current.CancellationToken));
+		var plan = await service.BuildPlanAsync(
+			project,
+			branch: null,
+			paths: null,
+			includePatterns: null,
+			excludePatterns: null,
+			profile: null,
+			trackedOnly: false,
+			gitScope: null,
+			maximumFileBytes: null,
+			TestContext.Current.CancellationToken,
+			includeOutputMetrics: false);
+		var warmed = await service.DependencyFactsEngine.IndexAsync(
+			plan.SourceRoot,
+			plan.IncludedFiles,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(warmed.Metrics.ResolutionCacheHit);
+	}
+
 	private static int[] ExtractPackLineMarkers(string text) =>
 		[.. Regex.Matches(text, "pack-line-(\\d{4})-")
 			.Select(static match => int.Parse(match.Groups[1].Value))];
@@ -6273,7 +6407,8 @@ public sealed class McpServerIntegrationTests
 			Func<McpRemoteProjectServices>? remoteServicesFactory = null,
 			GitFilteringMode? gitMode = null,
 			IReadOnlyCollection<ProjectExclusion>? exclusions = null,
-			bool agentExclusions = false)
+			bool agentExclusions = false,
+			Action<McpProjectService>? projectServiceCreated = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -6296,7 +6431,8 @@ public sealed class McpServerIntegrationTests
 				remoteServicesFactory,
 				gitMode,
 				exclusions,
-				agentExclusions);
+				agentExclusions,
+				projectServiceCreated);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

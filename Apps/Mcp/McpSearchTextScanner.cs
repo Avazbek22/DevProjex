@@ -6,17 +6,17 @@ internal readonly record struct McpTextLineRange(
 	int Length);
 
 internal sealed record McpSearchMatchContext(
-	int MatchLineNumber,
-	IReadOnlyList<McpTextLineRange> Lines);
+	IReadOnlyList<int> MatchLineNumbers,
+	IReadOnlyList<McpTextLineRange> Lines,
+	bool StartsNewGroup)
+{
+	public int MatchLineNumber => MatchLineNumbers[0];
+}
 
 internal sealed record McpSearchTextScanResult(
 	int TotalMatches,
-	IReadOnlyList<McpSearchMatchContext> Matches);
-
-internal readonly record struct McpProtectedTextRange(int Start, int Length)
-{
-	public int End => checked(Start + Length);
-}
+	IReadOnlyList<McpSearchMatchContext> Matches,
+	long ProtectedRangeComparisons);
 
 internal static class McpSearchTextScanner
 {
@@ -25,16 +25,25 @@ internal static class McpSearchTextScanner
 		McpSearchRegex regex,
 		int contextLines,
 		int maximumStoredMatches,
+		CancellationToken cancellationToken) =>
+		Scan(content, regex, contextLines, maximumStoredMatches, [], cancellationToken);
+
+	public static McpSearchTextScanResult Scan(
+		string content,
+		McpSearchRegex regex,
+		int contextLines,
+		int maximumStoredMatches,
+		IReadOnlyList<TransformedTextRange> protectedRanges,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(content);
 		ArgumentNullException.ThrowIfNull(regex);
+		ArgumentNullException.ThrowIfNull(protectedRanges);
 		ArgumentOutOfRangeException.ThrowIfNegative(contextLines);
 		ArgumentOutOfRangeException.ThrowIfNegative(maximumStoredMatches);
 		cancellationToken.ThrowIfCancellationRequested();
 		if (content.Length == 0)
-			return new McpSearchTextScanResult(0, []);
-		var protectedRanges = FindRedactionPlaceholders(content);
+			return new McpSearchTextScanResult(0, [], 0);
 
 		var previous = contextLines == 0
 			? null
@@ -42,6 +51,8 @@ internal static class McpSearchTextScanner
 		var active = new List<PendingMatch>(Math.Min(contextLines + 1, maximumStoredMatches));
 		var stored = new List<PendingMatch>(maximumStoredMatches);
 		var totalMatches = 0;
+		var protectedRangeIndex = 0;
+		long protectedRangeComparisons = 0;
 
 		void ProcessLine(McpTextLineRange line)
 		{
@@ -54,7 +65,14 @@ internal static class McpSearchTextScanner
 					active.RemoveAt(index);
 			}
 
-			if (regex.IsMatch(content, line.Offset, line.Length, protectedRanges))
+			if (regex.IsMatch(
+				    content,
+				    line.Offset,
+				    line.Length,
+				    protectedRanges,
+				    ref protectedRangeIndex,
+				    ref protectedRangeComparisons,
+				    cancellationToken))
 			{
 				totalMatches++;
 				if (stored.Count < maximumStoredMatches)
@@ -95,31 +113,39 @@ internal static class McpSearchTextScanner
 
 		return new McpSearchTextScanResult(
 			totalMatches,
-			stored
-				.Select(static match => new McpSearchMatchContext(
-					match.MatchLineNumber,
-					match.Lines.ToArray()))
-				.ToArray());
+			MergeContexts(stored),
+			protectedRangeComparisons);
 	}
 
-	private static IReadOnlyList<McpProtectedTextRange> FindRedactionPlaceholders(string content)
+	private static IReadOnlyList<McpSearchMatchContext> MergeContexts(IReadOnlyList<PendingMatch> matches)
 	{
-		const string prefix = "DEVPROJEX_REDACTED[";
-		List<McpProtectedTextRange>? ranges = null;
-		var offset = 0;
-		while (offset < content.Length)
+		if (matches.Count == 0)
+			return [];
+
+		var merged = new List<McpSearchMatchContext>(matches.Count);
+		var lineNumbers = new List<int> { matches[0].MatchLineNumber };
+		var lines = new List<McpTextLineRange>(matches[0].Lines);
+		for (var index = 1; index < matches.Count; index++)
 		{
-			var start = content.IndexOf(prefix, offset, StringComparison.Ordinal);
-			if (start < 0)
-				break;
-			var end = content.IndexOf(']', start + prefix.Length);
-			if (end < 0)
-				break;
-			ranges ??= [];
-			ranges.Add(new McpProtectedTextRange(start, end - start + 1));
-			offset = end + 1;
+			var match = matches[index];
+			var lastLine = lines[^1].LineNumber;
+			if (match.Lines[0].LineNumber <= lastLine + 1)
+			{
+				lineNumbers.Add(match.MatchLineNumber);
+				foreach (var line in match.Lines)
+				{
+					if (line.LineNumber > lastLine)
+						lines.Add(line);
+				}
+				continue;
+			}
+
+			merged.Add(new McpSearchMatchContext(lineNumbers.ToArray(), lines.ToArray(), merged.Count > 0));
+			lineNumbers = [match.MatchLineNumber];
+			lines = new List<McpTextLineRange>(match.Lines);
 		}
-		return ranges ?? [];
+		merged.Add(new McpSearchMatchContext(lineNumbers.ToArray(), lines.ToArray(), merged.Count > 0));
+		return merged;
 	}
 
 	private sealed class PendingMatch(

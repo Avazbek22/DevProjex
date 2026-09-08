@@ -1873,23 +1873,153 @@ public sealed class McpInfrastructureTests
 	{
 		const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
 		var content = $"before\n{placeholder}\nafter {placeholder} visible-needle\n";
+		var ranges = new[]
+		{
+			new TransformedTextRange(content.IndexOf(placeholder, StringComparison.Ordinal), placeholder.Length),
+			new TransformedTextRange(content.LastIndexOf(placeholder, StringComparison.Ordinal), placeholder.Length)
+		};
 
 		var placeholderResult = McpSearchTextScanner.Scan(
 			content,
 			new McpSearchRegex(System.Text.RegularExpressions.Regex.Escape(placeholder), ignoreCase: false),
 			contextLines: 0,
 			maximumStoredMatches: 50,
+			ranges,
 			TestContext.Current.CancellationToken);
 		var visibleResult = McpSearchTextScanner.Scan(
 			content,
 			new McpSearchRegex("visible-needle", ignoreCase: false),
 			contextLines: 0,
 			maximumStoredMatches: 50,
+			ranges,
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, placeholderResult.TotalMatches);
 		Assert.Empty(placeholderResult.Matches);
 		Assert.Equal(1, visibleResult.TotalMatches);
+	}
+
+	[Theory]
+	[InlineData("const string Prefix = \"DEVPROJEX_REDACTED[\";", "Prefix", 1)]
+	[InlineData("DEVPROJEX_REDACTED[\narray[index]", "array", 1)]
+	[InlineData("DEVPROJEX_REDACTED[x] visible", "visible", 1)]
+	public void SearchScannerDoesNotInferProtectedTextFromPlaceholderLikeSource(
+		string content,
+		string pattern,
+		int expectedMatches)
+	{
+		var result = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex(pattern, ignoreCase: false),
+			contextLines: 0,
+			maximumStoredMatches: 50,
+			protectedRanges: [],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(expectedMatches, result.TotalMatches);
+	}
+
+	[Fact]
+	public void SearchScannerUsesExactReplacementRangesAndPreservesBoundaries()
+	{
+		const string content = "leftONETWOright";
+		var ranges = new[]
+		{
+			new TransformedTextRange(4, 3),
+			new TransformedTextRange(7, 3)
+		};
+
+		foreach (var hidden in new[] { "ONE", "TWO", "ONETWO", "tONET", "ETWOr" })
+		{
+			var result = McpSearchTextScanner.Scan(
+				content,
+				new McpSearchRegex(hidden, ignoreCase: false),
+				0,
+				50,
+				ranges,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(0, result.TotalMatches);
+		}
+
+		foreach (var visible in new[] { "left", "right", "rig" })
+		{
+			var result = McpSearchTextScanner.Scan(
+				content,
+				new McpSearchRegex(visible, ignoreCase: false),
+				0,
+				50,
+				ranges,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(1, result.TotalMatches);
+		}
+
+		var hiddenZeroWidth = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("(?=O)", ignoreCase: false),
+			0,
+			50,
+			ranges,
+			TestContext.Current.CancellationToken);
+		var visibleZeroWidth = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("(?=r)", ignoreCase: false),
+			0,
+			50,
+			ranges,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, hiddenZeroWidth.TotalMatches);
+		Assert.Equal(1, visibleZeroWidth.TotalMatches);
+	}
+
+	[Fact]
+	public void SearchScannerProtectedRangeComparisonsGrowLinearly()
+	{
+		const int count = 10_000;
+		const string line = "HIT REDACTED\n";
+		var content = string.Concat(Enumerable.Repeat(line, count));
+		var ranges = Enumerable.Range(0, count)
+			.Select(index => new TransformedTextRange(index * line.Length + 4, 8))
+			.ToArray();
+
+		var result = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("HIT", ignoreCase: false),
+			0,
+			count,
+			ranges,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(count, result.TotalMatches);
+		Assert.Equal(29_999, result.ProtectedRangeComparisons);
+		var actualLines = result.Matches.SelectMany(static match => match.MatchLineNumbers);
+		var actualHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+			Encoding.UTF8.GetBytes(string.Join(',', actualLines))));
+		var legacyHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+			Encoding.UTF8.GetBytes(string.Join(',', Enumerable.Range(1, count)))));
+		Assert.Equal(legacyHash, actualHash);
+	}
+
+	[Fact]
+	public void SearchScannerMergesOverlappingContextWithoutChangingMatchCount()
+	{
+		const string content = "before\nneedle one\nbetween\nneedle two\nafter\ngap\ngap\nneedle three\ntail";
+
+		var result = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("needle", ignoreCase: false),
+			contextLines: 1,
+			maximumStoredMatches: 50,
+			protectedRanges: [],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(3, result.TotalMatches);
+		Assert.Equal(2, result.Matches.Count);
+		Assert.Equal([2, 4], result.Matches[0].MatchLineNumbers);
+		Assert.Equal(5, result.Matches[0].Lines.Count);
+		Assert.False(result.Matches[0].StartsNewGroup);
+		Assert.True(result.Matches[1].StartsNewGroup);
+		Assert.Equal(result.Matches.SelectMany(match => match.Lines).Select(line => line.LineNumber).Count(),
+			result.Matches.SelectMany(match => match.Lines).Select(line => line.LineNumber).Distinct().Count());
 	}
 
 	[Fact]
