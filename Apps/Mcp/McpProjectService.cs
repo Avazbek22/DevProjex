@@ -45,7 +45,8 @@ internal sealed class McpProjectService(
 		long? maximumFileBytes,
 		CancellationToken cancellationToken,
 		bool includeOutputMetrics = true,
-		IReadOnlyList<ProjectExclusion>? exclusions = null)
+		IReadOnlyList<ProjectExclusion>? exclusions = null,
+		bool tolerateMissingPaths = false)
 	{
 		using var selectionStage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Selection);
 		var parsedScope = ParseGitScope(gitScope);
@@ -141,7 +142,7 @@ internal sealed class McpProjectService(
 				$"{McpErrorCodes.ProjectUnavailable}: project preparation failed ({diagnostic.Code}: {diagnostic.Message}). " +
 				"Fix the reported project access or Git state and retry.");
 		}
-		ValidateRequestedPathCasing(plan, requested);
+		ValidateRequestedPathCasing(plan, requested, tolerateMissingPaths);
 		if (maximumFileBytes is not null)
 			plan = RefreshEffectiveFileSizes(plan);
 		var allowProjectionReuse = parsedScope is null &&
@@ -257,6 +258,8 @@ internal sealed class McpProjectService(
 		var final = await ProjectFileSizeFilter
 			.ApplyAsync(services.Planner, narrowed, maximumFileBytes, cancellationToken)
 			.ConfigureAwait(false);
+		if (tolerateMissingPaths)
+			final = AddMissingRequestedPathDiagnostics(final, requested);
 		ValidatePlanContainment(roots, projectRoot, final.IncludedFiles, cancellationToken);
 		if (allowProjectionReuse)
 		{
@@ -633,7 +636,7 @@ internal sealed class McpProjectService(
 			foreach (var path in includedFolders)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				if (requested.Directories.Contains(path) &&
+				if (MatchesRequested(path, requested.Paths, requested.Directories) &&
 				    !directoriesWithIncludedFiles.Contains(path) &&
 				    globs.IncludesDirectory(ToRelative(projectRoot, path)))
 					projectionPaths.Add(path);
@@ -962,7 +965,8 @@ internal sealed class McpProjectService(
 
 	private static void ValidateRequestedPathCasing(
 		ProjectContextPlan plan,
-		RequestedPathSelection requested)
+		RequestedPathSelection requested,
+		bool tolerateMissingPaths = false)
 	{
 		foreach (var token in requested.Tokens)
 		{
@@ -976,9 +980,35 @@ internal sealed class McpProjectService(
 			var caseMismatch = ResolveCaseMismatch(plan, token.Value);
 			if (caseMismatch is not null)
 				throw caseMismatch;
-			if (token.ResolutionError is not null)
+			if (token.ResolutionError is not null && !tolerateMissingPaths)
 				throw token.ResolutionError;
 		}
+	}
+
+	private static ProjectContextPlan AddMissingRequestedPathDiagnostics(
+		ProjectContextPlan plan,
+		RequestedPathSelection requested)
+	{
+		var missing = requested.Tokens.Where(token =>
+			token.ResolutionError is not null ||
+			token.ResolvedPath is { } resolved &&
+			!(token.IsDirectory
+				? plan.IncludedFolders.Contains(resolved, StringComparer.Ordinal)
+				: plan.IncludedFiles.Contains(resolved, StringComparer.Ordinal))).ToArray();
+		if (missing.Length == 0)
+			return plan;
+		return plan with
+		{
+			Diagnostics =
+			[
+				.. plan.Diagnostics,
+				.. missing.Select(static token => new ContextDiagnostic(
+					"DPX-SELECTION-PATH-MISSING",
+					ContextDiagnosticSeverity.Warning,
+					"A requested path is not present in the effective project tree.",
+					token.Value))
+			]
+		};
 	}
 
 	internal static IReadOnlyList<string> NormalizeRequestedPathTokens(

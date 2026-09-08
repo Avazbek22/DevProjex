@@ -125,6 +125,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("[Dependency configuration]", server, StringComparison.Ordinal);
 		Assert.Contains("spotlighted JSON serialization", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("reply ≈ E", server, StringComparison.Ordinal);
+		Assert.Contains("For `get_tree`, `analyze`, `pack_context`, and `search_project`, `paths` accepts", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("The entries name literal files or directories", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("at most 2,000 lines and 50,000 characters", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("`profile` applies the same effective selection", normalizedServer, StringComparison.Ordinal);
 
 		Assert.Contains("MCP agent ergonomics changes four v5.2 behaviors", normalizedVersion, StringComparison.Ordinal);
 		Assert.Contains("there is no strict-range switch", normalizedVersion, StringComparison.Ordinal);

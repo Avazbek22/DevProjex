@@ -238,23 +238,28 @@ open-world.
 | Tool | Parameters | Result and limits |
 |---|---|---|
 | `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
-| `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
+| `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart. |
-| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches are still counted. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
+| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches are still counted. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
-| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; line numbers refer to the returned text after replacements. At most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. A non-empty file that cannot be inspected under the 16 MiB mandatory-redaction boundary returns `DPX-MCP-PAYLOAD-TRUNCATED` with its byte size and the limit; it never returns an empty success. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
+| `get_file` | `project?`, `branch?`, `profile?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; line numbers refer to the returned text after replacements. At most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. A non-empty file that cannot be inspected under the 16 MiB mandatory-redaction boundary returns `DPX-MCP-PAYLOAD-TRUNCATED` with its byte size and the limit; it never returns an empty success. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, `related_files`, and `get_file` additionally accept the
 `exclusions` array parameter described in the startup section, so a file
 revealed by a per-call value stays readable through the same value.
 
-For `analyze` and `pack_context`, `paths` accepts at most 256 entries and each
+For `get_tree`, `analyze`, `pack_context`, and `search_project`, `paths` accepts
+at most 256 entries and each
 entry is limited to 4,096 Unicode scalar values. Lexically equivalent entries are
 deduplicated before root-jail resolution; every unique path still passes the full
-physical containment check. Regex, glob, and `git_scope` schema lengths use the
+physical containment check. The entries name literal files or directories, so
+`*`, `?`, `{`, and `[` have no glob meaning in `paths`. The selection is narrowed
+before intersection with patterns, Git scope, and `max_file_bytes`; a missing entry
+adds the count-only `DPX-SELECTION-PATH-MISSING` warning while valid entries continue,
+and an empty intersection remains empty. Regex, glob, and `git_scope` schema lengths use the
 same Unicode scalar-value semantics at runtime.
 
 ### `related_files`
@@ -377,8 +382,9 @@ trusted plain-text trailers outside every project spotlight block, such as
 For `get_file` and `read_pack`, a requested `end_line` past EOF returns every
 available line and appends
 `[Showing lines A-N of N; end_line B exceeded the file.]`. A `start_line` past
-EOF or `end_line < start_line` remains `DPX-MCP-INVALID-RANGE` with the valid
-`1-N` interval. If the 1,000-line or 50,000-character page limit is reached
+EOF remains `DPX-MCP-INVALID-RANGE` with the valid `1-N` interval. A syntactically
+reversed range is rejected before any project or pack access and states that lines
+start at 1 and `start_line` must not exceed `end_line`. If the 1,000-line or 50,000-character page limit is reached
 before EOF, the existing
 `[Showing lines A-B of N; continue with start_line=B+1.]` trailer takes priority.
 
@@ -387,18 +393,21 @@ selects the deepest depth whose complete tree fits the 2,000-line limit and
 appends `[Tree limited to depth D of N to fit 2000 lines; pass max_depth or
 include_patterns for a subtree.]`. Node and format-header line counts are
 computed from the selected tree before rendering, so the response never stops
-mid-tree. If depth 1 itself cannot fit, the original first-2,000-line response
-and `[Tree truncated at 2000 lines ...]` trailer remain. An explicit
+mid-tree for the line limit. An independent 50,000-character cap bounds unusually
+long names; human-readable output then carries the same truncation notice. If depth 1 itself cannot fit,
+the original bounded response and `[Tree truncated at 2000 lines or 50000 characters ...]`
+trailer remain. An explicit
 `max_depth` is the caller's choice and retains that same truncation behavior.
 JSON and XML never return partial syntax: overflow remains
-`DPX-MCP-PAYLOAD-TRUNCATED`, and the error names the largest `max_depth` that
-would produce a complete document before offering pattern narrowing.
+`DPX-MCP-PAYLOAD-TRUNCATED`; line overflow names the largest `max_depth` that
+would produce a complete document, while character overflow asks the caller to
+narrow `paths` or patterns.
 The `text` tree writes its project address once, followed directly by the real
 top-level children; it does not repeat the project name as a synthetic tree node.
 Markdown tree Root values and node names escape active CommonMark, HTML, and
 entity syntax so project-controlled labels remain literal data.
 Markdown context project headings and content-only Root lines use the same
-literal escaping. `get_file.path` and `paths` in `analyze` and `pack_context`
+literal escaping. `get_file.path` and `paths` in `get_tree`, `analyze`, `pack_context`, and `search_project`
 accept these escaped spellings when the literal path does not exist; callers can
 also request `get_tree` with `format: "text"` to copy unescaped names.
 Selection warnings are appended outside project spotlight blocks so clients can
@@ -545,10 +554,14 @@ lists alternatives (at most 64 per pattern, 1,024 per array after expansion).
 on every platform — copy names from `get_tree`. Negation (`!`) and character
 classes (`[...]`) are rejected with `DPX-MCP-INVALID-PATTERN` rather than
 matched literally, because a silently empty result reads as "no such files".
-`paths` contains existing project-relative files or directories.
+`paths` contains existing project-relative files or directories for `get_tree`,
+`analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
+glob metacharacters have meaning only in the pattern parameters.
 Numeric parameters accept JSON numbers and decimal numeric strings.
 Boolean parameters accept JSON booleans and the exact strings `"true"` and
 `"false"`.
+Numeric type, sign, published bounds, and line-range ordering are validated before
+the server resolves a project, reads a stored pack, plans files, or prepares content.
 
 `max_tokens` is an integer of at least 1 and accepts either a JSON number or a
 decimal numeric string. It uses the existing estimate of one token per four
