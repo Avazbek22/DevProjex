@@ -523,6 +523,7 @@ public sealed class ImportanceRankingService(
 		DependencyIndexSnapshot snapshot,
 		CancellationToken cancellationToken)
 	{
+		DependencyEngineDiagnostics.RecordGraphBuild();
 		var supportedPaths = snapshot.Files
 			.Where(static file => file.Status == DependencyFileStatus.Supported)
 			.Select(static file => file.Path)

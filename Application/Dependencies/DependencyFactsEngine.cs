@@ -80,6 +80,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		    ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 		    _indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
 		{
+			DependencyEngineDiagnostics.RecordResolutionCacheHit();
 			var snapshot = cachedSnapshot.Snapshot;
 			progress?.Report(new DependencyIndexProgress(manifest.Length, manifest.Length));
 			return snapshot with
@@ -140,7 +141,10 @@ public sealed class DependencyFactsEngine : IDisposable
 						_fileCacheOrder.Enqueue(key);
 				}
 				if (!ReferenceEquals(lazy, created))
+			{
 					Interlocked.Increment(ref reusedFiles);
+					DependencyEngineDiagnostics.RecordFileCacheHit();
+			}
 				try
 				{
 					var extracted = await lazy.Value.ConfigureAwait(false);
@@ -206,6 +210,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				throw;
 			}
 			resolutionCacheHit = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
+			if (resolutionCacheHit)
+				DependencyEngineDiagnostics.RecordResolutionCacheHit();
 			if (!resolutionCacheHit)
 				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		}
@@ -660,6 +666,7 @@ public sealed class DependencyFactsEngine : IDisposable
 	private static ResolvedIndex GateResolvedIndex(ResolvedIndex index, IReadOnlySet<string> allowed)
 	{
 		var files = new FileFacts[index.Files.Count];
+		var filesChanged = false;
 		for (var indexValue = 0; indexValue < files.Length; indexValue++)
 		{
 			var file = index.Files[indexValue];
@@ -668,16 +675,28 @@ public sealed class DependencyFactsEngine : IDisposable
 			files[indexValue] = ReferenceEquals(imports, file.Imports) && ReferenceEquals(references, file.References)
 				? file
 				: file with { Imports = imports, References = references };
+			if (!ReferenceEquals(files[indexValue], file))
+			{
+				filesChanged = true;
+				DependencyEngineDiagnostics.RecordFileFactsClone();
+			}
 		}
 		var edges = index.Edges.Where(edge => allowed.Contains(edge.Source) &&
 			(edge.Target is null || allowed.Contains(edge.Target) || edge.Target.StartsWith("namespace:", StringComparison.Ordinal)) &&
 			edge.Candidates.All(allowed.Contains) &&
 			edge.DeclarationFiles.All(allowed.Contains)).ToArray();
 		var (bySource, byTarget) = BuildEdgeIndexes(edges);
+		var gatedFiles = filesChanged ? files : index.Files;
+		var fileByPath = index.FileByPath;
+		if (filesChanged)
+		{
+			fileByPath = files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+			DependencyEngineDiagnostics.RecordDictionaryBuild();
+		}
 		return index with
 		{
-			Files = files,
-			FileByPath = files.ToDictionary(static file => file.Path, StringComparer.Ordinal),
+			Files = gatedFiles,
+			FileByPath = fileByPath,
 			Edges = edges,
 			EdgesBySource = bySource,
 			EdgesByTarget = byTarget
@@ -775,8 +794,10 @@ public sealed class DependencyFactsEngine : IDisposable
 			var fullPath = Path.GetFullPath(path);
 			if (!IsWithin(root, fullPath) || unique.ContainsKey(fullPath))
 				continue;
+			DependencyEngineDiagnostics.RecordPathNormalization();
 			unique.Add(fullPath, new CanonicalManifestFile(fullPath, PortableRelative(root, fullPath)));
 		}
+		DependencyEngineDiagnostics.RecordManifestSort();
 		return unique.Values.OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
 	}
 
@@ -941,10 +962,12 @@ public sealed class DependencyFactsEngine : IDisposable
 					References = work.References
 				};
 			}
+			var fileByPath = resolvedFiles.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+			DependencyEngineDiagnostics.RecordDictionaryBuild();
 			return new ResolvedIndex(
 				Aggregate(resolved),
 				resolvedFiles,
-				resolvedFiles.ToDictionary(static file => file.Path, StringComparer.Ordinal),
+				fileByPath,
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal),
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal));
 		}
@@ -1047,35 +1070,57 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private sealed class EdgeAccumulator
 		{
-			private readonly HashSet<string> _reasons = new(StringComparer.Ordinal);
-			private readonly HashSet<SourceSite> _evidenceSeen = [];
-			private readonly List<SourceSite> _evidence = [];
-			private readonly HashSet<string> _candidates = new(StringComparer.Ordinal);
-			private readonly HashSet<string> _declarationFiles = new(StringComparer.Ordinal);
+			private DependencyEdge? _single;
+			private HashSet<string>? _reasons;
+			private HashSet<SourceSite>? _evidenceSeen;
+			private List<SourceSite>? _evidence;
+			private HashSet<string>? _candidates;
+			private HashSet<string>? _declarationFiles;
 
 			public void Add(DependencyEdge edge)
 			{
-				_reasons.UnionWith(edge.Reasons);
+				if (_single is null)
+				{
+					_single = edge;
+					return;
+				}
+				if (_reasons is null)
+					InitializeCollections(_single);
+				_reasons!.UnionWith(edge.Reasons);
 				foreach (var site in edge.Evidence)
-					if (_evidenceSeen.Add(site))
-						_evidence.Add(site);
-				_candidates.UnionWith(edge.Candidates);
-				_declarationFiles.UnionWith(edge.DeclarationFiles);
+					if (_evidenceSeen!.Add(site))
+						_evidence!.Add(site);
+				_candidates!.UnionWith(edge.Candidates);
+				_declarationFiles!.UnionWith(edge.DeclarationFiles);
 			}
 
-			public DependencyEdge Create(EdgeAggregationKey key) => new(
-				key.Source,
-				key.Target,
-				key.Layer,
-				key.Status,
-				key.Reference,
-				_reasons.Order(StringComparer.Ordinal).ToArray(),
-				_evidence.OrderBy(static site => site.Line).ToArray(),
-				_candidates.Order(StringComparer.Ordinal).ToArray(),
-				key.CrossScope)
+			public DependencyEdge Create(EdgeAggregationKey key)
 			{
-				DeclarationFiles = _declarationFiles.Order(StringComparer.Ordinal).ToArray()
-			};
+				if (_reasons is null)
+					return _single!;
+				return new DependencyEdge(
+					key.Source,
+					key.Target,
+					key.Layer,
+					key.Status,
+					key.Reference,
+					_reasons.Order(StringComparer.Ordinal).ToArray(),
+					_evidence!.OrderBy(static site => site.Line).ToArray(),
+					_candidates!.Order(StringComparer.Ordinal).ToArray(),
+					key.CrossScope)
+				{
+					DeclarationFiles = _declarationFiles!.Order(StringComparer.Ordinal).ToArray()
+				};
+			}
+
+			private void InitializeCollections(DependencyEdge edge)
+			{
+				_reasons = new HashSet<string>(edge.Reasons, StringComparer.Ordinal);
+				_evidenceSeen = new HashSet<SourceSite>(edge.Evidence);
+				_evidence = new List<SourceSite>(edge.Evidence);
+				_candidates = new HashSet<string>(edge.Candidates, StringComparer.Ordinal);
+				_declarationFiles = new HashSet<string>(edge.DeclarationFiles, StringComparer.Ordinal);
+			}
 		}
 	}
 
@@ -1108,6 +1153,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			_root = root;
 			_files = files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+			DependencyEngineDiagnostics.RecordDictionaryBuild();
 			_symbolsBySimpleName = declarations
 				.GroupBy(static declaration => new SymbolLookupKey(
 					declaration.Identity.ScopeId,
@@ -1205,7 +1251,10 @@ public sealed class DependencyFactsEngine : IDisposable
 				foreach (var language in CompatibleLanguages(source.LanguageId))
 				{
 					if (_symbolsBySimpleName.TryGetValue(new SymbolLookupKey(scope, language, name), out var matches))
+					{
 						candidates += matches.Length;
+						DependencyEngineDiagnostics.RecordResolverCandidateProbes(matches.Length);
+					}
 					if (candidates > maximumWork)
 						return candidates;
 				}
