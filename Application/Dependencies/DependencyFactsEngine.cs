@@ -657,11 +657,16 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private static ResolvedIndex GateResolvedIndex(ResolvedIndex index, IReadOnlySet<string> allowed)
 	{
-		var files = index.Files.Select(file => file with
+		var files = new FileFacts[index.Files.Count];
+		for (var indexValue = 0; indexValue < files.Length; indexValue++)
 		{
-			Imports = GateImports(file.Imports, allowed),
-			References = GateReferences(file.References, allowed)
-		}).ToArray();
+			var file = index.Files[indexValue];
+			var imports = GateImports(file.Imports, allowed);
+			var references = GateReferences(file.References, allowed);
+			files[indexValue] = ReferenceEquals(imports, file.Imports) && ReferenceEquals(references, file.References)
+				? file
+				: file with { Imports = imports, References = references };
+		}
 		var edges = index.Edges.Where(edge => allowed.Contains(edge.Source) &&
 			(edge.Target is null || allowed.Contains(edge.Target) || edge.Target.StartsWith("namespace:", StringComparison.Ordinal)) &&
 			edge.Candidates.All(allowed.Contains) &&
