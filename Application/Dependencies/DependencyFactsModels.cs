@@ -52,6 +52,8 @@ public enum DependencyDirection
 
 public sealed record SourceSite(string File, int Line, string Evidence);
 
+public sealed record TypeParameterScope(string Name, int StartIndex, int EndIndex);
+
 public sealed record SymbolIdentity(
 	string ScopeId,
 	LanguageId LanguageId,
@@ -93,6 +95,7 @@ public sealed record ReferenceFact(
 {
 	public string ContainingNamespace { get; init; } = string.Empty;
 	public string? ContainingType { get; init; }
+	public int SourceStartIndex { get; init; } = -1;
 }
 
 public sealed record FileFacts(
@@ -115,6 +118,7 @@ public sealed record FileFacts(
 	IReadOnlyList<string> TypeParameters)
 {
 	public bool CanCache { get; init; } = true;
+	public IReadOnlyList<TypeParameterScope> TypeParameterScopes { get; init; } = [];
 }
 
 public sealed record DependencyEdge(

@@ -463,6 +463,19 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	private static DependencySyntaxCapture CreateCapture(string captureName, Node node)
 	{
+		if (captureName == "context.type_parameters")
+		{
+			var owner = node.Parent;
+			while (owner is not null && !IsTypeParameterOwner(owner.Type))
+				owner = owner.Parent;
+			return new DependencySyntaxCapture(
+				captureName,
+				node.Type,
+				node.Text,
+				checked((int)node.StartPosition.Row + 1),
+				checked((int)(owner?.StartIndex ?? node.StartIndex)),
+				checked((int)(owner?.EndIndex ?? node.EndIndex)));
+		}
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 			captureName == "context.namespace";
 		if (!isCompact)
@@ -590,6 +603,11 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		public long RegisteredWeight { get; set; }
 		public LinkedListNode<PreparedSourceCacheEntry>? OrderNode { get; set; }
 	}
+
+	private static bool IsTypeParameterOwner(string nodeType) => nodeType is
+		"class_declaration" or "struct_declaration" or "interface_declaration" or
+		"record_declaration" or "delegate_declaration" or "method_declaration" or
+		"local_function_statement";
 
 	internal readonly record struct PreparedSourceCacheState(
 		int Entries,

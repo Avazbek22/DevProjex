@@ -100,6 +100,47 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task CSharpTypeParameters_ShadowOnlyInsideTheirLexicalOwner()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var model = fixture.CreateFile("Models/User.cs", "namespace Models; public class User { }");
+		var source = fixture.CreateFile("Consumers.cs", """
+			using Models;
+			public class Box<User>
+			{
+				public User GenericValue { get; }
+				public Models.User QualifiedValue { get; }
+			}
+			public class Consumer
+			{
+				public User NeighborValue { get; }
+				public void Map<User>(User value) { }
+				public User OutsideMethod { get; }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, model, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Unresolved && edge.Evidence.Any(site => site.Line == 4));
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "Models.User" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "Models/User.cs");
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "Models/User.cs" &&
+			edge.Evidence.Any(site => site.Line == 9));
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Unresolved && edge.Evidence.Any(site => site.Line == 10));
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "Models/User.cs" &&
+			edge.Evidence.Any(site => site.Line == 11));
+	}
+
+	[Fact]
 	public async Task CSharpProjectReference_NormalizesBothMsBuildSeparatorsAndKeepsCrossScopeResolution()
 	{
 		using var fixture = new TemporaryDirectory();

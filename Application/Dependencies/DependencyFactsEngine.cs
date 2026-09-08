@@ -621,7 +621,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		facts.Aliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
 		facts.GlobalContextNamespaces.Sum(strings.Add) +
 		facts.GlobalAliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
-		facts.TypeParameters.Sum(strings.Add);
+		facts.TypeParameters.Sum(strings.Add) +
+		facts.TypeParameterScopes.Sum(scope => 40 + strings.Add(scope.Name));
 
 	private static long EstimateResolvedIndexBytes(ResolvedIndex index)
 	{
@@ -1544,7 +1545,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
-			if (source.TypeParameters.Contains(simpleName, StringComparer.Ordinal))
+			var isQualified = reference.Name.Contains('.');
+			var typeParameterShadowsReference = !isQualified && (source.TypeParameterScopes.Count > 0
+				? source.TypeParameterScopes.Any(parameter =>
+					parameter.Name == simpleName &&
+					parameter.StartIndex <= reference.SourceStartIndex &&
+					parameter.EndIndex >= reference.SourceStartIndex)
+				: source.TypeParameters.Contains(simpleName, StringComparer.Ordinal));
+			if (typeParameterShadowsReference)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
 			var expandedName = ExpandQualifiedAlias(source, reference.Name);
 			var candidates = reference.Name.Contains('.')
