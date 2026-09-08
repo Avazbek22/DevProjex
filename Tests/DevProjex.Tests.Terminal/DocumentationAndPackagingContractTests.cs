@@ -449,7 +449,17 @@ public sealed class DocumentationAndPackagingContractTests
 	[Fact]
 	public void HeadlessWorkflowsCoverMasterCoreChangesAndReleaseCandidatePinsOneSha()
 	{
+		// CI tier policy: .github/workflows/README.md. Packaging runs on feature pull requests only
+		// for its own inputs; core code paths trigger the merge tier (push to v*) instead. Change
+		// the policy and these assertions together; never drop an assertion to make a change pass.
 		var rootPath = FindRepositoryRoot();
+		var policy = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "README.md"));
+		Assert.Contains("| 1 Feature |", policy, StringComparison.Ordinal);
+		Assert.Contains("| 2 Merge |", policy, StringComparison.Ordinal);
+		Assert.Contains("| 3 Release |", policy, StringComparison.Ordinal);
+		Assert.Contains("HeadlessWorkflowsCoverMasterCoreChangesAndReleaseCandidatePinsOneSha", policy, StringComparison.Ordinal);
+
+		var corePathPatterns = new[] { "'Apps/Mcp/**'", "'Application/**'", "'Kernel/**'", "'Infrastructure/**'" };
 		foreach (var workflowName in new[]
 		         {
 			         "publish-packages.yml",
@@ -462,12 +472,54 @@ public sealed class DocumentationAndPackagingContractTests
 				".github",
 				"workflows",
 				workflowName));
-			Assert.Contains("master", workflow, StringComparison.Ordinal);
-			Assert.Contains("'Apps/Mcp/**'", workflow, StringComparison.Ordinal);
-			Assert.Contains("'Application/**'", workflow, StringComparison.Ordinal);
-			Assert.Contains("'Kernel/**'", workflow, StringComparison.Ordinal);
-			Assert.Contains("'Directory.Packages.props'", workflow, StringComparison.Ordinal);
+			Assert.Contains("Policy: .github/workflows/README.md", workflow, StringComparison.Ordinal);
+			Assert.Contains("concurrency:", workflow, StringComparison.Ordinal);
+			Assert.Contains("github.event.pull_request.number || github.ref", workflow, StringComparison.Ordinal);
+			Assert.Contains(
+				"cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}",
+				workflow,
+				StringComparison.Ordinal);
+
+			var push = TriggerSection(workflow, "push");
+			Assert.Contains("master", push, StringComparison.Ordinal);
+			Assert.Contains("'v*'", push, StringComparison.Ordinal);
+			Assert.Contains("'Directory.Packages.props'", push, StringComparison.Ordinal);
+			foreach (var pattern in corePathPatterns)
+				Assert.Contains(pattern, push, StringComparison.Ordinal);
+
+			var pullRequest = TriggerSection(workflow, "pull_request");
+			Assert.DoesNotContain("branches:", pullRequest, StringComparison.Ordinal);
+			Assert.Contains("branches-ignore: [master]", pullRequest, StringComparison.Ordinal);
+			Assert.Contains("paths:", pullRequest, StringComparison.Ordinal);
+			foreach (var pattern in corePathPatterns)
+				Assert.DoesNotContain(pattern, pullRequest, StringComparison.Ordinal);
+			Assert.DoesNotContain("'Apps/Terminal/**'", pullRequest, StringComparison.Ordinal);
 		}
+
+		var appImage = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-appimage.yml"));
+		Assert.Contains("Policy: .github/workflows/README.md", appImage, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/appimage-build.yml", appImage, StringComparison.Ordinal);
+		var appImagePush = TriggerSection(appImage, "push");
+		Assert.Contains("'v*'", appImagePush, StringComparison.Ordinal);
+		Assert.Contains("Application/**", appImagePush, StringComparison.Ordinal);
+		var appImagePullRequest = TriggerSection(appImage, "pull_request");
+		Assert.DoesNotContain("branches:", appImagePullRequest, StringComparison.Ordinal);
+		Assert.Contains("branches-ignore: [master]", appImagePullRequest, StringComparison.Ordinal);
+		Assert.DoesNotContain("Application/**", appImagePullRequest, StringComparison.Ordinal);
+		Assert.Contains("Packaging/Linux/**", appImagePullRequest, StringComparison.Ordinal);
+
+		var storeSmoke = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "store-package-smoke.yml"));
+		Assert.DoesNotContain("pull_request:", storeSmoke, StringComparison.Ordinal);
+		Assert.Contains("workflow_call:", storeSmoke, StringComparison.Ordinal);
+		Assert.Contains("force_full:", storeSmoke, StringComparison.Ordinal);
+		Assert.Contains("Select-CiPlan.ps1 -Full", storeSmoke, StringComparison.Ordinal);
+		Assert.DoesNotContain(": write", storeSmoke, StringComparison.Ordinal);
+
+		var grammarDelivery = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "grammar-delivery.yml"));
+		Assert.Contains("workflow_call:", grammarDelivery, StringComparison.Ordinal);
+		Assert.Contains("- 'v*'", grammarDelivery, StringComparison.Ordinal);
+		Assert.Contains("branches-ignore: [master]", TriggerSection(grammarDelivery, "pull_request"), StringComparison.Ordinal);
+		Assert.DoesNotContain(": write", grammarDelivery, StringComparison.Ordinal);
 
 		var releaseCandidate = File.ReadAllText(Path.Combine(
 			rootPath,
@@ -477,6 +529,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("sha:", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("workflow_dispatch:", releaseCandidate, StringComparison.Ordinal);
 		Assert.DoesNotContain("pull_request:", releaseCandidate, StringComparison.Ordinal);
+		Assert.DoesNotContain("\n  push:", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("must equal workflow ref SHA", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("printf 'Validated release candidate `%s`.\\n'", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/dotnet.yml", releaseCandidate, StringComparison.Ordinal);
@@ -484,9 +537,21 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("uses: ./.github/workflows/headless-build.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/container-build.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/packages-build.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/appimage-build.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/grammar-delivery.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/store-package-smoke.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("Release candidate report", releaseCandidate, StringComparison.Ordinal);
+		foreach (var gate in new[]
+		         {
+			         "'AppImage dry-run' = $env:APPIMAGE_RESULT",
+			         "'Grammar Delivery' = $env:GRAMMAR_RESULT",
+			         "'Store Package Smoke' = $env:STORE_RESULT"
+		         })
+		{
+			Assert.Contains(gate, releaseCandidate, StringComparison.Ordinal);
+		}
 		Assert.Equal(
-			2,
+			3,
 			Regex.Matches(
 				releaseCandidate,
 				@"^\s+force_full:\s+true\s*$",
@@ -516,7 +581,8 @@ public sealed class DocumentationAndPackagingContractTests
 		{
 			["headless-build.yml"] = "package-headless.yml",
 			["container-build.yml"] = "publish-container.yml",
-			["packages-build.yml"] = "publish-packages.yml"
+			["packages-build.yml"] = "publish-packages.yml",
+			["appimage-build.yml"] = "package-appimage.yml"
 		};
 		foreach (var (buildWorkflowName, publishingWorkflowName) in buildWorkflows)
 		{
@@ -571,15 +637,19 @@ public sealed class DocumentationAndPackagingContractTests
 			packagesWorkflow,
 			StringComparison.Ordinal);
 
-		var appImageWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-appimage.yml"));
-		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", appImageWorkflow, StringComparison.Ordinal);
+		// The receipt gates moved with the read-only build into appimage-build.yml; the publishing
+		// wrapper keeps only version resolution and the release upload.
+		var appImageBuildWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "appimage-build.yml"));
+		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", appImageBuildWorkflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"receipt_root=\"${GITHUB_WORKSPACE}/artifacts/appimage-release",
-			appImageWorkflow,
+			appImageBuildWorkflow,
 			StringComparison.Ordinal);
-		Assert.Contains("Test-ReleaseArtifacts.ps1", appImageWorkflow, StringComparison.Ordinal);
-		Assert.Contains("Test-ReleaseArtifactGateMutation.ps1", appImageWorkflow, StringComparison.Ordinal);
-		Assert.Contains("-Channels appimage", appImageWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifacts.ps1", appImageBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifactGateMutation.ps1", appImageBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("-Channels appimage", appImageBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("ref: ${{ inputs.checkout_ref }}", appImageBuildWorkflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("needs.prepare", appImageBuildWorkflow, StringComparison.Ordinal);
 
 		var releaseProcess = File.ReadAllText(Path.Combine(rootPath, "Docs", "Release-Process.md"));
 		Assert.Contains("must match", releaseProcess, StringComparison.Ordinal);
@@ -974,7 +1044,12 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Published Broken Pipe Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Startup Smoke (macOS)", workflow, StringComparison.Ordinal);
-		Assert.Contains("branches: [ \"master\", \"v5.1\", \"v5.2\" ]", workflow, StringComparison.Ordinal);
+		// Release Validation is tier 1: every pull request, no base-branch list to go stale, and no
+		// `push: v*` because the open release PR already covers each merge into a version branch.
+		Assert.Contains("Policy: .github/workflows/README.md", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("branches:", TriggerSection(workflow, "pull_request"), StringComparison.Ordinal);
+		Assert.Contains("branches: [ \"master\" ]", TriggerSection(workflow, "push"), StringComparison.Ordinal);
+		Assert.DoesNotContain("'v*'", TriggerSection(workflow, "push"), StringComparison.Ordinal);
 		Assert.Contains("Smart Secrets context contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"Password=DEVPROJEX_REDACTED[connection-password#1]",
@@ -1312,38 +1387,77 @@ public sealed class DocumentationAndPackagingContractTests
 			"Linux",
 			"README.md"));
 
+		// The publishing wrapper owns the events and the release upload; the read-only build
+		// (runners, publish flags, validators) lives in appimage-build.yml so that the release
+		// candidate can call it without write permissions.
+		var buildWorkflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"appimage-build.yml"));
+
 		Assert.Contains("workflow_dispatch:", workflow, StringComparison.Ordinal);
 		Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
 		Assert.Contains("- Packaging/Linux/**", workflow, StringComparison.Ordinal);
 		Assert.Contains("- Kernel/ProcessEntryPointResolver.cs", workflow, StringComparison.Ordinal);
 		Assert.Contains("types: [published]", workflow, StringComparison.Ordinal);
-		Assert.Contains("runner: ubuntu-22.04", workflow, StringComparison.Ordinal);
-		Assert.Contains("runner: ubuntu-22.04-arm", workflow, StringComparison.Ordinal);
-		Assert.Contains("/p:PublishSingleFile=true", workflow, StringComparison.Ordinal);
-		Assert.Contains("/p:IncludeNativeLibrariesForSelfExtract=true", workflow, StringComparison.Ordinal);
-		Assert.Contains("/p:PublishReadyToRun=true", workflow, StringComparison.Ordinal);
-		Assert.Contains("/p:PublishTrimmed=false", workflow, StringComparison.Ordinal);
-		Assert.Contains("appstreamcli validate --strict --explain", workflow, StringComparison.Ordinal);
-		Assert.Contains("APPSTREAM_VERSION: 0.16.4", workflow, StringComparison.Ordinal);
-		Assert.Contains("APPSTREAM_SHA256:", workflow, StringComparison.Ordinal);
-		Assert.Contains("LIBXMLB_SHA256:", workflow, StringComparison.Ordinal);
-		Assert.Contains("MESON_SHA256:", workflow, StringComparison.Ordinal);
-		Assert.Contains("desktop-file-validate", workflow, StringComparison.Ordinal);
-		Assert.Contains("appdir-lint.sh", workflow, StringComparison.Ordinal);
-		Assert.Contains("Verify packaged binary identity", workflow, StringComparison.Ordinal);
-		Assert.Contains("needs: [prepare, package]", workflow, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/appimage-build.yml", workflow, StringComparison.Ordinal);
+		Assert.Contains("needs: [prepare, build]", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"if: ${{ needs.prepare.outputs.upload_release == 'true' }}",
 			workflow,
 			StringComparison.Ordinal);
 		Assert.Contains("gh release upload", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("--updateinformation", workflow, StringComparison.Ordinal);
-		Assert.Contains("output_path}.zsync", workflow, StringComparison.Ordinal);
+
+		Assert.Contains("workflow_call:", buildWorkflow, StringComparison.Ordinal);
+		Assert.DoesNotContain(": write", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04-arm", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishSingleFile=true", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("/p:IncludeNativeLibrariesForSelfExtract=true", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishReadyToRun=true", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishTrimmed=false", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("appstreamcli validate --strict --explain", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_VERSION: 0.16.4", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_SHA256:", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("LIBXMLB_SHA256:", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("MESON_SHA256:", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("desktop-file-validate", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("appdir-lint.sh", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Verify packaged binary identity", buildWorkflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("--updateinformation", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("output_path}.zsync", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("DevProjex-<version>-x86_64.AppImage", installation, StringComparison.Ordinal);
 		Assert.Contains("--appimage-extract-and-run", installation, StringComparison.Ordinal);
 		Assert.Contains("Open Anyway", installation, StringComparison.Ordinal);
 		Assert.Contains("data/DevProjex", linuxPackaging, StringComparison.Ordinal);
 		Assert.Contains("https://github.com/Avazbek22/DevProjex", linuxPackaging, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// Returns the body of one <c>on:</c> trigger (for example <c>push</c>) of a workflow file: the
+	/// lines after <c>  eventName:</c> up to the next two-space-indented key. Comments and blank
+	/// lines inside the block are kept.
+	/// </summary>
+	private static string TriggerSection(string workflow, string eventName)
+	{
+		var lines = workflow.Split('\n');
+		var start = Array.FindIndex(lines, line => line.TrimEnd('\r') == $"  {eventName}:");
+		Assert.True(start >= 0, $"Trigger '{eventName}' is missing.");
+		var section = new System.Text.StringBuilder();
+		for (var index = start + 1; index < lines.Length; index++)
+		{
+			var line = lines[index].TrimEnd('\r');
+			if (line.Length > 0 &&
+			    !line.StartsWith("    ", StringComparison.Ordinal) &&
+			    !line.StartsWith("  #", StringComparison.Ordinal))
+			{
+				break;
+			}
+			section.Append(line).Append('\n');
+		}
+		return section.ToString();
 	}
 
 	private static string FindRepositoryRoot()

@@ -1,5 +1,10 @@
 name: Headless Container Build
 
+# CI tier: reusable read-only gate, `workflow_call` only. Policy: .github/workflows/README.md
+# Called by publish-container.yml and release-candidate.yml. Keep `contents: read` and no write
+# permission: a called job may not request more than the caller grants. Never add pull_request
+# or push triggers here; the publishing wrapper owns the events.
+
 on:
   workflow_call:
     inputs:

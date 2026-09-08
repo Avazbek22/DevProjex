@@ -25,6 +25,17 @@ gate damages a copy of an embedded resource and proves that validation fails whi
 naming the AppImage publish payload and the changed entry. Packaging continues
 only after both checks pass.
 
+## CI tiers
+
+Checks are tiered by how close a commit is to a release; the policy and the
+rules that keep it cheap live in `.github/workflows/README.md`. A pull request
+into a version branch runs `.NET CI` and Release Validation, both narrowed by
+the change planner. A merge into `v*` additionally runs the headless archive,
+container, package, and AppImage dry-runs once per merge; those check runs are
+attached to the merged commit, so the open release pull request shows them
+without a second run. Master adds the Store smoke, and the release candidate
+below runs every read-only gate for one commit.
+
 ## Release candidate gate
 
 Before creating a release tag, dispatch `.github/workflows/release-candidate.yml`
@@ -43,17 +54,18 @@ instead, so edits to workflow composition are checked without duplicating every
 matrix and packaging build.
 
 The gate checks out that exact SHA and runs reusable `.NET CI`, Release
-Validation, read-only headless archive, container, and headless-package builds.
-The two test planners receive `force_full: true`; every test, documentation,
-release-config, local-channel, and publish-smoke job must run, and either reusable
-gate fails if one of those jobs is skipped. The three read-only build workflows
-have no direct pull-request trigger and are invoked once by their publishing
-workflow during ordinary PR validation.
-The container and package paths never publish from the RC: write and OIDC
-permissions exist only in the outer release workflows. The final job writes one
-table covering all five gates and fails if any called workflow was skipped,
-canceled, or unsuccessful. A green manually dispatched release-candidate report
-for the exact commit is required before the tag is created.
+Validation, the read-only headless archive, container, headless-package, and
+AppImage builds, Grammar Delivery, and the Store package smoke. The three
+planners receive `force_full: true`; every test, documentation, release-config,
+local-channel, publish-smoke, and Store job must run, and each reusable gate
+fails if one of its jobs is skipped. The four read-only build workflows have no
+direct pull-request trigger and are invoked by their publishing workflow on a
+merge into `v*` or on a published release.
+No channel publishes from the RC: write and OIDC permissions exist only in the
+outer release workflows. The final job writes one table covering all eight gates
+and fails if any called workflow was skipped, canceled, or unsuccessful. A green
+manually dispatched release-candidate report for the exact commit is required
+before the tag is created.
 
 ## Local channel model
 
