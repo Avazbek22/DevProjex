@@ -73,7 +73,7 @@ sudo apt-get update
 sudo apt-get install -y appstream desktop-file-utils file jq libfile-mimeinfo-perl xvfb
 appstreamcli --version # 0.16.4 or newer
 
-VERSION=5.1
+VERSION=5.2
 RID=linux-x64
 APPIMAGE_ARCH=x86_64
 APP_ID=io.github.Avazbek22.DevProjex
