@@ -23,13 +23,23 @@ internal static class RelatedOutputRenderer
 	{
 		if (format == AnalysisOutputFormat.Json)
 		{
+			var jsonCoverage = result.Index.Coverage;
 			var document = new
 			{
 				schemaVersion = 1,
 				kind = "devprojex-related-files",
 				direction,
 				seeds = result.Seeds,
-				coverage = result.Index.Coverage,
+				coverage = new
+				{
+					jsonCoverage.Files,
+					jsonCoverage.Supported,
+					jsonCoverage.Unsupported,
+					jsonCoverage.ExtractionFailed,
+					jsonCoverage.UnsupportedLanguages,
+					jsonCoverage.CSharpErrorNodeKinds,
+					configurationDiagnostics = jsonCoverage.ConfigurationDiagnostics.Select(ProjectConfigurationDiagnostic)
+				},
 				searchScope = new { files = result.Index.Files.Count }
 			};
 			await writer.WriteLineAsync(JsonSerializer.Serialize(document, JsonOptions).AsMemory(), cancellationToken)
@@ -60,6 +70,14 @@ internal static class RelatedOutputRenderer
 			coverage.Supported,
 			coverage.Unsupported,
 			coverage.ExtractionFailed)).ConfigureAwait(false);
+		foreach (var diagnostic in coverage.ConfigurationDiagnostics.Take(8))
+		{
+			var projected = ProjectConfigurationDiagnostic(diagnostic);
+			await writer.WriteLineAsync(
+				$"[Dependency configuration] affected-scopes={projected.AffectedScopes} · " +
+				$"problem={projected.Problem} · path={TerminalTextEscaping.EscapeSingleLine(projected.Path)}")
+				.ConfigureAwait(false);
+		}
 	}
 
 	private static async Task WriteSection(
@@ -87,4 +105,12 @@ internal static class RelatedOutputRenderer
 			await writer.WriteLineAsync(line).ConfigureAwait(false);
 		}
 	}
+
+	private static ConfigurationDiagnosticOutput ProjectConfigurationDiagnostic(
+		DependencyConfigurationDiagnostic diagnostic) => new(
+			diagnostic.Path,
+			diagnostic.State.ToString().ToLowerInvariant(),
+			diagnostic.ScopeIds.Count);
+
+	private sealed record ConfigurationDiagnosticOutput(string Path, string Problem, int AffectedScopes);
 }

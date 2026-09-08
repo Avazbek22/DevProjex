@@ -80,6 +80,60 @@ public sealed class RelatedCommandProcessTests
 		Assert.NotEqual(JsonValueKind.Null, seed.GetProperty("noFactsReason").ValueKind);
 	}
 
+	[Fact]
+	public void ConfigurationDiagnosticsAreSafeAndEquivalentInTextAndJson()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/tsconfig.json", "{\"compilerOptions\":{");
+		workspace.WriteFile("project/main.ts", "import value from './target.js';");
+		workspace.WriteFile("project/target.ts", "export default 1;");
+
+		var text = Run(
+			workspace,
+			"related", "main.ts",
+			"--project", project,
+			"--format", "text",
+			"--git-mode", "none",
+			"--exclude", "none");
+		var json = Run(
+			workspace,
+			"related", "main.ts",
+			"--project", project,
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.Equal(0, text.ExitCode);
+		Assert.Contains(
+			"[Dependency configuration] affected-scopes=1 · problem=corrupt · path=tsconfig.json",
+			text.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("LineNumber", text.StandardOutput, StringComparison.OrdinalIgnoreCase);
+		Assert.Equal(0, json.ExitCode);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var diagnostic = Assert.Single(document.RootElement.GetProperty("coverage")
+			.GetProperty("configurationDiagnostics").EnumerateArray());
+		Assert.Equal("tsconfig.json", diagnostic.GetProperty("path").GetString());
+		Assert.Equal("corrupt", diagnostic.GetProperty("problem").GetString());
+		Assert.Equal(1, diagnostic.GetProperty("affectedScopes").GetInt32());
+		Assert.False(diagnostic.TryGetProperty("reason", out _));
+		Assert.False(diagnostic.TryGetProperty("scopeIds", out _));
+
+		workspace.WriteFile(
+			"project/tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var valid = Run(
+			workspace,
+			"related", "main.ts",
+			"--project", project,
+			"--format", "text",
+			"--git-mode", "none",
+			"--exclude", "none");
+		Assert.Equal(0, valid.ExitCode);
+		Assert.DoesNotContain("[Dependency configuration]", valid.StandardOutput, StringComparison.Ordinal);
+	}
+
 	private static TerminalTestProcessResult Run(TemporaryDirectory workspace, params string[] arguments)
 	{
 		var startInfo = new ProcessStartInfo("dotnet")

@@ -80,8 +80,10 @@ an owning `tsconfig.json` or `jsconfig.json` stay unresolved.
 Configuration reads have four explicit outcomes: valid, missing, corrupt, and unsupported semantics.
 A malformed JSON document, a `null` or non-object `compilerOptions`, or an unsupported value shape is
 never replaced by an implicit default. References whose resolution depends on that control file remain
-`Unresolved` with its diagnostic, and machine-readable facts coverage includes the affected control-file
-path, state, reason, and owning scopes. Every `.csproj`, `tsconfig.json`, `jsconfig.json`, `package.json`,
+`Unresolved` with its diagnostic. CLI facts coverage projects each failure as a bounded, safe object with
+`path`, `problem`, and `affectedScopes`; raw exception text and scope identifiers are not emitted. Text
+output uses the same three values in a trusted `[Dependency configuration]` line. Every `.csproj`,
+`tsconfig.json`, `jsconfig.json`, `package.json`,
 `pyproject.toml`, and `setup.cfg` is limited to 4 MiB. One operation reads and verifies each control file
 once, then derives all scope, package-name, package-map, and external-package projections from that same
 snapshot, so a result cannot mix two versions of one configuration file.
@@ -173,4 +175,5 @@ contains a portable relative path, aggregated evidence reasons, resolution statu
 and a cross-scope marker when applicable. Ambiguous references remain one group with their candidate
 list. Coverage reports manifest files, supported and unsupported languages, and extraction failures.
 An unsupported seed is a successful empty result with an explicit diagnostic; a supported seed with
-no edges reports that no related files exist in the effective selection.
+no edges reports that no related files exist in the effective selection. At most eight configuration
+diagnostic lines are rendered in CLI text output; JSON retains the complete safe array.
