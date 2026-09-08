@@ -479,7 +479,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 			captureName == "context.namespace";
 		if (!isCompact)
-			return CreateCapture(captureName, node, node.Text, null, 0, false);
+			return CreateCapture(captureName, node, node.Text, null, 0, false,
+				importSyntax: CreateImportSyntax(captureName, node));
 
 		var capturedName = node.GetChildForField("name")?.Text;
 		var typeParameters = node.Children.FirstOrDefault(static child =>
@@ -490,7 +491,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			: capturedName + (genericArity == 0 ? string.Empty : $"`{genericArity}");
 		var isFileLocal = captureName.StartsWith("declaration.", StringComparison.Ordinal) &&
 			node.Children.Any(static child => child.Type == "modifier" && child.Text == "file");
-		return CreateCapture(captureName, node, evidence, capturedName, genericArity, isFileLocal);
+		return CreateCapture(captureName, node, evidence, capturedName, genericArity, isFileLocal,
+			FindContainingDeclaration(node));
 	}
 
 	private static DependencySyntaxCapture CreateCapture(
@@ -499,7 +501,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string text,
 		string? capturedName,
 		int genericArity,
-		bool isFileLocal) =>
+		bool isFileLocal,
+		string? containingDeclaration = null,
+		DependencyImportSyntax? importSyntax = null) =>
 		new(
 			captureName,
 			node.Type,
@@ -509,7 +513,70 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			checked((int)node.EndIndex),
 			capturedName,
 			genericArity,
-			isFileLocal);
+			isFileLocal,
+			containingDeclaration,
+			importSyntax);
+
+	private static string? FindContainingDeclaration(Node node)
+	{
+		for (var parent = node.Parent; parent is not null; parent = parent.Parent)
+		{
+			if (parent.Type is not ("class_definition" or "function_definition")) continue;
+			var name = parent.GetChildForField("name")?.Text;
+			if (!string.IsNullOrWhiteSpace(name)) return name;
+		}
+		return null;
+	}
+
+	private static DependencyImportSyntax? CreateImportSyntax(string captureName, Node node)
+	{
+		if (captureName is "import.esm" or "import.export")
+		{
+			var source = node.GetChildForField("source");
+			return source is null
+				? null
+				: new DependencyImportSyntax(ReadQuotedLiteral(source.Text) ?? string.Empty, 0, [],
+					ReadQuotedLiteral(source.Text) is not null);
+		}
+		if (captureName == "import.call")
+		{
+			var function = node.GetChildForField("function")?.Text;
+			if (function is not ("require" or "import")) return null;
+			var argument = node.GetChildForField("arguments")?.NamedChildren.FirstOrDefault();
+			var specifier = argument is null ? null : ReadQuotedLiteral(argument.Text);
+			return new DependencyImportSyntax(specifier ?? string.Empty, 0, [], specifier is not null);
+		}
+		if (captureName == "import.direct")
+		{
+			var bindings = ReadPythonBindings(node.GetChildrenForField("name"));
+			return new DependencyImportSyntax(string.Empty, 0, bindings);
+		}
+		if (captureName == "import.from")
+		{
+			var moduleText = node.GetChildForField("module_name")?.Text ?? string.Empty;
+			var relativeLevel = moduleText.TakeWhile(static character => character == '.').Count();
+			var bindings = ReadPythonBindings(node.GetChildrenForField("name"));
+			if (node.NamedChildren.Any(static child => child.Type == "wildcard_import"))
+				bindings = [new DependencyImportBinding("*", null, true)];
+			return new DependencyImportSyntax(moduleText[relativeLevel..], relativeLevel, bindings);
+		}
+		return null;
+	}
+
+	private static IReadOnlyList<DependencyImportBinding> ReadPythonBindings(IEnumerable<Node> nodes) =>
+		nodes.Select(node =>
+		{
+			if (node.Type != "aliased_import")
+				return new DependencyImportBinding(node.Text, null, node.Type == "wildcard_import");
+			return new DependencyImportBinding(
+				node.GetChildForField("name")?.Text ?? string.Empty,
+				node.GetChildForField("alias")?.Text);
+		}).Where(static binding => binding.Name.Length > 0).ToArray();
+
+	private static string? ReadQuotedLiteral(string text) =>
+		text.Length >= 2 && text[0] is '\'' or '"' && text[^1] == text[0]
+			? text[1..^1]
+			: null;
 
 	private static int CountGenericArity(string text)
 	{

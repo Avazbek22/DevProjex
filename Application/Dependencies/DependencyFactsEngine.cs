@@ -1055,6 +1055,9 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolveTypeScriptImport(FileFacts source, ImportFact import)
 		{
+			if (!import.HasLiteralSpecifier)
+				return Edge(source, import, ResolutionStatus.Unresolved, null,
+					"module specifier is not a string literal", []);
 			var scope = FindScope(source.ScopeId);
 			if (scope is null || !scope.HasConfiguration)
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
@@ -1414,13 +1417,23 @@ public sealed class DependencyFactsEngine : IDisposable
 				}
 				else
 					candidates.Clear();
+				if (candidates.Count == 0 && !moduleEntityExists)
+				{
+					var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
+					candidates = ProbePythonModule(source, child).ToList();
+					if (candidates.Count > 0)
+						return FinishImport(source, import, candidates);
+				}
+				if (candidates.Count == 0 && moduleEntityExists)
+					return Edge(source, import, ResolutionStatus.Unresolved, null,
+						"name not found in module", []);
 			}
 			if (candidates.Count == 0 && !moduleEntityExists)
 			{
-				var portions = ProbePythonNamespace(source, module).ToArray();
-				if (portions.Length > 0)
+				var portionCount = CountPythonNamespacePortions(source, module);
+				if (portionCount > 0)
 					return Edge(source, import, ResolutionStatus.Resolved, "namespace:" + module,
-						$"one namespace-package entity with {portions.Length} portion(s)", portions);
+						"one namespace-package entity", []);
 			}
 			if (candidates.Count == 0 && import.RelativeLevel == 0 && DependencyPlatformCatalog.IsPythonExternal(_configuration, source.ScopeId, import.Specifier))
 				return Edge(source, import, ResolutionStatus.External, null, "known Python standard-library module", []);
@@ -1441,7 +1454,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			ISet<string> visited)
 		{
 			if (depth >= 8 || !visited.Add(candidate) || !_files.TryGetValue(candidate, out var facts)) return [];
-			if (facts.Declarations.Any(declaration => SimpleName(declaration.Identity.QualifiedName) == name))
+			if (facts.Declarations.Any(declaration => declaration.ContainingType is null &&
+				SimpleName(declaration.Identity.QualifiedName) == name))
 				return [candidate];
 			foreach (var import in facts.Imports.Where(import =>
 				string.Equals(import.Alias ?? import.ImportedName ?? import.Specifier.Split('.').Last(), name, StringComparison.Ordinal)))
@@ -1474,7 +1488,6 @@ public sealed class DependencyFactsEngine : IDisposable
 						.Order(StringComparer.Ordinal)
 						.ToArray();
 					if (nested.Length > 0) return nested;
-					if (moduleTargets.Length > 0) return moduleTargets;
 					var childTargets = ProbePythonModule(facts, child).ToArray();
 					if (childTargets.Length > 0) return childTargets;
 				}
@@ -1487,19 +1500,19 @@ public sealed class DependencyFactsEngine : IDisposable
 			return [];
 		}
 
-		private IEnumerable<string> ProbePythonNamespace(FileFacts source, string module)
+		private int CountPythonNamespacePortions(FileFacts source, string module)
 		{
-			if (module.Length == 0) return [];
+			if (module.Length == 0) return 0;
 			var relative = module.Replace('.', '/').Trim('/') + '/';
-			var portions = new List<string>();
+			var portions = 0;
 			foreach (var root in PythonRootPrefixes(source))
 			{
 				var prefix = string.Join('/', new[] { root, relative }.Where(static value => value.Length > 0));
 				var init = prefix + "__init__.py";
-				if (!_files.ContainsKey(init))
-					portions.AddRange(_files.Keys.Where(path => path.StartsWith(prefix, StringComparison.Ordinal)).Take(1));
+				if (!_files.ContainsKey(init) && _files.Keys.Any(path => path.StartsWith(prefix, StringComparison.Ordinal)))
+					portions++;
 			}
-			return portions.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
+			return portions;
 		}
 
 		private IEnumerable<string> ProbePythonModule(FileFacts source, string module)

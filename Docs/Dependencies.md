@@ -68,6 +68,9 @@ owning `.csproj` inside the effective manifest, cross-file C# type references st
 TypeScript and JavaScript use the nearest `tsconfig.json` or `jsconfig.json`. The resolver distinguishes
 relative, bare, package-self, and `#imports` specifiers and follows ordered substitution: the first
 existing probe wins, so multiple files found later in the same probe sequence are not ambiguity.
+Module specifiers are read from parsed `import`, `export`, dynamic `import(...)`, and supported
+literal `require(...)` syntax, including side-effect imports. A variable or template expression in
+place of a string literal remains `Unresolved`; it is never treated as a guessed path.
 `.js`, `.mjs`, and `.cjs` specifiers probe their TypeScript and declaration counterparts before the
 literal JavaScript file. Extensionless imports and directory indexes always probe `.js` and `.jsx`
 after `.ts`, `.tsx`, and `.d.ts`; `allowJs` controls compilation membership, not resolution of files
@@ -98,11 +101,17 @@ accepted with or without a BOM; malformed byte sequences remain corrupt.
 
 Python relative imports start at the source package. `from module import Name` first checks classes,
 functions, and static import aliases provided by either an ordinary module or a package initializer.
+Only module-level class and function declarations provide importable names; a method or nested class
+cannot satisfy `from module import Name`. Import syntax is read from parsed nodes, so parenthesized
+multiline lists, comments, aliases, relative forms, and wildcard imports have the same semantics as
+their single-line forms.
 Only a package may then fall back to a child module of that name. Regular and namespace-package portions are
-combined, and a package initializer takes precedence over a same-named module file. Within a package,
+combined as package entities rather than being represented by an arbitrary file under the namespace;
+a requested child is resolved to that child. A package initializer takes precedence over a same-named module file. Within a package,
 a statically provided or re-exported name is resolved before a same-named child module. `.py` is
 preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and `__all__` affects
-wildcard imports only. Relative imports that would escape the top-level package remain unresolved.
+wildcard imports only. A missing imported name remains `Unresolved` with a constant reason instead of
+turning the existence of the module into evidence for that name. Relative imports that would escape the top-level package remain unresolved.
 Dynamic `__all__`, `setup.py`, and import hooks are not executed and remain unresolved. Separate
 complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;

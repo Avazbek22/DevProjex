@@ -68,6 +68,119 @@ public sealed class DependencyReferenceSemanticsIntegrationTests
 			edge.Status == ResolutionStatus.Resolved);
 	}
 
+	[Fact]
+	public async Task PythonFromImport_RejectsNestedDeclarationsAndMissingNamesButKeepsTopLevelBindings()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var model = fixture.CreateFile("model.py", "class Container:\n    def helper(self): pass\n\nclass Item: pass\ndef create(): pass");
+		var nestedConsumer = fixture.CreateFile("nested_consumer.py", "from model import helper");
+		var missingConsumer = fixture.CreateFile("missing_consumer.py", "from model import Missing");
+		var consumer = fixture.CreateFile("consumer.py", "from model import Item\nfrom model import create");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, model, nestedConsumer, missingConsumer, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var imports = result.Files.Single(file => file.Path == "consumer.py").Imports;
+		Assert.Equal(2, imports.Count);
+		var resolved = Assert.Single(result.Edges, edge => edge.Source == "consumer.py" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "model.py");
+		Assert.Equal(2, resolved.Evidence.Count);
+		var unresolved = result.Edges.Where(edge => edge.Source is "nested_consumer.py" or "missing_consumer.py" &&
+			edge.Status == ResolutionStatus.Unresolved).ToArray();
+		Assert.Equal(2, unresolved.Length);
+		Assert.All(unresolved, edge => Assert.Contains("name not found in module", edge.Reasons));
+		var nested = result.Files.Single(file => file.Path == "model.py").Declarations
+			.Single(declaration => declaration.Identity.QualifiedName.EndsWith(".helper", StringComparison.Ordinal));
+		Assert.Equal("Container", nested.ContainingType);
+	}
+
+	[Fact]
+	public async Task PythonImports_UseParsedNodesForMultilineAliasesRelativeAndWildcardForms()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var init = fixture.CreateFile("pkg/__init__.py", "from .model import Item");
+		var model = fixture.CreateFile("pkg/model.py", "class Item: pass\nclass Other: pass");
+		var consumer = fixture.CreateFile("pkg/consumer.py", """
+			from .model import (
+			    Item as Renamed,
+			    # retained syntax comment
+			    Other,
+			)
+			from .model import *
+			from . import model
+			import pkg.model as direct
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, init, model, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = result.Files.Single(file => file.Path == "pkg/consumer.py");
+		Assert.Contains(facts.Imports, fact => fact.Specifier == "model" && fact.ImportedName == "Item" && fact.Alias == "Renamed");
+		Assert.Contains(facts.Imports, fact => fact.Specifier == "model" && fact.ImportedName == "Other");
+		Assert.Contains(facts.Imports, fact => fact.Specifier == "model" && fact.IsWildcard);
+		Assert.Contains(facts.Imports, fact => fact.Specifier.Length == 0 && fact.ImportedName == "model" && fact.RelativeLevel == 1);
+		Assert.Contains(facts.Imports, fact => fact.Specifier == "pkg.model" && fact.Alias == "direct");
+		Assert.All(result.Edges.Where(edge => edge.Source == "pkg/consumer.py"),
+			edge => Assert.Equal(ResolutionStatus.Resolved, edge.Status));
+	}
+
+	[Fact]
+	public async Task TypeScriptImports_UseSyntaxSourceAndRejectNonLiteralCalls()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var target = fixture.CreateFile("register.ts", "export const x = 1;");
+		var source = fixture.CreateFile("main.ts", """
+			import "./register.js";
+			import value from "./register.js";
+			import * as ns from "./register.js";
+			import type { x } from "./register.js";
+			export * from "./register.js";
+			export { x } from "./register.js";
+			require("./register.js");
+			import("./register.js");
+			const path = "./register.js";
+			require(path);
+			import(`./register.js`);
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edges = result.Edges.Where(edge => edge.Source == "main.ts").ToArray();
+		Assert.Contains(edges, edge => edge.Reference == "./register.js" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "register.ts");
+		var unsupported = edges.Where(edge => edge.Status == ResolutionStatus.Unresolved &&
+			edge.Reasons.Contains("module specifier is not a string literal")).ToArray();
+		var unsupportedEdge = Assert.Single(unsupported);
+		Assert.Equal(2, unsupportedEdge.Evidence.Count);
+		Assert.DoesNotContain(unsupported, edge => edge.Target is not null);
+	}
+
+	[Fact]
+	public async Task PythonNamespaceImport_ResolvesTheRequestedChildInsteadOfAnArbitraryPortionFile()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var unrelated = fixture.CreateFile("ns/aaa.py", "value = 1");
+		var child = fixture.CreateFile("ns/child.py", "value = 2");
+		var consumer = fixture.CreateFile("consumer.py", "from ns import child");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, unrelated, child, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("ns/child.py", edge.Target);
+		Assert.DoesNotContain("ns/aaa.py", edge.Candidates);
+	}
+
 	private static DependencyFactsEngine CreateEngine() => new(
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());

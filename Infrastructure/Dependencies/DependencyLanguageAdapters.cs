@@ -12,7 +12,17 @@ internal sealed record DependencySyntaxCapture(
 	int EndIndex,
 	string? CapturedName = null,
 	int GenericArity = 0,
-	bool IsFileLocal = false);
+	bool IsFileLocal = false,
+	string? ContainingDeclaration = null,
+	DependencyImportSyntax? ImportSyntax = null);
+
+internal sealed record DependencyImportSyntax(
+	string Specifier,
+	int RelativeLevel,
+	IReadOnlyList<DependencyImportBinding> Bindings,
+	bool HasLiteralSpecifier = true);
+
+internal sealed record DependencyImportBinding(string Name, string? Alias, bool IsWildcard = false);
 
 internal sealed record DependencyExtractionContext(
 	string RelativePath,
@@ -406,27 +416,25 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 
 	private static IEnumerable<ImportFact> ExtractImports(DependencyExtractionContext context, DependencySyntaxCapture capture)
 	{
-		if (capture.Name == "import.call")
+		if (capture.ImportSyntax is { } syntax)
 		{
-			var require = RequireRegex().Match(capture.Text);
-			if (require.Success)
-				yield return new ImportFact(require.Groups["path"].Value, null, null, false, 0, Site(context, capture));
+			if (!syntax.HasLiteralSpecifier)
+			{
+				yield return new ImportFact(string.Empty, null, null, false, 0, Site(context, capture))
+				{
+					HasLiteralSpecifier = false
+				};
+				yield break;
+			}
+			if (syntax.Bindings.Count == 0)
+			{
+				yield return new ImportFact(syntax.Specifier, null, null, false, 0, Site(context, capture));
+				yield break;
+			}
+			foreach (var binding in syntax.Bindings)
+				yield return new ImportFact(syntax.Specifier, binding.Name, binding.Alias,
+					binding.IsWildcard, 0, Site(context, capture));
 			yield break;
-		}
-		var match = ModuleRegex().Match(capture.Text);
-		if (!match.Success) yield break;
-		var specifier = match.Groups["path"].Value;
-		var names = NamedImportsRegex().Match(capture.Text);
-		if (!names.Success)
-		{
-			yield return new ImportFact(specifier, null, null, capture.Text.Contains('*'), 0, Site(context, capture));
-			yield break;
-		}
-		foreach (var item in names.Groups["names"].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-		{
-			var parts = Regex.Split(item, @"\s+as\s+", RegexOptions.CultureInvariant);
-			yield return new ImportFact(specifier, parts[0].Trim(), parts.Length > 1 ? parts[1].Trim() : null,
-				false, 0, Site(context, capture));
 		}
 	}
 
@@ -448,9 +456,6 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
 	private static readonly HashSet<string> Keywords = new(
 		["string", "number", "boolean", "unknown", "never", "any", "void", "null", "undefined", "keyof", "typeof", "readonly", "new", "extends", "implements"], StringComparer.Ordinal);
-	[GeneratedRegex("(?:from\\s+|import\\s*\\(|require\\s*\\()\\s*['\"](?<path>[^'\"]+)['\"]", RegexOptions.CultureInvariant)] private static partial Regex ModuleRegex();
-	[GeneratedRegex("""require\s*\(\s*['"](?<path>[^'"]+)['"]\s*\)""", RegexOptions.CultureInvariant)] private static partial Regex RequireRegex();
-	[GeneratedRegex(@"\{(?<names>[^}]+)\}", RegexOptions.CultureInvariant)] private static partial Regex NamedImportsRegex();
 	[GeneratedRegex(@"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeRegex();
 	[GeneratedRegex(@"\bnew\s+(?<type>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)", RegexOptions.CultureInvariant)] private static partial Regex NewTypeRegex();
 }
@@ -466,7 +471,10 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 			if (string.IsNullOrEmpty(capture.CapturedName)) return null;
 			var kind = capture.Name == "declaration.class" ? SymbolKind.Class : SymbolKind.Function;
 			return new DeclarationFact(new SymbolIdentity(context.ScopeId, context.LanguageId, kind,
-				$"{module}.{capture.CapturedName}", 0), [Site(context, capture)]);
+				$"{module}.{capture.CapturedName}", 0), [Site(context, capture)])
+			{
+				ContainingType = capture.ContainingDeclaration
+			};
 		}).Where(static item => item is not null).Cast<DeclarationFact>().ToArray();
 		var imports = context.References.Where(static capture => capture.Name.StartsWith("import.", StringComparison.Ordinal))
 			.SelectMany(capture => ExtractImports(context, capture)).ToArray();
@@ -485,26 +493,12 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 
 	private static IEnumerable<ImportFact> ExtractImports(DependencyExtractionContext context, DependencySyntaxCapture capture)
 	{
-		if (capture.Name == "import.direct")
-		{
-			foreach (var item in capture.Text["import".Length..].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-			{
-				var parts = Regex.Split(item, @"\s+as\s+", RegexOptions.CultureInvariant);
-				yield return new ImportFact(parts[0], null, parts.Length > 1 ? parts[1] : null, false, 0, Site(context, capture));
-			}
-			yield break;
-		}
-		var match = FromRegex().Match(capture.Text);
-		if (!match.Success) yield break;
-		var dotted = match.Groups["module"].Value;
-		var relativeLevel = dotted.TakeWhile(static value => value == '.').Count();
-		var module = dotted[relativeLevel..];
-		foreach (var item in match.Groups["names"].Value.Trim('(', ')', ' ').Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-		{
-			var parts = Regex.Split(item, @"\s+as\s+", RegexOptions.CultureInvariant);
-			yield return new ImportFact(module, parts[0], parts.Length > 1 ? parts[1] : null,
-				parts[0] == "*", relativeLevel, Site(context, capture));
-		}
+		if (capture.ImportSyntax is not { } syntax) yield break;
+		foreach (var binding in syntax.Bindings)
+			yield return capture.Name == "import.direct"
+				? new ImportFact(binding.Name, null, binding.Alias, false, 0, Site(context, capture))
+				: new ImportFact(syntax.Specifier, binding.Name, binding.Alias,
+					binding.IsWildcard, syntax.RelativeLevel, Site(context, capture));
 	}
 
 	private static FileFacts Failed(DependencyExtractionContext context) => new(
@@ -513,7 +507,6 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
 	private static readonly HashSet<string> Keywords = new(
 		["def", "class", "None", "True", "False", "str", "int", "float", "bool", "bytes", "list", "dict", "tuple", "set", "object", "typing", "self", "cls"], StringComparer.Ordinal);
-	[GeneratedRegex(@"^from\s+(?<module>\.*(?:[A-Za-z_][\w.]*)?)\s+import\s+(?<names>.+)$", RegexOptions.CultureInvariant)] private static partial Regex FromRegex();
 	[GeneratedRegex(@"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeRegex();
 	[GeneratedRegex(@"(?m)^\s*__all__\s*=\s*[A-Za-z_]", RegexOptions.CultureInvariant)] private static partial Regex DynamicAllRegex();
 }
