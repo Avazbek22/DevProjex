@@ -126,7 +126,10 @@ public sealed record DependencyEdge(
 	IReadOnlyList<string> Reasons,
 	IReadOnlyList<SourceSite> Evidence,
 	IReadOnlyList<string> Candidates,
-	bool CrossScope);
+	bool CrossScope)
+{
+	public IReadOnlyList<string> DeclarationFiles { get; init; } = [];
+}
 
 public sealed record DependencyFactsCoverage(
 	int Files,

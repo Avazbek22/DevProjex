@@ -4,6 +4,7 @@ internal sealed record RankingGraph(
 	string[] Paths,
 	IReadOnlyDictionary<string, int> NodeByPath,
 	int[][] Outgoing,
+	double[][] OutgoingWeights,
 	int[] Dependents,
 	int EdgeCount,
 	int FilesWithEdges)

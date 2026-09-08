@@ -40,6 +40,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var userEdge = Assert.Single(index.Edges, edge =>
 			edge.Source == "Consumer.cs" && edge.Reference == "User");
 		Assert.Equal(ResolutionStatus.Resolved, userEdge.Status);
+		Assert.Equal(["First.cs", "Second.cs"], userEdge.DeclarationFiles);
 		Assert.Contains("First.cs", userEdge.Candidates);
 		var resolvedReference = Assert.Single(index.Files.Single(file => file.Path == "Consumer.cs").References,
 			reference => reference.Name == "User");
@@ -50,6 +51,31 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var localEdge = Assert.Single(index.Edges, edge =>
 			edge.Source == "Second.cs" && edge.Reference == "Helper");
 		Assert.Equal(ResolutionStatus.Unresolved, localEdge.Status);
+
+		var dependencies = await engine.FindRelatedAsync(
+			fixture.Path,
+			[project, first, second, ambiguous, global, marker, consumer],
+			["Consumer.cs"],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var partialDependencies = Assert.Single(dependencies.Seeds).Dependencies
+			.Where(item => item.Path is "First.cs" or "Second.cs")
+			.ToArray();
+		Assert.Equal(["First.cs", "Second.cs"], partialDependencies.Select(static item => item.Path));
+		Assert.All(partialDependencies, item =>
+		{
+			Assert.Equal(ResolutionStatus.Resolved, item.Status);
+			Assert.Contains(item.Reasons, reason => reason.Contains("one resolved symbol with 2 files", StringComparison.Ordinal));
+		});
+
+		var dependents = await engine.FindRelatedAsync(
+			fixture.Path,
+			[project, first, second, ambiguous, global, marker, consumer],
+			["Second.cs"],
+			DependencyDirection.Dependents,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var caller = Assert.Single(Assert.Single(dependents.Seeds).Dependents, item => item.Path == "Consumer.cs");
+		Assert.Contains(caller.Reasons, reason => reason.Contains("one resolved symbol with 2 files", StringComparison.Ordinal));
 	}
 
 	[Fact]

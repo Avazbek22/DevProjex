@@ -281,9 +281,13 @@ public sealed class DependencyFactsEngine : IDisposable
 		IReadOnlyDictionary<string, FileFacts> files)
 	{
 		var resolved = sourceEdges
-			.Where(edge => edge.Status == ResolutionStatus.Resolved && edge.Target is not null && edge.Target != seed)
-			.GroupBy(static edge => edge.Target!, StringComparer.Ordinal)
-			.Select(group => ToRelated(group.Key, ResolutionStatus.Resolved, group, files));
+			.Where(static edge => edge.Status == ResolutionStatus.Resolved)
+			.SelectMany(edge => ResolvedTargetFiles(edge)
+				.Where(path => path != seed)
+				.Select(path => (Path: path, Edge: edge)))
+			.GroupBy(static item => item.Path, StringComparer.Ordinal)
+			.Select(group => ToRelated(group.Key, ResolutionStatus.Resolved,
+				group.Select(static item => item.Edge), files));
 		var ambiguous = sourceEdges
 			.Where(static edge => edge.Status == ResolutionStatus.Ambiguous)
 			.Select(edge => (Edge: edge, Path: edge.Candidates.Order(StringComparer.Ordinal)
@@ -335,11 +339,15 @@ public sealed class DependencyFactsEngine : IDisposable
 		IReadOnlyDictionary<string, FileFacts> files)
 	{
 		var edges = groupedEdges.ToArray();
+		var declarationPartReasons = edges
+			.Where(static edge => edge.Status == ResolutionStatus.Resolved && edge.DeclarationFiles.Count > 1)
+			.Select(static edge => $"declaration part of one resolved symbol with {edge.DeclarationFiles.Count} files");
 		return new RelatedFile(
 			path,
 			status,
 			edges.SelectMany(static edge => edge.Reasons.Concat(edge.Evidence.Select(site =>
 				$"{EvidenceLabel(edge.Layer)} {edge.Reference} at line {site.Line}")))
+				.Concat(declarationPartReasons)
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
 			edges.SelectMany(static edge => edge.Candidates).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
 			edges.Any(static edge => edge.CrossScope),
@@ -355,6 +363,11 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private static long EstimateTokens(int characters) => (characters + 3L) / 4L;
 
+	private static IReadOnlyList<string> ResolvedTargetFiles(DependencyEdge edge) =>
+		edge.DeclarationFiles.Count > 0
+			? edge.DeclarationFiles
+			: edge.Target is null ? [] : [edge.Target];
+
 	private static (
 		IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> BySource,
 		IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> ByTarget) BuildEdgeIndexes(
@@ -368,7 +381,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				static group => (IReadOnlyList<DependencyEdge>)group.ToArray(),
 				StringComparer.Ordinal);
 		var byTarget = edges
-			.SelectMany(static edge => (edge.Target is null ? edge.Candidates : edge.Candidates.Append(edge.Target))
+			.SelectMany(static edge => (edge.Status == ResolutionStatus.Resolved
+					? ResolvedTargetFiles(edge)
+					: edge.Candidates)
 				.Distinct(StringComparer.Ordinal)
 				.Select(target => (Target: target, Edge: edge)))
 			.GroupBy(static item => item.Target, StringComparer.Ordinal)
@@ -596,7 +611,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		}).ToArray();
 		var edges = index.Edges.Where(edge => allowed.Contains(edge.Source) &&
 			(edge.Target is null || allowed.Contains(edge.Target) || edge.Target.StartsWith("namespace:", StringComparison.Ordinal)) &&
-			edge.Candidates.All(allowed.Contains)).ToArray();
+			edge.Candidates.All(allowed.Contains) &&
+			edge.DeclarationFiles.All(allowed.Contains)).ToArray();
 		var (bySource, byTarget) = BuildEdgeIndexes(edges);
 		return index with
 		{
@@ -900,7 +916,11 @@ public sealed class DependencyFactsEngine : IDisposable
 					group.SelectMany(static edge => edge.Reasons).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
 					group.SelectMany(static edge => edge.Evidence).Distinct().OrderBy(static site => site.Line).ToArray(),
 					group.SelectMany(static edge => edge.Candidates).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
-					group.Key.CrossScope))
+					group.Key.CrossScope)
+				{
+					DeclarationFiles = group.SelectMany(static edge => edge.DeclarationFiles)
+						.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
+				})
 				.OrderBy(static edge => edge.Source, StringComparer.Ordinal)
 				.ThenBy(static edge => edge.Target, StringComparer.Ordinal)
 				.ThenBy(static edge => edge.Reference, StringComparer.Ordinal)
@@ -1407,7 +1427,10 @@ public sealed class DependencyFactsEngine : IDisposable
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 			return candidates.Length == 1
 				? Edge(source, reference, ResolutionStatus.Resolved, files[0],
-					$"one visible declaration identity in {source.ScopeId}", files)
+					$"one visible declaration identity in {source.ScopeId}", files) with
+					{
+						DeclarationFiles = files
+					}
 				: Edge(source, reference, ResolutionStatus.Ambiguous, null, "multiple visible declaration identities", files);
 		}
 

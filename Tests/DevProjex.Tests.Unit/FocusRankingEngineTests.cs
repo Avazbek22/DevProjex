@@ -154,6 +154,23 @@ public sealed class FocusRankingEngineTests
 	}
 
 	[Fact]
+	public void Focus_VisitsEveryDeclarationFileOfOneResolvedSymbolAtHopOne()
+	{
+		var edge = Edge("caller.cs", "part-a.cs") with
+		{
+			DeclarationFiles = ["part-a.cs", "part-b.cs"]
+		};
+		var fixture = CreateFixture(
+			["caller.cs", "part-a.cs", "part-b.cs"],
+			[edge]);
+
+		var result = Apply(fixture, [Seed(fixture, "caller.cs")]);
+
+		Assert.Equal(1, Assert.Single(result.Entries, item => item.Path == "part-a.cs").Hop);
+		Assert.Equal(1, Assert.Single(result.Entries, item => item.Path == "part-b.cs").Hop);
+	}
+
+	[Fact]
 	public void Apply_ReportsBidirectionalEdgesAndHonorsCancellation()
 	{
 		var fixture = CreateFixture(

@@ -440,31 +440,46 @@ public sealed class ImportanceRankingService(
 		var nodeByPath = new Dictionary<string, int>(paths.Length, StringComparer.Ordinal);
 		for (var node = 0; node < paths.Length; node++)
 			nodeByPath.Add(paths[node], node);
-		var outgoingSets = new HashSet<int>[paths.Length];
-		for (var node = 0; node < outgoingSets.Length; node++)
-			outgoingSets[node] = [];
+		var outgoingWeights = new Dictionary<int, double>[paths.Length];
+		for (var node = 0; node < outgoingWeights.Length; node++)
+			outgoingWeights[node] = [];
 		foreach (var edge in snapshot.Edges)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (edge.Status != ResolutionStatus.Resolved ||
-				edge.Target is not { } target ||
-				!nodeByPath.TryGetValue(edge.Source, out var sourceNode) ||
-				!nodeByPath.TryGetValue(target, out var targetNode) ||
-				sourceNode == targetNode)
+				!nodeByPath.TryGetValue(edge.Source, out var sourceNode))
 			{
 				continue;
 			}
-			outgoingSets[sourceNode].Add(targetNode);
+			var targets = (edge.DeclarationFiles.Count > 0
+					? edge.DeclarationFiles
+					: edge.Target is null ? [] : [edge.Target])
+				.Distinct(StringComparer.Ordinal)
+				.Where(nodeByPath.ContainsKey)
+				.Select(path => nodeByPath[path])
+				.Where(targetNode => sourceNode != targetNode)
+				.Order()
+				.ToArray();
+			if (targets.Length == 0)
+				continue;
+			var partWeight = 1d / targets.Length;
+			foreach (var targetNode in targets)
+			{
+				if (!outgoingWeights[sourceNode].TryGetValue(targetNode, out var existing) || partWeight > existing)
+					outgoingWeights[sourceNode][targetNode] = partWeight;
+			}
 		}
 
 		var outgoing = new int[paths.Length][];
+		var weights = new double[paths.Length][];
 		var dependents = new int[paths.Length];
 		var filesWithEdges = new bool[paths.Length];
 		var edgeCount = 0;
 		for (var source = 0; source < paths.Length; source++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			outgoing[source] = outgoingSets[source].Order().ToArray();
+			outgoing[source] = outgoingWeights[source].Keys.Order().ToArray();
+			weights[source] = outgoing[source].Select(target => outgoingWeights[source][target]).ToArray();
 			edgeCount += outgoing[source].Length;
 			if (outgoing[source].Length > 0)
 				filesWithEdges[source] = true;
@@ -478,6 +493,7 @@ public sealed class ImportanceRankingService(
 			paths,
 			nodeByPath,
 			outgoing,
+			weights,
 			dependents,
 			edgeCount,
 			filesWithEdges.Count(static value => value));
@@ -517,9 +533,11 @@ public sealed class ImportanceRankingService(
 				var targets = graph.Outgoing[source];
 				if (targets.Length == 0)
 					continue;
-				var share = damping * rank[source] / targets.Length;
-				foreach (var target in targets)
-					next[target] += share;
+				var weights = graph.OutgoingWeights[source];
+				var totalWeight = weights.Sum();
+				var share = damping * rank[source] / totalWeight;
+				for (var targetIndex = 0; targetIndex < targets.Length; targetIndex++)
+					next[targets[targetIndex]] += share * weights[targetIndex];
 			}
 			(rank, next) = (next, rank);
 			iterationCompleted?.Invoke(iteration);
