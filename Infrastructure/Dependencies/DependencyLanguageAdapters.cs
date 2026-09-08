@@ -122,10 +122,16 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			out var usingNamespaces,
 			out var globalNamespaces,
 			out var globalAliases);
-		var typeParameters = context.References
+		var typeParameterScopes = context.References
 			.Where(static capture => capture.Name == "context.type_parameters")
 			.SelectMany(static capture => TypeParameterRegex().Matches(capture.Text)
-				.Select(static match => match.Groups["name"].Value))
+				.Select(match => new TypeParameterScope(
+					match.Groups["name"].Value,
+					capture.StartIndex,
+					capture.EndIndex)))
+			.Distinct().OrderBy(static scope => scope.StartIndex)
+			.ThenBy(static scope => scope.Name, StringComparer.Ordinal).ToArray();
+		var typeParameters = typeParameterScopes.Select(static scope => scope.Name)
 			.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 		var declarationCaptures = context.Declarations
 			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrEmpty(capture.CapturedName))
@@ -178,7 +184,10 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			aliases,
 			globalNamespaces.Order(StringComparer.Ordinal).ToArray(),
 			globalAliases,
-			typeParameters);
+			typeParameters) with
+		{
+			TypeParameterScopes = typeParameterScopes
+		};
 	}
 
 	private static IEnumerable<ReferenceFact> ExtractReferences(
@@ -292,7 +301,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			Site(context, capture))
 		{
 			ContainingNamespace = containingNamespace,
-			ContainingType = containingType
+			ContainingType = containingType,
+			SourceStartIndex = capture.StartIndex
 		};
 
 	private static FileFacts Failure(DependencyExtractionContext context, string reason) => new(

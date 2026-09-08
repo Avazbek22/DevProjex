@@ -463,6 +463,19 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	private static DependencySyntaxCapture CreateCapture(string captureName, Node node)
 	{
+		if (captureName == "context.type_parameters")
+		{
+			var owner = node.Parent;
+			while (owner is not null && !IsTypeParameterOwner(owner.Type))
+				owner = owner.Parent;
+			return new DependencySyntaxCapture(
+				captureName,
+				node.Type,
+				node.Text,
+				checked((int)node.StartPosition.Row + 1),
+				checked((int)(owner?.StartIndex ?? node.StartIndex)),
+				checked((int)(owner?.EndIndex ?? node.EndIndex)));
+		}
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 			captureName == "context.namespace";
 		if (!isCompact)
@@ -591,6 +604,11 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		public LinkedListNode<PreparedSourceCacheEntry>? OrderNode { get; set; }
 	}
 
+	private static bool IsTypeParameterOwner(string nodeType) => nodeType is
+		"class_declaration" or "struct_declaration" or "interface_declaration" or
+		"record_declaration" or "delegate_declaration" or "method_declaration" or
+		"local_function_statement";
+
 	internal readonly record struct PreparedSourceCacheState(
 		int Entries,
 		int EvictionEntries,
@@ -605,16 +623,20 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		private static readonly Encoding StrictUtf32Le = new UTF32Encoding(false, true, true);
 		private static readonly Encoding StrictUtf32Be = new UTF32Encoding(true, true, true);
 		private long _lastBytesRead;
+		private int _lastByteBufferCapacity;
+		private int _lastCharacterBufferCapacity;
 
 		internal long LastBytesRead => Interlocked.Read(ref _lastBytesRead);
+		internal int LastByteBufferCapacity => Volatile.Read(ref _lastByteBufferCapacity);
+		internal int LastCharacterBufferCapacity => Volatile.Read(ref _lastCharacterBufferCapacity);
 
 		internal async Task<BoundedDependencySourceRead> ReadAsync(
 			string path,
 			int maximumCharacters,
 			CancellationToken cancellationToken)
 		{
-			var byteBuffer = ArrayPool<byte>.Shared.Rent(BufferSize);
-			var characterBuffer = ArrayPool<char>.Shared.Rent(checked(maximumCharacters + 1));
+			byte[]? byteBuffer = null;
+			char[]? characterBuffer = null;
 			var bytesReadTotal = 0L;
 			var charactersWritten = 0;
 			try
@@ -628,12 +650,15 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					FileOptions.Asynchronous | FileOptions.SequentialScan);
 				var length = stream.Length;
 				var lastWrite = File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks;
+				var byteBufferSize = checked((int)Math.Clamp(length, 1, BufferSize));
+				byteBuffer = ArrayPool<byte>.Shared.Rent(byteBufferSize);
 				Decoder? decoder = null;
+				StringBuilder? source = null;
 				while (true)
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 					var bytesRead = await stream.ReadAsync(
-						byteBuffer.AsMemory(0, BufferSize),
+						byteBuffer.AsMemory(0, byteBufferSize),
 						cancellationToken).ConfigureAwait(false);
 					if (bytesRead == 0)
 						break;
@@ -643,19 +668,29 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					{
 						var (encoding, preambleLength) = DetectEncoding(input);
 						decoder = encoding.GetDecoder();
+						var characterBufferSize = CharacterBufferSize(length - preambleLength, encoding, maximumCharacters);
+						characterBuffer = ArrayPool<char>.Shared.Rent(characterBufferSize);
+						source = new StringBuilder(characterBufferSize);
 						input = input[preambleLength..];
 					}
 					while (!input.IsEmpty)
 					{
+						var decodeBuffer = characterBuffer ??
+							throw new InvalidOperationException("The dependency source decoder has no character buffer.");
+						var remainingCharacters = (long)maximumCharacters + 1 - charactersWritten;
+						if (remainingCharacters <= 0)
+							return TooLarge(length, lastWrite, maximumCharacters);
 						decoder.Convert(
 							input,
-							characterBuffer.AsSpan(charactersWritten),
+							decodeBuffer.AsSpan(0, checked((int)Math.Min(decodeBuffer.Length, remainingCharacters))),
 							flush: false,
 							out var bytesUsed,
 							out var charactersUsed,
 							out _);
 						input = input[bytesUsed..];
 						charactersWritten += charactersUsed;
+						if (charactersUsed > 0)
+							source!.Append(decodeBuffer, 0, charactersUsed);
 						if (charactersWritten > maximumCharacters)
 							return TooLarge(length, lastWrite, maximumCharacters);
 						if (bytesUsed == 0 && charactersUsed == 0)
@@ -663,23 +698,33 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					}
 				}
 
-				decoder ??= StrictUtf8.GetDecoder();
+				if (decoder is null)
+				{
+					decoder = StrictUtf8.GetDecoder();
+					characterBuffer = ArrayPool<char>.Shared.Rent(1);
+					source = new StringBuilder(1);
+				}
+				var finalBuffer = characterBuffer ??
+					throw new InvalidOperationException("The dependency source decoder has no character buffer.");
+				var finalCapacity = checked((int)Math.Min(finalBuffer.Length, (long)maximumCharacters + 1 - charactersWritten));
 				decoder.Convert(
 					ReadOnlySpan<byte>.Empty,
-					characterBuffer.AsSpan(charactersWritten),
+					finalBuffer.AsSpan(0, finalCapacity),
 					flush: true,
 					out _,
 					out var finalCharacters,
 					out var completed);
 				charactersWritten += finalCharacters;
+				if (finalCharacters > 0)
+					source!.Append(finalBuffer, 0, finalCharacters);
 				if (charactersWritten > maximumCharacters)
 					return TooLarge(length, lastWrite, maximumCharacters);
 				if (!completed)
 					throw new IOException("The bounded dependency source decoder did not complete.");
 				if (stream.Length != length || File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks != lastWrite)
 					throw new IOException("The dependency source changed while it was being read.");
-				var source = new string(characterBuffer, 0, charactersWritten);
-				if (source.AsSpan().Contains('\0'))
+				var content = source!.ToString();
+				if (content.AsSpan().Contains('\0'))
 				{
 					return new BoundedDependencySourceRead(
 						MetadataFingerprint("binary", length, lastWrite),
@@ -688,8 +733,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 						"source is binary");
 				}
 				return new BoundedDependencySourceRead(
-					ContentFingerprint.Compute(source.AsSpan()).ToHexString().ToLowerInvariant(),
-					source,
+					ContentFingerprint.Compute(content.AsSpan()).ToHexString().ToLowerInvariant(),
+					content,
 					DependencyFileStatus.Supported,
 					null);
 			}
@@ -704,12 +749,31 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			finally
 			{
 				Interlocked.Exchange(ref _lastBytesRead, bytesReadTotal);
-				CryptographicOperations.ZeroMemory(byteBuffer.AsSpan());
-				CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(
-					characterBuffer.AsSpan(0, charactersWritten)));
-				ArrayPool<byte>.Shared.Return(byteBuffer);
-				ArrayPool<char>.Shared.Return(characterBuffer);
+				Volatile.Write(ref _lastByteBufferCapacity, byteBuffer?.Length ?? 0);
+				Volatile.Write(ref _lastCharacterBufferCapacity, characterBuffer?.Length ?? 0);
+				if (byteBuffer is not null)
+				{
+					CryptographicOperations.ZeroMemory(byteBuffer);
+					ArrayPool<byte>.Shared.Return(byteBuffer);
+				}
+				if (characterBuffer is not null)
+				{
+					CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(characterBuffer.AsSpan()));
+					ArrayPool<char>.Shared.Return(characterBuffer);
+				}
 			}
+		}
+
+		private static int CharacterBufferSize(long contentBytes, Encoding encoding, int maximumCharacters)
+		{
+			var divisor = encoding.CodePage switch
+			{
+				1200 or 1201 => 2,
+				12000 or 12001 => 4,
+				_ => 1
+			};
+			var estimatedCharacters = Math.Max(1L, (contentBytes + divisor - 1) / divisor);
+			return checked((int)Math.Min(Math.Min(estimatedCharacters, maximumCharacters + 1L), BufferSize));
 		}
 
 		private static BoundedDependencySourceRead TooLarge(

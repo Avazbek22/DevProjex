@@ -1,8 +1,8 @@
 {
   "protocol": "focus-v1",
   "runDate": "2026-09-08",
-  "productSha": "efe8b7083ccd523202bcc517255c71b1399fd9b4",
-  "evaluatorSha": "efe8b7083ccd523202bcc517255c71b1399fd9b4",
+  "productSha": "1c913520abde175dd13c1cb1a393c0d985581b9e",
+  "evaluatorSha": "1c913520abde175dd13c1cb1a393c0d985581b9e",
   "repositories": [
     {
       "id": "devprojex",
@@ -33,7 +33,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.7885,
+              "irrelevantTokenShare": 0.7883941970985493,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -95,7 +95,7 @@
               "available": true,
               "recallNew": 0.5,
               "allRequired": false,
-              "irrelevantTokenShare": 0.8576072009001126,
+              "irrelevantTokenShare": 0.857625,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -103,7 +103,7 @@
               "available": true,
               "recallNew": 0.5,
               "allRequired": false,
-              "irrelevantTokenShare": 0.8576072009001126,
+              "irrelevantTokenShare": 0.857625,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -141,7 +141,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.9471216951059441,
+              "irrelevantTokenShare": 0.947125,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -157,7 +157,7 @@
               "available": true,
               "recallNew": 0.5,
               "allRequired": false,
-              "irrelevantTokenShare": 0.9288036004500563,
+              "irrelevantTokenShare": 0.9288080505031564,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -195,7 +195,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.8864432216108054,
+              "irrelevantTokenShare": 0.8864716179044762,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -249,7 +249,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.943235808952238,
+              "irrelevantTokenShare": 0.9432429053631703,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -257,7 +257,7 @@
               "available": true,
               "recallNew": 0.5,
               "allRequired": false,
-              "irrelevantTokenShare": 0.6857107138392299,
+              "irrelevantTokenShare": 0.68575,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -311,7 +311,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.9716232264516532,
+              "irrelevantTokenShare": 0.971625,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -319,7 +319,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.971625,
+              "irrelevantTokenShare": 0.9716214526815852,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -365,7 +365,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.6388194097048524,
+              "irrelevantTokenShare": 0.639,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -373,7 +373,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.6389097274318579,
+              "irrelevantTokenShare": 0.6388194097048524,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -465,7 +465,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.90975,
+              "irrelevantTokenShare": 0.9097387173396675,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -473,7 +473,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.9097443590224389,
+              "irrelevantTokenShare": 0.90975,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -573,7 +573,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.34175,
+              "irrelevantTokenShare": 0.34158539634908724,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -635,7 +635,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.6708544284017751,
+              "irrelevantTokenShare": 0.670875,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -805,7 +805,7 @@
               "available": true,
               "recallNew": 0.5,
               "allRequired": false,
-              "irrelevantTokenShare": 0.3061875,
+              "irrelevantTokenShare": 0.30614413400837553,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -825,100 +825,100 @@
           "mode": "cold",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 2446.5994,
-          "medianPeakWorkingSetBytes": 315916288,
+          "medianElapsedMilliseconds": 2741.1446,
+          "medianPeakWorkingSetBytes": 323145728,
           "elapsedMilliseconds": [
-            2468.18,
-            2437.378,
-            2529.9551,
-            2387.022,
-            2482.9199,
-            2443.4637,
-            2446.5994
+            2827.371,
+            2877.6425,
+            2823.8446,
+            2741.1446,
+            2725.7522,
+            2676.9313,
+            2664.7149
           ],
           "peakWorkingSetBytes": [
-            314802176,
-            315916288,
-            314003456,
-            316018688,
-            315932672,
-            317300736,
-            315572224
+            322871296,
+            322797568,
+            323203072,
+            323002368,
+            323510272,
+            323571712,
+            323145728
           ]
         },
         {
           "mode": "cold",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 2563.0794,
-          "medianPeakWorkingSetBytes": 315580416,
+          "medianElapsedMilliseconds": 2723.3807,
+          "medianPeakWorkingSetBytes": 323612672,
           "elapsedMilliseconds": [
-            2534.0708,
-            2602.5267,
-            2563.0794,
-            2853.575,
-            2569.4044,
-            2523.4734,
-            2458.5597
+            2771.9397,
+            2761.6991,
+            2721.0678,
+            2696.1333,
+            2704.9493,
+            2723.3807,
+            2756.9543
           ],
           "peakWorkingSetBytes": [
-            314761216,
-            314826752,
-            315580416,
-            316350464,
-            315260928,
-            315748352,
-            317571072
+            324055040,
+            323612672,
+            323420160,
+            323964928,
+            323469312,
+            323809280,
+            323252224
           ]
         },
         {
           "mode": "warm",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 884.7422,
-          "medianPeakWorkingSetBytes": 320950272,
+          "medianElapsedMilliseconds": 917.7578,
+          "medianPeakWorkingSetBytes": 326709248,
           "elapsedMilliseconds": [
-            885.0604,
-            837.4633,
-            889.9375,
-            842.3548,
-            825.0265,
-            884.7422,
-            925.8167
+            1006.9337,
+            887.8236,
+            898.8276,
+            916.7459,
+            981.7166,
+            922.8804,
+            917.7578
           ],
           "peakWorkingSetBytes": [
-            317571072,
-            320950272,
-            319406080,
-            321916928,
-            319041536,
-            321032192,
-            321798144
+            331177984,
+            329039872,
+            323678208,
+            326709248,
+            323280896,
+            323354624,
+            327106560
           ]
         },
         {
           "mode": "warm",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 878.6411,
-          "medianPeakWorkingSetBytes": 323235840,
+          "medianElapsedMilliseconds": 910.6792,
+          "medianPeakWorkingSetBytes": 327147520,
           "elapsedMilliseconds": [
-            904.3165,
-            889.3062,
-            843.5885,
-            891.9314,
-            878.6411,
-            877.7811,
-            865.3265
+            930.2544,
+            896.9205,
+            902.3565,
+            931.4153,
+            910.6792,
+            901.6079,
+            928.9197
           ],
           "peakWorkingSetBytes": [
-            330821632,
-            321331200,
-            316698624,
-            324931584,
-            322375680,
-            323694592,
-            323235840
+            329351168,
+            332767232,
+            327147520,
+            325980160,
+            326864896,
+            326238208,
+            328966144
           ]
         }
       ]
@@ -1744,100 +1744,100 @@
           "mode": "cold",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 712.3366,
-          "medianPeakWorkingSetBytes": 116559872,
+          "medianElapsedMilliseconds": 750.7588,
+          "medianPeakWorkingSetBytes": 117288960,
           "elapsedMilliseconds": [
-            727.5936,
-            709.8105,
-            736.4194,
-            712.3366,
-            729.725,
-            710.3753,
-            700.6331
+            769.6079,
+            750.7588,
+            750.1261,
+            762.6834,
+            750.7034,
+            755.6056,
+            748.9306
           ],
           "peakWorkingSetBytes": [
-            116559872,
-            116326400,
-            116563968,
-            116723712,
-            114733056,
-            116703232,
-            115716096
+            115965952,
+            118222848,
+            118575104,
+            117288960,
+            116518912,
+            118411264,
+            116379648
           ]
         },
         {
           "mode": "cold",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 726.2491,
-          "medianPeakWorkingSetBytes": 116371456,
+          "medianElapsedMilliseconds": 779.0895,
+          "medianPeakWorkingSetBytes": 118222848,
           "elapsedMilliseconds": [
-            729.4131,
-            731.7984,
-            707.9188,
-            729.9012,
-            710.4836,
-            714.7981,
-            726.2491
+            753.8733,
+            761.1051,
+            760.9724,
+            779.0895,
+            859.8602,
+            849.6652,
+            838.3452
           ],
           "peakWorkingSetBytes": [
-            114819072,
-            116498432,
-            116842496,
-            116465664,
-            114552832,
-            116371456,
-            114286592
+            116269056,
+            118263808,
+            118263808,
+            116543488,
+            118222848,
+            116285440,
+            118403072
           ]
         },
         {
           "mode": "warm",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 355.371,
-          "medianPeakWorkingSetBytes": 117329920,
+          "medianElapsedMilliseconds": 464.8097,
+          "medianPeakWorkingSetBytes": 117465088,
           "elapsedMilliseconds": [
-            365.6334,
-            355.371,
-            353.1041,
-            352.658,
-            362.7924,
-            349.5526,
-            374.0879
+            409.445,
+            423.1344,
+            466.436,
+            464.8097,
+            469.4289,
+            489.0083,
+            376.082
           ],
           "peakWorkingSetBytes": [
-            118079488,
-            117882880,
-            117329920,
-            113823744,
-            117993472,
-            116367360,
-            116539392
+            117829632,
+            118177792,
+            117465088,
+            117227520,
+            116641792,
+            118714368,
+            117231616
           ]
         },
         {
           "mode": "warm",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 354.1019,
-          "medianPeakWorkingSetBytes": 117678080,
+          "medianElapsedMilliseconds": 398.0476,
+          "medianPeakWorkingSetBytes": 117469184,
           "elapsedMilliseconds": [
-            354.1019,
-            374.1333,
-            364.5468,
-            351.3647,
-            362.0659,
-            352.4192,
-            345.9806
+            383.9215,
+            395.7667,
+            388.8526,
+            559.7703,
+            486.529,
+            398.0476,
+            410.2502
           ],
           "peakWorkingSetBytes": [
-            118022144,
-            117440512,
-            117678080,
-            116355072,
-            116080640,
-            117977088,
-            118460416
+            117702656,
+            117075968,
+            117133312,
+            119263232,
+            117469184,
+            119234560,
+            117035008
           ]
         }
       ]
@@ -1933,7 +1933,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.13389173646705838,
+              "irrelevantTokenShare": 0.13378344586146537,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -1941,7 +1941,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.13389173646705838,
+              "irrelevantTokenShare": 0.13378344586146537,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -1995,7 +1995,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.567,
+              "irrelevantTokenShare": 0.5669458682335292,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2003,7 +2003,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.22131055411936607,
+              "irrelevantTokenShare": 0.5555555555555556,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2025,7 +2025,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.040010002500625155,
+              "irrelevantTokenShare": 1,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2079,7 +2079,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.5200650081260157,
+              "irrelevantTokenShare": 1,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2087,7 +2087,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.5200650081260157,
+              "irrelevantTokenShare": 0.520125,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2095,7 +2095,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.5200650081260157,
+              "irrelevantTokenShare": 0.5200050012503126,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2111,7 +2111,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.3862509992006395,
+              "irrelevantTokenShare": 0.45784493715576896,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2133,7 +2133,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.7600475029689355,
+              "irrelevantTokenShare": 1,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2141,7 +2141,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.7600475029689355,
+              "irrelevantTokenShare": 0.7600625,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2165,7 +2165,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.7169713948687703,
+              "irrelevantTokenShare": 0.7595515470374546,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2219,7 +2219,7 @@
               "available": true,
               "recallNew": null,
               "allRequired": false,
-              "irrelevantTokenShare": 0,
+              "irrelevantTokenShare": 1,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2273,7 +2273,7 @@
               "available": true,
               "recallNew": null,
               "allRequired": false,
-              "irrelevantTokenShare": 0,
+              "irrelevantTokenShare": 1,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2311,7 +2311,7 @@
               "available": true,
               "recallNew": null,
               "allRequired": true,
-              "irrelevantTokenShare": 0.4068125,
+              "irrelevantTokenShare": 0.4067383422927866,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -2327,7 +2327,7 @@
               "available": true,
               "recallNew": null,
               "allRequired": true,
-              "irrelevantTokenShare": 0,
+              "irrelevantTokenShare": 0.40036643922163256,
               "oracle": true,
               "oracleAfterSeeds": true
             }
@@ -2411,7 +2411,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.412375,
+              "irrelevantTokenShare": 0.4122280570142536,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2427,7 +2427,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.4123015376922115,
+              "irrelevantTokenShare": 0.412375,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2457,7 +2457,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.7061691355709732,
+              "irrelevantTokenShare": 1,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2465,7 +2465,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.7061691355709732,
+              "irrelevantTokenShare": 0.7061507688461057,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2473,7 +2473,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.7061691355709732,
+              "irrelevantTokenShare": 0.7061875,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2481,7 +2481,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.7061691355709732,
+              "irrelevantTokenShare": 0.7061875,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2489,7 +2489,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.6704983528422234,
+              "irrelevantTokenShare": 0.70359394703657,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2509,9 +2509,9 @@
             },
             "importance-v1": {
               "available": true,
-              "recallNew": 0,
+              "recallNew": 0.5,
               "allRequired": false,
-              "irrelevantTokenShare": 1,
+              "irrelevantTokenShare": 0.6401600400100025,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2527,7 +2527,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.508504252126063,
+              "irrelevantTokenShare": 0.5086271567891973,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2535,7 +2535,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.508504252126063,
+              "irrelevantTokenShare": 0.5086271567891973,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2543,7 +2543,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0,
+              "irrelevantTokenShare": 0.422737955346651,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2565,7 +2565,7 @@
               "available": true,
               "recallNew": 0.5,
               "allRequired": false,
-              "irrelevantTokenShare": 0.8201025128141017,
+              "irrelevantTokenShare": 0.8200800200050012,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2581,7 +2581,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.754375,
+              "irrelevantTokenShare": 0.7543135783945987,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2589,7 +2589,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.754375,
+              "irrelevantTokenShare": 0.7543442930366295,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2597,7 +2597,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.5514722666057977,
+              "irrelevantTokenShare": 0.6623711340206185,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2617,9 +2617,9 @@
             },
             "importance-v1": {
               "available": true,
-              "recallNew": 0.5,
+              "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.9100568785549097,
+              "irrelevantTokenShare": 0.8771875,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -2627,7 +2627,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.8771721465183148,
+              "irrelevantTokenShare": 0.8771875,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -2641,9 +2641,9 @@
             },
             "focus-ppr": {
               "available": true,
-              "recallNew": 1,
-              "allRequired": true,
-              "irrelevantTokenShare": 0.24420276267266705,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8771875,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -2651,7 +2651,7 @@
               "available": true,
               "recallNew": 1,
               "allRequired": true,
-              "irrelevantTokenShare": 0.166528811690102,
+              "irrelevantTokenShare": 0.24173825797955728,
               "oracle": true,
               "oracleAfterSeeds": true
             }
@@ -2663,100 +2663,100 @@
           "mode": "cold",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 414.6447,
-          "medianPeakWorkingSetBytes": 87166976,
+          "medianElapsedMilliseconds": 451.7971,
+          "medianPeakWorkingSetBytes": 90042368,
           "elapsedMilliseconds": [
-            468.8255,
-            406.9876,
-            414.6447,
-            409.9796,
-            410.3649,
-            414.7842,
-            415.1457
+            452.3961,
+            447.61,
+            448.9972,
+            451.4263,
+            475.7568,
+            527.1567,
+            451.7971
           ],
           "peakWorkingSetBytes": [
-            87519232,
-            88379392,
-            87097344,
-            87166976,
-            87126016,
-            87556096,
-            86888448
+            89972736,
+            89837568,
+            90275840,
+            90206208,
+            90320896,
+            90042368,
+            89763840
           ]
         },
         {
           "mode": "cold",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 420.7916,
-          "medianPeakWorkingSetBytes": 87568384,
+          "medianElapsedMilliseconds": 505.1934,
+          "medianPeakWorkingSetBytes": 90591232,
           "elapsedMilliseconds": [
-            421.4418,
-            418.4912,
-            420.7916,
-            415.5701,
-            422.0637,
-            423.0728,
-            416.5586
+            466.2204,
+            602.2492,
+            505.1934,
+            473.1098,
+            564.0658,
+            623.5853,
+            472.0967
           ],
           "peakWorkingSetBytes": [
-            87576576,
-            87605248,
-            87121920,
-            87568384,
-            87056384,
-            87060480,
-            88195072
+            90071040,
+            91029504,
+            90132480,
+            89903104,
+            90591232,
+            90849280,
+            90669056
           ]
         },
         {
           "mode": "warm",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 162.7996,
-          "medianPeakWorkingSetBytes": 90804224,
+          "medianElapsedMilliseconds": 189.2351,
+          "medianPeakWorkingSetBytes": 91856896,
           "elapsedMilliseconds": [
-            174.635,
-            151.8294,
-            155.5774,
-            162.7996,
-            152.7791,
-            173.0812,
-            180.9568
+            189.0975,
+            189.2351,
+            180.6813,
+            192.1943,
+            181.4632,
+            194.3405,
+            198.1856
           ],
           "peakWorkingSetBytes": [
-            90480640,
-            90808320,
-            90804224,
-            90910720,
-            90517504,
-            91201536,
-            90763264
+            92065792,
+            92078080,
+            91856896,
+            91406336,
+            91906048,
+            91443200,
+            91725824
           ]
         },
         {
           "mode": "warm",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 173.2918,
-          "medianPeakWorkingSetBytes": 91058176,
+          "medianElapsedMilliseconds": 205.9846,
+          "medianPeakWorkingSetBytes": 91926528,
           "elapsedMilliseconds": [
-            191.6381,
-            186.2093,
-            170.882,
-            171.2815,
-            178.2944,
-            173.2918,
-            172.4393
+            198.3767,
+            196.2042,
+            232.3974,
+            215.1112,
+            219.1971,
+            196.3093,
+            205.9846
           ],
           "peakWorkingSetBytes": [
-            91058176,
-            91058176,
-            90632192,
-            91209728,
-            91254784,
-            90378240,
-            91312128
+            91340800,
+            91926528,
+            92352512,
+            92577792,
+            92377088,
+            91885568,
+            91746304
           ]
         }
       ]
@@ -2772,19 +2772,19 @@
     },
     "allRequiredRegressions": 0,
     "warmIncrementalMilliseconds": {
-      "devprojex": -6.101099999999974,
-      "repomix": -1.2690999999999804,
-      "flask": 10.492199999999997
+      "devprojex": -7.078599999999938,
+      "repomix": -66.76210000000003,
+      "flask": 16.749500000000012
     },
     "warmIncrementalPercent": {
-      "devprojex": -0.6895907078920813,
-      "repomix": -0.35711974246631845,
-      "flask": 6.444856129867639
+      "devprojex": -0.7712928182141233,
+      "repomix": -14.363319009908793,
+      "flask": 8.851159219404863
     },
     "maximumPeakWorkingSetGrowthPercent": {
-      "devprojex": 0.712125272789923,
-      "repomix": 0.2967359050445104,
-      "flask": 0.4605046755321649
+      "devprojex": 0.1444995119972621,
+      "repomix": 0.7962283918281823,
+      "flask": 0.6095619342218987
     },
     "recallPassed": true,
     "allRequiredPassed": true,

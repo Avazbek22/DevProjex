@@ -39,6 +39,7 @@ public sealed record DependencyResolverConfiguration(
 	IReadOnlySet<string> NodeBuiltInModules)
 {
 	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
+	public bool CanCache { get; init; } = true;
 
 	public DependencyScopeDescriptor? FindScope(string scopeId) =>
 		Scopes.FirstOrDefault(scope => string.Equals(scope.ScopeId, scopeId, StringComparison.Ordinal));

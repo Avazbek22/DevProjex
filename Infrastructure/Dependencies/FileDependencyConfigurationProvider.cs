@@ -36,13 +36,22 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var snapshots = new Dictionary<string, Task<DependencyControlFileSnapshot>>(PathComparer);
 		var packageProjections = new Dictionary<string, Task<ConfigurationParseResult<PackageMapDescriptor>>>(PathComparer);
 		var diagnostics = new List<DependencyConfigurationDiagnostic>();
+		var transientReadFailure = 0;
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
 		{
 			if (snapshots.TryGetValue(path, out var existing)) return existing;
-			var created = _reader.ReadAsync(path, MaximumConfigurationBytes, cancellationToken).AsTask();
+			var created = ReadTrackedSnapshotAsync(path);
 			snapshots[path] = created;
 			return created;
+		}
+
+		async Task<DependencyControlFileSnapshot> ReadTrackedSnapshotAsync(string path)
+		{
+			var snapshot = await _reader.ReadAsync(path, MaximumConfigurationBytes, cancellationToken).ConfigureAwait(false);
+			if (!snapshot.CanCache)
+				Interlocked.Exchange(ref transientReadFailure, 1);
+			return snapshot;
 		}
 
 		Task<ConfigurationParseResult<PackageMapDescriptor>> ReadPackageAsync(string path)
@@ -199,7 +208,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 						.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
 				})
 				.OrderBy(static item => item.Path, StringComparer.Ordinal)
-				.ToArray()
+				.ToArray(),
+			CanCache = Volatile.Read(ref transientReadFailure) == 0
 		};
 	}
 
@@ -226,15 +236,18 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				.Where(static element => element.Name.LocalName == "ProjectReference")
 				.Select(element => element.Attribute("Include")?.Value)
 				.Where(static value => !string.IsNullOrWhiteSpace(value))
-				.Select(value => Path.GetFullPath(Path.Combine(directory, value!)))
+				.Select(value => Path.GetFullPath(Path.Combine(directory, NormalizeMsBuildInclude(value!))))
 				.Distinct(PathComparer).Order(StringComparer.Ordinal).ToArray());
 		}
-		catch (System.Xml.XmlException exception)
+		catch (System.Xml.XmlException)
 		{
 			return ConfigurationParseResult<string[]>.Failure(
-				[], DependencyConfigurationState.Corrupt, OneLine(exception.Message));
+				[], DependencyConfigurationState.Corrupt, "invalid project XML");
 		}
 	}
+
+	private static string NormalizeMsBuildInclude(string value) =>
+		value.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
 
 	private static ConfigurationParseResult<TypeScriptConfiguration> ParseTypeScriptConfig(string content)
 	{
@@ -293,12 +306,12 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			return ConfigurationParseResult<TypeScriptConfiguration>.Valid(
 				new TypeScriptConfiguration(moduleResolution, legacy, paths, allowJavaScript));
 		}
-		catch (JsonException exception)
+		catch (JsonException)
 		{
 			return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
 				TypeScriptConfiguration.Default,
 				DependencyConfigurationState.Corrupt,
-				"invalid tsconfig JSON: " + OneLine(exception.Message));
+				"invalid tsconfig JSON");
 		}
 	}
 
@@ -326,9 +339,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		catch (Exception exception) when (exception is JsonException or InvalidOperationException)
 		{
 			return ConfigurationParseResult<PackageMapDescriptor>.Failure(
-				UnavailablePackageMap(directory, DependencyConfigurationState.Corrupt, OneLine(exception.Message)),
+				UnavailablePackageMap(directory, DependencyConfigurationState.Corrupt, "invalid package.json JSON"),
 				DependencyConfigurationState.Corrupt,
-				OneLine(exception.Message));
+				"invalid package.json JSON");
 		}
 	}
 
@@ -599,10 +612,12 @@ internal sealed record DependencyControlFileSnapshot(
 	DependencyConfigurationState State,
 	string Content,
 	string? Reason,
-	string FingerprintValue);
+	string FingerprintValue,
+	bool CanCache = true);
 
 internal sealed class BoundedDependencyControlFileReader : IDependencyControlFileReader
 {
+	private static ReadOnlySpan<byte> Utf8Preamble => [0xEF, 0xBB, 0xBF];
 	private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
 	public async ValueTask<DependencyControlFileSnapshot> ReadAsync(
@@ -646,9 +661,10 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 					DependencyConfigurationState.Corrupt,
 					"configuration changed while it was being read",
 					currentLength,
-					currentLastWrite);
+					currentLastWrite,
+					canCache: false);
 			}
-			var offset = bytes.AsSpan().StartsWith(StrictUtf8.Preamble) ? StrictUtf8.Preamble.Length : 0;
+			var offset = bytes.AsSpan().StartsWith(Utf8Preamble) ? Utf8Preamble.Length : 0;
 			var content = StrictUtf8.GetString(bytes.AsSpan(offset));
 			return new DependencyControlFileSnapshot(
 				DependencyConfigurationState.Valid,
@@ -660,21 +676,21 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 		{
 			throw;
 		}
-		catch (FileNotFoundException exception)
+		catch (FileNotFoundException)
 		{
-			return Failure(DependencyConfigurationState.Missing, OneLine(exception.Message), 0, 0);
+			return Failure(DependencyConfigurationState.Missing, "configuration file is unavailable", 0, 0, canCache: false);
 		}
-		catch (DirectoryNotFoundException exception)
+		catch (DirectoryNotFoundException)
 		{
-			return Failure(DependencyConfigurationState.Missing, OneLine(exception.Message), 0, 0);
+			return Failure(DependencyConfigurationState.Missing, "configuration file is unavailable", 0, 0, canCache: false);
 		}
-		catch (DecoderFallbackException exception)
+		catch (DecoderFallbackException)
 		{
-			return Failure(DependencyConfigurationState.Corrupt, OneLine(exception.Message), 0, 0);
+			return Failure(DependencyConfigurationState.Corrupt, "configuration is not valid UTF-8", 0, 0);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
 		{
-			return Failure(DependencyConfigurationState.Corrupt, OneLine(exception.Message), 0, 0);
+			return Failure(DependencyConfigurationState.Corrupt, "configuration file could not be read", 0, 0, canCache: false);
 		}
 	}
 
@@ -682,7 +698,8 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 		DependencyConfigurationState state,
 		string reason,
 		long length,
-		long lastWrite) => new(state, string.Empty, reason, $"{state}:{length}:{lastWrite}:{reason}");
+		long lastWrite,
+		bool canCache = true) => new(state, string.Empty, reason, $"{state}:{length}:{lastWrite}:{reason}", canCache);
 
 	private static string Hash(ReadOnlySpan<byte> bytes) =>
 		Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();

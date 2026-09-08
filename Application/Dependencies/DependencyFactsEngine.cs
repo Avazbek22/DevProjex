@@ -169,7 +169,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			declarationRevision,
 			configuration.Fingerprint);
 		var allowed = orderedFacts.Select(static fact => fact.Path).ToHashSet(StringComparer.Ordinal);
-		var canCacheIndex = cacheable.All(static value => value);
+		var canCacheIndex = configuration.CanCache && cacheable.All(static value => value);
 		var createdIndex = new Lazy<Task<ResolvedIndex>>(
 			() => Task.FromResult(GateResolvedIndex(
 				DependencyResolver.Resolve(
@@ -621,7 +621,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		facts.Aliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
 		facts.GlobalContextNamespaces.Sum(strings.Add) +
 		facts.GlobalAliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
-		facts.TypeParameters.Sum(strings.Add);
+		facts.TypeParameters.Sum(strings.Add) +
+		facts.TypeParameterScopes.Sum(scope => 40 + strings.Add(scope.Name));
 
 	private static long EstimateResolvedIndexBytes(ResolvedIndex index)
 	{
@@ -1172,7 +1173,8 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private static bool Matches(string pattern, int star, string value) => star < 0
 			? pattern == value
-			: value.StartsWith(pattern[..star], StringComparison.Ordinal) &&
+			: star + (pattern.Length - star - 1) <= value.Length &&
+			  value.StartsWith(pattern[..star], StringComparison.Ordinal) &&
 			  value.EndsWith(pattern[(star + 1)..], StringComparison.Ordinal);
 
 		private static string BarePackageName(string specifier)
@@ -1265,7 +1267,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				var star = pair.Key.IndexOf('*');
 				var prefix = pair.Key[..star];
 				var suffix = pair.Key[(star + 1)..];
-				if (!key.StartsWith(prefix, StringComparison.Ordinal) || !key.EndsWith(suffix, StringComparison.Ordinal))
+				if (prefix.Length + suffix.Length > key.Length ||
+				    !key.StartsWith(prefix, StringComparison.Ordinal) ||
+				    !key.EndsWith(suffix, StringComparison.Ordinal))
 					continue;
 				wildcard = key[prefix.Length..(key.Length - suffix.Length)];
 				target = pair.Value;
@@ -1389,10 +1393,10 @@ public sealed class DependencyFactsEngine : IDisposable
 				? import.Specifier
 				: string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
 			var candidates = ProbePythonModule(source, module).ToList();
+			var moduleEntityExists = candidates.Count > 0;
 			if (import.ImportedName is { Length: > 0 } and not "*")
 			{
 				var provided = candidates
-					.Where(static candidate => Path.GetFileName(candidate).StartsWith("__init__.", StringComparison.Ordinal))
 					.SelectMany(candidate => ResolvePythonStaticBinding(
 						candidate,
 						import.ImportedName,
@@ -1403,13 +1407,15 @@ public sealed class DependencyFactsEngine : IDisposable
 					.ToArray();
 				if (provided.Length > 0)
 					candidates = provided.ToList();
-				else
+				else if (candidates.Any(IsPythonPackageInitializer))
 				{
 					var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
 					candidates = ProbePythonModule(source, child).ToList();
 				}
+				else
+					candidates.Clear();
 			}
-			if (candidates.Count == 0)
+			if (candidates.Count == 0 && !moduleEntityExists)
 			{
 				var portions = ProbePythonNamespace(source, module).ToArray();
 				if (portions.Length > 0)
@@ -1543,7 +1549,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
-			if (source.TypeParameters.Contains(simpleName, StringComparer.Ordinal))
+			var isQualified = reference.Name.Contains('.');
+			var typeParameterShadowsReference = !isQualified && (source.TypeParameterScopes.Count > 0
+				? source.TypeParameterScopes.Any(parameter =>
+					parameter.Name == simpleName &&
+					parameter.StartIndex <= reference.SourceStartIndex &&
+					parameter.EndIndex >= reference.SourceStartIndex)
+				: source.TypeParameters.Contains(simpleName, StringComparer.Ordinal));
+			if (typeParameterShadowsReference)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
 			var expandedName = ExpandQualifiedAlias(source, reference.Name);
 			var candidates = reference.Name.Contains('.')
@@ -1619,6 +1632,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			return matches?.ToArray() ?? [];
 		}
+
+		private static bool IsPythonPackageInitializer(string path) =>
+			Path.GetFileName(path).StartsWith("__init__.", StringComparison.Ordinal);
 
 		private DeclarationFact[] SelectVisibleCSharpCandidates(
 			FileFacts source,

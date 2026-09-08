@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using DevProjex.Application.Dependencies;
 using DevProjex.Infrastructure.Compression;
@@ -97,6 +98,84 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var edge = Assert.Single(index.Edges, candidate => candidate.Source == "Consumer/Box.cs" && candidate.Reference == "User");
 		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
 		Assert.Contains("shadows", Assert.Single(edge.Reasons), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task CSharpTypeParameters_ShadowOnlyInsideTheirLexicalOwner()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var model = fixture.CreateFile("Models/User.cs", "namespace Models; public class User { }");
+		var source = fixture.CreateFile("Consumers.cs", """
+			using Models;
+			public class Box<User>
+			{
+				public User GenericValue { get; }
+				public Models.User QualifiedValue { get; }
+			}
+			public class Consumer
+			{
+				public User NeighborValue { get; }
+				public void Map<User>(User value) { }
+				public User OutsideMethod { get; }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, model, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Unresolved && edge.Evidence.Any(site => site.Line == 4));
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "Models.User" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "Models/User.cs");
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "Models/User.cs" &&
+			edge.Evidence.Any(site => site.Line == 9));
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Unresolved && edge.Evidence.Any(site => site.Line == 10));
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "Models/User.cs" &&
+			edge.Evidence.Any(site => site.Line == 11));
+	}
+
+	[Fact]
+	public async Task CSharpProjectReference_NormalizesBothMsBuildSeparatorsAndKeepsCrossScopeResolution()
+	{
+		using var fixture = new TemporaryDirectory();
+		var producerProject = fixture.CreateFile("Lib/Lib.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var producer = fixture.CreateFile("Lib/User.cs", "namespace Models; public class User { }");
+		var consumerProject = fixture.CreateFile("App/App.csproj", """
+			<Project Sdk="Microsoft.NET.Sdk">
+			  <ItemGroup>
+			    <ProjectReference Include="../Lib/Lib.csproj" />
+			    <ProjectReference Include="..\Lib\Lib.csproj" />
+			  </ItemGroup>
+			</Project>
+			""");
+		var consumer = fixture.CreateFile("App/Consumer.cs", "using Models; public class Consumer { User Value; }");
+		var manifest = new[] { producerProject, producer, consumerProject, consumer };
+		var provider = new FileDependencyConfigurationProvider();
+
+		var configuration = await provider.ReadAsync(
+			fixture.Path,
+			manifest,
+			TestContext.Current.CancellationToken);
+		var appScope = Assert.Single(configuration.Scopes, scope => scope.ScopeId.EndsWith("App/App.csproj", StringComparison.Ordinal));
+		Assert.Single(appScope.ProjectReferences);
+
+		using var engine = new DependencyFactsEngine(new TreeSitterDependencyFactExtractor(), provider);
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "App/Consumer.cs" && item.Reference == "User");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("Lib/User.cs", edge.Target);
+		Assert.True(edge.CrossScope);
 	}
 
 	[Fact]
@@ -351,6 +430,45 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task TypeScriptPaths_RejectsOverlappingPrefixAndSuffixWithoutThrowing()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", """
+			{"compilerOptions":{"moduleResolution":"bundler","paths":{"ab*bc":["target/*"]}}}
+			""");
+		var source = fixture.CreateFile("main.ts", "import missing from 'abc'; import value from 'abXbc';");
+		var target = fixture.CreateFile("target/X.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "abc" && edge.Status == ResolutionStatus.Unresolved);
+		Assert.Contains(result.Edges, edge => edge.Reference == "abXbc" && edge.Target == "target/X.ts");
+	}
+
+	[Fact]
+	public async Task TypeScriptPackageMap_RejectsOverlappingPrefixAndSuffixWithoutThrowing()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var package = fixture.CreateFile("package.json", "{\"imports\":{\"#ab*bc\":\"./target/*.ts\"}}");
+		var source = fixture.CreateFile("main.ts", "import missing from '#abc'; import value from '#abXbc';");
+		var target = fixture.CreateFile("target/X.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "#abc" && edge.Status == ResolutionStatus.Unresolved);
+		Assert.Contains(result.Edges, edge => edge.Reference == "#abXbc" && edge.Target == "target/X.ts");
+	}
+
+	[Fact]
 	public async Task TypeScriptPackageExports_NullTargetIsUnresolvedAndLegacyConfigIsExplicit()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -555,6 +673,130 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(1, reader.CountFor(nestedConfig));
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task Utf8Bom_PreservesTypeScriptAndPackageConfigurationSemantics(bool includeBom)
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = WriteUtf8ControlFile(
+			fixture,
+			"package.json",
+			"{\"name\":\"fixture\",\"exports\":{\".\":\"./entry.ts\"}}",
+			includeBom);
+		var rootConfig = WriteUtf8ControlFile(
+			fixture,
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}",
+			includeBom);
+		var nestedConfig = WriteUtf8ControlFile(
+			fixture,
+			"nested/tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"paths\":{\"alias\":[\"../entry.ts\"]}}}",
+			includeBom);
+		var rootSource = fixture.CreateFile("main.ts", "import value from 'fixture';");
+		var nestedSource = fixture.CreateFile("nested/main.ts", "import value from 'alias';");
+		var entry = fixture.CreateFile("entry.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[package, rootConfig, nestedConfig, rootSource, nestedSource, entry],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Empty(result.Coverage.ConfigurationDiagnostics);
+		Assert.Contains(result.Edges, edge => edge.Source == "main.ts" && edge.Target == "entry.ts");
+		Assert.Contains(result.Edges, edge => edge.Source == "nested/main.ts" && edge.Target == "entry.ts");
+	}
+
+	[Fact]
+	public async Task TransientControlFileRead_IsRetriedBeforePublishingAManifestSnapshot()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		var reader = new FailOnceControlFileReader(config);
+		using var engine = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(),
+			new FileDependencyConfigurationProvider(reader));
+
+		var first = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var second = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(first.Edges, edge => edge.Source == "main.ts" && edge.Status == ResolutionStatus.Unresolved);
+		Assert.Contains(second.Edges, edge => edge.Source == "main.ts" && edge.Target == "target.ts");
+		Assert.Equal(2, reader.CountFor(config));
+		Assert.False(second.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
+	public async Task StableConfigurationSyntaxFailure_RemainsCacheable()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{");
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		var reader = new CountingControlFileReader();
+		using var engine = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(),
+			new FileDependencyConfigurationProvider(reader));
+
+		var first = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var second = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(first.Coverage.ConfigurationDiagnostics, item => item.Path == "tsconfig.json");
+		Assert.Equal(1, reader.CountFor(config));
+		Assert.True(second.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
+	public async Task WindowsSharingViolationOnControlFile_IsRetriedAfterTheFileIsReleased()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			Assert.Skip("An exclusive Windows sharing lock is required for this scenario.");
+			return;
+		}
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		using var engine = CreateEngine();
+		DependencyIndexSnapshot first;
+		await using (var locked = new FileStream(config, FileMode.Open, FileAccess.Read, FileShare.None))
+		{
+			first = await engine.IndexAsync(
+				fixture.Path,
+				[config, source, target],
+				cancellationToken: TestContext.Current.CancellationToken);
+		}
+
+		var second = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(first.Coverage.ConfigurationDiagnostics, item => item.Path == "tsconfig.json");
+		Assert.All(first.Coverage.ConfigurationDiagnostics, item =>
+			Assert.Equal("configuration file could not be read", item.Reason));
+		Assert.Contains(second.Edges, edge => edge.Source == "main.ts" && edge.Target == "target.ts");
+		Assert.Empty(second.Coverage.ConfigurationDiagnostics);
+		Assert.False(second.Metrics.ResolutionCacheHit);
+	}
+
 	[Fact]
 	public async Task TypeScriptExternalPackageEvidence_DoesNotLeakAcrossPackageScopes()
 	{
@@ -684,6 +926,69 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py" && item.Reference == "pkg");
 		Assert.Equal("pkg/impl.py", edge.Target);
 		Assert.DoesNotContain("pkg/Service.py", edge.Candidates);
+	}
+
+	[Fact]
+	public async Task PythonFromImport_ResolvesNamesProvidedByAnOrdinaryModule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var initializer = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var model = fixture.CreateFile("pkg/model.py", "class Item: pass\ndef create(): pass");
+		var consumer = fixture.CreateFile("pkg/consumer.py", "from .model import Item as ModelItem\nfrom .model import create\nimport pkg.model");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, model, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var moduleImport = Assert.Single(result.Edges, item => item.Source == "pkg/consumer.py" && item.Reference == "model");
+		Assert.Equal(ResolutionStatus.Resolved, moduleImport.Status);
+		Assert.Equal("pkg/model.py", moduleImport.Target);
+		Assert.Equal(2, moduleImport.Evidence.Count);
+		var directImport = Assert.Single(result.Edges, item => item.Source == "pkg/consumer.py" && item.Reference == "pkg.model");
+		Assert.Equal("pkg/model.py", directImport.Target);
+	}
+
+	[Fact]
+	public async Task PythonFromImport_ResolvesANameProvidedByAStubModule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var model = fixture.CreateFile("model.pyi", "class Item: ...");
+		var consumer = fixture.CreateFile("consumer.py", "from model import Item");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, model, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("model.pyi", edge.Target);
+	}
+
+	[Fact]
+	public async Task PythonFromImport_DoesNotProbeAChildOfAnOrdinaryModuleForAMissingName()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var model = fixture.CreateFile("model.py", "class Present: pass");
+		var falseChild = fixture.CreateFile("model/Missing.py", "class Wrong: pass");
+		var consumer = fixture.CreateFile("consumer.py", "from model import Missing");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, model, falseChild, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.DoesNotContain("model/Missing.py", edge.Candidates);
 	}
 
 	[Fact]
@@ -1377,6 +1682,50 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task BoundedDependencySourceRead_SizesPooledBuffersWithoutRetainingTheFileLimit()
+	{
+		const int maximumCharacters = 2 * 1024 * 1024;
+		using var fixture = new TemporaryDirectory();
+		var small = fixture.CreateFile("Small.cs", "public class Small { }");
+		var large = fixture.CreateFile("Large.cs", new string('x', 1024 * 1024));
+		var reader = new TreeSitterDependencyFactExtractor.BoundedDependencySourceReader();
+
+		var smallAllocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+		var smallStarted = Stopwatch.StartNew();
+		for (var index = 0; index < 500; index++)
+		{
+			var smallResult = await reader.ReadAsync(small, maximumCharacters, TestContext.Current.CancellationToken);
+			Assert.Equal(DependencyFileStatus.Supported, smallResult.Status);
+		}
+		smallStarted.Stop();
+		var smallAllocated = GC.GetTotalAllocatedBytes(precise: true) - smallAllocatedBefore;
+		var smallCharacterCapacity = reader.LastCharacterBufferCapacity;
+		var smallByteCapacity = reader.LastByteBufferCapacity;
+
+		var workingSetBefore = Process.GetCurrentProcess().WorkingSet64;
+		var largeAllocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+		var largeStarted = Stopwatch.StartNew();
+		var largeResult = await reader.ReadAsync(large, maximumCharacters, TestContext.Current.CancellationToken);
+		largeStarted.Stop();
+		var largeAllocated = GC.GetTotalAllocatedBytes(precise: true) - largeAllocatedBefore;
+		var workingSetAfter = Process.GetCurrentProcess().WorkingSet64;
+		var largeCharacterCapacity = reader.LastCharacterBufferCapacity;
+
+		var afterLarge = await reader.ReadAsync(small, maximumCharacters, TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.Supported, largeResult.Status);
+		Assert.Equal(DependencyFileStatus.Supported, afterLarge.Status);
+		Assert.InRange(smallCharacterCapacity, 1, 256);
+		Assert.InRange(smallByteCapacity, 1, 256);
+		Assert.InRange(largeCharacterCapacity, 1, 64 * 1024);
+		Assert.InRange(reader.LastCharacterBufferCapacity, 1, 256);
+		TestContext.Current.TestOutputHelper?.WriteLine(
+			$"Bounded reader: small-500={smallStarted.ElapsedMilliseconds}ms/{smallAllocated}B, " +
+			$"large-1MiChars={largeStarted.ElapsedMilliseconds}ms/{largeAllocated}B, " +
+			$"char-buffer={largeCharacterCapacity} chars, working-set-delta={workingSetAfter - workingSetBefore}B.");
+	}
+
+	[Fact]
 	public async Task WarmRelatedQuery_ReusesTheCanonicalFileLookupFromTheResolvedSnapshot()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -1577,6 +1926,18 @@ public sealed class DependencyFactsEngineIntegrationTests
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());
 
+	private static string WriteUtf8ControlFile(
+		TemporaryDirectory fixture,
+		string relativePath,
+		string content,
+		bool includeBom)
+	{
+		var path = fixture.CreateFile(relativePath, string.Empty);
+		var encoding = new UTF8Encoding(includeBom, true);
+		File.WriteAllBytes(path, encoding.GetPreamble().Concat(encoding.GetBytes(content)).ToArray());
+		return path;
+	}
+
 	private static DependencyResolverConfiguration EmptyConfiguration() => new(
 		"fixture",
 		[],
@@ -1674,6 +2035,30 @@ public sealed class DependencyFactsEngineIntegrationTests
 		{
 			_counts.AddOrUpdate(Path.GetFullPath(path), 1, static (_, count) => count + 1);
 			return _inner.ReadAsync(path, maximumBytes, cancellationToken);
+		}
+	}
+
+	private sealed class FailOnceControlFileReader(string failingPath) : IDependencyControlFileReader
+	{
+		private readonly BoundedDependencyControlFileReader _inner = new();
+		private readonly ConcurrentDictionary<string, int> _counts = new(PathComparer.Default);
+
+		public int CountFor(string path) => _counts.GetValueOrDefault(Path.GetFullPath(path));
+
+		public ValueTask<DependencyControlFileSnapshot> ReadAsync(
+			string path,
+			int maximumBytes,
+			CancellationToken cancellationToken)
+		{
+			var count = _counts.AddOrUpdate(Path.GetFullPath(path), 1, static (_, value) => value + 1);
+			return PathComparer.Default.Equals(path, failingPath) && count == 1
+				? ValueTask.FromResult(new DependencyControlFileSnapshot(
+					DependencyConfigurationState.Corrupt,
+					string.Empty,
+					"configuration access failed",
+					"transient",
+					CanCache: false))
+				: _inner.ReadAsync(path, maximumBytes, cancellationToken);
 		}
 	}
 
