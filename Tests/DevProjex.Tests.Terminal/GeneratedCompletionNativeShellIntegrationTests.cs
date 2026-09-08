@@ -224,14 +224,30 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 			generated.StandardOutput);
 		const string line =
 			"devprojex analyze \".\\Program Files\" --format ";
-
-		var completed = await RunPowerShellCandidateCompletionAsync(
+		var coldStart = await MeasureWindowsPowerShellColdStartAsync(
 			shellExecutable,
-			integrationRoot,
-			completionScript,
-			workingDirectory,
-			line,
 			TestContext.Current.CancellationToken);
+
+		ShellProcessResult completed;
+		try
+		{
+			completed = await RunPowerShellCandidateCompletionAsync(
+				shellExecutable,
+				integrationRoot,
+				completionScript,
+				workingDirectory,
+				line,
+				TestContext.Current.CancellationToken);
+		}
+		catch (TimeoutException exception)
+		{
+			throw new TimeoutException(
+				$"Windows PowerShell 5.1 cold start: {coldStart.TotalMilliseconds:F0} ms; " +
+				$"completion timeout: {WindowsPowerShellProcessTimeout.TotalMilliseconds:F0} ms; " +
+				$"cold-start/timeout ratio: {coldStart.TotalMilliseconds / WindowsPowerShellProcessTimeout.TotalMilliseconds:P1}. " +
+				exception.Message,
+				exception);
+		}
 
 		Assert.True(
 			completed.ExitCode == 0,
@@ -249,6 +265,29 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 					StringSplitOptions.RemoveEmptyEntries |
 					StringSplitOptions.TrimEntries)
 				.Order(StringComparer.Ordinal));
+	}
+
+	private static async Task<TimeSpan> MeasureWindowsPowerShellColdStartAsync(
+		string shellExecutable,
+		CancellationToken cancellationToken)
+	{
+		var startInfo = CreateShellStartInfo("powershell", shellExecutable);
+		startInfo.ArgumentList.Add("-Command");
+		startInfo.ArgumentList.Add("exit 0");
+		var stopwatch = Stopwatch.StartNew();
+		var result = await RunProcessAsync(
+			startInfo,
+			cancellationToken,
+			WindowsPowerShellProcessTimeout);
+		stopwatch.Stop();
+		Assert.True(
+			result.ExitCode == 0 &&
+			string.IsNullOrWhiteSpace(result.StandardOutput) &&
+			string.IsNullOrWhiteSpace(result.StandardError),
+			$"Windows PowerShell 5.1 cold-start probe took {stopwatch.Elapsed.TotalMilliseconds:F0} ms " +
+			$"and exited with {result.ExitCode}. stdout=[{result.StandardOutput}] " +
+			$"stderr=[{result.StandardError}]");
+		return stopwatch.Elapsed;
 	}
 
 	private static async Task<ShellProcessResult> RunCompletionAsync(
