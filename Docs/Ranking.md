@@ -168,7 +168,7 @@ greedy admission pass for every comparator. The one seed for each of the existin
 was selected from the task wording, not from its required-file set or ranked output. The
 complete machine-readable result is
 `tools/RankingEval/results/2026-09-07-focus-v1.json`; the product and evaluator SHA for the
-2026-09-08 reference-semantics rerun are both `7e8a1c9bc6229e2d61cc8a4e538cbf817f91f3a5`.
+2026-09-08 reference-semantics rerun are both `798ce9bef2622fda1eb6320ef98009428388c6c7`.
 
 The six frozen orders are current manifest order, `importance-v1`, seed first without graph
 traversal, `focus-v1` minimum undirected graph hop, evaluation-only personalized PageRank,
@@ -215,9 +215,9 @@ growth for the corpus.
 
 | Repository | Cold ms (importance / focus) | Warm ms (importance / focus) | Warm focus addition | Cold RSS MiB | Warm RSS MiB | Maximum RSS growth |
 |---|---:|---:|---:|---:|---:|---:|
-| DevProjex | `2733.31 / 2832.46` | `942.99 / 1002.12` | `+59.14 ms (6.27%)` | `303.42 / 300.89` | `307.43 / 309.50` | `0.67%` |
-| Repomix | `800.65 / 900.88` | `440.35 / 464.77` | `+24.42 ms (5.55%)` | `110.12 / 110.57` | `111.21 / 111.44` | `0.41%` |
-| Flask | `507.96 / 505.33` | `223.14 / 239.32` | `+16.18 ms (7.25%)` | `86.45 / 86.32` | `87.75 / 88.10` | `0.40%` |
+| DevProjex | `2727.88 / 2812.78` | `982.39 / 910.07` | `-72.33 ms (-7.36%)` | `304.45 / 302.29` | `307.70 / 310.05` | `0.76%` |
+| Repomix | `763.28 / 768.28` | `401.38 / 427.63` | `+26.25 ms (6.54%)` | `109.69 / 109.98` | `110.84 / 110.85` | `0.26%` |
+| Flask | `478.99 / 503.83` | `223.32 / 235.30` | `+11.99 ms (5.37%)` | `86.34 / 86.53` | `87.61 / 88.17` | `0.64%` |
 
 Fifteen of the 45 task-budget cells had a feasible oracle after the real seed admission and
 a defined RecallNew. Across those cells, `focus-v1 - seed-first` mean RecallNew was
