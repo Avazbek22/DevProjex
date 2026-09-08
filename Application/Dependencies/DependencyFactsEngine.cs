@@ -1091,7 +1091,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlyDictionary<string, string[]> _visibleScopesById;
 		private readonly IReadOnlyDictionary<string, string[]> _globalNamespaces;
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _globalAliases;
-		private readonly IReadOnlyDictionary<string, string[]> _contextNamespacesByFile;
+		private readonly IReadOnlyDictionary<string, CSharpNamespaceRegions> _csharpNamespaceRegionsByFile;
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, CSharpUsingDirective[]>> _aliasesByFileAndName;
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, TypeParameterScope[]>> _typeParametersByFileAndName;
 		private readonly IReadOnlySet<string> _dotNetExternalSimpleNames;
@@ -1134,13 +1134,11 @@ public sealed class DependencyFactsEngine : IDisposable
 						.GroupBy(static pair => pair.Key, StringComparer.Ordinal)
 						.ToDictionary(static aliases => aliases.Key, static aliases => aliases.OrderBy(static pair => pair.Value, StringComparer.Ordinal).First().Value, StringComparer.Ordinal),
 					StringComparer.Ordinal);
-			_contextNamespacesByFile = files.ToDictionary(
+			_csharpNamespaceRegionsByFile = files.ToDictionary(
 				static file => file.Path,
-				file => file.ContextNamespaces
-					.Concat(_globalNamespaces.GetValueOrDefault(file.ScopeId) ?? [])
-					.Distinct(StringComparer.Ordinal)
-					.Order(StringComparer.Ordinal)
-					.ToArray(),
+				file => CSharpNamespaceRegions.Create(
+					file.ContextNamespaces.Concat(_globalNamespaces.GetValueOrDefault(file.ScopeId) ?? []),
+					file.CSharpUsingDirectives),
 				StringComparer.Ordinal);
 			_aliasesByFileAndName = files.ToDictionary(
 				static file => file.Path,
@@ -2001,16 +1999,48 @@ public sealed class DependencyFactsEngine : IDisposable
 		}
 
 		private IReadOnlyList<string> ActiveCSharpNamespaces(FileFacts source, ReferenceFact reference) =>
-			(_contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [])
-			.Concat(source.CSharpUsingDirectives
-				.Where(directive => directive.Alias is null && IsActive(directive, reference.SourceStartIndex))
-				.Select(static directive => directive.Target))
-			.Distinct(StringComparer.Ordinal)
-			.Order(StringComparer.Ordinal)
-			.ToArray();
+			_csharpNamespaceRegionsByFile.GetValueOrDefault(source.Path)?.At(reference.SourceStartIndex) ?? [];
 
 		private static bool IsActive(CSharpUsingDirective directive, int sourceStartIndex) =>
 			directive.ScopeStartIndex <= sourceStartIndex && directive.ScopeEndIndex >= sourceStartIndex;
+
+		private sealed class CSharpNamespaceRegions(int[] starts, string[][] namespaces)
+		{
+			public IReadOnlyList<string> At(int sourceStartIndex)
+			{
+				var index = Array.BinarySearch(starts, sourceStartIndex);
+				if (index < 0)
+					index = ~index - 1;
+				return namespaces[Math.Max(0, index)];
+			}
+
+			public static CSharpNamespaceRegions Create(
+				IEnumerable<string> baseNamespaces,
+				IReadOnlyList<CSharpUsingDirective> directives)
+			{
+				var local = directives.Where(static directive => directive.Alias is null).ToArray();
+				var boundaries = new SortedSet<int> { int.MinValue };
+				foreach (var directive in local)
+				{
+					boundaries.Add(directive.ScopeStartIndex);
+					if (directive.ScopeEndIndex < int.MaxValue)
+						boundaries.Add(directive.ScopeEndIndex + 1);
+				}
+				var starts = boundaries.ToArray();
+				var values = new string[starts.Length][];
+				for (var index = 0; index < starts.Length; index++)
+				{
+					var position = starts[index];
+					values[index] = baseNamespaces.Concat(local
+							.Where(directive => IsActive(directive, position))
+							.Select(static directive => directive.Target))
+						.Distinct(StringComparer.Ordinal)
+						.Order(StringComparer.Ordinal)
+						.ToArray();
+				}
+				return new CSharpNamespaceRegions(starts, values);
+			}
+		}
 
 		private static string QualifiedLookupName(string qualified)
 		{
