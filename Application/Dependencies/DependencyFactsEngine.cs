@@ -600,32 +600,49 @@ public sealed class DependencyFactsEngine : IDisposable
 	}
 
 	private static long EstimateFileFactsBytes(FileFacts facts) =>
-		256 + StringBytes(facts.Path) + StringBytes(facts.ScopeId) + StringBytes(facts.ContentFingerprint) +
-		StringBytes(facts.StatusReason) +
-		facts.ErrorNodeKinds.Sum(static pair => StringBytes(pair.Key) + 16) +
-		facts.Declarations.Sum(static declaration => 160 + StringBytes(declaration.Identity.ScopeId) +
-			StringBytes(declaration.Identity.QualifiedName) + StringBytes(declaration.Identity.FileScope) +
-			StringBytes(declaration.ContainingNamespace) +
-			declaration.DeclarationSites.Sum(SiteBytes)) +
-		facts.Imports.Sum(static import => 128 + StringBytes(import.Specifier) + StringBytes(import.ImportedName) +
-			StringBytes(import.Alias) + SiteBytes(import.Site)) +
-		facts.References.Sum(static reference => 160 + StringBytes(reference.Name) + StringBytes(reference.SyntaxKind) +
-			StringBytes(reference.Reason) + StringBytes(reference.Target) + (reference.Candidates?.Sum(StringBytes) ?? 0) +
-			StringBytes(reference.ContainingNamespace) + StringBytes(reference.ContainingType) + SiteBytes(reference.Site)) +
-		facts.ContextNamespaces.Sum(StringBytes) + facts.Aliases.Sum(static pair => StringBytes(pair.Key) + StringBytes(pair.Value)) +
-		facts.GlobalContextNamespaces.Sum(StringBytes) + facts.GlobalAliases.Sum(static pair => StringBytes(pair.Key) + StringBytes(pair.Value)) +
-		facts.TypeParameters.Sum(StringBytes);
+		EstimateFileFactsBytes(facts, new RetainedStringEstimator());
 
-	private static long EstimateResolvedIndexBytes(ResolvedIndex index) =>
-		256 + index.Edges.Sum(static edge => 192 + StringBytes(edge.Source) + StringBytes(edge.Target) +
-			StringBytes(edge.Reference) + edge.Reasons.Sum(StringBytes) + edge.Evidence.Sum(SiteBytes) +
-			edge.Candidates.Sum(StringBytes) + edge.DeclarationFiles.Sum(StringBytes)) +
-		index.Files.Sum(EstimateFileFactsBytes);
+	private static long EstimateFileFactsBytes(FileFacts facts, RetainedStringEstimator strings) =>
+		256 + strings.Add(facts.Path) + strings.Add(facts.ScopeId) + strings.Add(facts.ContentFingerprint) +
+		strings.Add(facts.StatusReason) +
+		facts.ErrorNodeKinds.Sum(pair => strings.Add(pair.Key) + 16) +
+		facts.Declarations.Sum(declaration => 160 + strings.Add(declaration.Identity.ScopeId) +
+			strings.Add(declaration.Identity.QualifiedName) + strings.Add(declaration.Identity.FileScope) +
+			strings.Add(declaration.ContainingNamespace) +
+			declaration.DeclarationSites.Sum(site => SiteBytes(site, strings))) +
+		facts.Imports.Sum(import => 128 + strings.Add(import.Specifier) + strings.Add(import.ImportedName) +
+			strings.Add(import.Alias) + SiteBytes(import.Site, strings)) +
+		facts.References.Sum(reference => 160 + strings.Add(reference.Name) + strings.Add(reference.SyntaxKind) +
+			strings.Add(reference.Reason) + strings.Add(reference.Target) +
+			(reference.Candidates?.Sum(strings.Add) ?? 0) +
+			strings.Add(reference.ContainingNamespace) + strings.Add(reference.ContainingType) +
+			SiteBytes(reference.Site, strings)) +
+		facts.ContextNamespaces.Sum(strings.Add) +
+		facts.Aliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
+		facts.GlobalContextNamespaces.Sum(strings.Add) +
+		facts.GlobalAliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
+		facts.TypeParameters.Sum(strings.Add);
 
-	private static long SiteBytes(SourceSite site) =>
-		64 + StringBytes(site.File) + StringBytes(site.Evidence);
+	private static long EstimateResolvedIndexBytes(ResolvedIndex index)
+	{
+		var strings = new RetainedStringEstimator();
+		return 256 + index.Edges.Sum(edge => 192 + strings.Add(edge.Source) + strings.Add(edge.Target) +
+			strings.Add(edge.Reference) + edge.Reasons.Sum(strings.Add) +
+			edge.Evidence.Sum(site => SiteBytes(site, strings)) +
+			edge.Candidates.Sum(strings.Add) + edge.DeclarationFiles.Sum(strings.Add)) +
+			index.Files.Sum(file => EstimateFileFactsBytes(file, strings));
+	}
 
-	private static long StringBytes(string? value) => value is null ? 0 : 24 + value.Length * 2L;
+	private static long SiteBytes(SourceSite site, RetainedStringEstimator strings) =>
+		64 + strings.Add(site.File) + strings.Add(site.Evidence);
+
+	private sealed class RetainedStringEstimator
+	{
+		private readonly HashSet<string> _seen = new(ReferenceEqualityComparer.Instance);
+
+		public long Add(string? value) =>
+			value is not null && _seen.Add(value) ? 24 + value.Length * 2L : 0;
+	}
 
 	private static ResolvedIndex GateResolvedIndex(ResolvedIndex index, IReadOnlySet<string> allowed)
 	{
