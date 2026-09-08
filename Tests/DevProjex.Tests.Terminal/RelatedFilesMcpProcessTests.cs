@@ -227,7 +227,11 @@ public sealed partial class McpServerProcessTests
 				TestContext.Current.CancellationToken);
 			var unsupportedText = Assert.IsType<TextContentBlock>(Assert.Single(unsupported.Content)).Text;
 			var closingBoundary = unsupportedText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
-			var noFacts = unsupportedText.IndexOf("[No facts] md is not supported", StringComparison.Ordinal);
+			// Dependency diagnostics intentionally use constant trusted reasons so project-controlled
+			// extensions cannot be echoed outside the untrusted-data boundary.
+			var noFacts = unsupportedText.IndexOf(
+				"[No facts] file language is not supported by the dependency engine yet",
+				StringComparison.Ordinal);
 			Assert.True(closingBoundary >= 0 && noFacts > closingBoundary, unsupportedText);
 		}
 
