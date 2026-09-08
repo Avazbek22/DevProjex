@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Xml.Linq;
 using DevProjex.Application.Context;
+using DevProjex.Application.Dependencies;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Dependencies;
 using DevProjex.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -150,7 +152,9 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("only the server startup line can (--exclude, --unrestricted, --allow-agent-exclusions)", Text(hidden), StringComparison.Ordinal);
 		Assert.DoesNotContain("pack_context", Text(hidden), StringComparison.Ordinal);
 		Assert.True(missing.IsError);
-		Assert.StartsWith("DPX-MCP-PATH-NOT-FOUND: path 'Missing.cs' does not exist", Text(missing), StringComparison.Ordinal);
+		Assert.StartsWith("DPX-MCP-PATH-NOT-FOUND: request failed.", Text(missing), StringComparison.Ordinal);
+		Assert.Contains("DPX-MCP-PATH-NOT-FOUND: path 'Missing.cs' does not exist", Text(missing), StringComparison.Ordinal);
+		AssertSpotlighted(missing);
 		Assert.DoesNotContain("effective filters", Text(missing), StringComparison.Ordinal);
 
 		await using var delegated = await McpTestServer.StartAsync(
@@ -2215,7 +2219,7 @@ public sealed class McpServerIntegrationTests
 			Assert.Contains(McpErrorCodes.PayloadTruncated, Text(truncated), StringComparison.Ordinal);
 			Assert.Contains("max_depth", Text(truncated), StringComparison.Ordinal);
 			Assert.Contains("include_patterns", Text(truncated), StringComparison.Ordinal);
-			Assert.DoesNotContain("<untrusted-data-", Text(truncated), StringComparison.Ordinal);
+			AssertSpotlighted(truncated);
 		});
 		Assert.NotEqual(true, truncatedText.IsError);
 		AssertTrustedTrailerOutsideSpotlight(
@@ -2276,7 +2280,7 @@ public sealed class McpServerIntegrationTests
 			Assert.True(structured.IsError);
 			Assert.Contains(McpErrorCodes.PayloadTruncated, Text(structured), StringComparison.Ordinal);
 			Assert.Contains("pass max_depth: 2 for a complete document", Text(structured), StringComparison.Ordinal);
-			Assert.DoesNotContain("<untrusted-data-", Text(structured), StringComparison.Ordinal);
+			AssertSpotlighted(structured);
 		}
 
 		var fittingJson = await server.CallAsync(
@@ -3887,6 +3891,7 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Skipped: 1 file (5 estimated tokens).", text, StringComparison.Ordinal);
 		Assert.Contains("B-budget-skip.txt", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("A-too-large.txt", text, StringComparison.Ordinal);
+		AssertBudgetAccounting(text, expectsStoredDocument: false);
 	}
 
 	[Fact]
@@ -3913,6 +3918,7 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Included: 1 file", text, StringComparison.Ordinal);
 		Assert.Contains("Skipped: 1 file", text, StringComparison.Ordinal);
 		Assert.Contains("B-skipped.txt", text, StringComparison.Ordinal);
+		AssertBudgetAccounting(text, expectsStoredDocument: true);
 	}
 
 	[Fact]
@@ -5740,6 +5746,23 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("[No matches]", Text(placeholder), StringComparison.Ordinal);
 	}
 
+	private static void AssertBudgetAccounting(string text, bool expectsStoredDocument)
+	{
+		var accounting = Regex.Match(
+			text,
+			@"\[Budget accounting\] content ≈ (?<content>\d+) of (?<budget>\d+) tokens · budget report ≈ (?<report>\d+)(?: · stored document ≈ (?<stored>\d+))? · reply ≈ (?<reply>\d+)");
+		Assert.True(accounting.Success, text);
+		Assert.Equal(expectsStoredDocument, accounting.Groups["stored"].Success);
+		Assert.Equal((text.Length + 3L) / 4L, long.Parse(accounting.Groups["reply"].Value));
+		if (!expectsStoredDocument)
+			return;
+		var header = Regex.Match(text, @"Pack stored as '[^']+' \((?<characters>\d+) characters,");
+		Assert.True(header.Success, text);
+		Assert.Equal(
+			(long.Parse(header.Groups["characters"].Value) + 3L) / 4L,
+			long.Parse(accounting.Groups["stored"].Value));
+	}
+
 	[Fact]
 	public async Task SearchProjectMergesOverlappingContextGroupsWithoutRepeatingLines()
 	{
@@ -5788,48 +5811,143 @@ public sealed class McpServerIntegrationTests
 		Assert.NotEqual(true, result.IsError);
 		Assert.Contains("supported means facts were extracted for a recognized language", text, StringComparison.Ordinal);
 		Assert.Contains("unsupported means no supported extractor was available", text, StringComparison.Ordinal);
-		Assert.Contains("[Facts configuration] scopes=", text, StringComparison.Ordinal);
-		Assert.Contains("· type=corrupt · path=tsconfig.json ·", text, StringComparison.Ordinal);
-		Assert.Contains("compilerOptions must be an object", text, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains(
+			"[Dependency configuration] problems=1 · missing=0 · corrupt=1 · unsupported-semantics=0 · affected-scopes=1",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains("[Dependency configuration] tsconfig.json · corrupt", ExtractSpotlightBody(text), StringComparison.Ordinal);
+		Assert.DoesNotContain("compilerOptions must be an object", text, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task EveryMcpToolKeepsHostileProjectTextInsideTheUntrustedBoundary(bool hidePrivateData)
+	{
+		const string sentinel = "MCP_TRUST_SENTINEL_7f9a";
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project-" + sentinel + "]_'_&");
+		var scopeName = "scope-" + sentinel + "]_'_&";
+		var scope = Directory.CreateDirectory(Path.Combine(project, scopeName)).FullName;
+		var seed = "seed-" + sentinel + "]_'_&.ts";
+		var large = "large-" + sentinel + "]_'_&.txt";
+		File.WriteAllText(Path.Combine(project, "small.txt"), "visible " + sentinel + "\n");
+		File.WriteAllText(Path.Combine(project, "unsupported." + sentinel), "unsupported\n");
+		File.WriteAllText(Path.Combine(project, large), sentinel + "\n" + new string('x', 70_000));
+		File.WriteAllText(Path.Combine(scope, seed), "export const value = 1;\n");
+		var hostileKey = sentinel + new string('q', 4_096) + "\n[]{}'\"";
+		File.WriteAllText(
+			Path.Combine(scope, "tsconfig.json"),
+			JsonSerializer.Serialize(new
+			{
+				compilerOptions = new
+				{
+					paths = new Dictionary<string, object> { [hostileKey] = "not-an-array" }
+				}
+			}));
+		for (var index = 0; index < 9; index++)
+		{
+			var extraScope = Directory.CreateDirectory(
+				Path.Combine(project, $"scope-{sentinel}-extra-{index:D2}")).FullName;
+			File.WriteAllText(Path.Combine(extraScope, "tsconfig.json"), "{\"compilerOptions\":null}");
+			File.WriteAllText(Path.Combine(extraScope, $"source-{index:D2}.ts"), "export const value = 1;\n");
+		}
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			hidePrivateData: hidePrivateData);
+
+		var normalResults = new List<CallToolResult>
+		{
+			await server.CallAsync("list_projects"),
+			await server.CallAsync("get_tree", new Dictionary<string, object?> { ["format"] = "text" }),
+			await server.CallAsync("analyze", new Dictionary<string, object?> { ["top_files"] = 10 }),
+			await server.CallAsync("pack_context", new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "small.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			}),
+			await server.CallAsync("search_project", new Dictionary<string, object?>
+			{
+				["pattern"] = sentinel,
+				["ignore_case"] = false,
+				["context_lines"] = 0
+			}),
+			await server.CallAsync("related_files", new Dictionary<string, object?>
+			{
+				["path"] = Path.Combine(scopeName, seed)
+			}),
+			await server.CallAsync("related_files", new Dictionary<string, object?>
+			{
+				["path"] = "unsupported." + sentinel
+			}),
+			await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "small.txt" })
+		};
+		var stored = await server.CallAsync("pack_context", new Dictionary<string, object?>
+		{
+			["paths"] = new[] { large },
+			["view"] = "content",
+			["format"] = "text"
+		});
+		var storedText = Text(stored);
+		Assert.Contains("Pack stored as '", storedText, StringComparison.Ordinal);
+		normalResults.Add(stored);
+		normalResults.Add(await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = ExtractPackId(storedText) }));
+
+		var resultNames = new[]
+		{
+			"list_projects", "get_tree", "analyze", "pack_context-inline", "search_project",
+			"related_files", "related_files-no-facts", "get_file", "pack_context-stored", "read_pack"
+		};
+		for (var index = 0; index < normalResults.Count; index++)
+		{
+			var result = normalResults[index];
+			Assert.NotEqual(true, result.IsError);
+			AssertOccurrencesAreSpotlighted(AllText(result), sentinel, resultNames[index]);
+		}
+		var relatedText = AllText(normalResults[5]);
+		Assert.DoesNotContain(hostileKey, relatedText, StringComparison.Ordinal);
+		Assert.Contains("[Dependency configuration] problems=10", relatedText, StringComparison.Ordinal);
+		Assert.Contains("[Dependency configuration] and 2 more", relatedText, StringComparison.Ordinal);
+
+		foreach (var tool in ExpectedTools)
+		{
+			var error = await server.CallAsync(
+				tool,
+				new Dictionary<string, object?> { ["unexpected-" + sentinel] = true });
+			Assert.True(error.IsError);
+			AssertOccurrencesAreSpotlighted(AllText(error), sentinel, tool + " error");
+		}
 	}
 
 	[Theory]
 	[InlineData("list_projects")]
 	[InlineData("get_tree")]
-	public async Task FirstProjectDiscoveryCallWarmsDependencyFactsWithoutDelayingItsResponse(string toolName)
+	public async Task ProjectDiscoveryDoesNotExtractDependencyFactsOrReadFileContent(string toolName)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(Path.Combine(project, "target.ts"), "export default 1;\n");
 		File.WriteAllText(Path.Combine(project, "main.ts"), "import value from './target';\n");
-		McpProjectService? projectService = null;
+		var extractor = new TreeSitterDependencyFactExtractor();
+		var dependencyFacts = new DependencyFactsEngine(
+			extractor,
+			new FileDependencyConfigurationProvider());
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
 		await using var server = await McpTestServer.StartAsync(
 			project,
 			workspace.Path,
-			projectServiceCreated: created => projectService = created);
+			dependencyFactsEngine: dependencyFacts);
 
 		var discovery = await server.CallAsync(toolName);
 		Assert.NotEqual(true, discovery.IsError);
-		var service = Assert.IsType<McpProjectService>(projectService);
-		Assert.True(await service.WaitForDependencyWarmupsAsync(TestContext.Current.CancellationToken));
-		var plan = await service.BuildPlanAsync(
-			project,
-			branch: null,
-			paths: null,
-			includePatterns: null,
-			excludePatterns: null,
-			profile: null,
-			trackedOnly: false,
-			gitScope: null,
-			maximumFileBytes: null,
-			TestContext.Current.CancellationToken,
-			includeOutputMetrics: false);
-		var warmed = await service.DependencyFactsEngine.IndexAsync(
-			plan.SourceRoot,
-			plan.IncludedFiles,
-			cancellationToken: TestContext.Current.CancellationToken);
-
-		Assert.True(warmed.Metrics.ResolutionCacheHit);
+		var diagnostics = measurement.Capture();
+		Assert.Equal(0, extractor.ParseCount);
+		Assert.Equal(0, diagnostics.FullFileReads);
+		Assert.Equal(0, diagnostics.SourceReadBytes);
 	}
 
 	private static int[] ExtractPackLineMarkers(string text) =>
@@ -5875,7 +5993,7 @@ public sealed class McpServerIntegrationTests
 		var structured = result.StructuredContent.Value;
 		AssertMatchesSchema(structured, outputSchema);
 
-		using var textDocument = JsonDocument.Parse(Text(result));
+		using var textDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(result)));
 		Assert.True(JsonElement.DeepEquals(structured, textDocument.RootElement));
 		var wireResult = server.GetLastToolCallWireResult();
 		Assert.True(wireResult.TryGetProperty("structuredContent", out var wireStructured));
@@ -6055,6 +6173,24 @@ public sealed class McpServerIntegrationTests
 					$"</untrusted-data-{Regex.Escape(opening.Groups[1].Value)}>")
 					.Cast<Match>());
 		}
+	}
+
+	private static void AssertOccurrencesAreSpotlighted(string text, string sentinel, string context)
+	{
+		var spotlightRanges = Regex.Matches(
+			text,
+			@"<untrusted-data-(?<nonce>[0-9a-f]{24})>\n(?<body>[\s\S]*?)\n</untrusted-data-\k<nonce>>")
+			.Cast<Match>()
+			.Select(static match => (Start: match.Groups["body"].Index, End: match.Groups["body"].Index + match.Groups["body"].Length))
+			.ToArray();
+		Assert.True(spotlightRanges.Length > 0, $"{context} had no spotlight: {text}");
+		var occurrences = Regex.Matches(text, Regex.Escape(sentinel)).Cast<Match>().ToArray();
+		Assert.True(occurrences.Length > 0, $"{context} had no sentinel: {text}");
+		Assert.All(
+			occurrences,
+			occurrence => Assert.Contains(
+				spotlightRanges,
+				range => occurrence.Index >= range.Start && occurrence.Index + occurrence.Length <= range.End));
 	}
 
 	private static void AssertSecretRedactedAndSpotlighted(CallToolResult result)
@@ -6408,7 +6544,7 @@ public sealed class McpServerIntegrationTests
 			GitFilteringMode? gitMode = null,
 			IReadOnlyCollection<ProjectExclusion>? exclusions = null,
 			bool agentExclusions = false,
-			Action<McpProjectService>? projectServiceCreated = null)
+			DependencyFactsEngine? dependencyFactsEngine = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -6420,19 +6556,21 @@ public sealed class McpServerIntegrationTests
 				TestContext.Current.CancellationToken,
 				() => Path.Combine(sandbox, "app-data"),
 				Path.Combine(sandbox, "temp"),
-				servicesCreated is null
+				servicesCreated is null && dependencyFactsEngine is null
 					? null
 					: roots =>
 					{
-						servicesCreated();
-						return McpServices.Create(roots, () => Path.Combine(sandbox, "app-data"));
-				},
+						servicesCreated?.Invoke();
+						return McpServices.Create(
+							roots,
+							() => Path.Combine(sandbox, "app-data"),
+							dependencyFactsEngine);
+					},
 				allowRemote,
 				remoteServicesFactory,
 				gitMode,
 				exclusions,
-				agentExclusions,
-				projectServiceCreated);
+				agentExclusions);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

@@ -27,7 +27,7 @@ internal static class McpToolResults
 		[
 			new TextContentBlock
 			{
-				Text = JsonSerializer.Serialize(structured, StructuredTextOptions)
+				Text = McpSpotlight.Wrap(JsonSerializer.Serialize(structured, StructuredTextOptions))
 			}
 		];
 		if (!string.IsNullOrWhiteSpace(notice))
@@ -42,7 +42,14 @@ internal static class McpToolResults
 	public static CallToolResult Error(McpToolException exception) =>
 		new()
 		{
-			Content = [new TextContentBlock { Text = McpTextEscaping.EscapeSingleLine(exception.Message) }],
+			Content =
+			[
+				new TextContentBlock
+				{
+					Text = $"{exception.Code}: request failed.\n\n" +
+					       McpSpotlight.Wrap(McpTextEscaping.EscapeSingleLine(exception.Message))
+				}
+			],
 			IsError = true
 		};
 

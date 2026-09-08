@@ -49,7 +49,8 @@ internal sealed class McpServices : IDisposable
 
 	internal static McpServices Create(
 		McpProjectRootJail roots,
-		Func<string>? appDataPathProvider = null)
+		Func<string>? appDataPathProvider = null,
+		DependencyFactsEngine? dependencyFactsEngine = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
@@ -104,10 +105,10 @@ internal sealed class McpServices : IDisposable
 			redactionSession.Dispose();
 			throw;
 		}
-		DependencyFactsEngine dependencyFactsEngine;
+		DependencyFactsEngine resolvedDependencyFactsEngine;
 		try
 		{
-			dependencyFactsEngine = new DependencyFactsEngine(
+			resolvedDependencyFactsEngine = dependencyFactsEngine ?? new DependencyFactsEngine(
 				new TreeSitterDependencyFactExtractor(),
 				new FileDependencyConfigurationProvider());
 		}
@@ -148,12 +149,12 @@ internal sealed class McpServices : IDisposable
 				new GitScopePathProvider(gitPathComparisonSemanticsResolver),
 				redactionSession,
 				compressionSession,
-				dependencyFactsEngine,
+				resolvedDependencyFactsEngine,
 				new SecretRedactionOutputPreparer(contentAnalyzer, preparedContentAnalyzer));
 		}
 		catch
 		{
-			dependencyFactsEngine.Dispose();
+			resolvedDependencyFactsEngine.Dispose();
 			compressionSession.Dispose();
 			redactionSession.Dispose();
 			throw;
