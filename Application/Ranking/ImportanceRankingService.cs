@@ -451,6 +451,16 @@ public sealed class ImportanceRankingService(
 			{
 				continue;
 			}
+			if (edge.DeclarationFiles.Count == 0 && edge.Target is { } singleTarget)
+			{
+				if (nodeByPath.TryGetValue(singleTarget, out var targetNode) && sourceNode != targetNode)
+				{
+					var directWeights = outgoingWeights[sourceNode] ??= [];
+					if (!directWeights.TryGetValue(targetNode, out var existing) || existing < 1d)
+						directWeights[targetNode] = 1d;
+				}
+				continue;
+			}
 			var targets = (edge.DeclarationFiles.Count > 0
 					? edge.DeclarationFiles
 					: edge.Target is null ? [] : [edge.Target])
