@@ -49,8 +49,15 @@ reason can cross the current manifest gate, and self-file relationships are supp
 
 C# compilation scopes come from `.csproj` ownership and `ProjectReference` entries read as XML.
 Both `/` and `\` in an MSBuild `Include` are normalized as project-reference separators on every OS;
-this normalization never applies to ordinary Unix filenames. Global usings and aliases are shared
-within the owning scope; type parameters shadow global symbols only inside the lexical span of their
+this normalization never applies to ordinary Unix filenames. Project-reference visibility is
+transitive, matching the SDK default: if A references B and B references C, source in A can resolve
+declarations from C. The configuration model does not yet expose
+`DisableTransitiveProjectReferences`; a project that opts out cannot currently narrow that visibility.
+Global usings and aliases are shared
+within the owning scope. Non-global usings and aliases apply only inside their compilation-unit or
+namespace-block lexical scope; repeated blocks for the same namespace do not leak aliases into one
+another. An alias is expanded only when it is the first component of the reference, and `global::`
+bypasses alias expansion. Type parameters shadow global symbols only inside the lexical span of their
 declaring type or method, while a qualified name is never suppressed by its final component.
 The `global::` qualifier is retained as absolute-lookup evidence: it bypasses type-parameter
 shadowing and never falls back through the source namespace or imported namespaces;
@@ -78,6 +85,9 @@ already present in the manifest. Exact `paths` entries precede wildcard entries;
 wildcards, the longest prefix before `*` wins. Only that pattern's targets are tried, in declaration
 order. A wildcard whose prefix and suffix overlap in the specifier is not a match; the same guard
 applies to package maps. `package.json` `exports`, conditions, and explicit `null` blocking remain authoritative.
+Conditional package targets distinguish syntax from the source module kind: runtime `import(...)`
+selects the `import` condition even in a `.cts` or `.cjs` file, while literal `require(...)` selects
+the `require` condition.
 Directory-index fallback is allowed by `node10` and `bundler`; under `node16`/`nodenext`, an ESM
 relative import needs an explicit extension while a supported CommonJS context can use extensionless
 and directory probes. `.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ordinary
@@ -102,7 +112,9 @@ accepted with or without a BOM; malformed byte sequences remain corrupt.
 Python relative imports start at the source package. `from module import Name` first checks classes,
 functions, and static import aliases provided by either an ordinary module or a package initializer.
 Only module-level class and function declarations provide importable names; a method or nested class
-cannot satisfy `from module import Name`. Import syntax is read from parsed nodes, so parenthesized
+cannot satisfy `from module import Name`. Imports inside a function or class still create a dependency
+from their file to the imported module, but they do not become names exported by the containing
+module. Import syntax is read from parsed nodes, so parenthesized
 multiline lists, comments, aliases, relative forms, and wildcard imports have the same semantics as
 their single-line forms.
 Only a package may then fall back to a child module of that name. Regular and namespace-package portions are
@@ -129,9 +141,16 @@ C#, TypeScript/TSX/JavaScript, and Python adapters use shipped Tree-sitter gramm
 content fingerprint; its syntax tree is disposed immediately and only compact facts remain. Files
 without an adapter are counted as unsupported instead of disappearing. Read, grammar, and query
 failures are counted separately as extraction failures.
+The same per-file handling applies before language dispatch: if an unsupported file disappears or its
+metadata cannot be read after selection, it is reported as a transient extraction failure and is not
+retained in the facts cache; it does not abort the rest of the index.
 
-The default safety limits are 2 Mi characters per source file, 50,000 facts per file, 20,000 edges
-per file, and 5,000,000 units of resolver work per index pass. A limit produces an explicit
+The default safety limits are 2 Mi characters per source file, 50,000 useful facts per file,
+1,000,000 raw query captures per file, 20,000 edges per file, and 5,000,000 units of resolver work
+per index pass. Query captures that do not describe a supported declaration, import, or reference do
+not consume the useful-fact budget. The separate raw-capture ceiling bounds traversal of noisy syntax;
+reaching either fact ceiling produces `ExtractionFailed` with `fact limit exceeded`, never a supported
+file with silently missing dependencies. Any limit produces an explicit
 `Unresolved` fact or extraction status with a reason; it is never reported as an empty successful
 analysis. Source decoding is bounded by decoded characters rather than bytes: UTF-8, UTF-16, and
 UTF-32 BOMs are honored, incomplete sequences fail closed, and reading stops as soon as the engine
@@ -199,9 +218,11 @@ change serialized results.
 contains a portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
 and a cross-scope marker when applicable. Ambiguous references remain one group with their candidate
 list. Coverage reports manifest files, supported and unsupported languages, and extraction failures.
-Reason and configuration-diagnostic text uses a fixed vocabulary; project-controlled symbol names,
-module specifiers, mapping keys, and paths remain in their dedicated structured fields rather than
-being interpolated into trusted explanatory text.
+File-status reasons and configuration diagnostics use a fixed vocabulary; project-controlled mapping
+keys and paths remain in their dedicated structured fields rather than being interpolated into trusted
+diagnostic text. Edge evidence is project data: it deliberately includes the referenced symbol or
+module specifier together with its source line. MCP keeps that evidence inside the untrusted-data block,
+and CLI JSON returns it as result data.
 An unsupported seed is a successful empty result with an explicit diagnostic; a supported seed with
 no edges reports that no related files exist in the effective selection. At most eight configuration
 diagnostic lines are rendered in CLI text output; JSON retains the complete safe array.

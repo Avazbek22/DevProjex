@@ -54,6 +54,12 @@ public sealed record SourceSite(string File, int Line, string Evidence);
 
 public sealed record TypeParameterScope(string Name, int StartIndex, int EndIndex);
 
+public sealed record CSharpUsingDirective(
+	string Target,
+	string? Alias,
+	int ScopeStartIndex,
+	int ScopeEndIndex);
+
 public sealed record SymbolIdentity(
 	string ScopeId,
 	LanguageId LanguageId,
@@ -70,6 +76,13 @@ public sealed record DeclarationFact(
 	public string? ContainingType { get; init; }
 }
 
+public enum ModuleImportKind
+{
+	StaticImport,
+	DynamicImport,
+	Require
+}
+
 public sealed record ImportFact(
 	string Specifier,
 	string? ImportedName,
@@ -80,7 +93,11 @@ public sealed record ImportFact(
 	ResolutionStatus Status = ResolutionStatus.Unresolved,
 	string Reason = "not resolved yet",
 	IReadOnlyList<string>? Candidates = null,
-	string? Target = null);
+	string? Target = null)
+{
+	public string? ContainingDeclaration { get; init; }
+	public ModuleImportKind ImportKind { get; init; }
+}
 
 public sealed record ReferenceFact(
 	EvidenceLayer Layer,
@@ -120,6 +137,7 @@ public sealed record FileFacts(
 {
 	public bool CanCache { get; init; } = true;
 	public IReadOnlyList<TypeParameterScope> TypeParameterScopes { get; init; } = [];
+	public IReadOnlyList<CSharpUsingDirective> CSharpUsingDirectives { get; init; } = [];
 }
 
 public sealed record DependencyEdge(

@@ -15,13 +15,15 @@ internal sealed record DependencySyntaxCapture(
 	bool IsFileLocal = false,
 	string? ContainingDeclaration = null,
 	DependencyImportSyntax? ImportSyntax = null,
-	int CapturedNameStartIndex = -1);
+	int CapturedNameStartIndex = -1,
+	string? Evidence = null);
 
 internal sealed record DependencyImportSyntax(
 	string Specifier,
 	int RelativeLevel,
 	IReadOnlyList<DependencyImportBinding> Bindings,
-	bool HasLiteralSpecifier = true);
+	bool HasLiteralSpecifier = true,
+	ModuleImportKind ImportKind = ModuleImportKind.StaticImport);
 
 internal sealed record DependencyImportBinding(string Name, string? Alias, bool IsWildcard = false);
 
@@ -34,7 +36,19 @@ internal sealed record DependencyExtractionContext(
 	bool HasSyntaxErrors,
 	IReadOnlyDictionary<string, int> ErrorNodeKinds,
 	IReadOnlyList<DependencySyntaxCapture> Declarations,
-	IReadOnlyList<DependencySyntaxCapture> References);
+	IReadOnlyList<DependencySyntaxCapture> References)
+{
+	public DependencyAdapterWorkCounter Work { get; } = new();
+}
+
+internal sealed class DependencyAdapterWorkCounter
+{
+	public long VisitedRanges { get; private set; }
+	public long Comparisons { get; private set; }
+
+	public void VisitRange() => VisitedRanges++;
+	public void Compare() => Comparisons++;
+}
 
 internal interface IDependencyLanguageAdapter
 {
@@ -44,7 +58,7 @@ internal interface IDependencyLanguageAdapter
 internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageAdapter
 {
 	protected static SourceSite Site(DependencyExtractionContext context, DependencySyntaxCapture capture) =>
-		new(context.RelativePath, capture.Line, OneLine(capture.Text));
+		new(context.RelativePath, capture.Line, capture.Evidence ?? OneLine(capture.Text));
 
 	protected static string OneLine(string value)
 	{
@@ -76,6 +90,7 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 				fact.SourceStartIndex, fact.ContainingNamespace, fact.ContainingType, fact.IsGlobalQualified))
 			.Select(static group => group.First())
 			.OrderBy(static fact => fact.Site.Line)
+			.ThenBy(static fact => fact.SourceStartIndex)
 			.ThenBy(static fact => fact.Name, StringComparer.Ordinal)
 			.ToArray();
 
@@ -129,8 +144,11 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
 	{
 		var namespaces = ParseNamespaces(context.Declarations);
-		var aliases = ParseUsings(
+		var usingDirectives = ParseUsings(
 			context.Declarations,
+			namespaces,
+			context.Source.Length,
+			out var aliases,
 			out var usingNamespaces,
 			out var globalNamespaces,
 			out var globalAliases);
@@ -148,7 +166,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		var declarationCaptures = context.Declarations
 			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrEmpty(capture.CapturedName))
 			.ToArray();
-		var declarationScopes = BuildDeclarationScopes(declarationCaptures, namespaces);
+		var declarationScopes = BuildDeclarationScopes(declarationCaptures, namespaces, context.Work);
 		var declarations = new List<DeclarationFact>(declarationCaptures.Length);
 		foreach (var capture in declarationCaptures)
 		{
@@ -171,7 +189,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		var referenceCaptures = context.References
 			.Where(static capture => capture.Name.StartsWith("reference.", StringComparison.Ordinal))
 			.ToArray();
-		var referenceScopes = BuildReferenceScopes(referenceCaptures, declarationScopes.Ordered);
+		var referenceScopes = BuildReferenceScopes(referenceCaptures, declarationScopes.Ordered, context.Work);
 		var declarationOccurrences = declarationCaptures
 			.Where(static capture => capture.CapturedNameStartIndex >= 0)
 			.Select(static capture => (
@@ -199,7 +217,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			globalAliases,
 			typeParameters) with
 		{
-			TypeParameterScopes = typeParameterScopes
+			TypeParameterScopes = typeParameterScopes,
+			CSharpUsingDirectives = usingDirectives
 		};
 	}
 
@@ -209,7 +228,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		DeclarationScope? declarationScope,
 		IReadOnlyList<NamespaceSpan> namespaces)
 	{
-		var containingNamespace = declarationScope?.ContainingNamespace ?? FindContainingNamespace(capture, namespaces);
+		var containingNamespace = declarationScope?.ContainingNamespace ??
+			FindContainingNamespace(capture, namespaces, context.Work);
 		var containingType = declarationScope?.QualifiedName;
 		if (capture.Name == "reference.target_typed_object_creation")
 		{
@@ -237,7 +257,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 
 	private static DeclarationScopeIndex BuildDeclarationScopes(
 		IReadOnlyList<DependencySyntaxCapture> declarations,
-		IReadOnlyList<NamespaceSpan> namespaces)
+		IReadOnlyList<NamespaceSpan> namespaces,
+		DependencyAdapterWorkCounter work)
 	{
 		var byCapture = new Dictionary<DependencySyntaxCapture, DeclarationScope>(ReferenceEqualityComparer.Instance);
 		var orderedScopes = new List<DeclarationScope>(declarations.Count);
@@ -247,9 +268,10 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			         .ThenByDescending(static item => item.EndIndex)
 			         .ThenBy(static item => item.CapturedName, StringComparer.Ordinal))
 		{
-			while (active.TryPeek(out var current) && !Contains(current.Capture, capture))
+			work.VisitRange();
+			while (active.TryPeek(out var current) && !Contains(current.Capture, capture, work))
 				active.Pop();
-			var containingNamespace = FindContainingNamespace(capture, namespaces);
+			var containingNamespace = FindContainingNamespace(capture, namespaces, work);
 			var containingType = active.TryPeek(out var parent) ? parent.QualifiedName : null;
 			var qualifiedName = string.Join('.', new[]
 				{
@@ -266,7 +288,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 
 	private static IReadOnlyDictionary<DependencySyntaxCapture, DeclarationScope?> BuildReferenceScopes(
 		IReadOnlyList<DependencySyntaxCapture> references,
-		IReadOnlyList<DeclarationScope> declarations)
+		IReadOnlyList<DeclarationScope> declarations,
+		DependencyAdapterWorkCounter work)
 	{
 		var result = new Dictionary<DependencySyntaxCapture, DeclarationScope?>(ReferenceEqualityComparer.Instance);
 		var active = new Stack<DeclarationScope>();
@@ -275,32 +298,46 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			         .OrderBy(static item => item.StartIndex)
 			         .ThenBy(static item => item.EndIndex))
 		{
+			work.VisitRange();
 			while (declarationIndex < declarations.Count &&
 			       declarations[declarationIndex].Capture.StartIndex < reference.StartIndex)
 			{
 				var declaration = declarations[declarationIndex++];
-				while (active.TryPeek(out var current) && !Contains(current.Capture, declaration.Capture))
+				while (active.TryPeek(out var current) && !Contains(current.Capture, declaration.Capture, work))
 					active.Pop();
 				active.Push(declaration);
 			}
-			while (active.TryPeek(out var current) && !Contains(current.Capture, reference))
+			while (active.TryPeek(out var current) && !Contains(current.Capture, reference, work))
 				active.Pop();
 			result[reference] = active.TryPeek(out var containing) ? containing : null;
 		}
 		return result;
 	}
 
-	private static bool Contains(DependencySyntaxCapture container, DependencySyntaxCapture item) =>
-		container.StartIndex < item.StartIndex && container.EndIndex >= item.EndIndex;
+	private static bool Contains(
+		DependencySyntaxCapture container,
+		DependencySyntaxCapture item,
+		DependencyAdapterWorkCounter work)
+	{
+		work.Compare();
+		return container.StartIndex < item.StartIndex && container.EndIndex >= item.EndIndex;
+	}
 
 	private static string FindContainingNamespace(
 		DependencySyntaxCapture capture,
-		IReadOnlyList<NamespaceSpan> namespaces) =>
-		namespaces
-			.Where(item => item.Start <= capture.StartIndex && item.End >= capture.EndIndex)
-			.OrderBy(item => item.End - item.Start)
-			.Select(static item => item.Name)
-			.FirstOrDefault() ?? namespaces.FirstOrDefault(static item => item.FileScoped)?.Name ?? string.Empty;
+		IReadOnlyList<NamespaceSpan> namespaces,
+		DependencyAdapterWorkCounter work)
+	{
+		NamespaceSpan? closest = null;
+		foreach (var item in namespaces)
+		{
+			work.VisitRange();
+			work.Compare();
+			if (item.Start > capture.StartIndex || item.End < capture.EndIndex) continue;
+			if (closest is null || item.End - item.Start < closest.End - closest.Start) closest = item;
+		}
+		return closest?.Name ?? namespaces.FirstOrDefault(static item => item.FileScoped)?.Name ?? string.Empty;
+	}
 
 	private static ReferenceFact NewReference(
 		DependencyExtractionContext context,
@@ -333,8 +370,11 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				capture.StartIndex, capture.EndIndex, capture.NodeType == "file_scoped_namespace_declaration"))
 			.Where(static item => item.Name.Length > 0).ToArray();
 
-	private static IReadOnlyDictionary<string, string> ParseUsings(
+	private static IReadOnlyList<CSharpUsingDirective> ParseUsings(
 		IEnumerable<DependencySyntaxCapture> captures,
+		IReadOnlyList<NamespaceSpan> namespaceSpans,
+		int sourceLength,
+		out IReadOnlyDictionary<string, string> fileAliases,
 		out HashSet<string> namespaces,
 		out HashSet<string> globalNamespaces,
 		out IReadOnlyDictionary<string, string> globalAliases)
@@ -343,6 +383,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		globalNamespaces = new HashSet<string>(StringComparer.Ordinal);
 		var aliases = new Dictionary<string, string>(StringComparer.Ordinal);
 		var globals = new Dictionary<string, string>(StringComparer.Ordinal);
+		var directives = new List<CSharpUsingDirective>();
 		foreach (var capture in captures.Where(static capture => capture.Name == "context.using"))
 		{
 			var match = UsingRegex().Match(capture.Text);
@@ -350,13 +391,31 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				continue;
 			var target = match.Groups["target"].Value.Replace("global::", string.Empty, StringComparison.Ordinal);
 			var isGlobal = capture.Text.TrimStart().StartsWith("global using ", StringComparison.Ordinal);
-			if (match.Groups["alias"].Success)
-				(isGlobal ? globals : aliases)[match.Groups["alias"].Value] = target;
-			else
-				(isGlobal ? globalNamespaces : namespaces).Add(target);
+			var alias = match.Groups["alias"].Success ? match.Groups["alias"].Value : null;
+			if (isGlobal)
+			{
+				if (alias is null) globalNamespaces.Add(target);
+				else globals[alias] = target;
+				continue;
+			}
+			var lexicalNamespace = namespaceSpans
+				.Where(item => item.Start <= capture.StartIndex && item.End >= capture.EndIndex)
+				.OrderBy(item => item.End - item.Start)
+				.FirstOrDefault();
+			var scopeStart = lexicalNamespace?.Start ?? 0;
+			var scopeEnd = lexicalNamespace?.End ?? sourceLength;
+			directives.Add(new CSharpUsingDirective(target, alias, scopeStart, scopeEnd));
+			if (lexicalNamespace is not null) continue;
+			if (alias is null) namespaces.Add(target);
+			else aliases[alias] = target;
 		}
+		fileAliases = aliases;
 		globalAliases = globals;
-		return aliases;
+		return directives.OrderBy(static item => item.ScopeStartIndex)
+			.ThenBy(static item => item.ScopeEndIndex)
+			.ThenBy(static item => item.Alias, StringComparer.Ordinal)
+			.ThenBy(static item => item.Target, StringComparer.Ordinal)
+			.ToArray();
 	}
 
 	private static string SimpleName(string qualified)
@@ -424,17 +483,26 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 			{
 				yield return new ImportFact(
 					string.Empty, null, null, false, 0, Site(context, capture),
-					Reason: "module specifier is not a string literal");
+					Reason: "module specifier is not a string literal")
+				{
+					ImportKind = syntax.ImportKind
+				};
 				yield break;
 			}
 			if (syntax.Bindings.Count == 0)
 			{
-				yield return new ImportFact(syntax.Specifier, null, null, false, 0, Site(context, capture));
+				yield return new ImportFact(syntax.Specifier, null, null, false, 0, Site(context, capture))
+				{
+					ImportKind = syntax.ImportKind
+				};
 				yield break;
 			}
 			foreach (var binding in syntax.Bindings)
 				yield return new ImportFact(syntax.Specifier, binding.Name, binding.Alias,
-					binding.IsWildcard, 0, Site(context, capture));
+					binding.IsWildcard, 0, Site(context, capture))
+				{
+					ImportKind = syntax.ImportKind
+				};
 			yield break;
 		}
 	}
@@ -496,10 +564,13 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 	{
 		if (capture.ImportSyntax is not { } syntax) yield break;
 		foreach (var binding in syntax.Bindings)
-			yield return capture.Name == "import.direct"
+			yield return (capture.Name == "import.direct"
 				? new ImportFact(binding.Name, null, binding.Alias, false, 0, Site(context, capture))
 				: new ImportFact(syntax.Specifier, binding.Name, binding.Alias,
-					binding.IsWildcard, syntax.RelativeLevel, Site(context, capture));
+					binding.IsWildcard, syntax.RelativeLevel, Site(context, capture))) with
+			{
+				ContainingDeclaration = capture.ContainingDeclaration
+			};
 	}
 
 	private static FileFacts Failed(DependencyExtractionContext context) => new(

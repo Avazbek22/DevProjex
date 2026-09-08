@@ -14,11 +14,18 @@ public sealed partial class McpServerProcessTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		workspace.WriteFile("project/package.json", "{\"imports\":{\"#dual\":{\"import\":\"./import.mts\",\"require\":\"./require.cts\"}}}\n");
 		workspace.WriteFile("project/register.ts", "export const ready = true;\n");
 		workspace.WriteFile("project/main.ts", "import \"./register.js\";\n");
+		workspace.WriteFile("project/import.mts", "export const value = 1;\n");
+		workspace.WriteFile("project/require.cts", "export const value = 2;\n");
+		workspace.WriteFile("project/dual.cts", "import('#dual'); require('#dual');\n");
 		workspace.WriteFile("project/pyproject.toml", "[project]\nname = \"fixture\"\n");
+		workspace.WriteFile("project/impl.py", "class Item: pass\n");
 		workspace.WriteFile("project/model.py", "class Container:\n    def nested(self): pass\n\nclass Item: pass\n");
 		workspace.WriteFile("project/consumer.py", "from model import (\n    Item,\n)\n");
+		workspace.WriteFile("project/local_model.py", "def loader():\n    from impl import Item as LocalItem\n");
+		workspace.WriteFile("project/local_consumer.py", "from local_model import LocalItem\n");
 		var startInfo = new ProcessStartInfo("dotnet")
 		{
 			UseShellExecute = false,
@@ -50,11 +57,29 @@ public sealed partial class McpServerProcessTests
 			var python = await client.CallToolAsync("related_files",
 				new Dictionary<string, object?> { ["path"] = "consumer.py", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
-			Assert.Contains("register.ts", Assert.IsType<TextContentBlock>(Assert.Single(typeScript.Content)).Text,
-				StringComparison.Ordinal);
+			var conditional = await client.CallToolAsync("related_files",
+				new Dictionary<string, object?> { ["path"] = "dual.cts", ["direction"] = "dependencies" },
+				progress: null, options: null, TestContext.Current.CancellationToken);
+			var localPython = await client.CallToolAsync("related_files",
+				new Dictionary<string, object?> { ["path"] = "local_consumer.py", ["direction"] = "dependencies" },
+				progress: null, options: null, TestContext.Current.CancellationToken);
+			var localModel = await client.CallToolAsync("related_files",
+				new Dictionary<string, object?> { ["path"] = "local_model.py", ["direction"] = "dependencies" },
+				progress: null, options: null, TestContext.Current.CancellationToken);
+			var typeScriptText = Assert.IsType<TextContentBlock>(Assert.Single(typeScript.Content)).Text;
+			Assert.Contains("register.ts", typeScriptText, StringComparison.Ordinal);
+			Assert.Contains("import ./register.js at line 1", typeScriptText, StringComparison.Ordinal);
+			var conditionalText = Assert.IsType<TextContentBlock>(Assert.Single(conditional.Content)).Text;
+			Assert.Contains("import.mts", conditionalText, StringComparison.Ordinal);
+			Assert.Contains("require.cts", conditionalText, StringComparison.Ordinal);
 			var pythonText = Assert.IsType<TextContentBlock>(Assert.Single(python.Content)).Text;
 			Assert.Contains("model.py", pythonText, StringComparison.Ordinal);
 			Assert.DoesNotContain("nested", pythonText, StringComparison.Ordinal);
+			var localPythonText = Assert.IsType<TextContentBlock>(Assert.Single(localPython.Content)).Text;
+			Assert.DoesNotContain("impl.py", localPythonText, StringComparison.Ordinal);
+			Assert.Contains("[No related files]", localPythonText, StringComparison.Ordinal);
+			Assert.Contains("impl.py", Assert.IsType<TextContentBlock>(Assert.Single(localModel.Content)).Text,
+				StringComparison.Ordinal);
 		}
 		process.StandardInput.Close();
 		await process.WaitForExitAsync(TestContext.Current.CancellationToken)

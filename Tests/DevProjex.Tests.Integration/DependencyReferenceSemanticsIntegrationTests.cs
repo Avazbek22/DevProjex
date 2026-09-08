@@ -173,6 +173,9 @@ public sealed class DependencyReferenceSemanticsIntegrationTests
 		var imports = result.Files.Single(file => file.Path == "main.ts").Imports;
 		Assert.Equal(8, imports.Count(import => import.Specifier == "./register.js"));
 		Assert.Equal(2, imports.Count(import => import.Reason == "module specifier is not a string literal"));
+		Assert.Equal(6, imports.Count(import => import.ImportKind == ModuleImportKind.StaticImport));
+		Assert.Equal(2, imports.Count(import => import.ImportKind == ModuleImportKind.Require));
+		Assert.Equal(2, imports.Count(import => import.ImportKind == ModuleImportKind.DynamicImport));
 		var edges = result.Edges.Where(edge => edge.Source == "main.ts").ToArray();
 		var resolved = Assert.Single(edges, edge => edge.Reference == "./register.js" &&
 			edge.Status == ResolutionStatus.Resolved && edge.Target == "register.ts");

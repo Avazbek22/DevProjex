@@ -122,7 +122,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					source.LanguageId);
 				if (source.PreparedStatus != DependencyFileStatus.Supported)
 				{
-					var extracted = _extractor.Extract(source, _limits);
+					var extracted = _extractor.Extract(source, _limits, token);
 					facts[index] = extracted;
 					cacheable[index] = source.CanCache && extracted.CanCache;
 					progress?.Report(new DependencyIndexProgress(
@@ -132,7 +132,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				}
 				var key = CreateFileCacheKey(source);
 				var created = new Lazy<Task<FileFacts>>(
-					() => Task.Run(() => _extractor.Extract(source, _limits), token),
+					() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
 					LazyThreadSafetyMode.ExecutionAndPublication);
 				var lazy = _fileCache.GetOrAdd(key, created);
 				if (ReferenceEquals(lazy, created))
@@ -361,7 +361,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			path,
 			status,
 			edges.SelectMany(static edge => edge.Reasons.Concat(edge.Evidence.Select(site =>
-				$"{EvidenceLabel(edge.Layer)} at line {site.Line}")))
+				$"{EvidenceLabel(edge.Layer)} {edge.Reference} at line {site.Line}")))
 				.Concat(declarationPartReasons)
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
 			edges.SelectMany(static edge => edge.Candidates).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
@@ -616,7 +616,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			strings.Add(declaration.ContainingNamespace) +
 			declaration.DeclarationSites.Sum(site => SiteBytes(site, strings))) +
 		facts.Imports.Sum(import => 128 + strings.Add(import.Specifier) + strings.Add(import.ImportedName) +
-			strings.Add(import.Alias) + SiteBytes(import.Site, strings)) +
+			strings.Add(import.Alias) + strings.Add(import.ContainingDeclaration) + SiteBytes(import.Site, strings)) +
 		facts.References.Sum(reference => 160 + strings.Add(reference.Name) + strings.Add(reference.SyntaxKind) +
 			strings.Add(reference.Reason) + strings.Add(reference.Target) +
 			(reference.Candidates?.Sum(strings.Add) ?? 0) +
@@ -627,7 +627,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		facts.GlobalContextNamespaces.Sum(strings.Add) +
 		facts.GlobalAliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
 		facts.TypeParameters.Sum(strings.Add) +
-		facts.TypeParameterScopes.Sum(scope => 40 + strings.Add(scope.Name));
+		facts.TypeParameterScopes.Sum(scope => 40 + strings.Add(scope.Name)) +
+		facts.CSharpUsingDirectives.Sum(directive => 64 + strings.Add(directive.Target) + strings.Add(directive.Alias));
 
 	private static long EstimateResolvedIndexBytes(ResolvedIndex index)
 	{
@@ -1141,8 +1142,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			return true;
 		}
 
-		private static bool IsRequire(ImportFact import) =>
-			import.Site.Evidence.TrimStart().StartsWith("require", StringComparison.Ordinal);
+		private static bool IsRequire(ImportFact import) => import.ImportKind == ModuleImportKind.Require;
 
 		private bool RequiresExplicitRelativeExtension(FileFacts source, DependencyScopeDescriptor scope)
 		{
@@ -1255,6 +1255,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			if (IsRequire(import))
 				return "require";
+			if (import.ImportKind == ModuleImportKind.DynamicImport)
+				return "import";
 			var scope = FindScope(source.ScopeId);
 			var mode = scope?.ModuleResolution ?? "bundler";
 			return scope is not null &&
@@ -1468,7 +1470,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (facts.Declarations.Any(declaration => declaration.ContainingType is null &&
 				SimpleName(declaration.Identity.QualifiedName) == name))
 				return [candidate];
-			foreach (var import in facts.Imports.Where(import =>
+			foreach (var import in facts.Imports.Where(import => import.ContainingDeclaration is null &&
 				string.Equals(import.Alias ?? import.ImportedName ?? import.Specifier.Split('.').Last(), name, StringComparison.Ordinal)))
 			{
 				var sourceModule = PythonModule(facts);
@@ -1573,8 +1575,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
-			var isQualified = reference.IsGlobalQualified || reference.Name.Contains('.');
-			var typeParameterShadowsReference = !isQualified && (source.TypeParameterScopes.Count > 0
+			var isSyntacticallyQualified = reference.IsGlobalQualified || reference.Name.Contains('.');
+			var typeParameterShadowsReference = !isSyntacticallyQualified && (source.TypeParameterScopes.Count > 0
 				? source.TypeParameterScopes.Any(parameter =>
 					parameter.Name == simpleName &&
 					parameter.StartIndex <= reference.SourceStartIndex &&
@@ -1582,30 +1584,29 @@ public sealed class DependencyFactsEngine : IDisposable
 				: source.TypeParameters.Contains(simpleName, StringComparer.Ordinal));
 			if (typeParameterShadowsReference)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
-			var expandedName = reference.IsGlobalQualified
-				? reference.Name
-				: ExpandQualifiedAlias(source, reference.Name);
-			var candidates = isQualified
+			string? expandedAlias = null;
+			var aliasExpanded = source.LanguageId == LanguageId.CSharp &&
+			                    !reference.IsGlobalQualified &&
+			                    TryExpandCSharpAlias(source, reference, out expandedAlias);
+			var expandedName = aliasExpanded ? expandedAlias! : reference.Name;
+			var requiresQualifiedLookup = isSyntacticallyQualified || aliasExpanded;
+			var candidates = requiresQualifiedLookup
 				? LookupQualified(source, expandedName, reference.GenericArity)
 				: LookupSimple(source, simpleName, reference.GenericArity);
 			var attributeName = reference.SyntaxKind == "attribute"
-				? reference.Name + "Attribute"
+				? expandedName + "Attribute"
 				: null;
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
-					? LookupQualified(source, ExpandQualifiedAlias(source, attributeName), reference.GenericArity)
+					? LookupQualified(source, attributeName, reference.GenericArity)
 					: LookupSimple(source, attributeName, reference.GenericArity);
 			}
 			if (source.LanguageId == LanguageId.CSharp)
 			{
-				var globalAliases = _globalAliases.GetValueOrDefault(source.ScopeId);
-				if (source.Aliases.TryGetValue(simpleName, out var alias) ||
-				    globalAliases?.TryGetValue(simpleName, out alias) == true)
-					candidates = LookupQualified(source, alias, reference.GenericArity);
-				else if (!reference.IsGlobalQualified && reference.Name.Contains('.') && candidates.Length == 0)
+				if (!reference.IsGlobalQualified && reference.Name.Contains('.') && !aliasExpanded && candidates.Length == 0)
 					candidates = LookupContextualCSharpQualified(source, reference, expandedName);
-				else if (!isQualified)
+				else if (!requiresQualifiedLookup)
 					candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
 			}
 			if (candidates.Length == 0)
@@ -1690,7 +1691,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				namespaceName = separator < 0 ? string.Empty : namespaceName[..separator];
 			}
 
-			var importedNamespaces = _contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [];
+			var importedNamespaces = ActiveCSharpNamespaces(source, reference);
 			var imported = candidates.Where(candidate =>
 				candidate.ContainingType is null &&
 				importedNamespaces.Contains(candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
@@ -1716,7 +1717,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				namespaceName = separator < 0 ? string.Empty : namespaceName[..separator];
 			}
 
-			return (_contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [])
+			return ActiveCSharpNamespaces(source, reference)
 				.SelectMany(namespaceValue => LookupQualified(
 					source,
 					namespaceValue + "." + qualifiedName,
@@ -1760,8 +1761,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
 			return source.LanguageId == LanguageId.CSharp &&
-			       FindScope(source.ScopeId)?.ProjectReferences.Contains(
-			       declaration.Identity.ScopeId, StringComparer.Ordinal) == true;
+			       VisibleScopeIds(source.ScopeId).Contains(
+			       declaration.Identity.ScopeId, StringComparer.Ordinal);
 		}
 
 		private DependencyEdge FinishImport(
@@ -1802,17 +1803,45 @@ public sealed class DependencyFactsEngine : IDisposable
 			DependencyPlatformCatalog.IsDotNetAlias(reference) ||
 			_configuration.DotNetExternalSymbols.Contains(reference) ||
 			_dotNetExternalSimpleNames.Contains(SimpleName(reference));
-		private string ExpandQualifiedAlias(FileFacts source, string name)
+		private bool TryExpandCSharpAlias(
+			FileFacts source,
+			ReferenceFact reference,
+			out string? expanded)
 		{
-			var separator = name.IndexOf('.');
-			if (separator <= 0) return name;
-			var prefix = name[..separator];
+			var separator = reference.Name.IndexOf('.');
+			var prefix = separator < 0 ? reference.Name : reference.Name[..separator];
+			var suffix = separator < 0 ? string.Empty : reference.Name[separator..];
+			var local = source.CSharpUsingDirectives
+				.Where(directive => directive.Alias == prefix && IsActive(directive, reference.SourceStartIndex))
+				.OrderBy(directive => directive.ScopeEndIndex - directive.ScopeStartIndex)
+				.ThenBy(static directive => directive.Target, StringComparer.Ordinal)
+				.FirstOrDefault();
+			if (local is not null)
+			{
+				expanded = local.Target + suffix;
+				return true;
+			}
 			var globalAliases = _globalAliases.GetValueOrDefault(source.ScopeId);
-			return source.Aliases.TryGetValue(prefix, out var target) ||
-			       globalAliases?.TryGetValue(prefix, out target) == true
-				? target + name[separator..]
-				: name;
+			if (globalAliases?.TryGetValue(prefix, out var target) == true)
+			{
+				expanded = target + suffix;
+				return true;
+			}
+			expanded = null;
+			return false;
 		}
+
+		private IReadOnlyList<string> ActiveCSharpNamespaces(FileFacts source, ReferenceFact reference) =>
+			(_contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [])
+			.Concat(source.CSharpUsingDirectives
+				.Where(directive => directive.Alias is null && IsActive(directive, reference.SourceStartIndex))
+				.Select(static directive => directive.Target))
+			.Distinct(StringComparer.Ordinal)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+
+		private static bool IsActive(CSharpUsingDirective directive, int sourceStartIndex) =>
+			directive.ScopeStartIndex <= sourceStartIndex && directive.ScopeEndIndex >= sourceStartIndex;
 
 		private static string QualifiedLookupName(string qualified)
 		{
