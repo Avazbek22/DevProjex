@@ -4147,9 +4147,13 @@ public sealed class McpServerIntegrationTests
 		using var cliDocument = JsonDocument.Parse(terminal.StandardOutput);
 
 		Assert.NotEqual(true, result.IsError);
+		var mcpMetrics = mcpDocument.RootElement.GetProperty("metrics");
+		var cliMetrics = cliDocument.RootElement.GetProperty("metrics");
 		Assert.True(JsonElement.DeepEquals(
-			mcpDocument.RootElement.GetProperty("metrics"),
-			cliDocument.RootElement.GetProperty("metrics")));
+			mcpMetrics,
+			cliMetrics),
+			$"MCP metrics: {mcpMetrics.GetRawText()}{Environment.NewLine}" +
+			$"CLI metrics: {cliMetrics.GetRawText()}");
 		Assert.True(diagnostics.PreparedFilesMaterialized > 0, diagnostics.ToString());
 		Assert.Equal(diagnostics.PreparedWriteBytes, diagnostics.PreparedReadBytes);
 	}
