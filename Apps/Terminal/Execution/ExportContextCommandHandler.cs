@@ -87,25 +87,44 @@ public sealed class ExportContextCommandHandler(
 						cancellationToken: cancellationToken)
 					.ConfigureAwait(false);
 		var transformationContext = CreateTransformationContext(plan, request.View);
-		await using var prepared = transformationContext is null
+		await using var measured = transformationContext is null ||
+		                               (!request.DryRun && request.MaximumEstimatedTokens is null)
 			? null
-			: request.DryRun
-				? await services.SecretRedactionOutputPreparer
-					.MeasureAsync(
-						transformationContext,
-						plan.IncludedFiles,
-						captureEffectiveFindings: false,
-						cancellationToken: cancellationToken)
-					.ConfigureAwait(false)
-				: await services.SecretRedactionOutputPreparer
-					.PrepareAsync(
-						transformationContext,
-						plan.IncludedFiles,
-						captureEffectiveFindings: false,
-						captureTransformedMetrics: request.Format is
-							ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml,
-						cancellationToken)
-					.ConfigureAwait(false);
+			: await services.SecretRedactionOutputPreparer
+				.MeasureAsync(
+					transformationContext,
+					plan.IncludedFiles,
+					captureEffectiveFindings: false,
+					cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+		ProjectContextWriteResult? admissionResult = null;
+		if (!request.DryRun && request.MaximumEstimatedTokens is { } admissionBudget && measured is not null)
+		{
+			var admission = await new ProjectContextTokenAdmissionService(services.ContextDocumentService)
+				.AdmitMeasuredAsync(
+					plan,
+					request.View,
+					request.Format,
+					admissionBudget,
+					measured,
+					ranking,
+					cancellationToken)
+				.ConfigureAwait(false);
+			plan = admission.Plan;
+			admissionResult = admission.WriteResult;
+		}
+		await using var materialized = transformationContext is null || request.DryRun
+			? null
+			: await services.SecretRedactionOutputPreparer
+				.PrepareAsync(
+					transformationContext,
+					plan.IncludedFiles,
+					captureEffectiveFindings: false,
+					captureTransformedMetrics: request.Format is
+						ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml,
+					cancellationToken)
+				.ConfigureAwait(false);
+		var prepared = request.DryRun ? measured : materialized;
 		if (prepared?.CompressionSnapshot is { } compressionSnapshot)
 			plan = CodeCompressionDiagnostic.Append(plan, compressionSnapshot.Availability);
 		diagnosticRenderer.Write(plan.Diagnostics);
@@ -184,7 +203,8 @@ public sealed class ExportContextCommandHandler(
 									plain: request.Output.Plain,
 									useSourceMappedStructuredPaths: true,
 									maximumEstimatedTokens: request.MaximumEstimatedTokens,
-									ranking: ranking)
+									ranking: ranking,
+									precomputedTokenBudget: admissionResult?.TokenBudget)
 								.ConfigureAwait(false)
 							: await services.ContextDocumentService.WritePreparedCompleteAsync(
 									plan,
@@ -196,8 +216,12 @@ public sealed class ExportContextCommandHandler(
 									plain: request.Output.Plain,
 									useSourceMappedStructuredPaths: true,
 									maximumEstimatedTokens: request.MaximumEstimatedTokens,
-									ranking: ranking)
+									ranking: ranking,
+									precomputedTokenBudget: admissionResult?.TokenBudget,
+									preserveContentMetrics: admissionResult is not null)
 								.ConfigureAwait(false);
+						if (admissionResult is not null)
+							writeResult = writeResult with { UnscannableFiles = admissionResult.UnscannableFiles };
 						await destination.CompleteAsync(cancellationToken).ConfigureAwait(false);
 						return writeResult;
 					})
@@ -231,7 +255,8 @@ public sealed class ExportContextCommandHandler(
 									plain: request.Output.Plain,
 									useSourceMappedStructuredPaths: true,
 									maximumEstimatedTokens: request.MaximumEstimatedTokens,
-									ranking: ranking)
+									ranking: ranking,
+									precomputedTokenBudget: admissionResult?.TokenBudget)
 								.ConfigureAwait(false)
 							: await services.ContextDocumentService.WritePreparedCompleteAsync(
 									plan,
@@ -243,8 +268,12 @@ public sealed class ExportContextCommandHandler(
 									plain: request.Output.Plain,
 									useSourceMappedStructuredPaths: true,
 									maximumEstimatedTokens: request.MaximumEstimatedTokens,
-									ranking: ranking)
+									ranking: ranking,
+									precomputedTokenBudget: admissionResult?.TokenBudget,
+									preserveContentMetrics: admissionResult is not null)
 								.ConfigureAwait(false);
+						if (admissionResult is not null && writeReport is not null)
+							writeReport = writeReport with { UnscannableFiles = admissionResult.UnscannableFiles };
 					},
 					cancellationToken,
 					path => ExactOutputDestinationValidator.ValidateContext(

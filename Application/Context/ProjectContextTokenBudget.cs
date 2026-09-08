@@ -20,7 +20,10 @@ public sealed record ProjectContextTokenBudgetReport(
 	long SkippedEstimatedTokens,
 	IReadOnlyList<ProjectContextTokenBudgetSkippedFile> LargestSkippedFiles,
 	int AdditionalSkippedFileCount,
-	IReadOnlyList<ProjectContextTokenBudgetSkippedFile>? RankedSkippedFiles = null);
+	IReadOnlyList<ProjectContextTokenBudgetSkippedFile>? RankedSkippedFiles = null)
+{
+	internal IReadOnlyList<string> AdmittedSourceFiles { get; init; } = [];
+}
 
 internal sealed class ProjectContextTokenBudgetAccumulator
 {
@@ -34,6 +37,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 	private int _skippedFileCount;
 	private long _includedEstimatedTokens;
 	private long _skippedEstimatedTokens;
+	private readonly List<string> _admittedSourceFiles = [];
+	private readonly ProjectContextTokenBudgetReport? _precomputedReport;
 
 	public ProjectContextTokenBudgetAccumulator(long maximumEstimatedTokens)
 	{
@@ -42,15 +47,26 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		_remainingEstimatedTokens = maximumEstimatedTokens;
 	}
 
+	public ProjectContextTokenBudgetAccumulator(ProjectContextTokenBudgetReport precomputedReport)
+	{
+		ArgumentNullException.ThrowIfNull(precomputedReport);
+		_maximumEstimatedTokens = precomputedReport.MaximumEstimatedTokens;
+		_remainingEstimatedTokens = precomputedReport.MaximumEstimatedTokens - precomputedReport.IncludedEstimatedTokens;
+		_precomputedReport = precomputedReport;
+	}
+
 	public bool TryInclude(
 		string path,
 		int transformedCharacterCount,
 		int? priority = null,
 		int? hop = null,
 		int? baseImportancePriority = null,
-		FocusRankingVia? via = null)
+		FocusRankingVia? via = null,
+		string? sourcePath = null)
 	{
 		ArgumentNullException.ThrowIfNull(path);
+		if (_precomputedReport is not null)
+			return true;
 		var estimatedTokens = CodeCompressionSnapshot.EstimateTokens(
 			Math.Max(0, transformedCharacterCount));
 		if (estimatedTokens <= _remainingEstimatedTokens)
@@ -58,6 +74,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_remainingEstimatedTokens -= estimatedTokens;
 			_includedFileCount++;
 			_includedEstimatedTokens += estimatedTokens;
+			if (sourcePath is not null)
+				_admittedSourceFiles.Add(sourcePath);
 			return true;
 		}
 
@@ -85,6 +103,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 
 	public ProjectContextTokenBudgetReport CreateReport()
 	{
+		if (_precomputedReport is not null)
+			return _precomputedReport;
 		var largestSkippedFiles = _largestSkippedFiles?.ToArray() ?? [];
 		return new ProjectContextTokenBudgetReport(
 			_maximumEstimatedTokens,
@@ -94,7 +114,10 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_skippedEstimatedTokens,
 			largestSkippedFiles,
 			_skippedFileCount - largestSkippedFiles.Length,
-			_rankedSkippedFiles?.ToArray() ?? []);
+			_rankedSkippedFiles?.ToArray() ?? [])
+		{
+			AdmittedSourceFiles = _admittedSourceFiles.ToArray()
+		};
 	}
 
 	private void RetainRankedSkippedFile(
