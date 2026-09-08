@@ -1093,6 +1093,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _globalAliases;
 		private readonly IReadOnlyDictionary<string, string[]> _contextNamespacesByFile;
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, CSharpUsingDirective[]>> _aliasesByFileAndName;
+		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, TypeParameterScope[]>> _typeParametersByFileAndName;
 		private readonly IReadOnlySet<string> _dotNetExternalSimpleNames;
 
 		public ResolverContext(
@@ -1149,6 +1150,12 @@ public sealed class DependencyFactsEngine : IDisposable
 							.ThenBy(static directive => directive.Target, StringComparer.Ordinal)
 							.ToArray(),
 						StringComparer.Ordinal),
+				StringComparer.Ordinal);
+			_typeParametersByFileAndName = files.ToDictionary(
+				static file => file.Path,
+				static file => (IReadOnlyDictionary<string, TypeParameterScope[]>)file.TypeParameterScopes
+					.GroupBy(static parameter => parameter.Name, StringComparer.Ordinal)
+					.ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal),
 				StringComparer.Ordinal);
 			_dotNetExternalSimpleNames = DotNetSimpleNames.GetValue(
 				configuration.DotNetExternalSymbols,
@@ -1719,10 +1726,11 @@ public sealed class DependencyFactsEngine : IDisposable
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			var isSyntacticallyQualified = reference.IsGlobalQualified || reference.Name.Contains('.');
 			var typeParameterShadowsReference = !isSyntacticallyQualified && (source.TypeParameterScopes.Count > 0
-				? source.TypeParameterScopes.Any(parameter =>
+				? _typeParametersByFileAndName.GetValueOrDefault(source.Path)?
+					.GetValueOrDefault(simpleName)?.Any(parameter =>
 					parameter.Name == simpleName &&
 					parameter.StartIndex <= reference.SourceStartIndex &&
-					parameter.EndIndex >= reference.SourceStartIndex)
+					parameter.EndIndex >= reference.SourceStartIndex) == true
 				: source.TypeParameters.Contains(simpleName, StringComparer.Ordinal));
 			if (typeParameterShadowsReference)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
