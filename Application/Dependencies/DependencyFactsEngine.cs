@@ -1392,7 +1392,6 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (import.ImportedName is { Length: > 0 } and not "*")
 			{
 				var provided = candidates
-					.Where(static candidate => Path.GetFileName(candidate).StartsWith("__init__.", StringComparison.Ordinal))
 					.SelectMany(candidate => ResolvePythonStaticBinding(
 						candidate,
 						import.ImportedName,
@@ -1403,11 +1402,13 @@ public sealed class DependencyFactsEngine : IDisposable
 					.ToArray();
 				if (provided.Length > 0)
 					candidates = provided.ToList();
-				else
+				else if (candidates.Any(IsPythonPackageInitializer))
 				{
 					var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
 					candidates = ProbePythonModule(source, child).ToList();
 				}
+				else
+					candidates.Clear();
 			}
 			if (candidates.Count == 0)
 			{
@@ -1619,6 +1620,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			return matches?.ToArray() ?? [];
 		}
+
+		private static bool IsPythonPackageInitializer(string path) =>
+			Path.GetFileName(path).StartsWith("__init__.", StringComparison.Ordinal);
 
 		private DeclarationFact[] SelectVisibleCSharpCandidates(
 			FileFacts source,

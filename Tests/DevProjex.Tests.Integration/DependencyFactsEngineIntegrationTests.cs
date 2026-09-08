@@ -687,6 +687,72 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task PythonFromImport_ResolvesNamesProvidedByAnOrdinaryModule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var initializer = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var model = fixture.CreateFile("pkg/model.py", "class Item: pass\ndef create(): pass");
+		var consumer = fixture.CreateFile("pkg/consumer.py", "from .model import Item as ModelItem\nfrom .model import create\nimport pkg.model");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, model, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var moduleImports = result.Edges.Where(item => item.Source == "pkg/consumer.py" && item.Reference == "model").ToArray();
+		Assert.Equal(2, moduleImports.Length);
+		Assert.All(moduleImports, edge =>
+		{
+			Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+			Assert.Equal("pkg/model.py", edge.Target);
+		});
+		var directImport = Assert.Single(result.Edges, item => item.Source == "pkg/consumer.py" && item.Reference == "pkg.model");
+		Assert.Equal("pkg/model.py", directImport.Target);
+	}
+
+	[Fact]
+	public async Task PythonFromImport_ResolvesANameProvidedByAStubModule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var model = fixture.CreateFile("model.pyi", "class Item: ...");
+		var consumer = fixture.CreateFile("consumer.py", "from model import Item");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, model, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("model.pyi", edge.Target);
+	}
+
+	[Fact]
+	public async Task PythonFromImport_DoesNotProbeAChildOfAnOrdinaryModuleForAMissingName()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var model = fixture.CreateFile("model.py", "class Present: pass");
+		var falseChild = fixture.CreateFile("model/Missing.py", "class Wrong: pass");
+		var consumer = fixture.CreateFile("consumer.py", "from model import Missing");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, model, falseChild, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.DoesNotContain("model/Missing.py", edge.Candidates);
+	}
+
+	[Fact]
 	public async Task PythonRelativeImport_RejectsTraversalBeyondTheTopLevelPackage()
 	{
 		using var fixture = new TemporaryDirectory();
