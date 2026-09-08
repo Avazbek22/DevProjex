@@ -1,13 +1,6 @@
 name: Release Candidate
 
 on:
-  pull_request:
-    branches: [v5.2, master]
-    paths:
-      - '.github/workflows/release-candidate.yml'
-      - '.github/workflows/headless-build.yml'
-      - '.github/workflows/container-build.yml'
-      - '.github/workflows/packages-build.yml'
   workflow_dispatch:
     inputs:
       sha:
@@ -31,14 +24,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.sha }}
+          ref: ${{ inputs.sha }}
           fetch-depth: 1
 
       - name: Verify the pinned commit
         id: pin
         shell: bash
         env:
-          REQUESTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.sha }}
+          REQUESTED_SHA: ${{ inputs.sha }}
           WORKFLOW_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -46,7 +39,7 @@ jobs:
             echo "::error::Release candidate must be a full 40-character commit SHA."
             exit 1
           fi
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${REQUESTED_SHA,,}" != "${WORKFLOW_SHA,,}" ]]; then
+          if [[ "${REQUESTED_SHA,,}" != "${WORKFLOW_SHA,,}" ]]; then
             echo "::error::Release candidate input ${REQUESTED_SHA} must equal workflow ref SHA ${WORKFLOW_SHA}."
             exit 1
           fi
@@ -77,6 +70,7 @@ jobs:
     uses: ./.github/workflows/dotnet.yml
     with:
       checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      force_full: true
 
   release-validation:
     name: Release Validation
@@ -84,6 +78,7 @@ jobs:
     uses: ./.github/workflows/release-validate.yml
     with:
       checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      force_full: true
 
   headless-archives:
     name: Headless archives

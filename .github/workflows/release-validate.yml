@@ -12,6 +12,11 @@ on:
         description: Commit or ref to validate
         required: false
         type: string
+      force_full:
+        description: Run every release-validation job without changed-path filtering
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -50,12 +55,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PREVIOUS_GATE_NAME: Release Gate
-        run: >
-          ./Scripts/ci/Select-CiPlan.ps1
-          -GitHubEventPath $env:GITHUB_EVENT_PATH
-          -GitHubEventName $env:GITHUB_EVENT_NAME
-          -PreviousGateName $env:PREVIOUS_GATE_NAME
-          -GitHubOutputPath $env:GITHUB_OUTPUT
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          $common = @{
+            PreviousGateName = $env:PREVIOUS_GATE_NAME
+            GitHubOutputPath = $env:GITHUB_OUTPUT
+          }
+          if ($env:FORCE_FULL -eq 'true') {
+            ./Scripts/ci/Select-CiPlan.ps1 -Full @common
+          }
+          else {
+            ./Scripts/ci/Select-CiPlan.ps1 `
+              -GitHubEventPath $env:GITHUB_EVENT_PATH `
+              -GitHubEventName $env:GITHUB_EVENT_NAME `
+              @common
+          }
 
   validate-release-config:
     name: Validate Release Config
@@ -1740,6 +1754,7 @@ jobs:
           MATRIX_RESULT: ${{ needs.prepare-publish-matrix.result }}
           PUBLISH_RESULT: ${{ needs.publish-smoke.result }}
           LOCAL_CHANNEL_RESULT: ${{ needs.release-local-channel-gate.result }}
+          FORCE_FULL: ${{ inputs.force_full }}
         run: |
           $results = @{
             plan = $env:PLAN_RESULT
@@ -1748,7 +1763,8 @@ jobs:
             publish = $env:PUBLISH_RESULT
             local_channel = $env:LOCAL_CHANNEL_RESULT
           }
-          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
+          $accepted = if ($env:FORCE_FULL -eq 'true') { @('success') } else { @('success', 'skipped') }
+          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin $accepted })
           if ($failed.Count -gt 0) {
             throw "Selected release jobs failed: $($failed.ForEach({ \"$($_.Key)=$($_.Value)\" }) -join ', ')"
           }

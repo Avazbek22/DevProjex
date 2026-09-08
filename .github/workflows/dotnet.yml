@@ -12,6 +12,11 @@ on:
         description: Commit or ref to validate
         required: false
         type: string
+      force_full:
+        description: Run every CI job without changed-path filtering
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -55,12 +60,43 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PREVIOUS_GATE_NAME: CI Gate
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          $common = @{
+            PreviousGateName = $env:PREVIOUS_GATE_NAME
+            GitHubOutputPath = $env:GITHUB_OUTPUT
+          }
+          if ($env:FORCE_FULL -eq 'true') {
+            ./Scripts/ci/Select-CiPlan.ps1 -Full @common
+          }
+          else {
+            ./Scripts/ci/Select-CiPlan.ps1 `
+              -GitHubEventPath $env:GITHUB_EVENT_PATH `
+              -GitHubEventName $env:GITHUB_EVENT_NAME `
+              @common
+          }
+
+  workflow-lint:
+    name: Workflow syntax
+    if: ${{ github.event_name == 'pull_request' || inputs.force_full == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+
+      - name: Lint GitHub Actions workflows
+        shell: bash
         run: >
-          ./Scripts/ci/Select-CiPlan.ps1
-          -GitHubEventPath $env:GITHUB_EVENT_PATH
-          -GitHubEventName $env:GITHUB_EVENT_NAME
-          -PreviousGateName $env:PREVIOUS_GATE_NAME
-          -GitHubOutputPath $env:GITHUB_OUTPUT
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          .github/workflows/dotnet.yml
+          .github/workflows/release-validate.yml
+          .github/workflows/release-candidate.yml
+          .github/workflows/headless-build.yml
+          .github/workflows/container-build.yml
+          .github/workflows/packages-build.yml
 
   test-suite:
     name: CI (${{ matrix.os_name }} / ${{ matrix.suite_name }})
@@ -478,6 +514,7 @@ jobs:
       - ignore-scanner-cross-platform
       - documentation-contracts
       - ranking-eval-tests
+      - workflow-lint
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -492,6 +529,8 @@ jobs:
           IGNORE_SCANNER_RESULT: ${{ needs.ignore-scanner-cross-platform.result }}
           DOCUMENTATION_RESULT: ${{ needs.documentation-contracts.result }}
           RANKING_EVAL_RESULT: ${{ needs.ranking-eval-tests.result }}
+          WORKFLOW_LINT_RESULT: ${{ needs.workflow-lint.result }}
+          FORCE_FULL: ${{ inputs.force_full }}
         run: |
           $results = @{
             plan = $env:PREPARE_RESULT
@@ -500,8 +539,10 @@ jobs:
             ignoreScanner = $env:IGNORE_SCANNER_RESULT
             documentation = $env:DOCUMENTATION_RESULT
             rankingEval = $env:RANKING_EVAL_RESULT
+            workflowLint = $env:WORKFLOW_LINT_RESULT
           }
-          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
+          $accepted = if ($env:FORCE_FULL -eq 'true') { @('success') } else { @('success', 'skipped') }
+          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin $accepted })
           if ($failed.Count -gt 0) {
             $details = $failed.ForEach({ "$($_.Key)=$($_.Value)" }) -join ', '
             throw "Selected CI jobs failed: $details"

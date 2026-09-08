@@ -121,6 +121,9 @@ foreach ($target in $allHeavyTargets) {
 		throw "[Empty diff] Expected '$target' to be enabled by the safe fallback."
 	}
 }
+if (-not $emptyPlan.Documentation) {
+	throw "[Empty diff] Expected 'Documentation' to be enabled by the safe fallback."
+}
 
 $unitPlan = Get-CiChangePlan -ChangedPath 'Tests/DevProjex.Tests.Unit/FooTests.cs'
 if ($unitPlan.TestMatrix.include.Count -ne 3) {
@@ -130,6 +133,9 @@ if ($unitPlan.TestMatrix.include.Count -ne 3) {
 $fullPlan = Get-CiChangePlan -Full
 if ($fullPlan.TestMatrix.include.Count -ne 12) {
 	throw "[Full matrix] Expected twelve suite/OS jobs, found $($fullPlan.TestMatrix.include.Count)."
+}
+if (-not $fullPlan.Documentation) {
+	throw "[Full matrix] Expected 'Documentation' to be enabled."
 }
 
 $beforeSha = '1111111111111111111111111111111111111111'

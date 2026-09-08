@@ -475,8 +475,8 @@ public sealed class DocumentationAndPackagingContractTests
 			"workflows",
 			"release-candidate.yml"));
 		Assert.Contains("sha:", releaseCandidate, StringComparison.Ordinal);
-		Assert.Contains("pull_request:", releaseCandidate, StringComparison.Ordinal);
-		Assert.Contains("github.event.pull_request.head.sha", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("workflow_dispatch:", releaseCandidate, StringComparison.Ordinal);
+		Assert.DoesNotContain("pull_request:", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("must equal workflow ref SHA", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("printf 'Validated release candidate `%s`.\\n'", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/dotnet.yml", releaseCandidate, StringComparison.Ordinal);
@@ -485,14 +485,39 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("uses: ./.github/workflows/container-build.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/packages-build.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("Release candidate report", releaseCandidate, StringComparison.Ordinal);
+		Assert.Equal(
+			2,
+			Regex.Matches(
+				releaseCandidate,
+				@"^\s+force_full:\s+true\s*$",
+				RegexOptions.Multiline).Count);
 		Assert.DoesNotContain(": write", releaseCandidate, StringComparison.Ordinal);
 
-		foreach (var buildWorkflowName in new[]
-		         {
-			         "headless-build.yml",
-			         "container-build.yml",
-			         "packages-build.yml"
-		         })
+		var dotnetWorkflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"dotnet.yml"));
+		var releaseValidationWorkflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"release-validate.yml"));
+		Assert.Contains("force_full:", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains("force_full:", releaseValidationWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Select-CiPlan.ps1 -Full", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Select-CiPlan.ps1 -Full", releaseValidationWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actionlint/cmd/actionlint@v1.7.7", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains(".github/workflows/release-candidate.yml", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains("inputs.force_full == true", dotnetWorkflow, StringComparison.Ordinal);
+
+		var buildWorkflows = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["headless-build.yml"] = "package-headless.yml",
+			["container-build.yml"] = "publish-container.yml",
+			["packages-build.yml"] = "publish-packages.yml"
+		};
+		foreach (var (buildWorkflowName, publishingWorkflowName) in buildWorkflows)
 		{
 			var buildWorkflow = File.ReadAllText(Path.Combine(
 				rootPath,
@@ -500,8 +525,19 @@ public sealed class DocumentationAndPackagingContractTests
 				"workflows",
 				buildWorkflowName));
 			Assert.Contains("workflow_call:", buildWorkflow, StringComparison.Ordinal);
+			Assert.DoesNotContain("pull_request:", buildWorkflow, StringComparison.Ordinal);
 			Assert.Contains("contents: read", buildWorkflow, StringComparison.Ordinal);
 			Assert.DoesNotContain(": write", buildWorkflow, StringComparison.Ordinal);
+
+			var publishingWorkflow = File.ReadAllText(Path.Combine(
+				rootPath,
+				".github",
+				"workflows",
+				publishingWorkflowName));
+			Assert.Contains(
+				$"uses: ./.github/workflows/{buildWorkflowName}",
+				publishingWorkflow,
+				StringComparison.Ordinal);
 		}
 	}
 
