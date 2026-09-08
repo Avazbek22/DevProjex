@@ -100,6 +100,7 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("[Facts coverage] files=10, supported=9, unsupported=1, extraction-failed=0", text, StringComparison.Ordinal);
 			Assert.Contains("[Search scope] files=10", text, StringComparison.Ordinal);
 			Assert.Contains("[Effective filters]", text, StringComparison.Ordinal);
+			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
 			Assert.NotEmpty(progress.Values);
 
 			var overlappingDependencies = await client.CallToolAsync(

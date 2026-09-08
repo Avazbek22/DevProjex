@@ -4109,13 +4109,19 @@ public sealed class McpServerIntegrationTests
 	[Fact]
 	public async Task StructuredPackReusesPreparedMetricsAndMatchesCli()
 	{
-		using var workspace = new TemporaryDirectory();
+		// macOS exposes its temporary root through a /var -> /private/var alias. Keep both
+		// hosts on one lexical root so this test measures transformed-metric reuse only.
+		using var workspace = new TemporaryDirectory(AppContext.BaseDirectory);
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(
 			Path.Combine(project, "App.cs"),
 			"public sealed class App { private int Hidden() { return 42; } }\n");
 		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			gitMode: GitFilteringMode.None,
+			exclusions: []);
 
 		var result = await server.CallAsync(
 			"pack_context",
