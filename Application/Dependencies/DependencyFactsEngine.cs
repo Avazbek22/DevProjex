@@ -853,8 +853,6 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			var context = new ResolverContext(root, files, declarations, configuration);
 			var resolved = new List<DependencyEdge>();
-			var importsByFile = new Dictionary<string, IReadOnlyList<ImportFact>>(StringComparer.Ordinal);
-			var referencesByFile = new Dictionary<string, IReadOnlyList<ReferenceFact>>(StringComparer.Ordinal);
 			var supportedFiles = files.Where(static file => file.Status == DependencyFileStatus.Supported).ToArray();
 			var parallelism = Math.Clamp(Environment.ProcessorCount, 1, 8);
 			var plans = CreateWorkPlans(supportedFiles, context, limits, cancellationToken);
@@ -901,16 +899,24 @@ public sealed class DependencyFactsEngine : IDisposable
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				resolved.AddRange(fileWork.Edges);
-				importsByFile[fileWork.File.Path] = fileWork.Imports;
-				referencesByFile[fileWork.File.Path] = fileWork.References;
 			}
-			var resolvedFiles = files.Select(file => file.Status != DependencyFileStatus.Supported
-				? file
-				: file with
+			var resolvedFiles = new FileFacts[files.Count];
+			var supportedIndex = 0;
+			for (var fileIndex = 0; fileIndex < files.Count; fileIndex++)
+			{
+				var file = files[fileIndex];
+				if (file.Status != DependencyFileStatus.Supported)
 				{
-					Imports = importsByFile.GetValueOrDefault(file.Path) ?? file.Imports,
-					References = referencesByFile.GetValueOrDefault(file.Path) ?? file.References
-				}).ToArray();
+					resolvedFiles[fileIndex] = file;
+					continue;
+				}
+				var work = completed[supportedIndex++];
+				resolvedFiles[fileIndex] = file with
+				{
+					Imports = work.Imports,
+					References = work.References
+				};
+			}
 			return new ResolvedIndex(
 				Aggregate(resolved),
 				resolvedFiles,
