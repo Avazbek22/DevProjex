@@ -1326,6 +1326,56 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(0, extractor.ParseCount);
 	}
 
+	[Theory]
+	[InlineData("utf8")]
+	[InlineData("utf16-le")]
+	[InlineData("utf16-be")]
+	public async Task BoundedDependencySourceRead_StopsAfterTheDecodedCharacterLimit(string encodingName)
+	{
+		const int maximumCharacters = 100_000;
+		using var fixture = new TemporaryDirectory();
+		Encoding encoding = encodingName switch
+		{
+			"utf8" => new UTF8Encoding(true, true),
+			"utf16-le" => new UnicodeEncoding(false, true, true),
+			"utf16-be" => new UnicodeEncoding(true, true, true),
+			_ => throw new ArgumentOutOfRangeException(nameof(encodingName))
+		};
+		var bytes = encoding.GetPreamble()
+			.Concat(encoding.GetBytes(new string('x', maximumCharacters * 3)))
+			.ToArray();
+		var path = fixture.CreateFile("Large.cs", string.Empty);
+		File.WriteAllBytes(path, bytes);
+		var reader = new TreeSitterDependencyFactExtractor.BoundedDependencySourceReader();
+
+		var result = await reader.ReadAsync(path, maximumCharacters, TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, result.Status);
+		Assert.Contains("character parse limit", result.StatusReason, StringComparison.Ordinal);
+		Assert.InRange(reader.LastBytesRead, 1, bytes.Length - 1L);
+	}
+
+	[Fact]
+	public async Task BoundedDependencySourceRead_PreservesBomTextAndRejectsAnIncompleteSequence()
+	{
+		using var fixture = new TemporaryDirectory();
+		var unicode = new UnicodeEncoding(false, true, true);
+		var validBytes = unicode.GetPreamble().Concat(unicode.GetBytes("class Valid { }")).ToArray();
+		var valid = fixture.CreateFile("Valid.cs", string.Empty);
+		File.WriteAllBytes(valid, validBytes);
+		var incomplete = fixture.CreateFile("Incomplete.cs", string.Empty);
+		File.WriteAllBytes(incomplete, [0x63, 0x6c, 0x61, 0x73, 0x73, 0x20, 0xE2, 0x82]);
+		var reader = new TreeSitterDependencyFactExtractor.BoundedDependencySourceReader();
+
+		var validResult = await reader.ReadAsync(valid, 100, TestContext.Current.CancellationToken);
+		var incompleteResult = await reader.ReadAsync(incomplete, 100, TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.Supported, validResult.Status);
+		Assert.Equal("class Valid { }", validResult.Source);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, incompleteResult.Status);
+		Assert.Contains("unsupported encoding", incompleteResult.StatusReason, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task WarmRelatedQuery_ReusesTheCanonicalFileLookupFromTheResolvedSnapshot()
 	{

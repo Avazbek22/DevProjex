@@ -106,7 +106,9 @@ failures are counted separately as extraction failures.
 The default safety limits are 2 Mi characters per source file, 50,000 facts per file, 20,000 edges
 per file, and 5,000,000 units of resolver work per index pass. A limit produces an explicit
 `Unresolved` fact or extraction status with a reason; it is never reported as an empty successful
-analysis.
+analysis. Source decoding is bounded by decoded characters rather than bytes: UTF-8, UTF-16, and
+UTF-32 BOMs are honored, incomplete sequences fail closed, and reading stops as soon as the engine
+has proved that the character limit is exceeded instead of scanning the rest of the file.
 
 The resolver work limit is an admission budget applied in canonical file order, not a latch that
 stops all later files after one rejection. A file is admitted only when all of its known import and

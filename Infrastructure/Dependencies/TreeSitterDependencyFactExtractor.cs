@@ -19,6 +19,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private const string DiagnosticErrorQuery = "(ERROR) @diagnostic.error";
 	private readonly IGrammarLibraryLocator _locator;
 	private readonly IFileContentAnalyzer _contentAnalyzer;
+	private readonly BoundedDependencySourceReader? _boundedSourceReader;
 	private readonly IReadOnlyDictionary<LanguageId, LanguageDefinition> _definitions;
 	private readonly ConcurrentDictionary<LanguageId, Lazy<LanguageRuntime>> _runtimes = [];
 	private readonly ConcurrentDictionary<LanguageId, string> _extractorIdentities = [];
@@ -38,16 +39,25 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	}
 
 	internal TreeSitterDependencyFactExtractor(IGrammarLibraryLocator locator)
-		: this(locator, new FileContentAnalyzer())
+		: this(locator, new FileContentAnalyzer(), new BoundedDependencySourceReader())
 	{
 	}
 
 	internal TreeSitterDependencyFactExtractor(
 		IGrammarLibraryLocator locator,
 		IFileContentAnalyzer contentAnalyzer)
+		: this(locator, contentAnalyzer, null)
+	{
+	}
+
+	internal TreeSitterDependencyFactExtractor(
+		IGrammarLibraryLocator locator,
+		IFileContentAnalyzer contentAnalyzer,
+		BoundedDependencySourceReader? boundedSourceReader)
 	{
 		_locator = locator ?? throw new ArgumentNullException(nameof(locator));
 		_contentAnalyzer = contentAnalyzer ?? throw new ArgumentNullException(nameof(contentAnalyzer));
+		_boundedSourceReader = boundedSourceReader;
 		_definitions = LanguageDefinition.CreateAll();
 	}
 
@@ -205,6 +215,19 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		int maximumCharacters,
 		CancellationToken cancellationToken)
 	{
+		if (_boundedSourceReader is not null)
+		{
+			var read = await _boundedSourceReader
+				.ReadAsync(fullPath, maximumCharacters, cancellationToken)
+				.ConfigureAwait(false);
+			return new PreparedSourceContent(
+				read.Fingerprint,
+				GetExtractorIdentity(language),
+				read.Source,
+				read.Status,
+				read.StatusReason,
+				read.CanCache);
+		}
 		await using var snapshot = await _contentAnalyzer
 			.OpenCompleteSnapshotAsync(fullPath, cancellationToken)
 			.ConfigureAwait(false);
@@ -572,6 +595,158 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		int Entries,
 		int EvictionEntries,
 		long RetainedBytes);
+
+	internal sealed class BoundedDependencySourceReader
+	{
+		private const int BufferSize = 64 * 1024;
+		private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
+		private static readonly Encoding StrictUtf16Le = new UnicodeEncoding(false, true, true);
+		private static readonly Encoding StrictUtf16Be = new UnicodeEncoding(true, true, true);
+		private static readonly Encoding StrictUtf32Le = new UTF32Encoding(false, true, true);
+		private static readonly Encoding StrictUtf32Be = new UTF32Encoding(true, true, true);
+		private long _lastBytesRead;
+
+		internal long LastBytesRead => Interlocked.Read(ref _lastBytesRead);
+
+		internal async Task<BoundedDependencySourceRead> ReadAsync(
+			string path,
+			int maximumCharacters,
+			CancellationToken cancellationToken)
+		{
+			var byteBuffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+			var characterBuffer = ArrayPool<char>.Shared.Rent(checked(maximumCharacters + 1));
+			var bytesReadTotal = 0L;
+			var charactersWritten = 0;
+			try
+			{
+				await using var stream = new FileStream(
+					path,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.Read | FileShare.Delete,
+					BufferSize,
+					FileOptions.Asynchronous | FileOptions.SequentialScan);
+				var length = stream.Length;
+				var lastWrite = File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks;
+				Decoder? decoder = null;
+				while (true)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					var bytesRead = await stream.ReadAsync(
+						byteBuffer.AsMemory(0, BufferSize),
+						cancellationToken).ConfigureAwait(false);
+					if (bytesRead == 0)
+						break;
+					bytesReadTotal += bytesRead;
+					var input = byteBuffer.AsSpan(0, bytesRead);
+					if (decoder is null)
+					{
+						var (encoding, preambleLength) = DetectEncoding(input);
+						decoder = encoding.GetDecoder();
+						input = input[preambleLength..];
+					}
+					while (!input.IsEmpty)
+					{
+						decoder.Convert(
+							input,
+							characterBuffer.AsSpan(charactersWritten),
+							flush: false,
+							out var bytesUsed,
+							out var charactersUsed,
+							out _);
+						input = input[bytesUsed..];
+						charactersWritten += charactersUsed;
+						if (charactersWritten > maximumCharacters)
+							return TooLarge(length, lastWrite, maximumCharacters);
+						if (bytesUsed == 0 && charactersUsed == 0)
+							throw new IOException("The bounded dependency source decoder made no progress.");
+					}
+				}
+
+				decoder ??= StrictUtf8.GetDecoder();
+				decoder.Convert(
+					ReadOnlySpan<byte>.Empty,
+					characterBuffer.AsSpan(charactersWritten),
+					flush: true,
+					out _,
+					out var finalCharacters,
+					out var completed);
+				charactersWritten += finalCharacters;
+				if (charactersWritten > maximumCharacters)
+					return TooLarge(length, lastWrite, maximumCharacters);
+				if (!completed)
+					throw new IOException("The bounded dependency source decoder did not complete.");
+				if (stream.Length != length || File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks != lastWrite)
+					throw new IOException("The dependency source changed while it was being read.");
+				var source = new string(characterBuffer, 0, charactersWritten);
+				if (source.AsSpan().Contains('\0'))
+				{
+					return new BoundedDependencySourceRead(
+						MetadataFingerprint("binary", length, lastWrite),
+						string.Empty,
+						DependencyFileStatus.ExtractionFailed,
+						"source is binary");
+				}
+				return new BoundedDependencySourceRead(
+					ContentFingerprint.Compute(source.AsSpan()).ToHexString().ToLowerInvariant(),
+					source,
+					DependencyFileStatus.Supported,
+					null);
+			}
+			catch (DecoderFallbackException exception)
+			{
+				return new BoundedDependencySourceRead(
+					MetadataFingerprint("unsupported-encoding", 0, 0),
+					string.Empty,
+					DependencyFileStatus.ExtractionFailed,
+					$"source uses an unsupported encoding: {OneLine(exception.Message)}");
+			}
+			finally
+			{
+				Interlocked.Exchange(ref _lastBytesRead, bytesReadTotal);
+				CryptographicOperations.ZeroMemory(byteBuffer.AsSpan());
+				CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(
+					characterBuffer.AsSpan(0, charactersWritten)));
+				ArrayPool<byte>.Shared.Return(byteBuffer);
+				ArrayPool<char>.Shared.Return(characterBuffer);
+			}
+		}
+
+		private static BoundedDependencySourceRead TooLarge(
+			long length,
+			long lastWrite,
+			int maximumCharacters) => new(
+			MetadataFingerprint("character-limit", length, lastWrite),
+			string.Empty,
+			DependencyFileStatus.ExtractionFailed,
+			$"file exceeds the {maximumCharacters} character parse limit");
+
+		private static (Encoding Encoding, int PreambleLength) DetectEncoding(ReadOnlySpan<byte> bytes)
+		{
+			if (bytes.Length >= 4 && bytes[0] == 0x00 && bytes[1] == 0x00 && bytes[2] == 0xFE && bytes[3] == 0xFF)
+				return (StrictUtf32Be, 4);
+			if (bytes.Length >= 4 && bytes[0] == 0xFF && bytes[1] == 0xFE && bytes[2] == 0x00 && bytes[3] == 0x00)
+				return (StrictUtf32Le, 4);
+			if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+				return (StrictUtf8, 3);
+			if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+				return (StrictUtf16Be, 2);
+			if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+				return (StrictUtf16Le, 2);
+			return (StrictUtf8, 0);
+		}
+
+		private static string MetadataFingerprint(string state, long length, long lastWrite) =>
+			Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{state}:{length}:{lastWrite}")))
+				.ToLowerInvariant();
+	}
+
+	internal sealed record BoundedDependencySourceRead(
+		string Fingerprint,
+		string Source,
+		DependencyFileStatus Status,
+		string? StatusReason,
+		bool CanCache = true);
 
 	private sealed record PreparedSourceContent(
 		string Fingerprint,
