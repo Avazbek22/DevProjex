@@ -35,17 +35,19 @@ public sealed class FileContentAnalyzerTests
 	[InlineData(ProbeOperation.StreamingMetrics)]
 	[InlineData(ProbeOperation.CompleteSnapshot)]
 	[InlineData(ProbeOperation.ReadFact)]
-	public async Task NullByteProbe_IoFailureIsUnreadableRatherThanBinary(ProbeOperation operation)
+	public async Task BomAndNullByteProbe_ReadsThePrefixOnce(ProbeOperation operation)
 	{
 		using var temp = new TemporaryDirectory();
 		var path = temp.CreateFile("probe.txt", "ordinary text");
+		ProbeCountingFileStream? observed = null;
 		var analyzer = new FileContentAnalyzer(
-			(filePath, _, _, _) => new ProbeFailureFileStream(filePath));
+			(filePath, _, _, _) => observed = new ProbeCountingFileStream(filePath));
 
 		var classification = await ClassifyAsync(analyzer, path, operation);
 
-		Assert.Equal(FileContentClassification.Unreadable, classification);
-		Assert.NotEqual(FileContentClassification.Binary, classification);
+		Assert.Equal(FileContentClassification.Text, classification);
+		Assert.NotNull(observed);
+		Assert.Equal(1, observed.SpanReads);
 	}
 
 	[Theory]
@@ -1110,7 +1112,7 @@ public sealed class FileContentAnalyzerTests
 		ReadFact
 	}
 
-	private sealed class ProbeFailureFileStream(string path) : FileStream(
+	private sealed class ProbeCountingFileStream(string path) : FileStream(
 		path,
 		FileMode.Open,
 		FileAccess.Read,
@@ -1120,10 +1122,11 @@ public sealed class FileContentAnalyzerTests
 	{
 		private int _spanReads;
 
+		public int SpanReads => Volatile.Read(ref _spanReads);
+
 		public override int Read(Span<byte> buffer)
 		{
-			if (Interlocked.Increment(ref _spanReads) == 2)
-				throw new IOException("Injected null-byte probe failure.");
+			Interlocked.Increment(ref _spanReads);
 			return base.Read(buffer);
 		}
 	}
