@@ -23,8 +23,6 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private static readonly TimeSpan NonBacktrackingRegexTimeout = TimeSpan.FromSeconds(2);
 	private static readonly TimeSpan BacktrackingRegexTimeout = TimeSpan.FromMilliseconds(250);
 	private const string ResourceSuffix = ".Secrets.Rules.gitleaks-v8.30.1.toml";
-	private static readonly string EmbeddedConfigurationFileName = $"gitleaks-{RulesVersion}.toml";
-	private const string GitleaksAllowSignature = "gitleaks:allow";
 	private const string GenericApiKeyRuleId = "generic-api-key";
 	private const string PrivateKeyRuleId = "private-key";
 	private static readonly SearchValues<char> GenericDelimiters = SearchValues.Create("=>|:?,");
@@ -368,8 +366,6 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 					var lineRange = lineIndex.GetContainingLine(valueMatch.Index, valueMatch.Length);
 					var line = content.Slice(lineRange.Start, lineRange.Length);
-					if (line.Contains(GitleaksAllowSignature, StringComparison.Ordinal))
-						continue;
 					var secret = secretGroup.Value;
 					if (rule.Entropy > 0 && CalculateShannonEntropy(secret) <= rule.Entropy)
 						continue;
@@ -409,13 +405,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private static bool ShouldInspectPath(
 		CompiledConfiguration configuration,
 		string normalizedPath) =>
-		!IsEmbeddedConfigurationPath(normalizedPath) &&
 		!configuration.GlobalAllowlists.Any(
 			allowlist => allowlist.AllowsWholeFileByPath(normalizedPath));
-
-	private static bool IsEmbeddedConfigurationPath(string normalizedPath) =>
-		normalizedPath.Equals(EmbeddedConfigurationFileName, StringComparison.OrdinalIgnoreCase) ||
-		normalizedPath.EndsWith('/' + EmbeddedConfigurationFileName, StringComparison.OrdinalIgnoreCase);
 
 	private static bool HasGenericApiKeyEvidence(ReadOnlySpan<char> content)
 	{

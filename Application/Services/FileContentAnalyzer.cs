@@ -911,20 +911,12 @@ public sealed class FileContentAnalyzer :
 		string path,
 		int bufferSize,
 		FileShare fileShare,
-		bool asynchronous = false)
-	{
-		UnixFileTypeInspector.EnsureRegularFile(path);
-		// Callers keep this handle for length, probing, and decoding. Besides saving an
-		// extra open/stat cycle, one handle gives each operation a more coherent file view.
-		return new FileStream(
+		bool asynchronous = false) =>
+		UnixFileTypeInspector.OpenRegularFileForSequentialRead(
 			path,
-			FileMode.Open,
-			FileAccess.Read,
-			fileShare,
 			bufferSize,
-			FileOptions.SequentialScan |
-			(asynchronous ? FileOptions.Asynchronous : FileOptions.None));
-	}
+			fileShare,
+			asynchronous);
 
 	private static bool HasKnownBinaryExtension(string path)
 	{

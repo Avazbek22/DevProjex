@@ -77,8 +77,12 @@ DevProjex ships a reviewed managed port of the default Gitleaks
   opaque binary payload cannot be redacted in place;
 - keyword prescreening limits which bounded regular expressions inspect a file;
 - entropy thresholds and upstream allowlists preserve the pinned rule semantics;
-- `gitleaks:allow` suppresses findings on that line;
+- inline markers such as `gitleaks:allow` in project content do not suppress findings;
 - expressions use the managed non-backtracking .NET engine with a timeout.
+
+Redaction exceptions are controlled only by the operator through DevProjex
+configuration. File content is untrusted input and cannot exempt itself from
+redaction in GUI, CLI, or MCP output.
 
 ### Scope-aware configuration rules
 

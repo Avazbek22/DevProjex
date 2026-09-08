@@ -13,6 +13,11 @@ internal sealed record GitRepositorySafetyInspection(
 		new([], [], [], OldGitPromisorRepository: true, IsComplete: false);
 }
 
+internal sealed record GitInspectionProcessResult(
+	int ExitCode,
+	string Output,
+	bool ExceededOutputLimit = false);
+
 internal static class GitRepositorySafetyInspector
 {
 	private const int MaximumOutputCharacters = 256 * 1024;
@@ -25,15 +30,36 @@ internal static class GitRepositorySafetyInspector
 			repositoryPath,
 			GitProcessOperation.ReadConfigValue(GitConfigReadKind.UnsafeDrivers),
 			cancellationToken).ConfigureAwait(false);
-		if (filterResult is null)
+		var inspection = InterpretUnsafeDriverResult(filterResult);
+		if (!inspection.IsComplete)
 			return GitRepositorySafetyInspection.Unavailable;
 
-		var checkoutDrivers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		var unsafeWorkingDrivers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		var diffDrivers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		if (filterResult.ExitCode == 0)
+		var oldGitPromisor = false;
+		if (!GitRuntime.IsAtLeastVersion(2, 45))
 		{
-			foreach (var rawLine in filterResult.Output.Split(
+			var promisorResult = await RunAsync(
+				repositoryPath,
+				GitProcessOperation.ReadConfigValue(GitConfigReadKind.PromisorRemotes),
+				cancellationToken).ConfigureAwait(false);
+			if (!TryInterpretQueryResult(promisorResult, out oldGitPromisor))
+				return GitRepositorySafetyInspection.Unavailable;
+		}
+
+		return inspection with { OldGitPromisorRepository = oldGitPromisor };
+	}
+
+	internal static GitRepositorySafetyInspection InterpretUnsafeDriverResult(
+		GitInspectionProcessResult? result)
+	{
+		if (!TryInterpretQueryResult(result, out var hasMatches))
+			return GitRepositorySafetyInspection.Unavailable;
+
+		var checkoutDrivers = new HashSet<string>(StringComparer.Ordinal);
+		var unsafeWorkingDrivers = new HashSet<string>(StringComparer.Ordinal);
+		var diffDrivers = new HashSet<string>(StringComparer.Ordinal);
+		if (hasMatches)
+		{
+			foreach (var rawLine in result!.Output.Split(
 				         ['\r', '\n'],
 				         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
 			{
@@ -63,22 +89,11 @@ internal static class GitRepositorySafetyInspector
 			}
 		}
 
-		var oldGitPromisor = false;
-		if (!GitRuntime.IsAtLeastVersion(2, 45))
-		{
-			var promisorResult = await RunAsync(
-				repositoryPath,
-				GitProcessOperation.ReadConfigValue(GitConfigReadKind.PromisorRemotes),
-				cancellationToken).ConfigureAwait(false);
-			oldGitPromisor = promisorResult is null ||
-			                 promisorResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(promisorResult.Output);
-		}
-
 		return new GitRepositorySafetyInspection(
-			checkoutDrivers.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
-			unsafeWorkingDrivers.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
-			diffDrivers.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
-			oldGitPromisor);
+			checkoutDrivers.Order(StringComparer.Ordinal).ToArray(),
+			unsafeWorkingDrivers.Order(StringComparer.Ordinal).ToArray(),
+			diffDrivers.Order(StringComparer.Ordinal).ToArray(),
+			OldGitPromisorRepository: false);
 	}
 
 	public static void TraceDisabledMaterializationFilters(GitRepositorySafetyInspection inspection)
@@ -109,6 +124,21 @@ internal static class GitRepositorySafetyInspector
 		return driver.Length <= 256 &&
 		       driver.All(static character =>
 			       char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
+	}
+
+	private static bool TryInterpretQueryResult(
+		GitInspectionProcessResult? result,
+		out bool hasMatches)
+	{
+		hasMatches = false;
+		if (result is null || result.ExceededOutputLimit)
+			return false;
+		if (result.ExitCode == 0)
+		{
+			hasMatches = !string.IsNullOrWhiteSpace(result.Output);
+			return true;
+		}
+		return result.ExitCode == 1 && string.IsNullOrEmpty(result.Output);
 	}
 
 	private static async Task<GitInspectionProcessResult?> RunAsync(
@@ -153,9 +183,10 @@ internal static class GitRepositorySafetyInspector
 			}
 			var standardOutput = await output.ConfigureAwait(false);
 			var standardError = await error.ConfigureAwait(false);
-			return standardOutput.ExceededLimit || standardError.ExceededLimit
-				? null
-				: new GitInspectionProcessResult(process.ExitCode, standardOutput.Text);
+			return new GitInspectionProcessResult(
+				process.ExitCode,
+				standardOutput.Text,
+				standardOutput.ExceededLimit || standardError.ExceededLimit);
 		}
 		catch (OperationCanceledException)
 		{
@@ -166,6 +197,4 @@ internal static class GitRepositorySafetyInspector
 			return null;
 		}
 	}
-
-	private sealed record GitInspectionProcessResult(int ExitCode, string Output);
 }

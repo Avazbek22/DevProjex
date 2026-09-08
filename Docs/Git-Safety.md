@@ -114,6 +114,14 @@ Before materializing files, DevProjex reads the effective filter declarations wi
 
 There is no wildcard filter override in Git. If the filter registry cannot be read or a driver name cannot be represented safely, checkout fails closed. The registered forms are detached checkout, branch checkout/reset, hard reset, worktree add/remove/prune, and the fixed `extensions.worktreeConfig` / `devprojex.branch` tracking writes. Missing objects do not trigger a fetch. Consequently, an LFS pointer or another smudge-managed file remains a pointer until a future explicit feature provides a reviewed download path; the diagnostic trace names the disabled drivers instead of making that substitution silent.
 
+Git driver subsection names are case-sensitive, so DevProjex preserves and
+disables `filter.Foo` and `filter.foo` independently; section names and property
+names remain case-insensitive. For the fixed `git config --get-regexp` safety
+query, exit code 0 is parsed and exit code 1 with empty output means no matches.
+Any other exit code, missing process result, or output-limit breach makes the
+inspection unavailable, and managed checkout and change-scope requests fail
+closed without including Git output in the user-facing diagnostic.
+
 ## ExplicitNetwork
 
 `ExplicitNetwork` is used only after validating a remote source and deciding that network access is part of the requested operation. Clone is fixed to:
