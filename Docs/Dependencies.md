@@ -47,7 +47,10 @@ Seeds do not reduce the manifest that must be indexed. No declaration, candidate
 reason can cross the current manifest gate, and self-file relationships are suppressed.
 
 C# compilation scopes come from `.csproj` ownership and `ProjectReference` entries read as XML.
-Global usings and aliases are shared within the owning scope; type parameters shadow global symbols;
+Both `/` and `\` in an MSBuild `Include` are normalized as project-reference separators on every OS;
+this normalization never applies to ordinary Unix filenames. Global usings and aliases are shared
+within the owning scope; type parameters shadow global symbols only inside the lexical span of their
+declaring type or method, while a qualified name is never suppressed by its final component;
 nested generic names preserve the arity of every containing type. `InternalsVisibleTo` does not create
 an edge, target-typed `new()` stays unresolved, and source-generator output is unavailable. A simple
 type name can resolve only to a declaration in the current or an enclosing namespace, an exactly
@@ -67,7 +70,8 @@ literal JavaScript file. Extensionless imports and directory indexes always prob
 after `.ts`, `.tsx`, and `.d.ts`; `allowJs` controls compilation membership, not resolution of files
 already present in the manifest. Exact `paths` entries precede wildcard entries; among matching
 wildcards, the longest prefix before `*` wins. Only that pattern's targets are tried, in declaration
-order. `package.json` `exports`, conditions, and explicit `null` blocking remain authoritative.
+order. A wildcard whose prefix and suffix overlap in the specifier is not a match; the same guard
+applies to package maps. `package.json` `exports`, conditions, and explicit `null` blocking remain authoritative.
 Directory-index fallback is allowed by `node10` and `bundler`; under `node16`/`nodenext`, an ESM
 relative import needs an explicit extension while a supported CommonJS context can use extensionless
 and directory probes. `.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ordinary
@@ -86,9 +90,12 @@ output uses the same three values in a trusted `[Dependency configuration]` line
 `tsconfig.json`, `jsconfig.json`, `package.json`,
 `pyproject.toml`, and `setup.cfg` is limited to 4 MiB. One operation reads and verifies each control file
 once, then derives all scope, package-name, package-map, and external-package projections from that same
-snapshot, so a result cannot mix two versions of one configuration file.
+snapshot, so a result cannot mix two versions of one configuration file. UTF-8 control files are
+accepted with or without a BOM; malformed byte sequences remain corrupt.
 
-Python relative imports start at the source package. Regular and namespace-package portions are
+Python relative imports start at the source package. `from module import Name` first checks classes,
+functions, and static import aliases provided by either an ordinary module or a package initializer.
+Only a package may then fall back to a child module of that name. Regular and namespace-package portions are
 combined, and a package initializer takes precedence over a same-named module file. Within a package,
 a statically provided or re-exported name is resolved before a same-named child module. `.py` is
 preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and `__all__` affects
@@ -116,7 +123,10 @@ per file, and 5,000,000 units of resolver work per index pass. A limit produces 
 `Unresolved` fact or extraction status with a reason; it is never reported as an empty successful
 analysis. Source decoding is bounded by decoded characters rather than bytes: UTF-8, UTF-16, and
 UTF-32 BOMs are honored, incomplete sequences fail closed, and reading stops as soon as the engine
-has proved that the character limit is exceeded instead of scanning the rest of the file.
+has proved that the character limit is exceeded instead of scanning the rest of the file. Decode
+buffers start from the opened source size and pooled byte/character rentals are capped at 64 KiB;
+larger decoded text grows outside the shared pool, so one large file cannot retain a multi-megabyte
+pooled character array for later workers.
 
 The resolver work limit is an admission budget applied in canonical file order, not a latch that
 stops all later files after one rejection. A file is admitted only when all of its known import and
@@ -143,10 +153,11 @@ fact, including declarations and all declaration sites, even when the graph has 
 Manifest-snapshot eviction entries are generation-bound and removed together with their live
 snapshot, so repeated rebuilds of the same cache keys cannot grow bookkeeping outside the limit.
 
-Access failures, missing files, and other transient I/O failures are not retained in either the
-prepared-source cache or a manifest snapshot. A later request retries extraction even when file stamps
-are unchanged. Stable outcomes such as an unsupported language, a content parse failure, or a safety
-limit remain cacheable.
+Access failures, missing files, and other transient I/O failures in either source or control files are
+not retained in the prepared-source, resolved-index, or manifest-snapshot caches. A later request
+retries extraction and configuration reading even when file stamps are unchanged. Stable outcomes such
+as invalid configuration syntax, an unsupported language, a content parse failure, or a safety limit
+remain cacheable.
 
 The engine has two metadata shortcuts above those content-fingerprinted facts: the extractor retains
 prepared decoded text, and the engine retains resolved snapshots for a manifest. Importance ranking
