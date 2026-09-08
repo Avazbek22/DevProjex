@@ -199,6 +199,32 @@ For Godot, the reported 38.66× denominator is specifically 1,988 ms divided by
 51 ms for those first and second consecutive sequences; it does not compare two
 versions or two different queries.
 
+### MCP search without an intermediate export
+
+Measured on 2026-09-08 on Windows with three fresh initialized MCP servers per
+cell. Both implementations searched the same clean pinned checkout through the
+official .NET MCP client and the standard effective selection. DevProjex was
+pinned at `3669c3a38d1cc220387a6659abdffacd85130def` and searched for the
+case-sensitive pattern `namespace`; Repomix was pinned at
+`85e3969b010c72b905203812d1a3f5beb84a2102` and searched for `export`.
+The baseline product was `3669c3a38d1cc220387a6659abdffacd85130def`; the direct
+consumer was `eb44f38c32407053cf8be1fc41d137f374fe5385`. Times and in-flight
+bytes are medians. The response hash is SHA-256 after replacing the deliberately
+random untrusted-data delimiter with a fixed token.
+
+| Corpus | Path | Time to response | Prepared bytes written | Prepared bytes read | Peak in-flight bytes | Matches | Normalized response SHA-256 |
+|---|---|---:|---:|---:|---:|---:|---|
+| DevProjex | Intermediate export | 3,435 ms | 22,827,061 | 22,827,061 | 51,676,624 | 1,634 | `97445A170606E7B5BC37847118C33487A2932F44DD492917ACB3869A8A4169C8` |
+| DevProjex | Direct transformed-text consumer | 3,288 ms | 0 | 0 | 51,940,082 | 1,634 | `97445A170606E7B5BC37847118C33487A2932F44DD492917ACB3869A8A4169C8` |
+| Repomix | Intermediate export | 1,637 ms | 6,908,300 | 6,908,300 | 7,713,074 | 847 | `00731A226E3275E6B4D1ADF0E11F42F991E56608EAA6F79BCB64729E26D5FAAD` |
+| Repomix | Direct transformed-text consumer | 1,548 ms | 0 | 0 | 7,713,074 | 847 | `00731A226E3275E6B4D1ADF0E11F42F991E56608EAA6F79BCB64729E26D5FAAD` |
+
+This isolates one `search_project` call, including selection and transformation;
+it is not an end-to-end agent task benchmark. The direct consumer removes the
+temporary prepared write and reread while keeping the transform pipeline's
+bounded work window. Equal match counts, order-sensitive normalized response
+hashes, and trusted partial-result notices were required for acceptance.
+
 The cache retains immutable inventory and path projections only while a root
 watcher and Git/control-file stamps prove the snapshot current. Source content is
 not served from that cache: every content read still uses the validated root-jail
