@@ -1,8 +1,16 @@
 name: Publish Headless Container
 
+# CI tier 2 (push to v*) and 3 (master, release). Policy: .github/workflows/README.md
+# - `pull_request` runs ONLY when the container inputs themselves change (paths below). Core code
+#   paths belong to `push`; copying them here makes every feature push cross-build the image.
+# - `branches-ignore: [master]` keeps the release PR (v* -> master) out: the push run on v* already
+#   attaches its checks to the same commit the release PR shows. Never replace it with `branches:`.
+# - The read-only build is container-build.yml (also used by release-candidate.yml). Only the
+#   publish job may push to GHCR, and only for `release: published`.
+
 on:
-  pull_request:
-    branches: [v5.2, master]
+  push:
+    branches: [master, 'v*']
     paths:
       - '.github/workflows/publish-container.yml'
       - '.github/workflows/container-build.yml'
@@ -23,6 +31,21 @@ on:
       - 'Scripts/ci/Test-ReleaseVersion.ps1'
       - 'Directory.Build.*'
       - 'Directory.Packages.props'
+  pull_request:
+    # The release PR (v* -> master) is excluded: its head commit already carries the push run.
+    branches-ignore: [master]
+    paths:
+      - '.github/workflows/publish-container.yml'
+      - '.github/workflows/container-build.yml'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'glama.json'
+      - 'Packaging/Headless/**'
+      - 'Scripts/*Headless*'
+      - 'Scripts/*Release*'
+      - 'Scripts/release-archive-helpers.ps1'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
+      - 'Directory.Build.targets'
   workflow_dispatch:
     inputs:
       version:
@@ -44,6 +67,12 @@ on:
 
 permissions:
   contents: read
+
+# One run per pull request or branch head. Feature pushes and branch merges cancel their own
+# superseded runs; release, dispatch, and workflow_call runs are never cancelled.
+concurrency:
+  group: publish-container-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true

@@ -1,5 +1,15 @@
 name: Release Candidate
 
+# CI tier 3, `workflow_dispatch` only. Policy: .github/workflows/README.md
+# This aggregator calls every read-only gate for ONE pinned commit and fails if any gate is
+# skipped. Never add pull_request or push triggers: they would duplicate the whole matrix on
+# every push (tried in September 2026 and reverted). Composition changes are covered by the
+# actionlint job in dotnet.yml; a real dispatch on the candidate SHA is the acceptance test.
+# Keep `contents: read` here and call only workflows without write permissions: GitHub rejects
+# nested jobs that request more than the caller grants, `if:` guards do not help.
+# Adding a channel: one reusable read-only workflow, one job below, one row in the report, one
+# entry in the contract test (HeadlessWorkflowsCoverMasterCoreChangesAndReleaseCandidatePinsOneSha).
+
 on:
   workflow_dispatch:
     inputs:
@@ -105,6 +115,29 @@ jobs:
       display_version: ${{ needs.validate-sha.outputs.display_version }}
       package_version: ${{ needs.validate-sha.outputs.package_version }}
 
+  appimage:
+    name: AppImage dry-run
+    needs: validate-sha
+    uses: ./.github/workflows/appimage-build.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      version: ${{ needs.validate-sha.outputs.display_version }}
+
+  grammar-delivery:
+    name: Grammar Delivery
+    needs: validate-sha
+    uses: ./.github/workflows/grammar-delivery.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+
+  store-smoke:
+    name: Store Package Smoke
+    needs: validate-sha
+    uses: ./.github/workflows/store-package-smoke.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      force_full: true
+
   report:
     name: Release candidate report
     if: ${{ always() }}
@@ -115,6 +148,9 @@ jobs:
       - headless-archives
       - container
       - packages
+      - appimage
+      - grammar-delivery
+      - store-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -128,6 +164,9 @@ jobs:
           ARCHIVES_RESULT: ${{ needs.headless-archives.result }}
           CONTAINER_RESULT: ${{ needs.container.result }}
           PACKAGES_RESULT: ${{ needs.packages.result }}
+          APPIMAGE_RESULT: ${{ needs.appimage.result }}
+          GRAMMAR_RESULT: ${{ needs.grammar-delivery.result }}
+          STORE_RESULT: ${{ needs.store-smoke.result }}
         run: |
           $results = [ordered]@{
             'Pinned SHA' = $env:PIN_RESULT
@@ -136,6 +175,9 @@ jobs:
             'Headless archives' = $env:ARCHIVES_RESULT
             'Container dry-run' = $env:CONTAINER_RESULT
             'Package dry-run' = $env:PACKAGES_RESULT
+            'AppImage dry-run' = $env:APPIMAGE_RESULT
+            'Grammar Delivery' = $env:GRAMMAR_RESULT
+            'Store Package Smoke' = $env:STORE_RESULT
           }
           "## Release candidate ``$env:CANDIDATE_SHA``" >> $env:GITHUB_STEP_SUMMARY
           '' >> $env:GITHUB_STEP_SUMMARY

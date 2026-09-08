@@ -1,10 +1,15 @@
 name: Release Validation
 
+# CI tier 1, 2, and 3. Policy: .github/workflows/README.md
+# Runs on every pull request (the planner limits it to the touched release paths) because the
+# publish smoke exercises published single-file binaries per RID, which no test suite covers.
+# Do not add a `push: v*` trigger: every merge into v5.x is also a synchronize of the open
+# release PR, so the pull_request run already covers the merge tier without a second run.
+
 on:
   push:
     branches: [ "master" ]
   pull_request:
-    branches: [ "master", "v5.1", "v5.2" ]
   workflow_dispatch:
   workflow_call:
     inputs:

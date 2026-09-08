@@ -1,5 +1,13 @@
 name: .NET CI
 
+# CI tier 1, 2, and 3. Policy: .github/workflows/README.md
+# The change planner (Scripts/ci/Select-CiPlan.ps1) decides which suites and operating systems
+# run for a pull request; unclassified paths fall back to the full plan. A new product test goes
+# into an existing suite and needs no edit here. Do not add a `push: v*` trigger: every merge
+# into v5.x is also a synchronize of the open release PR, which already runs this workflow.
+# The three-OS matrix stays on pull requests on purpose: Windows and macOS path, PTY, and file
+# system differences are found here, not later.
+
 on:
   push:
     branches:
@@ -98,6 +106,13 @@ jobs:
           .github/workflows/headless-build.yml
           .github/workflows/container-build.yml
           .github/workflows/packages-build.yml
+          .github/workflows/appimage-build.yml
+          .github/workflows/package-headless.yml
+          .github/workflows/publish-container.yml
+          .github/workflows/publish-packages.yml
+          .github/workflows/package-appimage.yml
+          .github/workflows/grammar-delivery.yml
+          .github/workflows/store-package-smoke.yml
 
   test-suite:
     name: CI (${{ matrix.os_name }} / ${{ matrix.suite_name }})
