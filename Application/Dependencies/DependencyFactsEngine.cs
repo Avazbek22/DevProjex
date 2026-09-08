@@ -1095,6 +1095,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, CSharpUsingDirective[]>> _aliasesByFileAndName;
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, TypeParameterScope[]>> _typeParametersByFileAndName;
 		private readonly IReadOnlySet<string> _dotNetExternalSimpleNames;
+		private readonly IReadOnlyDictionary<string, string[]> _pythonRootPrefixesByScope;
+		private readonly IReadOnlyDictionary<string, string> _pythonModuleByFile;
 
 		public ResolverContext(
 			string root,
@@ -1160,6 +1162,16 @@ public sealed class DependencyFactsEngine : IDisposable
 			_dotNetExternalSimpleNames = DotNetSimpleNames.GetValue(
 				configuration.DotNetExternalSymbols,
 				static symbols => symbols.Select(SimpleName).ToHashSet(StringComparer.Ordinal));
+			_pythonRootPrefixesByScope = configuration.Scopes
+				.Where(static scope => scope.LanguageId == LanguageId.Python)
+				.ToDictionary(
+					static scope => scope.ScopeId,
+					scope => scope.PythonRoots.Where(candidate => IsWithin(_root, candidate))
+						.Select(candidate => PortableRelative(_root, candidate) is "." ? string.Empty : PortableRelative(_root, candidate).Trim('/'))
+						.Distinct(StringComparer.Ordinal).ToArray(),
+					StringComparer.Ordinal);
+			_pythonModuleByFile = files.Where(static file => file.LanguageId == LanguageId.Python)
+				.ToDictionary(static file => file.Path, ComputePythonModule, StringComparer.Ordinal);
 		}
 
 		public DependencyEdge ResolveImport(FileFacts source, ImportFact import) => source.LanguageId switch
@@ -1700,12 +1712,11 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 		}
 
-		private IEnumerable<string> PythonRootPrefixes(FileFacts source)
+		private IReadOnlyList<string> PythonRootPrefixes(FileFacts source)
 		{
-			var roots = FindScope(source.ScopeId)?.PythonRoots ?? [_root, Path.Combine(_root, "src")];
-			return roots.Where(root => IsWithin(_root, root))
-				.Select(root => PortableRelative(_root, root) is "." ? string.Empty : PortableRelative(_root, root).Trim('/'))
-				.Distinct(StringComparer.Ordinal);
+			if (_pythonRootPrefixesByScope.TryGetValue(source.ScopeId, out var roots))
+				return roots;
+			return [string.Empty, "src"];
 		}
 
 		public DependencyEdge ResolveType(FileFacts source, ReferenceFact reference)
@@ -2016,13 +2027,20 @@ public sealed class DependencyFactsEngine : IDisposable
 		}
 		private string PythonModule(FileFacts source)
 		{
+			if (_pythonModuleByFile.TryGetValue(source.Path, out var module))
+				return module;
+			return ComputePythonModule(source);
+		}
+
+		private string ComputePythonModule(FileFacts source)
+		{
 			var root = PythonRootPrefixes(source)
 				.Where(prefix => prefix.Length == 0 || source.Path.StartsWith(prefix + '/', StringComparison.Ordinal))
 				.OrderByDescending(static prefix => prefix.Length)
 				.FirstOrDefault();
 			var relative = root is { Length: > 0 } ? source.Path[(root.Length + 1)..] : source.Path;
-			var module = Path.ChangeExtension(relative, null)!.Replace('/', '.').Replace('\\', '.');
-			return module.EndsWith(".__init__", StringComparison.Ordinal) ? module[..^".__init__".Length] : module;
+			var computed = Path.ChangeExtension(relative, null)!.Replace('/', '.').Replace('\\', '.');
+			return computed.EndsWith(".__init__", StringComparison.Ordinal) ? computed[..^".__init__".Length] : computed;
 		}
 
 		private DependencyScopeDescriptor? FindScope(string scopeId) =>
