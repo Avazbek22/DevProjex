@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using DevProjex.Application.Dependencies;
 using DevProjex.Infrastructure.Compression;
@@ -1653,6 +1654,50 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal("class Valid { }", validResult.Source);
 		Assert.Equal(DependencyFileStatus.ExtractionFailed, incompleteResult.Status);
 		Assert.Contains("unsupported encoding", incompleteResult.StatusReason, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BoundedDependencySourceRead_SizesPooledBuffersWithoutRetainingTheFileLimit()
+	{
+		const int maximumCharacters = 2 * 1024 * 1024;
+		using var fixture = new TemporaryDirectory();
+		var small = fixture.CreateFile("Small.cs", "public class Small { }");
+		var large = fixture.CreateFile("Large.cs", new string('x', 1024 * 1024));
+		var reader = new TreeSitterDependencyFactExtractor.BoundedDependencySourceReader();
+
+		var smallAllocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+		var smallStarted = Stopwatch.StartNew();
+		for (var index = 0; index < 500; index++)
+		{
+			var smallResult = await reader.ReadAsync(small, maximumCharacters, TestContext.Current.CancellationToken);
+			Assert.Equal(DependencyFileStatus.Supported, smallResult.Status);
+		}
+		smallStarted.Stop();
+		var smallAllocated = GC.GetTotalAllocatedBytes(precise: true) - smallAllocatedBefore;
+		var smallCharacterCapacity = reader.LastCharacterBufferCapacity;
+		var smallByteCapacity = reader.LastByteBufferCapacity;
+
+		var workingSetBefore = Process.GetCurrentProcess().WorkingSet64;
+		var largeAllocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+		var largeStarted = Stopwatch.StartNew();
+		var largeResult = await reader.ReadAsync(large, maximumCharacters, TestContext.Current.CancellationToken);
+		largeStarted.Stop();
+		var largeAllocated = GC.GetTotalAllocatedBytes(precise: true) - largeAllocatedBefore;
+		var workingSetAfter = Process.GetCurrentProcess().WorkingSet64;
+		var largeCharacterCapacity = reader.LastCharacterBufferCapacity;
+
+		var afterLarge = await reader.ReadAsync(small, maximumCharacters, TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.Supported, largeResult.Status);
+		Assert.Equal(DependencyFileStatus.Supported, afterLarge.Status);
+		Assert.InRange(smallCharacterCapacity, 1, 256);
+		Assert.InRange(smallByteCapacity, 1, 256);
+		Assert.InRange(largeCharacterCapacity, 1, 64 * 1024);
+		Assert.InRange(reader.LastCharacterBufferCapacity, 1, 256);
+		TestContext.Current.TestOutputHelper?.WriteLine(
+			$"Bounded reader: small-500={smallStarted.ElapsedMilliseconds}ms/{smallAllocated}B, " +
+			$"large-1MiChars={largeStarted.ElapsedMilliseconds}ms/{largeAllocated}B, " +
+			$"char-buffer={largeCharacterCapacity} chars, working-set-delta={workingSetAfter - workingSetBefore}B.");
 	}
 
 	[Fact]
