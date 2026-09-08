@@ -385,6 +385,84 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task TypeScriptConditionalExports_SelectRequireForCommonJsSourceInObjectOrder()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var package = fixture.CreateFile("package.json", "{\"name\":\"self\",\"exports\":{\"import\":\"./import.mjs\",\"require\":\"./require.cjs\"}}");
+		var source = fixture.CreateFile("main.cts", "import value from 'self';");
+		var importTarget = fixture.CreateFile("import.mjs", "export default 1;");
+		var requireTarget = fixture.CreateFile("require.cjs", "module.exports = 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, package, source, importTarget, requireTarget],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Reference == "self");
+		Assert.Equal("require.cjs", edge.Target);
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+	}
+
+	[Fact]
+	public async Task TypeScriptConditionalExports_NullBlocksOnlyTheApplicableCondition()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var package = fixture.CreateFile("package.json", "{\"name\":\"self\",\"exports\":{\"import\":null,\"require\":\"./require.cjs\"}}");
+		var source = fixture.CreateFile("main.cts", "import value from 'self';");
+		var requireTarget = fixture.CreateFile("require.cjs", "module.exports = 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, package, source, requireTarget],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal("require.cjs", Assert.Single(result.Edges, item => item.Reference == "self").Target);
+	}
+
+	[Fact]
+	public async Task TypeScriptConditionalExports_DefaultBeforeImportWinsByDeclarationOrder()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var package = fixture.CreateFile("package.json", "{\"name\":\"self\",\"type\":\"module\",\"exports\":{\"default\":\"./default.js\",\"import\":\"./import.mjs\"}}");
+		var source = fixture.CreateFile("main.mts", "import value from 'self';");
+		var defaultTarget = fixture.CreateFile("default.js", "export default 1;");
+		var importTarget = fixture.CreateFile("import.mjs", "export default 2;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, package, source, defaultTarget, importTarget],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal("default.js", Assert.Single(result.Edges, item => item.Reference == "self").Target);
+	}
+
+	[Fact]
+	public async Task TypeScriptConditionalExports_ResolveNestedEsmConditionsAndFailClosedOnUnknownConditions()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var validPackage = fixture.CreateFile("valid/package.json", "{\"name\":\"valid\",\"type\":\"module\",\"exports\":{\"node\":{\"import\":\"./entry.mjs\",\"require\":\"./entry.cjs\"}}}");
+		var validSource = fixture.CreateFile("valid/main.mts", "import value from 'valid';");
+		var esmTarget = fixture.CreateFile("valid/entry.mjs", "export default 1;");
+		var cjsTarget = fixture.CreateFile("valid/entry.cjs", "module.exports = 1;");
+		var unknownPackage = fixture.CreateFile("unknown/package.json", "{\"name\":\"unknown\",\"type\":\"module\",\"exports\":{\"browser\":\"./browser.js\",\"default\":\"./default.js\"}}");
+		var unknownSource = fixture.CreateFile("unknown/main.mts", "import value from 'unknown';");
+		var browserTarget = fixture.CreateFile("unknown/browser.js", "export default 1;");
+		var fallbackTarget = fixture.CreateFile("unknown/default.js", "export default 2;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, validPackage, validSource, esmTarget, cjsTarget, unknownPackage, unknownSource, browserTarget, fallbackTarget],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal("valid/entry.mjs", Assert.Single(result.Edges, item => item.Reference == "valid").Target);
+		var unsupported = Assert.Single(result.Edges, item => item.Reference == "unknown");
+		Assert.Equal(ResolutionStatus.Unresolved, unsupported.Status);
+		Assert.Contains("condition 'browser' is not supported", Assert.Single(unsupported.Reasons), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task TypeScriptBareImports_RequireDeclaredExternalEvidence()
 	{
 		using var fixture = new TemporaryDirectory();

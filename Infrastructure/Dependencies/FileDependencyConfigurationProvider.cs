@@ -208,40 +208,57 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			return new PackageMapDescriptor(
 				directory,
 				null,
-				new Dictionary<string, string?>(),
-				new Dictionary<string, string?>(),
+				new Dictionary<string, PackageTargetDescriptor>(),
+				new Dictionary<string, PackageTargetDescriptor>(),
 				null,
 				new HashSet<string>());
 		}
 	}
 
-	private static IReadOnlyDictionary<string, string?> FlattenMap(JsonElement root, string property)
+	private static IReadOnlyDictionary<string, PackageTargetDescriptor> FlattenMap(JsonElement root, string property)
 	{
-		var result = new Dictionary<string, string?>(StringComparer.Ordinal);
+		var result = new Dictionary<string, PackageTargetDescriptor>(StringComparer.Ordinal);
 		if (!root.TryGetProperty(property, out var map)) return result;
-		if (map.ValueKind == JsonValueKind.String || map.ValueKind == JsonValueKind.Null)
+		if (map.ValueKind is JsonValueKind.String or JsonValueKind.Null)
 		{
-			result["."] = SelectConditional(map);
+			result["."] = ParsePackageTarget(map);
 			return result;
 		}
-		if (map.ValueKind != JsonValueKind.Object) return result;
+		if (map.ValueKind != JsonValueKind.Object)
+		{
+			result["."] = UnsupportedPackageTarget($"{property} must be a string, null, or object");
+			return result;
+		}
 		if (property == "exports" && !map.EnumerateObject().Any(static item => item.Name.StartsWith(".", StringComparison.Ordinal)))
 		{
-			result["."] = SelectConditional(map);
+			result["."] = ParsePackageTarget(map);
 			return result;
 		}
-		foreach (var item in map.EnumerateObject()) result[item.Name] = SelectConditional(item.Value);
+		foreach (var item in map.EnumerateObject()) result[item.Name] = ParsePackageTarget(item.Value);
 		return result;
 	}
 
-	private static string? SelectConditional(JsonElement value)
+	private static PackageTargetDescriptor ParsePackageTarget(JsonElement value)
 	{
-		if (value.ValueKind == JsonValueKind.String) return value.GetString();
-		if (value.ValueKind is JsonValueKind.Null or not JsonValueKind.Object) return null;
-		foreach (var condition in new[] { "types", "import", "require", "node", "default" })
-			if (value.TryGetProperty(condition, out var candidate)) return SelectConditional(candidate);
-		return null;
+		if (value.ValueKind == JsonValueKind.String)
+			return new PackageTargetDescriptor(PackageTargetKind.Path, value.GetString(), [], null);
+		if (value.ValueKind == JsonValueKind.Null)
+			return new PackageTargetDescriptor(PackageTargetKind.Blocked, null, [], null);
+		if (value.ValueKind != JsonValueKind.Object)
+			return UnsupportedPackageTarget($"package target kind {value.ValueKind} is not supported");
+		return new PackageTargetDescriptor(
+			PackageTargetKind.Conditions,
+			null,
+			value.EnumerateObject()
+				.Select(static condition => new PackageConditionDescriptor(
+					condition.Name,
+					ParsePackageTarget(condition.Value)))
+				.ToArray(),
+			null);
 	}
+
+	private static PackageTargetDescriptor UnsupportedPackageTarget(string reason) =>
+		new(PackageTargetKind.Unsupported, null, [], reason);
 
 	private static string? ReadPackageName(string content)
 	{

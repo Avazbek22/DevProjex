@@ -1023,17 +1023,19 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			else if (import.Specifier.StartsWith("#", StringComparison.Ordinal))
 			{
-				if (IsPackageMapBlocked(source, import.Specifier, exports: false))
-					return Edge(source, import, ResolutionStatus.Unresolved, null, "package imports target is null-blocked", []);
-				candidates = ResolvePackageMap(source, import.Specifier, exports: false);
+				var packageTarget = ResolvePackageMap(source, import, import.Specifier, exports: false);
+				if (packageTarget.FailureReason is { } reason)
+					return Edge(source, import, ResolutionStatus.Unresolved, null, reason, []);
+				candidates = packageTarget.Candidates;
 			}
 			else if ((scope.PackageName ?? FindNearestPackageMap(source)?.PackageName) is { } package &&
 			         (import.Specifier == package || import.Specifier.StartsWith(package + '/', StringComparison.Ordinal)))
 			{
 				var selfPath = import.Specifier[package.Length..].TrimStart('/');
-				if (IsPackageMapBlocked(source, selfPath, exports: true))
-					return Edge(source, import, ResolutionStatus.Unresolved, null, "package exports target is null-blocked", []);
-				candidates = ResolvePackageMap(source, selfPath, exports: true);
+				var packageTarget = ResolvePackageMap(source, import, selfPath, exports: true);
+				if (packageTarget.FailureReason is { } reason)
+					return Edge(source, import, ResolutionStatus.Unresolved, null, reason, []);
+				candidates = packageTarget.Candidates;
 			}
 			else
 			{
@@ -1120,7 +1122,11 @@ public sealed class DependencyFactsEngine : IDisposable
 				: parts.FirstOrDefault() ?? specifier;
 		}
 
-		private IEnumerable<string> ResolvePackageMap(FileFacts source, string specifier, bool exports)
+		private PackageMapProbe ResolvePackageMap(
+			FileFacts source,
+			ImportFact import,
+			string specifier,
+			bool exports)
 		{
 			var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
 			while (IsWithin(_root, directory))
@@ -1130,18 +1136,30 @@ public sealed class DependencyFactsEngine : IDisposable
 				{
 					var values = exports ? map.Exports : map.Imports;
 					var key = exports ? (specifier.Length == 0 ? "." : "./" + specifier) : specifier;
-					if (TryMap(values, key, out var target) && target is not null)
-						return ProbeTypeScript(
-							Path.GetFullPath(Path.Combine(directory, target)),
+					if (!TryMap(values, key, out var target, out var wildcard))
+						return new PackageMapProbe([], null);
+					var selected = SelectPackageTarget(target!, PackageCondition(source, import));
+					if (selected.Kind == PackageTargetSelectionKind.Blocked)
+						return new PackageMapProbe([], $"package {(exports ? "exports" : "imports")} target is null-blocked");
+					if (selected.Kind == PackageTargetSelectionKind.Unsupported)
+						return new PackageMapProbe([], selected.Reason);
+					if (selected.Kind != PackageTargetSelectionKind.Path || selected.Path is null)
+						return new PackageMapProbe([], "no applicable package condition");
+					var mappedPath = wildcard.Length == 0
+						? selected.Path
+						: selected.Path.Replace("*", wildcard, StringComparison.Ordinal);
+					return new PackageMapProbe(
+						ProbeTypeScript(
+							Path.GetFullPath(Path.Combine(directory, mappedPath)),
 							FindScope(source.ScopeId),
-							source);
-					return [];
+							source).ToArray(),
+						null);
 				}
 				if (Path.GetFullPath(directory) == Path.GetFullPath(_root))
 					break;
 				directory = Path.GetDirectoryName(directory)!;
 			}
-			return [];
+			return new PackageMapProbe([], null);
 		}
 
 		private PackageMapDescriptor? FindNearestPackageMap(FileFacts source)
@@ -1156,27 +1174,31 @@ public sealed class DependencyFactsEngine : IDisposable
 			return null;
 		}
 
-		private bool IsPackageMapBlocked(FileFacts source, string specifier, bool exports)
+		private string PackageCondition(FileFacts source, ImportFact import)
 		{
-			var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
-			while (IsWithin(_root, directory))
-			{
-				if (_configuration.PackageMaps.TryGetValue(PortableRelative(_root, directory), out var map))
-				{
-					var values = exports ? map.Exports : map.Imports;
-					var key = exports ? (specifier.Length == 0 ? "." : "./" + specifier) : specifier;
-					return TryMap(values, key, out var target) && target is null;
-				}
-				if (Path.GetFullPath(directory) == Path.GetFullPath(_root)) break;
-				directory = Path.GetDirectoryName(directory)!;
-			}
-			return false;
+			if (IsRequire(import))
+				return "require";
+			var scope = FindScope(source.ScopeId);
+			var mode = scope?.ModuleResolution ?? "bundler";
+			return scope is not null &&
+			       (mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
+			        mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase)) &&
+			       SupportsCommonJs(source, scope)
+				? "require"
+				: "import";
 		}
 
-		private static bool TryMap(IReadOnlyDictionary<string, string?> map, string key, out string? target)
+		private static bool TryMap(
+			IReadOnlyDictionary<string, PackageTargetDescriptor> map,
+			string key,
+			out PackageTargetDescriptor? target,
+			out string wildcard)
 		{
 			if (map.TryGetValue(key, out target))
+			{
+				wildcard = string.Empty;
 				return true;
+			}
 			foreach (var pair in map.Where(static pair => pair.Key.Contains('*')).OrderByDescending(static pair => pair.Key.Length))
 			{
 				var star = pair.Key.IndexOf('*');
@@ -1184,13 +1206,49 @@ public sealed class DependencyFactsEngine : IDisposable
 				var suffix = pair.Key[(star + 1)..];
 				if (!key.StartsWith(prefix, StringComparison.Ordinal) || !key.EndsWith(suffix, StringComparison.Ordinal))
 					continue;
-				var wildcard = key[prefix.Length..(key.Length - suffix.Length)];
-				target = pair.Value?.Replace("*", wildcard, StringComparison.Ordinal);
+				wildcard = key[prefix.Length..(key.Length - suffix.Length)];
+				target = pair.Value;
 				return true;
 			}
 			target = null;
+			wildcard = string.Empty;
 			return false;
 		}
+
+		private static PackageTargetSelection SelectPackageTarget(
+			PackageTargetDescriptor target,
+			string moduleCondition)
+		{
+			if (target.Kind == PackageTargetKind.Path)
+				return new PackageTargetSelection(PackageTargetSelectionKind.Path, target.Path, null);
+			if (target.Kind == PackageTargetKind.Blocked)
+				return new PackageTargetSelection(PackageTargetSelectionKind.Blocked, null, null);
+			if (target.Kind == PackageTargetKind.Unsupported)
+				return new PackageTargetSelection(
+					PackageTargetSelectionKind.Unsupported,
+					null,
+					target.UnsupportedReason ?? "unsupported package target");
+			foreach (var branch in target.Conditions)
+			{
+				if (!IsSupportedPackageCondition(branch.Name))
+					return new PackageTargetSelection(
+						PackageTargetSelectionKind.Unsupported,
+						null,
+						$"package condition '{branch.Name}' is not supported");
+				if (!IsActivePackageCondition(branch.Name, moduleCondition))
+					continue;
+				var selected = SelectPackageTarget(branch.Target, moduleCondition);
+				if (selected.Kind != PackageTargetSelectionKind.NoMatch)
+					return selected;
+			}
+			return new PackageTargetSelection(PackageTargetSelectionKind.NoMatch, null, null);
+		}
+
+		private static bool IsSupportedPackageCondition(string condition) =>
+			condition is "types" or "import" or "require" or "node" or "default";
+
+		private static bool IsActivePackageCondition(string condition, string moduleCondition) =>
+			condition is "types" or "node" or "default" || condition == moduleCondition;
 
 		private IEnumerable<string> ProbeTypeScript(
 			string candidate,
@@ -1684,5 +1742,19 @@ public sealed class DependencyFactsEngine : IDisposable
 			LanguageId LanguageId,
 			string QualifiedName,
 			int GenericArity);
+		private readonly record struct PackageMapProbe(
+			IReadOnlyList<string> Candidates,
+			string? FailureReason);
+		private readonly record struct PackageTargetSelection(
+			PackageTargetSelectionKind Kind,
+			string? Path,
+			string? Reason);
+		private enum PackageTargetSelectionKind
+		{
+			NoMatch,
+			Path,
+			Blocked,
+			Unsupported
+		}
 	}
 }

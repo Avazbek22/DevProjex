@@ -60,10 +60,26 @@ public sealed record DependencyScopeDescriptor(
 public sealed record PackageMapDescriptor(
 	string Directory,
 	string? PackageName,
-	IReadOnlyDictionary<string, string?> Imports,
-	IReadOnlyDictionary<string, string?> Exports,
+	IReadOnlyDictionary<string, PackageTargetDescriptor> Imports,
+	IReadOnlyDictionary<string, PackageTargetDescriptor> Exports,
 	string? ModuleType,
 	IReadOnlySet<string> ExternalPackages);
+
+public enum PackageTargetKind
+{
+	Path,
+	Blocked,
+	Conditions,
+	Unsupported
+}
+
+public sealed record PackageTargetDescriptor(
+	PackageTargetKind Kind,
+	string? Path,
+	IReadOnlyList<PackageConditionDescriptor> Conditions,
+	string? UnsupportedReason);
+
+public sealed record PackageConditionDescriptor(string Name, PackageTargetDescriptor Target);
 
 public interface IDependencyFactExtractor : IDisposable
 {
