@@ -1,8 +1,8 @@
 {
   "protocol": "focus-v1",
   "runDate": "2026-09-08",
-  "productSha": "1c913520abde175dd13c1cb1a393c0d985581b9e",
-  "evaluatorSha": "1c913520abde175dd13c1cb1a393c0d985581b9e",
+  "productSha": "7e8a1c9bc6229e2d61cc8a4e538cbf817f91f3a5",
+  "evaluatorSha": "7e8a1c9bc6229e2d61cc8a4e538cbf817f91f3a5",
   "repositories": [
     {
       "id": "devprojex",
@@ -825,100 +825,100 @@
           "mode": "cold",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 2741.1446,
-          "medianPeakWorkingSetBytes": 323145728,
+          "medianElapsedMilliseconds": 2733.3089,
+          "medianPeakWorkingSetBytes": 318156800,
           "elapsedMilliseconds": [
-            2827.371,
-            2877.6425,
-            2823.8446,
-            2741.1446,
-            2725.7522,
-            2676.9313,
-            2664.7149
+            2549.9843,
+            3094.0315,
+            3365.2011,
+            2585.4247,
+            2667.3333,
+            2733.3089,
+            2822.1437
           ],
           "peakWorkingSetBytes": [
-            322871296,
-            322797568,
-            323203072,
-            323002368,
-            323510272,
-            323571712,
-            323145728
+            319369216,
+            318058496,
+            318156800,
+            319119360,
+            315265024,
+            318902272,
+            314691584
           ]
         },
         {
           "mode": "cold",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 2723.3807,
-          "medianPeakWorkingSetBytes": 323612672,
+          "medianElapsedMilliseconds": 2832.4569,
+          "medianPeakWorkingSetBytes": 315506688,
           "elapsedMilliseconds": [
-            2771.9397,
-            2761.6991,
-            2721.0678,
-            2696.1333,
-            2704.9493,
-            2723.3807,
-            2756.9543
+            2741.2238,
+            2580.4833,
+            2742.0051,
+            2862.7813,
+            3597.899,
+            2832.4569,
+            3291.5232
           ],
           "peakWorkingSetBytes": [
-            324055040,
-            323612672,
-            323420160,
-            323964928,
-            323469312,
-            323809280,
-            323252224
+            319488000,
+            314474496,
+            314888192,
+            314421248,
+            320614400,
+            315506688,
+            316981248
           ]
         },
         {
           "mode": "warm",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 917.7578,
-          "medianPeakWorkingSetBytes": 326709248,
+          "medianElapsedMilliseconds": 942.9868,
+          "medianPeakWorkingSetBytes": 322359296,
           "elapsedMilliseconds": [
-            1006.9337,
-            887.8236,
-            898.8276,
-            916.7459,
-            981.7166,
-            922.8804,
-            917.7578
+            942.9868,
+            880.5622,
+            925.1331,
+            932.2042,
+            954.0765,
+            973.0601,
+            1139.5225
           ],
           "peakWorkingSetBytes": [
-            331177984,
-            329039872,
-            323678208,
-            326709248,
-            323280896,
-            323354624,
-            327106560
+            313016320,
+            324460544,
+            324857856,
+            319463424,
+            329125888,
+            322359296,
+            320462848
           ]
         },
         {
           "mode": "warm",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 910.6792,
-          "medianPeakWorkingSetBytes": 327147520,
+          "medianElapsedMilliseconds": 1002.1232,
+          "medianPeakWorkingSetBytes": 324530176,
           "elapsedMilliseconds": [
-            930.2544,
-            896.9205,
-            902.3565,
-            931.4153,
-            910.6792,
-            901.6079,
-            928.9197
+            915.7391,
+            1017.7031,
+            883.2161,
+            1361.1209,
+            1368.838,
+            1002.1232,
+            936.7692
           ],
           "peakWorkingSetBytes": [
-            329351168,
-            332767232,
-            327147520,
-            325980160,
-            326864896,
-            326238208,
-            328966144
+            320458752,
+            320995328,
+            324530176,
+            328613888,
+            320708608,
+            327811072,
+            324567040
           ]
         }
       ]
@@ -1330,7 +1330,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.5753219152394049,
+              "irrelevantTokenShare": 0.575375,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -1492,7 +1492,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.5465116279069767,
+              "irrelevantTokenShare": 0.54656832104013,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -1546,7 +1546,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.773284160520065,
+              "irrelevantTokenShare": 0.7733125,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -1608,7 +1608,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.3506753376688344,
+              "irrelevantTokenShare": 0.3508377094273568,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -1660,9 +1660,9 @@
             },
             "focus-v1": {
               "available": true,
-              "recallNew": 0,
+              "recallNew": 0.5,
               "allRequired": false,
-              "irrelevantTokenShare": 0.6754594324290536,
+              "irrelevantTokenShare": 0.539125,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -1676,9 +1676,9 @@
             },
             "directed-from-seed": {
               "available": true,
-              "recallNew": 0,
+              "recallNew": 0.5,
               "allRequired": false,
-              "irrelevantTokenShare": 0.6665382145150931,
+              "irrelevantTokenShare": 0.538779084313235,
               "oracle": true,
               "oracleAfterSeeds": true
             }
@@ -1708,7 +1708,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.83775,
+              "irrelevantTokenShare": 0.8377297162145269,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -1716,7 +1716,7 @@
               "available": true,
               "recallNew": 1,
               "allRequired": true,
-              "irrelevantTokenShare": 0.5562015503875969,
+              "irrelevantTokenShare": 0.5563125,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -1744,100 +1744,100 @@
           "mode": "cold",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 750.7588,
-          "medianPeakWorkingSetBytes": 117288960,
+          "medianElapsedMilliseconds": 800.6517,
+          "medianPeakWorkingSetBytes": 115470336,
           "elapsedMilliseconds": [
-            769.6079,
-            750.7588,
-            750.1261,
-            762.6834,
-            750.7034,
-            755.6056,
-            748.9306
+            775.9437,
+            800.6517,
+            838.0931,
+            781.1414,
+            793.9339,
+            811.7573,
+            849.0115
           ],
           "peakWorkingSetBytes": [
-            115965952,
-            118222848,
-            118575104,
-            117288960,
-            116518912,
-            118411264,
-            116379648
+            115240960,
+            115699712,
+            115957760,
+            116506624,
+            115134464,
+            115036160,
+            115470336
           ]
         },
         {
           "mode": "cold",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 779.0895,
-          "medianPeakWorkingSetBytes": 118222848,
+          "medianElapsedMilliseconds": 900.8799,
+          "medianPeakWorkingSetBytes": 115945472,
           "elapsedMilliseconds": [
-            753.8733,
-            761.1051,
-            760.9724,
-            779.0895,
-            859.8602,
-            849.6652,
-            838.3452
+            876.1415,
+            1193.117,
+            960.1144,
+            900.8799,
+            918.7424,
+            816.776,
+            845.394
           ],
           "peakWorkingSetBytes": [
-            116269056,
-            118263808,
-            118263808,
-            116543488,
-            118222848,
-            116285440,
-            118403072
+            117526528,
+            117309440,
+            117841920,
+            115945472,
+            115343360,
+            113848320,
+            115630080
           ]
         },
         {
           "mode": "warm",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 464.8097,
-          "medianPeakWorkingSetBytes": 117465088,
+          "medianElapsedMilliseconds": 440.3532,
+          "medianPeakWorkingSetBytes": 116613120,
           "elapsedMilliseconds": [
-            409.445,
-            423.1344,
-            466.436,
-            464.8097,
-            469.4289,
-            489.0083,
-            376.082
+            465.2768,
+            445.9437,
+            436.2875,
+            427.6049,
+            440.3532,
+            432.1774,
+            457.5
           ],
           "peakWorkingSetBytes": [
-            117829632,
-            118177792,
-            117465088,
-            117227520,
-            116641792,
-            118714368,
-            117231616
+            116686848,
+            116539392,
+            117456896,
+            116613120,
+            116523008,
+            117125120,
+            116064256
           ]
         },
         {
           "mode": "warm",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 398.0476,
-          "medianPeakWorkingSetBytes": 117469184,
+          "medianElapsedMilliseconds": 464.7749,
+          "medianPeakWorkingSetBytes": 116850688,
           "elapsedMilliseconds": [
-            383.9215,
-            395.7667,
-            388.8526,
-            559.7703,
-            486.529,
-            398.0476,
-            410.2502
+            618.1429,
+            497.314,
+            529.6741,
+            451.9957,
+            447.0087,
+            464.7749,
+            448.1639
           ],
           "peakWorkingSetBytes": [
-            117702656,
-            117075968,
-            117133312,
-            119263232,
-            117469184,
-            119234560,
-            117035008
+            116101120,
+            116850688,
+            116600832,
+            117424128,
+            116383744,
+            116862976,
+            117030912
           ]
         }
       ]
@@ -2103,7 +2103,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.5200650081260157,
+              "irrelevantTokenShare": 0.520125,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2111,7 +2111,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.45784493715576896,
+              "irrelevantTokenShare": 0.5196446446446447,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2473,7 +2473,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.7061875,
+              "irrelevantTokenShare": 0.7061691355709732,
               "oracle": false,
               "oracleAfterSeeds": false
             },
@@ -2489,7 +2489,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.70359394703657,
+              "irrelevantTokenShare": 0.6946807819705137,
               "oracle": false,
               "oracleAfterSeeds": false
             }
@@ -2619,7 +2619,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.8771875,
+              "irrelevantTokenShare": 0.8771721465183148,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -2627,7 +2627,7 @@
               "available": true,
               "recallNew": 0,
               "allRequired": false,
-              "irrelevantTokenShare": 0.8771875,
+              "irrelevantTokenShare": 0.8771721465183148,
               "oracle": true,
               "oracleAfterSeeds": true
             },
@@ -2663,100 +2663,100 @@
           "mode": "cold",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 451.7971,
-          "medianPeakWorkingSetBytes": 90042368,
+          "medianElapsedMilliseconds": 507.9554,
+          "medianPeakWorkingSetBytes": 90652672,
           "elapsedMilliseconds": [
-            452.3961,
-            447.61,
-            448.9972,
-            451.4263,
-            475.7568,
-            527.1567,
-            451.7971
+            501.6264,
+            507.9554,
+            502.04,
+            517.4479,
+            510.406,
+            508.5774,
+            490.9107
           ],
           "peakWorkingSetBytes": [
-            89972736,
-            89837568,
-            90275840,
-            90206208,
-            90320896,
-            90042368,
-            89763840
+            90390528,
+            90652672,
+            90673152,
+            91009024,
+            90480640,
+            90337280,
+            90673152
           ]
         },
         {
           "mode": "cold",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 505.1934,
-          "medianPeakWorkingSetBytes": 90591232,
+          "medianElapsedMilliseconds": 505.3338,
+          "medianPeakWorkingSetBytes": 90513408,
           "elapsedMilliseconds": [
-            466.2204,
-            602.2492,
-            505.1934,
-            473.1098,
-            564.0658,
-            623.5853,
-            472.0967
+            505.3338,
+            491.1484,
+            491.4166,
+            496.842,
+            519.8096,
+            576.3478,
+            513.1269
           ],
           "peakWorkingSetBytes": [
-            90071040,
-            91029504,
-            90132480,
-            89903104,
-            90591232,
-            90849280,
-            90669056
+            90677248,
+            90513408,
+            90185728,
+            90374144,
+            90644480,
+            91185152,
+            90394624
           ]
         },
         {
           "mode": "warm",
           "order": "importance-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 189.2351,
-          "medianPeakWorkingSetBytes": 91856896,
+          "medianElapsedMilliseconds": 223.1351,
+          "medianPeakWorkingSetBytes": 92016640,
           "elapsedMilliseconds": [
-            189.0975,
-            189.2351,
-            180.6813,
-            192.1943,
-            181.4632,
-            194.3405,
-            198.1856
+            211.8346,
+            219.5629,
+            232.0163,
+            214.1253,
+            236.5995,
+            291.6448,
+            223.1351
           ],
           "peakWorkingSetBytes": [
-            92065792,
-            92078080,
-            91856896,
-            91406336,
-            91906048,
-            91443200,
-            91725824
+            92303360,
+            91496448,
+            91734016,
+            92131328,
+            92196864,
+            91942912,
+            92016640
           ]
         },
         {
           "mode": "warm",
           "order": "focus-v1",
           "repetitions": 7,
-          "medianElapsedMilliseconds": 205.9846,
-          "medianPeakWorkingSetBytes": 91926528,
+          "medianElapsedMilliseconds": 239.3187,
+          "medianPeakWorkingSetBytes": 92381184,
           "elapsedMilliseconds": [
-            198.3767,
-            196.2042,
-            232.3974,
-            215.1112,
-            219.1971,
-            196.3093,
-            205.9846
+            239.3187,
+            225.6252,
+            290.1383,
+            226.738,
+            248.3143,
+            240.1974,
+            230.3727
           ],
           "peakWorkingSetBytes": [
-            91340800,
-            91926528,
-            92352512,
-            92577792,
-            92377088,
-            91885568,
-            91746304
+            92319744,
+            92479488,
+            92512256,
+            92205056,
+            92536832,
+            92381184,
+            92073984
           ]
         }
       ]
@@ -2764,27 +2764,27 @@
   ],
   "criterion": {
     "eligibleCells": 15,
-    "overallRecallNewDelta": 0.3,
+    "overallRecallNewDelta": 0.3333333333333333,
     "repositoryRecallNewDelta": {
       "devprojex": 0.1,
-      "repomix": 0.3333333333333333,
+      "repomix": 0.3888888888888889,
       "flask": 1
     },
     "allRequiredRegressions": 0,
     "warmIncrementalMilliseconds": {
-      "devprojex": -7.078599999999938,
-      "repomix": -66.76210000000003,
-      "flask": 16.749500000000012
+      "devprojex": 59.13639999999998,
+      "repomix": 24.421699999999987,
+      "flask": 16.183600000000013
     },
     "warmIncrementalPercent": {
-      "devprojex": -0.7712928182141233,
-      "repomix": -14.363319009908793,
-      "flask": 8.851159219404863
+      "devprojex": 6.271180041968771,
+      "repomix": 5.545934490767862,
+      "flask": 7.252825754442045
     },
     "maximumPeakWorkingSetGrowthPercent": {
-      "devprojex": 0.1444995119972621,
-      "repomix": 0.7962283918281823,
-      "flask": 0.6095619342218987
+      "devprojex": 0.6734348991753599,
+      "repomix": 0.4114788407647831,
+      "flask": 0.396171822835522
     },
     "recallPassed": true,
     "allRequiredPassed": true,

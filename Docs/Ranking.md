@@ -168,7 +168,7 @@ greedy admission pass for every comparator. The one seed for each of the existin
 was selected from the task wording, not from its required-file set or ranked output. The
 complete machine-readable result is
 `tools/RankingEval/results/2026-09-07-focus-v1.json`; the product and evaluator SHA for the
-2026-09-08 engine-contract rerun are both `1c913520abde175dd13c1cb1a393c0d985581b9e`.
+2026-09-08 reference-semantics rerun are both `7e8a1c9bc6229e2d61cc8a4e538cbf817f91f3a5`.
 
 The six frozen orders are current manifest order, `importance-v1`, seed first without graph
 traversal, `focus-v1` minimum undirected graph hop, evaluation-only personalized PageRank,
@@ -190,11 +190,11 @@ oracles are counts over the five tasks at that repository and budget.
 | DevProjex / 8,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.7997` | `0.2000 · 0/2/2 · 0.7409` | `0.1000 · 0/2/2 · 0.7924` | `0.2000 · 0/2/2 · 0.5611` |
 | DevProjex / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.8999` | `0.1000 · 0/2/2 · 0.8962` | `0.2000 · 0/2/2 · 0.7574` | `0.1000 · 0/2/2 · 0.7375` |
 | Repomix / 4,000 | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 0.4111` | `0.0000 · 0/1/1 · 0.4110` | `0.0000 · 0/1/1 · 0.4109` | `0.0000 · 0/1/1 · 0.3883` |
-| Repomix / 8,000 | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 0.7055` | `0.2000 · 1/3/3 · 0.6202` | `0.3000 · 1/3/3 · 0.5349` | `0.2000 · 1/3/3 · 0.5965` |
+| Repomix / 8,000 | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 0.7055` | `0.3000 · 1/3/3 · 0.5930` | `0.3000 · 1/3/3 · 0.5349` | `0.3000 · 1/3/3 · 0.5710` |
 | Repomix / 16,000 | `0.0000 · 0/5/5 · 1.0000` | `0.0000 · 0/5/5 · 1.0000` | `0.0000 · 0/5/5 · 0.8528` | `0.4000 · 2/5/5 · 0.7538` | `0.3000 · 1/5/5 · 0.7675` | `0.4000 · 2/5/5 · 0.7013` |
 | Flask / 4,000 | `0.0000 · 0/0/0 · 1.0000` | `0.1250 · 0/0/0 · 0.9280` | `0.0000 · 0/0/0 · 0.7098` | `0.0000 · 0/0/0 · 0.7097` | `0.0000 · 0/0/0 · 0.7097` | `0.0000 · 0/0/0 · 0.6845` |
-| Flask / 8,000 | `0.0000 · 0/0/0 · 1.0000` | `0.1250 · 0/0/0 · 0.9640` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5260` |
-| Flask / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.9754` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5368` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5322` |
+| Flask / 8,000 | `0.0000 · 0/0/0 · 1.0000` | `0.1250 · 0/0/0 · 0.9640` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5384` |
+| Flask / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.9754` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5368` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5304` |
 
 `focus-v1` and `directed-from-seed` have the same RecallNew and AllRequired result
 in all nine repository/budget aggregates above. Directed context spends a smaller
@@ -215,13 +215,13 @@ growth for the corpus.
 
 | Repository | Cold ms (importance / focus) | Warm ms (importance / focus) | Warm focus addition | Cold RSS MiB | Warm RSS MiB | Maximum RSS growth |
 |---|---:|---:|---:|---:|---:|---:|
-| DevProjex | `2741.14 / 2723.38` | `917.76 / 910.68` | `-7.08 ms (-0.77%)` | `308.18 / 308.62` | `311.57 / 311.99` | `0.14%` |
-| Repomix | `750.76 / 779.09` | `464.81 / 398.05` | `-66.76 ms (-14.36%)` | `111.86 / 112.75` | `112.02 / 112.03` | `0.80%` |
-| Flask | `451.80 / 505.19` | `189.24 / 205.98` | `+16.75 ms (8.85%)` | `85.87 / 86.39` | `87.60 / 87.67` | `0.61%` |
+| DevProjex | `2733.31 / 2832.46` | `942.99 / 1002.12` | `+59.14 ms (6.27%)` | `303.42 / 300.89` | `307.43 / 309.50` | `0.67%` |
+| Repomix | `800.65 / 900.88` | `440.35 / 464.77` | `+24.42 ms (5.55%)` | `110.12 / 110.57` | `111.21 / 111.44` | `0.41%` |
+| Flask | `507.96 / 505.33` | `223.14 / 239.32` | `+16.18 ms (7.25%)` | `86.45 / 86.32` | `87.75 / 88.10` | `0.40%` |
 
 Fifteen of the 45 task-budget cells had a feasible oracle after the real seed admission and
 a defined RecallNew. Across those cells, `focus-v1 - seed-first` mean RecallNew was
-`+0.3000`; the repository deltas were DevProjex `+0.1000`, Repomix `+0.3333`, and Flask
+`+0.3333`; the repository deltas were DevProjex `+0.1000`, Repomix `+0.3889`, and Flask
 `+1.0000`. There were zero cells where focus regressed a seed-first `AllRequired` success.
 Every warm increment was below `max(5% of importance time, 100 ms)`, and maximum median RSS
 growth was below 10% on every corpus. All three pre-registered gates therefore pass, so the
