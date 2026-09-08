@@ -1098,6 +1098,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlyDictionary<string, string[]> _pythonRootPrefixesByScope;
 		private readonly IReadOnlyDictionary<string, string> _pythonModuleByFile;
 		private readonly IReadOnlySet<string> _manifestDirectoryPrefixes;
+		private readonly IReadOnlyDictionary<string, TypeScriptPathMapping[]> _typeScriptMappingsByScope;
 
 		public ResolverContext(
 			string root,
@@ -1174,6 +1175,17 @@ public sealed class DependencyFactsEngine : IDisposable
 			_pythonModuleByFile = files.Where(static file => file.LanguageId == LanguageId.Python)
 				.ToDictionary(static file => file.Path, ComputePythonModule, StringComparer.Ordinal);
 			_manifestDirectoryPrefixes = BuildDirectoryPrefixes(files);
+			_typeScriptMappingsByScope = configuration.Scopes
+				.Where(static scope => IsTypeScript(scope.LanguageId))
+				.ToDictionary(
+					static scope => scope.ScopeId,
+					static scope => scope.TypeScriptPaths
+						.Select(static pair => new TypeScriptPathMapping(pair.Key, pair.Value, pair.Key.IndexOf('*')))
+						.OrderBy(static mapping => mapping.Star >= 0)
+						.ThenByDescending(static mapping => mapping.Star)
+						.ThenBy(static mapping => mapping.Pattern, StringComparer.Ordinal)
+						.ToArray(),
+					StringComparer.Ordinal);
 		}
 
 		public DependencyEdge ResolveImport(FileFacts source, ImportFact import) => source.LanguageId switch
@@ -1302,19 +1314,15 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			if (scope is null)
 				return [];
-			var mappings = scope.TypeScriptPaths
-				.Select(pair => (pair.Key, pair.Value, Star: pair.Key.IndexOf('*')))
-				.Where(item => Matches(item.Key, item.Star, specifier))
-				.OrderBy(static item => item.Star >= 0)
-				.ThenByDescending(static item => item.Star)
-				.ThenBy(static item => item.Key, StringComparer.Ordinal)
+			var mappings = (_typeScriptMappingsByScope.GetValueOrDefault(scope.ScopeId) ?? [])
+				.Where(item => Matches(item.Pattern, item.Star, specifier))
 				.ToArray();
 			if (mappings.Length == 0)
 				return [];
 			var mapping = mappings[0];
 			var wildcard = mapping.Star < 0 ? string.Empty :
-				specifier[mapping.Star..(specifier.Length - (mapping.Key.Length - mapping.Star - 1))];
-			foreach (var target in mapping.Value)
+					specifier[mapping.Star..(specifier.Length - (mapping.Pattern.Length - mapping.Star - 1))];
+			foreach (var target in mapping.Targets)
 			{
 				var resolved = ProbeTypeScript(
 					Path.GetFullPath(Path.Combine(scope.Root, target.Replace("*", wildcard, StringComparison.Ordinal))),
@@ -2098,6 +2106,10 @@ public sealed class DependencyFactsEngine : IDisposable
 			LanguageId LanguageId,
 			string QualifiedName,
 			int GenericArity);
+		private readonly record struct TypeScriptPathMapping(
+			string Pattern,
+			IReadOnlyList<string> Targets,
+			int Star);
 		private readonly record struct PackageMapProbe(
 			IReadOnlyList<string> Candidates,
 			string? FailureReason);
