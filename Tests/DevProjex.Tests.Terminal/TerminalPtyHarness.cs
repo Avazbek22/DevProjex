@@ -756,30 +756,58 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			$"Terminal responses: {CaptureTerminalResponseLog()}");
 	}
 
-	public async Task<string> WaitForStableScreenAsync(
+	public Task<string> WaitForStableScreenAsync(
 		string required,
 		string? forbidden = null,
 		TimeSpan? timeout = null,
+		CancellationToken cancellationToken = default) =>
+		WaitForStableScreenAsync(
+			screen =>
+				screen.Contains(required, StringComparison.Ordinal) &&
+				(forbidden is null || !screen.Contains(forbidden, StringComparison.Ordinal)),
+			forbidden is null
+				? $"containing '{required}'"
+				: $"containing '{required}' without '{forbidden}'",
+			screen =>
+				$"required={screen.Contains(required, StringComparison.Ordinal)} " +
+				$"forbidden={forbidden is not null && screen.Contains(forbidden, StringComparison.Ordinal)}",
+			timeout,
+			cancellationToken);
+
+	public async Task<string> WaitForStableScreenAsync(
+		Func<string, bool> readiness,
+		string readinessDescription,
+		Func<string, string>? timelineState = null,
+		TimeSpan? timeout = null,
 		CancellationToken cancellationToken = default)
 	{
+		ArgumentNullException.ThrowIfNull(readiness);
+		ArgumentException.ThrowIfNullOrWhiteSpace(readinessDescription);
 		var stopwatch = Stopwatch.StartNew();
 		var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(15);
 		var previous = string.Empty;
 		var stableSamples = 0;
+		var timeline = new List<string>();
 		while (stopwatch.Elapsed < effectiveTimeout)
 		{
 			var screen = CaptureScreen();
+			var matches = readiness(screen);
+			if (!string.Equals(previous, screen, StringComparison.Ordinal))
+			{
+				timeline.Add(
+					$"{stopwatch.Elapsed.TotalMilliseconds,7:F0} ms " +
+					$"ready={matches} {timelineState?.Invoke(screen) ?? string.Empty} " +
+					$"chars={screen.Length}");
+			}
 			if (HasExited)
 			{
 				throw new Xunit.Sdk.XunitException(
 					$"Terminal process exited with code {_process.ExitCode} before the screen " +
-					$"stabilized for '{required}'.\nScreen:\n{screen}\nRaw output:\n{CaptureRawOutput()}");
+					$"stabilized while {readinessDescription}.\n" +
+					$"Timeline:\n{string.Join(Environment.NewLine, timeline)}\n" +
+					$"Full screen:\n{screen}\nRaw output:\n{CaptureRawOutput()}");
 			}
 
-			var matches =
-				screen.Contains(required, StringComparison.Ordinal) &&
-				(forbidden is null ||
-				 !screen.Contains(forbidden, StringComparison.Ordinal));
 			if (matches &&
 			    string.Equals(previous, screen, StringComparison.Ordinal))
 			{
@@ -796,12 +824,10 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			await Task.Delay(80, cancellationToken).ConfigureAwait(false);
 		}
 
-		var forbiddenCondition = forbidden is null
-			? string.Empty
-			: $" without '{forbidden}'";
 		throw new TimeoutException(
-			$"Timed out waiting for a stable screen containing '{required}'" +
-			$"{forbiddenCondition}.\n{CaptureScreen()}\n" +
+			$"Timed out waiting for a stable screen while {readinessDescription}.\n" +
+			$"Timeline:\n{string.Join(Environment.NewLine, timeline)}\n" +
+			$"Full screen:\n{CaptureScreen()}\n" +
 			$"Raw output tail:\n{CaptureRawOutputTail()}\n" +
 			$"Terminal responses: {CaptureTerminalResponseLog()}");
 	}

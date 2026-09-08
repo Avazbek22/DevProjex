@@ -1,16 +1,33 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace DevProjex.Tests.Terminal;
 
 [Collection(TerminalProcessCollection.Name)]
-public sealed class GeneratedCompletionNativeShellIntegrationTests
+public sealed class GeneratedCompletionNativeShellIntegrationTests(ITestOutputHelper output)
 {
 	private const string CompletionLine = "devprojex analyze . --format ";
 	private const string CompletionShellsVariable =
 		"DEVPROJEX_COMPLETION_SHELLS";
+	private const uint SnapshotProcesses = 0x00000002;
 	private static readonly TimeSpan WindowsPowerShellProcessTimeout = TimeSpan.FromSeconds(60);
 	private static readonly TimeSpan ProcessCleanupTimeout = TimeSpan.FromSeconds(5);
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	private static extern bool Process32First(IntPtr snapshot, ref ProcessEntry32 entry);
+
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	private static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry32 entry);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	private static extern bool CloseHandle(IntPtr handle);
 
 	[Theory]
 	[InlineData("bash")]
@@ -186,6 +203,25 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 	[Fact(Timeout = 120_000)]
 	public async Task WindowsPowerShell51CompletesAfterClosedQuotedWhitespacePath()
 	{
+		var measurement = await RunWindowsPowerShell51CompletionScenarioAsync(warmUp: true);
+		output.WriteLine(
+			"DPX_PS51_WARMUP_MS={0:F0}; DPX_PS51_WARM_COMPLETION_MS={1:F0}",
+			measurement.WarmupDuration!.Value.TotalMilliseconds,
+			measurement.CompletionDuration.TotalMilliseconds);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task WindowsPowerShell51ColdCompletionRecordsDurationAndDiagnostics()
+	{
+		var measurement = await RunWindowsPowerShell51CompletionScenarioAsync(warmUp: false);
+		output.WriteLine(
+			"DPX_PS51_COLD_COMPLETION_MS={0:F0}",
+			measurement.CompletionDuration.TotalMilliseconds);
+	}
+
+	[Fact(Timeout = 15_000)]
+	public async Task WindowsPowerShell51TimeoutReportsStagePidInputsStreamsAndChildren()
+	{
 		if (!OperatingSystem.IsWindows())
 		{
 			Assert.Skip("Windows PowerShell 5.1 is available only on Windows.");
@@ -202,6 +238,48 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		{
 			Assert.Skip("Windows PowerShell 5.1 is not installed on this Windows host.");
 			return;
+		}
+
+		var startInfo = CreateShellStartInfo("powershell", shellExecutable);
+		startInfo.Environment["DPX_DIAGNOSTIC_INPUT"] = "cold-completion";
+		startInfo.ArgumentList.Add("-Command");
+		startInfo.ArgumentList.Add("Write-Output ready; Start-Sleep -Seconds 30");
+		var exception = await Assert.ThrowsAsync<TimeoutException>(() =>
+			RunProcessAsync(
+				startInfo,
+				TestContext.Current.CancellationToken,
+				TimeSpan.FromMilliseconds(300),
+				diagnosticStage: "diagnostic-contract"));
+
+		Assert.Contains("Stage=[diagnostic-contract]", exception.Message, StringComparison.Ordinal);
+		Assert.Contains("PID=", exception.Message, StringComparison.Ordinal);
+		Assert.Contains("inputs=[", exception.Message, StringComparison.Ordinal);
+		Assert.Contains("DPX_DIAGNOSTIC_INPUT=[cold-completion]", exception.Message, StringComparison.Ordinal);
+		Assert.Contains("stdout=[", exception.Message, StringComparison.Ordinal);
+		Assert.Contains("stderr=[", exception.Message, StringComparison.Ordinal);
+		Assert.Contains("children-before-termination=[", exception.Message, StringComparison.Ordinal);
+		Assert.Contains("children-after-termination=[", exception.Message, StringComparison.Ordinal);
+	}
+
+	private static async Task<WindowsPowerShellCompletionMeasurement>
+		RunWindowsPowerShell51CompletionScenarioAsync(bool warmUp)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows PowerShell 5.1 is available only on Windows.");
+			throw new UnreachableException();
+		}
+
+		var shellExecutable = Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+			"System32",
+			"WindowsPowerShell",
+			"v1.0",
+			"powershell.exe");
+		if (!File.Exists(shellExecutable))
+		{
+			Assert.Skip("Windows PowerShell 5.1 is not installed on this Windows host.");
+			throw new UnreachableException();
 		}
 
 		var unifiedHost = PublishedApplicationLocator.FindExecutable();
@@ -224,30 +302,23 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 			generated.StandardOutput);
 		const string line =
 			"devprojex analyze \".\\Program Files\" --format ";
-		var coldStart = await MeasureWindowsPowerShellColdStartAsync(
-			shellExecutable,
-			TestContext.Current.CancellationToken);
-
-		ShellProcessResult completed;
-		try
+		TimeSpan? warmupDuration = null;
+		if (warmUp)
 		{
-			completed = await RunPowerShellCandidateCompletionAsync(
+			warmupDuration = await MeasureWindowsPowerShellColdStartAsync(
 				shellExecutable,
-				integrationRoot,
-				completionScript,
-				workingDirectory,
-				line,
 				TestContext.Current.CancellationToken);
 		}
-		catch (TimeoutException exception)
-		{
-			throw new TimeoutException(
-				$"Windows PowerShell 5.1 cold start: {coldStart.TotalMilliseconds:F0} ms; " +
-				$"completion timeout: {WindowsPowerShellProcessTimeout.TotalMilliseconds:F0} ms; " +
-				$"cold-start/timeout ratio: {coldStart.TotalMilliseconds / WindowsPowerShellProcessTimeout.TotalMilliseconds:P1}. " +
-				exception.Message,
-				exception);
-		}
+
+		var completionStopwatch = Stopwatch.StartNew();
+		var completed = await RunPowerShellCandidateCompletionAsync(
+			shellExecutable,
+			integrationRoot,
+			completionScript,
+			workingDirectory,
+			line,
+			TestContext.Current.CancellationToken);
+		completionStopwatch.Stop();
 
 		Assert.True(
 			completed.ExitCode == 0,
@@ -265,6 +336,9 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 					StringSplitOptions.RemoveEmptyEntries |
 					StringSplitOptions.TrimEntries)
 				.Order(StringComparer.Ordinal));
+		return new WindowsPowerShellCompletionMeasurement(
+			warmupDuration,
+			completionStopwatch.Elapsed);
 	}
 
 	private static async Task<TimeSpan> MeasureWindowsPowerShellColdStartAsync(
@@ -278,7 +352,8 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		var result = await RunProcessAsync(
 			startInfo,
 			cancellationToken,
-			WindowsPowerShellProcessTimeout);
+			WindowsPowerShellProcessTimeout,
+			diagnosticStage: "Windows PowerShell 5.1 warmup");
 		stopwatch.Stop();
 		Assert.True(
 			result.ExitCode == 0 &&
@@ -455,7 +530,8 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		return await RunProcessAsync(
 			startInfo,
 			cancellationToken,
-			WindowsPowerShellProcessTimeout);
+			WindowsPowerShellProcessTimeout,
+			diagnosticStage: "Windows PowerShell 5.1 completion");
 	}
 
 	private static ProcessStartInfo CreateShellStartInfo(
@@ -813,7 +889,8 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 	private static async Task<ShellProcessResult> RunProcessAsync(
 		ProcessStartInfo startInfo,
 		CancellationToken cancellationToken,
-		TimeSpan? processTimeout = null)
+		TimeSpan? processTimeout = null,
+		string diagnosticStage = "native shell process")
 	{
 		using var processTimeoutCancellation = new CancellationTokenSource(
 			processTimeout ?? TimeSpan.FromSeconds(20));
@@ -823,6 +900,8 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		using var outputCancellation = new CancellationTokenSource();
 		using var process = new Process { StartInfo = startInfo };
 		Assert.True(process.Start(), $"Could not start {startInfo.FileName}.");
+		var processId = process.Id;
+		var processInputs = FormatProcessInputs(startInfo);
 		var standardOutput = process.StandardOutput.ReadToEndAsync(outputCancellation.Token);
 		var standardError = process.StandardError.ReadToEndAsync(outputCancellation.Token);
 		process.StandardInput.Close();
@@ -834,16 +913,22 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 			}
 			catch (OperationCanceledException) when (processCancellation.IsCancellationRequested)
 			{
+				var descendantsBeforeTermination = CaptureDescendantProcesses(processId);
 				await TerminateProcessTreeAsync(process);
+				var descendantsAfterTermination = CaptureDescendantProcesses(processId);
 				var cancelledOutput = await DrainProcessOutputAsync(
 					standardOutput,
 					standardError,
 					outputCancellation);
 				cancellationToken.ThrowIfCancellationRequested();
 				throw new TimeoutException(
-					$"{startInfo.FileName} completion integration timed out. " +
-					$"stdout=[{cancelledOutput.StandardOutput}] " +
-					$"stderr=[{cancelledOutput.StandardError}]");
+					$"Stage=[{diagnosticStage}] timed out after " +
+					$"{(processTimeout ?? TimeSpan.FromSeconds(20)).TotalMilliseconds:F0} ms. " +
+					$"PID={processId}; inputs=[{processInputs}]; " +
+					$"stdout=[{cancelledOutput.StandardOutput}]; " +
+					$"stderr=[{cancelledOutput.StandardError}]; " +
+					$"children-before-termination=[{descendantsBeforeTermination}]; " +
+					$"children-after-termination=[{descendantsAfterTermination}]");
 			}
 
 			var output = await DrainProcessOutputAsync(
@@ -853,8 +938,10 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 			if (!output.Completed)
 			{
 				throw new TimeoutException(
-					$"{startInfo.FileName} completion integration output did not close. " +
-					$"stdout=[{output.StandardOutput}] stderr=[{output.StandardError}]");
+					$"Stage=[{diagnosticStage}: output drain] did not close. " +
+					$"PID={processId}; inputs=[{processInputs}]; " +
+					$"stdout=[{output.StandardOutput}]; stderr=[{output.StandardError}]; " +
+					$"children=[{CaptureDescendantProcesses(processId)}]");
 			}
 
 			return new ShellProcessResult(
@@ -870,6 +957,81 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 				outputCancellation.Cancel();
 				await ObserveReadersAsync(standardOutput, standardError);
 			}
+		}
+	}
+
+	private static string FormatProcessInputs(ProcessStartInfo startInfo)
+	{
+		var arguments = string.Join(
+			' ',
+			startInfo.ArgumentList.Select(static argument => $"[{argument}]"));
+		var environment = startInfo.Environment
+			.Where(static item => item.Key.StartsWith("DPX_", StringComparison.Ordinal))
+			.OrderBy(static item => item.Key, StringComparer.Ordinal)
+			.Select(static item => $"{item.Key}=[{item.Value}]");
+		return
+			$"file=[{startInfo.FileName}]; arguments={arguments}; " +
+			$"working-directory=[{startInfo.WorkingDirectory}]; " +
+			$"environment={string.Join(';', environment)}";
+	}
+
+	private static string CaptureDescendantProcesses(int rootProcessId)
+	{
+		if (!OperatingSystem.IsWindows())
+			return "not available on this platform";
+
+		var snapshot = CreateToolhelp32Snapshot(SnapshotProcesses, 0);
+		if (snapshot == new IntPtr(-1))
+			return $"snapshot-error={Marshal.GetLastWin32Error()}";
+
+		try
+		{
+			var entries = new List<ProcessSnapshotEntry>();
+			var entry = new ProcessEntry32
+			{
+				Size = checked((uint)Marshal.SizeOf<ProcessEntry32>())
+			};
+			if (Process32First(snapshot, ref entry))
+			{
+				do
+				{
+					entries.Add(new ProcessSnapshotEntry(
+						checked((int)entry.ProcessId),
+						checked((int)entry.ParentProcessId),
+						entry.ExecutableFile));
+					entry.Size = checked((uint)Marshal.SizeOf<ProcessEntry32>());
+				}
+				while (Process32Next(snapshot, ref entry));
+			}
+
+			var descendantIds = new HashSet<int> { rootProcessId };
+			var descendants = new List<ProcessSnapshotEntry>();
+			var added = true;
+			while (added)
+			{
+				added = false;
+				foreach (var candidate in entries)
+				{
+					if (!descendantIds.Contains(candidate.ParentProcessId) ||
+					    !descendantIds.Add(candidate.ProcessId))
+					{
+						continue;
+					}
+					descendants.Add(candidate);
+					added = true;
+				}
+			}
+
+			return descendants.Count == 0
+				? "none"
+				: string.Join(
+					", ",
+					descendants.Select(static child =>
+						$"pid={child.ProcessId}/ppid={child.ParentProcessId}/name={child.Name}"));
+		}
+		finally
+		{
+			CloseHandle(snapshot);
 		}
 	}
 
@@ -1069,4 +1231,30 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		int ExitCode,
 		string StandardOutput,
 		string StandardError);
+
+	private sealed record WindowsPowerShellCompletionMeasurement(
+		TimeSpan? WarmupDuration,
+		TimeSpan CompletionDuration);
+
+	private sealed record ProcessSnapshotEntry(
+		int ProcessId,
+		int ParentProcessId,
+		string Name);
+
+	[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+	private struct ProcessEntry32
+	{
+		public uint Size;
+		public uint Usage;
+		public uint ProcessId;
+		public IntPtr DefaultHeapId;
+		public uint ModuleId;
+		public uint ThreadCount;
+		public uint ParentProcessId;
+		public int BasePriority;
+		public uint Flags;
+
+		[MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+		public string ExecutableFile;
+	}
 }

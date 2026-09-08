@@ -7,8 +7,11 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class DocumentationExecutionRegressionTests
 {
-	[Fact]
-	public async Task PublishedDirectCommandExamplesExecuteWithoutMutatingSource()
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task PublishedDirectCommandExamplesExecuteWithoutMutatingSource(
+		bool useSeparateGitDirectory)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("source-project");
@@ -16,7 +19,11 @@ public sealed class DocumentationExecutionRegressionTests
 		workspace.WriteFile("source-project/README.md", "# Sample\n");
 		var repositoryRoot = FindRepositoryRoot();
 		Assert.False(PathUtility.IsPathInside(workspace.Path, repositoryRoot));
-		InitializeGitIndex(project, workspace.CreateDirectory("source-project.git"));
+		InitializeGitIndex(
+			project,
+			useSeparateGitDirectory
+				? workspace.CreateDirectory("source-project.git")
+				: null);
 		var examples = await ExtractPublishedDirectExamplesAsync(
 			repositoryRoot,
 			TestContext.Current.CancellationToken);
@@ -40,19 +47,25 @@ public sealed class DocumentationExecutionRegressionTests
 					environment,
 					serviceFactory)
 				.RunAsync(arguments, TestContext.Current.CancellationToken);
+			var failureDiagnostic =
+				exitCode != CommandLineExitCodes.Success ||
+				!string.IsNullOrEmpty(environment.StandardError)
+					? BuildCommandFailureDiagnostic(
+						uniqueCommands[index],
+						arguments,
+						environment.StandardError,
+						serviceFactory,
+						project,
+						before,
+						useSeparateGitDirectory)
+					: string.Empty;
 
 			Assert.True(
 				exitCode == CommandLineExitCodes.Success,
-				$"Documented command failed with exit code {exitCode}: " +
-				$"{uniqueCommands[index]}{Environment.NewLine}{environment.StandardError}");
+				$"Documented command failed with exit code {exitCode}.\n{failureDiagnostic}");
 			Assert.True(
 				string.IsNullOrEmpty(environment.StandardError),
-				BuildUnexpectedStandardErrorDiagnostic(
-					uniqueCommands[index],
-					arguments,
-					environment.StandardError,
-					serviceFactory,
-					project));
+				failureDiagnostic);
 			Assert.NotEmpty(environment.StandardOutput);
 			Assert.Equal(before, ComputeTreeFingerprint(project));
 			AssertObservableResult(
@@ -285,20 +298,25 @@ public sealed class DocumentationExecutionRegressionTests
 		return Convert.ToHexString(hash.GetHashAndReset());
 	}
 
-	private static string BuildUnexpectedStandardErrorDiagnostic(
+	private static string BuildCommandFailureDiagnostic(
 		string documentedCommand,
 		IReadOnlyList<string> arguments,
 		string standardError,
 		TerminalServiceFactory serviceFactory,
-		string project)
+		string project,
+		string sourceFingerprintBeforeCommand,
+		bool useSeparateGitDirectory)
 	{
 		using var services = serviceFactory.Create(AppLanguage.En);
 		var loaded = services.AnalysisService.Load(new ProjectAnalysisRequest(project));
 		var unavailablePaths = EnumerateAccessDeniedPaths(loaded.Tree.Root).ToArray();
 		return
-			$"Documented command wrote stderr.\n" +
+			$"Documented command failed or wrote stderr.\n" +
+			$"Git layout: {(useSeparateGitDirectory ? "separate git dir" : "in-tree .git")}\n" +
 			$"Documented: {documentedCommand}\n" +
 			$"Executed: devprojex {string.Join(' ', arguments.Select(QuoteArgument))}\n" +
+			$"Source fingerprint before command: {sourceFingerprintBeforeCommand}\n" +
+			$"Source fingerprint at diagnostic rescan: {ComputeTreeFingerprint(project)}\n" +
 			$"Full stderr:\n{standardError}\n" +
 			$"Access-denied paths from a diagnostic rescan ({unavailablePaths.Length}):\n" +
 			(unavailablePaths.Length == 0
@@ -322,9 +340,12 @@ public sealed class DocumentationExecutionRegressionTests
 			? $"\"{argument.Replace("\"", "\\\"", StringComparison.Ordinal)}\""
 			: argument;
 
-	private static void InitializeGitIndex(string project, string gitDirectory)
+	private static void InitializeGitIndex(string project, string? gitDirectory)
 	{
-		RunGit(project, "init", "--quiet", $"--separate-git-dir={gitDirectory}");
+		if (gitDirectory is null)
+			RunGit(project, "init", "--quiet");
+		else
+			RunGit(project, "init", "--quiet", $"--separate-git-dir={gitDirectory}");
 		RunGit(project, "add", "--all");
 	}
 
