@@ -23,22 +23,19 @@ internal static class FocusRankingEngine
 		var entriesByFullPath = importance.Entries.ToDictionary(
 			static entry => Path.GetFullPath(entry.FullPath),
 			PathComparer.Default);
-		var relativeByFullPath = entriesByFullPath.ToDictionary(
-			static pair => pair.Key,
-			static pair => pair.Value.Path,
-			PathComparer.Default);
 		var seeds = DeduplicateSeeds(request.Seeds, entriesByFullPath, cancellationToken);
 		var seedOrder = seeds
 			.Select((seed, index) => (Path.GetFullPath(seed.FullPath), index))
 			.ToDictionary(static item => item.Item1, static item => item.index, PathComparer.Default);
-		var undirected = graph.BuildUndirected(cancellationToken);
-		var distances = CalculateDistances(
-			graph,
-			undirected,
-			seeds,
-			relativeByFullPath,
-			cancellationToken);
-		var viaByPath = SelectParents(graph, undirected, distances, cancellationToken);
+		var hasGraphSeed = seeds.Any(seed => graph.NodeByPath.ContainsKey(
+			entriesByFullPath[Path.GetFullPath(seed.FullPath)].Path));
+		var undirected = hasGraphSeed ? graph.BuildUndirected(cancellationToken) : null;
+		var distances = hasGraphSeed
+			? CalculateDistances(graph, undirected!, seeds, entriesByFullPath, cancellationToken)
+			: Enumerable.Repeat(-1, graph.Paths.Length).ToArray();
+		var viaByPath = hasGraphSeed
+			? SelectParents(graph, undirected!, distances, cancellationToken)
+			: new Dictionary<string, FocusRankingVia>(StringComparer.Ordinal);
 		var entries = OrderByHop(
 			importance,
 			seedOrder,
@@ -77,7 +74,7 @@ internal static class FocusRankingEngine
 		RankingGraph graph,
 		int[][] undirected,
 		IReadOnlyList<FocusRankingSeedRequest> seeds,
-		IReadOnlyDictionary<string, string> relativeByFullPath,
+		IReadOnlyDictionary<string, ImportanceRankingEntry> entriesByFullPath,
 		CancellationToken cancellationToken)
 	{
 		var distances = new int[graph.Paths.Length];
@@ -85,8 +82,8 @@ internal static class FocusRankingEngine
 		var queue = new Queue<int>();
 		foreach (var seed in seeds)
 		{
-			if (!relativeByFullPath.TryGetValue(Path.GetFullPath(seed.FullPath), out var relative) ||
-			    !graph.NodeByPath.TryGetValue(relative, out var node) || distances[node] == 0)
+			if (!entriesByFullPath.TryGetValue(Path.GetFullPath(seed.FullPath), out var entry) ||
+			    !graph.NodeByPath.TryGetValue(entry.Path, out var node) || distances[node] == 0)
 				continue;
 			distances[node] = 0;
 			queue.Enqueue(node);
@@ -230,7 +227,7 @@ internal static class FocusRankingEngine
 		IReadOnlyList<FocusRankingSeedRequest> seeds,
 		IReadOnlyDictionary<string, ImportanceRankingEntry> entriesByFullPath,
 		RankingGraph graph,
-		int[][] undirected,
+		int[][]? undirected,
 		DependencyIndexSnapshot snapshot)
 	{
 		var factsByPath = snapshot.FileByPath.Count == snapshot.Files.Count
@@ -244,7 +241,7 @@ internal static class FocusRankingEngine
 			{
 				DependencyFileStatus.ExtractionFailed => FocusSeedState.ExtractionFailed,
 				DependencyFileStatus.Unsupported or null => FocusSeedState.Unsupported,
-				_ when graph.NodeByPath.TryGetValue(path, out var node) && undirected[node].Length > 0 =>
+				_ when undirected is not null && graph.NodeByPath.TryGetValue(path, out var node) && undirected[node].Length > 0 =>
 					FocusSeedState.Resolved,
 				_ => FocusSeedState.NoResolvedNeighbors
 			};
