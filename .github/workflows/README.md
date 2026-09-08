@@ -46,7 +46,8 @@ pull request shows them without running anything twice.
    for AppImage portability (GitHub deprecates it from 2026-09-17 and retires it on 2027-04-17,
    move to `container: ubuntu:22.04` on `ubuntu-latest` before then); `macos-15-intel` in
    `grammar-delivery.yml` is the last x86_64 image (retires autumn 2027);
-   `windows-2025-vs2026` carries the Store toolchain.
+   `windows-2025-vs2026` carries the Store toolchain. actionlint does not know these newer
+   hosted labels; they are listed in `.github/actionlint.yaml`, keep that list in sync.
 
 ## Where a new check belongs
 
