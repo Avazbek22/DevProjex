@@ -4111,7 +4111,9 @@ public sealed class McpServerIntegrationTests
 	{
 		// macOS exposes its temporary root through a /var -> /private/var alias. Keep both
 		// hosts on one lexical root so this test measures transformed-metric reuse only.
-		using var workspace = new TemporaryDirectory(AppContext.BaseDirectory);
+		using var workspace = new TemporaryDirectory(Path.Combine(
+			AppContext.BaseDirectory,
+			"MetricParityWorkspaces"));
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(
 			Path.Combine(project, "App.cs"),
