@@ -126,7 +126,10 @@ public sealed record DependencyEdge(
 	IReadOnlyList<string> Reasons,
 	IReadOnlyList<SourceSite> Evidence,
 	IReadOnlyList<string> Candidates,
-	bool CrossScope);
+	bool CrossScope)
+{
+	public IReadOnlyList<string> DeclarationFiles { get; init; } = [];
+}
 
 public sealed record DependencyFactsCoverage(
 	int Files,
@@ -134,7 +137,10 @@ public sealed record DependencyFactsCoverage(
 	int Unsupported,
 	int ExtractionFailed,
 	IReadOnlyDictionary<string, int> UnsupportedLanguages,
-	IReadOnlyDictionary<string, int> CSharpErrorNodeKinds);
+	IReadOnlyDictionary<string, int> CSharpErrorNodeKinds)
+{
+	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
+}
 
 public sealed record DependencyIndexMetrics(
 	int ParsedFiles,

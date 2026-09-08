@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using DevProjex.Application.Dependencies;
 using DevProjex.Infrastructure.Compression;
@@ -40,6 +41,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var userEdge = Assert.Single(index.Edges, edge =>
 			edge.Source == "Consumer.cs" && edge.Reference == "User");
 		Assert.Equal(ResolutionStatus.Resolved, userEdge.Status);
+		Assert.Equal(["First.cs", "Second.cs"], userEdge.DeclarationFiles);
 		Assert.Contains("First.cs", userEdge.Candidates);
 		var resolvedReference = Assert.Single(index.Files.Single(file => file.Path == "Consumer.cs").References,
 			reference => reference.Name == "User");
@@ -50,6 +52,31 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var localEdge = Assert.Single(index.Edges, edge =>
 			edge.Source == "Second.cs" && edge.Reference == "Helper");
 		Assert.Equal(ResolutionStatus.Unresolved, localEdge.Status);
+
+		var dependencies = await engine.FindRelatedAsync(
+			fixture.Path,
+			[project, first, second, ambiguous, global, marker, consumer],
+			["Consumer.cs"],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var partialDependencies = Assert.Single(dependencies.Seeds).Dependencies
+			.Where(item => item.Path is "First.cs" or "Second.cs")
+			.ToArray();
+		Assert.Equal(["First.cs", "Second.cs"], partialDependencies.Select(static item => item.Path));
+		Assert.All(partialDependencies, item =>
+		{
+			Assert.Equal(ResolutionStatus.Resolved, item.Status);
+			Assert.Contains(item.Reasons, reason => reason.Contains("one resolved symbol with 2 files", StringComparison.Ordinal));
+		});
+
+		var dependents = await engine.FindRelatedAsync(
+			fixture.Path,
+			[project, first, second, ambiguous, global, marker, consumer],
+			["Second.cs"],
+			DependencyDirection.Dependents,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var caller = Assert.Single(Assert.Single(dependents.Seeds).Dependents, item => item.Path == "Consumer.cs");
+		Assert.Contains(caller.Reasons, reason => reason.Contains("one resolved symbol with 2 files", StringComparison.Ordinal));
 	}
 
 	[Fact]
@@ -359,6 +386,84 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task TypeScriptConditionalExports_SelectRequireForCommonJsSourceInObjectOrder()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var package = fixture.CreateFile("package.json", "{\"name\":\"self\",\"exports\":{\"import\":\"./import.mjs\",\"require\":\"./require.cjs\"}}");
+		var source = fixture.CreateFile("main.cts", "import value from 'self';");
+		var importTarget = fixture.CreateFile("import.mjs", "export default 1;");
+		var requireTarget = fixture.CreateFile("require.cjs", "module.exports = 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, package, source, importTarget, requireTarget],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Reference == "self");
+		Assert.Equal("require.cjs", edge.Target);
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+	}
+
+	[Fact]
+	public async Task TypeScriptConditionalExports_NullBlocksOnlyTheApplicableCondition()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var package = fixture.CreateFile("package.json", "{\"name\":\"self\",\"exports\":{\"import\":null,\"require\":\"./require.cjs\"}}");
+		var source = fixture.CreateFile("main.cts", "import value from 'self';");
+		var requireTarget = fixture.CreateFile("require.cjs", "module.exports = 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, package, source, requireTarget],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal("require.cjs", Assert.Single(result.Edges, item => item.Reference == "self").Target);
+	}
+
+	[Fact]
+	public async Task TypeScriptConditionalExports_DefaultBeforeImportWinsByDeclarationOrder()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var package = fixture.CreateFile("package.json", "{\"name\":\"self\",\"type\":\"module\",\"exports\":{\"default\":\"./default.js\",\"import\":\"./import.mjs\"}}");
+		var source = fixture.CreateFile("main.mts", "import value from 'self';");
+		var defaultTarget = fixture.CreateFile("default.js", "export default 1;");
+		var importTarget = fixture.CreateFile("import.mjs", "export default 2;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, package, source, defaultTarget, importTarget],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal("default.js", Assert.Single(result.Edges, item => item.Reference == "self").Target);
+	}
+
+	[Fact]
+	public async Task TypeScriptConditionalExports_ResolveNestedEsmConditionsAndFailClosedOnUnknownConditions()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var validPackage = fixture.CreateFile("valid/package.json", "{\"name\":\"valid\",\"type\":\"module\",\"exports\":{\"node\":{\"import\":\"./entry.mjs\",\"require\":\"./entry.cjs\"}}}");
+		var validSource = fixture.CreateFile("valid/main.mts", "import value from 'valid';");
+		var esmTarget = fixture.CreateFile("valid/entry.mjs", "export default 1;");
+		var cjsTarget = fixture.CreateFile("valid/entry.cjs", "module.exports = 1;");
+		var unknownPackage = fixture.CreateFile("unknown/package.json", "{\"name\":\"unknown\",\"type\":\"module\",\"exports\":{\"browser\":\"./browser.js\",\"default\":\"./default.js\"}}");
+		var unknownSource = fixture.CreateFile("unknown/main.mts", "import value from 'unknown';");
+		var browserTarget = fixture.CreateFile("unknown/browser.js", "export default 1;");
+		var fallbackTarget = fixture.CreateFile("unknown/default.js", "export default 2;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, validPackage, validSource, esmTarget, cjsTarget, unknownPackage, unknownSource, browserTarget, fallbackTarget],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal("valid/entry.mjs", Assert.Single(result.Edges, item => item.Reference == "valid").Target);
+		var unsupported = Assert.Single(result.Edges, item => item.Reference == "unknown");
+		Assert.Equal(ResolutionStatus.Unresolved, unsupported.Status);
+		Assert.Contains("condition 'browser' is not supported", Assert.Single(unsupported.Reasons), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task TypeScriptBareImports_RequireDeclaredExternalEvidence()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -372,6 +477,82 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		Assert.Contains(result.Edges, edge => edge.Reference == "react" && edge.Status == ResolutionStatus.External);
 		Assert.Contains(result.Edges, edge => edge.Reference == "not-declared" && edge.Status == ResolutionStatus.Unresolved);
+	}
+
+	[Theory]
+	[InlineData("{\"compilerOptions\":null}", DependencyConfigurationState.Corrupt, "compilerOptions must be an object")]
+	[InlineData("{\"compilerOptions\":{", DependencyConfigurationState.Corrupt, "JSON")]
+	[InlineData("[]", DependencyConfigurationState.UnsupportedSemantics, "root must be an object")]
+	public async Task TypeScriptConfigurationFailures_AreDiagnosedAndLeaveReferencesUnresolved(
+		string configurationContent,
+		DependencyConfigurationState expectedState,
+		string expectedReason)
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", configurationContent);
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "main.ts");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Contains(expectedReason, Assert.Single(edge.Reasons), StringComparison.OrdinalIgnoreCase);
+		var diagnostic = Assert.Single(result.Coverage.ConfigurationDiagnostics);
+		Assert.Equal("tsconfig.json", diagnostic.Path);
+		Assert.Equal(expectedState, diagnostic.State);
+	}
+
+	[Fact]
+	public async Task DependencyConfigurationRead_IsBoundedAndMissingConfigurationRemainsExplicit()
+	{
+		using var fixture = new TemporaryDirectory();
+		var oversized = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"padding\":\"" + new string('x', FileDependencyConfigurationProvider.MaximumConfigurationBytes) + "\"}");
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		var provider = new FileDependencyConfigurationProvider();
+
+		var oversizedConfiguration = await provider.ReadAsync(
+			fixture.Path,
+			[oversized, source, target],
+			TestContext.Current.CancellationToken);
+		var oversizedScope = Assert.Single(oversizedConfiguration.Scopes,
+			scope => scope.LanguageId == LanguageId.TypeScript && scope.HasConfiguration);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, oversizedScope.ConfigurationState);
+		Assert.Contains("byte limit", oversizedScope.ConfigurationDiagnostic, StringComparison.Ordinal);
+
+		var missingConfiguration = await provider.ReadAsync(
+			fixture.Path,
+			[source, target],
+			TestContext.Current.CancellationToken);
+		var fallback = Assert.Single(missingConfiguration.Scopes, scope => scope.LanguageId == LanguageId.TypeScript);
+		Assert.False(fallback.HasConfiguration);
+		Assert.Equal(DependencyConfigurationState.Missing, fallback.ConfigurationState);
+		Assert.Empty(missingConfiguration.ConfigurationDiagnostics);
+	}
+
+	[Fact]
+	public async Task ConfigurationProvider_ReadsEachControlFileOncePerOperation()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("package.json", "{\"name\":\"fixture\",\"type\":\"module\"}");
+		var rootConfig = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var nestedConfig = fixture.CreateFile("nested/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var reader = new CountingControlFileReader();
+		var provider = new FileDependencyConfigurationProvider(reader);
+
+		_ = await provider.ReadAsync(
+			fixture.Path,
+			[package, rootConfig, nestedConfig],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, reader.CountFor(package));
+		Assert.Equal(1, reader.CountFor(rootConfig));
+		Assert.Equal(1, reader.CountFor(nestedConfig));
 	}
 
 	[Fact]
@@ -464,6 +645,64 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var pythonScope = Assert.Single(configuration.Scopes, scope => scope.LanguageId == LanguageId.Python && scope.HasConfiguration);
 		Assert.Contains("flask", pythonScope.PythonExternalPackages);
 		Assert.DoesNotContain("project", pythonScope.PythonExternalPackages);
+	}
+
+	[Fact]
+	public async Task PythonImport_PrefersARegularPackageOverTheSameNamedModule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var module = fixture.CreateFile("pkg.py", "value = 'module'");
+		var initializer = fixture.CreateFile("pkg/__init__.py", "value = 'package'");
+		var consumer = fixture.CreateFile("consumer.py", "import pkg");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, module, initializer, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py" && item.Reference == "pkg");
+		Assert.Equal("pkg/__init__.py", edge.Target);
+		Assert.DoesNotContain("pkg.py", edge.Candidates);
+	}
+
+	[Fact]
+	public async Task PythonFromImport_PrefersAStaticPackageBindingOverAChildModule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var initializer = fixture.CreateFile("pkg/__init__.py", "from .impl import Service");
+		var implementation = fixture.CreateFile("pkg/impl.py", "class Service: pass");
+		var child = fixture.CreateFile("pkg/Service.py", "class Wrong: pass");
+		var consumer = fixture.CreateFile("consumer.py", "from pkg import Service");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, implementation, child, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py" && item.Reference == "pkg");
+		Assert.Equal("pkg/impl.py", edge.Target);
+		Assert.DoesNotContain("pkg/Service.py", edge.Candidates);
+	}
+
+	[Fact]
+	public async Task PythonRelativeImport_RejectsTraversalBeyondTheTopLevelPackage()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var initializer = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var consumer = fixture.CreateFile("pkg/consumer.py", "from .. import target");
+		var target = fixture.CreateFile("target.py", "value = 1");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, initializer, consumer, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "pkg/consumer.py");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Contains("beyond the top-level package", Assert.Single(edge.Reasons), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -1087,6 +1326,56 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(0, extractor.ParseCount);
 	}
 
+	[Theory]
+	[InlineData("utf8")]
+	[InlineData("utf16-le")]
+	[InlineData("utf16-be")]
+	public async Task BoundedDependencySourceRead_StopsAfterTheDecodedCharacterLimit(string encodingName)
+	{
+		const int maximumCharacters = 100_000;
+		using var fixture = new TemporaryDirectory();
+		Encoding encoding = encodingName switch
+		{
+			"utf8" => new UTF8Encoding(true, true),
+			"utf16-le" => new UnicodeEncoding(false, true, true),
+			"utf16-be" => new UnicodeEncoding(true, true, true),
+			_ => throw new ArgumentOutOfRangeException(nameof(encodingName))
+		};
+		var bytes = encoding.GetPreamble()
+			.Concat(encoding.GetBytes(new string('x', maximumCharacters * 3)))
+			.ToArray();
+		var path = fixture.CreateFile("Large.cs", string.Empty);
+		File.WriteAllBytes(path, bytes);
+		var reader = new TreeSitterDependencyFactExtractor.BoundedDependencySourceReader();
+
+		var result = await reader.ReadAsync(path, maximumCharacters, TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, result.Status);
+		Assert.Contains("character parse limit", result.StatusReason, StringComparison.Ordinal);
+		Assert.InRange(reader.LastBytesRead, 1, bytes.Length - 1L);
+	}
+
+	[Fact]
+	public async Task BoundedDependencySourceRead_PreservesBomTextAndRejectsAnIncompleteSequence()
+	{
+		using var fixture = new TemporaryDirectory();
+		var unicode = new UnicodeEncoding(false, true, true);
+		var validBytes = unicode.GetPreamble().Concat(unicode.GetBytes("class Valid { }")).ToArray();
+		var valid = fixture.CreateFile("Valid.cs", string.Empty);
+		File.WriteAllBytes(valid, validBytes);
+		var incomplete = fixture.CreateFile("Incomplete.cs", string.Empty);
+		File.WriteAllBytes(incomplete, [0x63, 0x6c, 0x61, 0x73, 0x73, 0x20, 0xE2, 0x82]);
+		var reader = new TreeSitterDependencyFactExtractor.BoundedDependencySourceReader();
+
+		var validResult = await reader.ReadAsync(valid, 100, TestContext.Current.CancellationToken);
+		var incompleteResult = await reader.ReadAsync(incomplete, 100, TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.Supported, validResult.Status);
+		Assert.Equal("class Valid { }", validResult.Source);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, incompleteResult.Status);
+		Assert.Contains("unsupported encoding", incompleteResult.StatusReason, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task WarmRelatedQuery_ReusesTheCanonicalFileLookupFromTheResolvedSnapshot()
 	{
@@ -1368,6 +1657,23 @@ public sealed class DependencyFactsEngineIntegrationTests
 		{
 			ReadCount++;
 			return _inner.ReadAsync(sourceRoot, manifestFiles, cancellationToken);
+		}
+	}
+
+	private sealed class CountingControlFileReader : IDependencyControlFileReader
+	{
+		private readonly BoundedDependencyControlFileReader _inner = new();
+		private readonly ConcurrentDictionary<string, int> _counts = new(PathComparer.Default);
+
+		public int CountFor(string path) => _counts.GetValueOrDefault(Path.GetFullPath(path));
+
+		public ValueTask<DependencyControlFileSnapshot> ReadAsync(
+			string path,
+			int maximumBytes,
+			CancellationToken cancellationToken)
+		{
+			_counts.AddOrUpdate(Path.GetFullPath(path), 1, static (_, count) => count + 1);
+			return _inner.ReadAsync(path, maximumBytes, cancellationToken);
 		}
 	}
 

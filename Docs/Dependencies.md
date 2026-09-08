@@ -24,8 +24,11 @@ therefore not inferred.
 
 Each declaration is identified by scope, language, symbol kind, qualified name, generic arity, and
 an optional file scope. Partial C# declarations share one identity with multiple source sites;
-file-local types remain distinct even when their names match. Each reference retains its source line
-and a compact source excerpt. Results use four statuses:
+file-local types remain distinct even when their names match. A resolved edge to such a partial
+identity keeps one canonical target and the complete declaration-file list. Related-file projections
+show every declaration file as a resolved part of the same symbol, in both directions; ambiguous
+candidates remain a separate concept. Each reference retains its source line and a compact source
+excerpt. Results use four statuses:
 
 - **Resolved** — exactly one declaration or module in the allowed manifest is supported by the
   resolver evidence;
@@ -74,10 +77,22 @@ and directory probes. `.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ord
 DevProjex never guesses a `dist` to `src` mapping without configuration, and module references without
 an owning `tsconfig.json` or `jsconfig.json` stay unresolved.
 
+Configuration reads have four explicit outcomes: valid, missing, corrupt, and unsupported semantics.
+A malformed JSON document, a `null` or non-object `compilerOptions`, or an unsupported value shape is
+never replaced by an implicit default. References whose resolution depends on that control file remain
+`Unresolved` with its diagnostic, and machine-readable facts coverage includes the affected control-file
+path, state, reason, and owning scopes. Every `.csproj`, `tsconfig.json`, `jsconfig.json`, `package.json`,
+`pyproject.toml`, and `setup.cfg` is limited to 4 MiB. One operation reads and verifies each control file
+once, then derives all scope, package-name, package-map, and external-package projections from that same
+snapshot, so a result cannot mix two versions of one configuration file.
+
 Python relative imports start at the source package. Regular and namespace-package portions are
-combined, `.py` is preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and
-`__all__` affects wildcard imports only. Dynamic `__all__`, `setup.py`, and import hooks are not
-executed and remain unresolved. Separate complete `sys.stdlib_module_names` snapshots cover Python
+combined, and a package initializer takes precedence over a same-named module file. Within a package,
+a statically provided or re-exported name is resolved before a same-named child module. `.py` is
+preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and `__all__` affects
+wildcard imports only. Relative imports that would escape the top-level package remain unresolved.
+Dynamic `__all__`, `setup.py`, and import hooks are not executed and remain unresolved. Separate
+complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;
 otherwise only names found in both snapshots are classified as external.
 
@@ -97,7 +112,9 @@ failures are counted separately as extraction failures.
 The default safety limits are 2 Mi characters per source file, 50,000 facts per file, 20,000 edges
 per file, and 5,000,000 units of resolver work per index pass. A limit produces an explicit
 `Unresolved` fact or extraction status with a reason; it is never reported as an empty successful
-analysis.
+analysis. Source decoding is bounded by decoded characters rather than bytes: UTF-8, UTF-16, and
+UTF-32 BOMs are honored, incomplete sequences fail closed, and reading stops as soon as the engine
+has proved that the character limit is exceeded instead of scanning the rest of the file.
 
 The resolver work limit is an admission budget applied in canonical file order, not a latch that
 stops all later files after one rejection. A file is admitted only when all of its known import and
@@ -119,7 +136,10 @@ a resolver-configuration fingerprint covering `.csproj`/project references/globa
 TypeScript configuration and package maps, Python configuration, and the TypeScript dialect.
 Concurrent requests share one lazy computation. The default caches are bounded by both entry count
 and estimated retained size: 64 MiB for compact file facts and 128 MiB for resolved edges. Eviction
-changes latency, not results.
+changes latency, not results. The resolved-index estimate includes every transitively retained file
+fact, including declarations and all declaration sites, even when the graph has few or no edges.
+Manifest-snapshot eviction entries are generation-bound and removed together with their live
+snapshot, so repeated rebuilds of the same cache keys cannot grow bookkeeping outside the limit.
 
 Access failures, missing files, and other transient I/O failures are not retained in either the
 prepared-source cache or a manifest snapshot. A later request retries extraction even when file stamps

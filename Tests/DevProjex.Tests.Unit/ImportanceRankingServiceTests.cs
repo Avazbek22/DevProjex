@@ -177,6 +177,35 @@ public sealed class ImportanceRankingServiceTests
 	}
 
 	[Fact]
+	public void BuildGraph_SplitsOneResolvedSymbolWeightAcrossAllDeclarationFiles()
+	{
+		var partial = Edge("caller.cs", "part-a.cs") with
+		{
+			DeclarationFiles = ["part-a.cs", "part-b.cs"]
+		};
+		var direct = Edge("caller.cs", "single.cs");
+		var files = new[] { "caller.cs", "part-a.cs", "part-b.cs", "single.cs" };
+		var snapshot = Snapshot([partial, direct]) with
+		{
+			Files = files.Select(path => CreateFacts(path, null)).ToArray()
+		};
+		var candidates = files.Select(path => new ImportanceRankingService.Candidate(path, path)).ToArray();
+
+		var graph = ImportanceRankingService.BuildGraph(
+			candidates,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		var source = graph.NodeByPath["caller.cs"];
+		var weightedTargets = graph.Outgoing[source]
+			.Select((target, index) => (Path: graph.Paths[target], Weight: graph.OutgoingWeights[source][index]))
+			.ToDictionary(static item => item.Path, static item => item.Weight, StringComparer.Ordinal);
+		Assert.Equal(0.5, weightedTargets["part-a.cs"]);
+		Assert.Equal(0.5, weightedTargets["part-b.cs"]);
+		Assert.Equal(1, weightedTargets["single.cs"]);
+	}
+
+	[Fact]
 	public void CalculatePageRank_IsDeterministicAcrossInputOrderAndOmitsUnsupportedFiles()
 	{
 		var edges = new[] { Edge("a.cs", "b.cs"), Edge("c.cs", "b.cs"), Edge("b.cs", "a.cs") };

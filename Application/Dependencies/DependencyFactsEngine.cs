@@ -18,7 +18,7 @@ public sealed class DependencyFactsEngine : IDisposable
 	private readonly ConcurrentQueue<IndexCacheKey> _indexCacheOrder = [];
 	private readonly ConcurrentDictionary<IndexCacheKey, long> _indexCacheWeights = [];
 	private readonly ConcurrentDictionary<ManifestRequestKey, ManifestSnapshotCacheEntry> _manifestSnapshots = [];
-	private readonly ConcurrentQueue<ManifestRequestKey> _manifestSnapshotOrder = [];
+	private readonly LinkedList<ManifestSnapshotCacheEntry> _manifestSnapshotOrder = [];
 	private readonly object _cacheTrimSync = new();
 	private long _fileCacheBytes;
 	private long _indexCacheBytes;
@@ -37,6 +37,18 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	public int ParseCount => _extractor.ParseCount;
 	public int CompiledQuerySetCount => _extractor.CompiledQuerySetCount;
+	internal DependencyFactsCacheState CacheState
+	{
+		get
+		{
+			lock (_cacheTrimSync)
+				return new(
+					_manifestSnapshots.Count,
+					_manifestSnapshotOrder.Count,
+					_indexCache.Count,
+					_indexCacheBytes);
+		}
+	}
 
 	public async Task<DependencyIndexSnapshot> IndexAsync(
 		string sourceRoot,
@@ -193,7 +205,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (!resolutionCacheHit)
 				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		}
-		var coverage = BuildCoverage(resolved.Files);
+		var coverage = BuildCoverage(resolved.Files, configuration.ConfigurationDiagnostics);
 		var result = new DependencyIndexSnapshot(
 			root,
 			manifestGeneration,
@@ -281,9 +293,13 @@ public sealed class DependencyFactsEngine : IDisposable
 		IReadOnlyDictionary<string, FileFacts> files)
 	{
 		var resolved = sourceEdges
-			.Where(edge => edge.Status == ResolutionStatus.Resolved && edge.Target is not null && edge.Target != seed)
-			.GroupBy(static edge => edge.Target!, StringComparer.Ordinal)
-			.Select(group => ToRelated(group.Key, ResolutionStatus.Resolved, group, files));
+			.Where(static edge => edge.Status == ResolutionStatus.Resolved)
+			.SelectMany(edge => ResolvedTargetFiles(edge)
+				.Where(path => path != seed)
+				.Select(path => (Path: path, Edge: edge)))
+			.GroupBy(static item => item.Path, StringComparer.Ordinal)
+			.Select(group => ToRelated(group.Key, ResolutionStatus.Resolved,
+				group.Select(static item => item.Edge), files));
 		var ambiguous = sourceEdges
 			.Where(static edge => edge.Status == ResolutionStatus.Ambiguous)
 			.Select(edge => (Edge: edge, Path: edge.Candidates.Order(StringComparer.Ordinal)
@@ -335,11 +351,15 @@ public sealed class DependencyFactsEngine : IDisposable
 		IReadOnlyDictionary<string, FileFacts> files)
 	{
 		var edges = groupedEdges.ToArray();
+		var declarationPartReasons = edges
+			.Where(static edge => edge.Status == ResolutionStatus.Resolved && edge.DeclarationFiles.Count > 1)
+			.Select(static edge => $"declaration part of one resolved symbol with {edge.DeclarationFiles.Count} files");
 		return new RelatedFile(
 			path,
 			status,
 			edges.SelectMany(static edge => edge.Reasons.Concat(edge.Evidence.Select(site =>
 				$"{EvidenceLabel(edge.Layer)} {edge.Reference} at line {site.Line}")))
+				.Concat(declarationPartReasons)
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
 			edges.SelectMany(static edge => edge.Candidates).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
 			edges.Any(static edge => edge.CrossScope),
@@ -355,6 +375,11 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private static long EstimateTokens(int characters) => (characters + 3L) / 4L;
 
+	private static IReadOnlyList<string> ResolvedTargetFiles(DependencyEdge edge) =>
+		edge.DeclarationFiles.Count > 0
+			? edge.DeclarationFiles
+			: edge.Target is null ? [] : [edge.Target];
+
 	private static (
 		IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> BySource,
 		IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> ByTarget) BuildEdgeIndexes(
@@ -368,7 +393,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				static group => (IReadOnlyList<DependencyEdge>)group.ToArray(),
 				StringComparer.Ordinal);
 		var byTarget = edges
-			.SelectMany(static edge => (edge.Target is null ? edge.Candidates : edge.Candidates.Append(edge.Target))
+			.SelectMany(static edge => (edge.Status == ResolutionStatus.Resolved
+					? ResolvedTargetFiles(edge)
+					: edge.Candidates)
 				.Distinct(StringComparer.Ordinal)
 				.Select(target => (Target: target, Edge: edge)))
 			.GroupBy(static item => item.Target, StringComparer.Ordinal)
@@ -408,7 +435,9 @@ public sealed class DependencyFactsEngine : IDisposable
 		$"{declaration.Identity.GenericArity}\0{declaration.Identity.FileScope}\0" +
 		string.Join('\0', declaration.DeclarationSites.Select(static site => $"{site.File}:{site.Line}"));
 
-	private static DependencyFactsCoverage BuildCoverage(IReadOnlyList<FileFacts> files) =>
+	private static DependencyFactsCoverage BuildCoverage(
+		IReadOnlyList<FileFacts> files,
+		IReadOnlyList<DependencyConfigurationDiagnostic> configurationDiagnostics) =>
 		new(
 			files.Count,
 			files.Count(static file => file.Status == DependencyFileStatus.Supported),
@@ -420,7 +449,10 @@ public sealed class DependencyFactsEngine : IDisposable
 			files.Where(static file => file.LanguageId == LanguageId.CSharp)
 				.SelectMany(static file => file.ErrorNodeKinds)
 				.GroupBy(static pair => pair.Key)
-				.ToDictionary(static group => group.Key, static group => group.Sum(static pair => pair.Value), StringComparer.Ordinal));
+				.ToDictionary(static group => group.Key, static group => group.Sum(static pair => pair.Value), StringComparer.Ordinal))
+		{
+			ConfigurationDiagnostics = configurationDiagnostics
+		};
 
 	private void RegisterFileCacheWeight(
 		FileCacheKey key,
@@ -468,7 +500,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			_indexCache.TryRemove(oldest, out _);
 			foreach (var snapshot in _manifestSnapshots.Where(pair => pair.Value.IndexCacheKey == oldest).ToArray())
-				_manifestSnapshots.TryRemove(snapshot.Key, out _);
+				RemoveManifestSnapshotUnderLock(snapshot.Key, snapshot.Value);
 			if (_indexCacheWeights.TryRemove(oldest, out var weight))
 				_indexCacheBytes -= weight;
 		}
@@ -485,15 +517,28 @@ public sealed class DependencyFactsEngine : IDisposable
 		lock (_cacheTrimSync)
 		{
 			if (!_indexCache.ContainsKey(indexCacheKey)) return;
-			var entry = new ManifestSnapshotCacheEntry(manifestPaths, stamps, contentIdentities, indexCacheKey, snapshot);
-			if (_manifestSnapshots.TryAdd(key, entry))
-				_manifestSnapshotOrder.Enqueue(key);
-			else
-				_manifestSnapshots[key] = entry;
+			if (_manifestSnapshots.TryGetValue(key, out var previous))
+				RemoveManifestSnapshotUnderLock(key, previous);
+			var entry = new ManifestSnapshotCacheEntry(key, manifestPaths, stamps, contentIdentities, indexCacheKey, snapshot);
+			_manifestSnapshots[key] = entry;
+			entry.OrderNode = _manifestSnapshotOrder.AddLast(entry);
 			while (_manifestSnapshots.Count > _limits.MaximumCachedIndexes &&
-			       _manifestSnapshotOrder.TryDequeue(out var oldest))
-				_manifestSnapshots.TryRemove(oldest, out _);
+			       _manifestSnapshotOrder.First is { Value: var oldest })
+				RemoveManifestSnapshotUnderLock(oldest.Key, oldest);
 		}
+	}
+
+	private void RemoveManifestSnapshotUnderLock(
+		ManifestRequestKey key,
+		ManifestSnapshotCacheEntry entry)
+	{
+		if (!_manifestSnapshots.TryRemove(
+			    new KeyValuePair<ManifestRequestKey, ManifestSnapshotCacheEntry>(key, entry)))
+			return;
+		if (entry.OrderNode is null)
+			return;
+		_manifestSnapshotOrder.Remove(entry.OrderNode);
+		entry.OrderNode = null;
 	}
 
 	private static FileCacheKey CreateFileCacheKey(PreparedDependencySource source) => new(
@@ -555,37 +600,49 @@ public sealed class DependencyFactsEngine : IDisposable
 	}
 
 	private static long EstimateFileFactsBytes(FileFacts facts) =>
-		256 + StringBytes(facts.Path) + StringBytes(facts.ScopeId) + StringBytes(facts.ContentFingerprint) +
-		StringBytes(facts.StatusReason) +
-		facts.ErrorNodeKinds.Sum(static pair => StringBytes(pair.Key) + 16) +
-		facts.Declarations.Sum(static declaration => 160 + StringBytes(declaration.Identity.ScopeId) +
-			StringBytes(declaration.Identity.QualifiedName) + StringBytes(declaration.Identity.FileScope) +
-			StringBytes(declaration.ContainingNamespace) +
-			declaration.DeclarationSites.Sum(SiteBytes)) +
-		facts.Imports.Sum(static import => 128 + StringBytes(import.Specifier) + StringBytes(import.ImportedName) +
-			StringBytes(import.Alias) + SiteBytes(import.Site)) +
-		facts.References.Sum(static reference => 160 + StringBytes(reference.Name) + StringBytes(reference.SyntaxKind) +
-			StringBytes(reference.Reason) + StringBytes(reference.Target) + (reference.Candidates?.Sum(StringBytes) ?? 0) +
-			StringBytes(reference.ContainingNamespace) + StringBytes(reference.ContainingType) + SiteBytes(reference.Site)) +
-		facts.ContextNamespaces.Sum(StringBytes) + facts.Aliases.Sum(static pair => StringBytes(pair.Key) + StringBytes(pair.Value)) +
-		facts.GlobalContextNamespaces.Sum(StringBytes) + facts.GlobalAliases.Sum(static pair => StringBytes(pair.Key) + StringBytes(pair.Value)) +
-		facts.TypeParameters.Sum(StringBytes);
+		EstimateFileFactsBytes(facts, new RetainedStringEstimator());
 
-	private static long EstimateResolvedIndexBytes(ResolvedIndex index) =>
-		256 + index.Edges.Sum(static edge => 192 + StringBytes(edge.Source) + StringBytes(edge.Target) +
-			StringBytes(edge.Reference) + edge.Reasons.Sum(StringBytes) + edge.Evidence.Sum(SiteBytes) +
-			edge.Candidates.Sum(StringBytes)) +
-		index.Files.Sum(static file => StringBytes(file.Path) + file.Imports.Sum(static fact =>
-			128 + StringBytes(fact.Specifier) + StringBytes(fact.ImportedName) + StringBytes(fact.Alias) +
-			StringBytes(fact.Reason) + StringBytes(fact.Target) + (fact.Candidates?.Sum(StringBytes) ?? 0))) +
-		index.Files.Sum(static file => file.References.Sum(static fact =>
-			128 + StringBytes(fact.Name) + StringBytes(fact.Reason) + StringBytes(fact.Target) +
-			(fact.Candidates?.Sum(StringBytes) ?? 0)));
+	private static long EstimateFileFactsBytes(FileFacts facts, RetainedStringEstimator strings) =>
+		256 + strings.Add(facts.Path) + strings.Add(facts.ScopeId) + strings.Add(facts.ContentFingerprint) +
+		strings.Add(facts.StatusReason) +
+		facts.ErrorNodeKinds.Sum(pair => strings.Add(pair.Key) + 16) +
+		facts.Declarations.Sum(declaration => 160 + strings.Add(declaration.Identity.ScopeId) +
+			strings.Add(declaration.Identity.QualifiedName) + strings.Add(declaration.Identity.FileScope) +
+			strings.Add(declaration.ContainingNamespace) +
+			declaration.DeclarationSites.Sum(site => SiteBytes(site, strings))) +
+		facts.Imports.Sum(import => 128 + strings.Add(import.Specifier) + strings.Add(import.ImportedName) +
+			strings.Add(import.Alias) + SiteBytes(import.Site, strings)) +
+		facts.References.Sum(reference => 160 + strings.Add(reference.Name) + strings.Add(reference.SyntaxKind) +
+			strings.Add(reference.Reason) + strings.Add(reference.Target) +
+			(reference.Candidates?.Sum(strings.Add) ?? 0) +
+			strings.Add(reference.ContainingNamespace) + strings.Add(reference.ContainingType) +
+			SiteBytes(reference.Site, strings)) +
+		facts.ContextNamespaces.Sum(strings.Add) +
+		facts.Aliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
+		facts.GlobalContextNamespaces.Sum(strings.Add) +
+		facts.GlobalAliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
+		facts.TypeParameters.Sum(strings.Add);
 
-	private static long SiteBytes(SourceSite site) =>
-		64 + StringBytes(site.File) + StringBytes(site.Evidence);
+	private static long EstimateResolvedIndexBytes(ResolvedIndex index)
+	{
+		var strings = new RetainedStringEstimator();
+		return 256 + index.Edges.Sum(edge => 192 + strings.Add(edge.Source) + strings.Add(edge.Target) +
+			strings.Add(edge.Reference) + edge.Reasons.Sum(strings.Add) +
+			edge.Evidence.Sum(site => SiteBytes(site, strings)) +
+			edge.Candidates.Sum(strings.Add) + edge.DeclarationFiles.Sum(strings.Add)) +
+			index.Files.Sum(file => EstimateFileFactsBytes(file, strings));
+	}
 
-	private static long StringBytes(string? value) => value is null ? 0 : 24 + value.Length * 2L;
+	private static long SiteBytes(SourceSite site, RetainedStringEstimator strings) =>
+		64 + strings.Add(site.File) + strings.Add(site.Evidence);
+
+	private sealed class RetainedStringEstimator
+	{
+		private readonly HashSet<string> _seen = new(ReferenceEqualityComparer.Instance);
+
+		public long Add(string? value) =>
+			value is not null && _seen.Add(value) ? 24 + value.Length * 2L : 0;
+	}
 
 	private static ResolvedIndex GateResolvedIndex(ResolvedIndex index, IReadOnlySet<string> allowed)
 	{
@@ -596,7 +653,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		}).ToArray();
 		var edges = index.Edges.Where(edge => allowed.Contains(edge.Source) &&
 			(edge.Target is null || allowed.Contains(edge.Target) || edge.Target.StartsWith("namespace:", StringComparison.Ordinal)) &&
-			edge.Candidates.All(allowed.Contains)).ToArray();
+			edge.Candidates.All(allowed.Contains) &&
+			edge.DeclarationFiles.All(allowed.Contains)).ToArray();
 		var (bySource, byTarget) = BuildEdgeIndexes(edges);
 		return index with
 		{
@@ -684,7 +742,11 @@ public sealed class DependencyFactsEngine : IDisposable
 	{
 		if (Interlocked.Exchange(ref _disposed, 1) == 0)
 		{
-			_manifestSnapshots.Clear();
+			lock (_cacheTrimSync)
+			{
+				_manifestSnapshots.Clear();
+				_manifestSnapshotOrder.Clear();
+			}
 			_extractor.Dispose();
 		}
 	}
@@ -722,11 +784,21 @@ public sealed class DependencyFactsEngine : IDisposable
 		long CreationTimeUtcTicks);
 
 	private sealed record ManifestSnapshotCacheEntry(
+		ManifestRequestKey Key,
 		IReadOnlyList<string> ManifestPaths,
 		IReadOnlyList<FileStamp> Stamps,
 		IReadOnlyList<string>? ContentIdentities,
 		IndexCacheKey IndexCacheKey,
-		DependencyIndexSnapshot Snapshot);
+		DependencyIndexSnapshot Snapshot)
+	{
+		public LinkedListNode<ManifestSnapshotCacheEntry>? OrderNode { get; set; }
+	}
+
+	internal readonly record struct DependencyFactsCacheState(
+		int ManifestSnapshots,
+		int ManifestEvictionEntries,
+		int ResolvedIndexes,
+		long ResolvedIndexBytes);
 
 	private sealed record ResolvedIndex(
 		IReadOnlyList<DependencyEdge> Edges,
@@ -900,7 +972,11 @@ public sealed class DependencyFactsEngine : IDisposable
 					group.SelectMany(static edge => edge.Reasons).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
 					group.SelectMany(static edge => edge.Evidence).Distinct().OrderBy(static site => site.Line).ToArray(),
 					group.SelectMany(static edge => edge.Candidates).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
-					group.Key.CrossScope))
+					group.Key.CrossScope)
+				{
+					DeclarationFiles = group.SelectMany(static edge => edge.DeclarationFiles)
+						.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
+				})
 				.OrderBy(static edge => edge.Source, StringComparer.Ordinal)
 				.ThenBy(static edge => edge.Target, StringComparer.Ordinal)
 				.ThenBy(static edge => edge.Reference, StringComparer.Ordinal)
@@ -982,6 +1058,11 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (scope is null || !scope.HasConfiguration)
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"no owning tsconfig.json or jsconfig.json in the manifest", []);
+			if (ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
+			if (FindNearestPackageMap(source) is { ConfigurationState: not DependencyConfigurationState.Valid } packageMap)
+				return Edge(source, import, ResolutionStatus.Unresolved, null,
+					packageMap.ConfigurationDiagnostic ?? "package.json configuration is unavailable", []);
 			if (IsRequire(import) && !SupportsCommonJs(source, scope))
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"require call is outside a supported CommonJS context", []);
@@ -1003,17 +1084,19 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			else if (import.Specifier.StartsWith("#", StringComparison.Ordinal))
 			{
-				if (IsPackageMapBlocked(source, import.Specifier, exports: false))
-					return Edge(source, import, ResolutionStatus.Unresolved, null, "package imports target is null-blocked", []);
-				candidates = ResolvePackageMap(source, import.Specifier, exports: false);
+				var packageTarget = ResolvePackageMap(source, import, import.Specifier, exports: false);
+				if (packageTarget.FailureReason is { } reason)
+					return Edge(source, import, ResolutionStatus.Unresolved, null, reason, []);
+				candidates = packageTarget.Candidates;
 			}
 			else if ((scope.PackageName ?? FindNearestPackageMap(source)?.PackageName) is { } package &&
 			         (import.Specifier == package || import.Specifier.StartsWith(package + '/', StringComparison.Ordinal)))
 			{
 				var selfPath = import.Specifier[package.Length..].TrimStart('/');
-				if (IsPackageMapBlocked(source, selfPath, exports: true))
-					return Edge(source, import, ResolutionStatus.Unresolved, null, "package exports target is null-blocked", []);
-				candidates = ResolvePackageMap(source, selfPath, exports: true);
+				var packageTarget = ResolvePackageMap(source, import, selfPath, exports: true);
+				if (packageTarget.FailureReason is { } reason)
+					return Edge(source, import, ResolutionStatus.Unresolved, null, reason, []);
+				candidates = packageTarget.Candidates;
 			}
 			else
 			{
@@ -1100,7 +1183,11 @@ public sealed class DependencyFactsEngine : IDisposable
 				: parts.FirstOrDefault() ?? specifier;
 		}
 
-		private IEnumerable<string> ResolvePackageMap(FileFacts source, string specifier, bool exports)
+		private PackageMapProbe ResolvePackageMap(
+			FileFacts source,
+			ImportFact import,
+			string specifier,
+			bool exports)
 		{
 			var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
 			while (IsWithin(_root, directory))
@@ -1110,18 +1197,30 @@ public sealed class DependencyFactsEngine : IDisposable
 				{
 					var values = exports ? map.Exports : map.Imports;
 					var key = exports ? (specifier.Length == 0 ? "." : "./" + specifier) : specifier;
-					if (TryMap(values, key, out var target) && target is not null)
-						return ProbeTypeScript(
-							Path.GetFullPath(Path.Combine(directory, target)),
+					if (!TryMap(values, key, out var target, out var wildcard))
+						return new PackageMapProbe([], null);
+					var selected = SelectPackageTarget(target!, PackageCondition(source, import));
+					if (selected.Kind == PackageTargetSelectionKind.Blocked)
+						return new PackageMapProbe([], $"package {(exports ? "exports" : "imports")} target is null-blocked");
+					if (selected.Kind == PackageTargetSelectionKind.Unsupported)
+						return new PackageMapProbe([], selected.Reason);
+					if (selected.Kind != PackageTargetSelectionKind.Path || selected.Path is null)
+						return new PackageMapProbe([], "no applicable package condition");
+					var mappedPath = wildcard.Length == 0
+						? selected.Path
+						: selected.Path.Replace("*", wildcard, StringComparison.Ordinal);
+					return new PackageMapProbe(
+						ProbeTypeScript(
+							Path.GetFullPath(Path.Combine(directory, mappedPath)),
 							FindScope(source.ScopeId),
-							source);
-					return [];
+							source).ToArray(),
+						null);
 				}
 				if (Path.GetFullPath(directory) == Path.GetFullPath(_root))
 					break;
 				directory = Path.GetDirectoryName(directory)!;
 			}
-			return [];
+			return new PackageMapProbe([], null);
 		}
 
 		private PackageMapDescriptor? FindNearestPackageMap(FileFacts source)
@@ -1136,27 +1235,31 @@ public sealed class DependencyFactsEngine : IDisposable
 			return null;
 		}
 
-		private bool IsPackageMapBlocked(FileFacts source, string specifier, bool exports)
+		private string PackageCondition(FileFacts source, ImportFact import)
 		{
-			var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
-			while (IsWithin(_root, directory))
-			{
-				if (_configuration.PackageMaps.TryGetValue(PortableRelative(_root, directory), out var map))
-				{
-					var values = exports ? map.Exports : map.Imports;
-					var key = exports ? (specifier.Length == 0 ? "." : "./" + specifier) : specifier;
-					return TryMap(values, key, out var target) && target is null;
-				}
-				if (Path.GetFullPath(directory) == Path.GetFullPath(_root)) break;
-				directory = Path.GetDirectoryName(directory)!;
-			}
-			return false;
+			if (IsRequire(import))
+				return "require";
+			var scope = FindScope(source.ScopeId);
+			var mode = scope?.ModuleResolution ?? "bundler";
+			return scope is not null &&
+			       (mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
+			        mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase)) &&
+			       SupportsCommonJs(source, scope)
+				? "require"
+				: "import";
 		}
 
-		private static bool TryMap(IReadOnlyDictionary<string, string?> map, string key, out string? target)
+		private static bool TryMap(
+			IReadOnlyDictionary<string, PackageTargetDescriptor> map,
+			string key,
+			out PackageTargetDescriptor? target,
+			out string wildcard)
 		{
 			if (map.TryGetValue(key, out target))
+			{
+				wildcard = string.Empty;
 				return true;
+			}
 			foreach (var pair in map.Where(static pair => pair.Key.Contains('*')).OrderByDescending(static pair => pair.Key.Length))
 			{
 				var star = pair.Key.IndexOf('*');
@@ -1164,13 +1267,49 @@ public sealed class DependencyFactsEngine : IDisposable
 				var suffix = pair.Key[(star + 1)..];
 				if (!key.StartsWith(prefix, StringComparison.Ordinal) || !key.EndsWith(suffix, StringComparison.Ordinal))
 					continue;
-				var wildcard = key[prefix.Length..(key.Length - suffix.Length)];
-				target = pair.Value?.Replace("*", wildcard, StringComparison.Ordinal);
+				wildcard = key[prefix.Length..(key.Length - suffix.Length)];
+				target = pair.Value;
 				return true;
 			}
 			target = null;
+			wildcard = string.Empty;
 			return false;
 		}
+
+		private static PackageTargetSelection SelectPackageTarget(
+			PackageTargetDescriptor target,
+			string moduleCondition)
+		{
+			if (target.Kind == PackageTargetKind.Path)
+				return new PackageTargetSelection(PackageTargetSelectionKind.Path, target.Path, null);
+			if (target.Kind == PackageTargetKind.Blocked)
+				return new PackageTargetSelection(PackageTargetSelectionKind.Blocked, null, null);
+			if (target.Kind == PackageTargetKind.Unsupported)
+				return new PackageTargetSelection(
+					PackageTargetSelectionKind.Unsupported,
+					null,
+					target.UnsupportedReason ?? "unsupported package target");
+			foreach (var branch in target.Conditions)
+			{
+				if (!IsSupportedPackageCondition(branch.Name))
+					return new PackageTargetSelection(
+						PackageTargetSelectionKind.Unsupported,
+						null,
+						$"package condition '{branch.Name}' is not supported");
+				if (!IsActivePackageCondition(branch.Name, moduleCondition))
+					continue;
+				var selected = SelectPackageTarget(branch.Target, moduleCondition);
+				if (selected.Kind != PackageTargetSelectionKind.NoMatch)
+					return selected;
+			}
+			return new PackageTargetSelection(PackageTargetSelectionKind.NoMatch, null, null);
+		}
+
+		private static bool IsSupportedPackageCondition(string condition) =>
+			condition is "types" or "import" or "require" or "node" or "default";
+
+		private static bool IsActivePackageCondition(string condition, string moduleCondition) =>
+			condition is "types" or "node" or "default" || condition == moduleCondition;
 
 		private IEnumerable<string> ProbeTypeScript(
 			string candidate,
@@ -1232,6 +1371,8 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolvePythonImport(FileFacts source, ImportFact import)
 		{
+			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			var sourceModule = PythonModule(source);
 			var sourcePackage = Path.GetFileNameWithoutExtension(source.Path) == "__init__"
 				? sourceModule
@@ -1240,8 +1381,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (import.RelativeLevel > 0)
 			{
 				var remove = import.RelativeLevel - 1;
-				if (remove > parts.Count)
-					return Edge(source, import, ResolutionStatus.Unresolved, null, "relative import escapes package", []);
+				if (remove >= parts.Count)
+					return Edge(source, import, ResolutionStatus.Unresolved, null, "relative import goes beyond the top-level package", []);
 				parts.RemoveRange(parts.Count - remove, remove);
 			}
 			var module = import.RelativeLevel == 0
@@ -1250,14 +1391,23 @@ public sealed class DependencyFactsEngine : IDisposable
 			var candidates = ProbePythonModule(source, module).ToList();
 			if (import.ImportedName is { Length: > 0 } and not "*")
 			{
-				var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
-				var children = ProbePythonModule(source, child).ToArray();
-				if (children.Length > 0)
-					candidates = children.ToList();
+				var provided = candidates
+					.Where(static candidate => Path.GetFileName(candidate).StartsWith("__init__.", StringComparison.Ordinal))
+					.SelectMany(candidate => ResolvePythonStaticBinding(
+						candidate,
+						import.ImportedName,
+						0,
+						new HashSet<string>(StringComparer.Ordinal)))
+					.Distinct(StringComparer.Ordinal)
+					.Order(StringComparer.Ordinal)
+					.ToArray();
+				if (provided.Length > 0)
+					candidates = provided.ToList();
 				else
-					candidates = candidates.Where(candidate =>
-						!Path.GetFileName(candidate).StartsWith("__init__.", StringComparison.Ordinal) ||
-						PythonStaticallyProvides(candidate, import.ImportedName, 0, new HashSet<string>(StringComparer.Ordinal))).ToList();
+				{
+					var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
+					candidates = ProbePythonModule(source, child).ToList();
+				}
 			}
 			if (candidates.Count == 0)
 			{
@@ -1278,10 +1428,15 @@ public sealed class DependencyFactsEngine : IDisposable
 			return FinishImport(source, import, candidates);
 		}
 
-		private bool PythonStaticallyProvides(string candidate, string name, int depth, ISet<string> visited)
+		private IReadOnlyList<string> ResolvePythonStaticBinding(
+			string candidate,
+			string name,
+			int depth,
+			ISet<string> visited)
 		{
-			if (depth >= 8 || !visited.Add(candidate) || !_files.TryGetValue(candidate, out var facts)) return false;
-			if (facts.Declarations.Any(declaration => SimpleName(declaration.Identity.QualifiedName) == name)) return true;
+			if (depth >= 8 || !visited.Add(candidate) || !_files.TryGetValue(candidate, out var facts)) return [];
+			if (facts.Declarations.Any(declaration => SimpleName(declaration.Identity.QualifiedName) == name))
+				return [candidate];
 			foreach (var import in facts.Imports.Where(import =>
 				string.Equals(import.Alias ?? import.ImportedName ?? import.Specifier.Split('.').Last(), name, StringComparison.Ordinal)))
 			{
@@ -1293,7 +1448,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (import.RelativeLevel > 0)
 				{
 					var remove = import.RelativeLevel - 1;
-					if (remove > parts.Count) continue;
+					if (remove >= parts.Count) continue;
 					parts.RemoveRange(parts.Count - remove, remove);
 				}
 				var module = import.RelativeLevel == 0 ? import.Specifier :
@@ -1301,12 +1456,29 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (import.ImportedName is { Length: > 0 } imported)
 				{
 					var child = module.Length == 0 ? imported : module + "." + imported;
-					if (ProbePythonModule(facts, child).Any()) return true;
-					if (ProbePythonModule(facts, module).Any(next => PythonStaticallyProvides(next, imported, depth + 1, visited))) return true;
+					if (import.Specifier.Length == 0)
+					{
+						var directChildTargets = ProbePythonModule(facts, child).ToArray();
+						if (directChildTargets.Length > 0) return directChildTargets;
+					}
+					var moduleTargets = ProbePythonModule(facts, module).ToArray();
+					var nested = moduleTargets
+						.SelectMany(next => ResolvePythonStaticBinding(next, imported, depth + 1, visited))
+						.Distinct(StringComparer.Ordinal)
+						.Order(StringComparer.Ordinal)
+						.ToArray();
+					if (nested.Length > 0) return nested;
+					if (moduleTargets.Length > 0) return moduleTargets;
+					var childTargets = ProbePythonModule(facts, child).ToArray();
+					if (childTargets.Length > 0) return childTargets;
 				}
-				else if (ProbePythonModule(facts, module).Any()) return true;
+				else
+				{
+					var moduleTargets = ProbePythonModule(facts, module).ToArray();
+					if (moduleTargets.Length > 0) return moduleTargets;
+				}
 			}
-			return false;
+			return [];
 		}
 
 		private IEnumerable<string> ProbePythonNamespace(FileFacts source, string module)
@@ -1330,14 +1502,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			foreach (var root in PythonRootPrefixes(source))
 			{
 				var prefix = string.Join('/', new[] { root, relative }.Where(static value => value.Length > 0));
-				var implementation = new[] { prefix + ".py", prefix + "/__init__.py" }
+				var implementation = new[] { prefix + "/__init__.py", prefix + ".py" }
 					.FirstOrDefault(_files.ContainsKey);
 				if (implementation is not null)
 				{
 					yield return implementation;
 					yield break;
 				}
-				var stub = new[] { prefix + ".pyi", prefix + "/__init__.pyi" }
+				var stub = new[] { prefix + "/__init__.pyi", prefix + ".pyi" }
 					.FirstOrDefault(_files.ContainsKey);
 				if (stub is not null)
 				{
@@ -1369,6 +1541,8 @@ public sealed class DependencyFactsEngine : IDisposable
 						? "no owning .csproj in the manifest"
 						: "no owning tsconfig.json or jsconfig.json in the manifest", []);
 			}
+			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			if (source.TypeParameters.Contains(simpleName, StringComparer.Ordinal))
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
 			var expandedName = ExpandQualifiedAlias(source, reference.Name);
@@ -1407,7 +1581,10 @@ public sealed class DependencyFactsEngine : IDisposable
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 			return candidates.Length == 1
 				? Edge(source, reference, ResolutionStatus.Resolved, files[0],
-					$"one visible declaration identity in {source.ScopeId}", files)
+					$"one visible declaration identity in {source.ScopeId}", files) with
+					{
+						DeclarationFiles = files
+					}
 				: Edge(source, reference, ResolutionStatus.Ambiguous, null, "multiple visible declaration identities", files);
 		}
 
@@ -1632,6 +1809,12 @@ public sealed class DependencyFactsEngine : IDisposable
 		private DependencyScopeDescriptor? FindScope(string scopeId) =>
 			_scopesById.GetValueOrDefault(scopeId);
 
+		private static string? ConfigurationFailure(DependencyScopeDescriptor scope) =>
+			scope.ConfigurationState == DependencyConfigurationState.Valid
+				? null
+				: scope.ConfigurationDiagnostic ??
+				  $"{scope.ConfigurationState.ToString().ToLowerInvariant()} dependency configuration";
+
 		private static IReadOnlyDictionary<string, string[]> BuildVisibleScopes(
 			IReadOnlyDictionary<string, DependencyScopeDescriptor> scopes)
 		{
@@ -1661,5 +1844,19 @@ public sealed class DependencyFactsEngine : IDisposable
 			LanguageId LanguageId,
 			string QualifiedName,
 			int GenericArity);
+		private readonly record struct PackageMapProbe(
+			IReadOnlyList<string> Candidates,
+			string? FailureReason);
+		private readonly record struct PackageTargetSelection(
+			PackageTargetSelectionKind Kind,
+			string? Path,
+			string? Reason);
+		private enum PackageTargetSelectionKind
+		{
+			NoMatch,
+			Path,
+			Blocked,
+			Unsupported
+		}
 	}
 }

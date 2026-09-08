@@ -38,6 +38,8 @@ public sealed record DependencyResolverConfiguration(
 	IReadOnlyDictionary<string, IReadOnlySet<string>> PythonStandardLibraryModules,
 	IReadOnlySet<string> NodeBuiltInModules)
 {
+	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
+
 	public DependencyScopeDescriptor? FindScope(string scopeId) =>
 		Scopes.FirstOrDefault(scope => string.Equals(scope.ScopeId, scopeId, StringComparison.Ordinal));
 }
@@ -55,15 +57,53 @@ public sealed record DependencyScopeDescriptor(
 	IReadOnlyList<string> PythonRoots,
 	bool HasConfiguration,
 	string? PythonVersion = null,
-	bool AllowJavaScript = false);
+	bool AllowJavaScript = false)
+{
+	public DependencyConfigurationState ConfigurationState { get; init; } = DependencyConfigurationState.Valid;
+	public string? ConfigurationDiagnostic { get; init; }
+}
 
 public sealed record PackageMapDescriptor(
 	string Directory,
 	string? PackageName,
-	IReadOnlyDictionary<string, string?> Imports,
-	IReadOnlyDictionary<string, string?> Exports,
+	IReadOnlyDictionary<string, PackageTargetDescriptor> Imports,
+	IReadOnlyDictionary<string, PackageTargetDescriptor> Exports,
 	string? ModuleType,
-	IReadOnlySet<string> ExternalPackages);
+	IReadOnlySet<string> ExternalPackages)
+{
+	public DependencyConfigurationState ConfigurationState { get; init; } = DependencyConfigurationState.Valid;
+	public string? ConfigurationDiagnostic { get; init; }
+}
+
+public enum DependencyConfigurationState
+{
+	Valid,
+	Missing,
+	Corrupt,
+	UnsupportedSemantics
+}
+
+public sealed record DependencyConfigurationDiagnostic(
+	string Path,
+	DependencyConfigurationState State,
+	string Reason,
+	IReadOnlyList<string> ScopeIds);
+
+public enum PackageTargetKind
+{
+	Path,
+	Blocked,
+	Conditions,
+	Unsupported
+}
+
+public sealed record PackageTargetDescriptor(
+	PackageTargetKind Kind,
+	string? Path,
+	IReadOnlyList<PackageConditionDescriptor> Conditions,
+	string? UnsupportedReason);
+
+public sealed record PackageConditionDescriptor(string Name, PackageTargetDescriptor Target);
 
 public interface IDependencyFactExtractor : IDisposable
 {
