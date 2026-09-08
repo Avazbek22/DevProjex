@@ -80,10 +80,7 @@ public sealed record ImportFact(
 	ResolutionStatus Status = ResolutionStatus.Unresolved,
 	string Reason = "not resolved yet",
 	IReadOnlyList<string>? Candidates = null,
-	string? Target = null)
-{
-	public bool HasLiteralSpecifier { get; init; } = true;
-}
+	string? Target = null);
 
 public sealed record ReferenceFact(
 	EvidenceLayer Layer,

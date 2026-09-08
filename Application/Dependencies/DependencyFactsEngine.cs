@@ -1064,9 +1064,9 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolveTypeScriptImport(FileFacts source, ImportFact import)
 		{
-			if (!import.HasLiteralSpecifier)
+			if (!string.Equals(import.Reason, "not resolved yet", StringComparison.Ordinal))
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
-					"module specifier is not a string literal", []);
+					import.Reason, []);
 			var scope = FindScope(source.ScopeId);
 			if (scope is null || !scope.HasConfiguration)
 				return Edge(source, import, ResolutionStatus.Unresolved, null,

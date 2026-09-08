@@ -420,10 +420,9 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 		{
 			if (!syntax.HasLiteralSpecifier)
 			{
-				yield return new ImportFact(string.Empty, null, null, false, 0, Site(context, capture))
-				{
-					HasLiteralSpecifier = false
-				};
+				yield return new ImportFact(
+					string.Empty, null, null, false, 0, Site(context, capture),
+					Reason: "module specifier is not a string literal");
 				yield break;
 			}
 			if (syntax.Bindings.Count == 0)

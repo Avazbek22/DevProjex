@@ -152,9 +152,13 @@ public sealed class DependencyReferenceSemanticsIntegrationTests
 		var result = await engine.IndexAsync(fixture.Path, [config, target, source],
 			cancellationToken: TestContext.Current.CancellationToken);
 
+		var imports = result.Files.Single(file => file.Path == "main.ts").Imports;
+		Assert.Equal(8, imports.Count(import => import.Specifier == "./register.js"));
+		Assert.Equal(2, imports.Count(import => import.Reason == "module specifier is not a string literal"));
 		var edges = result.Edges.Where(edge => edge.Source == "main.ts").ToArray();
-		Assert.Contains(edges, edge => edge.Reference == "./register.js" &&
+		var resolved = Assert.Single(edges, edge => edge.Reference == "./register.js" &&
 			edge.Status == ResolutionStatus.Resolved && edge.Target == "register.ts");
+		Assert.Equal(8, resolved.Evidence.Count);
 		var unsupported = edges.Where(edge => edge.Status == ResolutionStatus.Unresolved &&
 			edge.Reasons.Contains("module specifier is not a string literal")).ToArray();
 		var unsupportedEdge = Assert.Single(unsupported);
