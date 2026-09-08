@@ -158,7 +158,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		var manifestGeneration = Hash(prepared.Select(source =>
 			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"));
 		var parsedFiles = _extractor.ParseCount - parsedBefore;
-		var orderedFacts = facts.OrderBy(static fact => fact.Path, StringComparer.Ordinal).ToArray();
+		// Parallel extraction writes by canonical manifest index, so this array is already ordered.
+		var orderedFacts = facts;
 		var declarations = MergeDeclarations(orderedFacts);
 		var declarationRevision = Hash(declarations.Select(DeclarationKey));
 		var cacheKey = new IndexCacheKey(
