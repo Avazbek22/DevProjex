@@ -8,6 +8,11 @@ internal sealed class McpGlobSet
 	// hostile nested group from compiling thousands of automata per call.
 	internal const int MaximumBraceAlternatives = 64;
 	internal const int MaximumExpandedPatterns = 1024;
+	private const int MaximumCachedPatternSets = 64;
+	private static readonly object CacheSync = new();
+	private static readonly Dictionary<string, Lazy<McpGlobSet>> Cache = new(StringComparer.Ordinal);
+	private static readonly Queue<string> CacheOrder = new();
+	private static int _compiledRegexCount;
 	private readonly IReadOnlyList<Regex> _includes;
 	private readonly IReadOnlyList<Regex> _excludes;
 
@@ -17,10 +22,31 @@ internal sealed class McpGlobSet
 		_excludes = excludes;
 	}
 
+	internal static int CompiledRegexCount => Volatile.Read(ref _compiledRegexCount);
+
 	public static McpGlobSet Create(
 		IReadOnlyList<string>? includePatterns,
-		IReadOnlyList<string>? excludePatterns) =>
-		new(Compile(includePatterns, "include_patterns"), Compile(excludePatterns, "exclude_patterns"));
+		IReadOnlyList<string>? excludePatterns)
+	{
+		var includes = ValidateAndExpand(includePatterns, "include_patterns");
+		var excludes = ValidateAndExpand(excludePatterns, "exclude_patterns");
+		var key = CacheKey(includes, excludes);
+		Lazy<McpGlobSet> entry;
+		lock (CacheSync)
+		{
+			if (!Cache.TryGetValue(key, out entry!))
+			{
+				entry = new Lazy<McpGlobSet>(
+					() => new McpGlobSet(Compile(includes), Compile(excludes)),
+					LazyThreadSafetyMode.ExecutionAndPublication);
+				Cache.Add(key, entry);
+				CacheOrder.Enqueue(key);
+				while (CacheOrder.Count > MaximumCachedPatternSets)
+					Cache.Remove(CacheOrder.Dequeue());
+			}
+		}
+		return entry.Value;
+	}
 
 	public bool Includes(string relativePath)
 	{
@@ -43,14 +69,14 @@ internal sealed class McpGlobSet
 		string subtreeBoundary) =>
 		patterns.Any(regex => regex.IsMatch(path) || regex.IsMatch(subtreeBoundary));
 
-	private static IReadOnlyList<Regex> Compile(IReadOnlyList<string>? patterns, string parameter)
+	private static IReadOnlyList<string> ValidateAndExpand(IReadOnlyList<string>? patterns, string parameter)
 	{
 		if (patterns is null || patterns.Count == 0)
 			return [];
 		if (patterns.Count > MaximumPatterns)
 			throw Invalid(parameter, $"at most {MaximumPatterns} patterns are allowed");
 
-		var result = new List<Regex>(patterns.Count);
+		var result = new List<string>(patterns.Count);
 		foreach (var pattern in patterns)
 		{
 			Validate(pattern, parameter);
@@ -58,14 +84,30 @@ internal sealed class McpGlobSet
 			{
 				if (result.Count == MaximumExpandedPatterns)
 					throw Invalid(parameter, $"at most {MaximumExpandedPatterns} patterns are allowed after brace expansion");
-				result.Add(new Regex(
-					ToRegex(expanded),
-					RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
-					TimeSpan.FromSeconds(2)));
+				result.Add(expanded);
 			}
 		}
 		return result;
 	}
+
+	private static IReadOnlyList<Regex> Compile(IReadOnlyList<string> patterns)
+	{
+		if (patterns.Count == 0)
+			return [];
+		var result = new Regex[patterns.Count];
+		for (var index = 0; index < patterns.Count; index++)
+		{
+			result[index] = new Regex(
+				ToRegex(patterns[index]),
+				RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
+				TimeSpan.FromSeconds(2));
+			Interlocked.Increment(ref _compiledRegexCount);
+		}
+		return result;
+	}
+
+	private static string CacheKey(IReadOnlyList<string> includes, IReadOnlyList<string> excludes) =>
+		$"{includes.Count}:I\0{string.Join('\0', includes)}\0{excludes.Count}:E\0{string.Join('\0', excludes)}";
 
 	private static void Validate(string pattern, string parameter)
 	{
