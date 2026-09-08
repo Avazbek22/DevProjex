@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text;
 using DevProjex.Application.Dependencies;
 using DevProjex.Infrastructure.Dependencies;
 using DevProjex.Mcp;
@@ -140,9 +143,39 @@ public sealed class DependencyPerformanceCorrectnessIntegrationTests
 		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Cancellation took {stopwatch.Elapsed}.");
 	}
 
+	[Fact]
+	public async Task IncrementalManifestHash_RemainsByteIdenticalToLengthPrefixedUtf8Contract()
+	{
+		using var fixture = new TemporaryDirectory();
+		var first = fixture.CreateFile("α.cs", "public sealed class Alpha { }");
+		var second = fixture.CreateFile("nested/β.ts", "export const beta = 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [second, first],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var identities = result.Files.OrderBy(static file => file.Path, StringComparer.Ordinal)
+			.Select(file => $"{file.Path}\0{file.ContentFingerprint}\0{file.LanguageId}");
+
+		Assert.Equal(ReferenceHash(identities), result.ManifestGeneration);
+	}
+
 	private static DependencyFactsEngine CreateEngine() => new(
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());
+
+	private static string ReferenceHash(IEnumerable<string> values)
+	{
+		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		Span<byte> prefix = stackalloc byte[sizeof(int)];
+		foreach (var value in values)
+		{
+			var bytes = Encoding.UTF8.GetBytes(value);
+			BinaryPrimitives.WriteInt32BigEndian(prefix, bytes.Length);
+			hash.AppendData(prefix);
+			hash.AppendData(bytes);
+		}
+		return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+	}
 
 	private static void ReplaceWithExternalDirectoryLinkOrSkip(string linkPath, string targetPath)
 	{

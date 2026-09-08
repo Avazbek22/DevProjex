@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -730,12 +731,34 @@ public sealed class DependencyFactsEngine : IDisposable
 	{
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		Span<byte> lengthPrefix = stackalloc byte[sizeof(int)];
-		foreach (var value in values)
+		var buffer = ArrayPool<byte>.Shared.Rent(4096);
+		try
 		{
-			var bytes = Encoding.UTF8.GetBytes(value);
-			BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, bytes.Length);
-			hash.AppendData(lengthPrefix);
-			hash.AppendData(bytes);
+			foreach (var value in values)
+			{
+				BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, Encoding.UTF8.GetByteCount(value));
+				hash.AppendData(lengthPrefix);
+				var encoder = Encoding.UTF8.GetEncoder();
+				var remaining = value.AsSpan();
+				do
+				{
+					encoder.Convert(
+						remaining,
+						buffer,
+						flush: true,
+						out var charactersUsed,
+						out var bytesUsed,
+						out _);
+					if (bytesUsed > 0)
+						hash.AppendData(buffer.AsSpan(0, bytesUsed));
+					remaining = remaining[charactersUsed..];
+				} while (!remaining.IsEmpty);
+			}
+		}
+		finally
+		{
+			CryptographicOperations.ZeroMemory(buffer);
+			ArrayPool<byte>.Shared.Return(buffer);
 		}
 
 		return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
