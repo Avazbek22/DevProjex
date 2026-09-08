@@ -47,7 +47,10 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		_maximumPackBytes = maximumPackBytes;
 		_maximumSessionBytes = maximumSessionBytes;
 		TimeProvider = timeProvider ?? TimeProvider.System;
-		var productDirectory = Path.Combine(tempRoot ?? Path.GetTempPath(), "DevProjex");
+		var productDirectory = ResolveProductDirectory(
+			tempRoot,
+			Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR"),
+			Environment.UserName);
 		EnsurePrivateDirectory(productDirectory);
 		var baseDirectory = Path.Combine(productDirectory, "mcp");
 		EnsurePrivateDirectory(baseDirectory);
@@ -85,6 +88,30 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	internal TimeProvider TimeProvider { get; }
 	internal string SessionDirectory => _sessionDirectory;
 	internal Task ScavengingCompletion => _scavengeTask;
+
+	internal static string ResolveProductDirectory(
+		string? tempRoot,
+		string? xdgRuntimeDirectory,
+		string? userName)
+	{
+		if (tempRoot is null &&
+		    !string.IsNullOrWhiteSpace(xdgRuntimeDirectory) &&
+		    Path.IsPathFullyQualified(xdgRuntimeDirectory))
+		{
+			return Path.Combine(Path.GetFullPath(xdgRuntimeDirectory), "DevProjex");
+		}
+
+		var root = Path.GetFullPath(tempRoot ?? Path.GetTempPath());
+		var identity = string.IsNullOrWhiteSpace(userName) ? "user" : userName.Trim();
+		var safeIdentity = new string(identity
+			.Select(static character => char.IsLetterOrDigit(character) || character is '-' or '_'
+				? character
+				: '-')
+			.ToArray());
+		var identityHash = Convert.ToHexString(
+			SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(identity)))[..8].ToLowerInvariant();
+		return Path.Combine(root, $"DevProjex-{safeIdentity}-{identityHash}");
+	}
 
 	public async Task<string> StoreAsync(string content, CancellationToken cancellationToken)
 	{
