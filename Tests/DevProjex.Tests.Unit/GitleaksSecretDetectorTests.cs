@@ -347,6 +347,29 @@ public sealed class GitleaksSecretDetectorTests
 		Assert.Equal(genericValue, finding.Value);
 	}
 
+	[Theory]
+	[MemberData(nameof(GenericApiKeyGateWhitespaceVariants))]
+	public void Detect_GenericFastGatePreservesPinnedWhitespaceBeforeDelimiter(string separator)
+	{
+		const string genericValue = "A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h";
+		var content = $"apiKey{separator}= \"{genericValue}\"";
+		Assert.True(Detector.InspectRuleMatch("generic-api-key", content).IsMatch);
+
+		var finding = Assert.Single(
+			Detector.Detect("src/config.txt", content, TestContext.Current.CancellationToken),
+			static match => match.RuleId == "generic-api-key");
+
+		Assert.Equal(genericValue, finding.Value);
+	}
+
+	public static IEnumerable<object[]> GenericApiKeyGateWhitespaceVariants()
+	{
+		yield return [string.Empty];
+		yield return ["\n"];
+		yield return ["\r\n"];
+		yield return ["\r"];
+	}
+
 	[Fact]
 	public void Detect_GitleaksAllowMarker_SuppressesFindingOnThatLine()
 	{

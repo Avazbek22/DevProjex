@@ -1,6 +1,8 @@
+using System.Text;
 using DevProjex.Application.Dependencies;
 using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.Dependencies;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.Integration;
 
@@ -136,7 +138,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
-	public async Task TypeScriptFacts_ApplyJsSubstitutionPathsAndNoBundlerIndexFallback()
+	public async Task TypeScriptFacts_ApplyOrderedJsSubstitutionPathsAndBundlerIndexFallback()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("tsconfig.json", """
@@ -164,7 +166,161 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal("src/x.ts", resolvedImport.Target);
 		Assert.Contains(result.Edges, edge => edge.Source == "src/main.ts" && edge.Target == "src/exact.ts");
 		Assert.Contains(result.Edges, edge => edge.Source == "src/main.ts" && edge.Target == "src/lib/item.ts");
-		Assert.Contains(result.Edges, edge => edge.Source == "src/main.ts" && edge.Reference == "./dir" && edge.Status == ResolutionStatus.Unresolved);
+		Assert.Contains(result.Edges, edge => edge.Source == "src/main.ts" && edge.Reference == "./dir" && edge.Target == "src/dir/index.ts");
+	}
+
+	[Fact]
+	public async Task TypeScriptRelativeResolution_UsesTheFirstExistingProbeAndPreservesJavaScriptFallback()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var source = fixture.CreateFile("main.ts", "import one from './worker.js'; import two from './plain.js';");
+		var workerTypeScript = fixture.CreateFile("worker.ts", "export default 1;");
+		var workerDeclaration = fixture.CreateFile("worker.d.ts", "declare const value: number; export default value;");
+		var plainJavaScript = fixture.CreateFile("plain.js", "export default 2;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, workerTypeScript, workerDeclaration, plainJavaScript],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "./worker.js" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "worker.ts");
+		Assert.Contains(result.Edges, edge => edge.Reference == "./plain.js" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "plain.js");
+		Assert.DoesNotContain(result.Edges, edge => edge.Reference == "./worker.js" &&
+			edge.Status == ResolutionStatus.Ambiguous);
+	}
+
+	[Fact]
+	public async Task TypeScriptExtensionlessResolution_ProbesJavaScriptWithoutAllowJs()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var source = fixture.CreateFile("main.ts", "import value from './dep';");
+		var target = fixture.CreateFile("dep.js", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "main.ts" &&
+			edge.Reference == "./dep" && edge.Status == ResolutionStatus.Resolved && edge.Target == "dep.js");
+	}
+
+	[Fact]
+	public async Task TypeScriptNode16_DefaultsOrdinaryTypeScriptFilesToCommonJsWithoutPackageType()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var source = fixture.CreateFile("main.ts", "import value from './dep';");
+		var target = fixture.CreateFile("dep.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "main.ts" &&
+			edge.Reference == "./dep" && edge.Status == ResolutionStatus.Resolved && edge.Target == "dep.ts");
+	}
+
+	[Fact]
+	public async Task TypeScriptDirectoryResolution_DistinguishesBundlerFromNodeEsm()
+	{
+		using var fixture = new TemporaryDirectory();
+		var bundlerConfig = fixture.CreateFile("bundler/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var bundlerSource = fixture.CreateFile("bundler/main.ts", "import value from './dir';");
+		var bundlerIndex = fixture.CreateFile("bundler/dir/index.ts", "export default 1;");
+		var nodeConfig = fixture.CreateFile("node/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
+		var nodePackage = fixture.CreateFile("node/package.json", "{\"type\":\"module\"}");
+		var nodeSource = fixture.CreateFile("node/main.mts", "import value from './dir';");
+		var nodeIndex = fixture.CreateFile("node/dir/index.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[bundlerConfig, bundlerSource, bundlerIndex, nodeConfig, nodePackage, nodeSource, nodeIndex],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "bundler/main.ts" &&
+			edge.Reference == "./dir" && edge.Target == "bundler/dir/index.ts");
+		Assert.Contains(result.Edges, edge => edge.Source == "node/main.mts" &&
+			edge.Reference == "./dir" && edge.Status == ResolutionStatus.Unresolved &&
+			edge.Reasons.Contains("extension required for a relative ESM import under node16/nodenext"));
+	}
+
+	[Fact]
+	public async Task TypeScriptPaths_UsesTheFirstFallbackTargetThatExists()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", """
+			{"compilerOptions":{"moduleResolution":"bundler","paths":{"alias":["missing.ts","src/value.ts"]}}}
+			""");
+		var source = fixture.CreateFile("main.ts", "import value from 'alias';");
+		var target = fixture.CreateFile("src/value.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "alias" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "src/value.ts");
+	}
+
+	[Fact]
+	public async Task TypeScriptPaths_SelectsTheLongestPrefixBeforeTheWildcard()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", """
+			{"compilerOptions":{"moduleResolution":"bundler","paths":{
+				"foo/*":["correct/*"],
+				"f*tail":["wrong/*"]
+			}}}
+			""");
+		var source = fixture.CreateFile("main.ts", "import value from 'foo/xtail';");
+		var correct = fixture.CreateFile("correct/xtail.ts", "export default 1;");
+		var wrong = fixture.CreateFile("wrong/oo/x.ts", "export default 2;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, correct, wrong],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "foo/xtail" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "correct/xtail.ts");
+		Assert.DoesNotContain(result.Edges, edge => edge.Reference == "foo/xtail" && edge.Target == "wrong/oo/x.ts");
+	}
+
+	[Fact]
+	public async Task TypeScriptPaths_DoesNotFallBackToALessSpecificPattern()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", """
+			{"compilerOptions":{"moduleResolution":"bundler","paths":{
+				"foo/*":["missing/*"],
+				"*":["fallback/*"]
+			}}}
+			""");
+		var source = fixture.CreateFile("main.ts", "import value from 'foo/item';");
+		var fallback = fixture.CreateFile("fallback/foo/item.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, fallback],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Reference == "foo/item");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
 	}
 
 	[Fact]
@@ -434,6 +590,192 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task CSharpResolution_UsesLanguageVisibilityWithoutProjectWideNameFallback()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var hiddenTask = fixture.CreateFile("CompanyTask.cs", "namespace Company.Internal; public sealed class Task { }\n");
+		var nestedWidget = fixture.CreateFile("NestedWidget.cs", "namespace Parent.Child; public sealed class Widget { }\n");
+		var enclosing = fixture.CreateFile("Envelope.cs", "namespace Parent; public sealed class Envelope { }\n");
+		var consumer = fixture.CreateFile("Consumer.cs", """
+			using System.Threading.Tasks;
+			using Parent;
+			namespace App;
+			public sealed class Consumer
+			{
+				public Task ExternalTask { get; }
+				public Widget HiddenChild { get; }
+				public Company.Internal.Task Qualified { get; }
+			}
+			""");
+		var childConsumer = fixture.CreateFile(
+			"ChildConsumer.cs",
+			"namespace Parent.Child; public sealed class Consumer { public Envelope Value { get; } }\n");
+		var nestedConsumer = fixture.CreateFile(
+			"NestedConsumer.cs",
+			"""
+			namespace Nest;
+			public class Outer
+			{
+				public class Inner { }
+				public class Consumer
+				{
+					public Inner Value { get; }
+				}
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[project, hiddenTask, nestedWidget, enclosing, consumer, childConsumer, nestedConsumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var externalTask = Assert.Single(index.Edges, edge => edge.Source == "Consumer.cs" && edge.Reference == "Task");
+		Assert.Equal(ResolutionStatus.External, externalTask.Status);
+		Assert.Null(externalTask.Target);
+		Assert.Empty(externalTask.Candidates);
+		var hiddenChild = Assert.Single(index.Edges, edge => edge.Source == "Consumer.cs" && edge.Reference == "Widget");
+		Assert.Equal(ResolutionStatus.Unresolved, hiddenChild.Status);
+		Assert.Null(hiddenChild.Target);
+		Assert.Contains(index.Edges, edge => edge.Source == "Consumer.cs" &&
+			edge.Reference == "Company.Internal.Task" && edge.Target == "CompanyTask.cs");
+		Assert.Contains(index.Edges, edge => edge.Source == "ChildConsumer.cs" &&
+			edge.Reference == "Envelope" && edge.Target == "Envelope.cs");
+		Assert.Contains(index.Edges, edge => edge.Source == "NestedConsumer.cs" &&
+			edge.Reference == "Inner" && edge.Target == "NestedConsumer.cs");
+	}
+
+	[Fact]
+	public async Task CSharpResolution_KeepsNestedTypesOutOfNamespaceLookupAndUsesTheNearestContainingType()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var holder = fixture.CreateFile("Holder.cs", """
+			namespace App;
+			public partial class Holder { public class Task { } }
+			""");
+		var holderConsumer = fixture.CreateFile("HolderConsumer.cs", """
+			namespace App;
+			public partial class Holder { public Task Inside { get; } }
+			""");
+		var consumer = fixture.CreateFile("Consumer.cs", """
+			using System.Threading.Tasks;
+			namespace App;
+			public sealed class Consumer
+			{
+				public Task External { get; }
+				public Holder.Task Qualified { get; }
+			}
+			""");
+		var globalHolder = fixture.CreateFile(
+			"GlobalHolder.cs",
+			"public sealed class GlobalHolder { public class Task { } }\n");
+		var globalConsumer = fixture.CreateFile(
+			"GlobalConsumer.cs",
+			"using System.Threading.Tasks; public sealed class GlobalConsumer { public Task Value { get; } }\n");
+		var outerTask = fixture.CreateFile("OuterTask.cs", """
+			namespace App;
+			public partial class Outer { public class Task { } }
+			""");
+		var innerTask = fixture.CreateFile("InnerTask.cs", """
+			namespace App;
+			public partial class Outer { public partial class Inner { public class Task { } } }
+			""");
+		var outerConsumer = fixture.CreateFile("OuterConsumer.cs", """
+			namespace App;
+			public partial class Outer { public Task Value { get; } }
+			""");
+		var innerConsumer = fixture.CreateFile("InnerConsumer.cs", """
+			namespace App;
+			public partial class Outer { public partial class Inner { public Task Value { get; } } }
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[project, holder, holderConsumer, consumer, globalHolder, globalConsumer,
+				outerTask, innerTask, outerConsumer, innerConsumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var appExternal = Assert.Single(index.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "Task");
+		Assert.Equal(ResolutionStatus.External, appExternal.Status);
+		Assert.DoesNotContain("Holder.cs", appExternal.Candidates);
+		Assert.Contains(index.Edges, edge => edge.Source == "Consumer.cs" &&
+			edge.Reference == "Holder.Task" && edge.Target == "Holder.cs");
+		Assert.Contains(index.Edges, edge => edge.Source == "HolderConsumer.cs" &&
+			edge.Reference == "Task" && edge.Target == "Holder.cs");
+
+		var globalExternal = Assert.Single(index.Edges, edge =>
+			edge.Source == "GlobalConsumer.cs" && edge.Reference == "Task");
+		Assert.Equal(ResolutionStatus.External, globalExternal.Status);
+		Assert.DoesNotContain("GlobalHolder.cs", globalExternal.Candidates);
+		Assert.Contains(index.Edges, edge => edge.Source == "OuterConsumer.cs" &&
+			edge.Reference == "Task" && edge.Target == "OuterTask.cs");
+		Assert.Contains(index.Edges, edge => edge.Source == "InnerConsumer.cs" &&
+			edge.Reference == "Task" && edge.Target == "InnerTask.cs");
+	}
+
+	[Fact]
+	public async Task TransientExtractionFailure_IsRetriedAtThePreparedAndManifestCacheLayers()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var extractor = new FailOnceDependencyFactExtractor();
+		using var engine = new DependencyFactsEngine(extractor, new EmptyDependencyConfigurationProvider());
+
+		var failed = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var recovered = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var warm = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, Assert.Single(failed.Files).Status);
+		Assert.Equal(DependencyFileStatus.Supported, Assert.Single(recovered.Files).Status);
+		Assert.False(recovered.Metrics.ResolutionCacheHit);
+		Assert.True(warm.Metrics.ResolutionCacheHit);
+		Assert.Equal(2, extractor.PrepareCount);
+	}
+
+	[Fact]
+	public async Task WindowsExclusiveSourceLock_IsRetriedAfterTheLockIsReleased()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Exclusive source locking has the required access-denied behavior only on Windows.");
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		using var engine = CreateEngine();
+		DependencyIndexSnapshot failed;
+		using (File.Open(source, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+		{
+			failed = await engine.IndexAsync(
+				fixture.Path,
+				[project, source],
+				cancellationToken: TestContext.Current.CancellationToken);
+		}
+
+		var recovered = await engine.IndexAsync(
+			fixture.Path,
+			[project, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(DependencyFileStatus.ExtractionFailed,
+			Assert.Single(failed.Files, file => file.Path == "Source.cs").Status);
+		Assert.Equal(DependencyFileStatus.Supported,
+			Assert.Single(recovered.Files, file => file.Path == "Source.cs").Status);
+		Assert.False(recovered.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
 	public async Task PreparedSourceCacheIdentityMismatchReadsSameStampReplacement()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -508,6 +850,81 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		Assert.Equal(original, first.Source);
 		Assert.Same(first.Source, metadataOnly.Source);
+	}
+
+	[Fact]
+	public async Task PreparedSourceCache_TransientFailuresDoNotAccumulateEvictionEntries()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var analyzer = new TransientPreparedSourceAnalyzer();
+		using var extractor = new TreeSitterDependencyFactExtractor(new MissingGrammarLocator(), analyzer);
+		var configuration = EmptyConfiguration();
+
+		for (var attempt = 0; attempt < 10_000; attempt++)
+		{
+			var prepared = await extractor.PrepareAsync(
+				fixture.Path,
+				source,
+				configuration,
+				new DependencyFactsLimits(),
+				TestContext.Current.CancellationToken,
+				$"attempt-{attempt}");
+			Assert.False(prepared.CanCache);
+		}
+
+		Assert.Equal(10_000, analyzer.OpenCount);
+		Assert.Equal(new TreeSitterDependencyFactExtractor.PreparedSourceCacheState(0, 0, 0), extractor.CacheState);
+	}
+
+	[Fact]
+	public async Task PreparedSourceCache_StaleCompletionCannotRemoveReplacementWeight()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var analyzer = new CoordinatedPreparedSourceAnalyzer();
+		using var extractor = new TreeSitterDependencyFactExtractor(new MissingGrammarLocator(), analyzer);
+		var configuration = EmptyConfiguration();
+
+		var staleTask = extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken,
+			"identity-v1").AsTask();
+		await analyzer.FirstReadStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		var replacement = await extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken,
+			"identity-v2");
+		var replacementState = extractor.CacheState;
+		analyzer.ReleaseFirstRead();
+		var stale = await staleTask;
+		var afterStaleCompletion = extractor.CacheState;
+		var warm = await extractor.PrepareAsync(
+			fixture.Path,
+			source,
+			configuration,
+			new DependencyFactsLimits(),
+			TestContext.Current.CancellationToken,
+			"identity-v2");
+
+		Assert.Equal("new source", replacement.Source);
+		Assert.Equal("old source", stale.Source);
+		Assert.Same(replacement.Source, warm.Source);
+		Assert.Equal(2, analyzer.OpenCount);
+		Assert.Equal(1, replacementState.Entries);
+		Assert.Equal(1, replacementState.EvictionEntries);
+		Assert.True(replacementState.RetainedBytes > 0);
+		Assert.Equal(replacementState, afterStaleCompletion);
+		Assert.Equal(replacementState, extractor.CacheState);
 	}
 
 	[Fact]
@@ -598,6 +1015,39 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task ManifestSnapshot_LengthPrefixesPathsAndVerifiesTheCanonicalManifest()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not permit line-feed characters in file names.");
+		using var fixture = new TemporaryDirectory();
+		var backing = fixture.CreateFile("backing", "public sealed class Shared { }\n");
+		var a = Path.Combine(fixture.Path, "A.cs");
+		var bc = Path.Combine(fixture.Path, "B.cs\nC.cs");
+		var ab = Path.Combine(fixture.Path, "A.cs\nB.cs");
+		var c = Path.Combine(fixture.Path, "C.cs");
+		foreach (var link in new[] { a, bc, ab, c })
+			CreateHardLinkOrSkip(link, backing);
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var seed = fixture.CreateFile("Seed.cs", "public sealed class Seed { }\n");
+		using var engine = CreateEngine();
+
+		_ = await engine.FindRelatedAsync(
+			fixture.Path,
+			[a, bc, project, seed],
+			["Seed.cs"],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var second = await engine.FindRelatedAsync(
+			fixture.Path,
+			[ab, c, project, seed],
+			["Seed.cs"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(second.Index.Files, file => file.Path is "A.cs" or "B.cs\nC.cs");
+		Assert.Contains(second.Index.Files, file => file.Path == "A.cs\nB.cs");
+		Assert.Contains(second.Index.Files, file => file.Path == "C.cs");
+	}
+
+	[Fact]
 	public async Task ConcurrentColdRequests_DeduplicateFileParsingAndResolution()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -659,6 +1109,62 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		Assert.Same(indexed.FileByPath, related.Index.FileByPath);
 		Assert.Same(indexed.FileByPath["Source.cs"], related.Index.FileByPath["Source.cs"]);
+	}
+
+	[Fact]
+	public async Task RelatedFiles_KeepResolvedAndDistinctAmbiguousReferencesInSeparateRows()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var a = fixture.CreateFile("A.cs", """
+			namespace Targets { public sealed class ResolvedType { } }
+			namespace One { public sealed class SharedAB { } public sealed class SharedAC { } }
+			""");
+		var b = fixture.CreateFile("B.cs", "namespace Two; public sealed class SharedAB { }\n");
+		var c = fixture.CreateFile("C.cs", "namespace Three; public sealed class SharedAC { }\n");
+		var seed = fixture.CreateFile("Seed.cs", """
+			using Targets;
+			using One;
+			using Two;
+			using Three;
+			public sealed class Seed
+			{
+				public ResolvedType Resolved { get; }
+				public SharedAB FirstAmbiguous { get; }
+				public SharedAC SecondAmbiguous { get; }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var fromSeed = await engine.FindRelatedAsync(
+			fixture.Path,
+			[project, a, b, c, seed],
+			["Seed.cs"],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var toA = await engine.FindRelatedAsync(
+			fixture.Path,
+			[project, a, b, c, seed],
+			["A.cs"],
+			DependencyDirection.Dependents,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertRelatedOverlap(Assert.Single(fromSeed.Seeds).Dependencies, "A.cs", fromSeed.Index.Edges);
+		AssertRelatedOverlap(Assert.Single(toA.Seeds).Dependents, "Seed.cs", toA.Index.Edges);
+	}
+
+	private static void AssertRelatedOverlap(
+		IReadOnlyList<RelatedFile> related,
+		string expectedPath,
+		IReadOnlyList<DependencyEdge> edges)
+	{
+		Assert.True(related.Count == 3, JsonSerializer.Serialize(edges));
+		Assert.All(related, item => Assert.Equal(expectedPath, item.Path));
+		Assert.Single(related, static item => item.Status == ResolutionStatus.Resolved);
+		var ambiguous = related.Where(static item => item.Status == ResolutionStatus.Ambiguous).ToArray();
+		Assert.Equal(2, ambiguous.Length);
+		Assert.Contains(ambiguous, item => item.Candidates.SequenceEqual(["A.cs", "B.cs"]));
+		Assert.Contains(ambiguous, item => item.Candidates.SequenceEqual(["A.cs", "C.cs"]));
 	}
 
 	[Fact]
@@ -782,6 +1288,14 @@ public sealed class DependencyFactsEngineIntegrationTests
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());
 
+	private static DependencyResolverConfiguration EmptyConfiguration() => new(
+		"fixture",
+		[],
+		new Dictionary<string, PackageMapDescriptor>(StringComparer.Ordinal),
+		new HashSet<string>(StringComparer.Ordinal),
+		new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal),
+		new HashSet<string>(StringComparer.Ordinal));
+
 	private static DependencyManifestContentIdentities Identities(
 		params (string Path, string Identity)[] values) =>
 		new(values.ToDictionary(
@@ -818,6 +1332,29 @@ public sealed class DependencyFactsEngineIntegrationTests
 		}
 	}
 
+	private static void CreateHardLinkOrSkip(string linkPath, string targetPath)
+	{
+		var startInfo = new ProcessStartInfo("ln")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add(targetPath);
+		startInfo.ArgumentList.Add(linkPath);
+		try
+		{
+			using var process = Process.Start(startInfo);
+			if (process is null || !process.WaitForExit(TimeSpan.FromSeconds(10)) || process.ExitCode != 0)
+				Assert.Skip("Hard links are unavailable in this test environment.");
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			Assert.Skip($"Hard links are unavailable: {exception.GetType().Name}.");
+		}
+	}
+
 	private sealed class CountingConfigurationProvider : IDependencyConfigurationProvider
 	{
 		private readonly FileDependencyConfigurationProvider _inner = new();
@@ -840,6 +1377,112 @@ public sealed class DependencyFactsEngineIntegrationTests
 		public IReadOnlyList<string> EnumerateLibraries() => [];
 		public string Resolve(string libraryBaseName) =>
 			throw new FileNotFoundException($"Grammar '{libraryBaseName}' is unavailable.", libraryBaseName);
+	}
+
+	private sealed class TransientPreparedSourceAnalyzer : IFileContentAnalyzer
+	{
+		private int _openCount;
+
+		public int OpenCount => Volatile.Read(ref _openCount);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Interlocked.Increment(ref _openCount);
+			return ValueTask.FromResult<IFileContentSnapshot>(
+				new ClassifiedSnapshot(FileContentClassification.Missing));
+		}
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) => throw new NotSupportedException();
+	}
+
+	private sealed class CoordinatedPreparedSourceAnalyzer : IFileContentAnalyzer
+	{
+		private readonly TaskCompletionSource _firstReadStarted =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource _releaseFirstRead =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private int _openCount;
+
+		public TaskCompletionSource FirstReadStarted => _firstReadStarted;
+		public int OpenCount => Volatile.Read(ref _openCount);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			var invocation = Interlocked.Increment(ref _openCount);
+			return invocation == 1
+				? AwaitFirstReadAsync(cancellationToken)
+				: ValueTask.FromResult<IFileContentSnapshot>(new TextSnapshot("new source"));
+		}
+
+		public void ReleaseFirstRead() => _releaseFirstRead.TrySetResult();
+
+		private async ValueTask<IFileContentSnapshot> AwaitFirstReadAsync(CancellationToken cancellationToken)
+		{
+			_firstReadStarted.TrySetResult();
+			await _releaseFirstRead.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+			return new TextSnapshot("old source");
+		}
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) => throw new NotSupportedException();
+	}
+
+	private sealed class ClassifiedSnapshot(FileContentClassification classification) : IFileContentSnapshot
+	{
+		public FileContentMetricsResult Result { get; } = new(classification);
+
+		public ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	private sealed class TextSnapshot(string content) : IFileContentSnapshot
+	{
+		public FileContentMetricsResult Result { get; } = new(
+			FileContentClassification.Text,
+			new TextFileMetrics(
+				Encoding.UTF8.GetByteCount(content),
+				1,
+				content.Length,
+				content.Length == 0,
+				string.IsNullOrWhiteSpace(content)));
+
+		public async ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default)
+		{
+			await writeChunk(
+				content.AsMemory(0, Math.Min(content.Length, maximumCharacters)),
+				cancellationToken).ConfigureAwait(false);
+		}
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 	}
 
 	private sealed class CostedFactExtractor(IReadOnlyDictionary<string, int> costs) : IDependencyFactExtractor
@@ -897,6 +1540,62 @@ public sealed class DependencyFactsEngineIntegrationTests
 				new Dictionary<string, string>(StringComparer.Ordinal),
 				[]);
 		}
+
+		public void Dispose()
+		{
+		}
+	}
+
+	private sealed class FailOnceDependencyFactExtractor : IDependencyFactExtractor
+	{
+		private int _prepareCount;
+
+		public int PrepareCount => Volatile.Read(ref _prepareCount);
+		public int ParseCount => 0;
+		public int CompiledQuerySetCount => 0;
+
+		public ValueTask<PreparedDependencySource> PrepareAsync(
+			string sourceRoot,
+			string fullPath,
+			DependencyResolverConfiguration configuration,
+			DependencyFactsLimits limits,
+			CancellationToken cancellationToken,
+			string? contentIdentity = null)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var relativePath = PathUtility.GetPortableRelativePath(sourceRoot, fullPath);
+			var failed = Interlocked.Increment(ref _prepareCount) == 1;
+			return ValueTask.FromResult(new PreparedDependencySource(
+				fullPath,
+				relativePath,
+				"fixture",
+				LanguageId.CSharp,
+				failed ? "transient" : "recovered",
+				"fail-once-fixture",
+				string.Empty,
+				failed ? DependencyFileStatus.ExtractionFailed : DependencyFileStatus.Supported,
+				failed ? "IOException: sharing violation" : null,
+				CanCache: !failed));
+		}
+
+		public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) => new(
+			source.RelativePath,
+			source.ScopeId,
+			source.LanguageId,
+			source.ContentFingerprint,
+			0,
+			source.PreparedStatus,
+			source.PreparedStatusReason,
+			HasSyntaxErrors: false,
+			new Dictionary<string, int>(StringComparer.Ordinal),
+			[], [], [], [],
+			new Dictionary<string, string>(StringComparer.Ordinal),
+			[],
+			new Dictionary<string, string>(StringComparer.Ordinal),
+			[])
+		{
+			CanCache = source.CanCache
+		};
 
 		public void Dispose()
 		{

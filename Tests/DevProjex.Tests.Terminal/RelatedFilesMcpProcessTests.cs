@@ -23,6 +23,24 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("project/src/Consumers/Consumer.cs", "using Services; public sealed class Consumer { public Service Value { get; } }\n");
 		workspace.WriteFile("project/src/Alpha/Widget.cs", "namespace Alpha; public sealed class Widget {}\n");
 		workspace.WriteFile("project/src/Beta/Widget.cs", "namespace Beta; public sealed class Widget {}\n");
+		workspace.WriteFile("project/src/Relations/A.cs", """
+			namespace Targets { public sealed class ResolvedType { } }
+			namespace One { public sealed class SharedAB { } public sealed class SharedAC { } }
+			""");
+		workspace.WriteFile("project/src/Relations/B.cs", "namespace Two; public sealed class SharedAB { }\n");
+		workspace.WriteFile("project/src/Relations/C.cs", "namespace Three; public sealed class SharedAC { }\n");
+		workspace.WriteFile("project/src/Relations/Seed.cs", """
+			using Targets;
+			using One;
+			using Two;
+			using Three;
+			public sealed class Seed
+			{
+				public ResolvedType Resolved { get; }
+				public SharedAB FirstAmbiguous { get; }
+				public SharedAC SecondAmbiguous { get; }
+			}
+			""");
 		workspace.WriteFile("project/outside/Hidden.cs", "using Services; public sealed class Hidden { public Service Value { get; } }\n");
 		workspace.WriteFile("project/README.md", "# Unsupported seed\n");
 		InitializeIsolatedRepository(project);
@@ -79,10 +97,42 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("src/Consumers/Consumer.cs", text, StringComparison.Ordinal);
 			Assert.Contains("candidates: src/Alpha/Widget.cs, src/Beta/Widget.cs", text, StringComparison.Ordinal);
 			Assert.DoesNotContain("outside/Hidden.cs", text, StringComparison.Ordinal);
-			Assert.Contains("[Facts coverage] files=6, supported=5, unsupported=1, extraction-failed=0", text, StringComparison.Ordinal);
-			Assert.Contains("[Search scope] files=6", text, StringComparison.Ordinal);
+			Assert.Contains("[Facts coverage] files=10, supported=9, unsupported=1, extraction-failed=0", text, StringComparison.Ordinal);
+			Assert.Contains("[Search scope] files=10", text, StringComparison.Ordinal);
 			Assert.Contains("[Effective filters]", text, StringComparison.Ordinal);
 			Assert.NotEmpty(progress.Values);
+
+			var overlappingDependencies = await client.CallToolAsync(
+				"related_files",
+				new Dictionary<string, object?>
+				{
+					["path"] = "src/Relations/Seed.cs",
+					["direction"] = "dependencies",
+					["include_patterns"] = new[] { "src/**" }
+				},
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			var dependenciesText = Assert.IsType<TextContentBlock>(Assert.Single(overlappingDependencies.Content)).Text;
+			Assert.Equal(3, CountLinesStartingWith(dependenciesText, "src/Relations/A.cs —"));
+			Assert.Equal(1, CountLinesContaining(dependenciesText, "src/Relations/A.cs —", " — resolved — "));
+			Assert.Equal(2, CountLinesContaining(dependenciesText, "src/Relations/A.cs —", " — ambiguous — "));
+
+			var overlappingDependents = await client.CallToolAsync(
+				"related_files",
+				new Dictionary<string, object?>
+				{
+					["path"] = "src/Relations/A.cs",
+					["direction"] = "dependents",
+					["include_patterns"] = new[] { "src/**" }
+				},
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			var dependentsText = Assert.IsType<TextContentBlock>(Assert.Single(overlappingDependents.Content)).Text;
+			Assert.Equal(3, CountLinesStartingWith(dependentsText, "src/Relations/Seed.cs —"));
+			Assert.Equal(1, CountLinesContaining(dependentsText, "src/Relations/Seed.cs —", " — resolved — "));
+			Assert.Equal(2, CountLinesContaining(dependentsText, "src/Relations/Seed.cs —", " — ambiguous — "));
 
 			var excluded = await client.CallToolAsync(
 				"related_files",
@@ -131,4 +181,15 @@ public sealed partial class McpServerProcessTests
 		Assert.Equal(0, process.ExitCode);
 		Assert.True(string.IsNullOrWhiteSpace(await errorTask), await errorTask);
 	}
+
+	private static int CountLinesStartingWith(string value, string prefix) =>
+		value.Split('\n').Count(line => line.TrimEnd('\r').StartsWith(prefix, StringComparison.Ordinal));
+
+	private static int CountLinesContaining(string value, string prefix, string fragment) =>
+		value.Split('\n').Count(line =>
+		{
+			var normalized = line.TrimEnd('\r');
+			return normalized.StartsWith(prefix, StringComparison.Ordinal) &&
+			       normalized.Contains(fragment, StringComparison.Ordinal);
+		});
 }

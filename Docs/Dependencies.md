@@ -46,17 +46,33 @@ reason can cross the current manifest gate, and self-file relationships are supp
 C# compilation scopes come from `.csproj` ownership and `ProjectReference` entries read as XML.
 Global usings and aliases are shared within the owning scope; type parameters shadow global symbols;
 nested generic names preserve the arity of every containing type. `InternalsVisibleTo` does not create
-an edge, target-typed `new()` stays unresolved, and source-generator output is unavailable. Without
-an owning `.csproj` inside the effective manifest, cross-file C# type references stay unresolved.
+an edge, target-typed `new()` stays unresolved, and source-generator output is unavailable. A simple
+type name can resolve only to a declaration in the current or an enclosing namespace, an exactly
+imported namespace, the current type's nesting chain, or the global namespace. Importing `Company`
+does not expose `Company.Internal`, and a sole same-named declaration elsewhere in the project is not
+guessed as the target. Current and enclosing namespaces take precedence over imported namespaces;
+multiple visible imported declarations remain ambiguous. Namespace lookup considers only immediate
+members of that namespace: a nested type is visible through an explicit qualification such as
+`Holder.Task` or through the source type's nearest-to-farthest containing-type chain. Without an
+owning `.csproj` inside the effective manifest, cross-file C# type references stay unresolved.
 
 TypeScript and JavaScript use the nearest `tsconfig.json` or `jsconfig.json`. The resolver distinguishes
-relative, bare, package-self, and `#imports` specifiers; performs `.js` to `.ts`, `.tsx`, and `.d.ts`
-substitution; applies exact `paths` entries before wildcard entries; and respects `package.json`
-`exports`, conditions, and explicit `null` blocking. Directory-index fallback is mode-dependent.
-Literal `require(...)` calls are import evidence only in a supported CommonJS context; ESM contexts
-remain unresolved. `node10` (including its `node` alias) and `baseUrl` are marked legacy under the
-TypeScript 7 contract. DevProjex never guesses a `dist` to `src` mapping without configuration, and module references without an owning
-`tsconfig.json` or `jsconfig.json` stay unresolved.
+relative, bare, package-self, and `#imports` specifiers and follows ordered substitution: the first
+existing probe wins, so multiple files found later in the same probe sequence are not ambiguity.
+`.js`, `.mjs`, and `.cjs` specifiers probe their TypeScript and declaration counterparts before the
+literal JavaScript file. Extensionless imports and directory indexes always probe `.js` and `.jsx`
+after `.ts`, `.tsx`, and `.d.ts`; `allowJs` controls compilation membership, not resolution of files
+already present in the manifest. Exact `paths` entries precede wildcard entries; among matching
+wildcards, the longest prefix before `*` wins. Only that pattern's targets are tried, in declaration
+order. `package.json` `exports`, conditions, and explicit `null` blocking remain authoritative.
+Directory-index fallback is allowed by `node10` and `bundler`; under `node16`/`nodenext`, an ESM
+relative import needs an explicit extension while a supported CommonJS context can use extensionless
+and directory probes. `.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ordinary
+`.ts`/`.tsx`/`.js`/`.jsx` files default to CommonJS unless the nearest `package.json` has
+`"type": "module"`. Literal `require(...)` calls are import evidence only in such a CommonJS context.
+`node10` (including its `node` alias) and `baseUrl` are marked legacy under the TypeScript 7 contract.
+DevProjex never guesses a `dist` to `src` mapping without configuration, and module references without
+an owning `tsconfig.json` or `jsconfig.json` stay unresolved.
 
 Python relative imports start at the source package. Regular and namespace-package portions are
 combined, `.py` is preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and
@@ -105,6 +121,11 @@ Concurrent requests share one lazy computation. The default caches are bounded b
 and estimated retained size: 64 MiB for compact file facts and 128 MiB for resolved edges. Eviction
 changes latency, not results.
 
+Access failures, missing files, and other transient I/O failures are not retained in either the
+prepared-source cache or a manifest snapshot. A later request retries extraction even when file stamps
+are unchanged. Stable outcomes such as an unsupported language, a content parse failure, or a safety
+limit remain cacheable.
+
 The engine has two metadata shortcuts above those content-fingerprinted facts: the extractor retains
 prepared decoded text, and the engine retains resolved snapshots for a manifest. Importance ranking
 supplies the SHA-256 identity it already captured from each source to both shortcuts, so a cache hit
@@ -113,6 +134,11 @@ requires matching file metadata and the same opaque content identity. `related_f
 length, modification-time, and creation-time compromise. A same-length replacement whose timestamps
 are deliberately restored can therefore remain cached for those two related-file surfaces until the
 entry is evicted or its metadata changes.
+
+The content identity passed to the extractor is an observed cache label; the extractor does not hash
+the bytes again while reading. An adversarial `hash A -> read B -> restore A -> hash A` sequence between
+the two observations is therefore not detected. This is a known coherence limitation, not evidence
+that the intermediate bytes belonged to identity A.
 
 Changing one source reparses that source. Changing resolver configuration invalidates resolution but
 reuses file facts, so no source parse is required. Before every result is exposed, it is gated against

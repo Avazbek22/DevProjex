@@ -16,6 +16,7 @@ public sealed class RelatedCommandProcessTests
 		workspace.WriteFile("project/Services/ClockService.cs", "using Contracts; namespace Services; public sealed class ClockService { public IClock Clock { get; } }\n");
 		workspace.WriteFile("project/Consumers/Worker.cs", "using Services; public sealed class Worker { public ClockService Service { get; } }\n");
 		workspace.WriteFile("project/Outside.cs", "public sealed class Outside {}\n");
+		WriteOverlappingRelationsFixture(workspace, "project/Relations");
 
 		var result = Run(
 			workspace,
@@ -48,6 +49,11 @@ public sealed class RelatedCommandProcessTests
 		var seed = Assert.Single(root.GetProperty("seeds").EnumerateArray());
 		Assert.Equal("Contracts/IClock.cs", Assert.Single(seed.GetProperty("dependencies").EnumerateArray()).GetProperty("path").GetString());
 		Assert.Equal("Consumers/Worker.cs", Assert.Single(seed.GetProperty("dependents").EnumerateArray()).GetProperty("path").GetString());
+
+		var dependencies = RunRelatedJson(workspace, project, "Relations/Seed.cs", "dependencies");
+		AssertRelatedOverlap(dependencies.GetProperty("dependencies"), "Relations/A.cs");
+		var dependents = RunRelatedJson(workspace, project, "Relations/A.cs", "dependents");
+		AssertRelatedOverlap(dependents.GetProperty("dependents"), "Relations/Seed.cs");
 	}
 
 	[Fact]
@@ -93,5 +99,62 @@ public sealed class RelatedCommandProcessTests
 		startInfo.ArgumentList.Add("never");
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
 		return TerminalTestProcess.Run(startInfo, TimeSpan.FromMinutes(1));
+	}
+
+	private static JsonElement RunRelatedJson(
+		TemporaryDirectory workspace,
+		string project,
+		string seed,
+		string direction)
+	{
+		var result = Run(
+			workspace,
+			"related", seed,
+			"--project", project,
+			"--direction", direction,
+			"--format", "json",
+			"--select", "Relations",
+			"--select", "Fixture.csproj",
+			"--git-mode", "none",
+			"--exclude", "none");
+		Assert.True(result.ExitCode == 0, result.StandardError + result.StandardOutput);
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		return Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray()).Clone();
+	}
+
+	private static void AssertRelatedOverlap(JsonElement relatedElement, string expectedPath)
+	{
+		var related = relatedElement.EnumerateArray().ToArray();
+		Assert.Equal(3, related.Length);
+		Assert.All(related, item => Assert.Equal(expectedPath, item.GetProperty("path").GetString()));
+		Assert.Single(related, item => item.GetProperty("status").GetString() == "resolved");
+		var ambiguous = related.Where(item => item.GetProperty("status").GetString() == "ambiguous").ToArray();
+		Assert.Equal(2, ambiguous.Length);
+		Assert.Contains(ambiguous, item => item.GetProperty("candidates").EnumerateArray()
+			.Select(static candidate => candidate.GetString()).SequenceEqual(["Relations/A.cs", "Relations/B.cs"]));
+		Assert.Contains(ambiguous, item => item.GetProperty("candidates").EnumerateArray()
+			.Select(static candidate => candidate.GetString()).SequenceEqual(["Relations/A.cs", "Relations/C.cs"]));
+	}
+
+	private static void WriteOverlappingRelationsFixture(TemporaryDirectory workspace, string directory)
+	{
+		workspace.WriteFile(directory + "/A.cs", """
+			namespace Targets { public sealed class ResolvedType { } }
+			namespace One { public sealed class SharedAB { } public sealed class SharedAC { } }
+			""");
+		workspace.WriteFile(directory + "/B.cs", "namespace Two; public sealed class SharedAB { }\n");
+		workspace.WriteFile(directory + "/C.cs", "namespace Three; public sealed class SharedAC { }\n");
+		workspace.WriteFile(directory + "/Seed.cs", """
+			using Targets;
+			using One;
+			using Two;
+			using Three;
+			public sealed class Seed
+			{
+				public ResolvedType Resolved { get; }
+				public SharedAB FirstAmbiguous { get; }
+				public SharedAC SecondAmbiguous { get; }
+			}
+			""");
 	}
 }
