@@ -4,6 +4,7 @@ public sealed class McpRootRegistry
 {
 	private readonly IReadOnlyList<string> _roots;
 	private readonly Dictionary<string, List<string>> _lexicalRootsByPhysical;
+	private readonly Dictionary<string, List<string>> _rootsByName;
 
 	public McpRootRegistry(IEnumerable<string> roots)
 	{
@@ -27,6 +28,12 @@ public sealed class McpRootRegistry
 			throw new ArgumentException("At least one existing MCP root is required.", nameof(roots));
 		_roots = normalized.AsReadOnly();
 		_lexicalRootsByPhysical = lexicalRootsByPhysical;
+		_rootsByName = normalized
+			.GroupBy(GetProjectName, StringComparer.Ordinal)
+			.ToDictionary(
+				static group => group.Key,
+				static group => group.ToList(),
+				StringComparer.Ordinal);
 	}
 
 	public IReadOnlyList<string> Roots => _roots;
@@ -40,9 +47,18 @@ public sealed class McpRootRegistry
 			throw new McpToolException(
 				McpErrorCodes.UnknownProject,
 				$"{McpErrorCodes.UnknownProject}: 'project' is required because multiple roots are available. " +
-				$"Call list_projects and use one of: {FormatRoots()}.");
+				$"Call list_projects and use a listed name or path: {FormatRoots()}.");
 		}
 		var requestedProject = project!;
+		if (_rootsByName.TryGetValue(requestedProject, out var namedRoots))
+		{
+			if (namedRoots.Count == 1)
+				return namedRoots[0];
+			throw new McpToolException(
+				McpErrorCodes.UnknownProject,
+				$"{McpErrorCodes.UnknownProject}: project name '{requestedProject}' is ambiguous. " +
+				$"Call list_projects and use one of these paths: {string.Join(", ", namedRoots.Select(static root => $"'{root}'"))}.");
+		}
 
 		string physical;
 		try
@@ -199,8 +215,8 @@ public sealed class McpRootRegistry
 	private McpToolException UnknownProject(string project) =>
 		new(
 			McpErrorCodes.UnknownProject,
-			$"{McpErrorCodes.UnknownProject}: project '{project}' is not an allowed root. " +
-			$"Call list_projects and use one of: {FormatRoots()}.");
+			$"{McpErrorCodes.UnknownProject}: project '{project}' is not an allowed root name or path. " +
+			$"Call list_projects and use a listed name or path: {FormatRoots()}.");
 
 	private McpToolException RootViolation(string path) =>
 		new(
@@ -214,5 +230,13 @@ public sealed class McpRootRegistry
 			$"{McpErrorCodes.InvalidArguments}: 'path' is not a valid filesystem path; " +
 			"provide a valid path inside the project.");
 
-	private string FormatRoots() => string.Join(", ", _roots.Select(static root => $"'{root}'"));
+	private string FormatRoots() => string.Join(
+		", ",
+		_roots.Select(static root => $"'{GetProjectName(root)}' ('{root}')"));
+
+	internal static string GetProjectName(string root)
+	{
+		var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(root));
+		return string.IsNullOrEmpty(name) ? root : name;
+	}
 }

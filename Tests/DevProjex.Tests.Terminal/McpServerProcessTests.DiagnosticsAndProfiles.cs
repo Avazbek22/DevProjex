@@ -10,6 +10,52 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
+	public async Task RealProcessAcceptsUniqueListedProjectNameAndUnknownProjectNamesBothForms()
+	{
+		using var workspace = new TemporaryDirectory();
+		var first = workspace.CreateDirectory("alpha-project");
+		var second = workspace.CreateDirectory("beta-project");
+		workspace.WriteFile("alpha-project/alpha.txt", "alpha-marker\n");
+		workspace.WriteFile("beta-project/beta.txt", "beta-marker\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			first,
+			workspace.CreateDirectory("data"),
+			["--root", second]);
+
+		var listed = await server.Client.CallToolAsync(
+			"list_projects",
+			new Dictionary<string, object?>(),
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		Assert.NotEqual(true, listed.IsError);
+		var projects = listed.StructuredContent!.Value.GetProperty("projects");
+		Assert.Contains(projects.EnumerateArray(), item => item.GetProperty("name").GetString() == "beta-project");
+
+		var byName = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = "beta-project", ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		Assert.NotEqual(true, byName.IsError);
+		Assert.Contains("beta.txt", AllProcessText(byName), StringComparison.Ordinal);
+		Assert.DoesNotContain("alpha.txt", AllProcessText(byName), StringComparison.Ordinal);
+
+		var unknown = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = "missing-project" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		Assert.True(unknown.IsError);
+		Assert.StartsWith("DPX-MCP-UNKNOWN-PROJECT", AllProcessText(unknown), StringComparison.Ordinal);
+		Assert.Contains("name or path", AllProcessText(unknown), StringComparison.Ordinal);
+		Assert.Contains("alpha-project", AllProcessText(unknown), StringComparison.Ordinal);
+		Assert.Contains("beta-project", AllProcessText(unknown), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcess_ReusesInventoryForANarrowQueryAndInvalidatesItAfterTreeChange()
 	{
 		using var workspace = new TemporaryDirectory();

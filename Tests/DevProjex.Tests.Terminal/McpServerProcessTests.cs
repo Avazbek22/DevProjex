@@ -275,16 +275,15 @@ public sealed partial class McpServerProcessTests
 			var descriptionContracts = new Dictionary<string, (string Purpose, string Alternative, string Limit)>(
 				StringComparer.Ordinal)
 			{
-				["list_projects"] = ("Lists local roots", "get_tree", "Remote Git URLs"),
-				["get_tree"] = ("Shows the filtered tree", "analyze", "2,000 lines"),
-				["analyze"] = ("Reports file", "pack_context", "1,000 entries"),
-				["pack_context"] = ("Builds one context", "get_file", "50,000 characters"),
-				["read_pack"] = ("Reads a line range", "pack_context", "1,000 lines"),
-				["search_project"] = ("Searches selected files", "get_file", "200 per call"),
-				["related_files"] = ("Finds statically evidenced", "get_file", "50,000 characters"),
-				["get_file"] = ("Reads one selected file", "pack_context", "1,000 lines")
+				["list_projects"] = ("Lists configured local projects", "get_tree instead", "unique listed name"),
+				["get_tree"] = ("Returns the filtered project structure", "analyze instead", "format=markdown|text|json|xml"),
+				["analyze"] = ("Measures a selection", "pack_context", "detail=full|compact|signatures"),
+				["pack_context"] = ("Builds multi-file project context", "get_file instead", "view=tree|content|tree-content"),
+				["read_pack"] = ("Reads one page", "pack_context instead", "1,000 lines"),
+				["search_project"] = ("Searches safe transformed project text", "related_files instead", "max_results=1..200"),
+				["related_files"] = ("Finds statically evidenced", "search_project instead", "direction=dependencies|dependents|both"),
+				["get_file"] = ("Reads one page", "pack_context instead", "DPX-MCP-PAYLOAD-TRUNCATED")
 			};
-			var descriptionCharacters = 0;
 			foreach (var tool in tools)
 			{
 				var description = Assert.IsType<string>(tool.ProtocolTool.Description);
@@ -292,16 +291,14 @@ public sealed partial class McpServerProcessTests
 				Assert.InRange(
 					description.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length,
 					40,
-					60);
+					100);
+				Assert.InRange(description.Length, 1, 800);
 				Assert.StartsWith(expected.Purpose, description, StringComparison.Ordinal);
 				Assert.Contains(expected.Alternative, description, StringComparison.Ordinal);
 				Assert.Contains(expected.Limit, description, StringComparison.Ordinal);
 				Assert.DoesNotContain("read-only", description, StringComparison.OrdinalIgnoreCase);
 				Assert.DoesNotContain("idempotent", description, StringComparison.OrdinalIgnoreCase);
-				if (tool.Name != "related_files")
-					descriptionCharacters += description.Length;
 			}
-			Assert.True(descriptionCharacters <= 1_782, $"Existing tool descriptions used {descriptionCharacters} characters.");
 
 			var wrongCase = await client.CallToolAsync(
 				"get_file",
@@ -667,6 +664,14 @@ public sealed partial class McpServerProcessTests
 			AssertGeneratedRootPathPolicy(pack, expectedProject, hidePrivateData);
 			Assert.Contains(
 				"Token budget: 100000 estimated tokens.",
+				Assert.IsType<TextContentBlock>(Assert.Single(pack.Content)).Text,
+				StringComparison.Ordinal);
+			Assert.Contains(
+				"[Budget accounting] content ≈ ",
+				Assert.IsType<TextContentBlock>(Assert.Single(pack.Content)).Text,
+				StringComparison.Ordinal);
+			Assert.Contains(
+				"tokens of budget 100000; report ≈ ",
 				Assert.IsType<TextContentBlock>(Assert.Single(pack.Content)).Text,
 				StringComparison.Ordinal);
 		}

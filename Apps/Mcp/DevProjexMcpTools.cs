@@ -30,8 +30,7 @@ internal sealed class DevProjexMcpTools(
 	private McpProjectService Projects => projectService.Value;
 
 	[Description(
-		"Lists local roots, saved profiles, and the Git/exclusion base for all calls. Use it to get a project value for other tools; " +
-		"use get_tree to view one. Returns all as data. Remote Git URLs do not appear as valid roots.")]
+		"Lists configured local projects, saved profiles, and baseline filters. Call it first in a session to obtain the project value accepted by other tools; use get_tree instead when you need one project's structure. Returns structured names, absolute paths, root types, profiles, and the Git/exclusion baseline. project accepts a unique listed name or its listed path. This tool has no parameters; remote Git URLs are accepted only by project tools when the server enables remote sources.")]
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -65,12 +64,13 @@ internal sealed class DevProjexMcpTools(
 					.ToArray(),
 				agentExclusions
 			};
+			foreach (var root in validatedRoots)
+				Projects.ScheduleDependencyWarmup(root);
 			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles, baseline }));
 		});
 
 	[Description(
-		"Shows the filtered tree with globs, Git scope, and depth. Use it before reading; use analyze for metrics or get_file for content. " +
-		"It applies Smart Ignore, Git, and server exclusions; large default trees stop at the deepest complete depth within 2,000 lines.")]
+		"Returns the filtered project structure without file contents. Use it to orient before reading; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML and limits large text trees to a complete depth within 2,000 lines. project accepts a unique name or path from list_projects, or an allowed remote Git URL. Key parameters: format=markdown|text|json|xml, max_depth=0..1000, git_scope=staged|changes|diff:<ref>..<ref>, plus include/exclude patterns and max_file_bytes.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -153,6 +153,7 @@ internal sealed class DevProjexMcpTools(
 					? $"[Tree limited to depth {selectedDepth} of {depthFit.FullDepth} to fit {MaximumTreeLines} lines; " +
 					  "pass max_depth or include_patterns for a subtree.]"
 					: null;
+			Projects.ScheduleDependencyWarmup(plan);
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.Text),
 				treeTruncationNotice,
@@ -166,8 +167,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reports file, character, token, detail, and top-file metrics, not content. Use it before pack_context to size a set or find large files; " +
-		"use get_tree for structure. Results mark uninspected estimates, use one token base, and cap top_files at 1,000 entries.")]
+		"Measures a selection before packaging: files, transformed characters, estimated tokens, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree instead for structure, and pack_context for actual content. Returns structured metrics and explicit uninspected estimates; redacted metrics describe safe transformed text after enabled secret/private-data replacement. project comes from list_projects. Key parameters: detail=full|compact|signatures, top_files=1..1000, git_scope=staged|changes|diff:<ref>..<ref>, paths, patterns, profile, and max_file_bytes.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -282,8 +282,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Builds one context from a tree, files, or both in Markdown, text, JSON, or XML with detail, token, importance, and focus controls. " +
-		"Use get_file for one file or search_project first. Over 50,000 characters, results return a pack_id for read_pack until server exit.")]
+		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. focus requires rank=importance and seeds graph-hop ordering without widening selection; max_tokens applies greedy content admission and reports its budget.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -458,6 +457,9 @@ internal sealed class DevProjexMcpTools(
 					var inlineMessage = AppendTrustedNotices(BuildSpotlightedPackContent(
 						content,
 						writeResult?.TokenBudget),
+						writeResult?.TokenBudget is { } inlineBudget
+							? FormatTokenBudgetAccounting(inlineBudget)
+							: null,
 						FormatRankingReport(writeResult?.Ranking, writeResult?.TokenBudget),
 						FormatUnscannableNotice(
 							writeResult?.UnscannableFiles,
@@ -500,6 +502,9 @@ internal sealed class DevProjexMcpTools(
 						writeResult?.UnscannableFiles,
 						UnscannableResultKind.Pack),
 					CombineTrustedNotices(
+						writeResult?.TokenBudget is { } storedBudget
+							? FormatTokenBudgetAccounting(storedBudget)
+							: null,
 						FormatRankingReport(writeResult?.Ranking, writeResult?.TokenBudget),
 						FormatCompressionUnavailable(prepared?.CompressionSnapshot),
 						trustedPlanWarnings));
@@ -519,8 +524,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads a line range from a pack made by pack_context in this process. Use it to page stored output; use pack_context again for an old pack_id. " +
-		"Returns up to 1,000 lines or 50,000 characters per call, plus trusted next-page or range-clamp notes.")]
+		"Reads one page of a stored pack created by pack_context in this server process. Use it for a returned pack_id; use pack_context instead to create or recreate context when an id is absent or expired. Returns untrusted pack data up to 1,000 lines or 50,000 characters plus trusted continuation or range-clamp notes. Required: pack_id. Optional start_line and end_line are inclusive 1-based integers or numeric strings.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -649,8 +653,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Finds statically evidenced dependencies and dependents for selected seed files without widening the effective project selection. " +
-		"Use it after search_project or get_tree; use get_file for source content. Returns paths, evidence reasons, resolution status, token estimates, coverage, and search-scope diagnostics. Results over 50,000 characters are stored for read_pack.")]
+		"Finds statically evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project instead for textual references, or get_file for content. Returns paths, evidence, resolution status, token estimates, language-limited coverage, configuration diagnostics, and scope; results over 50,000 characters use read_pack. Key parameters: path=string|array, direction=dependencies|dependents|both, profile, git_scope=staged|changes|diff:<ref>..<ref>, patterns, and max_file_bytes.")]
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -720,7 +723,8 @@ internal sealed class DevProjexMcpTools(
 				: null;
 			var message = AppendTrustedNotices(
 				McpSpotlight.Wrap(body),
-				$"[Facts coverage] files={coverage.Files}, supported={coverage.Supported}, unsupported={coverage.Unsupported}, extraction-failed={coverage.ExtractionFailed}",
+				$"[Facts coverage] files={coverage.Files}, supported={coverage.Supported}, unsupported={coverage.Unsupported}, extraction-failed={coverage.ExtractionFailed}; supported means facts were extracted for a recognized language, unsupported means no supported extractor was available",
+				FormatDependencyConfigurationDiagnostics(coverage.ConfigurationDiagnostics),
 				$"[Search scope] files={plan.IncludedFiles.Count}",
 				SelectionNotices(plan, includeFilters: true, selectionContext),
 				string.Join('\n', noFactsNotices),
@@ -736,8 +740,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads one selected file or line range after secrets become DEVPROJEX_REDACTED[<category>#<n>]. Use it after get_tree or search_project; " +
-		"use pack_context for many files. Returns up to 1,000 lines or 50,000 characters; files excluded by effective filters stay unreadable in this tool.")]
+		"Reads one page of one selected file after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context instead for multiple files. Returns untrusted file text up to 1,000 lines or 50,000 characters plus continuation notes. Required: path. Optional start_line and end_line are inclusive 1-based integers or numeric strings. Files outside effective filters are unavailable; content beyond the safe inspection limit fails explicitly with DPX-MCP-PAYLOAD-TRUNCATED.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1269,6 +1272,27 @@ internal sealed class DevProjexMcpTools(
 		return output.ToString().TrimEnd('\r', '\n');
 	}
 
+	private static string FormatTokenBudgetAccounting(ProjectContextTokenBudgetReport report)
+	{
+		var reportTokens = CodeCompressionSnapshot.EstimateTokens(FormatTokenBudgetReport(report).Length);
+		return $"[Budget accounting] content ≈ {report.IncludedEstimatedTokens.ToString(CultureInfo.InvariantCulture)} tokens of budget " +
+		       $"{report.MaximumEstimatedTokens.ToString(CultureInfo.InvariantCulture)}; report ≈ {reportTokens.ToString(CultureInfo.InvariantCulture)} tokens";
+	}
+
+	private static string? FormatDependencyConfigurationDiagnostics(
+		IReadOnlyList<DependencyConfigurationDiagnostic> diagnostics)
+	{
+		if (diagnostics.Count == 0)
+			return null;
+		return string.Join(
+			'\n',
+			diagnostics.Select(diagnostic =>
+				$"[Facts configuration] scopes={diagnostic.ScopeIds.Count.ToString(CultureInfo.InvariantCulture)} · " +
+				$"type={diagnostic.State.ToString().ToLowerInvariant()} · " +
+				$"path={McpTextEscaping.EscapeSingleLine(diagnostic.Path)} · " +
+				McpTextEscaping.EscapeSingleLine(diagnostic.Reason)));
+	}
+
 	private static string? FormatRankingReport(
 		ImportanceRankingReport? report,
 		ProjectContextTokenBudgetReport? tokenBudget)
@@ -1743,9 +1767,6 @@ internal sealed class DevProjexMcpTools(
 			value.Replace("\\", "\\\\", StringComparison.Ordinal));
 
 	private static string ResolveProjectName(string root)
-	{
-		var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(root));
-		return string.IsNullOrEmpty(name) ? root : name;
-	}
+		=> McpRootRegistry.GetProjectName(root);
 
 }
