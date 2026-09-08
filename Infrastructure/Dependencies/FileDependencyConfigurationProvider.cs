@@ -59,7 +59,11 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var manifest = manifestFiles.Select(Path.GetFullPath).ToHashSet(PathComparer);
 		var scopes = new List<DependencyScopeDescriptor>();
 		var fingerprintParts = new List<string>();
-		var csharpProjects = new Dictionary<string, (string Scope, string[] References)>(PathComparer);
+		var csharpProjects = new Dictionary<string, (
+			string Scope,
+			string[] References,
+			DependencyConfigurationState State,
+			string? Reason)>(PathComparer);
 		var snapshots = new Dictionary<string, Task<DependencyControlFileSnapshot>>(PathComparer);
 		var packageProjections = new Dictionary<string, Task<ConfigurationParseResult<PackageMapDescriptor>>>(PathComparer);
 		var typeScriptLayerProjections = new Dictionary<string, Task<ConfigurationParseResult<TypeScriptConfigurationLayer>>>(PathComparer);
@@ -241,7 +245,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				if (!exists)
 					absentControlFiles.Add(reference);
 			}
-			csharpProjects[project] = (scope, references);
+			csharpProjects[project] = (scope, references, parsed.State, parsed.Reason);
 			AddDiagnostic(project, parsed.State, parsed.Reason, scope);
 		}
 		foreach (var pair in csharpProjects.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
@@ -250,7 +254,6 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				.Where(csharpProjects.ContainsKey)
 				.Select(path => csharpProjects[path].Scope)
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-			var diagnostic = diagnostics.FirstOrDefault(item => item.ScopeIds.Contains(pair.Value.Scope, StringComparer.Ordinal));
 			scopes.Add(new DependencyScopeDescriptor(
 				pair.Value.Scope,
 				Path.GetDirectoryName(pair.Key)!,
@@ -264,8 +267,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				[],
 				true)
 			{
-				ConfigurationState = diagnostic?.State ?? DependencyConfigurationState.Valid,
-				ConfigurationDiagnostic = diagnostic?.Reason
+				ConfigurationState = pair.Value.State,
+				ConfigurationDiagnostic = pair.Value.Reason
 			});
 		}
 
