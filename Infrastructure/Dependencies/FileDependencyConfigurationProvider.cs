@@ -67,6 +67,17 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var absentControlFiles = new HashSet<string>(PathComparer);
 		var fingerprintedControlFiles = new HashSet<string>(PathComparer);
 		var transientReadFailure = 0;
+		var projectFiles = new List<string>();
+		var typeScriptConfigFiles = new List<string>();
+		var pythonConfigFiles = new List<string>();
+		var packageFiles = new List<string>();
+		foreach (var path in manifest.Order(StringComparer.Ordinal))
+		{
+			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
+			if (IsTypeScriptConfig(path)) typeScriptConfigFiles.Add(path);
+			if (IsPythonConfig(path)) pythonConfigFiles.Add(path);
+			if (Path.GetFileName(path).Equals("package.json", StringComparison.OrdinalIgnoreCase)) packageFiles.Add(path);
+		}
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
 		{
@@ -207,7 +218,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				scopeIds.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()));
 		}
 
-		foreach (var project in manifest.Where(static path => path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)).Order(StringComparer.Ordinal))
+		foreach (var project in projectFiles)
 		{
 			var snapshot = await ReadSnapshotAsync(project).ConfigureAwait(false);
 			AddFingerprint(project, snapshot);
@@ -258,7 +269,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			});
 		}
 
-		foreach (var configPath in manifest.Where(IsTypeScriptConfig).Order(StringComparer.Ordinal))
+		foreach (var configPath in typeScriptConfigFiles)
 		{
 			var directory = Path.GetDirectoryName(configPath)!;
 			var parsed = await ReadTypeScriptConfigAsync(configPath, directory).ConfigureAwait(false);
@@ -286,7 +297,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			});
 		}
 
-		foreach (var configPath in manifest.Where(IsPythonConfig).Order(StringComparer.Ordinal))
+		foreach (var configPath in pythonConfigFiles)
 		{
 			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
 			AddFingerprint(configPath, snapshot);
@@ -315,7 +326,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		AddFallbackScope(scopes, root, LanguageId.TypeScript);
 		AddFallbackScope(scopes, root, LanguageId.Python);
 		var packageMaps = new Dictionary<string, PackageMapDescriptor>(StringComparer.Ordinal);
-		foreach (var packagePath in manifest.Where(static path => Path.GetFileName(path).Equals("package.json", StringComparison.OrdinalIgnoreCase)).Order(StringComparer.Ordinal))
+		foreach (var packagePath in packageFiles)
 		{
 			var parsed = await ReadPackageAsync(packagePath).ConfigureAwait(false);
 			packageMaps[PortableRelative(root, parsed.Value.Directory)] = parsed.Value;
