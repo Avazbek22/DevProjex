@@ -345,6 +345,7 @@ internal sealed class DevProjexMcpTools(
 						format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 				.ConfigureAwait(false);
 			var plan = selection.Plan;
+			var selectedFileCount = plan.IncludedFiles.Count;
 			var focusSeeds = focus is null
 				? null
 				: Projects.ResolveRequestedFiles(plan, focus, cancellationToken)
@@ -438,7 +439,9 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(
 				65,
 				$"transforming content {transformedFileCount}/{transformedFileCount}");
-			var writtenFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
+			// Writing still accounts for every selected file in the preserved budget report,
+			// including entries denied before content materialization.
+			var writtenFileCount = view == ProjectContextView.Tree ? 0 : selectedFileCount;
 			operationProgress.Milestone(66, $"writing pack 0/{writtenFileCount}");
 			ProjectContextWriteResult? writeResult = null;
 			var pack = await packs.CreateAsync(
@@ -584,7 +587,7 @@ internal sealed class DevProjexMcpTools(
 					cancellationToken)
 				.ConfigureAwait(false);
 			var rangeNotice = FormatLineRangeNotice(page, end);
-			var characterLimitNotice = page.CharacterLimitReached && page.NextColumn is null
+			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			return McpToolResults.TextSuccess(
@@ -839,7 +842,7 @@ internal sealed class DevProjexMcpTools(
 				cancellationToken,
 				startColumn);
 			var rangeNotice = FormatLineRangeNotice(page, end);
-			var characterLimitNotice = page.CharacterLimitReached && page.NextColumn is null
+			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
