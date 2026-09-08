@@ -58,6 +58,7 @@ public sealed class ImportanceRankingService(
 			.Distinct(PathComparer.Default)
 			.Select(path => new Candidate(path, PortableRelative(root, path)))
 			.OrderBy(static candidate => candidate.RelativePath, StringComparer.Ordinal)
+			.Select(static (candidate, id) => candidate with { Id = id })
 			.ToArray();
 		if (candidates.Length == 0)
 			return EmptyReport();
@@ -93,53 +94,38 @@ public sealed class ImportanceRankingService(
 				10 + (iteration + 1) * 50 / PageRankIterations,
 				computationUnits));
 
-		var graphRaw = new Dictionary<string, double?>(candidates.Length, StringComparer.Ordinal);
-		var dependents = new Dictionary<string, int>(candidates.Length, StringComparer.Ordinal);
-		var dependencies = new Dictionary<string, int>(candidates.Length, StringComparer.Ordinal);
-		var roles = new Dictionary<string, ImportanceFileRole>(candidates.Length, StringComparer.Ordinal);
-		var coordinators = new Dictionary<string, bool>(candidates.Length, StringComparer.Ordinal);
-		foreach (var candidate in candidates)
+		var states = candidates.Select(static candidate => new CandidateState(candidate)).ToArray();
+		foreach (var state in states)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			var candidate = state.Candidate;
 			factsByPath.TryGetValue(candidate.RelativePath, out var facts);
 			if (graph.NodeByPath.TryGetValue(candidate.RelativePath, out var node))
 			{
-				dependents[candidate.RelativePath] = graph.Dependents[node];
-				dependencies[candidate.RelativePath] = graph.Outgoing[node].Length;
-				graphRaw[candidate.RelativePath] = QuantizePageRank(pageRank[node]);
+				state.Dependents = graph.Dependents[node];
+				state.Dependencies = graph.Outgoing[node].Length;
+				state.GraphRaw = QuantizePageRank(pageRank[node]);
 			}
-			else
-			{
-				dependents[candidate.RelativePath] = 0;
-				dependencies[candidate.RelativePath] = 0;
-				graphRaw[candidate.RelativePath] = null;
-			}
-			roles[candidate.RelativePath] = ClassifyRole(
+			state.Role = ClassifyRole(
 				candidate.RelativePath,
 				facts,
-				dependents[candidate.RelativePath],
-				dependencies[candidate.RelativePath]);
-			coordinators[candidate.RelativePath] = IsCoordinatorCandidate(
-				roles[candidate.RelativePath],
-				dependents[candidate.RelativePath],
-				dependencies[candidate.RelativePath]);
+				state.Dependents,
+				state.Dependencies);
+			state.IsCoordinator = IsCoordinatorCandidate(state.Role, state.Dependents, state.Dependencies);
 		}
 
-		var graphNormalized = RankNormalize(graphRaw, cancellationToken);
-		var gitRaw = new Dictionary<string, double?>(candidates.Length, StringComparer.Ordinal);
-		var roleRaw = new Dictionary<string, double?>(candidates.Length, StringComparer.Ordinal);
-		foreach (var candidate in candidates)
+		NormalizeStateValues(states, RankingValueKind.Graph, cancellationToken);
+		foreach (var state in states)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			gitRaw[candidate.RelativePath] = history.Files.TryGetValue(candidate.FullPath, out var activity)
+			var candidate = state.Candidate;
+			state.GitRaw = history.Files.TryGetValue(candidate.FullPath, out var activity)
 				? activity.CommitCount + Recency(activity, history.WindowSize)
 				: null;
-			roleRaw[candidate.RelativePath] = RoleValue(
-				roles[candidate.RelativePath],
-				coordinators[candidate.RelativePath]);
+			state.RoleRaw = RoleValue(state.Role, state.IsCoordinator);
 		}
-		var gitNormalized = RankNormalize(gitRaw, cancellationToken);
-		var roleNormalized = NormalizeRoleValues(roleRaw, cancellationToken);
+		NormalizeStateValues(states, RankingValueKind.Git, cancellationToken);
+		NormalizeRoleValues(states, cancellationToken);
 		var coverage = CalculateExtractedFactsCoverage(dependency.Coverage, candidates.Length);
 		var internalReferenceCandidates = dependency.Edges.Count(static edge =>
 			edge.Status != ResolutionStatus.External);
@@ -147,25 +133,25 @@ public sealed class ImportanceRankingService(
 		var resolvedInternalReferenceCoverage = internalReferenceCandidates == 0
 			? 0
 			: Math.Clamp((double)resolvedInternalReferences / internalReferenceCandidates, 0, 1);
-		var hasMissingSignals = coverage < 1 || gitRaw.Values.Any(static value => value is null);
+		var hasMissingSignals = coverage < 1 || states.Any(static state => state.GitRaw is null);
 		var gitConfidence = history.IsShallow && !history.IsComplete
 			? Math.Clamp((double)history.CommitCount / history.WindowSize, 0, 1)
 			: 1;
 
 		var scored = new List<ScoredCandidate>(candidates.Length);
 		var scoreProgressStep = Math.Max(1, candidates.Length / 25);
-		for (var index = 0; index < candidates.Length; index++)
+		for (var index = 0; index < states.Length; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var candidate = candidates[index];
+			var state = states[index];
 			var score = CalculateScoreBreakdown(
-				graphNormalized[candidate.RelativePath],
-				gitNormalized[candidate.RelativePath],
-				roleNormalized[candidate.RelativePath] ?? 0.5,
+				state.GraphNormalized,
+				state.GitNormalized,
+				state.RoleNormalized ?? 0.5,
 				coverage,
 				MissingSignalPolicy,
 				gitConfidence);
-			scored.Add(new ScoredCandidate(candidate, score));
+			scored.Add(new ScoredCandidate(state, score));
 			if ((index + 1) % scoreProgressStep == 0 || index + 1 == candidates.Length)
 			{
 				Report(
@@ -178,28 +164,29 @@ public sealed class ImportanceRankingService(
 
 		var ordered = scored
 			.OrderByDescending(static candidate => candidate.Score.Score)
-			.ThenBy(static candidate => candidate.Candidate.RelativePath, StringComparer.Ordinal)
+			.ThenBy(static candidate => candidate.State.Candidate.RelativePath, StringComparer.Ordinal)
 			.Select((candidate, index) =>
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var path = candidate.Candidate.RelativePath;
-				var hasHistory = history.Files.TryGetValue(candidate.Candidate.FullPath, out var activity);
+				var state = candidate.State;
+				var path = state.Candidate.RelativePath;
+				var hasHistory = history.Files.TryGetValue(state.Candidate.FullPath, out var activity);
 				var historyReason = hasHistory
 					? (ProjectGitHistoryUnavailableReason?)null
-					: history.UnavailableFiles.TryGetValue(candidate.Candidate.FullPath, out var unavailableReason)
+					: history.UnavailableFiles.TryGetValue(state.Candidate.FullPath, out var unavailableReason)
 						? unavailableReason
 						: history.UnavailableReason;
 				return new ImportanceRankingEntry(
-					candidate.Candidate.FullPath,
+					state.Candidate.FullPath,
 					path,
 					index + 1,
 					candidate.Score.Score,
-					dependents[path],
-					dependencies[path],
+					state.Dependents,
+					state.Dependencies,
 					hasHistory ? activity!.CommitCount : null,
 					hasHistory ? activity!.MostRecentCommitPosition : null,
-					roles[path],
-					graphRaw[path] is not null,
+					state.Role,
+					state.GraphRaw is not null,
 					hasHistory,
 					historyReason)
 				{
@@ -207,7 +194,7 @@ public sealed class ImportanceRankingService(
 					MainContribution = candidate.Score.MainContribution,
 					ConfidenceLimited = MissingSignalPolicy == ImportanceMissingSignalPolicy.ConfidenceLimited &&
 						candidate.Score.Confidence < 1,
-					IsCoordinator = coordinators[path]
+					IsCoordinator = state.IsCoordinator
 				};
 			})
 			.ToArray();
@@ -340,30 +327,63 @@ public sealed class ImportanceRankingService(
 		return result;
 	}
 
-	private static IReadOnlyDictionary<string, double?> NormalizeRoleValues(
-		IReadOnlyDictionary<string, double?> values,
+	private static void NormalizeStateValues(
+		IReadOnlyList<CandidateState> states,
+		RankingValueKind kind,
 		CancellationToken cancellationToken)
 	{
-		var presentValues = values.Values
-			.Where(static value => value is not null)
-			.Select(static value => value!.Value)
-			.Distinct()
-			.Order()
+		var present = states.Select(state => (State: state, Value: RawValue(state, kind)))
+			.Where(static item => item.Value is not null)
+			.OrderBy(static item => item.Value!.Value)
+			.ThenBy(static item => item.State.Candidate.Id)
 			.ToArray();
-		var result = new Dictionary<string, double?>(values.Count, StringComparer.Ordinal);
-		foreach (var pair in values)
+		if (present.Length == 0)
+			return;
+		var groupCount = 1;
+		for (var index = 1; index < present.Length; index++)
+			if (!present[index].Value!.Value.Equals(present[index - 1].Value!.Value))
+				groupCount++;
+		var group = 0;
+		for (var index = 0; index < present.Length; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (pair.Value is not { } value)
-			{
-				result.Add(pair.Key, null);
-				continue;
-			}
-			result.Add(pair.Key, presentValues.Length == 1
+			if (index > 0 && !present[index].Value!.Value.Equals(present[index - 1].Value!.Value))
+				group++;
+			SetNormalizedValue(present[index].State, kind, groupCount == 1
 				? 0.5
-				: (double)Array.BinarySearch(presentValues, value) / (presentValues.Length - 1));
+				: (double)group / (groupCount - 1));
 		}
-		return result;
+	}
+
+	private static void NormalizeRoleValues(
+		IReadOnlyList<CandidateState> states,
+		CancellationToken cancellationToken)
+	{
+		var values = states.Select(static state => state.RoleRaw).Distinct().Order().ToArray();
+		foreach (var state in states)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			state.RoleNormalized = values.Length == 1
+				? 0.5
+				: (double)Array.BinarySearch(values, state.RoleRaw) / (values.Length - 1);
+		}
+	}
+
+	private static double? RawValue(CandidateState state, RankingValueKind kind) => kind switch
+	{
+		RankingValueKind.Graph => state.GraphRaw,
+		RankingValueKind.Git => state.GitRaw,
+		_ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
+	};
+
+	private static void SetNormalizedValue(CandidateState state, RankingValueKind kind, double value)
+	{
+		if (kind == RankingValueKind.Graph)
+			state.GraphNormalized = value;
+		else if (kind == RankingValueKind.Git)
+			state.GitNormalized = value;
+		else
+			throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
 	}
 
 	internal static double CalculateScore(double? graph, double? git, double role, double graphCoverage)
@@ -679,8 +699,33 @@ public sealed class ImportanceRankingService(
 		progress?.Report(new ImportanceRankingProgress(stage, Math.Clamp(completed, 0, total), total));
 
 	private const int ProjectGitHistoryReaderWindow = 200;
-	internal sealed record Candidate(string FullPath, string RelativePath);
-	private sealed record ScoredCandidate(Candidate Candidate, ImportanceScoreBreakdown Score);
+	internal sealed record Candidate(string FullPath, string RelativePath)
+	{
+		public int Id { get; init; }
+	}
+
+	private sealed class CandidateState(Candidate candidate)
+	{
+		public Candidate Candidate { get; } = candidate;
+		public int Dependents { get; set; }
+		public int Dependencies { get; set; }
+		public ImportanceFileRole Role { get; set; }
+		public bool IsCoordinator { get; set; }
+		public double? GraphRaw { get; set; }
+		public double? GraphNormalized { get; set; }
+		public double? GitRaw { get; set; }
+		public double? GitNormalized { get; set; }
+		public double RoleRaw { get; set; }
+		public double? RoleNormalized { get; set; }
+	}
+
+	private enum RankingValueKind
+	{
+		Graph,
+		Git
+	}
+
+	private sealed record ScoredCandidate(CandidateState State, ImportanceScoreBreakdown Score);
 	internal readonly record struct ImportanceScoreBreakdown(
 		double Score,
 		double Confidence,
