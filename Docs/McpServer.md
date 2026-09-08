@@ -289,10 +289,10 @@ Configuration state is summarized outside the block as `[Dependency configuratio
 problems=N · missing=A · corrupt=B · unsupported-semantics=C · affected-scopes=M`.
 At most eight `path · problem` rows plus an `and N more` row stay inside the
 untrusted block; parser reasons are not returned. `[Search scope] files=N` and the ordinary
-`[Effective filters]` trailer follow. An unsupported seed is a successful empty result with
-its `[No facts]` path and project-derived explanation inside the untrusted block. The fixed Markdown
-language-category status remains a path-free trusted line while its path stays untrusted;
-arbitrary extension text never enters the trusted line. A
+`[Effective filters]` trailer follow. A seed without facts is a successful empty result with
+its path and any nonstandard explanation inside the untrusted block. One of the six fixed
+dependency-engine status constants is repeated without a path in the trusted line
+`[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
 supported seed without projected edges receives trusted `[No related files] in the
 effective selection.` No trailer names a file hidden by the manifest. See
 [Dependencies.md](Dependencies.md) for evidence layers, statuses, resolver boundaries,

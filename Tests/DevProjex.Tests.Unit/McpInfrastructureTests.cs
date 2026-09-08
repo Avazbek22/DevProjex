@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
+using DevProjex.Application.Dependencies;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Services;
 using DevProjex.Mcp;
@@ -10,6 +11,32 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class McpInfrastructureTests
 {
+	[Fact]
+	public void NoFactsTrustedNoticeAllowsOnlyFixedEngineReasons()
+	{
+		var reasons = new[]
+		{
+			"file language is not supported by the dependency engine yet",
+			"source file could not be read",
+			"dependency grammar could not be loaded",
+			"source is binary",
+			"source uses an unsupported encoding",
+			"fact limit exceeded"
+		};
+		var seeds = reasons
+			.Select(reason => new SeedRelatedFiles("seed", LanguageId.Unsupported, [], [], reason))
+			.Append(new SeedRelatedFiles("duplicate", LanguageId.Unsupported, [], [], reasons[0]))
+			.Append(new SeedRelatedFiles("hostile", LanguageId.Unsupported, [], [], "hostile project reason"))
+			.ToArray();
+
+		var notice = Assert.IsType<string>(DevProjexMcpTools.FormatSafeNoFactsNotice(seeds));
+
+		Assert.Contains($"[No facts] {reasons[0]}. seeds=2", notice, StringComparison.Ordinal);
+		foreach (var reason in reasons.Skip(1))
+			Assert.Contains($"[No facts] {reason}.", notice, StringComparison.Ordinal);
+		Assert.DoesNotContain("hostile project reason", notice, StringComparison.Ordinal);
+	}
+
 	public static TheoryData<string, int, bool> PackCheckpointBoundaryCases()
 	{
 		var cases = new TheoryData<string, int, bool>();

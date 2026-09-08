@@ -26,6 +26,15 @@ internal sealed class DevProjexMcpTools(
 		"[Token budget file list truncated to fit the stored-pack response limit.]";
 	private const string StoredTrustedNoticeTruncationNotice =
 		"[Additional trusted diagnostics truncated to fit the stored-pack response limit.]";
+	private static readonly string[] SafeNoFactsReasons =
+	[
+		"file language is not supported by the dependency engine yet",
+		"source file could not be read",
+		"dependency grammar could not be loaded",
+		"source is binary",
+		"source uses an unsupported encoding",
+		"fact limit exceeded"
+	];
 	private readonly McpProjectOperationGate _projectOperation = new();
 	private McpProjectService Projects => projectService.Value;
 
@@ -1032,8 +1041,8 @@ internal sealed class DevProjexMcpTools(
 			if (seed.NoFactsReason is { Length: > 0 })
 			{
 				output.Append("[No facts] ")
-					.Append(IsSafeMarkdownNoFactsReason(seed.NoFactsReason)
-						? "unsupported language category"
+					.Append(IsSafeNoFactsReason(seed.NoFactsReason)
+						? "fixed dependency-engine status"
 						: McpTextEscaping.EscapeSingleLine(seed.NoFactsReason))
 					.AppendLine(".");
 				continue;
@@ -1358,18 +1367,22 @@ internal sealed class DevProjexMcpTools(
 		return output.ToString();
 	}
 
-	private static string? FormatSafeNoFactsNotice(IReadOnlyList<SeedRelatedFiles> seeds)
+	internal static string? FormatSafeNoFactsNotice(IReadOnlyList<SeedRelatedFiles> seeds)
 	{
-		const string markdownUnsupported = "md is not supported by the dependency engine yet";
-		var markdownSeeds = seeds.Count(seed => IsSafeMarkdownNoFactsReason(seed.NoFactsReason));
-		return markdownSeeds == 0
-			? null
-			: $"[No facts] {markdownUnsupported}." +
-			  (markdownSeeds == 1 ? string.Empty : $" seeds={markdownSeeds.ToString(CultureInfo.InvariantCulture)}");
+		var notices = SafeNoFactsReasons
+			.Select(reason => (Reason: reason, Seeds: seeds.Count(seed =>
+				string.Equals(seed.NoFactsReason, reason, StringComparison.Ordinal))))
+			.Where(static item => item.Seeds > 0)
+			.Select(static item => $"[No facts] {item.Reason}." +
+				(item.Seeds == 1
+					? string.Empty
+					: $" seeds={item.Seeds.ToString(CultureInfo.InvariantCulture)}"))
+			.ToArray();
+		return notices.Length == 0 ? null : string.Join('\n', notices);
 	}
 
-	private static bool IsSafeMarkdownNoFactsReason(string? reason) =>
-		string.Equals(reason, "md is not supported by the dependency engine yet", StringComparison.Ordinal);
+	private static bool IsSafeNoFactsReason(string? reason) =>
+		reason is not null && SafeNoFactsReasons.Contains(reason, StringComparer.Ordinal);
 
 	private static string? FormatRankingReport(
 		ImportanceRankingReport? report,
