@@ -78,6 +78,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		    _manifestSnapshots.TryGetValue(manifestRequestKey, out var cachedSnapshot) &&
 		    cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
 		    cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
+		    AreControlFilesStillAbsent(cachedSnapshot.AbsentControlFiles) &&
 		    ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 		    _indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
 		{
@@ -226,7 +227,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			FileByPath = resolved.FileByPath
 		};
 		var finalStamps = TryCaptureFileStamps(manifest);
-		if (canCacheIndex && initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps))
+		if (canCacheIndex && initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
+		    AreControlFilesStillAbsent(configuration.AbsentControlFiles))
 		{
 			if (_indexCache.ContainsKey(cacheKey))
 				StoreManifestSnapshot(
@@ -234,6 +236,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					manifestRelativePaths,
 					initialStamps,
 					alignedContentIdentities,
+					configuration.AbsentControlFiles,
 					cacheKey,
 					result);
 		}
@@ -358,7 +361,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			path,
 			status,
 			edges.SelectMany(static edge => edge.Reasons.Concat(edge.Evidence.Select(site =>
-				$"{EvidenceLabel(edge.Layer)} {edge.Reference} at line {site.Line}")))
+				$"{EvidenceLabel(edge.Layer)} at line {site.Line}")))
 				.Concat(declarationPartReasons)
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
 			edges.SelectMany(static edge => edge.Candidates).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
@@ -511,6 +514,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		IReadOnlyList<string> manifestPaths,
 		IReadOnlyList<FileStamp> stamps,
 		IReadOnlyList<string>? contentIdentities,
+		IReadOnlyList<string> absentControlFiles,
 		IndexCacheKey indexCacheKey,
 		DependencyIndexSnapshot snapshot)
 	{
@@ -519,7 +523,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (!_indexCache.ContainsKey(indexCacheKey)) return;
 			if (_manifestSnapshots.TryGetValue(key, out var previous))
 				RemoveManifestSnapshotUnderLock(key, previous);
-			var entry = new ManifestSnapshotCacheEntry(key, manifestPaths, stamps, contentIdentities, indexCacheKey, snapshot);
+			var entry = new ManifestSnapshotCacheEntry(
+				key, manifestPaths, stamps, contentIdentities, absentControlFiles, indexCacheKey, snapshot);
 			_manifestSnapshots[key] = entry;
 			entry.OrderNode = _manifestSnapshotOrder.AddLast(entry);
 			while (_manifestSnapshots.Count > _limits.MaximumCachedIndexes &&
@@ -633,6 +638,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			edge.Candidates.Sum(strings.Add) + edge.DeclarationFiles.Sum(strings.Add)) +
 			index.Files.Sum(file => EstimateFileFactsBytes(file, strings));
 	}
+
+	private static bool AreControlFilesStillAbsent(IEnumerable<string> paths) =>
+		paths.All(static path => !File.Exists(path));
 
 	private static long SiteBytes(SourceSite site, RetainedStringEstimator strings) =>
 		64 + strings.Add(site.File) + strings.Add(site.Evidence);
@@ -789,6 +797,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		IReadOnlyList<string> ManifestPaths,
 		IReadOnlyList<FileStamp> Stamps,
 		IReadOnlyList<string>? ContentIdentities,
+		IReadOnlyList<string> AbsentControlFiles,
 		IndexCacheKey IndexCacheKey,
 		DependencyIndexSnapshot Snapshot)
 	{
@@ -1107,7 +1116,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				var mapped = ResolvePaths(scope, source, import.Specifier).ToArray();
 				if (mapped.Length > 0)
 					return FinishImport(source, import, mapped,
-						$"one module target under {scope.ModuleResolution} in {scope.ScopeId}");
+						"one module target under configured module resolution");
 				var packageName = BarePackageName(import.Specifier);
 				return FindNearestPackageMap(source)?.ExternalPackages.Contains(packageName) == true
 					? Edge(source, import, ResolutionStatus.External, null,
@@ -1116,7 +1125,7 @@ public sealed class DependencyFactsEngine : IDisposable
 						"bare package has no target or external-package evidence", []);
 			}
 			return FinishImport(source, import, candidates,
-				$"one module target under {scope.ModuleResolution} in {scope.ScopeId}");
+				"one module target under configured module resolution");
 		}
 
 		private bool SupportsCommonJs(FileFacts source, DependencyScopeDescriptor scope)
@@ -1206,7 +1215,9 @@ public sealed class DependencyFactsEngine : IDisposable
 						return new PackageMapProbe([], null);
 					var selected = SelectPackageTarget(target!, PackageCondition(source, import));
 					if (selected.Kind == PackageTargetSelectionKind.Blocked)
-						return new PackageMapProbe([], $"package {(exports ? "exports" : "imports")} target is null-blocked");
+						return new PackageMapProbe([], exports
+							? "package exports target is null-blocked"
+							: "package imports target is null-blocked");
 					if (selected.Kind == PackageTargetSelectionKind.Unsupported)
 						return new PackageMapProbe([], selected.Reason);
 					if (selected.Kind != PackageTargetSelectionKind.Path || selected.Path is null)
@@ -1302,7 +1313,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					return new PackageTargetSelection(
 						PackageTargetSelectionKind.Unsupported,
 						null,
-						$"package condition '{branch.Name}' is not supported");
+						"package condition is not supported");
 				if (!IsActivePackageCondition(branch.Name, moduleCondition))
 					continue;
 				var selected = SelectPackageTarget(branch.Target, moduleCondition);
@@ -1609,7 +1620,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 			return candidates.Length == 1
 				? Edge(source, reference, ResolutionStatus.Resolved, files[0],
-					$"one visible declaration identity in {source.ScopeId}", files) with
+						"one visible declaration identity", files) with
 					{
 						DeclarationFiles = files
 					}
@@ -1764,7 +1775,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			{
 				0 => Edge(source, import, ResolutionStatus.Unresolved, null, "no target in the manifest for this module", []),
 				1 => Edge(source, import, ResolutionStatus.Resolved, candidates[0],
-					resolvedReason ?? $"one module target in {source.ScopeId}", candidates),
+					resolvedReason ?? "one module target", candidates),
 				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple module targets", candidates)
 			};
 		}

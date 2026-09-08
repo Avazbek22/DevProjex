@@ -165,9 +165,11 @@ fact, including declarations and all declaration sites, even when the graph has 
 Manifest-snapshot eviction entries are generation-bound and removed together with their live
 snapshot, so repeated rebuilds of the same cache keys cannot grow bookkeeping outside the limit.
 
-Access failures, missing files, and other transient I/O failures in either source or control files are
-not retained in the prepared-source, resolved-index, or manifest-snapshot caches. A later request
-retries extraction and configuration reading even when file stamps are unchanged. Stable outcomes such
+Access failures and other transient I/O failures in either source or control files are not retained in
+the prepared-source, resolved-index, or manifest-snapshot caches. A later request retries extraction
+and configuration reading even when file stamps are unchanged. An expected control file observed as
+absent is cacheable: its canonical path is part of the snapshot, and the snapshot is rejected as soon
+as that path appears. Stable outcomes such
 as invalid configuration syntax, an unsupported language, a content parse failure, or a safety limit
 remain cacheable.
 
@@ -197,6 +199,9 @@ change serialized results.
 contains a portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
 and a cross-scope marker when applicable. Ambiguous references remain one group with their candidate
 list. Coverage reports manifest files, supported and unsupported languages, and extraction failures.
+Reason and configuration-diagnostic text uses a fixed vocabulary; project-controlled symbol names,
+module specifiers, mapping keys, and paths remain in their dedicated structured fields rather than
+being interpolated into trusted explanatory text.
 An unsupported seed is a successful empty result with an explicit diagnostic; a supported seed with
 no edges reports that no related files exist in the effective selection. At most eight configuration
 diagnostic lines are rendered in CLI text output; JSON retains the complete safe array.

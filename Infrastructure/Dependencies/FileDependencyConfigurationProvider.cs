@@ -36,6 +36,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var snapshots = new Dictionary<string, Task<DependencyControlFileSnapshot>>(PathComparer);
 		var packageProjections = new Dictionary<string, Task<ConfigurationParseResult<PackageMapDescriptor>>>(PathComparer);
 		var diagnostics = new List<DependencyConfigurationDiagnostic>();
+		var absentControlFiles = new HashSet<string>(PathComparer);
 		var transientReadFailure = 0;
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
@@ -49,6 +50,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		async Task<DependencyControlFileSnapshot> ReadTrackedSnapshotAsync(string path)
 		{
 			var snapshot = await _reader.ReadAsync(path, MaximumConfigurationBytes, cancellationToken).ConfigureAwait(false);
+			if (snapshot.State == DependencyConfigurationState.Missing)
+				absentControlFiles.Add(Path.GetFullPath(path));
 			if (!snapshot.CanCache)
 				Interlocked.Exchange(ref transientReadFailure, 1);
 			return snapshot;
@@ -95,6 +98,13 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				? ParseProjectReferences(project, snapshot.Content)
 				: ConfigurationParseResult<string[]>.Failure([], snapshot.State, snapshot.Reason);
 			var references = parsed.Value;
+			foreach (var reference in references.Where(reference => !manifest.Contains(reference)))
+			{
+				var exists = File.Exists(reference);
+				fingerprintParts.Add(Fingerprint(root, reference, exists ? "present" : "missing"));
+				if (!exists)
+					absentControlFiles.Add(reference);
+			}
 			csharpProjects[project] = (scope, references);
 			AddDiagnostic(project, parsed.State, parsed.Reason, scope);
 		}
@@ -209,7 +219,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				})
 				.OrderBy(static item => item.Path, StringComparer.Ordinal)
 				.ToArray(),
-			CanCache = Volatile.Read(ref transientReadFailure) == 0
+			CanCache = Volatile.Read(ref transientReadFailure) == 0,
+			AbsentControlFiles = absentControlFiles.Order(StringComparer.Ordinal).ToArray()
 		};
 	}
 
@@ -298,7 +309,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 						return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
 							TypeScriptConfiguration.Default,
 							DependencyConfigurationState.UnsupportedSemantics,
-							$"tsconfig path mapping '{mapping.Name}' must be an array of strings");
+							"tsconfig path mapping must be an array of strings");
 					paths[mapping.Name] = mapping.Value.EnumerateArray()
 						.Select(static item => item.GetString()!).ToArray();
 				}
@@ -373,7 +384,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		}
 		if (map.ValueKind != JsonValueKind.Object)
 		{
-			result["."] = UnsupportedPackageTarget($"{property} must be a string, null, or object");
+			result["."] = UnsupportedPackageTarget(property == "exports"
+				? "package exports must be a string, null, or object"
+				: "package imports must be a string, null, or object");
 			return result;
 		}
 		if (property == "exports" && !map.EnumerateObject().Any(static item => item.Name.StartsWith(".", StringComparison.Ordinal)))
@@ -392,7 +405,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		if (value.ValueKind == JsonValueKind.Null)
 			return new PackageTargetDescriptor(PackageTargetKind.Blocked, null, [], null);
 		if (value.ValueKind != JsonValueKind.Object)
-			return UnsupportedPackageTarget($"package target kind {value.ValueKind} is not supported");
+			return UnsupportedPackageTarget("package target kind is not supported");
 		return new PackageTargetDescriptor(
 			PackageTargetKind.Conditions,
 			null,
@@ -678,11 +691,11 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 		}
 		catch (FileNotFoundException)
 		{
-			return Failure(DependencyConfigurationState.Missing, "configuration file is unavailable", 0, 0, canCache: false);
+			return Failure(DependencyConfigurationState.Missing, "configuration file is unavailable", 0, 0);
 		}
 		catch (DirectoryNotFoundException)
 		{
-			return Failure(DependencyConfigurationState.Missing, "configuration file is unavailable", 0, 0, canCache: false);
+			return Failure(DependencyConfigurationState.Missing, "configuration file is unavailable", 0, 0);
 		}
 		catch (DecoderFallbackException)
 		{

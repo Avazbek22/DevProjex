@@ -181,6 +181,59 @@ public sealed class DependencyReferenceSemanticsIntegrationTests
 		Assert.DoesNotContain("ns/aaa.py", edge.Candidates);
 	}
 
+	[Fact]
+	public async Task DependencyReasons_DoNotEchoProjectControlledNamesSpecifiersOrPaths()
+	{
+		const string sentinel = "PROJECT_SENTINEL_DO_NOT_ECHO";
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"paths\":{\"" + sentinel + "\":42}}}");
+		var source = fixture.CreateFile("main.ts", "import \"" + sentinel + "\";");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var reasons = result.Edges.SelectMany(static edge => edge.Reasons)
+			.Concat(result.Files.SelectMany(static file => file.Imports.Select(import => import.Reason)))
+			.Concat(result.Files.SelectMany(static file => file.References.Select(reference => reference.Reason)))
+			.Concat(result.Files.Select(static file => file.StatusReason ?? string.Empty))
+			.Concat(result.Coverage.ConfigurationDiagnostics.Select(static diagnostic => diagnostic.Reason));
+		Assert.DoesNotContain(reasons, reason => reason.Contains(sentinel, StringComparison.Ordinal));
+		Assert.Contains(result.Coverage.ConfigurationDiagnostics,
+			diagnostic => diagnostic.Reason == "tsconfig path mapping must be an array of strings");
+	}
+
+	[Fact]
+	public async Task MissingReferencedControlFile_IsCacheableUntilTheFileAppears()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("App/App.csproj", """
+			<Project Sdk="Microsoft.NET.Sdk">
+			  <ItemGroup><ProjectReference Include="../Missing/Missing.csproj" /></ItemGroup>
+			</Project>
+			""");
+		var source = fixture.CreateFile("App/Consumer.cs", "public sealed class Consumer { }");
+		var configuration = await new FileDependencyConfigurationProvider().ReadAsync(
+			fixture.Path, [project, source], TestContext.Current.CancellationToken);
+		Assert.Contains(Path.GetFullPath(Path.Combine(fixture.Path, "Missing/Missing.csproj")),
+			configuration.AbsentControlFiles);
+		using var engine = CreateEngine();
+
+		var first = await engine.IndexAsync(fixture.Path, [project, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var warm = await engine.IndexAsync(fixture.Path, [project, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var appeared = fixture.CreateFile("Missing/Missing.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var invalidated = await engine.IndexAsync(fixture.Path, [project, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.False(first.Metrics.ResolutionCacheHit);
+		Assert.True(warm.Metrics.ResolutionCacheHit);
+		Assert.False(invalidated.Metrics.ResolutionCacheHit);
+		Assert.True(File.Exists(appeared));
+	}
+
 	private static DependencyFactsEngine CreateEngine() => new(
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());

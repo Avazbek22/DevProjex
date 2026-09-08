@@ -96,7 +96,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return new PreparedDependencySource(fullPath, relative, scope, language,
 				Hash(Encoding.UTF8.GetBytes(identity)), "unsupported:v1", string.Empty,
 				DependencyFileStatus.Unsupported,
-				$"{Path.GetExtension(fullPath).TrimStart('.')} is not supported by the dependency engine yet");
+				"file language is not supported by the dependency engine yet");
 		}
 
 		try
@@ -148,7 +148,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return new PreparedDependencySource(fullPath, relative, scope, language,
 				Hash(Encoding.UTF8.GetBytes(exception.GetType().Name)), GetExtractorIdentity(language),
 				string.Empty, DependencyFileStatus.ExtractionFailed,
-				$"{exception.GetType().Name}: {OneLine(exception.Message)}",
+				"source file could not be read",
 				CanCache: false);
 		}
 	}
@@ -380,14 +380,14 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		       IOException or UnauthorizedAccessException or System.Security.SecurityException)
 		{
 			return StatusOnly(source, DependencyFileStatus.ExtractionFailed,
-				$"{exception.GetType().Name}: {OneLine(exception.Message)}") with { CanCache = false };
+				"dependency grammar could not be loaded") with { CanCache = false };
 		}
 		catch (Exception exception) when (exception is
 		       DllNotFoundException or BadImageFormatException or
 		       EntryPointNotFoundException or InvalidOperationException)
 		{
 			return StatusOnly(source, DependencyFileStatus.ExtractionFailed,
-				$"{exception.GetType().Name}: {OneLine(exception.Message)}");
+				"dependency grammar could not be loaded");
 		}
 	}
 
@@ -805,13 +805,13 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					DependencyFileStatus.Supported,
 					null);
 			}
-			catch (DecoderFallbackException exception)
+			catch (DecoderFallbackException)
 			{
 				return new BoundedDependencySourceRead(
 					MetadataFingerprint("unsupported-encoding", 0, 0),
 					string.Empty,
 					DependencyFileStatus.ExtractionFailed,
-					$"source uses an unsupported encoding: {OneLine(exception.Message)}");
+					"source uses an unsupported encoding");
 			}
 			finally
 			{
