@@ -137,7 +137,10 @@ public sealed record DependencyFactsCoverage(
 	int Unsupported,
 	int ExtractionFailed,
 	IReadOnlyDictionary<string, int> UnsupportedLanguages,
-	IReadOnlyDictionary<string, int> CSharpErrorNodeKinds);
+	IReadOnlyDictionary<string, int> CSharpErrorNodeKinds)
+{
+	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
+}
 
 public sealed record DependencyIndexMetrics(
 	int ParsedFiles,

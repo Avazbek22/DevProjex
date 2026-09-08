@@ -38,6 +38,8 @@ public sealed record DependencyResolverConfiguration(
 	IReadOnlyDictionary<string, IReadOnlySet<string>> PythonStandardLibraryModules,
 	IReadOnlySet<string> NodeBuiltInModules)
 {
+	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
+
 	public DependencyScopeDescriptor? FindScope(string scopeId) =>
 		Scopes.FirstOrDefault(scope => string.Equals(scope.ScopeId, scopeId, StringComparison.Ordinal));
 }
@@ -55,7 +57,11 @@ public sealed record DependencyScopeDescriptor(
 	IReadOnlyList<string> PythonRoots,
 	bool HasConfiguration,
 	string? PythonVersion = null,
-	bool AllowJavaScript = false);
+	bool AllowJavaScript = false)
+{
+	public DependencyConfigurationState ConfigurationState { get; init; } = DependencyConfigurationState.Valid;
+	public string? ConfigurationDiagnostic { get; init; }
+}
 
 public sealed record PackageMapDescriptor(
 	string Directory,
@@ -63,7 +69,25 @@ public sealed record PackageMapDescriptor(
 	IReadOnlyDictionary<string, PackageTargetDescriptor> Imports,
 	IReadOnlyDictionary<string, PackageTargetDescriptor> Exports,
 	string? ModuleType,
-	IReadOnlySet<string> ExternalPackages);
+	IReadOnlySet<string> ExternalPackages)
+{
+	public DependencyConfigurationState ConfigurationState { get; init; } = DependencyConfigurationState.Valid;
+	public string? ConfigurationDiagnostic { get; init; }
+}
+
+public enum DependencyConfigurationState
+{
+	Valid,
+	Missing,
+	Corrupt,
+	UnsupportedSemantics
+}
+
+public sealed record DependencyConfigurationDiagnostic(
+	string Path,
+	DependencyConfigurationState State,
+	string Reason,
+	IReadOnlyList<string> ScopeIds);
 
 public enum PackageTargetKind
 {

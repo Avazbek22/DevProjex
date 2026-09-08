@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using DevProjex.Application.Dependencies;
 using DevProjex.Infrastructure.Compression;
@@ -476,6 +477,82 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		Assert.Contains(result.Edges, edge => edge.Reference == "react" && edge.Status == ResolutionStatus.External);
 		Assert.Contains(result.Edges, edge => edge.Reference == "not-declared" && edge.Status == ResolutionStatus.Unresolved);
+	}
+
+	[Theory]
+	[InlineData("{\"compilerOptions\":null}", DependencyConfigurationState.Corrupt, "compilerOptions must be an object")]
+	[InlineData("{\"compilerOptions\":{", DependencyConfigurationState.Corrupt, "JSON")]
+	[InlineData("[]", DependencyConfigurationState.UnsupportedSemantics, "root must be an object")]
+	public async Task TypeScriptConfigurationFailures_AreDiagnosedAndLeaveReferencesUnresolved(
+		string configurationContent,
+		DependencyConfigurationState expectedState,
+		string expectedReason)
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", configurationContent);
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "main.ts");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Contains(expectedReason, Assert.Single(edge.Reasons), StringComparison.OrdinalIgnoreCase);
+		var diagnostic = Assert.Single(result.Coverage.ConfigurationDiagnostics);
+		Assert.Equal("tsconfig.json", diagnostic.Path);
+		Assert.Equal(expectedState, diagnostic.State);
+	}
+
+	[Fact]
+	public async Task DependencyConfigurationRead_IsBoundedAndMissingConfigurationRemainsExplicit()
+	{
+		using var fixture = new TemporaryDirectory();
+		var oversized = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"padding\":\"" + new string('x', FileDependencyConfigurationProvider.MaximumConfigurationBytes) + "\"}");
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		var provider = new FileDependencyConfigurationProvider();
+
+		var oversizedConfiguration = await provider.ReadAsync(
+			fixture.Path,
+			[oversized, source, target],
+			TestContext.Current.CancellationToken);
+		var oversizedScope = Assert.Single(oversizedConfiguration.Scopes,
+			scope => scope.LanguageId == LanguageId.TypeScript && scope.HasConfiguration);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, oversizedScope.ConfigurationState);
+		Assert.Contains("byte limit", oversizedScope.ConfigurationDiagnostic, StringComparison.Ordinal);
+
+		var missingConfiguration = await provider.ReadAsync(
+			fixture.Path,
+			[source, target],
+			TestContext.Current.CancellationToken);
+		var fallback = Assert.Single(missingConfiguration.Scopes, scope => scope.LanguageId == LanguageId.TypeScript);
+		Assert.False(fallback.HasConfiguration);
+		Assert.Equal(DependencyConfigurationState.Missing, fallback.ConfigurationState);
+		Assert.Empty(missingConfiguration.ConfigurationDiagnostics);
+	}
+
+	[Fact]
+	public async Task ConfigurationProvider_ReadsEachControlFileOncePerOperation()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("package.json", "{\"name\":\"fixture\",\"type\":\"module\"}");
+		var rootConfig = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var nestedConfig = fixture.CreateFile("nested/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var reader = new CountingControlFileReader();
+		var provider = new FileDependencyConfigurationProvider(reader);
+
+		_ = await provider.ReadAsync(
+			fixture.Path,
+			[package, rootConfig, nestedConfig],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, reader.CountFor(package));
+		Assert.Equal(1, reader.CountFor(rootConfig));
+		Assert.Equal(1, reader.CountFor(nestedConfig));
 	}
 
 	[Fact]
@@ -1530,6 +1607,23 @@ public sealed class DependencyFactsEngineIntegrationTests
 		{
 			ReadCount++;
 			return _inner.ReadAsync(sourceRoot, manifestFiles, cancellationToken);
+		}
+	}
+
+	private sealed class CountingControlFileReader : IDependencyControlFileReader
+	{
+		private readonly BoundedDependencyControlFileReader _inner = new();
+		private readonly ConcurrentDictionary<string, int> _counts = new(PathComparer.Default);
+
+		public int CountFor(string path) => _counts.GetValueOrDefault(Path.GetFullPath(path));
+
+		public ValueTask<DependencyControlFileSnapshot> ReadAsync(
+			string path,
+			int maximumBytes,
+			CancellationToken cancellationToken)
+		{
+			_counts.AddOrUpdate(Path.GetFullPath(path), 1, static (_, count) => count + 1);
+			return _inner.ReadAsync(path, maximumBytes, cancellationToken);
 		}
 	}
 

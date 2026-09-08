@@ -193,7 +193,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (!resolutionCacheHit)
 				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		}
-		var coverage = BuildCoverage(resolved.Files);
+		var coverage = BuildCoverage(resolved.Files, configuration.ConfigurationDiagnostics);
 		var result = new DependencyIndexSnapshot(
 			root,
 			manifestGeneration,
@@ -423,7 +423,9 @@ public sealed class DependencyFactsEngine : IDisposable
 		$"{declaration.Identity.GenericArity}\0{declaration.Identity.FileScope}\0" +
 		string.Join('\0', declaration.DeclarationSites.Select(static site => $"{site.File}:{site.Line}"));
 
-	private static DependencyFactsCoverage BuildCoverage(IReadOnlyList<FileFacts> files) =>
+	private static DependencyFactsCoverage BuildCoverage(
+		IReadOnlyList<FileFacts> files,
+		IReadOnlyList<DependencyConfigurationDiagnostic> configurationDiagnostics) =>
 		new(
 			files.Count,
 			files.Count(static file => file.Status == DependencyFileStatus.Supported),
@@ -435,7 +437,10 @@ public sealed class DependencyFactsEngine : IDisposable
 			files.Where(static file => file.LanguageId == LanguageId.CSharp)
 				.SelectMany(static file => file.ErrorNodeKinds)
 				.GroupBy(static pair => pair.Key)
-				.ToDictionary(static group => group.Key, static group => group.Sum(static pair => pair.Value), StringComparer.Ordinal));
+				.ToDictionary(static group => group.Key, static group => group.Sum(static pair => pair.Value), StringComparer.Ordinal))
+		{
+			ConfigurationDiagnostics = configurationDiagnostics
+		};
 
 	private void RegisterFileCacheWeight(
 		FileCacheKey key,
@@ -1002,6 +1007,11 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (scope is null || !scope.HasConfiguration)
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"no owning tsconfig.json or jsconfig.json in the manifest", []);
+			if (ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
+			if (FindNearestPackageMap(source) is { ConfigurationState: not DependencyConfigurationState.Valid } packageMap)
+				return Edge(source, import, ResolutionStatus.Unresolved, null,
+					packageMap.ConfigurationDiagnostic ?? "package.json configuration is unavailable", []);
 			if (IsRequire(import) && !SupportsCommonJs(source, scope))
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"require call is outside a supported CommonJS context", []);
@@ -1310,6 +1320,8 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolvePythonImport(FileFacts source, ImportFact import)
 		{
+			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			var sourceModule = PythonModule(source);
 			var sourcePackage = Path.GetFileNameWithoutExtension(source.Path) == "__init__"
 				? sourceModule
@@ -1478,6 +1490,8 @@ public sealed class DependencyFactsEngine : IDisposable
 						? "no owning .csproj in the manifest"
 						: "no owning tsconfig.json or jsconfig.json in the manifest", []);
 			}
+			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			if (source.TypeParameters.Contains(simpleName, StringComparer.Ordinal))
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
 			var expandedName = ExpandQualifiedAlias(source, reference.Name);
@@ -1743,6 +1757,12 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyScopeDescriptor? FindScope(string scopeId) =>
 			_scopesById.GetValueOrDefault(scopeId);
+
+		private static string? ConfigurationFailure(DependencyScopeDescriptor scope) =>
+			scope.ConfigurationState == DependencyConfigurationState.Valid
+				? null
+				: scope.ConfigurationDiagnostic ??
+				  $"{scope.ConfigurationState.ToString().ToLowerInvariant()} dependency configuration";
 
 		private static IReadOnlyDictionary<string, string[]> BuildVisibleScopes(
 			IReadOnlyDictionary<string, DependencyScopeDescriptor> scopes)

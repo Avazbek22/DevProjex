@@ -74,6 +74,15 @@ and directory probes. `.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ord
 DevProjex never guesses a `dist` to `src` mapping without configuration, and module references without
 an owning `tsconfig.json` or `jsconfig.json` stay unresolved.
 
+Configuration reads have four explicit outcomes: valid, missing, corrupt, and unsupported semantics.
+A malformed JSON document, a `null` or non-object `compilerOptions`, or an unsupported value shape is
+never replaced by an implicit default. References whose resolution depends on that control file remain
+`Unresolved` with its diagnostic, and machine-readable facts coverage includes the affected control-file
+path, state, reason, and owning scopes. Every `.csproj`, `tsconfig.json`, `jsconfig.json`, `package.json`,
+`pyproject.toml`, and `setup.cfg` is limited to 4 MiB. One operation reads and verifies each control file
+once, then derives all scope, package-name, package-map, and external-package projections from that same
+snapshot, so a result cannot mix two versions of one configuration file.
+
 Python relative imports start at the source package. Regular and namespace-package portions are
 combined, `.py` is preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and
 `__all__` affects wildcard imports only. Dynamic `__all__`, `setup.py`, and import hooks are not
