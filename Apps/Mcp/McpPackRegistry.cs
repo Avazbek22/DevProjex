@@ -17,6 +17,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	private static readonly TimeSpan ScavengeShutdownTimeout = TimeSpan.FromSeconds(5);
 	private static readonly ConcurrentDictionary<string, byte> ActiveSessions = new(PathComparer.Default);
 	private readonly Dictionary<string, PackEntry> _packs = new(StringComparer.Ordinal);
+	private readonly HashSet<string> _quotaEvictedPackIds = new(StringComparer.Ordinal);
+	private readonly Queue<string> _quotaEvictionOrder = new();
 	private readonly string _sessionDirectory;
 	private readonly FileStream _sessionLease;
 	private readonly long _maximumPackBytes;
@@ -164,7 +166,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 					metrics.Characters,
 					reservation.Bytes)
 				{
-					LineCheckpoints = metrics.LineCheckpoints
+					LineCheckpoints = metrics.LineCheckpoints,
+					EvictedPackCount = reservation.EvictedPackCount
 				};
 				lock (_sync)
 				{
@@ -207,14 +210,51 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		if (string.IsNullOrWhiteSpace(packId))
 			throw Expired();
 		PackEntry? entry;
+		var quotaEvicted = false;
 		lock (_sync)
 		{
 			ObjectDisposedException.ThrowIf(_disposed, this);
 			_packs.TryGetValue(packId, out entry);
+			if (entry is not null)
+				entry.LastReadUtc = TimeProvider.GetUtcNow();
+			else
+				quotaEvicted = _quotaEvictedPackIds.Contains(packId);
 		}
 		if (entry is null || !File.Exists(entry.Document.Path))
-			throw Expired();
+			throw Expired(quotaEvicted || IsQuotaEvicted(packId));
 		return entry.Document;
+	}
+
+	internal McpPackReadLease OpenReadDocument(string packId)
+	{
+		if (string.IsNullOrWhiteSpace(packId))
+			throw Expired(false);
+		PackEntry? entry;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			_packs.TryGetValue(packId, out entry);
+			if (entry is null)
+				throw Expired(_quotaEvictedPackIds.Contains(packId));
+			entry.ActiveReaders++;
+			entry.LastReadUtc = TimeProvider.GetUtcNow();
+		}
+		try
+		{
+			var stream = OpenPrivateFile(
+				entry.Document.Path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.Read,
+				16 * 1024,
+				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			return new McpPackReadLease(this, entry, stream);
+		}
+		catch
+		{
+			ReleaseReader(entry);
+			throw Expired(IsQuotaEvicted(packId));
+		}
 	}
 
 	public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -489,10 +529,11 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		}
 	}
 
-	private static McpToolException Expired() =>
+	private static McpToolException Expired(bool quotaEvicted = false) =>
 		new(
 			McpErrorCodes.PackExpired,
-			$"{McpErrorCodes.PackExpired}: pack expired or belongs to another server session; call pack_context again.");
+			$"{McpErrorCodes.PackExpired}: pack expired or belongs to another server session; call pack_context again." +
+			(quotaEvicted ? " The pack was evicted to satisfy the session quota." : string.Empty));
 
 	private static McpToolException TooLarge() =>
 		new(
@@ -504,17 +545,56 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	{
 		if (count <= 0)
 			return;
+		List<string>? evictedPaths = null;
 		lock (_sync)
 		{
 			ObjectDisposedException.ThrowIf(_disposed, this);
-			if (count > _maximumPackBytes - reservation.Bytes ||
-			    count > _maximumSessionBytes - _allocatedBytes)
-			{
+			if (count > _maximumPackBytes - reservation.Bytes)
 				throw TooLarge();
+			while (count > _maximumSessionBytes - _allocatedBytes)
+			{
+				var victim = _packs
+					.Where(static item => item.Value.ActiveReaders == 0)
+					.OrderBy(static item => item.Value.LastReadUtc)
+					.ThenBy(static item => item.Key, StringComparer.Ordinal)
+					.FirstOrDefault();
+				if (victim.Value is null)
+					throw TooLarge();
+				_packs.Remove(victim.Key);
+				_allocatedBytes -= victim.Value.Document.Bytes;
+				reservation.EvictedPackCount++;
+				RememberQuotaEviction(victim.Key);
+				(evictedPaths ??= []).Add(victim.Value.Document.Path);
 			}
 			reservation.Add(count);
 			_allocatedBytes += count;
 		}
+		if (evictedPaths is not null)
+		{
+			foreach (var path in evictedPaths)
+				TryDeletePackFile(path);
+		}
+	}
+
+	private void RememberQuotaEviction(string packId)
+	{
+		const int maximumRememberedEvictions = 1024;
+		if (_quotaEvictedPackIds.Add(packId))
+			_quotaEvictionOrder.Enqueue(packId);
+		while (_quotaEvictionOrder.Count > maximumRememberedEvictions)
+			_quotaEvictedPackIds.Remove(_quotaEvictionOrder.Dequeue());
+	}
+
+	private bool IsQuotaEvicted(string packId)
+	{
+		lock (_sync)
+			return _quotaEvictedPackIds.Contains(packId);
+	}
+
+	private void ReleaseReader(PackEntry entry)
+	{
+		lock (_sync)
+			entry.ActiveReaders--;
 	}
 
 	private void Release(long bytes)
@@ -523,7 +603,13 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			_allocatedBytes -= bytes;
 	}
 
-	private sealed record PackEntry(McpPackDocument Document, DateTimeOffset CreatedUtc);
+	internal sealed class PackEntry(McpPackDocument document, DateTimeOffset createdUtc)
+	{
+		public McpPackDocument Document { get; } = document;
+		public DateTimeOffset CreatedUtc { get; } = createdUtc;
+		public DateTimeOffset LastReadUtc { get; set; } = createdUtc;
+		public int ActiveReaders { get; set; }
+	}
 
 	private sealed class PackReservation(McpPackRegistry owner) : IDisposable
 	{
@@ -531,6 +617,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		private bool _disposed;
 
 		public long Bytes { get; private set; }
+		public int EvictedPackCount { get; set; }
 
 		public void Reserve(int count) => owner.Reserve(this, count);
 
@@ -545,6 +632,30 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			_disposed = true;
 			if (!_committed)
 				owner.Release(Bytes);
+		}
+	}
+
+	internal sealed class McpPackReadLease(
+		McpPackRegistry owner,
+		PackEntry entry,
+		FileStream stream) : IAsyncDisposable
+	{
+		private int _disposed;
+		public McpPackDocument Document => entry.Document;
+		public FileStream Stream => stream;
+
+		public async ValueTask DisposeAsync()
+		{
+			if (Interlocked.Exchange(ref _disposed, 1) != 0)
+				return;
+			try
+			{
+				await stream.DisposeAsync().ConfigureAwait(false);
+			}
+			finally
+			{
+				owner.ReleaseReader(entry);
+			}
 		}
 	}
 
@@ -760,6 +871,7 @@ internal readonly record struct McpPackLineCheckpoint(int LineNumber, long ByteO
 
 public sealed record McpPackDocument(string Id, string Path, int Lines, long Characters, long Bytes)
 {
+	public int EvictedPackCount { get; init; }
 	internal IReadOnlyList<McpPackLineCheckpoint> LineCheckpoints { get; init; } =
 		[new McpPackLineCheckpoint(1, 0)];
 

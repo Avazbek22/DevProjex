@@ -203,8 +203,11 @@ packs.
   After a server restart, call `pack_context` again to create a new id.
   Stale session directories older than 24 hours are scavenged at startup. A
   stored pack is limited to 200 MiB and all packs in one server session are
-  limited to 1 GiB. The server does not evict valid packs; a request that would
-  exceed either limit returns `DPX-MCP-PACK-TOO-LARGE` with narrowing guidance.
+  limited to 1 GiB. To place a new pack within the session limit, the server evicts
+  least-recently-read packs that have no active reader and reports the eviction count.
+  Reading an evicted id returns `DPX-MCP-PACK-EXPIRED` with a quota notice. A request
+  that exceeds the per-pack limit, or cannot fit while every candidate is active,
+  returns `DPX-MCP-PACK-TOO-LARGE` with narrowing guidance.
 
 Errors returned by tools have `isError: true` and stable `DPX-MCP-*` codes. Only
 the code and `request failed` status are trusted; the detailed message, including
@@ -240,11 +243,11 @@ open-world.
 | `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. |
-| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
-| `read_pack` | `pack_id`, `start_line?`, `end_line?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
+| `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
 | `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches are still counted. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
-| `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
-| `get_file` | `project?`, `branch?`, `profile?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; line numbers refer to the returned text after replacements. At most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. A non-empty file that cannot be inspected under the 16 MiB mandatory-redaction boundary returns `DPX-MCP-PAYLOAD-TRUNCATED` with its byte size and the limit; it never returns an empty success. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
+| `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
+| `get_file` | `project?`, `branch?`, `profile?`, `path`, `start_line?`, `end_line?`, `start_column?` | Redacted text from one effective file; line numbers refer to the returned text after replacements. `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. A non-empty file that cannot be inspected under the 16 MiB mandatory-redaction boundary returns `DPX-MCP-PAYLOAD-TRUNCATED` with its byte size and the limit; it never returns an empty success. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, `related_files`, and `get_file` additionally accept the
@@ -294,12 +297,15 @@ Configuration state is summarized outside the block as `[Dependency configuratio
 problems=N · missing=A · corrupt=B · unsupported-semantics=C · affected-scopes=M`.
 At most eight `path · problem` rows plus an `and N more` row stay inside the
 untrusted block; parser reasons are not returned. `[Search scope] files=N` and the ordinary
-`[Effective filters]` trailer follow. A seed without facts is a successful empty result with
+`[Effective filters]` trailer follow. `[Resolution] resolved=N · ambiguous=M ·
+unresolved=K · external=E` counts the selected-direction edges considered for the call.
+A seed without facts is a successful empty result with
 its path and any nonstandard explanation inside the untrusted block. One of the six fixed
 dependency-engine status constants is repeated without a path in the trusted line
 `[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
-supported seed without projected edges receives trusted `[No related files] in the
-effective selection.` No trailer names a file hidden by the manifest. See
+call with no resolved edges receives trusted `[No related files] in the effective
+selection.`; when unresolved references exist, that same line reports their count.
+No trailer names a file hidden by the manifest. See
 [Dependencies.md](Dependencies.md) for evidence layers, statuses, resolver boundaries,
 limits, caching, and determinism.
 
@@ -387,6 +393,9 @@ reversed range is rejected before any project or pack access and states that lin
 start at 1 and `start_line` must not exceed `end_line`. If the 1,000-line or 50,000-character page limit is reached
 before EOF, the existing
 `[Showing lines A-B of N; continue with start_line=B+1.]` trailer takes priority.
+When the character cap falls inside one long line, the trailer keeps that line and
+adds the next 1-based Unicode column:
+`[Showing lines A-A of N; continue with start_line=A start_column=C.]`.
 
 For `get_tree`, omitted `max_depth` on an oversized `text` or `markdown` result
 selects the deepest depth whose complete tree fits the 2,000-line limit and

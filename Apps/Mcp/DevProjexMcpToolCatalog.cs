@@ -316,7 +316,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    "pack_id": { "type": "string", "minLength": 1, "description": "Session-scoped id returned by pack_context or related_files." },
 	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
 	  "required": ["pack_id"],
 	  "additionalProperties": false
@@ -354,7 +355,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
 	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
 	  "required": ["path"],
 	  "additionalProperties": false
