@@ -223,7 +223,9 @@ internal static class FocusRankingEngine
 		int[][] undirected,
 		DependencyIndexSnapshot snapshot)
 	{
-		var factsByPath = snapshot.Files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+		var factsByPath = snapshot.FileByPath.Count == snapshot.Files.Count
+			? snapshot.FileByPath
+			: snapshot.Files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
 		return seeds.Select(seed =>
 		{
 			var path = entriesByFullPath[Path.GetFullPath(seed.FullPath)].Path;

@@ -79,7 +79,9 @@ public sealed class ImportanceRankingService(
 
 		const int computationUnits = 100;
 		Report(progress, ImportanceRankingStage.ComputingPriorities, 0, computationUnits);
-		var factsByPath = dependency.Files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+		var factsByPath = dependency.FileByPath.Count == dependency.Files.Count
+			? dependency.FileByPath
+			: dependency.Files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
 		var graph = BuildGraph(candidates, dependency, cancellationToken);
 		Report(progress, ImportanceRankingStage.ComputingPriorities, 10, computationUnits);
 		var pageRank = CalculatePageRank(
