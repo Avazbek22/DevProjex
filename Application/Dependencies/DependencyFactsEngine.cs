@@ -995,34 +995,64 @@ public sealed class DependencyFactsEngine : IDisposable
 			file.Path, null, EvidenceLayer.TypeReference, ResolutionStatus.Unresolved,
 			"<limit>", [reason], [new SourceSite(file.Path, 1, reason)], [], false);
 
-		private static IReadOnlyList<DependencyEdge> Aggregate(IEnumerable<DependencyEdge> raw) =>
-			raw.GroupBy(static edge => new
-				{
-					edge.Source,
-					edge.Target,
-					edge.Layer,
-					edge.Status,
-					edge.Reference,
-					edge.CrossScope
-				})
-				.Select(static group => new DependencyEdge(
-					group.Key.Source,
-					group.Key.Target,
-					group.Key.Layer,
-					group.Key.Status,
-					group.Key.Reference,
-					group.SelectMany(static edge => edge.Reasons).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
-					group.SelectMany(static edge => edge.Evidence).Distinct().OrderBy(static site => site.Line).ToArray(),
-					group.SelectMany(static edge => edge.Candidates).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
-					group.Key.CrossScope)
-				{
-					DeclarationFiles = group.SelectMany(static edge => edge.DeclarationFiles)
-						.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
-				})
+		private static IReadOnlyList<DependencyEdge> Aggregate(IEnumerable<DependencyEdge> raw)
+		{
+			var groups = new Dictionary<EdgeAggregationKey, EdgeAccumulator>();
+			foreach (var edge in raw)
+			{
+				var key = new EdgeAggregationKey(
+					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope);
+				if (!groups.TryGetValue(key, out var accumulator))
+					groups.Add(key, accumulator = new EdgeAccumulator());
+				accumulator.Add(edge);
+			}
+			return groups.Select(static group => group.Value.Create(group.Key))
 				.OrderBy(static edge => edge.Source, StringComparer.Ordinal)
 				.ThenBy(static edge => edge.Target, StringComparer.Ordinal)
 				.ThenBy(static edge => edge.Reference, StringComparer.Ordinal)
 				.ToArray();
+		}
+
+		private readonly record struct EdgeAggregationKey(
+			string Source,
+			string? Target,
+			EvidenceLayer Layer,
+			ResolutionStatus Status,
+			string Reference,
+			bool CrossScope);
+
+		private sealed class EdgeAccumulator
+		{
+			private readonly HashSet<string> _reasons = new(StringComparer.Ordinal);
+			private readonly HashSet<SourceSite> _evidenceSeen = [];
+			private readonly List<SourceSite> _evidence = [];
+			private readonly HashSet<string> _candidates = new(StringComparer.Ordinal);
+			private readonly HashSet<string> _declarationFiles = new(StringComparer.Ordinal);
+
+			public void Add(DependencyEdge edge)
+			{
+				_reasons.UnionWith(edge.Reasons);
+				foreach (var site in edge.Evidence)
+					if (_evidenceSeen.Add(site))
+						_evidence.Add(site);
+				_candidates.UnionWith(edge.Candidates);
+				_declarationFiles.UnionWith(edge.DeclarationFiles);
+			}
+
+			public DependencyEdge Create(EdgeAggregationKey key) => new(
+				key.Source,
+				key.Target,
+				key.Layer,
+				key.Status,
+				key.Reference,
+				_reasons.Order(StringComparer.Ordinal).ToArray(),
+				_evidence.OrderBy(static site => site.Line).ToArray(),
+				_candidates.Order(StringComparer.Ordinal).ToArray(),
+				key.CrossScope)
+			{
+				DeclarationFiles = _declarationFiles.Order(StringComparer.Ordinal).ToArray()
+			};
+		}
 	}
 
 	private sealed class ResolverContext
