@@ -1097,6 +1097,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlySet<string> _dotNetExternalSimpleNames;
 		private readonly IReadOnlyDictionary<string, string[]> _pythonRootPrefixesByScope;
 		private readonly IReadOnlyDictionary<string, string> _pythonModuleByFile;
+		private readonly IReadOnlySet<string> _manifestDirectoryPrefixes;
 
 		public ResolverContext(
 			string root,
@@ -1172,6 +1173,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					StringComparer.Ordinal);
 			_pythonModuleByFile = files.Where(static file => file.LanguageId == LanguageId.Python)
 				.ToDictionary(static file => file.Path, ComputePythonModule, StringComparer.Ordinal);
+			_manifestDirectoryPrefixes = BuildDirectoryPrefixes(files);
 		}
 
 		public DependencyEdge ResolveImport(FileFacts source, ImportFact import) => source.LanguageId switch
@@ -1683,7 +1685,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			{
 				var prefix = string.Join('/', new[] { root, relative }.Where(static value => value.Length > 0));
 				var init = prefix + "__init__.py";
-				if (!_files.ContainsKey(init) && _files.Keys.Any(path => path.StartsWith(prefix, StringComparison.Ordinal)))
+				if (!_files.ContainsKey(init) && _manifestDirectoryPrefixes.Contains(prefix))
 					portions++;
 			}
 			return portions;
@@ -2041,6 +2043,21 @@ public sealed class DependencyFactsEngine : IDisposable
 			var relative = root is { Length: > 0 } ? source.Path[(root.Length + 1)..] : source.Path;
 			var computed = Path.ChangeExtension(relative, null)!.Replace('/', '.').Replace('\\', '.');
 			return computed.EndsWith(".__init__", StringComparison.Ordinal) ? computed[..^".__init__".Length] : computed;
+		}
+
+		private static IReadOnlySet<string> BuildDirectoryPrefixes(IEnumerable<FileFacts> files)
+		{
+			var result = new HashSet<string>(StringComparer.Ordinal);
+			foreach (var file in files)
+			{
+				var separator = file.Path.IndexOf('/');
+				while (separator >= 0)
+				{
+					result.Add(file.Path[..(separator + 1)]);
+					separator = file.Path.IndexOf('/', separator + 1);
+				}
+			}
+			return result;
 		}
 
 		private DependencyScopeDescriptor? FindScope(string scopeId) =>
