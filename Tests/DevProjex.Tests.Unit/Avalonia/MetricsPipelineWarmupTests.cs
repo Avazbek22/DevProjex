@@ -10,6 +10,44 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class MetricsPipelineWarmupTests
 {
 	[AvaloniaFact]
+	public async Task PublishMetricsAsync_NoCheckedNodesAndNoFilesClearsContentTotals()
+	{
+		using var temp = new TemporaryDirectory();
+		var root = new TreeNodeDescriptor("root", temp.Path, true, false, "folder", []);
+		var currentTree = new BuildTreeResult(root, false, false, []);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(root, parent: null, icon: null));
+		var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			new FileContentAnalyzer(),
+			new TreeExportService(),
+			new StatusOperationCoordinator(
+				viewModel,
+				isBackgroundMetricsActive: () => false,
+				metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData),
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			scheduleMemoryCleanup: _ => completed.TrySetResult());
+
+		pipeline.UpdateStatusBarMetrics(9, 9, 9, 9, 9, 9);
+		pipeline.Recalculate(MemoryCleanupReason.FilterApplied);
+		await completed.Task.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0L, ReadPrivateLong(pipeline, "_lastStatusContentLines"));
+		Assert.Equal(0L, ReadPrivateLong(pipeline, "_lastStatusContentChars"));
+		Assert.Equal(0L, ReadPrivateLong(pipeline, "_lastStatusContentTokens"));
+	}
+
+	[AvaloniaFact]
 	public async Task EmptyContentSelectionMetricsMatchRootOnlyDocument()
 	{
 		using var temp = new TemporaryDirectory();
@@ -715,7 +753,7 @@ public sealed class MetricsPipelineWarmupTests
 			status,
 			currentTreeProvider: () => currentTree,
 			currentPathProvider: () => temp.Path,
-			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			selectedPathsProvider: () => new HashSet<string>([temp.Path], PathComparer.Default),
 			treeFormatProvider: () => TreeTextFormat.Ascii,
 			exportPathPresentationProvider: () => null,
 			boundsWidthProvider: () => 1400,
@@ -1184,7 +1222,7 @@ public sealed class MetricsPipelineWarmupTests
             status,
             currentTreeProvider: () => currentTree,
             currentPathProvider: () => temp.Path,
-            selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+            selectedPathsProvider: () => new HashSet<string>([temp.Path], PathComparer.Default),
             treeFormatProvider: () => TreeTextFormat.Ascii,
             exportPathPresentationProvider: () => null,
             boundsWidthProvider: () => 1400);
@@ -1626,11 +1664,16 @@ public sealed class MetricsPipelineWarmupTests
             status,
             currentTreeProvider: () => currentTree,
             currentPathProvider: () => currentPath,
-            selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+            selectedPathsProvider: () => new HashSet<string>([currentPath], PathComparer.Default),
             treeFormatProvider: () => TreeTextFormat.Ascii,
             exportPathPresentationProvider: () => null,
             boundsWidthProvider: () => 1400);
     }
+
+	private static long ReadPrivateLong(MetricsPipeline pipeline, string fieldName) =>
+		(long)(typeof(MetricsPipeline).GetField(
+			fieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(pipeline) ?? -1L);
 
     private static MainWindowViewModel CreateViewModel() =>
         new(CreateLocalization(), new HelpContentProvider());
