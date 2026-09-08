@@ -1869,6 +1869,30 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void SearchScannerNeverMatchesGeneratedRedactionPlaceholders()
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
+		var content = $"before\n{placeholder}\nafter {placeholder} visible-needle\n";
+
+		var placeholderResult = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex(System.Text.RegularExpressions.Regex.Escape(placeholder), ignoreCase: false),
+			contextLines: 0,
+			maximumStoredMatches: 50,
+			TestContext.Current.CancellationToken);
+		var visibleResult = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("visible-needle", ignoreCase: false),
+			contextLines: 0,
+			maximumStoredMatches: 50,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, placeholderResult.TotalMatches);
+		Assert.Empty(placeholderResult.Matches);
+		Assert.Equal(1, visibleResult.TotalMatches);
+	}
+
+	[Fact]
 	public void SearchScannerDoesNotAllocateOneObjectPerSourceLine()
 	{
 		var content = new string('\n', 1024 * 1024);

@@ -589,46 +589,43 @@ internal sealed class DevProjexMcpTools(
 				cancellationToken,
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
-			await using var prepared = await Projects.PrepareAsync(plan, cancellationToken).ConfigureAwait(false);
-			var analyzer = Projects.CreatePreparedAnalyzer(prepared);
 			var output = new StringBuilder();
 			var totalMatches = 0;
 			var shownMatches = 0;
 			var responseLimitReached = false;
-			foreach (var file in plan.IncludedFiles)
-			{
-				var content = await analyzer
-					.TryReadAsTextAsync(file, long.MaxValue, cancellationToken)
-					.ConfigureAwait(false);
-				if (content is null)
-					continue;
-				var scan = McpSearchTextScanner.Scan(
-					content.Content,
-					regex,
-					contextLines,
-					Math.Max(0, maximumResults - totalMatches),
-					cancellationToken);
-				totalMatches += scan.TotalMatches;
-				if (responseLimitReached)
-					continue;
-
-				foreach (var match in scan.Matches)
+			await using var searched = await Projects.ConsumeSearchTextAsync(
+				plan,
+				(file, token) =>
 				{
-					if (AppendSearchResult(
-						output,
-						McpProjectService.ToRelative(plan.SourceRoot, file),
-						content.Content,
-						match,
-						MaximumSearchContentCharacters))
+					var scan = McpSearchTextScanner.Scan(
+						file.Content,
+						regex,
+						contextLines,
+						Math.Max(0, maximumResults - totalMatches),
+						token);
+					totalMatches += scan.TotalMatches;
+					if (responseLimitReached)
+						return ValueTask.CompletedTask;
+
+					foreach (var match in scan.Matches)
 					{
-						shownMatches++;
+						if (AppendSearchResult(
+							output,
+							McpProjectService.ToRelative(plan.SourceRoot, file.Path),
+							file.Content,
+							match,
+							MaximumSearchContentCharacters))
+						{
+							shownMatches++;
+						}
+						else
+						{
+							responseLimitReached = true;
+						}
 					}
-					else
-					{
-						responseLimitReached = true;
-					}
-				}
-			}
+					return ValueTask.CompletedTask;
+				},
+				cancellationToken).ConfigureAwait(false);
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
 				: null;
@@ -639,7 +636,7 @@ internal sealed class DevProjexMcpTools(
 				: null;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(output.ToString().TrimEnd()),
-				FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Search),
+				FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
 				additionalMatchesNotice,
@@ -773,15 +770,20 @@ internal sealed class DevProjexMcpTools(
 			var file = Projects.ResolveFile(plan, requestedPath);
 			await using var prepared = await Projects.PrepareAsync(plan with { IncludedFiles = [file] }, cancellationToken)
 				.ConfigureAwait(false);
-			var content = await Projects.CreatePreparedAnalyzer(prepared)
-				.TryReadAsTextAsync(file, cancellationToken)
+			var read = await Projects.CreatePreparedAnalyzer(prepared)
+				.ReadClassifiedAsync(file, long.MaxValue, cancellationToken)
 				.ConfigureAwait(false);
-			if (content is null)
+			if (read.Classification != FileContentClassification.Text || read.Content is null)
 			{
+				var detail = read.Classification == FileContentClassification.TooLarge
+					? $"file size {read.Content?.SizeBytes ?? new FileInfo(file).Length} bytes exceeds the mandatory redaction scan limit of {SecretRedactionOutputPreparer.MaximumScannableFileBytes} bytes"
+					: $"file classification is {read.Classification.ToString().ToLowerInvariant()}";
 				throw new McpToolException(
 					McpErrorCodes.PayloadTruncated,
-					$"{McpErrorCodes.PayloadTruncated}: file content is binary, unsupported, or exceeds the redaction scan limit and cannot be returned safely.");
+					$"{McpErrorCodes.PayloadTruncated}: {detail}; content was not returned because it could not be inspected safely. " +
+					$"Select a file no larger than {SecretRedactionOutputPreparer.MaximumScannableFileBytes} bytes or narrow the project before retrying.");
 			}
+			var content = read.Content;
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var page = McpTextRanges.Slice(

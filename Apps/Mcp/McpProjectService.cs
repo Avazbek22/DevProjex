@@ -822,6 +822,18 @@ internal sealed class McpProjectService(
 				cancellationToken)
 			.ConfigureAwait(false);
 
+	public async Task<PreparedSecretRedactionOutput> ConsumeSearchTextAsync(
+		ProjectContextPlan plan,
+		Func<TransformedTextFile, CancellationToken, ValueTask> consumer,
+		CancellationToken cancellationToken) =>
+		await services.OutputPreparer
+			.ConsumeTransformedTextAsync(
+				CreateTransformationContext(plan),
+				plan.IncludedFiles,
+				consumer,
+				cancellationToken)
+			.ConfigureAwait(false);
+
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
 		services.OutputPreparer.CreatePreparedAnalyzer(prepared);
 

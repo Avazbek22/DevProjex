@@ -13,6 +13,11 @@ internal sealed record McpSearchTextScanResult(
 	int TotalMatches,
 	IReadOnlyList<McpSearchMatchContext> Matches);
 
+internal readonly record struct McpProtectedTextRange(int Start, int Length)
+{
+	public int End => checked(Start + Length);
+}
+
 internal static class McpSearchTextScanner
 {
 	public static McpSearchTextScanResult Scan(
@@ -29,6 +34,7 @@ internal static class McpSearchTextScanner
 		cancellationToken.ThrowIfCancellationRequested();
 		if (content.Length == 0)
 			return new McpSearchTextScanResult(0, []);
+		var protectedRanges = FindRedactionPlaceholders(content);
 
 		var previous = contextLines == 0
 			? null
@@ -48,7 +54,7 @@ internal static class McpSearchTextScanner
 					active.RemoveAt(index);
 			}
 
-			if (regex.IsMatch(content, line.Offset, line.Length))
+			if (regex.IsMatch(content, line.Offset, line.Length, protectedRanges))
 			{
 				totalMatches++;
 				if (stored.Count < maximumStoredMatches)
@@ -94,6 +100,26 @@ internal static class McpSearchTextScanner
 					match.MatchLineNumber,
 					match.Lines.ToArray()))
 				.ToArray());
+	}
+
+	private static IReadOnlyList<McpProtectedTextRange> FindRedactionPlaceholders(string content)
+	{
+		const string prefix = "DEVPROJEX_REDACTED[";
+		List<McpProtectedTextRange>? ranges = null;
+		var offset = 0;
+		while (offset < content.Length)
+		{
+			var start = content.IndexOf(prefix, offset, StringComparison.Ordinal);
+			if (start < 0)
+				break;
+			var end = content.IndexOf(']', start + prefix.Length);
+			if (end < 0)
+				break;
+			ranges ??= [];
+			ranges.Add(new McpProtectedTextRange(start, end - start + 1));
+			offset = end + 1;
+		}
+		return ranges ?? [];
 	}
 
 	private sealed class PendingMatch(

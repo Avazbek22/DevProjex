@@ -114,6 +114,8 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("JSON and XML never return partial syntax", server, StringComparison.Ordinal);
 		Assert.Contains("analyze.topFiles[].uninspected", server, StringComparison.Ordinal);
 		Assert.Contains("initialize` result", server, StringComparison.Ordinal);
+		Assert.Contains("never returns an empty success", server, StringComparison.Ordinal);
+		Assert.Contains("no intermediate export is written or read", server, StringComparison.Ordinal);
 
 		Assert.Contains("MCP agent ergonomics changes four v5.2 behaviors", normalizedVersion, StringComparison.Ordinal);
 		Assert.Contains("there is no strict-range switch", normalizedVersion, StringComparison.Ordinal);

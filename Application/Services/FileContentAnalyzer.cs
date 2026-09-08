@@ -699,7 +699,11 @@ public sealed class FileContentAnalyzer :
 		string path,
 		CancellationToken cancellationToken = default)
 	{
-		return TryReadAsTextAsync(path, DefaultMaxSizeForFullRead, cancellationToken);
+		var result = ReadFactWithIdentitySync(path, DefaultMaxSizeForFullRead, cancellationToken).Fact.ToReadResult();
+		return ValueTask.FromResult(
+			result.Classification == FileContentClassification.Text
+				? result.Content
+				: null);
 	}
 
 	/// <inheritdoc />

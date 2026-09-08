@@ -232,9 +232,9 @@ open-world.
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call `pack_context` again after server restart. |
-| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
+| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. Files withheld by the mandatory inspection limit are counted in the partial-result warning rather than silently treated as searched. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). Results larger than 50,000 characters are stored and returned with a `pack_id` for `read_pack`. |
-| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
+| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. A non-empty file that cannot be inspected under the 16 MiB mandatory-redaction boundary returns `DPX-MCP-PAYLOAD-TRUNCATED` with its byte size and the limit; it never returns an empty success. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, `related_files`, and `get_file` additionally accept the
@@ -329,6 +329,12 @@ searches the inspected files, `analyze` preserves its structured metrics
 envelope while identifying metrics that may be estimated, and `pack_context`
 withholds uninspected content. The notice is outside spotlight delimiters and
 reports only a count, never file paths or uninspected content.
+For the single-file `get_file` operation the same state is an error, because a
+successful empty payload must mean that the inspected source file is genuinely
+empty. Line ranges are evaluated only after the complete source passed mandatory
+inspection. Search consumes each transformed, redacted file directly from the
+bounded pipeline; generated `DEVPROJEX_REDACTED[...]` placeholders themselves
+are excluded from pattern matches, and no intermediate export is written or read.
 
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append
