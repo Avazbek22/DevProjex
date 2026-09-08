@@ -153,6 +153,28 @@ public sealed class SecretRedactionOutputPreparer
 			cancellationToken,
 			progress);
 
+	/// <summary>
+	/// Applies the normal compression and redaction pipeline and delivers each safe text payload
+	/// directly to a bounded consumer in selection order. No prepared content is written to disk.
+	/// Files that cannot be inspected under the mandatory redaction limit are withheld and reported
+	/// through <see cref="PreparedSecretRedactionOutput.UnscannableFiles"/>.
+	/// </summary>
+	public Task<PreparedSecretRedactionOutput> ConsumeTransformedTextAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		Func<TransformedTextFile, CancellationToken, ValueTask> consumer,
+		CancellationToken cancellationToken = default) =>
+		PrepareCoreAsync(
+			context,
+			orderedFilePaths,
+			captureEffectiveFindings: false,
+			materializeTransformedContent: false,
+			captureTransformedMetrics: false,
+			allowConsolidatedSnapshot: false,
+			cancellationToken,
+			progress: null,
+			consumer ?? throw new ArgumentNullException(nameof(consumer)));
+
 	private async Task<PreparedSecretRedactionOutput> PrepareCoreAsync(
 		ContentTransformationContext context,
 		IReadOnlyList<string> orderedFilePaths,
@@ -161,7 +183,8 @@ public sealed class SecretRedactionOutputPreparer
 		bool captureTransformedMetrics,
 		bool allowConsolidatedSnapshot,
 		CancellationToken cancellationToken,
-		IProgress<ProjectCopyExportProgress>? progress)
+		IProgress<ProjectCopyExportProgress>? progress,
+		Func<TransformedTextFile, CancellationToken, ValueTask>? transformedTextConsumer = null)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
@@ -240,7 +263,7 @@ public sealed class SecretRedactionOutputPreparer
 			                   transformationScope,
 			                   orderedFilePaths,
 			                   cancellationToken,
-			                   requiredInspectionScope).ConfigureAwait(false))
+			                   transformedTextConsumer is null ? requiredInspectionScope : null).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var completed = false;
@@ -267,7 +290,8 @@ public sealed class SecretRedactionOutputPreparer
 							if (captureTransformedMetrics && result.Content is { } estimatedContent)
 								transformedFileMetrics![sourcePath] = ToContentFileMetrics(sourcePath, estimatedContent);
 							if (scope is not null &&
-							    scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None)
+							    (scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None ||
+							     transformedTextConsumer is not null))
 							{
 								scope.AnalyzeUnscannable(sourcePath, metadataAfterRead, result.Classification);
 								preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(
@@ -313,6 +337,16 @@ public sealed class SecretRedactionOutputPreparer
 					IReadOnlyList<EffectiveRedactionFinding> findings = plan is null || !captureEffectiveFindings
 						? []
 						: BuildEffectiveFindings(plan.Spans, content.Content, compressed.Map);
+					if (transformedTextConsumer is not null)
+					{
+						var outputText = plan is null
+							? transformedText
+							: plan.BuildResult(transformedText).Text;
+						await transformedTextConsumer(
+								new TransformedTextFile(sourcePath, outputText),
+								cancellationToken)
+							.ConfigureAwait(false);
+					}
 					if (captureTransformedMetrics)
 					{
 						transformedFileMetrics![sourcePath] = await MeasureTransformedContentAsync(
@@ -2589,6 +2623,8 @@ public sealed record PreparedSecretFile(
 	}
 }
 
+public sealed record TransformedTextFile(string Path, string Content);
+
 public sealed record PreparedSecretSpan(int Start, int Length)
 {
 	public int End => checked(Start + Length);
@@ -2938,15 +2974,7 @@ public sealed class PreparedSecretFileContentAnalyzer :
 	{
 		var file = prepared.GetFile(path);
 		if (file.IsUnscannable)
-		{
-			file.EnsureSourceVersion();
-			var unscannable = await ResolveAnalyzer(file).TryReadAsTextAsync(
-				file.ContentPath,
-				SecretRedactionOutputPreparer.MaximumScannableFileBytes,
-				cancellationToken).ConfigureAwait(false);
-			file.EnsureSourceVersion();
-			return unscannable;
-		}
+			return null;
 
 		if (!file.IsText)
 			return null;
@@ -2958,7 +2986,10 @@ public sealed class PreparedSecretFileContentAnalyzer :
 
 		file.EnsureSourceVersion();
 		RecordPreparedRead(file);
-		var result = await ResolveAnalyzer(file).TryReadAsTextAsync(file.ContentPath, cancellationToken)
+		var result = await ResolveAnalyzer(file).TryReadAsTextAsync(
+				file.ContentPath,
+				long.MaxValue,
+				cancellationToken)
 			.ConfigureAwait(false);
 		file.EnsureSourceVersion();
 		return result;

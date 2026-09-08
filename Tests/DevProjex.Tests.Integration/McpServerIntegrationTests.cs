@@ -4107,6 +4107,108 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SearchProjectConsumesRedactedTextWithoutPreparedFileIo()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Sensitive.txt"),
+			$"search-marker before {Secret} after\nsecond search-marker\n");
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "search-marker",
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			});
+		var diagnostics = measurement.Capture();
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("Sensitive.txt:1:", text, StringComparison.Ordinal);
+		Assert.Contains("Sensitive.txt:2:", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
+		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
+		Assert.Equal(0, diagnostics.PreparedWriteBytes);
+		Assert.Equal(0, diagnostics.PreparedReadBytes);
+		Assert.True(diagnostics.PeakInFlightBytes > 0);
+	}
+
+	[Fact]
+	public async Task SearchProjectDoesNotMatchGeneratedPlaceholderText()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Sensitive.txt"), $"token={Secret}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "DEVPROJEX_REDACTED\\[github-pat#1\\]",
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			});
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.DoesNotContain("Sensitive.txt:", Text(result), StringComparison.Ordinal);
+		Assert.Contains("[No matches]", Text(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileAndSearchDistinguishReadableAndUninspectedLargeText()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Empty.txt"), string.Empty);
+		File.WriteAllText(
+			Path.Combine(project, "Readable.txt"),
+			"readable-marker\n" + new string('a', 12 * 1024 * 1024));
+		File.WriteAllText(
+			Path.Combine(project, "Uninspected.txt"),
+			"withheld-marker\n" + new string('b', 17 * 1024 * 1024));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var empty = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Empty.txt" });
+		var readable = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Readable.txt", ["end_line"] = 1 });
+		var withheld = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Uninspected.txt" });
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "withheld-marker",
+				["include_patterns"] = new[] { "Uninspected.txt" },
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			});
+
+		Assert.NotEqual(true, empty.IsError);
+		Assert.Equal(string.Empty, ExtractSpotlightBody(Text(empty)));
+		Assert.NotEqual(true, readable.IsError);
+		Assert.Contains("readable-marker", Text(readable), StringComparison.Ordinal);
+		Assert.True(withheld.IsError);
+		Assert.StartsWith(McpErrorCodes.PayloadTruncated, Text(withheld), StringComparison.Ordinal);
+		Assert.Contains("17825808 bytes", Text(withheld), StringComparison.Ordinal);
+		Assert.Contains("16777216 bytes", Text(withheld), StringComparison.Ordinal);
+		Assert.NotEqual(true, search.IsError);
+		Assert.DoesNotContain("Uninspected.txt:", Text(search), StringComparison.Ordinal);
+		Assert.Contains("1 selected file", Text(search), StringComparison.Ordinal);
+		Assert.Contains("Uninspected content was not searched", Text(search), StringComparison.Ordinal);
+		Assert.Contains("Results are partial", Text(search), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task StructuredPackReusesPreparedMetricsAndMatchesCli()
 	{
 		// macOS exposes its temporary root through a /var -> /private/var alias. Keep both

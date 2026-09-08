@@ -857,6 +857,32 @@ public sealed partial class McpServerProcessTests
 		Assert.NotEmpty(ParseJsonRpcMessages(recordingOutput.GetRecordedText()));
 	}
 
+	private static void WriteExactSizeTextFile(string path, long sizeBytes, bool utf16)
+	{
+		Encoding encoding = utf16
+			? new UnicodeEncoding(bigEndian: false, byteOrderMark: true, throwOnInvalidBytes: true)
+			: new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+		var preamble = encoding.GetPreamble();
+		var marker = encoding.GetBytes("boundary-marker\n");
+		var fill = encoding.GetBytes(new string('a', 4096));
+		using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+		WritePrefix(preamble);
+		WritePrefix(marker);
+		while (stream.Position < sizeBytes)
+		{
+			var count = (int)Math.Min(fill.Length, sizeBytes - stream.Position);
+			stream.Write(fill, 0, count);
+		}
+
+		void WritePrefix(byte[] bytes)
+		{
+			if (stream.Position >= sizeBytes)
+				return;
+			var count = (int)Math.Min(bytes.Length, sizeBytes - stream.Position);
+			stream.Write(bytes, 0, count);
+		}
+	}
+
 	private static string ExtractPackId(string text)
 	{
 		const string prefix = "Pack stored as '";
@@ -1035,6 +1061,110 @@ public sealed partial class McpServerProcessTests
 
 		public Task WaitForValueAsync(CancellationToken cancellationToken) =>
 			_reported.Task.WaitAsync(cancellationToken);
+	}
+
+	[Fact]
+	public async Task RealProcessGetFileAndSearchReportEveryReadLimitBoundaryHonestly()
+	{
+		const long tenMiB = 10L * 1024 * 1024;
+		const long sixteenMiB = 16L * 1024 * 1024;
+		long[] sizes = [21, tenMiB, tenMiB + 1, sixteenMiB, sixteenMiB + 1];
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllBytes(Path.Combine(project, "empty.txt"), []);
+		foreach (var utf16 in new[] { false, true })
+		foreach (var size in sizes)
+			WriteExactSizeTextFile(
+				Path.Combine(project, $"{(utf16 ? "utf16" : "utf8")}-{size}.txt"),
+				size,
+				utf16);
+
+		var application = PublishedApplicationLocator.FindApplicationAssembly();
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(application);
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			TestContext.Current.CancellationToken);
+
+		var empty = await client.CallToolAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "empty.txt" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		Assert.NotEqual(true, empty.IsError);
+
+		foreach (var utf16 in new[] { false, true })
+		foreach (var size in sizes)
+		foreach (var ranged in new[] { false, true })
+		{
+			var arguments = new Dictionary<string, object?>
+			{
+				["path"] = $"{(utf16 ? "utf16" : "utf8")}-{size}.txt"
+			};
+			if (ranged)
+			{
+				arguments["start_line"] = 1;
+				arguments["end_line"] = 1;
+			}
+			var result = await client.CallToolAsync(
+				"get_file",
+				arguments,
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+			var invalidUtf16Length = utf16 && (size & 1) != 0 && size <= sixteenMiB;
+			var mustFail = size > sixteenMiB || invalidUtf16Length;
+			Assert.Equal(mustFail, result.IsError == true);
+			if (mustFail)
+				Assert.StartsWith(McpErrorCodes.PayloadTruncated, text, StringComparison.Ordinal);
+			else
+				Assert.Contains("boundary-marker", text, StringComparison.Ordinal);
+		}
+
+		var search = await client.CallToolAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "boundary-marker",
+				["include_patterns"] = new[] { $"utf8-{sixteenMiB + 1}.txt" },
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			},
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var searchText = Assert.IsType<TextContentBlock>(Assert.Single(search.Content)).Text;
+		Assert.NotEqual(true, search.IsError);
+		Assert.DoesNotContain($"utf8-{sixteenMiB + 1}.txt:", searchText, StringComparison.Ordinal);
+		Assert.Contains("Uninspected content was not searched", searchText, StringComparison.Ordinal);
+		Assert.Contains("Results are partial", searchText, StringComparison.Ordinal);
+
+		await client.DisposeAsync();
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
 	}
 
 	// Mirrors the hardened EnsureRepository fixture: a signing requirement, hook

@@ -59,6 +59,31 @@ public sealed class SecretRedactionPipelineConcurrencyIntegrationTests
 	}
 
 	[Fact(Timeout = 15_000)]
+	public async Task ConsumeTransformedTextAsync_ConsumerFailureDrainsWorkersAndReservations()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("project");
+		var paths = CreateFiles(temporary, 16);
+		using var detector = new FillWindowBeforeFirstDetector(requiredLaterDetections: 7);
+		using var session = new SecretRedactionSession(detector);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		using var diagnostics = ContentPipelineDiagnostics.BeginMeasurement();
+
+		var exception = await Assert.ThrowsAsync<PipelineProbeException>(() =>
+			preparer.ConsumeTransformedTextAsync(
+				new ContentTransformationContext(
+					Compression: null,
+					new SecretRedactionContext(projectRoot, session)),
+				paths,
+				(_, _) => ValueTask.FromException(new PipelineProbeException("search-consumer")),
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("search-consumer", exception.Message);
+		Assert.Equal(0, detector.ActiveCalls);
+		Assert.Equal(0, ReadInFlightBytes(diagnostics));
+	}
+
+	[Fact(Timeout = 15_000)]
 	public async Task PrepareAsync_ExternalCancellationWithAFullWindowDrainsWorkersAndReservations()
 	{
 		using var temporary = new TemporaryDirectory();
