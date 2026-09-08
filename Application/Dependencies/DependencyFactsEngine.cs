@@ -752,13 +752,22 @@ public sealed class DependencyFactsEngine : IDisposable
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		Span<byte> lengthPrefix = stackalloc byte[sizeof(int)];
 		var buffer = ArrayPool<byte>.Shared.Rent(4096);
+		Encoder? encoder = null;
 		try
 		{
 			foreach (var value in values)
 			{
-				BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, Encoding.UTF8.GetByteCount(value));
+				var byteCount = Encoding.UTF8.GetByteCount(value);
+				BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, byteCount);
 				hash.AppendData(lengthPrefix);
-				var encoder = Encoding.UTF8.GetEncoder();
+				if (byteCount <= buffer.Length)
+				{
+					var written = Encoding.UTF8.GetBytes(value.AsSpan(), buffer);
+					hash.AppendData(buffer.AsSpan(0, written));
+					continue;
+				}
+				encoder ??= Encoding.UTF8.GetEncoder();
+				encoder.Reset();
 				var remaining = value.AsSpan();
 				do
 				{
