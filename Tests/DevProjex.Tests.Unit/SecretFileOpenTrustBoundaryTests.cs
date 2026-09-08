@@ -57,6 +57,27 @@ public sealed class SecretFileOpenTrustBoundaryTests
 		Assert.Equal(FileContentClassification.Unreadable, (await readTask).Classification);
 	}
 
+	[Fact]
+	public async Task UnixDescriptorOpenSupportsAnAsynchronousReadConsumer()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Unix descriptor coverage is Unix-only.");
+
+		using var temporary = new TemporaryDirectory();
+		var path = temporary.CreateFile("source.txt", "safe");
+		await using var stream = UnixFileTypeInspector.OpenRegularFileForSequentialRead(
+			path,
+			bufferSize: 1,
+			FileShare.ReadWrite | FileShare.Delete,
+			asynchronous: true);
+		var buffer = new byte[4];
+
+		var read = await stream.ReadAsync(buffer, TestContext.Current.CancellationToken);
+
+		Assert.Equal(4, read);
+		Assert.Equal("safe", Encoding.UTF8.GetString(buffer));
+	}
+
 	private static void CreateFifoOrSkip(string path)
 	{
 		var startInfo = new ProcessStartInfo("mkfifo")

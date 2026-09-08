@@ -96,7 +96,9 @@ public static class UnixFileTypeInspector
 			if (blockingResult != 0)
 				ThrowForLastError(path);
 
-			var stream = new FileStream(handle, FileAccess.Read, bufferSize, asynchronous);
+			// A descriptor created outside FileStream has no runtime async-handle marker.
+			// Keep it synchronous here; ReadAsync remains supported by FileStream's fallback.
+			var stream = new FileStream(handle, FileAccess.Read, bufferSize, isAsync: false);
 			handle = null!;
 			return stream;
 		}
