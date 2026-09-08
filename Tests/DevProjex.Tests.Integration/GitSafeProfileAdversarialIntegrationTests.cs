@@ -148,6 +148,89 @@ public sealed class GitSafeProfileAdversarialIntegrationTests
 	}
 
 	[Fact]
+	public async Task ManagedCheckoutDisablesCaseDistinctFilterDriversWithoutExecutingEither()
+	{
+		using var fixture = await HostileGitFixture.CreateAsync(TestContext.Current.CancellationToken);
+		var container = fixture.CreateManagedContainer("case-distinct-managed");
+		var basePath = Path.Combine(container, RepositoryCacheLayout.BaseDirectoryName);
+		Directory.Move(fixture.RepositoryPath, basePath);
+		fixture.RepositoryPath = basePath;
+		await File.WriteAllTextAsync(
+			Path.Combine(basePath, ".gitattributes"),
+			"tracked.txt filter=foo\n",
+			TestContext.Current.CancellationToken);
+		fixture.RunGit("add", ".gitattributes");
+		fixture.RunGit("commit", "-m", "case-sensitive filter attribute");
+		fixture.RunGit("config", "filter.Foo.smudge", "cat");
+		fixture.RunGit("config", "filter.foo.smudge", fixture.CreateMarkerCommand("lowercase-smudge"));
+		File.Delete(Path.Combine(basePath, "tracked.txt"));
+
+		var inspection = await GitRepositorySafetyInspector.InspectAsync(
+			basePath,
+			TestContext.Current.CancellationToken);
+		Assert.True(inspection.IsComplete);
+		Assert.Contains("Foo", inspection.CheckoutFilterDrivers);
+		Assert.Contains("foo", inspection.CheckoutFilterDrivers);
+
+		await using var lease = await RepositoryFileLease.AcquireExclusiveAsync(
+			RepositoryCacheLayout.GetBaseOperationLockPath(container, basePath),
+			TestContext.Current.CancellationToken);
+		await RunProtectedAsync(
+			basePath,
+			GitProcessOperation.ManagedCheckout(
+				GitManagedCheckoutKind.HardReset,
+				"HEAD",
+				filterDrivers: inspection.CheckoutFilterDrivers),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(File.Exists(fixture.MarkerPath("lowercase-smudge")));
+	}
+
+	[Fact]
+	public async Task CorruptRepositoryConfigMakesInspectionCheckoutAndScopeUnavailable()
+	{
+		using var fixture = await HostileGitFixture.CreateAsync(TestContext.Current.CancellationToken);
+		var container = fixture.CreateManagedContainer("corrupt-managed");
+		var basePath = Path.Combine(container, RepositoryCacheLayout.BaseDirectoryName);
+		Directory.Move(fixture.RepositoryPath, basePath);
+		fixture.RepositoryPath = basePath;
+		await File.AppendAllTextAsync(
+			Path.Combine(basePath, ".git", "config"),
+			"\n[broken\n",
+			TestContext.Current.CancellationToken);
+
+		var inspection = await GitRepositorySafetyInspector.InspectAsync(
+			basePath,
+			TestContext.Current.CancellationToken);
+		Assert.False(inspection.IsComplete);
+
+		var service = new GitRepositoryService(allowFileTransportForTests: true);
+		Assert.False(await service.SwitchBranchAsync(
+			basePath,
+			"main",
+			cancellationToken: TestContext.Current.CancellationToken));
+
+		var worktrees = new GitWorktreeManager();
+		Assert.False(await worktrees.PreparePrimaryAsync(
+			basePath,
+			"main",
+			TestContext.Current.CancellationToken));
+
+		var scope = await new GitScopePathProvider(PlatformGitPathComparisonSemanticsResolver.Instance).ResolveAsync(
+			basePath,
+			GitFilteringMode.Changes,
+			diffRange: null,
+			TestContext.Current.CancellationToken);
+		Assert.False(scope.IsAvailable);
+		Assert.Equal("Git safety configuration could not be inspected.", scope.FailureReason);
+		Assert.Null(scope.FailureDetail);
+		var diagnostic = GitScopeFilter.CreateUnavailableDiagnostic(basePath, scope);
+		Assert.Equal(GitScopeFilter.UnavailableDiagnosticCode, diagnostic.Code);
+		Assert.Equal("Git safety configuration could not be inspected.", diagnostic.Message);
+		Assert.Null(diagnostic.Detail);
+	}
+
+	[Fact]
 	public async Task ExplicitNetworkRejectsMutableRepositoryTransportOverridesBeforeFetch()
 	{
 		using var fixture = await HostileGitFixture.CreateAsync(TestContext.Current.CancellationToken);
