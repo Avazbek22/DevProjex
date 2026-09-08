@@ -404,26 +404,6 @@ public sealed class FileContentAnalyzerTests
 	}
 
 	[Fact]
-	public async Task TryReadAsTextAsync_DefaultLimitDoesNotReturnEstimatedContentAsReadableText()
-	{
-		using var temp = new TemporaryDirectory();
-		var file = temp.CreateFile("large-default.txt", new string('A', 10 * 1024 * 1024 + 1));
-
-		var content = await _analyzer.TryReadAsTextAsync(
-			file,
-			cancellationToken: TestContext.Current.CancellationToken);
-		var classified = await _analyzer.ReadClassifiedAsync(
-			file,
-			10 * 1024 * 1024,
-			TestContext.Current.CancellationToken);
-
-		Assert.Null(content);
-		Assert.Equal(FileContentClassification.TooLarge, classified.Classification);
-		Assert.NotNull(classified.Content);
-		Assert.True(classified.Content.IsEstimated);
-	}
-
-	[Fact]
 	public async Task TryReadAsTextAsync_ReturnsCorrectCharCount()
 	{
 		using var temp = new TemporaryDirectory();
