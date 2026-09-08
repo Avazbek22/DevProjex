@@ -761,7 +761,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			ArrayPool<byte>.Shared.Return(buffer);
 		}
 
-		return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+		return Convert.ToHexStringLower(hash.GetHashAndReset());
 	}
 
 	private static CanonicalManifestFile[] CreateCanonicalManifest(

@@ -865,7 +865,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		});
 	}
 	private static string Fingerprint(string root, string path, string content) => $"{PortableRelative(root, path)}\0{Hash([content])}";
-	private static string Hash(IEnumerable<string> values) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', values)))).ToLowerInvariant();
+	private static string Hash(IEnumerable<string> values) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', values))));
 	private static string PortableRelative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 	private static bool IsWithin(string root, string path)
 	{
@@ -1112,7 +1112,7 @@ internal sealed class BoundedDependencyControlFileReader(FileContentReadStreamOp
 		bool canCache = true) => new(state, string.Empty, reason, $"{state}:{length}:{lastWrite}:{reason}", canCache);
 
 	private static string Hash(ReadOnlySpan<byte> bytes) =>
-		Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+		Convert.ToHexStringLower(SHA256.HashData(bytes));
 
 	private static string OneLine(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
 }

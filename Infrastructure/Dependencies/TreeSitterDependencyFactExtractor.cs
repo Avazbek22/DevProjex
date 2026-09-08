@@ -855,7 +855,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		? LanguageId.TypeScript
 		: language;
 	private static string Normalize(string path) => path.Replace('\\', '/');
-	private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+	private static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 	private static string OneLine(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
 	private static bool IsWithin(string root, string path)
 	{
@@ -1099,8 +1099,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		}
 
 		private static string MetadataFingerprint(string state, long length, long lastWrite) =>
-			Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{state}:{length}:{lastWrite}")))
-				.ToLowerInvariant();
+			Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes($"{state}:{length}:{lastWrite}")));
 	}
 
 	internal sealed record BoundedDependencySourceRead(
