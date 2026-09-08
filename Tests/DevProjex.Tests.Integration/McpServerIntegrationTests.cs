@@ -1525,7 +1525,11 @@ public sealed class McpServerIntegrationTests
 			var globAnchor = Array.IndexOf(propertyNames, "exclude_patterns");
 			var profileAnchor = Array.IndexOf(propertyNames, "profile");
 			Assert.Equal(
-				Math.Max(globAnchor, Math.Max(profileAnchor, Array.IndexOf(propertyNames, "branch"))) + 1,
+				(globAnchor >= 0
+					? globAnchor
+					: profileAnchor >= 0
+						? profileAnchor
+						: Array.IndexOf(propertyNames, "branch")) + 1,
 				Array.IndexOf(propertyNames, "exclusions"));
 			var required = schema.TryGetProperty("required", out var requiredElement)
 				? requiredElement.EnumerateArray().Select(static item => item.GetString()).ToArray()
