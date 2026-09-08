@@ -513,7 +513,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			BufferSize = bufferSize,
 			Options = options
 		};
-		if (!OperatingSystem.IsWindows())
+		if (!OperatingSystem.IsWindows() && mode is
+		    FileMode.CreateNew or FileMode.Create or FileMode.OpenOrCreate or FileMode.Append)
 			streamOptions.UnixCreateMode = PrivateFileMode;
 		var stream = new FileStream(path, streamOptions);
 		try
