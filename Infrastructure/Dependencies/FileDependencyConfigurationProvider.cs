@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using DevProjex.Application.Dependencies;
+using DevProjex.Application.Services;
 
 namespace DevProjex.Infrastructure.Dependencies;
 
@@ -25,6 +26,14 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 
 	public FileDependencyConfigurationProvider()
 		: this(new BoundedDependencyControlFileReader(), new DependencyPathMetadata())
+	{
+	}
+
+	public FileDependencyConfigurationProvider(FileContentReadStreamOpener sourceOpener)
+		: this(
+			new BoundedDependencyControlFileReader(
+				sourceOpener ?? throw new ArgumentNullException(nameof(sourceOpener))),
+			new DependencyPathMetadata())
 	{
 	}
 
@@ -254,7 +263,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				new HashSet<string>(),
 				[],
 				true,
-				AllowJavaScript: parsed.Value.AllowJavaScript)
+				AllowJavaScript: parsed.Value.AllowJavaScript,
+				TypeScriptModuleSuffixes: parsed.Value.ModuleSuffixes)
 			{
 				ConfigurationState = parsed.State,
 				ConfigurationDiagnostic = parsed.Reason
@@ -419,6 +429,18 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				: null;
 			var hasAllowJavaScript = options.TryGetProperty("allowJs", out var allowJs);
 			var allowJavaScript = hasAllowJavaScript && allowJs.ValueKind is JsonValueKind.True;
+			var hasModuleSuffixes = options.TryGetProperty("moduleSuffixes", out var moduleSuffixesElement);
+			if (hasModuleSuffixes &&
+			    (moduleSuffixesElement.ValueKind != JsonValueKind.Array ||
+			     moduleSuffixesElement.EnumerateArray().Any(static item => item.ValueKind != JsonValueKind.String)))
+			{
+				return TypeScriptLayerFailure(
+					DependencyConfigurationState.UnsupportedSemantics,
+					"tsconfig compilerOptions.moduleSuffixes must be an array of strings");
+			}
+			var moduleSuffixes = hasModuleSuffixes
+				? moduleSuffixesElement.EnumerateArray().Select(static item => item.GetString()!).ToArray()
+				: null;
 			var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 			var hasPaths = options.TryGetProperty("paths", out var mappings);
 			if (hasPaths && mappings.ValueKind != JsonValueKind.Object)
@@ -448,7 +470,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 					new OptionalConfigurationValue<TypeScriptPathMappings>(
 						hasPaths,
 						hasPaths ? new TypeScriptPathMappings(Path.GetDirectoryName(configPath)!, paths) : null),
-					new OptionalConfigurationValue<bool>(hasAllowJavaScript, allowJavaScript)));
+					new OptionalConfigurationValue<bool>(hasAllowJavaScript, allowJavaScript),
+					new OptionalConfigurationValue<IReadOnlyList<string>>(hasModuleSuffixes, moduleSuffixes)));
 		}
 		catch (JsonException)
 		{
@@ -539,7 +562,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			child.ModuleResolution.IsSpecified ? child.ModuleResolution : inherited.ModuleResolution,
 			child.BaseUrl.IsSpecified ? child.BaseUrl : inherited.BaseUrl,
 			child.Paths.IsSpecified ? child.Paths : inherited.Paths,
-			child.AllowJavaScript.IsSpecified ? child.AllowJavaScript : inherited.AllowJavaScript);
+			child.AllowJavaScript.IsSpecified ? child.AllowJavaScript : inherited.AllowJavaScript,
+			child.ModuleSuffixes.IsSpecified ? child.ModuleSuffixes : inherited.ModuleSuffixes);
 
 	private static TypeScriptConfiguration MaterializeTypeScriptConfiguration(
 		TypeScriptConfigurationLayer layer,
@@ -568,7 +592,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			moduleResolution,
 			legacy,
 			mappings,
-			layer.AllowJavaScript.IsSpecified && layer.AllowJavaScript.Value);
+			layer.AllowJavaScript.IsSpecified && layer.AllowJavaScript.Value,
+			layer.ModuleSuffixes.IsSpecified
+				? layer.ModuleSuffixes.Value ?? []
+				: [""]);
 	}
 
 	private static string ResolveTypeScriptOptionDirectory(string declaringDirectory, string? relative) =>
@@ -867,13 +894,15 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		string ModuleResolution,
 		bool Legacy,
 		IReadOnlyDictionary<string, IReadOnlyList<string>> Paths,
-		bool AllowJavaScript)
+		bool AllowJavaScript,
+		IReadOnlyList<string> ModuleSuffixes)
 	{
 		public static readonly TypeScriptConfiguration Default = new(
 			"bundler",
 			false,
 			new Dictionary<string, IReadOnlyList<string>>(),
-			false);
+			false,
+			[""]);
 	}
 
 	private readonly record struct OptionalConfigurationValue<T>(bool IsSpecified, T? Value);
@@ -889,10 +918,12 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		OptionalConfigurationValue<string> ModuleResolution,
 		OptionalConfigurationValue<TypeScriptBaseUrl> BaseUrl,
 		OptionalConfigurationValue<TypeScriptPathMappings> Paths,
-		OptionalConfigurationValue<bool> AllowJavaScript)
+		OptionalConfigurationValue<bool> AllowJavaScript,
+		OptionalConfigurationValue<IReadOnlyList<string>> ModuleSuffixes)
 	{
 		public static readonly TypeScriptConfigurationLayer Empty = new(
 			null,
+			default,
 			default,
 			default,
 			default,
@@ -992,7 +1023,7 @@ internal sealed record DependencyControlFileSnapshot(
 	string FingerprintValue,
 	bool CanCache = true);
 
-internal sealed class BoundedDependencyControlFileReader : IDependencyControlFileReader
+internal sealed class BoundedDependencyControlFileReader(FileContentReadStreamOpener? sourceOpener = null) : IDependencyControlFileReader
 {
 	private static ReadOnlySpan<byte> Utf8Preamble => [0xEF, 0xBB, 0xBF];
 	private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -1004,13 +1035,15 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 	{
 		try
 		{
-			await using var stream = new FileStream(
-				path,
-				FileMode.Open,
-				FileAccess.Read,
-				FileShare.Read | FileShare.Delete,
-				64 * 1024,
-				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			await using var stream = sourceOpener is null
+				? new FileStream(
+					path,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.Read | FileShare.Delete,
+					64 * 1024,
+					FileOptions.Asynchronous | FileOptions.SequentialScan)
+				: sourceOpener(path, 64 * 1024, FileShare.Read | FileShare.Delete, asynchronous: true);
 			var length = stream.Length;
 			var lastWrite = File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks;
 			if (length > maximumBytes || length > int.MaxValue)

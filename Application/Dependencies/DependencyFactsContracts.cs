@@ -59,7 +59,8 @@ public sealed record DependencyScopeDescriptor(
 	IReadOnlyList<string> PythonRoots,
 	bool HasConfiguration,
 	string? PythonVersion = null,
-	bool AllowJavaScript = false)
+	bool AllowJavaScript = false,
+	IReadOnlyList<string>? TypeScriptModuleSuffixes = null)
 {
 	public DependencyConfigurationState ConfigurationState { get; init; } = DependencyConfigurationState.Valid;
 	public string? ConfigurationDiagnostic { get; init; }

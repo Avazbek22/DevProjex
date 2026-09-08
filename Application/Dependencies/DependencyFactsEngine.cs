@@ -834,7 +834,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			var referencesByFile = new Dictionary<string, IReadOnlyList<ReferenceFact>>(StringComparer.Ordinal);
 			var supportedFiles = files.Where(static file => file.Status == DependencyFileStatus.Supported).ToArray();
 			var parallelism = Math.Clamp(Environment.ProcessorCount, 1, 8);
-			var plans = CreateWorkPlans(supportedFiles, limits, cancellationToken);
+			var plans = CreateWorkPlans(supportedFiles, context, limits, cancellationToken);
 			var completed = new ResolvedFileWork[plans.Length];
 			Parallel.For(0, plans.Length, new ParallelOptions
 			{
@@ -898,6 +898,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private static ResolutionWorkPlan[] CreateWorkPlans(
 			IReadOnlyList<FileFacts> files,
+			ResolverContext context,
 			DependencyFactsLimits limits,
 			CancellationToken cancellationToken)
 		{
@@ -907,9 +908,10 @@ public sealed class DependencyFactsEngine : IDisposable
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var file = files[index];
-				var requestedWork = (long)file.Imports.Count + file.References.Count;
+				var requestedEdges = (long)file.Imports.Count + file.References.Count;
+				var requestedWork = context.EstimateResolutionWork(file, limits.MaximumWorkPerIndex);
 				string? limitReason = null;
-				if (requestedWork > limits.MaximumEdgesPerFile)
+				if (requestedEdges > limits.MaximumEdgesPerFile)
 					limitReason = "edge limit exceeded";
 				else if (requestedWork > limits.MaximumWorkPerIndex - acceptedWork)
 					limitReason = "index work limit exceeded";
@@ -1062,6 +1064,28 @@ public sealed class DependencyFactsEngine : IDisposable
 			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
 				"explicit imports are context, not dependency edges, for this language", [])
 		};
+
+		public long EstimateResolutionWork(FileFacts source, int maximumWork)
+		{
+			long work = source.Imports.Count;
+			foreach (var reference in source.References)
+			{
+				var name = SimpleName(reference.Name);
+				long candidates = 0;
+				foreach (var scope in VisibleScopeIds(source.ScopeId))
+				foreach (var language in CompatibleLanguages(source.LanguageId))
+				{
+					if (_symbolsBySimpleName.TryGetValue(new SymbolLookupKey(scope, language, name), out var matches))
+						candidates += matches.Length;
+					if (candidates > maximumWork)
+						return candidates;
+				}
+				work += Math.Max(1, candidates);
+				if (work > maximumWork)
+					return work;
+			}
+			return work;
+		}
 
 		private DependencyEdge ResolveTypeScriptImport(FileFacts source, ImportFact import)
 		{
@@ -1369,13 +1393,33 @@ public sealed class DependencyFactsEngine : IDisposable
 					Path.Combine(candidate, "index.js"),
 					Path.Combine(candidate, "index.jsx")]);
 			}
-			foreach (var probe in probes)
+			var suffixes = scope?.TypeScriptModuleSuffixes is { Count: > 0 } configuredSuffixes
+				? configuredSuffixes
+				: [""];
+			foreach (var baseProbe in probes)
+			foreach (var suffix in suffixes)
 			{
+				var probe = ApplyTypeScriptModuleSuffix(baseProbe, suffix);
 				var relative = PortableRelative(_root, probe);
 				if (_files.ContainsKey(relative))
 					return [relative];
 			}
 			return [];
+		}
+
+		private static string ApplyTypeScriptModuleSuffix(string path, string suffix)
+		{
+			if (suffix.Length == 0)
+				return path;
+			var extension = path.EndsWith(".d.mts", StringComparison.OrdinalIgnoreCase) ||
+			                path.EndsWith(".d.cts", StringComparison.OrdinalIgnoreCase)
+				? path[^6..]
+				: path.EndsWith(".d.ts", StringComparison.OrdinalIgnoreCase)
+					? path[^5..]
+					: Path.GetExtension(path);
+			return extension.Length == 0
+				? path + suffix
+				: path[..^extension.Length] + suffix + extension;
 		}
 
 		private bool SupportsDirectoryIndex(

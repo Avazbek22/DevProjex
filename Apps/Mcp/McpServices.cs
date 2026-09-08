@@ -109,8 +109,8 @@ internal sealed class McpServices : IDisposable
 		try
 		{
 			resolvedDependencyFactsEngine = dependencyFactsEngine ?? new DependencyFactsEngine(
-				new TreeSitterDependencyFactExtractor(),
-				new FileDependencyConfigurationProvider());
+				new TreeSitterDependencyFactExtractor(guardedFileOpener.OpenRead),
+				new FileDependencyConfigurationProvider(guardedFileOpener.OpenRead));
 		}
 		catch
 		{

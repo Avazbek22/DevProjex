@@ -85,6 +85,10 @@ already present in the manifest. Exact `paths` entries precede wildcard entries;
 wildcards, the longest prefix before `*` wins. Only that pattern's targets are tried, in declaration
 order. A wildcard whose prefix and suffix overlap in the specifier is not a match; the same guard
 applies to package maps. `package.json` `exports`, conditions, and explicit `null` blocking remain authoritative.
+When `compilerOptions.moduleSuffixes` is present, every path probe applies its suffixes in declared
+order; an empty suffix is the explicit unsuffixed fallback. Thus `[".ios", ""]` selects `v.ios.ts`
+before `v.ts`. A non-string entry makes the configuration unsupported instead of silently reverting
+to unsuffixed resolution.
 Conditional package targets distinguish syntax from the source module kind: runtime `import(...)`
 selects the `import` condition even in a `.cts` or `.cjs` file, while literal `require(...)` selects
 the `require` condition.
@@ -172,9 +176,16 @@ buffers start from the opened source size and pooled byte/character rentals are 
 larger decoded text grows outside the shared pool, so one large file cannot retain a multi-megabyte
 pooled character array for later workers.
 
+TreeSitter.DotNet 1.3.0 exposes neither a parser timeout nor a cancellation flag. Cancellation is
+checked before native parsing and every 256 captures during traversal. Native work is bounded by the
+existing 2 Mi-character per-file limit, but cancellation requested inside one native parse is observed
+only after that parse returns; the engine does not claim immediate native cancellation.
+
 The resolver work limit is an admission budget applied in canonical file order, not a latch that
-stops all later files after one rejection. A file is admitted only when all of its known import and
-reference work fits the remaining budget. For example, with a limit of 10 and file costs 8, 4, and
+stops all later files after one rejection. A file is admitted only when all of its known import,
+reference, and declaration-candidate visits fit the remaining budget. Candidate fan-out is counted
+before resolution, so one reference cannot evade the limit by scanning thousands of same-name
+declarations. For example, with a limit of 10 and file costs 8, 4, and
 1, the first file is resolved, the second is marked `Unresolved` with `index work limit exceeded`,
 and the third is resolved from the two remaining units. Rejected work is never executed.
 

@@ -44,6 +44,14 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	{
 	}
 
+	public TreeSitterDependencyFactExtractor(FileContentReadStreamOpener sourceOpener)
+		: this(
+			CodeCompressionFactory.CreateLocator(),
+			new FileContentAnalyzer(sourceOpener ?? throw new ArgumentNullException(nameof(sourceOpener))),
+			new BoundedDependencySourceReader(sourceOpener))
+	{
+	}
+
 	internal TreeSitterDependencyFactExtractor(IGrammarLibraryLocator locator)
 		: this(locator, new FileContentAnalyzer(), new BoundedDependencySourceReader())
 	{
@@ -898,7 +906,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		int EvictionEntries,
 		long RetainedBytes);
 
-	internal sealed class BoundedDependencySourceReader
+	internal sealed class BoundedDependencySourceReader(FileContentReadStreamOpener? sourceOpener = null)
 	{
 		private const int BufferSize = 64 * 1024;
 		private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
@@ -925,13 +933,15 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var charactersWritten = 0;
 			try
 			{
-				await using var stream = new FileStream(
-					path,
-					FileMode.Open,
-					FileAccess.Read,
-					FileShare.Read | FileShare.Delete,
-					BufferSize,
-					FileOptions.Asynchronous | FileOptions.SequentialScan);
+				await using var stream = sourceOpener is null
+					? new FileStream(
+						path,
+						FileMode.Open,
+						FileAccess.Read,
+						FileShare.Read | FileShare.Delete,
+						BufferSize,
+						FileOptions.Asynchronous | FileOptions.SequentialScan)
+					: sourceOpener(path, BufferSize, FileShare.Read | FileShare.Delete, asynchronous: true);
 				var length = stream.Length;
 				var lastWrite = File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks;
 				var byteBufferSize = checked((int)Math.Clamp(length, 1, BufferSize));
