@@ -9,6 +9,61 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
+	public async Task RealProcessRelatedFilesPreservesParsedImportSemantics()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		workspace.WriteFile("project/register.ts", "export const ready = true;\n");
+		workspace.WriteFile("project/main.ts", "import \"./register.js\";\n");
+		workspace.WriteFile("project/pyproject.toml", "[project]\nname = \"fixture\"\n");
+		workspace.WriteFile("project/model.py", "class Container:\n    def nested(self): pass\n\nclass Item: pass\n");
+		workspace.WriteFile("project/consumer.py", "from model import (\n    Item,\n)\n");
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		startInfo.ArgumentList.Add("--git-mode");
+		startInfo.ArgumentList.Add("none");
+		startInfo.ArgumentList.Add("--exclude");
+		startInfo.ArgumentList.Add("none");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("MCP process did not start.");
+		var errorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null, loggerFactory: null, TestContext.Current.CancellationToken))
+		{
+			var typeScript = await client.CallToolAsync("related_files",
+				new Dictionary<string, object?> { ["path"] = "main.ts", ["direction"] = "dependencies" },
+				progress: null, options: null, TestContext.Current.CancellationToken);
+			var python = await client.CallToolAsync("related_files",
+				new Dictionary<string, object?> { ["path"] = "consumer.py", ["direction"] = "dependencies" },
+				progress: null, options: null, TestContext.Current.CancellationToken);
+			Assert.Contains("register.ts", Assert.IsType<TextContentBlock>(Assert.Single(typeScript.Content)).Text,
+				StringComparison.Ordinal);
+			var pythonText = Assert.IsType<TextContentBlock>(Assert.Single(python.Content)).Text;
+			Assert.Contains("model.py", pythonText, StringComparison.Ordinal);
+			Assert.DoesNotContain("nested", pythonText, StringComparison.Ordinal);
+		}
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(await errorTask), await errorTask);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesReportsBothDirectionsAmbiguityCoverageAndProgress()
 	{
 		if (!await IsGitAvailableAsync())
@@ -172,7 +227,11 @@ public sealed partial class McpServerProcessTests
 				TestContext.Current.CancellationToken);
 			var unsupportedText = Assert.IsType<TextContentBlock>(Assert.Single(unsupported.Content)).Text;
 			var closingBoundary = unsupportedText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
-			var noFacts = unsupportedText.IndexOf("[No facts] md is not supported", StringComparison.Ordinal);
+			// Dependency diagnostics intentionally use constant trusted reasons so project-controlled
+			// extensions cannot be echoed outside the untrusted-data boundary.
+			var noFacts = unsupportedText.IndexOf(
+				"[No facts] file language is not supported by the dependency engine yet",
+				StringComparison.Ordinal);
 			Assert.True(closingBoundary >= 0 && noFacts > closingBoundary, unsupportedText);
 		}
 

@@ -40,6 +40,7 @@ public sealed record DependencyResolverConfiguration(
 {
 	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
 	public bool CanCache { get; init; } = true;
+	public IReadOnlyList<string> AbsentControlFiles { get; init; } = [];
 
 	public DependencyScopeDescriptor? FindScope(string scopeId) =>
 		Scopes.FirstOrDefault(scope => string.Equals(scope.ScopeId, scopeId, StringComparison.Ordinal));

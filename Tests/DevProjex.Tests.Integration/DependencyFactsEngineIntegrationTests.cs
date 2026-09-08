@@ -578,7 +578,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal("valid/entry.mjs", Assert.Single(result.Edges, item => item.Reference == "valid").Target);
 		var unsupported = Assert.Single(result.Edges, item => item.Reference == "unknown");
 		Assert.Equal(ResolutionStatus.Unresolved, unsupported.Status);
-		Assert.Contains("condition 'browser' is not supported", Assert.Single(unsupported.Reasons), StringComparison.Ordinal);
+		// Project-controlled condition names stay out of trusted resolution reasons.
+		Assert.Equal("package condition is not supported", Assert.Single(unsupported.Reasons));
 	}
 
 	[Fact]
@@ -1820,7 +1821,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		var failed = Assert.Single(result.Files, file => file.Path == "Source.cs");
 		Assert.Equal(DependencyFileStatus.ExtractionFailed, failed.Status);
-		Assert.Contains(nameof(FileNotFoundException), failed.StatusReason, StringComparison.Ordinal);
+		// Exception messages and resource names stay out of trusted diagnostics.
+		Assert.Equal("dependency grammar could not be loaded", failed.StatusReason);
 		Assert.Equal(1, result.Coverage.ExtractionFailed);
 	}
 

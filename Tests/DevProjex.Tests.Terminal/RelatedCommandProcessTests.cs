@@ -134,6 +134,43 @@ public sealed class RelatedCommandProcessTests
 		Assert.DoesNotContain("[Dependency configuration]", valid.StandardOutput, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void RealPublishedCommandPreservesParsedImportAndCSharpOccurrenceSemantics()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Models.cs", "namespace Models; public sealed class User { }\n");
+		workspace.WriteFile("project/Consumers.cs",
+			"using Models; class Box<User> { User a; } class Consumer { User b; }\n");
+		workspace.WriteFile("project/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		workspace.WriteFile("project/register.ts", "export const ready = true;\n");
+		workspace.WriteFile("project/main.ts", "import \"./register.js\";\n");
+		workspace.WriteFile("project/pyproject.toml", "[project]\nname = \"fixture\"\n");
+		workspace.WriteFile("project/model.py", "class Container:\n    def nested(self): pass\n\nclass Item: pass\n");
+		workspace.WriteFile("project/python_consumer.py", "from model import (\n    Item,\n)\n");
+
+		var csharp = Run(workspace, "related", "Consumers.cs", "--project", project,
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		var typeScript = Run(workspace, "related", "main.ts", "--project", project,
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		var python = Run(workspace, "related", "python_consumer.py", "--project", project,
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, csharp.ExitCode);
+		using (var document = JsonDocument.Parse(csharp.StandardOutput))
+		{
+			var dependencies = Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray())
+				.GetProperty("dependencies").EnumerateArray().ToArray();
+			Assert.Contains(dependencies, item => item.GetProperty("path").GetString() == "Models.cs");
+		}
+		Assert.Equal(0, typeScript.ExitCode);
+		Assert.Contains("register.ts", typeScript.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(0, python.ExitCode);
+		Assert.Contains("model.py", python.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("nested", python.StandardOutput, StringComparison.Ordinal);
+	}
+
 	private static TerminalTestProcessResult Run(TemporaryDirectory workspace, params string[] arguments)
 	{
 		var startInfo = new ProcessStartInfo("dotnet")

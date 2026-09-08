@@ -27,8 +27,9 @@ an optional file scope. Partial C# declarations share one identity with multiple
 file-local types remain distinct even when their names match. A resolved edge to such a partial
 identity keeps one canonical target and the complete declaration-file list. Related-file projections
 show every declaration file as a resolved part of the same symbol, in both directions; ambiguous
-candidates remain a separate concept. Each reference retains its source line and a compact source
-excerpt. Results use four statuses:
+candidates remain a separate concept. Each reference retains its exact source occurrence, lexical
+owner, source line, and a compact source excerpt; two same-name references on one line are not
+deduplicated before resolution. Results use four statuses:
 
 - **Resolved** — exactly one declaration or module in the allowed manifest is supported by the
   resolver evidence;
@@ -50,7 +51,9 @@ C# compilation scopes come from `.csproj` ownership and `ProjectReference` entri
 Both `/` and `\` in an MSBuild `Include` are normalized as project-reference separators on every OS;
 this normalization never applies to ordinary Unix filenames. Global usings and aliases are shared
 within the owning scope; type parameters shadow global symbols only inside the lexical span of their
-declaring type or method, while a qualified name is never suppressed by its final component;
+declaring type or method, while a qualified name is never suppressed by its final component.
+The `global::` qualifier is retained as absolute-lookup evidence: it bypasses type-parameter
+shadowing and never falls back through the source namespace or imported namespaces;
 nested generic names preserve the arity of every containing type. `InternalsVisibleTo` does not create
 an edge, target-typed `new()` stays unresolved, and source-generator output is unavailable. A simple
 type name can resolve only to a declaration in the current or an enclosing namespace, an exactly
@@ -65,6 +68,9 @@ owning `.csproj` inside the effective manifest, cross-file C# type references st
 TypeScript and JavaScript use the nearest `tsconfig.json` or `jsconfig.json`. The resolver distinguishes
 relative, bare, package-self, and `#imports` specifiers and follows ordered substitution: the first
 existing probe wins, so multiple files found later in the same probe sequence are not ambiguity.
+Module specifiers are read from parsed `import`, `export`, dynamic `import(...)`, and supported
+literal `require(...)` syntax, including side-effect imports. A variable or template expression in
+place of a string literal remains `Unresolved`; it is never treated as a guessed path.
 `.js`, `.mjs`, and `.cjs` specifiers probe their TypeScript and declaration counterparts before the
 literal JavaScript file. Extensionless imports and directory indexes always probe `.js` and `.jsx`
 after `.ts`, `.tsx`, and `.d.ts`; `allowJs` controls compilation membership, not resolution of files
@@ -95,11 +101,17 @@ accepted with or without a BOM; malformed byte sequences remain corrupt.
 
 Python relative imports start at the source package. `from module import Name` first checks classes,
 functions, and static import aliases provided by either an ordinary module or a package initializer.
+Only module-level class and function declarations provide importable names; a method or nested class
+cannot satisfy `from module import Name`. Import syntax is read from parsed nodes, so parenthesized
+multiline lists, comments, aliases, relative forms, and wildcard imports have the same semantics as
+their single-line forms.
 Only a package may then fall back to a child module of that name. Regular and namespace-package portions are
-combined, and a package initializer takes precedence over a same-named module file. Within a package,
+combined as package entities rather than being represented by an arbitrary file under the namespace;
+a requested child is resolved to that child. A package initializer takes precedence over a same-named module file. Within a package,
 a statically provided or re-exported name is resolved before a same-named child module. `.py` is
 preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and `__all__` affects
-wildcard imports only. Relative imports that would escape the top-level package remain unresolved.
+wildcard imports only. A missing imported name remains `Unresolved` with a constant reason instead of
+turning the existence of the module into evidence for that name. Relative imports that would escape the top-level package remain unresolved.
 Dynamic `__all__`, `setup.py`, and import hooks are not executed and remain unresolved. Separate
 complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;
@@ -153,9 +165,11 @@ fact, including declarations and all declaration sites, even when the graph has 
 Manifest-snapshot eviction entries are generation-bound and removed together with their live
 snapshot, so repeated rebuilds of the same cache keys cannot grow bookkeeping outside the limit.
 
-Access failures, missing files, and other transient I/O failures in either source or control files are
-not retained in the prepared-source, resolved-index, or manifest-snapshot caches. A later request
-retries extraction and configuration reading even when file stamps are unchanged. Stable outcomes such
+Access failures and other transient I/O failures in either source or control files are not retained in
+the prepared-source, resolved-index, or manifest-snapshot caches. A later request retries extraction
+and configuration reading even when file stamps are unchanged. An expected control file observed as
+absent is cacheable: its canonical path is part of the snapshot, and the snapshot is rejected as soon
+as that path appears. Stable outcomes such
 as invalid configuration syntax, an unsupported language, a content parse failure, or a safety limit
 remain cacheable.
 
@@ -185,6 +199,9 @@ change serialized results.
 contains a portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
 and a cross-scope marker when applicable. Ambiguous references remain one group with their candidate
 list. Coverage reports manifest files, supported and unsupported languages, and extraction failures.
+Reason and configuration-diagnostic text uses a fixed vocabulary; project-controlled symbol names,
+module specifiers, mapping keys, and paths remain in their dedicated structured fields rather than
+being interpolated into trusted explanatory text.
 An unsupported seed is a successful empty result with an explicit diagnostic; a supported seed with
 no edges reports that no related files exist in the effective selection. At most eight configuration
 diagnostic lines are rendered in CLI text output; JSON retains the complete safe array.
