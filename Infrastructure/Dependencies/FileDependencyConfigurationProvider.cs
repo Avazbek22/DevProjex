@@ -36,13 +36,22 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var snapshots = new Dictionary<string, Task<DependencyControlFileSnapshot>>(PathComparer);
 		var packageProjections = new Dictionary<string, Task<ConfigurationParseResult<PackageMapDescriptor>>>(PathComparer);
 		var diagnostics = new List<DependencyConfigurationDiagnostic>();
+		var transientReadFailure = 0;
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
 		{
 			if (snapshots.TryGetValue(path, out var existing)) return existing;
-			var created = _reader.ReadAsync(path, MaximumConfigurationBytes, cancellationToken).AsTask();
+			var created = ReadTrackedSnapshotAsync(path);
 			snapshots[path] = created;
 			return created;
+		}
+
+		async Task<DependencyControlFileSnapshot> ReadTrackedSnapshotAsync(string path)
+		{
+			var snapshot = await _reader.ReadAsync(path, MaximumConfigurationBytes, cancellationToken).ConfigureAwait(false);
+			if (!snapshot.CanCache)
+				Interlocked.Exchange(ref transientReadFailure, 1);
+			return snapshot;
 		}
 
 		Task<ConfigurationParseResult<PackageMapDescriptor>> ReadPackageAsync(string path)
@@ -199,7 +208,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 						.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
 				})
 				.OrderBy(static item => item.Path, StringComparer.Ordinal)
-				.ToArray()
+				.ToArray(),
+			CanCache = Volatile.Read(ref transientReadFailure) == 0
 		};
 	}
 
@@ -599,7 +609,8 @@ internal sealed record DependencyControlFileSnapshot(
 	DependencyConfigurationState State,
 	string Content,
 	string? Reason,
-	string FingerprintValue);
+	string FingerprintValue,
+	bool CanCache = true);
 
 internal sealed class BoundedDependencyControlFileReader : IDependencyControlFileReader
 {
@@ -647,7 +658,8 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 					DependencyConfigurationState.Corrupt,
 					"configuration changed while it was being read",
 					currentLength,
-					currentLastWrite);
+					currentLastWrite,
+					canCache: false);
 			}
 			var offset = bytes.AsSpan().StartsWith(Utf8Preamble) ? Utf8Preamble.Length : 0;
 			var content = StrictUtf8.GetString(bytes.AsSpan(offset));
@@ -663,11 +675,11 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 		}
 		catch (FileNotFoundException exception)
 		{
-			return Failure(DependencyConfigurationState.Missing, OneLine(exception.Message), 0, 0);
+			return Failure(DependencyConfigurationState.Missing, OneLine(exception.Message), 0, 0, canCache: false);
 		}
 		catch (DirectoryNotFoundException exception)
 		{
-			return Failure(DependencyConfigurationState.Missing, OneLine(exception.Message), 0, 0);
+			return Failure(DependencyConfigurationState.Missing, OneLine(exception.Message), 0, 0, canCache: false);
 		}
 		catch (DecoderFallbackException exception)
 		{
@@ -675,7 +687,7 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
 		{
-			return Failure(DependencyConfigurationState.Corrupt, OneLine(exception.Message), 0, 0);
+			return Failure(DependencyConfigurationState.Corrupt, OneLine(exception.Message), 0, 0, canCache: false);
 		}
 	}
 
@@ -683,7 +695,8 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 		DependencyConfigurationState state,
 		string reason,
 		long length,
-		long lastWrite) => new(state, string.Empty, reason, $"{state}:{length}:{lastWrite}:{reason}");
+		long lastWrite,
+		bool canCache = true) => new(state, string.Empty, reason, $"{state}:{length}:{lastWrite}:{reason}", canCache);
 
 	private static string Hash(ReadOnlySpan<byte> bytes) =>
 		Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();

@@ -169,7 +169,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			declarationRevision,
 			configuration.Fingerprint);
 		var allowed = orderedFacts.Select(static fact => fact.Path).ToHashSet(StringComparer.Ordinal);
-		var canCacheIndex = cacheable.All(static value => value);
+		var canCacheIndex = configuration.CanCache && cacheable.All(static value => value);
 		var createdIndex = new Lazy<Task<ResolvedIndex>>(
 			() => Task.FromResult(GateResolvedIndex(
 				DependencyResolver.Resolve(

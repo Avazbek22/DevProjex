@@ -592,6 +592,66 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task TransientControlFileRead_IsRetriedBeforePublishingAManifestSnapshot()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		var reader = new FailOnceControlFileReader(config);
+		using var engine = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(),
+			new FileDependencyConfigurationProvider(reader));
+
+		var first = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var second = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(first.Edges, edge => edge.Source == "main.ts" && edge.Status == ResolutionStatus.Unresolved);
+		Assert.Contains(second.Edges, edge => edge.Source == "main.ts" && edge.Target == "target.ts");
+		Assert.Equal(2, reader.CountFor(config));
+		Assert.False(second.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
+	public async Task WindowsSharingViolationOnControlFile_IsRetriedAfterTheFileIsReleased()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			Assert.Skip("An exclusive Windows sharing lock is required for this scenario.");
+			return;
+		}
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var source = fixture.CreateFile("main.ts", "import value from './target.js';");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		using var engine = CreateEngine();
+		DependencyIndexSnapshot first;
+		await using (var locked = new FileStream(config, FileMode.Open, FileAccess.Read, FileShare.None))
+		{
+			first = await engine.IndexAsync(
+				fixture.Path,
+				[config, source, target],
+				cancellationToken: TestContext.Current.CancellationToken);
+		}
+
+		var second = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(first.Coverage.ConfigurationDiagnostics, item => item.Path == "tsconfig.json");
+		Assert.Contains(second.Edges, edge => edge.Source == "main.ts" && edge.Target == "target.ts");
+		Assert.Empty(second.Coverage.ConfigurationDiagnostics);
+		Assert.False(second.Metrics.ResolutionCacheHit);
+	}
+
+	[Fact]
 	public async Task TypeScriptExternalPackageEvidence_DoesNotLeakAcrossPackageScopes()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -1788,6 +1848,30 @@ public sealed class DependencyFactsEngineIntegrationTests
 		{
 			_counts.AddOrUpdate(Path.GetFullPath(path), 1, static (_, count) => count + 1);
 			return _inner.ReadAsync(path, maximumBytes, cancellationToken);
+		}
+	}
+
+	private sealed class FailOnceControlFileReader(string failingPath) : IDependencyControlFileReader
+	{
+		private readonly BoundedDependencyControlFileReader _inner = new();
+		private readonly ConcurrentDictionary<string, int> _counts = new(PathComparer.Default);
+
+		public int CountFor(string path) => _counts.GetValueOrDefault(Path.GetFullPath(path));
+
+		public ValueTask<DependencyControlFileSnapshot> ReadAsync(
+			string path,
+			int maximumBytes,
+			CancellationToken cancellationToken)
+		{
+			var count = _counts.AddOrUpdate(Path.GetFullPath(path), 1, static (_, value) => value + 1);
+			return PathComparer.Default.Equals(path, failingPath) && count == 1
+				? ValueTask.FromResult(new DependencyControlFileSnapshot(
+					DependencyConfigurationState.Corrupt,
+					string.Empty,
+					"configuration access failed",
+					"transient",
+					CanCache: false))
+				: _inner.ReadAsync(path, maximumBytes, cancellationToken);
 		}
 	}
 
