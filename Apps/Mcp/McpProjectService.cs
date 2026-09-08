@@ -854,15 +854,25 @@ internal sealed class McpProjectService(
 		{
 			throw ResolveCaseMismatch(plan, path) ?? exception;
 		}
-		if (Directory.Exists(physical))
+		ValidateResolvedFile(plan, path, physical, Directory.Exists(physical));
+		return physical;
+	}
+
+	private void ValidateResolvedFile(
+		ProjectContextPlan plan,
+		string requestedPath,
+		string physicalPath,
+		bool isDirectory)
+	{
+		if (isDirectory)
 		{
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: '{path}' is a directory; provide a file path returned by get_tree or search_project.");
+				$"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; provide a file path returned by get_tree or search_project.");
 		}
-		if (!Membership(plan).Files.Contains(physical))
+		if (!Membership(plan).Files.Contains(physicalPath))
 		{
-			var caseMismatch = ResolveCaseMismatch(plan, path);
+			var caseMismatch = ResolveCaseMismatch(plan, requestedPath);
 			if (caseMismatch is not null)
 				throw caseMismatch;
 
@@ -873,10 +883,9 @@ internal sealed class McpProjectService(
 				: $"Per-call arguments cannot widen these filters; only the server startup line can ({McpEffectiveFilters.StartupFlags}).";
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: file '{path}' is not in the effective project selection " +
+				$"{McpErrorCodes.PathNotFound}: file '{requestedPath}' is not in the effective project selection " +
 				$"(effective filters: {McpEffectiveFilters.Describe(plan)}). {remedy}");
 		}
-		return physical;
 	}
 
 	public IReadOnlyList<string> ResolveRequestedFiles(
@@ -886,7 +895,17 @@ internal sealed class McpProjectService(
 	{
 		var requested = ResolveRequestedPaths(plan.SourceRoot, paths, cancellationToken);
 		ValidateRequestedPathCasing(plan, requested);
-		return requested.InputTokens.Select(token => token.ResolvedPath!).ToArray();
+		var resolved = new string[requested.InputTokens.Count];
+		for (var index = 0; index < requested.InputTokens.Count; index++)
+		{
+			var token = requested.InputTokens[index];
+			var physical = token.ResolvedPath ?? throw token.ResolutionError ?? new McpToolException(
+				McpErrorCodes.PathNotFound,
+				$"{McpErrorCodes.PathNotFound}: file '{token.Value}' was not found.");
+			ValidateResolvedFile(plan, token.Value, physical, token.IsDirectory);
+			resolved[index] = physical;
+		}
+		return resolved;
 	}
 
 	public bool HasLocalProfile(string projectRoot) =>
