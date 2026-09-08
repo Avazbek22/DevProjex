@@ -310,27 +310,32 @@ public sealed class ImportanceRankingService(
 	{
 		var present = values
 			.Where(static pair => pair.Value is not null)
-			.GroupBy(static pair => pair.Value!.Value)
-			.OrderBy(static group => group.Key)
+			.OrderBy(static pair => pair.Value!.Value)
+			.ThenBy(static pair => pair.Key, StringComparer.Ordinal)
 			.ToArray();
 		var result = values.Keys.ToDictionary(static path => path, static _ => (double?)null, StringComparer.Ordinal);
 		if (present.Length == 0)
 			return result;
-		if (present.Length == 1)
+		var groupCount = 1;
+		for (var index = 1; index < present.Length; index++)
+			if (!present[index].Value!.Value.Equals(present[index - 1].Value!.Value))
+				groupCount++;
+		if (groupCount == 1)
 		{
-			foreach (var pair in present[0])
+			foreach (var pair in present)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				result[pair.Key] = 0.5;
 			}
 			return result;
 		}
+		var group = 0;
 		for (var index = 0; index < present.Length; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var normalized = (double)index / (present.Length - 1);
-			foreach (var pair in present[index])
-				result[pair.Key] = normalized;
+			if (index > 0 && !present[index].Value!.Value.Equals(present[index - 1].Value!.Value))
+				group++;
+			result[present[index].Key] = (double)group / (groupCount - 1);
 		}
 		return result;
 	}
