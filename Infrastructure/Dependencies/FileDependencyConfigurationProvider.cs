@@ -11,6 +11,13 @@ namespace DevProjex.Infrastructure.Dependencies;
 public sealed class FileDependencyConfigurationProvider : IDependencyConfigurationProvider
 {
 	internal const int MaximumConfigurationBytes = 4 * 1024 * 1024;
+	internal const int MaximumTypeScriptExtendsDepth = 8;
+	internal const string TypeScriptExtendsShapeReason = "tsconfig extends must be one relative path string";
+	internal const string TypeScriptExtendsPackageReason = "tsconfig package extends is not supported";
+	internal const string TypeScriptExtendsOutsideRootReason = "tsconfig extends must stay inside the project root";
+	internal const string TypeScriptExtendsCycleReason = "tsconfig extends cycle is not supported";
+	internal const string TypeScriptExtendsDepthReason = "tsconfig extends exceeds the maximum depth";
+	internal const string TypeScriptExtendsUnavailableReason = "extended tsconfig is unavailable";
 	private readonly IDependencyControlFileReader _reader;
 
 	public FileDependencyConfigurationProvider()
@@ -37,6 +44,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var packageProjections = new Dictionary<string, Task<ConfigurationParseResult<PackageMapDescriptor>>>(PathComparer);
 		var diagnostics = new List<DependencyConfigurationDiagnostic>();
 		var absentControlFiles = new HashSet<string>(PathComparer);
+		var fingerprintedControlFiles = new HashSet<string>(PathComparer);
 		var transientReadFailure = 0;
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
@@ -68,13 +76,88 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		async Task<ConfigurationParseResult<PackageMapDescriptor>> ReadPackageCoreAsync(string path)
 		{
 			var snapshot = await ReadSnapshotAsync(path).ConfigureAwait(false);
-			fingerprintParts.Add(Fingerprint(root, path, snapshot.FingerprintValue));
+			AddFingerprint(path, snapshot);
 			return snapshot.State == DependencyConfigurationState.Valid
 				? ParsePackageMap(Path.GetDirectoryName(path)!, snapshot.Content)
 				: ConfigurationParseResult<PackageMapDescriptor>.Failure(
 					UnavailablePackageMap(Path.GetDirectoryName(path)!, snapshot.State, snapshot.Reason),
 					snapshot.State,
 					snapshot.Reason);
+		}
+
+		void AddFingerprint(string path, DependencyControlFileSnapshot snapshot)
+		{
+			path = Path.GetFullPath(path);
+			if (fingerprintedControlFiles.Add(path))
+				fingerprintParts.Add(Fingerprint(root, path, snapshot.FingerprintValue));
+		}
+
+		async Task<ConfigurationParseResult<TypeScriptConfiguration>> ReadTypeScriptConfigAsync(
+			string configPath,
+			string scopeDirectory)
+		{
+			var chain = new HashSet<string>(PathComparer);
+			var parsed = await ReadTypeScriptLayerAsync(Path.GetFullPath(configPath), 0, chain).ConfigureAwait(false);
+			return parsed.State == DependencyConfigurationState.Valid
+				? ConfigurationParseResult<TypeScriptConfiguration>.Valid(
+					MaterializeTypeScriptConfiguration(parsed.Value, scopeDirectory))
+				: ConfigurationParseResult<TypeScriptConfiguration>.Failure(
+					TypeScriptConfiguration.Default,
+					parsed.State,
+					parsed.Reason);
+		}
+
+		async Task<ConfigurationParseResult<TypeScriptConfigurationLayer>> ReadTypeScriptLayerAsync(
+			string configPath,
+			int depth,
+			HashSet<string> chain)
+		{
+			if (!chain.Add(configPath))
+				return TypeScriptLayerFailure(DependencyConfigurationState.UnsupportedSemantics, TypeScriptExtendsCycleReason);
+
+			try
+			{
+				var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+				AddFingerprint(configPath, snapshot);
+				if (snapshot.State != DependencyConfigurationState.Valid)
+				{
+					return TypeScriptLayerFailure(
+						snapshot.State,
+						snapshot.State == DependencyConfigurationState.Missing && depth > 0
+							? TypeScriptExtendsUnavailableReason
+							: snapshot.Reason);
+				}
+
+				var layer = ParseTypeScriptConfigLayer(configPath, snapshot.Content);
+				if (layer.State != DependencyConfigurationState.Valid || layer.Value.Extends is null)
+					return layer;
+
+				if (depth >= MaximumTypeScriptExtendsDepth)
+					return TypeScriptLayerFailure(DependencyConfigurationState.UnsupportedSemantics, TypeScriptExtendsDepthReason);
+
+				var extendedPath = ResolveTypeScriptExtendsPath(configPath, layer.Value.Extends);
+				if (extendedPath.State != DependencyConfigurationState.Valid)
+					return TypeScriptLayerFailure(extendedPath.State, extendedPath.Reason);
+				if (!IsWithin(root, extendedPath.Value))
+					return TypeScriptLayerFailure(DependencyConfigurationState.UnsupportedSemantics, TypeScriptExtendsOutsideRootReason);
+				// The engine's fast manifest snapshot can validate only files in its manifest.
+				// If an extended control file is outside that set, bypass that snapshot so this
+				// provider observes every later edit instead of reusing configuration by metadata
+				// that never included the base file.
+				if (!manifest.Contains(extendedPath.Value))
+					Interlocked.Exchange(ref transientReadFailure, 1);
+
+				var inherited = await ReadTypeScriptLayerAsync(extendedPath.Value, depth + 1, chain)
+					.ConfigureAwait(false);
+				return inherited.State == DependencyConfigurationState.Valid
+					? ConfigurationParseResult<TypeScriptConfigurationLayer>.Valid(
+						MergeTypeScriptLayers(inherited.Value, layer.Value))
+					: inherited;
+			}
+			finally
+			{
+				chain.Remove(configPath);
+			}
 		}
 
 		void AddDiagnostic(string path, DependencyConfigurationState state, string? reason, params string[] scopeIds)
@@ -92,7 +175,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		foreach (var project in manifest.Where(static path => path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)).Order(StringComparer.Ordinal))
 		{
 			var snapshot = await ReadSnapshotAsync(project).ConfigureAwait(false);
-			fingerprintParts.Add(Fingerprint(root, project, snapshot.FingerprintValue));
+			AddFingerprint(project, snapshot);
 			var scope = "csharp:" + PortableRelative(root, project);
 			var parsed = snapshot.State == DependencyConfigurationState.Valid
 				? ParseProjectReferences(project, snapshot.Content)
@@ -135,13 +218,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 
 		foreach (var configPath in manifest.Where(IsTypeScriptConfig).Order(StringComparer.Ordinal))
 		{
-			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
-			fingerprintParts.Add(Fingerprint(root, configPath, snapshot.FingerprintValue));
-			var parsed = snapshot.State == DependencyConfigurationState.Valid
-				? ParseTypeScriptConfig(snapshot.Content)
-				: ConfigurationParseResult<TypeScriptConfiguration>.Failure(
-					TypeScriptConfiguration.Default, snapshot.State, snapshot.Reason);
 			var directory = Path.GetDirectoryName(configPath)!;
+			var parsed = await ReadTypeScriptConfigAsync(configPath, directory).ConfigureAwait(false);
 			var package = FindNearestManifestFile(directory, root, "package.json", manifest);
 			var packageName = package is null ? null : (await ReadPackageAsync(package).ConfigureAwait(false)).Value.PackageName;
 			var scopeId = "typescript:" + PortableRelative(root, configPath);
@@ -168,7 +246,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		foreach (var configPath in manifest.Where(IsPythonConfig).Order(StringComparer.Ordinal))
 		{
 			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
-			fingerprintParts.Add(Fingerprint(root, configPath, snapshot.FingerprintValue));
+			AddFingerprint(configPath, snapshot);
 			var directory = Path.GetDirectoryName(configPath)!;
 			var scopeId = "python:" + PortableRelative(root, configPath);
 			AddDiagnostic(configPath, snapshot.State, snapshot.Reason, scopeId);
@@ -260,7 +338,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	private static string NormalizeMsBuildInclude(string value) =>
 		value.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
 
-	private static ConfigurationParseResult<TypeScriptConfiguration> ParseTypeScriptConfig(string content)
+	private static ConfigurationParseResult<TypeScriptConfigurationLayer> ParseTypeScriptConfigLayer(
+		string configPath,
+		string content)
 	{
 		try
 		{
@@ -270,34 +350,40 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				CommentHandling = JsonCommentHandling.Skip
 			});
 			if (document.RootElement.ValueKind != JsonValueKind.Object)
-				return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
-					TypeScriptConfiguration.Default,
+				return TypeScriptLayerFailure(
 					DependencyConfigurationState.UnsupportedSemantics,
 					"tsconfig root must be an object");
+
+			var extends = ParseTypeScriptExtends(document.RootElement);
+			if (extends.State != DependencyConfigurationState.Valid)
+				return TypeScriptLayerFailure(extends.State, extends.Reason);
+
 			if (!document.RootElement.TryGetProperty("compilerOptions", out var options))
-				return ConfigurationParseResult<TypeScriptConfiguration>.Valid(TypeScriptConfiguration.Default);
+			{
+				return ConfigurationParseResult<TypeScriptConfigurationLayer>.Valid(
+					TypeScriptConfigurationLayer.Empty with { Extends = extends.Value });
+			}
 			if (options.ValueKind != JsonValueKind.Object)
-				return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
-					TypeScriptConfiguration.Default,
+				return TypeScriptLayerFailure(
 					DependencyConfigurationState.Corrupt,
 					"tsconfig compilerOptions must be an object");
 			if (options.TryGetProperty("moduleResolution", out var mode) && mode.ValueKind != JsonValueKind.String)
-				return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
-					TypeScriptConfiguration.Default,
+				return TypeScriptLayerFailure(
 					DependencyConfigurationState.UnsupportedSemantics,
 					"tsconfig compilerOptions.moduleResolution must be a string");
-			var moduleResolution = options.TryGetProperty("moduleResolution", out mode)
-				? mode.GetString() ?? "bundler"
-				: "bundler";
-			var legacy = moduleResolution.Equals("node10", StringComparison.OrdinalIgnoreCase) ||
-			             moduleResolution.Equals("node", StringComparison.OrdinalIgnoreCase) ||
-			             options.TryGetProperty("baseUrl", out _);
-			var allowJavaScript = options.TryGetProperty("allowJs", out var allowJs) &&
-			                      allowJs.ValueKind is JsonValueKind.True;
+
+			var hasModuleResolution = options.TryGetProperty("moduleResolution", out mode);
+			var moduleResolution = hasModuleResolution ? mode.GetString() ?? "bundler" : null;
+			var hasBaseUrl = options.TryGetProperty("baseUrl", out var baseUrlElement);
+			var baseUrl = hasBaseUrl && baseUrlElement.ValueKind == JsonValueKind.String
+				? baseUrlElement.GetString()
+				: null;
+			var hasAllowJavaScript = options.TryGetProperty("allowJs", out var allowJs);
+			var allowJavaScript = hasAllowJavaScript && allowJs.ValueKind is JsonValueKind.True;
 			var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-			if (options.TryGetProperty("paths", out var mappings) && mappings.ValueKind != JsonValueKind.Object)
-				return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
-					TypeScriptConfiguration.Default,
+			var hasPaths = options.TryGetProperty("paths", out var mappings);
+			if (hasPaths && mappings.ValueKind != JsonValueKind.Object)
+				return TypeScriptLayerFailure(
 					DependencyConfigurationState.UnsupportedSemantics,
 					"tsconfig compilerOptions.paths must be an object");
 			if (mappings.ValueKind == JsonValueKind.Object)
@@ -306,25 +392,134 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				{
 					if (mapping.Value.ValueKind != JsonValueKind.Array ||
 					    mapping.Value.EnumerateArray().Any(static item => item.ValueKind != JsonValueKind.String))
-						return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
-							TypeScriptConfiguration.Default,
+						return TypeScriptLayerFailure(
 							DependencyConfigurationState.UnsupportedSemantics,
 							"tsconfig path mapping must be an array of strings");
 					paths[mapping.Name] = mapping.Value.EnumerateArray()
 						.Select(static item => item.GetString()!).ToArray();
 				}
 			}
-			return ConfigurationParseResult<TypeScriptConfiguration>.Valid(
-				new TypeScriptConfiguration(moduleResolution, legacy, paths, allowJavaScript));
+			return ConfigurationParseResult<TypeScriptConfigurationLayer>.Valid(
+				new TypeScriptConfigurationLayer(
+					extends.Value,
+					new OptionalConfigurationValue<string>(hasModuleResolution, moduleResolution),
+					new OptionalConfigurationValue<TypeScriptBaseUrl>(
+						hasBaseUrl,
+						hasBaseUrl ? new TypeScriptBaseUrl(Path.GetDirectoryName(configPath)!, baseUrl) : null),
+					new OptionalConfigurationValue<TypeScriptPathMappings>(
+						hasPaths,
+						hasPaths ? new TypeScriptPathMappings(Path.GetDirectoryName(configPath)!, paths) : null),
+					new OptionalConfigurationValue<bool>(hasAllowJavaScript, allowJavaScript)));
 		}
 		catch (JsonException)
 		{
-			return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
-				TypeScriptConfiguration.Default,
+			return TypeScriptLayerFailure(
 				DependencyConfigurationState.Corrupt,
 				"invalid tsconfig JSON");
 		}
 	}
+
+	private static ConfigurationParseResult<string?> ParseTypeScriptExtends(JsonElement root)
+	{
+		if (!root.TryGetProperty("extends", out var extends))
+			return ConfigurationParseResult<string?>.Valid(null);
+		if (extends.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(extends.GetString()))
+			return ConfigurationParseResult<string?>.Failure(
+				null,
+				DependencyConfigurationState.UnsupportedSemantics,
+				TypeScriptExtendsShapeReason);
+
+		var value = extends.GetString()!;
+		if (!IsExplicitRelativeTypeScriptExtends(value))
+			return ConfigurationParseResult<string?>.Failure(
+				null,
+				DependencyConfigurationState.UnsupportedSemantics,
+				TypeScriptExtendsPackageReason);
+		return ConfigurationParseResult<string?>.Valid(value);
+	}
+
+	private static bool IsExplicitRelativeTypeScriptExtends(string value) =>
+		value.StartsWith("./", StringComparison.Ordinal) ||
+		value.StartsWith("../", StringComparison.Ordinal) ||
+		value.StartsWith(".\\", StringComparison.Ordinal) ||
+		value.StartsWith("..\\", StringComparison.Ordinal);
+
+	private static ConfigurationParseResult<string> ResolveTypeScriptExtendsPath(
+		string configPath,
+		string relativePath)
+	{
+		try
+		{
+			var normalized = relativePath
+				.Replace('/', Path.DirectorySeparatorChar)
+				.Replace('\\', Path.DirectorySeparatorChar);
+			return ConfigurationParseResult<string>.Valid(
+				Path.GetFullPath(Path.Combine(Path.GetDirectoryName(configPath)!, normalized)));
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return ConfigurationParseResult<string>.Failure(
+				string.Empty,
+				DependencyConfigurationState.UnsupportedSemantics,
+				TypeScriptExtendsShapeReason);
+		}
+	}
+
+	private static TypeScriptConfigurationLayer MergeTypeScriptLayers(
+		TypeScriptConfigurationLayer inherited,
+		TypeScriptConfigurationLayer child) =>
+		new(
+			Extends: null,
+			child.ModuleResolution.IsSpecified ? child.ModuleResolution : inherited.ModuleResolution,
+			child.BaseUrl.IsSpecified ? child.BaseUrl : inherited.BaseUrl,
+			child.Paths.IsSpecified ? child.Paths : inherited.Paths,
+			child.AllowJavaScript.IsSpecified ? child.AllowJavaScript : inherited.AllowJavaScript);
+
+	private static TypeScriptConfiguration MaterializeTypeScriptConfiguration(
+		TypeScriptConfigurationLayer layer,
+		string scopeDirectory)
+	{
+		var moduleResolution = layer.ModuleResolution.IsSpecified
+			? layer.ModuleResolution.Value ?? "bundler"
+			: "bundler";
+		var mappings = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+		if (layer.Paths.Value is { } paths)
+		{
+			var mappingRoot = layer.BaseUrl.Value is { } baseUrl
+				? ResolveTypeScriptOptionDirectory(baseUrl.DeclaringDirectory, baseUrl.Value)
+				: paths.DeclaringDirectory;
+			foreach (var mapping in paths.Values)
+			{
+				mappings[mapping.Key] = mapping.Value
+					.Select(target => RebaseTypeScriptPath(scopeDirectory, mappingRoot, target))
+					.ToArray();
+			}
+		}
+		var legacy = moduleResolution.Equals("node10", StringComparison.OrdinalIgnoreCase) ||
+		             moduleResolution.Equals("node", StringComparison.OrdinalIgnoreCase) ||
+		             layer.BaseUrl.IsSpecified;
+		return new TypeScriptConfiguration(
+			moduleResolution,
+			legacy,
+			mappings,
+			layer.AllowJavaScript.IsSpecified && layer.AllowJavaScript.Value);
+	}
+
+	private static string ResolveTypeScriptOptionDirectory(string declaringDirectory, string? relative) =>
+		string.IsNullOrEmpty(relative)
+			? declaringDirectory
+			: Path.GetFullPath(Path.Combine(declaringDirectory, relative));
+
+	private static string RebaseTypeScriptPath(string scopeDirectory, string mappingRoot, string target) =>
+		Path.GetRelativePath(scopeDirectory, Path.GetFullPath(Path.Combine(mappingRoot, target)));
+
+	private static ConfigurationParseResult<TypeScriptConfigurationLayer> TypeScriptLayerFailure(
+		DependencyConfigurationState state,
+		string? reason) =>
+		ConfigurationParseResult<TypeScriptConfigurationLayer>.Failure(
+			TypeScriptConfigurationLayer.Empty,
+			state,
+			reason);
 
 	private static ConfigurationParseResult<PackageMapDescriptor> ParsePackageMap(string directory, string content)
 	{
@@ -610,6 +805,29 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			false,
 			new Dictionary<string, IReadOnlyList<string>>(),
 			false);
+	}
+
+	private readonly record struct OptionalConfigurationValue<T>(bool IsSpecified, T? Value);
+
+	private sealed record TypeScriptBaseUrl(string DeclaringDirectory, string? Value);
+
+	private sealed record TypeScriptPathMappings(
+		string DeclaringDirectory,
+		IReadOnlyDictionary<string, IReadOnlyList<string>> Values);
+
+	private sealed record TypeScriptConfigurationLayer(
+		string? Extends,
+		OptionalConfigurationValue<string> ModuleResolution,
+		OptionalConfigurationValue<TypeScriptBaseUrl> BaseUrl,
+		OptionalConfigurationValue<TypeScriptPathMappings> Paths,
+		OptionalConfigurationValue<bool> AllowJavaScript)
+	{
+		public static readonly TypeScriptConfigurationLayer Empty = new(
+			null,
+			default,
+			default,
+			default,
+			default);
 	}
 }
 

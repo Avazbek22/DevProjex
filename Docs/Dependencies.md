@@ -87,6 +87,17 @@ and directory probes. `.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ord
 DevProjex never guesses a `dist` to `src` mapping without configuration, and module references without
 an owning `tsconfig.json` or `jsconfig.json` stay unresolved.
 
+TypeScript configuration supports a bounded `extends` chain when every value is one explicit relative
+path inside the project root. At most eight inheritance edges are followed; cycles, arrays, package or
+bare specifiers, and paths outside the root are reported as unsupported semantics. Child
+`compilerOptions` replace inherited values by key. Inherited `paths` and `baseUrl` remain relative to
+the configuration file that declared them, matching TypeScript's configuration-origin semantics;
+the existing legacy `baseUrl` resolution limitation described above still applies.
+Every extended file is included in the configuration fingerprint. A missing base is also recorded as
+an absent control file, so its later appearance invalidates a cached dependency snapshot. When an
+existing base is outside the effective manifest, the manifest-snapshot shortcut is bypassed; this
+keeps later edits observable without widening the selected dependency manifest.
+
 Configuration reads have four explicit outcomes: valid, missing, corrupt, and unsupported semantics.
 A malformed JSON document, a `null` or non-object `compilerOptions`, or an unsupported value shape is
 never replaced by an implicit default. References whose resolution depends on that control file remain
