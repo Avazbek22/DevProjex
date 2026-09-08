@@ -62,13 +62,9 @@ public sealed class DependencyFactsEngine : IDisposable
 		ArgumentNullException.ThrowIfNull(manifestFiles);
 		var started = Stopwatch.StartNew();
 		var root = Path.GetFullPath(sourceRoot);
-		var manifest = manifestFiles
-			.Select(Path.GetFullPath)
-			.Where(path => IsWithin(root, path))
-			.Distinct(PathComparer)
-			.OrderBy(path => PortableRelative(root, path), StringComparer.Ordinal)
-			.ToArray();
-		var manifestRelativePaths = manifest.Select(path => PortableRelative(root, path)).ToArray();
+		var canonicalManifest = CreateCanonicalManifest(root, manifestFiles);
+		var manifest = canonicalManifest.Select(static file => file.FullPath).ToArray();
+		var manifestRelativePaths = canonicalManifest.Select(static file => file.RelativePath).ToArray();
 		var manifestRequestKey = new ManifestRequestKey(
 			root,
 			Hash(manifestRelativePaths));
@@ -117,7 +113,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					.PrepareAsync(root, manifest[index], configuration, _limits, token, contentIdentity)
 					.ConfigureAwait(false);
 				prepared[index] = new PreparedDependencyIdentity(
-					source.RelativePath,
+					canonicalManifest[index].RelativePath,
 					source.ContentFingerprint,
 					source.LanguageId);
 				if (source.PreparedStatus != DependencyFileStatus.Supported)
@@ -735,6 +731,21 @@ public sealed class DependencyFactsEngine : IDisposable
 		return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
 	}
 
+	private static CanonicalManifestFile[] CreateCanonicalManifest(
+		string root,
+		IReadOnlyList<string> manifestFiles)
+	{
+		var unique = new Dictionary<string, CanonicalManifestFile>(manifestFiles.Count, PathComparer);
+		foreach (var path in manifestFiles)
+		{
+			var fullPath = Path.GetFullPath(path);
+			if (!IsWithin(root, fullPath) || unique.ContainsKey(fullPath))
+				continue;
+			unique.Add(fullPath, new CanonicalManifestFile(fullPath, PortableRelative(root, fullPath)));
+		}
+		return unique.Values.OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
+	}
+
 	private static bool IsWithin(string root, string path)
 	{
 		var relative = Path.GetRelativePath(root, path);
@@ -772,6 +783,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		string RelativePath,
 		string ContentFingerprint,
 		LanguageId LanguageId);
+
+	private readonly record struct CanonicalManifestFile(string FullPath, string RelativePath);
 
 	private readonly record struct IndexCacheKey(
 		string ManifestGeneration,
