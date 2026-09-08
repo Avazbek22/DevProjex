@@ -1173,7 +1173,8 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private static bool Matches(string pattern, int star, string value) => star < 0
 			? pattern == value
-			: value.StartsWith(pattern[..star], StringComparison.Ordinal) &&
+			: star + (pattern.Length - star - 1) <= value.Length &&
+			  value.StartsWith(pattern[..star], StringComparison.Ordinal) &&
 			  value.EndsWith(pattern[(star + 1)..], StringComparison.Ordinal);
 
 		private static string BarePackageName(string specifier)
@@ -1266,7 +1267,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				var star = pair.Key.IndexOf('*');
 				var prefix = pair.Key[..star];
 				var suffix = pair.Key[(star + 1)..];
-				if (!key.StartsWith(prefix, StringComparison.Ordinal) || !key.EndsWith(suffix, StringComparison.Ordinal))
+				if (prefix.Length + suffix.Length > key.Length ||
+				    !key.StartsWith(prefix, StringComparison.Ordinal) ||
+				    !key.EndsWith(suffix, StringComparison.Ordinal))
 					continue;
 				wildcard = key[prefix.Length..(key.Length - suffix.Length)];
 				target = pair.Value;

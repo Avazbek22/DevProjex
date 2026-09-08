@@ -429,6 +429,45 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task TypeScriptPaths_RejectsOverlappingPrefixAndSuffixWithoutThrowing()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", """
+			{"compilerOptions":{"moduleResolution":"bundler","paths":{"ab*bc":["target/*"]}}}
+			""");
+		var source = fixture.CreateFile("main.ts", "import missing from 'abc'; import value from 'abXbc';");
+		var target = fixture.CreateFile("target/X.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "abc" && edge.Status == ResolutionStatus.Unresolved);
+		Assert.Contains(result.Edges, edge => edge.Reference == "abXbc" && edge.Target == "target/X.ts");
+	}
+
+	[Fact]
+	public async Task TypeScriptPackageMap_RejectsOverlappingPrefixAndSuffixWithoutThrowing()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var package = fixture.CreateFile("package.json", "{\"imports\":{\"#ab*bc\":\"./target/*.ts\"}}");
+		var source = fixture.CreateFile("main.ts", "import missing from '#abc'; import value from '#abXbc';");
+		var target = fixture.CreateFile("target/X.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "#abc" && edge.Status == ResolutionStatus.Unresolved);
+		Assert.Contains(result.Edges, edge => edge.Reference == "#abXbc" && edge.Target == "target/X.ts");
+	}
+
+	[Fact]
 	public async Task TypeScriptPackageExports_NullTargetIsUnresolvedAndLegacyConfigIsExplicit()
 	{
 		using var fixture = new TemporaryDirectory();
