@@ -1027,7 +1027,14 @@ public sealed partial class McpServerProcessTests
 		{
 			lock (_sync)
 				_values.Add(value);
+			_reported.TrySetResult();
 		}
+
+		private readonly TaskCompletionSource _reported = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public Task WaitForValueAsync(CancellationToken cancellationToken) =>
+			_reported.Task.WaitAsync(cancellationToken);
 	}
 
 	// Mirrors the hardened EnsureRepository fixture: a signing requirement, hook

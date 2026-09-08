@@ -1,10 +1,12 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Unicode;
-using System.Runtime.InteropServices;
 using System.Xml;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Ranking;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Services;
@@ -275,15 +277,22 @@ public sealed class ProjectContextDocumentService(
 		ImportanceRankingReport? ranking = null)
 	{
 		ArgumentNullException.ThrowIfNull(prepared);
+		var analyzer = CreatePreparedAnalyzer(prepared);
+		await EnsureRankingSourceVersionsAsync(
+				plan.IncludedFiles,
+				ranking,
+				cancellationToken,
+				path => analyzer.IsApplicationOwnedImmutableContent(path))
+			.ConfigureAwait(false);
 		var pathRedaction = outputPathRedactionDecision ??
 		                    OutputRootPathPresentation.CaptureRedactionDecision(
 			                    CreateTransformationContext(plan));
-		var analyzer = CreatePreparedAnalyzer(prepared);
 		plan = await RefreshStructuredContentMetricsAsync(
 				plan,
 				view,
 				format,
 				analyzer,
+				prepared,
 				cancellationToken)
 			.ConfigureAwait(false);
 		var service = new ProjectContextDocumentService(
@@ -363,6 +372,98 @@ public sealed class ProjectContextDocumentService(
 		return new ProjectContextWriteResult(prepared.UnscannableFiles, tokenBudget.CreateReport(), ranking);
 	}
 
+	public async Task<ProjectContextWriteResult> EvaluateMeasuredTokenBudgetAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		long maximumEstimatedTokens,
+		PreparedSecretRedactionOutput measured,
+		ImportanceRankingReport? ranking = null,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentNullException.ThrowIfNull(measured);
+		ValidateView(view);
+		ValidateDocumentFormat(format);
+		await EnsureRankingSourceVersionsAsync(plan.IncludedFiles, ranking, cancellationToken)
+			.ConfigureAwait(false);
+		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens)!;
+		if (!IncludesContent(view))
+			return new ProjectContextWriteResult(measured.UnscannableFiles, tokenBudget.CreateReport(), ranking);
+
+		var effectivePathRedaction = outputPathRedactionDecision ??
+			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
+		var contentPathMapper = CreateContentPathMapper(
+			plan,
+			view,
+			format,
+			useSourceMappedStructuredPaths: true);
+		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
+		var metricsByPath = measured.TransformedFileMetrics.ToDictionary(
+			static metrics => Path.GetFullPath(metrics.Path),
+			PathComparer.Default);
+		var measuredAnalyzer = CreatePreparedAnalyzer(measured);
+		var orderedPaths = ResolveOrderedPaths(plan.IncludedFiles, ranking);
+		for (var index = 0; index < orderedPaths.Count; index++)
+		{
+			var path = orderedPaths[index];
+			metricsByPath.TryGetValue(Path.GetFullPath(path), out var metrics);
+			var preparedFile = measured.GetFile(path);
+			var result = metrics.Path is not null && !metrics.IsEstimated
+				? new FileContentMetricsResult(
+					preparedFile.Classification,
+					ToTextFileMetrics(metrics))
+				: await ReadExactMetricsAsync(path, measuredAnalyzer, cancellationToken)
+					.ConfigureAwait(false);
+			var file = CreateCompleteFileDocument(
+				path,
+				result,
+				contentPathMapper,
+				effectivePathRedaction);
+			TryIncludeInBudget(
+				tokenBudget,
+				file.Path,
+				path,
+				file.Metrics?.CharCount ?? 0,
+				rankingEntriesByFullPath,
+				index);
+		}
+
+		return new ProjectContextWriteResult(measured.UnscannableFiles, tokenBudget.CreateReport(), ranking);
+	}
+
+	public static ProjectContextPlan ApplyMeasuredContentMetrics(
+		ProjectContextPlan plan,
+		PreparedSecretRedactionOutput measured)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentNullException.ThrowIfNull(measured);
+		return WithContentMetrics(plan, measured.GetTransformedMetrics());
+	}
+
+	private static async Task EnsureRankingSourceVersionsAsync(
+		IReadOnlyList<string> paths,
+		ImportanceRankingReport? ranking,
+		CancellationToken cancellationToken,
+		Func<string, bool>? shouldValidate = null)
+	{
+		ArgumentNullException.ThrowIfNull(paths);
+		if (ranking?.SourceVersions is null)
+			return;
+		foreach (var path in paths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (shouldValidate is not null && !shouldValidate(path))
+				continue;
+			if (ranking.SourceVersions.TryGetValue(Path.GetFullPath(path), out var expectedVersion) &&
+			    !await expectedVersion.IsCurrentAsync(path, cancellationToken).ConfigureAwait(false))
+			{
+				throw new IOException(
+					"Selected source content changed during importance ranking; repeat the export.");
+			}
+		}
+	}
+
 	private async Task EvaluateTokenBudgetCoreAsync(
 		ProjectContextPlan plan,
 		ProjectContextView view,
@@ -384,6 +485,7 @@ public sealed class ProjectContextDocumentService(
 			               plan.SourceRoot,
 			               orderedPaths,
 			               ranking?.SourceVersions,
+			               validateDuringUtf8Copy: false,
 			               cancellationToken).ConfigureAwait(false))
 		{
 			await using var snapshot = source.Snapshot;
@@ -462,7 +564,7 @@ public sealed class ProjectContextDocumentService(
 		return ordered;
 	}
 
-	private IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
+	private PreparedSecretFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
 		new PreparedSecretFileContentAnalyzer(
 			contentAnalyzer,
 			preparedContentAnalyzer ?? contentAnalyzer,
@@ -473,6 +575,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
 		IFileContentAnalyzer analyzer,
+		PreparedSecretRedactionOutput prepared,
 		CancellationToken cancellationToken)
 	{
 		if (!IncludesContent(view) ||
@@ -481,10 +584,47 @@ public sealed class ProjectContextDocumentService(
 			return plan;
 		}
 
-		var metrics = await ProjectContentMetricsCalculator
-			.CalculateAsync(analyzer, plan.IncludedFiles, cancellationToken)
+		var preparedMetrics = prepared.TransformedFileMetrics.ToDictionary(
+			static metrics => Path.GetFullPath(metrics.Path),
+			PathComparer.Default);
+		var orderedMetrics = new List<ContentFileMetrics>(plan.IncludedFiles.Count);
+		foreach (var path in plan.IncludedFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (preparedMetrics.TryGetValue(Path.GetFullPath(path), out var metrics) &&
+			    !metrics.IsEstimated)
+			{
+				orderedMetrics.Add(metrics);
+				continue;
+			}
+
+			var result = await ReadExactMetricsAsync(path, analyzer, cancellationToken)
+				.ConfigureAwait(false);
+			if (result.IsText && result.Metrics is { } textMetrics)
+				orderedMetrics.Add(ToContentFileMetrics(path, textMetrics));
+		}
+		return WithContentMetrics(
+			plan,
+			ExportOutputMetricsCalculator.FromOrderedContentFiles(orderedMetrics));
+	}
+
+	private static async ValueTask<FileContentMetricsResult> ReadExactMetricsAsync(
+		string path,
+		IFileContentAnalyzer analyzer,
+		CancellationToken cancellationToken)
+	{
+		await using var snapshot = await analyzer
+			.OpenCompleteSnapshotAsync(path, cancellationToken)
 			.ConfigureAwait(false);
-		return plan with
+		if (snapshot.Result.Metrics is { IsEstimated: true })
+			throw new IOException($"Exact document metrics are unavailable for '{path}'.");
+		return snapshot.Result;
+	}
+
+	private static ProjectContextPlan WithContentMetrics(
+		ProjectContextPlan plan,
+		ExportOutputMetrics metrics) =>
+		plan with
 		{
 			Analysis = plan.Analysis with
 			{
@@ -497,7 +637,32 @@ public sealed class ProjectContextDocumentService(
 				}
 			}
 		};
-	}
+
+	private static ContentFileMetrics ToContentFileMetrics(string path, TextFileMetrics metrics) =>
+		new(
+			path,
+			metrics.SizeBytes,
+			metrics.LineCount,
+			metrics.CharCount,
+			metrics.IsEmpty,
+			metrics.IsWhitespaceOnly,
+			metrics.IsEstimated,
+			metrics.CrLfPairCount,
+			metrics.TrailingNewlineChars,
+			metrics.TrailingNewlineLineBreaks);
+
+	private static TextFileMetrics ToTextFileMetrics(ContentFileMetrics metrics) =>
+		new(
+			metrics.SizeBytes,
+			metrics.LineCount,
+			metrics.CharCount,
+			metrics.IsEmpty,
+			metrics.IsWhitespaceOnly,
+			metrics.IsEstimated,
+			CrLfPairCount: metrics.CrLfPairCount,
+			TrailingNewlineChars: metrics.TrailingNewlineChars,
+			TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks,
+			LongestBacktickRun: 0);
 
 	// One gate for both transformations: whichever is enabled, the document is built from prepared
 	// text rather than from the files on disk, so every format sees the same bytes.
@@ -574,14 +739,27 @@ public sealed class ProjectContextDocumentService(
 		var context = CreateTransformationContext(plan)!;
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
 		await using var prepared = await preparer
-			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
+			.PrepareAsync(
+				context,
+				plan.IncludedFiles,
+				captureEffectiveFindings: false,
+				captureTransformedMetrics: format is
+					ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml,
+				cancellationToken)
 			.ConfigureAwait(false);
 		var analyzer = CreatePreparedAnalyzer(prepared);
+		await EnsureRankingSourceVersionsAsync(
+				plan.IncludedFiles,
+				ranking,
+				cancellationToken,
+				path => analyzer.IsApplicationOwnedImmutableContent(path))
+			.ConfigureAwait(false);
 		plan = await RefreshStructuredContentMetricsAsync(
 				plan,
 				view,
 				format,
 				analyzer,
+				prepared,
 				cancellationToken)
 			.ConfigureAwait(false);
 		var service = new ProjectContextDocumentService(
@@ -652,6 +830,7 @@ public sealed class ProjectContextDocumentService(
 				               plan.SourceRoot,
 				               orderedPaths,
 				               ranking?.SourceVersions,
+				               validateDuringUtf8Copy: false,
 				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -785,6 +964,7 @@ public sealed class ProjectContextDocumentService(
 				               plan.SourceRoot,
 				               orderedPaths,
 				               ranking?.SourceVersions,
+				               validateDuringUtf8Copy: true,
 				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -911,6 +1091,7 @@ public sealed class ProjectContextDocumentService(
 				               plan.SourceRoot,
 				               orderedPaths,
 				               ranking?.SourceVersions,
+				               validateDuringUtf8Copy: false,
 				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -1035,6 +1216,7 @@ public sealed class ProjectContextDocumentService(
 				               plan.SourceRoot,
 				               orderedPaths,
 				               ranking?.SourceVersions,
+				               validateDuringUtf8Copy: false,
 				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -1147,6 +1329,7 @@ public sealed class ProjectContextDocumentService(
 		string projectRoot,
 		IReadOnlyList<string> orderedPaths,
 		IReadOnlyDictionary<string, RankingSourceVersion>? sourceVersions,
+		bool validateDuringUtf8Copy,
 		[EnumeratorCancellation] CancellationToken cancellationToken)
 	{
 		if (orderedPaths.Count == 0)
@@ -1180,6 +1363,7 @@ public sealed class ProjectContextDocumentService(
 						path,
 						retainedBytes,
 						expectedVersion,
+						validateDuringUtf8Copy,
 						readCancellation.Token)));
 			}
 		}
@@ -1221,6 +1405,7 @@ public sealed class ProjectContextDocumentService(
 		string path,
 		WeightedByteBudget retainedBytes,
 		RankingSourceVersion? expectedVersion,
+		bool validateDuringUtf8Copy,
 		CancellationToken cancellationToken)
 	{
 		// Start these methods in source order so a full-budget request cannot be
@@ -1232,12 +1417,39 @@ public sealed class ProjectContextDocumentService(
 		IFileContentSnapshot? snapshot = null;
 		try
 		{
-			EnsureRankingSourceVersion(path, expectedVersion);
-			snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
+			var isApplicationOwnedImmutable = contentAnalyzer is PreparedSecretFileContentAnalyzer preparedAnalyzer &&
+			                                  preparedAnalyzer.IsApplicationOwnedImmutableContent(path);
+			snapshot = await OpenSourceSnapshotAsync(
+					projectRoot,
+					path,
+					captureRawContentIdentity: !isApplicationOwnedImmutable && expectedVersion is not null,
+					cancellationToken)
 				.ConfigureAwait(false);
-			EnsureRankingSourceVersion(path, expectedVersion);
-			if (expectedVersion is { } version)
-				snapshot = CreateRankingValidatedSourceSnapshot(snapshot, path, version);
+			if (!isApplicationOwnedImmutable && expectedVersion is { } version)
+			{
+				if (validateDuringUtf8Copy && snapshot is IUtf8FileContentSnapshot)
+				{
+					snapshot = new RankingValidatedUtf8SourceSnapshot(snapshot, path, version);
+				}
+				else if (snapshot is IRawContentIdentitySnapshot identitySnapshot)
+				{
+					if (!version.HasMatchingContentHash(identitySnapshot.RawContentHash.Span))
+					{
+						throw new IOException(
+							"A selected source file changed after importance facts were indexed; repeat the export.");
+					}
+					snapshot = new RankingMetadataValidatedSourceSnapshot(snapshot, path, version);
+				}
+				else if (!await version.IsCurrentAsync(path, cancellationToken).ConfigureAwait(false))
+				{
+					throw new IOException(
+						"A selected source file changed after importance facts were indexed; repeat the export.");
+				}
+				else
+				{
+					snapshot = new RankingMetadataValidatedSourceSnapshot(snapshot, path, version);
+				}
+			}
 			IFileContentSnapshot budgeted = snapshot is IUtf8FileContentSnapshot
 				? new BudgetedUtf8CompleteSourceSnapshot(snapshot, lease)
 				: new BudgetedCompleteSourceSnapshot(snapshot, lease);
@@ -1303,6 +1515,7 @@ public sealed class ProjectContextDocumentService(
 	private async ValueTask<IFileContentSnapshot> OpenSourceSnapshotAsync(
 		string projectRoot,
 		string path,
+		bool captureRawContentIdentity,
 		CancellationToken cancellationToken)
 	{
 		if (contentAnalyzer is PreparedSecretFileContentAnalyzer preparedAnalyzer &&
@@ -1319,9 +1532,13 @@ public sealed class ProjectContextDocumentService(
 		if (classification is { } unavailable)
 			return new UnavailableSourceSnapshot(unavailable);
 
-		var snapshot = await contentAnalyzer
-			.OpenCompleteSnapshotAsync(path, cancellationToken)
-			.ConfigureAwait(false);
+		var snapshot = captureRawContentIdentity &&
+		               contentAnalyzer is IRawContentIdentityFileContentAnalyzer identityAnalyzer
+			? await identityAnalyzer
+				.OpenCompleteSnapshotWithRawContentIdentityAsync(path, cancellationToken)
+				.ConfigureAwait(false)
+			: await contentAnalyzer.OpenCompleteSnapshotAsync(path, cancellationToken)
+				.ConfigureAwait(false);
 		classification = ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
 		if (classification is null)
 			return snapshot;
@@ -2033,13 +2250,6 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteEndObject();
 	}
 
-	private static void EnsureRankingSourceVersion(string path, RankingSourceVersion? expectedVersion)
-	{
-		if (expectedVersion is { } version && !version.IsCurrent(path))
-			throw new IOException(
-				"Selected source content changed during importance ranking; repeat the export.");
-	}
-
 	private static void WriteRanking(
 		Utf8JsonWriter writer,
 		ImportanceRankingReport report,
@@ -2746,14 +2956,6 @@ public sealed class ProjectContextDocumentService(
 		string Path,
 		Task<IFileContentSnapshot> ReadTask);
 
-	private static IFileContentSnapshot CreateRankingValidatedSourceSnapshot(
-		IFileContentSnapshot inner,
-		string sourcePath,
-		RankingSourceVersion expectedVersion) =>
-		inner is IUtf8FileContentSnapshot
-			? new RankingValidatedUtf8SourceSnapshot(inner, sourcePath, expectedVersion)
-			: new RankingValidatedSourceSnapshot(inner, sourcePath, expectedVersion);
-
 	private sealed class BudgetedCompleteSourceSnapshot(
 		IFileContentSnapshot inner,
 		WeightedByteBudget.Lease lease) : IFileContentSnapshot
@@ -2819,7 +3021,7 @@ public sealed class ProjectContextDocumentService(
 		}
 	}
 
-	private sealed class RankingValidatedSourceSnapshot(
+	private sealed class RankingMetadataValidatedSourceSnapshot(
 		IFileContentSnapshot inner,
 		string sourcePath,
 		RankingSourceVersion expectedVersion) : IFileContentSnapshot
@@ -2835,27 +3037,14 @@ public sealed class ProjectContextDocumentService(
 		{
 			await inner.CopyTextToAsync(maximumCharacters, writeChunk, cancellationToken)
 				.ConfigureAwait(false);
-			EnsureCurrent();
+			EnsureMetadataCurrent(sourcePath, expectedVersion);
 		}
 
 		public async ValueTask DisposeAsync()
 		{
 			if (Interlocked.Exchange(ref _disposed, 1) != 0)
 				return;
-			try
-			{
-				EnsureCurrent();
-			}
-			finally
-			{
-				await inner.DisposeAsync().ConfigureAwait(false);
-			}
-		}
-
-		private void EnsureCurrent()
-		{
-			if (!expectedVersion.IsCurrent(sourcePath))
-				throw new IOException("A selected source file changed after importance facts were indexed.");
+			await inner.DisposeAsync().ConfigureAwait(false);
 		}
 	}
 
@@ -2875,7 +3064,6 @@ public sealed class ProjectContextDocumentService(
 		{
 			await inner.CopyTextToAsync(maximumCharacters, writeChunk, cancellationToken)
 				.ConfigureAwait(false);
-			EnsureCurrent();
 		}
 
 		public async ValueTask CopyUtf8ToAsync(
@@ -2883,30 +3071,48 @@ public sealed class ProjectContextDocumentService(
 			Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> writeChunk,
 			CancellationToken cancellationToken = default)
 		{
+			using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+			ContentPipelineDiagnostics.RecordSourceVersionHashPass();
 			await ((IUtf8FileContentSnapshot)inner)
-				.CopyUtf8ToAsync(maximumCharacters, writeChunk, cancellationToken)
+				.CopyUtf8ToAsync(
+					maximumCharacters,
+					async (chunk, token) =>
+					{
+						token.ThrowIfCancellationRequested();
+						hash.AppendData(chunk.Span);
+						ContentPipelineDiagnostics.RecordSourceVersionHashBytes(chunk.Length);
+						await writeChunk(chunk, token).ConfigureAwait(false);
+					},
+					cancellationToken)
 				.ConfigureAwait(false);
-			EnsureCurrent();
+			var actualHash = hash.GetHashAndReset();
+			var expectedHash = expectedVersion.ContentHash is null
+				? []
+				: Convert.FromHexString(expectedVersion.ContentHash);
+			if (!CryptographicOperations.FixedTimeEquals(actualHash, expectedHash))
+			{
+				throw new IOException(
+					"A selected source file changed after importance facts were indexed; repeat the export.");
+			}
+			EnsureMetadataCurrent(sourcePath, expectedVersion);
 		}
 
 		public async ValueTask DisposeAsync()
 		{
 			if (Interlocked.Exchange(ref _disposed, 1) != 0)
 				return;
-			try
-			{
-				EnsureCurrent();
-			}
-			finally
-			{
-				await inner.DisposeAsync().ConfigureAwait(false);
-			}
+			await inner.DisposeAsync().ConfigureAwait(false);
 		}
+	}
 
-		private void EnsureCurrent()
+	private static void EnsureMetadataCurrent(
+		string sourcePath,
+		RankingSourceVersion expectedVersion)
+	{
+		if (!expectedVersion.HasMatchingMetadata(sourcePath))
 		{
-			if (!expectedVersion.IsCurrent(sourcePath))
-				throw new IOException("A selected source file changed after importance facts were indexed.");
+			throw new IOException(
+				"A selected source file changed after importance facts were indexed; repeat the export.");
 		}
 	}
 

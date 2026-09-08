@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Security.Cryptography;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Dependencies;
 
 namespace DevProjex.Application.Ranking;
@@ -119,6 +121,14 @@ internal readonly record struct RankingSourceVersion(
 	long LastWriteTimeUtcTicks,
 	string? ContentHash)
 {
+	internal bool HasMatchingContentHash(ReadOnlySpan<byte> contentHash)
+	{
+		if (ContentHash is null)
+			return false;
+		var expectedHash = Convert.FromHexString(ContentHash);
+		return CryptographicOperations.FixedTimeEquals(contentHash, expectedHash);
+	}
+
 	internal static RankingSourceVersion Capture(string path)
 	{
 		try
@@ -142,7 +152,88 @@ internal readonly record struct RankingSourceVersion(
 		}
 	}
 
+	internal static async ValueTask<RankingSourceVersion> CaptureAsync(
+		string path,
+		CancellationToken cancellationToken,
+		Action<long>? chunkRead = null)
+	{
+		byte[]? buffer = null;
+		try
+		{
+			var file = new FileInfo(path);
+			if (!file.Exists)
+				return default;
+			await using var stream = new FileStream(
+				path,
+				new FileStreamOptions
+				{
+					Mode = FileMode.Open,
+					Access = FileAccess.Read,
+					Share = FileShare.ReadWrite | FileShare.Delete,
+					BufferSize = 64 * 1024,
+					Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+				});
+			using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+			ContentPipelineDiagnostics.RecordSourceVersionHashPass();
+			buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+			while (true)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var read = await stream
+					.ReadAsync(buffer.AsMemory(), cancellationToken)
+					.ConfigureAwait(false);
+				if (read == 0)
+					break;
+				hash.AppendData(buffer.AsSpan(0, read));
+				ContentPipelineDiagnostics.RecordSourceVersionHashBytes(read);
+				chunkRead?.Invoke(read);
+			}
+			file.Refresh();
+			return new RankingSourceVersion(
+				true,
+				file.Length,
+				file.LastWriteTimeUtc.Ticks,
+				Convert.ToHexString(hash.GetHashAndReset()));
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+		{
+			return default;
+		}
+		finally
+		{
+			if (buffer is not null)
+			{
+				CryptographicOperations.ZeroMemory(buffer);
+				ArrayPool<byte>.Shared.Return(buffer);
+			}
+		}
+	}
+
 	internal bool IsCurrent(string path) => Equals(Capture(path));
+
+	internal async ValueTask<bool> IsCurrentAsync(string path, CancellationToken cancellationToken) =>
+		Equals(await CaptureAsync(path, cancellationToken).ConfigureAwait(false));
+
+	internal bool HasMatchingMetadata(string path)
+	{
+		try
+		{
+			var file = new FileInfo(path);
+			return Exists == file.Exists &&
+			       (!Exists ||
+			        (Length == file.Length && LastWriteTimeUtcTicks == file.LastWriteTimeUtc.Ticks));
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+		{
+			return false;
+		}
+	}
 }
 
 public interface IImportanceRankingService

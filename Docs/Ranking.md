@@ -64,7 +64,7 @@ Git activity is commit count plus recency by position in a safe 200-commit Local
 
 Manifests and explicit `Main` or executable-module evidence are entry points. A source with no dependents and at least three dependencies is only a `coordinator`, not an inferred entry point. Tests are deprioritized but never excluded. The final tie-break is the canonical relative path.
 
-Facts, preparation, cost, and emitted bytes are bound to one source identity. SHA-256 content plus length and last-write metadata are captured around fact indexing and checked while the coherent output snapshot is opened, copied, and disposed. A mismatch fails closed with guidance to repeat the export. Ranking still never widens the effective selection. Without `rank`, it performs no fact indexing, Git work, or content hashing and preserves the existing bytes.
+Facts, preparation, cost, and emitted bytes are bound to one source identity. SHA-256 content plus length and last-write metadata are captured around fact indexing. For source-backed output, raw SHA-256 is then calculated from the same opened handle that supplies the decoded or direct UTF-8 payload; path metadata remains a second guard against replacement. Application-owned immutable prepared content needs no source check after ownership transfer. A mismatch fails closed with guidance to repeat the export. Ranking still never widens the effective selection. Without `rank`, it performs no fact indexing, Git work, or content hashing and preserves the existing bytes and metadata-coherence behavior.
 
 ### Missing-signal ablation
 

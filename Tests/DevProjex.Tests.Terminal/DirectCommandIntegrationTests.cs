@@ -1137,6 +1137,40 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Empty(unsafeEnvironment.StandardOutput);
 	}
 
+	[Fact]
+	public async Task ContextDryRunRejectsUnsafeDestinationBeforeRankingOrPreparation()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "public sealed class App { }\n");
+		var unsafeDestination = Path.Combine(project, "context.md");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => appData.Path))
+			.RunAsync(
+			[
+				"export", "context", project,
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--rank", "importance",
+				"--compress-code",
+				"--dry-run",
+				"-o", unsafeDestination
+			],
+				TestContext.Current.CancellationToken);
+		var diagnostics = measurement.Capture();
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Contains("DPX-EXPORT-UNSAFE-DESTINATION", environment.StandardError, StringComparison.Ordinal);
+		Assert.Equal(0, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
+		Assert.Equal(0, diagnostics.DocumentWriteBytes);
+	}
+
 	private static async Task<int> RunContextExportAsync(
 		TemporaryDirectory workspace,
 		string project,

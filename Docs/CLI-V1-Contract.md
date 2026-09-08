@@ -929,7 +929,7 @@ that prevents an accepted option from becoming a no-op.
 | `export context` | `--view`, `--format` | `tree-content`, `markdown` | selects typed document sections and serializer | none | document on stdout/file; invalid value exits `2` | parser, serializer, process |
 | `export context` | `-o`, `--output` | `-` | selects streaming stdout or an exact context file | destination must be outside source | document or real absolute path on stdout | destination, streaming, process |
 | `export context` | `--force` | off | atomically replaces an existing context file | invalid with stdout | success path on stdout; conflict exits `4`, invalid combination `2` | parser, destination, handler |
-| `export context` | `--dry-run` | off | runs plan and destination preflight without document generation | creates no parent, staging, or output | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
+| `export context` | `--dry-run` | off | runs plan, destination preflight, and a non-materializing transformed-content budget measurement without document generation | creates no prepared file, parent, staging, or output and serializes zero document bytes | stdout empty; one readiness plan on stderr | handler, measurement, filesystem-effects, process |
 | `export context` | `--max-tokens` | unlimited | greedily limits included transformed file content by estimated tokens while preserving deterministic path order | integer `>= 1`; skipped files do not stop consideration of later files; document structure is outside the budget | document stays on stdout/file; localized budget report is written to stderr; JSON/XML add `tokenBudget` | parser, serializer, handler, process |
 | `export context` | `--rank importance` | absent | reorders only the effective content candidates by `importance-v1`; with a budget this is admission priority, without one it is serialization order | invalid with `--view tree`; unknown values exit `2`; no rank performs no ranking work | trusted stderr ranking report; context JSON adds `ranking` | parser, serializer, handler, process |
 | `export context` | `--focus PATH` | absent | with `--rank importance`, places caller-ordered seeds at hop 0, then orders the unchanged effective selection by minimum undirected resolved-graph hop and `importance-v1` within each hop | repeatable; 1..16 supplied non-empty values before deduplication; each is a relative path or absolute file inside the root and effective selection; without rank exits `2`; missing/filtered seed is `DPX-SELECTION-PATH-MISSING` and exit `3` | `focus-v1` stderr report; context JSON adds `ranking.focus` and per-entry hop provenance | parser, resolver, serializer, handler, process |
@@ -1400,7 +1400,10 @@ entries; context JSON adds an optional `ranking` object. The algorithm, weights,
 coverage semantics, and frozen evaluation are specified in
 [Ranking.md](Ranking.md). Per-file source-version guards fail the operation if
 facts and the coherent emitted-content snapshot no longer describe the same
-file version.
+file version. For source-backed ranked exports, the raw SHA-256 identity is
+calculated from the same opened handle that supplies decoded output; path metadata
+remains a second guard. Non-ranked exports retain the existing metadata-coherence
+semantics and do not add content hashing.
 
 Analysis v1 contains inventory, effective selection, metrics, diagnostics, and
 fingerprint. Either findings option adds `findingCount`. With `--findings`, it

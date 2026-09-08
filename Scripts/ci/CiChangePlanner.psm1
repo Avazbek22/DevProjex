@@ -57,6 +57,7 @@ function Enable-FullCiPlan {
 		'UI',
 		'TerminalCommand',
 		'IgnoreScanner',
+		'Documentation',
 		'Release',
 		'Store',
 		'Full'

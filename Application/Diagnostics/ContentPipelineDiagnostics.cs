@@ -57,9 +57,13 @@ public static class ContentPipelineDiagnostics
 
 	public static void RecordPreparedWrite(long bytes)
 	{
+		Increment(static state => ref state.PreparedFilesMaterialized);
 		RecordBytes(static state => ref state.PreparedWriteBytes, bytes);
 		ContentPipelineEventSource.Log.FileIo("prepared-write", bytes);
 	}
+
+	public static void RecordDocumentWrite(long bytes) =>
+		RecordBytes(static state => ref state.DocumentWriteBytes, bytes);
 
 	public static void RecordQueueWait(long elapsedStopwatchTicks)
 	{
@@ -106,6 +110,12 @@ public static class ContentPipelineDiagnostics
 
 	public static void RecordContentFingerprint() =>
 		Increment(static state => ref state.ContentFingerprintComputations);
+
+	public static void RecordSourceVersionHashPass() =>
+		Increment(static state => ref state.SourceVersionHashPasses);
+
+	public static void RecordSourceVersionHashBytes(long bytes) =>
+		RecordBytes(static state => ref state.SourceVersionHashBytes, bytes);
 
 	public static void RecordPlanApply() =>
 		Increment(static state => ref state.PlanApplications);
@@ -174,11 +184,15 @@ public static class ContentPipelineDiagnostics
 		public long FullFileReads;
 		public long FullFileReadBytes;
 		public long ContentFingerprintComputations;
+		public long SourceVersionHashPasses;
+		public long SourceVersionHashBytes;
 		public long PlanApplications;
 		public long OccurrenceIdComputations;
 		public long SourceReadBytes;
 		public long PreparedReadBytes;
 		public long PreparedWriteBytes;
+		public long PreparedFilesMaterialized;
+		public long DocumentWriteBytes;
 		public long QueueWaitStopwatchTicks;
 		public long ByteBudgetWaitStopwatchTicks;
 		public long ByteBudgetRequestedBytes;
@@ -211,6 +225,10 @@ public static class ContentPipelineDiagnostics
 				SourceReadBytes = Volatile.Read(ref SourceReadBytes),
 				PreparedReadBytes = Volatile.Read(ref PreparedReadBytes),
 				PreparedWriteBytes = Volatile.Read(ref PreparedWriteBytes),
+				PreparedFilesMaterialized = Volatile.Read(ref PreparedFilesMaterialized),
+				DocumentWriteBytes = Volatile.Read(ref DocumentWriteBytes),
+				SourceVersionHashPasses = Volatile.Read(ref SourceVersionHashPasses),
+				SourceVersionHashBytes = Volatile.Read(ref SourceVersionHashBytes),
 				QueueWaitTimeTicks = ToTimeSpanTicks(Volatile.Read(ref QueueWaitStopwatchTicks)),
 				ByteBudgetWaitTimeTicks = ToTimeSpanTicks(Volatile.Read(ref ByteBudgetWaitStopwatchTicks)),
 				ByteBudgetRequestedBytes = Volatile.Read(ref ByteBudgetRequestedBytes)
@@ -308,6 +326,10 @@ public sealed record ContentPipelineDiagnosticSnapshot(
 	public long SourceReadBytes { get; init; }
 	public long PreparedReadBytes { get; init; }
 	public long PreparedWriteBytes { get; init; }
+	public long PreparedFilesMaterialized { get; init; }
+	public long DocumentWriteBytes { get; init; }
+	public long SourceVersionHashPasses { get; init; }
+	public long SourceVersionHashBytes { get; init; }
 	public long QueueWaitTimeTicks { get; init; }
 	public long ByteBudgetWaitTimeTicks { get; init; }
 	public long ByteBudgetRequestedBytes { get; init; }

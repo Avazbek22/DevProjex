@@ -257,7 +257,8 @@ public sealed class ImportanceRankingService(
 	{
 		for (var attempt = 0; attempt < 2; attempt++)
 		{
-			var before = CaptureVersions(candidatePaths, cancellationToken);
+			var before = await CaptureVersionsAsync(candidatePaths, cancellationToken)
+				.ConfigureAwait(false);
 			var contentIdentities = new DependencyManifestContentIdentities(
 				before.ToDictionary(
 					static pair => pair.Key,
@@ -271,7 +272,8 @@ public sealed class ImportanceRankingService(
 					cancellationToken,
 					contentIdentities)
 				.ConfigureAwait(false);
-			var after = CaptureVersions(candidatePaths, cancellationToken);
+			var after = await CaptureVersionsAsync(candidatePaths, cancellationToken)
+				.ConfigureAwait(false);
 			if (VersionsEqual(before, after))
 				return (snapshot, after);
 		}
@@ -279,7 +281,7 @@ public sealed class ImportanceRankingService(
 		throw new IOException("Selected source files changed while dependency facts were being indexed.");
 	}
 
-	private static IReadOnlyDictionary<string, RankingSourceVersion> CaptureVersions(
+	private static async Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsAsync(
 		IReadOnlyList<string> paths,
 		CancellationToken cancellationToken)
 	{
@@ -287,7 +289,9 @@ public sealed class ImportanceRankingService(
 		foreach (var path in paths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			versions[Path.GetFullPath(path)] = RankingSourceVersion.Capture(path);
+			versions[Path.GetFullPath(path)] = await RankingSourceVersion
+				.CaptureAsync(path, cancellationToken)
+				.ConfigureAwait(false);
 		}
 		return versions;
 	}

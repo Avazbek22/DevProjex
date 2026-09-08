@@ -25,6 +25,36 @@ gate damages a copy of an embedded resource and proves that validation fails whi
 naming the AppImage publish payload and the changed entry. Packaging continues
 only after both checks pass.
 
+## Release candidate gate
+
+Before creating a release tag, dispatch `.github/workflows/release-candidate.yml`
+with the full 40-character commit SHA that will be tagged:
+
+```shell
+candidate_sha=$(git rev-parse origin/v5.2)
+gh workflow run release-candidate.yml --ref "$candidate_sha" -f sha="$candidate_sha"
+```
+
+For a manual dispatch, the input SHA must equal `github.sha` for the selected
+workflow ref. This keeps the workflow definition and source tree on one commit;
+both identities are printed in the summary. Pull requests do not run the RC
+aggregator: the ordinary `.NET CI` workflow runs a lightweight `actionlint` job
+instead, so edits to workflow composition are checked without duplicating every
+matrix and packaging build.
+
+The gate checks out that exact SHA and runs reusable `.NET CI`, Release
+Validation, read-only headless archive, container, and headless-package builds.
+The two test planners receive `force_full: true`; every test, documentation,
+release-config, local-channel, and publish-smoke job must run, and either reusable
+gate fails if one of those jobs is skipped. The three read-only build workflows
+have no direct pull-request trigger and are invoked once by their publishing
+workflow during ordinary PR validation.
+The container and package paths never publish from the RC: write and OIDC
+permissions exist only in the outer release workflows. The final job writes one
+table covering all five gates and fails if any called workflow was skipped,
+canceled, or unsuccessful. A green manually dispatched release-candidate report
+for the exact commit is required before the tag is created.
+
 ## Local channel model
 
 The default invocation selects both local channels:
