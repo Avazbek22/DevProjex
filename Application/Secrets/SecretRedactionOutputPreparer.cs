@@ -218,7 +218,7 @@ public sealed class SecretRedactionOutputPreparer
 			orderedFilePaths.Count >= ConsolidatedSnapshotFileThreshold;
 		var preparedFiles = new Dictionary<string, PreparedSecretFile>(ProjectTreePathIdentity.CanonicalComparer);
 		var transformedFileMetrics = captureTransformedMetrics
-			? new Dictionary<string, ContentFileMetrics>(ProjectTreePathIdentity.CanonicalComparer)
+			? new ContentFileMetrics?[orderedFilePaths.Count]
 			: null;
 		var unscannableFiles = new List<UnscannableFile>();
 		using var transformationScope = context.BeginOutput(orderedFilePaths, cancellationToken);
@@ -226,8 +226,9 @@ public sealed class SecretRedactionOutputPreparer
 		var requiredInspectionScope = context.Compression is null ? scope : null;
 		if (requiredInspectionScope is not null)
 		{
-			foreach (var sourcePath in orderedFilePaths)
+			for (var sourceIndex = 0; sourceIndex < orderedFilePaths.Count; sourceIndex++)
 			{
+				var sourcePath = orderedFilePaths[sourceIndex];
 				if (requiredInspectionScope.GetContentInspectionMode(sourcePath) ==
 				    SecretContentInspectionMode.None)
 				{
@@ -247,7 +248,7 @@ public sealed class SecretRedactionOutputPreparer
 									ContentPipelineDiagnostics.RecordSourceRead(sourceMetrics.SizeBytes);
 							}
 							if (ClassifySourcePath(context, sourcePath) is null && metrics.Metrics is { } textMetrics)
-								transformedFileMetrics![sourcePath] = ToContentFileMetrics(sourcePath, textMetrics);
+								transformedFileMetrics![sourceIndex] = ToContentFileMetrics(sourcePath, textMetrics);
 						}
 					}
 				}
@@ -288,7 +289,7 @@ public sealed class SecretRedactionOutputPreparer
 							// Redaction cannot promise anything about text it never decoded or fully read,
 							// so every output withholds the content and reports the exact reason.
 							if (captureTransformedMetrics && result.Content is { } estimatedContent)
-								transformedFileMetrics![sourcePath] = ToContentFileMetrics(sourcePath, estimatedContent);
+								transformedFileMetrics![prepared.SourceIndex] = ToContentFileMetrics(sourcePath, estimatedContent);
 							if (scope is not null &&
 							    (scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None ||
 							     transformedTextConsumer is not null))
@@ -330,10 +331,12 @@ public sealed class SecretRedactionOutputPreparer
 							prepared.DetectionEntry,
 							compressed.Map);
 					}
-					var redactions = plan?.Spans
-						.Where(static span => span.State == SecretPreviewSpanState.Redacted)
-						.Select(static span => new PreparedSecretSpan(span.Start, span.Length))
-						.ToArray() ?? [];
+					var redactions = materializeTransformedContent
+						? plan?.Spans
+							.Where(static span => span.State == SecretPreviewSpanState.Redacted)
+							.Select(static span => new PreparedSecretSpan(span.Start, span.Length))
+							.ToArray() ?? []
+						: [];
 					IReadOnlyList<EffectiveRedactionFinding> findings = plan is null || !captureEffectiveFindings
 						? []
 						: BuildEffectiveFindings(plan.Spans, content.Content, compressed.Map);
@@ -352,9 +355,9 @@ public sealed class SecretRedactionOutputPreparer
 								cancellationToken)
 							.ConfigureAwait(false);
 					}
-					if (captureTransformedMetrics)
+					if (captureTransformedMetrics && !materializeTransformedContent)
 					{
-						transformedFileMetrics![sourcePath] = await MeasureTransformedContentAsync(
+						transformedFileMetrics![prepared.SourceIndex] = await MeasureTransformedContentAsync(
 							sourcePath,
 							transformedText,
 							plan,
@@ -379,6 +382,15 @@ public sealed class SecretRedactionOutputPreparer
 					// A completed redaction scan must remain authoritative if the source changes before output.
 					if (scope is null && ReferenceEquals(transformedText, content.Content) && redactions.Length == 0)
 					{
+						if (captureTransformedMetrics)
+						{
+							transformedFileMetrics![prepared.SourceIndex] = await MeasureTransformedContentAsync(
+								sourcePath,
+								transformedText,
+								plan,
+								ResolveEncoding(result.Encoding ?? TextFileEncoding.Utf8),
+								cancellationToken).ConfigureAwait(false);
+						}
 						preparedFiles[sourcePath] = findings.Count == 0
 							? PreparedSecretFile.Unchanged(sourcePath)
 							: new PreparedSecretFile(
@@ -418,17 +430,23 @@ public sealed class SecretRedactionOutputPreparer
 						{
 							ContentSlice = slice
 						};
+						if (captureTransformedMetrics)
+							transformedFileMetrics![prepared.SourceIndex] = ToContentFileMetrics(sourcePath, slice.Metrics);
 					}
 					else
 					{
 						var preparedPath = Path.Combine(workingDirectory.Path, $"{prepared.Index:D8}.redacted.txt");
-						await WritePreparedTextAsync(
+						var writtenMetrics = await WritePreparedTextAsync(
 								preparedPath,
+								sourcePath,
 								transformedText,
 								plan,
 								ResolveEncoding(encoding),
+								captureTransformedMetrics,
 								cancellationToken)
 							.ConfigureAwait(false);
+						if (writtenMetrics is { } metrics)
+							transformedFileMetrics![prepared.SourceIndex] = metrics;
 						preparedFiles[sourcePath] = new PreparedSecretFile(
 							sourcePath,
 							preparedPath,
@@ -469,10 +487,7 @@ public sealed class SecretRedactionOutputPreparer
 				unscannableFiles,
 				transformedFileMetrics is null
 					? []
-					: orderedFilePaths
-						.Where(transformedFileMetrics.ContainsKey)
-						.Select(path => transformedFileMetrics[path])
-						.ToArray(),
+					: transformedFileMetrics.OfType<ContentFileMetrics>().ToArray(),
 				contentStore);
 		}
 		catch
@@ -490,22 +505,10 @@ public sealed class SecretRedactionOutputPreparer
 		[EnumeratorCancellation] CancellationToken cancellationToken,
 		SecretRedactionScope? requiredInspectionScope = null)
 	{
-		var scheduled = new List<CompressionWorkItem>(orderedFilePaths.Count);
-		for (var index = 0; index < orderedFilePaths.Count; index++)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var item = new CompressionWorkItem(index, orderedFilePaths[index]);
-			if (requiredInspectionScope?.GetContentInspectionMode(item.SourcePath) ==
-			    SecretContentInspectionMode.None)
-			{
-				continue;
-			}
-			scheduled.Add(item);
-		}
-		if (scheduled.Count == 0)
+		if (orderedFilePaths.Count == 0)
 			yield break;
 
-		var workerCount = Math.Min(MaximumTransformationWorkers, scheduled.Count);
+		var workerCount = Math.Min(MaximumTransformationWorkers, orderedFilePaths.Count);
 		using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		using var retainedBytes = new WeightedByteBudget(MaximumTransformationInFlightBytes);
 		using var lookAhead = new SemaphoreSlim(workerCount * 2, workerCount * 2);
@@ -537,8 +540,7 @@ public sealed class SecretRedactionOutputPreparer
 			await foreach (var entry in output.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
 			{
 				pending.Add(entry.Index, entry);
-				while (nextScheduledIndex < scheduled.Count &&
-				       pending.Remove(scheduled[nextScheduledIndex].Index, out var next))
+				while (pending.Remove(nextScheduledIndex, out var next))
 				{
 					nextScheduledIndex++;
 					try
@@ -600,9 +602,20 @@ public sealed class SecretRedactionOutputPreparer
 		{
 			try
 			{
-				foreach (var template in scheduled)
+				var admissionIndex = 0;
+				for (var sourceIndex = 0; sourceIndex < orderedFilePaths.Count; sourceIndex++)
 				{
+					var sourcePath = orderedFilePaths[sourceIndex];
 					linkedCancellation.Token.ThrowIfCancellationRequested();
+					if (requiredInspectionScope?.GetContentInspectionMode(sourcePath) ==
+					    SecretContentInspectionMode.None)
+					{
+						continue;
+					}
+					var template = new CompressionWorkItem(
+						admissionIndex++,
+						sourcePath,
+						SourceIndex: sourceIndex);
 					await lookAhead.WaitAsync(linkedCancellation.Token).ConfigureAwait(false);
 					var windowLease = new WorkWindowLease(lookAhead);
 					WeightedByteBudget.Lease? byteLease = null;
@@ -794,7 +807,8 @@ public sealed class SecretRedactionOutputPreparer
 			contentLease: null,
 			detectionEntry: null,
 			item.RetainedBudget,
-			item.WindowLease);
+			item.WindowLease,
+			sourceIndex: item.EffectiveSourceIndex);
 
 	private async Task<PreparedTransformationEntry> PrepareTransformationEntryCoreAsync(
 		ContentTransformationContext context,
@@ -869,7 +883,8 @@ public sealed class SecretRedactionOutputPreparer
 				contentLease,
 				detectionEntry,
 				item.RetainedBudget,
-				item.WindowLease);
+				item.WindowLease,
+				sourceIndex: item.EffectiveSourceIndex);
 		}
 		catch
 		{
@@ -1117,9 +1132,11 @@ public sealed class SecretRedactionOutputPreparer
 			preparedPath = Path.Combine(workingDirectory.Value.Path, $"{workItem.Index:D8}.compressed.txt");
 			await WritePreparedTextAsync(
 					preparedPath,
+					sourcePath,
 					compressed.Text,
 					plan: null,
 					ResolveEncoding(encoding),
+					captureMetrics: false,
 					cancellationToken)
 				.ConfigureAwait(false);
 		}
@@ -1265,14 +1282,18 @@ public sealed class SecretRedactionOutputPreparer
 			contentLease: null,
 			detectionEntry: null,
 			item.RetainedBudget,
-			item.WindowLease);
+			item.WindowLease,
+			sourceIndex: item.EffectiveSourceIndex);
 
 	private readonly record struct CompressionWorkItem(
 		int Index,
 		string SourcePath,
 		WeightedByteBudget.Lease? RetainedBudget = null,
-		WorkWindowLease? WindowLease = null)
+		WorkWindowLease? WindowLease = null,
+		int SourceIndex = -1)
 	{
+		public int EffectiveSourceIndex => SourceIndex < 0 ? Index : SourceIndex;
+
 		public void DisposeReservations()
 		{
 			RetainedBudget?.Dispose();
@@ -1297,13 +1318,15 @@ public sealed class SecretRedactionOutputPreparer
 		IDisposable? contentLease,
 		SecretScanCacheEntry? detectionEntry = null,
 		IDisposable? retainedBudget = null,
-		IDisposable? windowLease = null) : IDisposable
+		IDisposable? windowLease = null,
+		int sourceIndex = -1) : IDisposable
 	{
 		private IDisposable? _contentLease = contentLease;
 		private IDisposable? _retainedBudget = retainedBudget;
 		private IDisposable? _windowLease = windowLease;
 
 		public int Index { get; } = index;
+		public int SourceIndex { get; } = sourceIndex < 0 ? index : sourceIndex;
 		public string SourcePath { get; } = sourcePath;
 		public SecretFileMetadata Metadata { get; } = metadata;
 		public FileContentReadResult ReadResult { get; } = readResult;
@@ -1628,14 +1651,10 @@ public sealed class SecretRedactionOutputPreparer
 						prepared.ReadResult.Classification));
 					break;
 				case FileContentClassification.Text:
-					redactionScope.AnalyzeTransformed(
+					redactionScope.ProcessDetectedEntry(
 						prepared.SourcePath,
-						prepared.Compression.Text,
+						prepared.DetectionEntry,
 						prepared.Compression.Map,
-						prepared.Metadata,
-						prepared.Compression.Map.IsIdentity
-							? prepared.SourceFingerprint
-							: null,
 						cancellationToken);
 					break;
 				default:
@@ -1754,14 +1773,10 @@ public sealed class SecretRedactionOutputPreparer
 							prepared.ReadResult.Classification));
 						break;
 					case FileContentClassification.Text:
-						redactionScope.AnalyzeTransformed(
+						redactionScope.ProcessDetectedEntry(
 							prepared.SourcePath,
-							prepared.Compression.Text,
+							prepared.DetectionEntry,
 							prepared.Compression.Map,
-							prepared.Metadata,
-							prepared.Compression.Map.IsIdentity
-								? prepared.SourceFingerprint
-								: null,
 							cancellationToken);
 						break;
 					default:
@@ -2203,11 +2218,13 @@ public sealed class SecretRedactionOutputPreparer
 		}
 	}
 
-	private static async Task WritePreparedTextAsync(
+	private static async Task<ContentFileMetrics?> WritePreparedTextAsync(
 		string path,
+		string sourcePath,
 		string content,
 		SecretFileRedactionPlan? plan,
 		Encoding encoding,
+		bool captureMetrics,
 		CancellationToken cancellationToken)
 	{
 		using var stage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.RedactionAndOutput);
@@ -2223,12 +2240,15 @@ public sealed class SecretRedactionOutputPreparer
 
 		await using var stream = new FileStream(path, options);
 		await using var writer = new StreamWriter(stream, encoding);
+		var metricsWriter = captureMetrics ? new ContentMetricsTextWriter(encoding, writer) : null;
+		var destination = (TextWriter?)metricsWriter ?? writer;
 		if (plan is null)
-			await writer.WriteAsync(content.AsMemory(), cancellationToken).ConfigureAwait(false);
+			await destination.WriteAsync(content.AsMemory(), cancellationToken).ConfigureAwait(false);
 		else
-			await plan.WriteToAsync(writer, content, cancellationToken).ConfigureAwait(false);
+			await plan.WriteToAsync(destination, content, cancellationToken).ConfigureAwait(false);
 		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
 		ContentPipelineDiagnostics.RecordPreparedWrite(stream.Position);
+		return metricsWriter?.Build(sourcePath);
 	}
 
 	private static async Task<ContentFileMetrics> MeasureTransformedContentAsync(
@@ -2239,6 +2259,7 @@ public sealed class SecretRedactionOutputPreparer
 		CancellationToken cancellationToken)
 	{
 		using var stage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.RedactionAndOutput);
+		ContentPipelineDiagnostics.RecordMeasurementPass();
 		var writer = new ContentMetricsTextWriter(encoding);
 		if (plan is null)
 			await writer.WriteAsync(content.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -2273,7 +2294,9 @@ public sealed class SecretRedactionOutputPreparer
 			content.TrailingNewlineChars,
 			content.TrailingNewlineLineBreaks);
 
-	private sealed class ContentMetricsTextWriter(Encoding encoding) : TextWriter
+	private sealed class ContentMetricsTextWriter(
+		Encoding encoding,
+		TextWriter? destination = null) : TextWriter
 	{
 		private readonly Encoder _encoder = encoding.GetEncoder();
 		private FileContentAnalyzer.TextMetricsCounter _counter = new();
@@ -2292,7 +2315,7 @@ public sealed class SecretRedactionOutputPreparer
 			if (!_counter.Append(buffer.Span))
 				throw new InvalidOperationException("Decoded transformed text unexpectedly contained a null character.");
 			_encodedBytes = checked(_encodedBytes + _encoder.GetByteCount(buffer.Span, flush: false));
-			return Task.CompletedTask;
+			return destination?.WriteAsync(buffer, cancellationToken) ?? Task.CompletedTask;
 		}
 
 		public ContentFileMetrics Build(string path)
