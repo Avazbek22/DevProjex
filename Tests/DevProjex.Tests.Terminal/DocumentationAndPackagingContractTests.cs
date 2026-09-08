@@ -508,6 +508,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Select-CiPlan.ps1 -Full", dotnetWorkflow, StringComparison.Ordinal);
 		Assert.Contains("Select-CiPlan.ps1 -Full", releaseValidationWorkflow, StringComparison.Ordinal);
 		Assert.Contains("actionlint/cmd/actionlint@v1.7.7", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains("-shellcheck=", dotnetWorkflow, StringComparison.Ordinal);
 		Assert.Contains(".github/workflows/release-candidate.yml", dotnetWorkflow, StringComparison.Ordinal);
 		Assert.Contains("inputs.force_full == true", dotnetWorkflow, StringComparison.Ordinal);
 
