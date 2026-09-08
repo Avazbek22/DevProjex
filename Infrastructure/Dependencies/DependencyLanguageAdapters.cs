@@ -14,7 +14,8 @@ internal sealed record DependencySyntaxCapture(
 	int GenericArity = 0,
 	bool IsFileLocal = false,
 	string? ContainingDeclaration = null,
-	DependencyImportSyntax? ImportSyntax = null);
+	DependencyImportSyntax? ImportSyntax = null,
+	int CapturedNameStartIndex = -1);
 
 internal sealed record DependencyImportSyntax(
 	string Specifier,
@@ -171,10 +172,11 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			.Where(static capture => capture.Name.StartsWith("reference.", StringComparison.Ordinal))
 			.ToArray();
 		var referenceScopes = BuildReferenceScopes(referenceCaptures, declarationScopes.Ordered);
-		var declarationSites = declarations
-			.Select(static declaration => (
-				declaration.DeclarationSites[0].Line,
-				Name: SimpleName(declaration.Identity.QualifiedName)))
+		var declarationOccurrences = declarationCaptures
+			.Where(static capture => capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => (
+				capture.CapturedNameStartIndex,
+				Name: capture.CapturedName!))
 			.ToHashSet();
 		var references = referenceCaptures
 			.SelectMany(capture => ExtractReferences(
@@ -182,7 +184,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				capture,
 				referenceScopes.GetValueOrDefault(capture),
 				namespaces))
-			.Where(reference => !declarationSites.Contains((reference.Site.Line, reference.Name)))
+			.Where(reference => !declarationOccurrences.Contains((reference.SourceStartIndex, reference.Name)))
 			.Take(limits.MaximumFactsPerFile + 1).ToArray();
 		if (declarations.Count + references.Length > limits.MaximumFactsPerFile)
 			return Failure(context, "fact limit exceeded");

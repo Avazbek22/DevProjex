@@ -482,7 +482,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return CreateCapture(captureName, node, node.Text, null, 0, false,
 				importSyntax: CreateImportSyntax(captureName, node));
 
-		var capturedName = node.GetChildForField("name")?.Text;
+		var nameNode = node.GetChildForField("name");
+		var capturedName = nameNode?.Text;
+		var capturedNameStartIndex = nameNode is null ? -1 : checked((int)nameNode.StartIndex);
 		var typeParameters = node.Children.FirstOrDefault(static child =>
 			child.Type is "type_parameter_list" or "type_parameters");
 		var genericArity = typeParameters is null ? 0 : CountGenericArity(typeParameters.Text);
@@ -492,7 +494,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		var isFileLocal = captureName.StartsWith("declaration.", StringComparison.Ordinal) &&
 			node.Children.Any(static child => child.Type == "modifier" && child.Text == "file");
 		return CreateCapture(captureName, node, evidence, capturedName, genericArity, isFileLocal,
-			FindContainingDeclaration(node));
+			FindContainingDeclaration(node), capturedNameStartIndex: capturedNameStartIndex);
 	}
 
 	private static DependencySyntaxCapture CreateCapture(
@@ -503,7 +505,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		int genericArity,
 		bool isFileLocal,
 		string? containingDeclaration = null,
-		DependencyImportSyntax? importSyntax = null) =>
+		DependencyImportSyntax? importSyntax = null,
+		int capturedNameStartIndex = -1) =>
 		new(
 			captureName,
 			node.Type,
@@ -515,7 +518,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			genericArity,
 			isFileLocal,
 			containingDeclaration,
-			importSyntax);
+			importSyntax,
+			capturedNameStartIndex);
 
 	private static string? FindContainingDeclaration(Node node)
 	{

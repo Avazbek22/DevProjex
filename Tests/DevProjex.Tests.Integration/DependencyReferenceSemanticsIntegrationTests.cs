@@ -30,6 +30,24 @@ public sealed class DependencyReferenceSemanticsIntegrationTests
 	}
 
 	[Fact]
+	public async Task CSharpDeclarationFiltering_UsesTheNameOccurrenceInsteadOfTheWholeLine()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var source = fixture.CreateFile("User.cs", "public sealed class User { public User Value { get; } }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [project, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = result.Files.Single(file => file.Path == "User.cs");
+		Assert.Single(facts.Declarations, declaration => declaration.Identity.QualifiedName == "User");
+		Assert.Single(facts.References, reference => reference.Name == "User");
+		Assert.Contains(result.Edges, edge => edge.Source == "User.cs" && edge.Target == "User.cs" &&
+			edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
 	public async Task CSharpGlobalQualification_BypassesTypeParameterShadowingAndContextualFallback()
 	{
 		using var fixture = new TemporaryDirectory();
