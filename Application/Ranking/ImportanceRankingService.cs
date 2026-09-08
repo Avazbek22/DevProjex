@@ -139,7 +139,7 @@ public sealed class ImportanceRankingService(
 				coordinators[candidate.RelativePath]);
 		}
 		var gitNormalized = RankNormalize(gitRaw, cancellationToken);
-		var roleNormalized = RankNormalize(roleRaw, cancellationToken);
+		var roleNormalized = NormalizeRoleValues(roleRaw, cancellationToken);
 		var coverage = CalculateExtractedFactsCoverage(dependency.Coverage, candidates.Length);
 		var internalReferenceCandidates = dependency.Edges.Count(static edge =>
 			edge.Status != ResolutionStatus.External);
@@ -336,6 +336,32 @@ public sealed class ImportanceRankingService(
 			if (index > 0 && !present[index].Value!.Value.Equals(present[index - 1].Value!.Value))
 				group++;
 			result[present[index].Key] = (double)group / (groupCount - 1);
+		}
+		return result;
+	}
+
+	private static IReadOnlyDictionary<string, double?> NormalizeRoleValues(
+		IReadOnlyDictionary<string, double?> values,
+		CancellationToken cancellationToken)
+	{
+		var presentValues = values.Values
+			.Where(static value => value is not null)
+			.Select(static value => value!.Value)
+			.Distinct()
+			.Order()
+			.ToArray();
+		var result = new Dictionary<string, double?>(values.Count, StringComparer.Ordinal);
+		foreach (var pair in values)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (pair.Value is not { } value)
+			{
+				result.Add(pair.Key, null);
+				continue;
+			}
+			result.Add(pair.Key, presentValues.Length == 1
+				? 0.5
+				: (double)Array.BinarySearch(presentValues, value) / (presentValues.Length - 1));
 		}
 		return result;
 	}
