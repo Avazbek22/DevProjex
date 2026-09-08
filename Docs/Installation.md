@@ -121,15 +121,15 @@ dotnet tool install --global devprojex
 
 Release automation prepares one headless archive for each supported RID. Choose
 `DevProjex-headless.v<version>.<rid>.zip` on Windows or
-`DevProjex-headless.v<version>.<rid>.tar.gz` on Linux and macOS. For example:
+`DevProjex-headless.v<version>.<rid>.tar.gz` on Linux and macOS. For the v5.2 release:
 
 ```powershell
-Expand-Archive DevProjex-headless.v<version>.win-x64.zip
+Expand-Archive DevProjex-headless.v5.2.win-x64.zip
 ./devprojex.exe --version
 ```
 
 ```bash
-tar xzf DevProjex-headless.v<version>.linux-x64.tar.gz
+tar xzf DevProjex-headless.v5.2.linux-x64.tar.gz
 ./devprojex --version
 ```
 

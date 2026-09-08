@@ -57,10 +57,9 @@ public sealed partial class TerminalRecentRepositoriesPtyTests
 			welcomeDirectory.Path);
 
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var workspace = await terminal.WaitForStableScreenAsync(
-			required: "RepositoryMarker.cs",
-			timeout: TimeSpan.FromSeconds(30),
-			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await WaitForWorkspaceTreeRenderedAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
 
 		Assert.Contains("DevProjex Terminal · DevProjex", workspace, StringComparison.Ordinal);
 		Assert.Contains(RepositoryUrl, workspace, StringComparison.Ordinal);
@@ -110,6 +109,47 @@ public sealed partial class TerminalRecentRepositoriesPtyTests
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
 				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	private static async Task<string> WaitForWorkspaceTreeRenderedAsync(
+		TerminalPtyHarness terminal,
+		CancellationToken cancellationToken)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		var timeline = new List<string>();
+		var previous = string.Empty;
+		var stableSamples = 0;
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(30))
+		{
+			var screen = terminal.CaptureScreen();
+			var tree = screen.Contains("PROJECT TREE", StringComparison.Ordinal);
+			var parameters = screen.Contains("PARAMETERS", StringComparison.Ordinal);
+			var marker = screen.Contains("RepositoryMarker.cs", StringComparison.Ordinal);
+			if (!string.Equals(previous, screen, StringComparison.Ordinal))
+			{
+				timeline.Add(
+					$"{stopwatch.Elapsed.TotalMilliseconds,7:F0} ms " +
+					$"tree={tree} parameters={parameters} marker={marker} " +
+					$"chars={screen.Length}");
+				previous = screen;
+				stableSamples = 0;
+			}
+			else if (tree && parameters && marker && ++stableSamples >= 3)
+			{
+				return screen;
+			}
+
+			if (terminal.HasExited)
+				break;
+			await Task.Delay(80, cancellationToken);
+		}
+
+		var finalScreen = terminal.CaptureScreen();
+		throw new Xunit.Sdk.XunitException(
+			"Workspace tree did not reach its rendered signal " +
+			"(PROJECT TREE + PARAMETERS + RepositoryMarker.cs).\n" +
+			$"Timeline:\n{string.Join(Environment.NewLine, timeline)}\n" +
+			$"Full screen:\n{finalScreen}");
 	}
 
 	[Fact(Timeout = 90_000)]

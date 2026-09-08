@@ -114,6 +114,77 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Equal(1, selectedPaths.EnumerationCount);
 	}
 
+	[AvaloniaFact]
+	public async Task NameFilter_ReusesUnchangedFactsAndRereadsOnlyChangedFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var matchingFile = temp.CreateFile("Matching.cs", "internal class Matching { }");
+		var otherFile = temp.CreateFile("Other.cs", "internal class Other { }");
+		var fullRoot = CreateTree(temp.Path, [matchingFile, otherFile]);
+		var filteredRoot = CreateTree(temp.Path, [matchingFile]);
+		var fullTree = new BuildTreeResult(
+			fullRoot,
+			RootAccessDenied: false,
+			HadAccessDenied: false,
+			[matchingFile, otherFile]);
+		var filteredTree = new BuildTreeResult(
+			filteredRoot,
+			RootAccessDenied: false,
+			HadAccessDenied: false,
+			[matchingFile]);
+		var currentTree = fullTree;
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(fullRoot, parent: null, icon: null));
+		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+		var completedRecalculations = 0;
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			new StatusOperationCoordinator(
+				viewModel,
+				isBackgroundMetricsActive: () => false,
+				metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData),
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			scheduleMemoryCleanup: _ => Interlocked.Increment(ref completedRecalculations));
+
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			fullTree,
+			TestContext.Current.CancellationToken);
+		Assert.True(pipeline.HasCompleteBaseline);
+		Assert.Equal(1, analyzer.GetMetricsCallCount(matchingFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(otherFile));
+
+		currentTree = filteredTree;
+		pipeline.InvalidateSelectionProjection();
+		pipeline.Recalculate(MemoryCleanupReason.FilterApplied);
+		await WaitUntilAsync(
+			() => Volatile.Read(ref completedRecalculations) == 1,
+			TimeSpan.FromSeconds(5));
+
+		Assert.Equal(1, analyzer.GetMetricsCallCount(matchingFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(otherFile));
+
+		File.WriteAllText(matchingFile, "internal class Matching { int Changed; }");
+		File.SetLastWriteTimeUtc(matchingFile, DateTime.UtcNow.AddMinutes(1));
+		currentTree = fullTree;
+		pipeline.InvalidateSelectionProjection();
+		pipeline.Recalculate(MemoryCleanupReason.FilterApplied);
+		await WaitUntilAsync(
+			() => Volatile.Read(ref completedRecalculations) == 2,
+			TimeSpan.FromSeconds(5));
+
+		Assert.Equal(2, analyzer.GetMetricsCallCount(matchingFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(otherFile));
+	}
+
     [AvaloniaFact]
     public async Task InitializeFileMetricsCacheAsync_PendingVisualGate_DefersAllFileIoUntilReveal()
     {

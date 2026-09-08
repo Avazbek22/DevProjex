@@ -118,7 +118,7 @@ is not release-ready:
 `-GitHubArtifactsOnly` remains an alias for `-Channels github`:
 
 ```powershell
-./Scripts/release-all.ps1 -Version 5.1 -GitHubArtifactsOnly
+./Scripts/release-all.ps1 -Version 5.2 -GitHubArtifactsOnly
 ```
 
 Build Store without WACK from a non-elevated console, then validate the existing
@@ -146,8 +146,8 @@ gate explicitly:
 
 ```powershell
 ./Scripts/release-all.ps1 -Channels github -Rids win-x64,linux-x64 -SkipWack -NonInteractive
-./Scripts/Test-ReleaseArtifacts.ps1 -PublishRoot publish -Version 5.1 -Channels github -Rids win-x64,linux-x64
-./Scripts/Test-ReleaseArtifactGateMutation.ps1 -PublishRoot publish -Version 5.1 -Channels github -Rids win-x64,linux-x64
+./Scripts/Test-ReleaseArtifacts.ps1 -PublishRoot publish -Version 5.2 -Channels github -Rids win-x64,linux-x64
+./Scripts/Test-ReleaseArtifactGateMutation.ps1 -PublishRoot publish -Version 5.2 -Channels github -Rids win-x64,linux-x64
 ```
 
 When `-NonInteractive` is set, `Read-Host` is never called. An invalid explicit

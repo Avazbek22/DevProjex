@@ -12,7 +12,7 @@ Icon PNGs are located in `Assets/AppIcon/MacOS/AppIconSet/`:
 `Scripts/release-all.ps1` builds the official unsigned macOS artifacts:
 
 ```powershell
-./Scripts/release-all.ps1 -Version 5.1 -GitHubArtifactsOnly
+./Scripts/release-all.ps1 -Version 5.2 -GitHubArtifactsOnly
 ```
 
 The equivalent channel form is `-Channels github`. Use `-Rids osx-x64` or
