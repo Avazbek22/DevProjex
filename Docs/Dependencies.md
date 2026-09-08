@@ -128,7 +128,10 @@ a resolver-configuration fingerprint covering `.csproj`/project references/globa
 TypeScript configuration and package maps, Python configuration, and the TypeScript dialect.
 Concurrent requests share one lazy computation. The default caches are bounded by both entry count
 and estimated retained size: 64 MiB for compact file facts and 128 MiB for resolved edges. Eviction
-changes latency, not results.
+changes latency, not results. The resolved-index estimate includes every transitively retained file
+fact, including declarations and all declaration sites, even when the graph has few or no edges.
+Manifest-snapshot eviction entries are generation-bound and removed together with their live
+snapshot, so repeated rebuilds of the same cache keys cannot grow bookkeeping outside the limit.
 
 Access failures, missing files, and other transient I/O failures are not retained in either the
 prepared-source cache or a manifest snapshot. A later request retries extraction even when file stamps

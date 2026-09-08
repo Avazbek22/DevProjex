@@ -18,7 +18,7 @@ public sealed class DependencyFactsEngine : IDisposable
 	private readonly ConcurrentQueue<IndexCacheKey> _indexCacheOrder = [];
 	private readonly ConcurrentDictionary<IndexCacheKey, long> _indexCacheWeights = [];
 	private readonly ConcurrentDictionary<ManifestRequestKey, ManifestSnapshotCacheEntry> _manifestSnapshots = [];
-	private readonly ConcurrentQueue<ManifestRequestKey> _manifestSnapshotOrder = [];
+	private readonly LinkedList<ManifestSnapshotCacheEntry> _manifestSnapshotOrder = [];
 	private readonly object _cacheTrimSync = new();
 	private long _fileCacheBytes;
 	private long _indexCacheBytes;
@@ -37,6 +37,18 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	public int ParseCount => _extractor.ParseCount;
 	public int CompiledQuerySetCount => _extractor.CompiledQuerySetCount;
+	internal DependencyFactsCacheState CacheState
+	{
+		get
+		{
+			lock (_cacheTrimSync)
+				return new(
+					_manifestSnapshots.Count,
+					_manifestSnapshotOrder.Count,
+					_indexCache.Count,
+					_indexCacheBytes);
+		}
+	}
 
 	public async Task<DependencyIndexSnapshot> IndexAsync(
 		string sourceRoot,
@@ -488,7 +500,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			_indexCache.TryRemove(oldest, out _);
 			foreach (var snapshot in _manifestSnapshots.Where(pair => pair.Value.IndexCacheKey == oldest).ToArray())
-				_manifestSnapshots.TryRemove(snapshot.Key, out _);
+				RemoveManifestSnapshotUnderLock(snapshot.Key, snapshot.Value);
 			if (_indexCacheWeights.TryRemove(oldest, out var weight))
 				_indexCacheBytes -= weight;
 		}
@@ -505,15 +517,28 @@ public sealed class DependencyFactsEngine : IDisposable
 		lock (_cacheTrimSync)
 		{
 			if (!_indexCache.ContainsKey(indexCacheKey)) return;
-			var entry = new ManifestSnapshotCacheEntry(manifestPaths, stamps, contentIdentities, indexCacheKey, snapshot);
-			if (_manifestSnapshots.TryAdd(key, entry))
-				_manifestSnapshotOrder.Enqueue(key);
-			else
-				_manifestSnapshots[key] = entry;
+			if (_manifestSnapshots.TryGetValue(key, out var previous))
+				RemoveManifestSnapshotUnderLock(key, previous);
+			var entry = new ManifestSnapshotCacheEntry(key, manifestPaths, stamps, contentIdentities, indexCacheKey, snapshot);
+			_manifestSnapshots[key] = entry;
+			entry.OrderNode = _manifestSnapshotOrder.AddLast(entry);
 			while (_manifestSnapshots.Count > _limits.MaximumCachedIndexes &&
-			       _manifestSnapshotOrder.TryDequeue(out var oldest))
-				_manifestSnapshots.TryRemove(oldest, out _);
+			       _manifestSnapshotOrder.First is { Value: var oldest })
+				RemoveManifestSnapshotUnderLock(oldest.Key, oldest);
 		}
+	}
+
+	private void RemoveManifestSnapshotUnderLock(
+		ManifestRequestKey key,
+		ManifestSnapshotCacheEntry entry)
+	{
+		if (!_manifestSnapshots.TryRemove(
+			    new KeyValuePair<ManifestRequestKey, ManifestSnapshotCacheEntry>(key, entry)))
+			return;
+		if (entry.OrderNode is null)
+			return;
+		_manifestSnapshotOrder.Remove(entry.OrderNode);
+		entry.OrderNode = null;
 	}
 
 	private static FileCacheKey CreateFileCacheKey(PreparedDependencySource source) => new(
@@ -594,13 +619,8 @@ public sealed class DependencyFactsEngine : IDisposable
 	private static long EstimateResolvedIndexBytes(ResolvedIndex index) =>
 		256 + index.Edges.Sum(static edge => 192 + StringBytes(edge.Source) + StringBytes(edge.Target) +
 			StringBytes(edge.Reference) + edge.Reasons.Sum(StringBytes) + edge.Evidence.Sum(SiteBytes) +
-			edge.Candidates.Sum(StringBytes)) +
-		index.Files.Sum(static file => StringBytes(file.Path) + file.Imports.Sum(static fact =>
-			128 + StringBytes(fact.Specifier) + StringBytes(fact.ImportedName) + StringBytes(fact.Alias) +
-			StringBytes(fact.Reason) + StringBytes(fact.Target) + (fact.Candidates?.Sum(StringBytes) ?? 0))) +
-		index.Files.Sum(static file => file.References.Sum(static fact =>
-			128 + StringBytes(fact.Name) + StringBytes(fact.Reason) + StringBytes(fact.Target) +
-			(fact.Candidates?.Sum(StringBytes) ?? 0)));
+			edge.Candidates.Sum(StringBytes) + edge.DeclarationFiles.Sum(StringBytes)) +
+		index.Files.Sum(EstimateFileFactsBytes);
 
 	private static long SiteBytes(SourceSite site) =>
 		64 + StringBytes(site.File) + StringBytes(site.Evidence);
@@ -705,7 +725,11 @@ public sealed class DependencyFactsEngine : IDisposable
 	{
 		if (Interlocked.Exchange(ref _disposed, 1) == 0)
 		{
-			_manifestSnapshots.Clear();
+			lock (_cacheTrimSync)
+			{
+				_manifestSnapshots.Clear();
+				_manifestSnapshotOrder.Clear();
+			}
 			_extractor.Dispose();
 		}
 	}
@@ -743,11 +767,21 @@ public sealed class DependencyFactsEngine : IDisposable
 		long CreationTimeUtcTicks);
 
 	private sealed record ManifestSnapshotCacheEntry(
+		ManifestRequestKey Key,
 		IReadOnlyList<string> ManifestPaths,
 		IReadOnlyList<FileStamp> Stamps,
 		IReadOnlyList<string>? ContentIdentities,
 		IndexCacheKey IndexCacheKey,
-		DependencyIndexSnapshot Snapshot);
+		DependencyIndexSnapshot Snapshot)
+	{
+		public LinkedListNode<ManifestSnapshotCacheEntry>? OrderNode { get; set; }
+	}
+
+	internal readonly record struct DependencyFactsCacheState(
+		int ManifestSnapshots,
+		int ManifestEvictionEntries,
+		int ResolvedIndexes,
+		long ResolvedIndexBytes);
 
 	private sealed record ResolvedIndex(
 		IReadOnlyList<DependencyEdge> Edges,
