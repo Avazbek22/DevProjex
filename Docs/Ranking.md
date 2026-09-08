@@ -168,7 +168,7 @@ greedy admission pass for every comparator. The one seed for each of the existin
 was selected from the task wording, not from its required-file set or ranked output. The
 complete machine-readable result is
 `tools/RankingEval/results/2026-09-07-focus-v1.json`; the product and evaluator SHA for the
-2026-09-08 reference-semantics rerun are both `798ce9bef2622fda1eb6320ef98009428388c6c7`.
+2026-09-08 extraction-and-binding rerun are both `0ce6eb3b03e724fcb3d4b54d21bf156dc468ab33`.
 
 The six frozen orders are current manifest order, `importance-v1`, seed first without graph
 traversal, `focus-v1` minimum undirected graph hop, evaluation-only personalized PageRank,
@@ -186,9 +186,9 @@ oracles are counts over the five tasks at that repository and budget.
 
 | Repository / budget | Current | Importance | Seed-first | Focus-v1 | Focus-PPR | Directed-from-seed |
 |---|---:|---:|---:|---:|---:|---:|
-| DevProjex / 4,000 | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 0.8628` | `0.1000 · 0/1/1 · 0.8482` | `0.1000 · 0/1/1 · 0.8481` | `0.1000 · 0/1/1 · 0.7511` |
-| DevProjex / 8,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.7997` | `0.2000 · 0/2/2 · 0.7409` | `0.1000 · 0/2/2 · 0.7924` | `0.2000 · 0/2/2 · 0.5611` |
-| DevProjex / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.8999` | `0.1000 · 0/2/2 · 0.8962` | `0.2000 · 0/2/2 · 0.7574` | `0.1000 · 0/2/2 · 0.7375` |
+| DevProjex / 4,000 | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 0.8627` | `0.1000 · 0/1/1 · 0.8481` | `0.1000 · 0/1/1 · 0.8481` | `0.1000 · 0/1/1 · 0.8057` |
+| DevProjex / 8,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.7997` | `0.2000 · 0/2/2 · 0.7409` | `0.1000 · 0/2/2 · 0.7924` | `0.2000 · 0/2/2 · 0.6157` |
+| DevProjex / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.8999` | `0.1000 · 0/2/2 · 0.8962` | `0.2000 · 0/2/2 · 0.7574` | `0.1000 · 0/2/2 · 0.7381` |
 | Repomix / 4,000 | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 0.4111` | `0.0000 · 0/1/1 · 0.4110` | `0.0000 · 0/1/1 · 0.4109` | `0.0000 · 0/1/1 · 0.3883` |
 | Repomix / 8,000 | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 0.7055` | `0.3000 · 1/3/3 · 0.5930` | `0.3000 · 1/3/3 · 0.5349` | `0.3000 · 1/3/3 · 0.5710` |
 | Repomix / 16,000 | `0.0000 · 0/5/5 · 1.0000` | `0.0000 · 0/5/5 · 1.0000` | `0.0000 · 0/5/5 · 0.8528` | `0.4000 · 2/5/5 · 0.7538` | `0.3000 · 1/5/5 · 0.7675` | `0.4000 · 2/5/5 · 0.7013` |
@@ -215,9 +215,9 @@ growth for the corpus.
 
 | Repository | Cold ms (importance / focus) | Warm ms (importance / focus) | Warm focus addition | Cold RSS MiB | Warm RSS MiB | Maximum RSS growth |
 |---|---:|---:|---:|---:|---:|---:|
-| DevProjex | `2727.88 / 2812.78` | `982.39 / 910.07` | `-72.33 ms (-7.36%)` | `304.45 / 302.29` | `307.70 / 310.05` | `0.76%` |
-| Repomix | `763.28 / 768.28` | `401.38 / 427.63` | `+26.25 ms (6.54%)` | `109.69 / 109.98` | `110.84 / 110.85` | `0.26%` |
-| Flask | `478.99 / 503.83` | `223.32 / 235.30` | `+11.99 ms (5.37%)` | `86.34 / 86.53` | `87.61 / 88.17` | `0.64%` |
+| DevProjex | `3014.91 / 2833.84` | `1011.30 / 974.44` | `-36.86 ms (-3.64%)` | `308.78 / 305.74` | `314.68 / 315.78` | `0.35%` |
+| Repomix | `856.22 / 796.92` | `405.56 / 411.88` | `+6.32 ms (1.56%)` | `112.01 / 111.31` | `107.11 / 107.40` | `0.27%` |
+| Flask | `465.98 / 472.38` | `206.65 / 253.86` | `+47.21 ms (22.85%)` | `86.64 / 86.48` | `87.73 / 88.72` | `1.13%` |
 
 Fifteen of the 45 task-budget cells had a feasible oracle after the real seed admission and
 a defined RecallNew. Across those cells, `focus-v1 - seed-first` mean RecallNew was

@@ -31,6 +31,12 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private long _preparedSourceGeneration;
 	private int _parseCount;
 	private int _compiledQuerySetCount;
+	private long _rawCapturesVisited;
+	private long _createdCaptures;
+	private long _materializedCharacters;
+	private long _adapterVisitedRanges;
+	private long _adapterComparisons;
+	private long _createdFacts;
 	private int _disposed;
 
 	public TreeSitterDependencyFactExtractor()
@@ -63,6 +69,14 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	public int ParseCount => Volatile.Read(ref _parseCount);
 	public int CompiledQuerySetCount => Volatile.Read(ref _compiledQuerySetCount);
+	internal DependencyExtractionWorkState WorkState => new(
+		Interlocked.Read(ref _rawCapturesVisited),
+		Interlocked.Read(ref _createdCaptures),
+		Interlocked.Read(ref _materializedCharacters),
+		Interlocked.Read(ref _adapterVisitedRanges),
+		Interlocked.Read(ref _adapterComparisons),
+		Interlocked.Read(ref _createdFacts),
+		ParseCount);
 	internal PreparedSourceCacheState CacheState
 	{
 		get
@@ -89,18 +103,18 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			.OrderByDescending(static candidate => candidate.Root.Length)
 			.Select(static candidate => candidate.ScopeId)
 			.FirstOrDefault() ?? $"root:{LanguageFamily(language).ToString().ToLowerInvariant()}";
-		if (language == LanguageId.Unsupported)
-		{
-			var info = new FileInfo(fullPath);
-			var identity = $"{info.Length}:{info.LastWriteTimeUtc.Ticks}";
-			return new PreparedDependencySource(fullPath, relative, scope, language,
-				Hash(Encoding.UTF8.GetBytes(identity)), "unsupported:v1", string.Empty,
-				DependencyFileStatus.Unsupported,
-				"file language is not supported by the dependency engine yet");
-		}
-
 		try
 		{
+			if (language == LanguageId.Unsupported)
+			{
+				var unsupportedInfo = new FileInfo(fullPath);
+				var identity = $"{unsupportedInfo.Length}:{unsupportedInfo.LastWriteTimeUtc.Ticks}";
+				return new PreparedDependencySource(fullPath, relative, scope, language,
+					Hash(Encoding.UTF8.GetBytes(identity)), "unsupported:v1", string.Empty,
+					DependencyFileStatus.Unsupported,
+					"file language is not supported by the dependency engine yet");
+			}
+
 			var info = new FileInfo(fullPath);
 			var key = new PreparedSourceCacheKey(
 				Path.GetFullPath(fullPath),
@@ -146,7 +160,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
 		{
 			return new PreparedDependencySource(fullPath, relative, scope, language,
-				Hash(Encoding.UTF8.GetBytes(exception.GetType().Name)), GetExtractorIdentity(language),
+				Hash(Encoding.UTF8.GetBytes(exception.GetType().Name)),
+				language == LanguageId.Unsupported ? "unsupported:v1" : GetExtractorIdentity(language),
 				string.Empty, DependencyFileStatus.ExtractionFailed,
 				"source file could not be read",
 				CanCache: false);
@@ -344,7 +359,13 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}";
 		});
 
-	public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits)
+	public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) =>
+		Extract(source, limits, CancellationToken.None);
+
+	public FileFacts Extract(
+		PreparedDependencySource source,
+		DependencyFactsLimits limits,
+		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 		if (source.PreparedStatus != DependencyFileStatus.Supported)
@@ -355,15 +376,19 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 		try
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var runtime = GetRuntime(source.LanguageId);
 			using var lease = runtime.Rent(_workerBudget);
 			using var tree = lease.Parser.Parse(source.Source) ??
 				throw new InvalidOperationException("Tree-sitter returned no syntax tree.");
 			Interlocked.Increment(ref _parseCount);
-			var (declarations, references, errorKinds) = CaptureFacts(
+			var (declarations, references, errorKinds, rawCaptureLimitExceeded) = CaptureFacts(
 				runtime.Facts,
 				tree.RootNode,
-				limits.MaximumFactsPerFile);
+				limits.MaximumRawCapturesPerFile,
+				cancellationToken);
+			if (rawCaptureLimitExceeded)
+				return StatusOnly(source, DependencyFileStatus.ExtractionFailed, "fact limit exceeded");
 			var context = new DependencyExtractionContext(
 				source.RelativePath,
 				source.ScopeId,
@@ -374,7 +399,12 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				errorKinds,
 				declarations,
 				references);
-			return runtime.Adapter.Extract(context, limits);
+			var result = runtime.Adapter.Extract(context, limits);
+			Interlocked.Add(ref _adapterVisitedRanges, context.Work.VisitedRanges);
+			Interlocked.Add(ref _adapterComparisons, context.Work.Comparisons);
+			Interlocked.Add(ref _createdFacts,
+				result.Declarations.Count + result.Imports.Count + result.References.Count);
+			return result;
 		}
 		catch (Exception exception) when (exception is
 		       IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -425,77 +455,171 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		}
 	}
 
-	private static (
+	private (
 		IReadOnlyList<DependencySyntaxCapture> Declarations,
 		IReadOnlyList<DependencySyntaxCapture> References,
-		IReadOnlyDictionary<string, int> ErrorKinds) CaptureFacts(Query query, Node root, int limit)
+		IReadOnlyDictionary<string, int> ErrorKinds,
+		bool RawCaptureLimitExceeded) CaptureFacts(
+		Query query,
+		Node root,
+		int rawCaptureLimit,
+		CancellationToken cancellationToken)
 	{
 		using var cursor = query.Execute(root);
 		var declarations = new List<DependencySyntaxCapture>();
 		var references = new List<DependencySyntaxCapture>();
 		var errorKinds = new Dictionary<string, int>(StringComparer.Ordinal);
-		foreach (var capture in cursor.Captures)
+		var rawCapturesVisited = 0L;
+		var createdCaptures = 0L;
+		var materialization = new NodeTextMaterializationCounter();
+		var rawCaptureLimitExceeded = false;
+		try
 		{
-			if (capture.Name == "diagnostic.error")
+			foreach (var capture in cursor.Captures)
 			{
-				var kinds = capture.Node.Children.Where(static child => child.IsNamed)
-					.Select(static child => child.Type).Distinct().ToArray();
-				if (kinds.Length == 0) kinds = ["<token>"];
-				foreach (var kind in kinds)
-					errorKinds[kind] = errorKinds.GetValueOrDefault(kind) + 1;
-				continue;
+				if ((rawCapturesVisited & 255) == 0)
+					cancellationToken.ThrowIfCancellationRequested();
+				rawCapturesVisited++;
+				if (rawCapturesVisited > rawCaptureLimit)
+				{
+					rawCaptureLimitExceeded = true;
+					break;
+				}
+				if (capture.Name == "diagnostic.error")
+				{
+					var kinds = capture.Node.Children.Where(static child => child.IsNamed)
+						.Select(static child => child.Type).Distinct().ToArray();
+					if (kinds.Length == 0) kinds = ["<token>"];
+					foreach (var kind in kinds)
+						errorKinds[kind] = errorKinds.GetValueOrDefault(kind) + 1;
+					continue;
+				}
+				var created = TryCreateCapture(capture.Name, capture.Node, materialization);
+				if (created is null)
+					continue;
+				var target = IsDeclarationCapture(capture.Name) ? declarations : references;
+				target.Add(created);
+				createdCaptures++;
 			}
-			var target = IsDeclarationCapture(capture.Name) ? declarations : references;
-			if (target.Count <= limit)
-				target.Add(CreateCapture(capture.Name, capture.Node));
+		}
+		finally
+		{
+			Interlocked.Add(ref _rawCapturesVisited, rawCapturesVisited);
+			Interlocked.Add(ref _createdCaptures, createdCaptures);
+			Interlocked.Add(ref _materializedCharacters, materialization.Characters);
 		}
 		return (
 			declarations.OrderBy(static capture => capture.StartIndex)
 				.ThenBy(static capture => capture.Name, StringComparer.Ordinal).ToArray(),
 			references.OrderBy(static capture => capture.StartIndex)
 				.ThenBy(static capture => capture.Name, StringComparer.Ordinal).ToArray(),
-			errorKinds);
+			errorKinds,
+			rawCaptureLimitExceeded);
 	}
 
 	private static bool IsDeclarationCapture(string captureName) =>
 		captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 		captureName is "context.namespace" or "context.using";
 
-	private static DependencySyntaxCapture CreateCapture(string captureName, Node node)
+	private static DependencySyntaxCapture? TryCreateCapture(
+		string captureName,
+		Node node,
+		NodeTextMaterializationCounter materialization)
 	{
 		if (captureName == "context.type_parameters")
 		{
 			var owner = node.Parent;
 			while (owner is not null && !IsTypeParameterOwner(owner.Type))
 				owner = owner.Parent;
+			var text = materialization.Read(node);
 			return new DependencySyntaxCapture(
 				captureName,
 				node.Type,
-				node.Text,
+				text,
 				checked((int)node.StartPosition.Row + 1),
 				checked((int)(owner?.StartIndex ?? node.StartIndex)),
-				checked((int)(owner?.EndIndex ?? node.EndIndex)));
+				checked((int)(owner?.EndIndex ?? node.EndIndex)),
+				Evidence: OneLineEvidence(text));
 		}
+		string? moduleCallName = null;
+		if (captureName == "import.call" &&
+		    !TryReadSupportedModuleCall(node, materialization, out moduleCallName))
+			return null;
+
+		if (captureName.StartsWith("import.", StringComparison.Ordinal))
+		{
+			var importSyntax = CreateImportSyntax(captureName, node, materialization, moduleCallName);
+			var importEvidence = CreateCompactImportEvidence(captureName, importSyntax);
+			return CreateCapture(captureName, node, importEvidence, null, 0, false,
+				FindImportOwner(captureName, node, materialization), importSyntax, evidence: importEvidence);
+		}
+
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 			captureName == "context.namespace";
 		if (!isCompact)
-			return CreateCapture(captureName, node, node.Text, null, 0, false,
-				importSyntax: CreateImportSyntax(captureName, node));
+		{
+			var text = materialization.Read(node);
+			return CreateCapture(captureName, node, text, null, 0, false,
+				evidence: OneLineEvidence(text));
+		}
 
 		var nameNode = node.GetChildForField("name");
-		var capturedName = nameNode?.Text;
+		var capturedName = nameNode is null ? null : materialization.Read(nameNode);
 		var capturedNameStartIndex = nameNode is null ? -1 : checked((int)nameNode.StartIndex);
 		var typeParameters = node.Children.FirstOrDefault(static child =>
 			child.Type is "type_parameter_list" or "type_parameters");
-		var genericArity = typeParameters is null ? 0 : CountGenericArity(typeParameters.Text);
+		var genericArity = typeParameters is null ? 0 : CountGenericArity(materialization.Read(typeParameters));
 		var evidence = string.IsNullOrEmpty(capturedName)
 			? string.Empty
 			: capturedName + (genericArity == 0 ? string.Empty : $"`{genericArity}");
 		var isFileLocal = captureName.StartsWith("declaration.", StringComparison.Ordinal) &&
-			node.Children.Any(static child => child.Type == "modifier" && child.Text == "file");
+			node.Children.Any(child => child.Type == "modifier" && materialization.Read(child) == "file");
 		return CreateCapture(captureName, node, evidence, capturedName, genericArity, isFileLocal,
-			FindContainingDeclaration(node), capturedNameStartIndex: capturedNameStartIndex);
+			FindContainingDeclaration(node, materialization), capturedNameStartIndex: capturedNameStartIndex, evidence: evidence);
 	}
+
+	private static bool TryReadSupportedModuleCall(
+		Node node,
+		NodeTextMaterializationCounter materialization,
+		out string? functionName)
+	{
+		var function = node.GetChildForField("function");
+		functionName = function is null ? null : materialization.Read(function);
+		return functionName is "require" or "import";
+	}
+
+	private static string CreateCompactImportEvidence(
+		string captureName,
+		DependencyImportSyntax? syntax)
+	{
+		if (captureName is "import.esm" or "import.export")
+			return OneLineEvidence($"{(captureName == "import.export" ? "export" : "import")} {syntax?.Specifier ?? string.Empty}");
+		if (captureName == "import.call")
+		{
+			var function = syntax?.ImportKind == ModuleImportKind.Require ? "require" : "import";
+			var argument = syntax?.HasLiteralSpecifier == true ? syntax.Specifier : "<non-literal>";
+			return OneLineEvidence($"{function}({argument})");
+		}
+		if (captureName == "import.direct")
+			return "import " + OneLineEvidence(string.Join(", ", syntax?.Bindings.Select(static binding => binding.Name) ?? []));
+		return "from " + OneLineEvidence(syntax?.Specifier ?? string.Empty) + " import";
+	}
+
+	private static string OneLineEvidence(string value)
+	{
+		var prefixLength = Math.Min(value.Length, 240);
+		var line = value.AsSpan(0, prefixLength).ToString().Replace('\r', ' ').Replace('\n', ' ').Trim();
+		if (value.Length <= prefixLength) return line;
+		return line.Length <= 237 ? line + "..." : line[..237] + "...";
+	}
+
+	private static string? FindImportOwner(
+		string captureName,
+		Node node,
+		NodeTextMaterializationCounter materialization) =>
+		captureName is "import.direct" or "import.from"
+			? FindContainingDeclaration(node, materialization)
+			: null;
 
 	private static DependencySyntaxCapture CreateCapture(
 		string captureName,
@@ -506,7 +630,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		bool isFileLocal,
 		string? containingDeclaration = null,
 		DependencyImportSyntax? importSyntax = null,
-		int capturedNameStartIndex = -1) =>
+		int capturedNameStartIndex = -1,
+		string? evidence = null) =>
 		new(
 			captureName,
 			node.Type,
@@ -519,47 +644,61 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			isFileLocal,
 			containingDeclaration,
 			importSyntax,
-			capturedNameStartIndex);
+			capturedNameStartIndex,
+			evidence);
 
-	private static string? FindContainingDeclaration(Node node)
+	private static string? FindContainingDeclaration(
+		Node node,
+		NodeTextMaterializationCounter materialization)
 	{
 		for (var parent = node.Parent; parent is not null; parent = parent.Parent)
 		{
 			if (parent.Type is not ("class_definition" or "function_definition")) continue;
-			var name = parent.GetChildForField("name")?.Text;
+			var nameNode = parent.GetChildForField("name");
+			var name = nameNode is null ? null : materialization.Read(nameNode);
 			if (!string.IsNullOrWhiteSpace(name)) return name;
 		}
 		return null;
 	}
 
-	private static DependencyImportSyntax? CreateImportSyntax(string captureName, Node node)
+	private static DependencyImportSyntax? CreateImportSyntax(
+		string captureName,
+		Node node,
+		NodeTextMaterializationCounter materialization,
+		string? moduleCallName)
 	{
 		if (captureName is "import.esm" or "import.export")
 		{
 			var source = node.GetChildForField("source");
+			var specifier = source is null ? null : ReadJavaScriptStringLiteral(source, materialization);
 			return source is null
 				? null
-				: new DependencyImportSyntax(ReadQuotedLiteral(source.Text) ?? string.Empty, 0, [],
-					ReadQuotedLiteral(source.Text) is not null);
+				: new DependencyImportSyntax(specifier ?? string.Empty, 0, [], specifier is not null);
 		}
 		if (captureName == "import.call")
 		{
-			var function = node.GetChildForField("function")?.Text;
-			if (function is not ("require" or "import")) return null;
-			var argument = node.GetChildForField("arguments")?.NamedChildren.FirstOrDefault();
-			var specifier = argument is null ? null : ReadQuotedLiteral(argument.Text);
-			return new DependencyImportSyntax(specifier ?? string.Empty, 0, [], specifier is not null);
+			var argument = node.GetChildForField("arguments")?.NamedChildren
+				.Where(static child => child.Type != "comment")
+				.SingleOrDefault();
+			var specifier = argument is null ? null : ReadJavaScriptStringLiteral(argument, materialization);
+			return new DependencyImportSyntax(
+				specifier ?? string.Empty,
+				0,
+				[],
+				specifier is not null,
+				moduleCallName == "require" ? ModuleImportKind.Require : ModuleImportKind.DynamicImport);
 		}
 		if (captureName == "import.direct")
 		{
-			var bindings = ReadPythonBindings(node.GetChildrenForField("name"));
+			var bindings = ReadPythonBindings(node.GetChildrenForField("name"), materialization);
 			return new DependencyImportSyntax(string.Empty, 0, bindings);
 		}
 		if (captureName == "import.from")
 		{
-			var moduleText = node.GetChildForField("module_name")?.Text ?? string.Empty;
+			var moduleNode = node.GetChildForField("module_name");
+			var moduleText = moduleNode is null ? string.Empty : materialization.Read(moduleNode);
 			var relativeLevel = moduleText.TakeWhile(static character => character == '.').Count();
-			var bindings = ReadPythonBindings(node.GetChildrenForField("name"));
+			var bindings = ReadPythonBindings(node.GetChildrenForField("name"), materialization);
 			if (node.NamedChildren.Any(static child => child.Type == "wildcard_import"))
 				bindings = [new DependencyImportBinding("*", null, true)];
 			return new DependencyImportSyntax(moduleText[relativeLevel..], relativeLevel, bindings);
@@ -567,20 +706,91 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		return null;
 	}
 
-	private static IReadOnlyList<DependencyImportBinding> ReadPythonBindings(IEnumerable<Node> nodes) =>
+	private static IReadOnlyList<DependencyImportBinding> ReadPythonBindings(
+		IEnumerable<Node> nodes,
+		NodeTextMaterializationCounter materialization) =>
 		nodes.Select(node =>
 		{
 			if (node.Type != "aliased_import")
-				return new DependencyImportBinding(node.Text, null, node.Type == "wildcard_import");
+				return new DependencyImportBinding(materialization.Read(node), null, node.Type == "wildcard_import");
+			var nameNode = node.GetChildForField("name");
+			var aliasNode = node.GetChildForField("alias");
 			return new DependencyImportBinding(
-				node.GetChildForField("name")?.Text ?? string.Empty,
-				node.GetChildForField("alias")?.Text);
+				nameNode is null ? string.Empty : materialization.Read(nameNode),
+				aliasNode is null ? null : materialization.Read(aliasNode));
 		}).Where(static binding => binding.Name.Length > 0).ToArray();
 
-	private static string? ReadQuotedLiteral(string text) =>
-		text.Length >= 2 && text[0] is '\'' or '"' && text[^1] == text[0]
-			? text[1..^1]
-			: null;
+	private static string? ReadJavaScriptStringLiteral(
+		Node node,
+		NodeTextMaterializationCounter materialization)
+	{
+		if (node.Type != "string") return null;
+		var text = materialization.Read(node);
+		if (text.Length < 2 || text[0] is not ('\'' or '"') || text[^1] != text[0]) return null;
+		var result = new StringBuilder(text.Length - 2);
+		for (var index = 1; index < text.Length - 1; index++)
+		{
+			var character = text[index];
+			if (character != '\\')
+			{
+				result.Append(character);
+				continue;
+			}
+			if (++index >= text.Length - 1) return null;
+			var escaped = text[index];
+			switch (escaped)
+			{
+				case '\\': result.Append('\\'); break;
+				case '\'': result.Append('\''); break;
+				case '"': result.Append('"'); break;
+				case 'n': result.Append('\n'); break;
+				case 'r': result.Append('\r'); break;
+				case 't': result.Append('\t'); break;
+				case 'b': result.Append('\b'); break;
+				case 'f': result.Append('\f'); break;
+				case 'v': result.Append('\v'); break;
+				case '0': result.Append('\0'); break;
+				case 'x':
+					if (!TryReadHexEscape(text, ref index, 2, out var hex)) return null;
+					result.Append((char)hex);
+					break;
+				case 'u':
+					if (!TryReadHexEscape(text, ref index, 4, out var unicode)) return null;
+					result.Append((char)unicode);
+					break;
+				case '\r':
+					if (index + 1 < text.Length - 1 && text[index + 1] == '\n') index++;
+					break;
+				case '\n':
+					break;
+				default:
+					result.Append(escaped);
+					break;
+			}
+		}
+		return result.ToString();
+	}
+
+	private static bool TryReadHexEscape(string text, ref int index, int digits, out int value)
+	{
+		value = 0;
+		if (index + digits >= text.Length) return false;
+		for (var offset = 1; offset <= digits; offset++)
+		{
+			var digit = text[index + offset];
+			var numeric = digit switch
+			{
+				>= '0' and <= '9' => digit - '0',
+				>= 'a' and <= 'f' => digit - 'a' + 10,
+				>= 'A' and <= 'F' => digit - 'A' + 10,
+				_ => -1
+			};
+			if (numeric < 0) return false;
+			value = (value << 4) | numeric;
+		}
+		index += digits;
+		return true;
+	}
 
 	private static int CountGenericArity(string text)
 	{
@@ -605,7 +815,10 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	private static FileFacts StatusOnly(PreparedDependencySource source, DependencyFileStatus status, string? reason) => new(
 		source.RelativePath, source.ScopeId, source.LanguageId, source.ContentFingerprint, source.Source.Length,
-		status, reason, false, new Dictionary<string, int>(), [], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+		status, reason, false, new Dictionary<string, int>(), [], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), [])
+	{
+		CanCache = source.CanCache
+	};
 
 	private static string ReadQuery(string directory, string file)
 	{
@@ -882,6 +1095,27 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		DependencyFileStatus Status,
 		string? StatusReason,
 		bool CanCache = true);
+
+	internal readonly record struct DependencyExtractionWorkState(
+		long RawCapturesVisited,
+		long CreatedCaptures,
+		long MaterializedCharacters,
+		long AdapterVisitedRanges,
+		long AdapterComparisons,
+		long CreatedFacts,
+		int ParsedFiles);
+
+	private sealed class NodeTextMaterializationCounter
+	{
+		public long Characters { get; private set; }
+
+		public string Read(Node node)
+		{
+			var text = node.Text;
+			Characters += text.Length;
+			return text;
+		}
+	}
 
 	private sealed record PreparedSourceContent(
 		string Fingerprint,

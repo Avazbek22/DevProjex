@@ -144,17 +144,30 @@ public sealed class RelatedCommandProcessTests
 		workspace.WriteFile("project/Consumers.cs",
 			"using Models; class Box<User> { User a; } class Consumer { User b; }\n");
 		workspace.WriteFile("project/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		workspace.WriteFile("project/package.json", "{\"imports\":{\"#dual\":{\"import\":\"./import.mts\",\"require\":\"./require.cts\"}}}\n");
 		workspace.WriteFile("project/register.ts", "export const ready = true;\n");
 		workspace.WriteFile("project/main.ts", "import \"./register.js\";\n");
+		workspace.WriteFile("project/import.mts", "export const value = 1;\n");
+		workspace.WriteFile("project/require.cts", "export const value = 2;\n");
+		workspace.WriteFile("project/dual.cts", "import('#dual'); require('#dual');\n");
 		workspace.WriteFile("project/pyproject.toml", "[project]\nname = \"fixture\"\n");
+		workspace.WriteFile("project/impl.py", "class Item: pass\n");
 		workspace.WriteFile("project/model.py", "class Container:\n    def nested(self): pass\n\nclass Item: pass\n");
 		workspace.WriteFile("project/python_consumer.py", "from model import (\n    Item,\n)\n");
+		workspace.WriteFile("project/local_model.py", "def loader():\n    from impl import Item as LocalItem\n");
+		workspace.WriteFile("project/local_consumer.py", "from local_model import LocalItem\n");
 
 		var csharp = Run(workspace, "related", "Consumers.cs", "--project", project,
 			"--format", "json", "--git-mode", "none", "--exclude", "none");
 		var typeScript = Run(workspace, "related", "main.ts", "--project", project,
 			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		var conditional = Run(workspace, "related", "dual.cts", "--project", project,
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
 		var python = Run(workspace, "related", "python_consumer.py", "--project", project,
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		var localPython = Run(workspace, "related", "local_consumer.py", "--project", project,
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		var localModel = Run(workspace, "related", "local_model.py", "--project", project,
 			"--format", "json", "--git-mode", "none", "--exclude", "none");
 
 		Assert.Equal(0, csharp.ExitCode);
@@ -166,9 +179,21 @@ public sealed class RelatedCommandProcessTests
 		}
 		Assert.Equal(0, typeScript.ExitCode);
 		Assert.Contains("register.ts", typeScript.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("import ./register.js at line 1", typeScript.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(0, conditional.ExitCode);
+		Assert.Contains("import.mts", conditional.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("require.cts", conditional.StandardOutput, StringComparison.Ordinal);
 		Assert.Equal(0, python.ExitCode);
 		Assert.Contains("model.py", python.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("nested", python.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(0, localPython.ExitCode);
+		using (var localDocument = JsonDocument.Parse(localPython.StandardOutput))
+		{
+			var localSeed = Assert.Single(localDocument.RootElement.GetProperty("seeds").EnumerateArray());
+			Assert.Empty(localSeed.GetProperty("dependencies").EnumerateArray());
+		}
+		Assert.Equal(0, localModel.ExitCode);
+		Assert.Contains("impl.py", localModel.StandardOutput, StringComparison.Ordinal);
 	}
 
 	private static TerminalTestProcessResult Run(TemporaryDirectory workspace, params string[] arguments)

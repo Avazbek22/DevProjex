@@ -119,6 +119,15 @@ public interface IDependencyFactExtractor : IDisposable
 
 	FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits);
 
+	FileFacts Extract(
+		PreparedDependencySource source,
+		DependencyFactsLimits limits,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		return Extract(source, limits);
+	}
+
 	int ParseCount { get; }
 	int CompiledQuerySetCount { get; }
 }
@@ -134,6 +143,7 @@ public interface IDependencyConfigurationProvider
 public sealed record DependencyFactsLimits(
 	int MaximumCharactersPerFile = 2 * 1024 * 1024,
 	int MaximumFactsPerFile = 50_000,
+	int MaximumRawCapturesPerFile = 1_000_000,
 	int MaximumEdgesPerFile = 20_000,
 	int MaximumWorkPerIndex = 5_000_000,
 	int MaximumCachedFiles = 8_192,

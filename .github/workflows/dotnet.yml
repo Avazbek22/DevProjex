@@ -166,12 +166,14 @@ jobs:
       - name: Run ${{ matrix.suite_name }} Tests
         if: ${{ matrix.os_id != 'linux' && matrix.suite_id != 'ui' }}
         shell: pwsh
+        env:
+          TEST_FILTER: ${{ matrix.suite_id == 'integration' && '(Category!=TerminalCommand)&(Category!=LocalPerformance)&(Category!=Performance)' || '(Category!=LocalPerformance)&(Category!=Performance)' }}
         run: >
           dotnet test ${{ matrix.project_path }}
           -c Release
           --no-build
           --verbosity minimal
-          ${{ matrix.test_filter_args }}
+          --filter "$env:TEST_FILTER"
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
           --blame-hang
@@ -195,12 +197,14 @@ jobs:
       - name: Run ${{ matrix.suite_name }} Tests (Linux headless)
         if: ${{ matrix.os_id == 'linux' && matrix.suite_id != 'ui' }}
         shell: bash
+        env:
+          TEST_FILTER: ${{ matrix.suite_id == 'integration' && '(Category!=TerminalCommand)&(Category!=LocalPerformance)&(Category!=Performance)' || '(Category!=LocalPerformance)&(Category!=Performance)' }}
         run: >
           xvfb-run -a dotnet test ${{ matrix.project_path }}
           -c Release
           --no-build
           --verbosity minimal
-          ${{ matrix.test_filter_args }}
+          --filter "$TEST_FILTER"
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
           --blame-hang
