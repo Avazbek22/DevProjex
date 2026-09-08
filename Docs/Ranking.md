@@ -168,13 +168,16 @@ greedy admission pass for every comparator. The one seed for each of the existin
 was selected from the task wording, not from its required-file set or ranked output. The
 complete machine-readable result is
 `tools/RankingEval/results/2026-09-07-focus-v1.json`; the product and evaluator SHA for the
-run are both `25b4acb6283913afe989374be60883694cb090a9`.
+2026-09-08 graph-fidelity rerun are both `63fcc291a1379c6e9d03bc1d815aa51f986426c4`.
 
 The six frozen orders are current manifest order, `importance-v1`, seed first without graph
 traversal, `focus-v1` minimum undirected graph hop, evaluation-only personalized PageRank,
 and an explicit seed plus `related_files` in both directions. Personalized PageRank uses
 the registered damping, teleport, dangling-mass, convergence, and quantization rules; it is
 not a product feature. All seeded orders consider the same registered seed first.
+When one resolved symbol has declarations in multiple files, graph traversal connects the source to
+every declaration file. Personalized PageRank divides that logical edge evenly across those files
+(`1/n` each), so splitting one partial type across many files cannot manufacture extra rank weight.
 
 Each table cell is `mean RecallNew · AllRequired/oracle/oracle-after-seeds · mean irrelevant-token share`.
 RecallNew excludes the registered seed and is averaged only where the remaining sufficient
@@ -183,15 +186,15 @@ oracles are counts over the five tasks at that repository and budget.
 
 | Repository / budget | Current | Importance | Seed-first | Focus-v1 | Focus-PPR | Directed-from-seed |
 |---|---:|---:|---:|---:|---:|---:|
-| DevProjex / 4,000 | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 0.8628` | `0.1000 · 0/1/1 · 0.8482` | `0.1000 · 0/1/1 · 0.8481` | `0.1000 · 0/1/1 · 0.7511` |
+| DevProjex / 4,000 | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 0.8628` | `0.1000 · 0/1/1 · 0.8481` | `0.1000 · 0/1/1 · 0.8481` | `0.1000 · 0/1/1 · 0.7511` |
 | DevProjex / 8,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.7997` | `0.2000 · 0/2/2 · 0.7409` | `0.1000 · 0/2/2 · 0.7924` | `0.2000 · 0/2/2 · 0.5611` |
 | DevProjex / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.8999` | `0.1000 · 0/2/2 · 0.8962` | `0.2000 · 0/2/2 · 0.7574` | `0.1000 · 0/2/2 · 0.7375` |
 | Repomix / 4,000 | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 1.0000` | `0.0000 · 0/1/1 · 0.4111` | `0.0000 · 0/1/1 · 0.4110` | `0.0000 · 0/1/1 · 0.4109` | `0.0000 · 0/1/1 · 0.3883` |
 | Repomix / 8,000 | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 1.0000` | `0.0000 · 0/3/3 · 0.7055` | `0.2000 · 1/3/3 · 0.6202` | `0.3000 · 1/3/3 · 0.5349` | `0.2000 · 1/3/3 · 0.5965` |
 | Repomix / 16,000 | `0.0000 · 0/5/5 · 1.0000` | `0.0000 · 0/5/5 · 1.0000` | `0.0000 · 0/5/5 · 0.8528` | `0.4000 · 2/5/5 · 0.7538` | `0.3000 · 1/5/5 · 0.7675` | `0.4000 · 2/5/5 · 0.7013` |
-| Flask / 4,000 | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 0.7098` | `0.0000 · 0/0/0 · 0.7097` | `0.0000 · 0/0/0 · 0.7097` | `0.0000 · 0/0/0 · 0.6845` |
-| Flask / 8,000 | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5262` |
-| Flask / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.0000 · 0/2/2 · 0.9412` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5368` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5310` |
+| Flask / 4,000 | `0.0000 · 0/0/0 · 1.0000` | `0.0000 · 0/0/0 · 0.8080` | `0.0000 · 0/0/0 · 0.7098` | `0.0000 · 0/0/0 · 0.7097` | `0.0000 · 0/0/0 · 0.7097` | `0.0000 · 0/0/0 · 0.4000` |
+| Flask / 8,000 | `0.0000 · 0/0/0 · 1.0000` | `0.1250 · 0/0/0 · 0.8680` | `0.0000 · 0/0/0 · 0.5642` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.5641` | `0.0000 · 0/0/0 · 0.2895` |
+| Flask / 16,000 | `0.0000 · 0/2/2 · 1.0000` | `0.1250 · 0/2/2 · 0.8753` | `0.0000 · 1/2/2 · 0.6634` | `0.2500 · 2/2/2 · 0.5369` | `0.2500 · 2/2/2 · 0.5368` | `0.2500 · 2/2/2 · 0.3551` |
 
 `focus-v1` and `directed-from-seed` have the same RecallNew and AllRequired result
 in all nine repository/budget aggregates above. Directed context spends a smaller
@@ -212,9 +215,9 @@ growth for the corpus.
 
 | Repository | Cold ms (importance / focus) | Warm ms (importance / focus) | Warm focus addition | Cold RSS MiB | Warm RSS MiB | Maximum RSS growth |
 |---|---:|---:|---:|---:|---:|---:|
-| DevProjex | `2726.33 / 2779.00` | `963.22 / 1047.16` | `+83.94 ms (8.71%)` | `286.54 / 288.83` | `299.23 / 302.76` | `1.18%` |
-| Repomix | `807.94 / 809.41` | `404.52 / 412.87` | `+8.35 ms (2.06%)` | `109.84 / 109.79` | `107.02 / 107.32` | `0.28%` |
-| Flask | `541.79 / 561.06` | `276.24 / 265.36` | `-10.88 ms (-3.94%)` | `83.75 / 84.09` | `87.28 / 87.23` | `0.40%` |
+| DevProjex | `2596.13 / 2655.83` | `2370.52 / 2386.56` | `+16.03 ms (0.68%)` | `290.17 / 289.87` | `362.32 / 363.30` | `0.27%` |
+| Repomix | `735.45 / 767.74` | `393.65 / 428.44` | `+34.79 ms (8.84%)` | `111.43 / 111.09` | `111.44 / 112.27` | `0.74%` |
+| Flask | `475.42 / 498.86` | `192.57 / 189.95` | `-2.61 ms (-1.36%)` | `83.66 / 83.86` | `85.58 / 86.50` | `1.07%` |
 
 Fifteen of the 45 task-budget cells had a feasible oracle after the real seed admission and
 a defined RecallNew. Across those cells, `focus-v1 - seed-first` mean RecallNew was

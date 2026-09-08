@@ -24,8 +24,11 @@ therefore not inferred.
 
 Each declaration is identified by scope, language, symbol kind, qualified name, generic arity, and
 an optional file scope. Partial C# declarations share one identity with multiple source sites;
-file-local types remain distinct even when their names match. Each reference retains its source line
-and a compact source excerpt. Results use four statuses:
+file-local types remain distinct even when their names match. A resolved edge to such a partial
+identity keeps one canonical target and the complete declaration-file list. Related-file projections
+show every declaration file as a resolved part of the same symbol, in both directions; ambiguous
+candidates remain a separate concept. Each reference retains its source line and a compact source
+excerpt. Results use four statuses:
 
 - **Resolved** — exactly one declaration or module in the allowed manifest is supported by the
   resolver evidence;
@@ -84,9 +87,12 @@ once, then derives all scope, package-name, package-map, and external-package pr
 snapshot, so a result cannot mix two versions of one configuration file.
 
 Python relative imports start at the source package. Regular and namespace-package portions are
-combined, `.py` is preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and
-`__all__` affects wildcard imports only. Dynamic `__all__`, `setup.py`, and import hooks are not
-executed and remain unresolved. Separate complete `sys.stdlib_module_names` snapshots cover Python
+combined, and a package initializer takes precedence over a same-named module file. Within a package,
+a statically provided or re-exported name is resolved before a same-named child module. `.py` is
+preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and `__all__` affects
+wildcard imports only. Relative imports that would escape the top-level package remain unresolved.
+Dynamic `__all__`, `setup.py`, and import hooks are not executed and remain unresolved. Separate
+complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;
 otherwise only names found in both snapshots are classified as external.
 
