@@ -1144,6 +1144,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlyDictionary<string, string> _pythonModuleByFile;
 		private readonly IReadOnlySet<string> _manifestDirectoryPrefixes;
 		private readonly IReadOnlyDictionary<string, TypeScriptPathMapping[]> _typeScriptMappingsByScope;
+		private readonly bool _diagnosticsEnabled;
 
 		public ResolverContext(
 			string root,
@@ -1152,6 +1153,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			DependencyResolverConfiguration configuration)
 		{
 			_root = root;
+			_diagnosticsEnabled = DependencyEngineDiagnostics.IsEnabled;
 			_files = files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
 			DependencyEngineDiagnostics.RecordDictionaryBuild();
 			_symbolsBySimpleName = declarations
@@ -1253,7 +1255,8 @@ public sealed class DependencyFactsEngine : IDisposable
 					if (_symbolsBySimpleName.TryGetValue(new SymbolLookupKey(scope, language, name), out var matches))
 					{
 						candidates += matches.Length;
-						DependencyEngineDiagnostics.RecordResolverCandidateProbes(matches.Length);
+						if (_diagnosticsEnabled)
+							DependencyEngineDiagnostics.RecordResolverCandidateProbes(matches.Length);
 					}
 					if (candidates > maximumWork)
 						return candidates;
