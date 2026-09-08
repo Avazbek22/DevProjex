@@ -571,6 +571,64 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task PythonImport_PrefersARegularPackageOverTheSameNamedModule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var module = fixture.CreateFile("pkg.py", "value = 'module'");
+		var initializer = fixture.CreateFile("pkg/__init__.py", "value = 'package'");
+		var consumer = fixture.CreateFile("consumer.py", "import pkg");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, module, initializer, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py" && item.Reference == "pkg");
+		Assert.Equal("pkg/__init__.py", edge.Target);
+		Assert.DoesNotContain("pkg.py", edge.Candidates);
+	}
+
+	[Fact]
+	public async Task PythonFromImport_PrefersAStaticPackageBindingOverAChildModule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var initializer = fixture.CreateFile("pkg/__init__.py", "from .impl import Service");
+		var implementation = fixture.CreateFile("pkg/impl.py", "class Service: pass");
+		var child = fixture.CreateFile("pkg/Service.py", "class Wrong: pass");
+		var consumer = fixture.CreateFile("consumer.py", "from pkg import Service");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, implementation, child, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py" && item.Reference == "pkg");
+		Assert.Equal("pkg/impl.py", edge.Target);
+		Assert.DoesNotContain("pkg/Service.py", edge.Candidates);
+	}
+
+	[Fact]
+	public async Task PythonRelativeImport_RejectsTraversalBeyondTheTopLevelPackage()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var initializer = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var consumer = fixture.CreateFile("pkg/consumer.py", "from .. import target");
+		var target = fixture.CreateFile("target.py", "value = 1");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, initializer, consumer, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "pkg/consumer.py");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Contains("beyond the top-level package", Assert.Single(edge.Reasons), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task PythonPlatformCatalog_UsesDeclaredTargetVersionAndAConservativeUnknownVersion()
 	{
 		using var fixture = new TemporaryDirectory();

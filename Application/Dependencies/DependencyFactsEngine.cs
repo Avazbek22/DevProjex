@@ -1318,8 +1318,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (import.RelativeLevel > 0)
 			{
 				var remove = import.RelativeLevel - 1;
-				if (remove > parts.Count)
-					return Edge(source, import, ResolutionStatus.Unresolved, null, "relative import escapes package", []);
+				if (remove >= parts.Count)
+					return Edge(source, import, ResolutionStatus.Unresolved, null, "relative import goes beyond the top-level package", []);
 				parts.RemoveRange(parts.Count - remove, remove);
 			}
 			var module = import.RelativeLevel == 0
@@ -1328,14 +1328,23 @@ public sealed class DependencyFactsEngine : IDisposable
 			var candidates = ProbePythonModule(source, module).ToList();
 			if (import.ImportedName is { Length: > 0 } and not "*")
 			{
-				var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
-				var children = ProbePythonModule(source, child).ToArray();
-				if (children.Length > 0)
-					candidates = children.ToList();
+				var provided = candidates
+					.Where(static candidate => Path.GetFileName(candidate).StartsWith("__init__.", StringComparison.Ordinal))
+					.SelectMany(candidate => ResolvePythonStaticBinding(
+						candidate,
+						import.ImportedName,
+						0,
+						new HashSet<string>(StringComparer.Ordinal)))
+					.Distinct(StringComparer.Ordinal)
+					.Order(StringComparer.Ordinal)
+					.ToArray();
+				if (provided.Length > 0)
+					candidates = provided.ToList();
 				else
-					candidates = candidates.Where(candidate =>
-						!Path.GetFileName(candidate).StartsWith("__init__.", StringComparison.Ordinal) ||
-						PythonStaticallyProvides(candidate, import.ImportedName, 0, new HashSet<string>(StringComparer.Ordinal))).ToList();
+				{
+					var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
+					candidates = ProbePythonModule(source, child).ToList();
+				}
 			}
 			if (candidates.Count == 0)
 			{
@@ -1356,10 +1365,15 @@ public sealed class DependencyFactsEngine : IDisposable
 			return FinishImport(source, import, candidates);
 		}
 
-		private bool PythonStaticallyProvides(string candidate, string name, int depth, ISet<string> visited)
+		private IReadOnlyList<string> ResolvePythonStaticBinding(
+			string candidate,
+			string name,
+			int depth,
+			ISet<string> visited)
 		{
-			if (depth >= 8 || !visited.Add(candidate) || !_files.TryGetValue(candidate, out var facts)) return false;
-			if (facts.Declarations.Any(declaration => SimpleName(declaration.Identity.QualifiedName) == name)) return true;
+			if (depth >= 8 || !visited.Add(candidate) || !_files.TryGetValue(candidate, out var facts)) return [];
+			if (facts.Declarations.Any(declaration => SimpleName(declaration.Identity.QualifiedName) == name))
+				return [candidate];
 			foreach (var import in facts.Imports.Where(import =>
 				string.Equals(import.Alias ?? import.ImportedName ?? import.Specifier.Split('.').Last(), name, StringComparison.Ordinal)))
 			{
@@ -1371,7 +1385,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (import.RelativeLevel > 0)
 				{
 					var remove = import.RelativeLevel - 1;
-					if (remove > parts.Count) continue;
+					if (remove >= parts.Count) continue;
 					parts.RemoveRange(parts.Count - remove, remove);
 				}
 				var module = import.RelativeLevel == 0 ? import.Specifier :
@@ -1379,12 +1393,29 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (import.ImportedName is { Length: > 0 } imported)
 				{
 					var child = module.Length == 0 ? imported : module + "." + imported;
-					if (ProbePythonModule(facts, child).Any()) return true;
-					if (ProbePythonModule(facts, module).Any(next => PythonStaticallyProvides(next, imported, depth + 1, visited))) return true;
+					if (import.Specifier.Length == 0)
+					{
+						var directChildTargets = ProbePythonModule(facts, child).ToArray();
+						if (directChildTargets.Length > 0) return directChildTargets;
+					}
+					var moduleTargets = ProbePythonModule(facts, module).ToArray();
+					var nested = moduleTargets
+						.SelectMany(next => ResolvePythonStaticBinding(next, imported, depth + 1, visited))
+						.Distinct(StringComparer.Ordinal)
+						.Order(StringComparer.Ordinal)
+						.ToArray();
+					if (nested.Length > 0) return nested;
+					if (moduleTargets.Length > 0) return moduleTargets;
+					var childTargets = ProbePythonModule(facts, child).ToArray();
+					if (childTargets.Length > 0) return childTargets;
 				}
-				else if (ProbePythonModule(facts, module).Any()) return true;
+				else
+				{
+					var moduleTargets = ProbePythonModule(facts, module).ToArray();
+					if (moduleTargets.Length > 0) return moduleTargets;
+				}
 			}
-			return false;
+			return [];
 		}
 
 		private IEnumerable<string> ProbePythonNamespace(FileFacts source, string module)
@@ -1408,14 +1439,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			foreach (var root in PythonRootPrefixes(source))
 			{
 				var prefix = string.Join('/', new[] { root, relative }.Where(static value => value.Length > 0));
-				var implementation = new[] { prefix + ".py", prefix + "/__init__.py" }
+				var implementation = new[] { prefix + "/__init__.py", prefix + ".py" }
 					.FirstOrDefault(_files.ContainsKey);
 				if (implementation is not null)
 				{
 					yield return implementation;
 					yield break;
 				}
-				var stub = new[] { prefix + ".pyi", prefix + "/__init__.pyi" }
+				var stub = new[] { prefix + "/__init__.pyi", prefix + ".pyi" }
 					.FirstOrDefault(_files.ContainsKey);
 				if (stub is not null)
 				{
