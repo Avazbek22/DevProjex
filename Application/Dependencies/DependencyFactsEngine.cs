@@ -1092,6 +1092,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlyDictionary<string, string[]> _globalNamespaces;
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _globalAliases;
 		private readonly IReadOnlyDictionary<string, string[]> _contextNamespacesByFile;
+		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, CSharpUsingDirective[]>> _aliasesByFileAndName;
 		private readonly IReadOnlySet<string> _dotNetExternalSimpleNames;
 
 		public ResolverContext(
@@ -1135,6 +1136,19 @@ public sealed class DependencyFactsEngine : IDisposable
 					.Distinct(StringComparer.Ordinal)
 					.Order(StringComparer.Ordinal)
 					.ToArray(),
+				StringComparer.Ordinal);
+			_aliasesByFileAndName = files.ToDictionary(
+				static file => file.Path,
+				static file => (IReadOnlyDictionary<string, CSharpUsingDirective[]>)file.CSharpUsingDirectives
+					.Where(static directive => directive.Alias is not null)
+					.GroupBy(static directive => directive.Alias!, StringComparer.Ordinal)
+					.ToDictionary(
+						static group => group.Key,
+						static group => group
+							.OrderBy(static directive => directive.ScopeEndIndex - directive.ScopeStartIndex)
+							.ThenBy(static directive => directive.Target, StringComparer.Ordinal)
+							.ToArray(),
+						StringComparer.Ordinal),
 				StringComparer.Ordinal);
 			_dotNetExternalSimpleNames = DotNetSimpleNames.GetValue(
 				configuration.DotNetExternalSymbols,
@@ -1939,11 +1953,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			var separator = reference.Name.IndexOf('.');
 			var prefix = separator < 0 ? reference.Name : reference.Name[..separator];
 			var suffix = separator < 0 ? string.Empty : reference.Name[separator..];
-			var local = source.CSharpUsingDirectives
-				.Where(directive => directive.Alias == prefix && IsActive(directive, reference.SourceStartIndex))
-				.OrderBy(directive => directive.ScopeEndIndex - directive.ScopeStartIndex)
-				.ThenBy(static directive => directive.Target, StringComparer.Ordinal)
-				.FirstOrDefault();
+			var local = _aliasesByFileAndName.GetValueOrDefault(source.Path)?
+				.GetValueOrDefault(prefix)?
+				.FirstOrDefault(directive => IsActive(directive, reference.SourceStartIndex));
 			if (local is not null)
 			{
 				expanded = local.Target + suffix;
