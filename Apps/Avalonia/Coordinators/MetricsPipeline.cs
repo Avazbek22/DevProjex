@@ -63,17 +63,30 @@ internal sealed class MetricsPipeline(
         FileMetricsData Metrics,
         bool HasMetrics);
 
+	private readonly record struct FileMetricsSourceVersion(
+		long Length,
+		long LastWriteTimeUtcTicks,
+		bool IsMissing)
+	{
+		public bool IsCurrent(string path) =>
+			TryCaptureCurrentSourceVersion(path) == this;
+	}
+
     private readonly record struct FileMetricsScanResult(
         FileMetricsVariant Raw,
         FileMetricsVariant Effective,
         string TransformIdentity,
+		FileMetricsSourceVersion? SourceVersion,
         bool WasInspected);
 
-    private sealed class FileMetricsCacheEntry(FileMetricsVariant raw)
+    private sealed class FileMetricsCacheEntry(
+		FileMetricsVariant raw,
+		FileMetricsSourceVersion sourceVersion)
     {
         private readonly Dictionary<string, FileMetricsVariant> _transformed = new(StringComparer.Ordinal);
 
         public FileMetricsVariant Raw { get; set; } = raw;
+		public FileMetricsSourceVersion SourceVersion { get; } = sourceVersion;
 
         public void SetTransformed(string identity, FileMetricsVariant metrics) =>
             _transformed[identity] = metrics;
@@ -280,36 +293,11 @@ internal sealed class MetricsPipeline(
 
         var selectedPaths = selectedPathsProvider();
         var hasAnyChecked = selectedPaths.Count > 0;
-        var hasCompleteMetricsBaseline = _hasCompleteMetricsBaseline;
         var treeFormat = treeFormatProvider();
         var currentTree = currentTreeProvider();
         var currentPath = currentPathProvider();
 
-        if (!hasCompleteMetricsBaseline)
-        {
-            _backgroundTasks.Register(RecalculateIncompleteBaselineMetricsAsync(
-                recalcCts,
-                token,
-                recalcVersion,
-                hasAnyChecked,
-                selectedPaths,
-                treeFormat,
-                currentTree,
-                currentPath,
-                cleanupAfterCompletion),
-			nameof(RecalculateIncompleteBaselineMetricsAsync));
-            return;
-        }
-
-        if (!MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(hasAnyChecked, hasCompleteMetricsBaseline))
-        {
-            UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-            ScheduleMemoryCleanup(cleanupAfterCompletion);
-            return;
-        }
-
-        _backgroundTasks.Register(RecalculateMetricsCoreAsync(
+        _backgroundTasks.Register(RecalculateIncompleteBaselineMetricsAsync(
             recalcCts,
             token,
             recalcVersion,
@@ -319,7 +307,7 @@ internal sealed class MetricsPipeline(
             currentTree,
             currentPath,
             cleanupAfterCompletion),
-			nameof(RecalculateMetricsCoreAsync));
+			nameof(RecalculateIncompleteBaselineMetricsAsync));
     }
 
     public async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
@@ -419,6 +407,17 @@ internal sealed class MetricsPipeline(
         CancelBackgroundCalculation();
         ClearFileMetricsCache(trimCapacity: true);
     }
+
+	/// <summary>
+	/// Invalidates the selected-tree projection and aggregate totals without changing the
+	/// generation of source-versioned per-file facts or transformation variants.
+	/// </summary>
+	public void InvalidateSelectionProjection()
+	{
+		_recalculateMetricsCts?.Cancel();
+		Interlocked.Increment(ref _metricsRecalcVersion);
+		InvalidateComputedCaches();
+	}
 
     public void CancelByUser()
     {
@@ -964,14 +963,15 @@ internal sealed class MetricsPipeline(
             for (var index = 0; index < count; index++)
             {
                 var result = results[index];
-                if (!result.WasInspected)
+                if (!result.WasInspected || result.SourceVersion is not { } sourceVersion)
                     continue;
 
                 var filePath = filePaths[index];
-                if (!_fileMetricsCache.TryGetValue(filePath, out var entry))
+                if (!_fileMetricsCache.TryGetValue(filePath, out var entry) ||
+					entry.SourceVersion != sourceVersion)
                 {
-                    entry = new FileMetricsCacheEntry(result.Raw);
-                    _fileMetricsCache.Add(filePath, entry);
+					entry = new FileMetricsCacheEntry(result.Raw, sourceVersion);
+					_fileMetricsCache[filePath] = entry;
                 }
                 else
                 {
@@ -1024,34 +1024,52 @@ internal sealed class MetricsPipeline(
             ? string.Empty
             : _appliedTransformIdentity;
 
-        await Parallel.ForAsync(0, filePaths.Count, parallelOptions, async (index, ct) =>
+		await Parallel.ForAsync(0, filePaths.Count, parallelOptions, async (index, ct) =>
         {
             var filePath = filePaths[index];
             try
             {
+				var sourceVersionBeforeRead = TryCaptureCurrentSourceVersion(filePath);
                 if (fileContentAnalyzer.ClassifyWithoutReading(filePath) ==
                     FileContentClassification.Binary)
                 {
+					var binarySourceVersion = TryCaptureStableSourceVersion(
+						filePath,
+						sourceVersionBeforeRead);
+					if (binarySourceVersion is null)
+					{
+						Interlocked.Exchange(ref hadReadFailures, 1);
+						return;
+					}
+
                     stagedResults[index] = new FileMetricsScanResult(
                         Raw: new FileMetricsVariant(default, HasMetrics: false),
                         Effective: new FileMetricsVariant(default, HasMetrics: false),
                         TransformIdentity: transformIdentity,
+						SourceVersion: binarySourceVersion,
                         WasInspected: true);
                     return;
                 }
 
                 TextFileMetrics? rawMetrics;
                 TextFileMetrics? effectiveMetrics;
+				FileMetricsSourceVersion? sourceVersion = null;
 				ContentReadFact? retainedFact = null;
 				if (readFacts is not null && readFacts.TryGet(filePath, out var retained))
 					retainedFact = retained;
                 if (transformationScope is not null && IsCompressible(filePath))
                 {
-					var fact = retainedFact is { IsMaterializedText: true }
-						? retainedFact
-						: await fileContentAnalyzer
+					ContentReadFact fact;
+					if (retainedFact is { IsMaterializedText: true })
+					{
+						fact = retainedFact;
+					}
+					else
+					{
+						fact = await fileContentAnalyzer
 							.ReadFactAsync(filePath, MaximumMetricsMaterializationBytes, ct)
 							.ConfigureAwait(false);
+					}
 					rawMetrics = fact.RawMetrics;
 					effectiveMetrics = rawMetrics is { IsEstimated: false } && fact.IsMaterializedText
 						? MeasureTransformed(
@@ -1080,10 +1098,20 @@ internal sealed class MetricsPipeline(
                     effectiveMetrics = rawMetrics;
                 }
 
+				sourceVersion ??= TryCaptureStableSourceVersion(
+					filePath,
+					sourceVersionBeforeRead);
+				if (sourceVersion is null || !sourceVersion.Value.IsCurrent(filePath))
+				{
+					Interlocked.Exchange(ref hadReadFailures, 1);
+					return;
+				}
+
                 stagedResults[index] = new FileMetricsScanResult(
                     Raw: ToVariant(rawMetrics),
                     Effective: ToVariant(effectiveMetrics),
                     TransformIdentity: transformIdentity,
+					SourceVersion: sourceVersion,
                     WasInspected: true);
             }
             catch (OperationCanceledException)
@@ -1113,6 +1141,45 @@ internal sealed class MetricsPipeline(
 
         return Volatile.Read(ref hadReadFailures) != 0;
     }
+
+	private static FileMetricsSourceVersion? TryCaptureCurrentSourceVersion(string path)
+	{
+		try
+		{
+			using var stream = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.Read | FileShare.Delete,
+				bufferSize: 1,
+				FileOptions.RandomAccess);
+			return new FileMetricsSourceVersion(
+				RandomAccess.GetLength(stream.SafeFileHandle),
+				File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks,
+				IsMissing: false);
+		}
+		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+		{
+			return new FileMetricsSourceVersion(
+				Length: 0,
+				LastWriteTimeUtcTicks: 0,
+				IsMissing: true);
+		}
+		catch (Exception exception) when (IsExpectedMetricsReadFailure(exception))
+		{
+			return null;
+		}
+	}
+
+	private static FileMetricsSourceVersion? TryCaptureStableSourceVersion(
+		string path,
+		FileMetricsSourceVersion? versionBeforeRead)
+	{
+		var versionAfterRead = TryCaptureCurrentSourceVersion(path);
+		return versionBeforeRead is { } before && versionAfterRead == before
+			? versionAfterRead
+			: null;
+	}
 
     private static bool IsExpectedMetricsReadFailure(Exception exception) =>
         exception is IOException or UnauthorizedAccessException or SecurityException;
@@ -1215,11 +1282,15 @@ internal sealed class MetricsPipeline(
 
             if (targetFilePaths.Count == 0)
             {
-                await PublishTreeMetricsWhileContentPendingAsync(
-                    token,
-                    recalcVersion,
-                    treeFormat,
-                    selection);
+				await PublishMetricsAsync(
+					token,
+					recalcVersion,
+					hasAnyChecked,
+					selectedPaths,
+					treeFormat,
+					currentTree,
+					currentPath,
+					selection);
                 completed = true;
                 return;
             }
@@ -1332,46 +1403,6 @@ internal sealed class MetricsPipeline(
         });
     }
 
-    private async Task RecalculateMetricsCoreAsync(
-        CancellationTokenSource recalcCts,
-        CancellationToken token,
-        int recalcVersion,
-        bool hasAnyChecked,
-        IReadOnlySet<string> selectedPaths,
-        TreeTextFormat treeFormat,
-        BuildTreeResult? currentTree,
-        string? currentPath,
-        MemoryCleanupReason? cleanupAfterCompletion)
-    {
-        var completed = false;
-        try
-        {
-            await PublishMetricsAsync(
-                token,
-                recalcVersion,
-                hasAnyChecked,
-                selectedPaths,
-                treeFormat,
-                currentTree,
-                currentPath);
-            completed = true;
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when a newer recalculation supersedes the current one.
-        }
-        finally
-        {
-            if (completed &&
-                recalcVersion == Volatile.Read(ref _metricsRecalcVersion))
-            {
-                ScheduleMemoryCleanup(cleanupAfterCompletion);
-            }
-
-            DisposeIfCurrent(ref _recalculateMetricsCts, recalcCts);
-        }
-    }
-
     private void ScheduleMemoryCleanup(
         MemoryCleanupReason? cleanupReason)
     {
@@ -1441,6 +1472,7 @@ internal sealed class MetricsPipeline(
     {
 		cancellationToken.ThrowIfCancellationRequested();
         var missingPaths = new List<string>();
+		var removedStaleEntry = false;
         lock (_metricsLock)
         {
             for (var index = 0; index < orderedPaths.Count; index++)
@@ -1449,9 +1481,21 @@ internal sealed class MetricsPipeline(
                 var path = orderedPaths[index];
                 if (!_fileMetricsCache.TryGetValue(path, out var entry) ||
                     !entry.TryGet(_appliedTransformIdentity, out _))
+				{
                     missingPaths.Add(path);
+					continue;
+				}
+
+				if (!entry.SourceVersion.IsCurrent(path))
+				{
+					_fileMetricsCache.Remove(path);
+					missingPaths.Add(path);
+					removedStaleEntry = true;
+				}
             }
         }
+		if (removedStaleEntry)
+			InvalidateContentMetricsCache();
 
         return missingPaths;
     }
