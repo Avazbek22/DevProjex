@@ -862,6 +862,34 @@ public sealed class SecretRedactionCommandContractTests
 		}
 	}
 
+	[Fact]
+	public async Task ExportContext_HideSecretsIgnoresInlineAllowMarkerFromProjectContent()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile(
+			"project/src/inline-allow.cs",
+			$"const string token = \"{GithubToken}\"; // gitleaks:allow\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content",
+				"--format", "text",
+				"--git-mode", "none",
+				"--hide-secrets",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Theory]
 	[InlineData("folder")]
 	[InlineData("zip")]

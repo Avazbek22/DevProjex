@@ -16,6 +16,14 @@ limits documented in [McpServer.md](McpServer.md),
 | File system | MCP tools are annotated read-only and non-destructive for the source project. Remote checkouts and stored packs live in application-owned managed cache or temporary session storage; the source project is not written. Cache checkout writes require an active lease and a path inside the application-owned repository container. |
 | Supply chain | Grammar sources and secret-detection rules are pinned and hash-verified. Release channels require content receipts, static completeness checks, mutation gates, and real-entry-point smoke tests before publication. Published container artifacts include build provenance; the other channel-specific evidence is described in the release process. |
 
+Secret-redaction exceptions are operator-controlled. Project content is
+untrusted input, so inline markers such as `gitleaks:allow` cannot grant an
+exception in GUI, CLI, or MCP output.
+
+Temporary redaction data is stored in private per-user directories. After an
+abnormal termination it can remain until a later DevProjex startup runs the
+scavenger, which removes stale directories once they are more than 24 hours old.
+
 ## What is not guaranteed
 
 - Secret detection is not proof that output is safe or clean. It covers reviewed

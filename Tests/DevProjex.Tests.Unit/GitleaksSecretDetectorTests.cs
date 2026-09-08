@@ -171,14 +171,24 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
-	public void Detect_BundledConfigurationPath_DoesNotReportRuleExamplesAsSecrets()
+	public void Detect_ProjectFileNamedLikeBundledConfiguration_IsInspectedLikeAnyOtherToml()
 	{
-		var ruleExample = "bedrock-api-" + "key-YmVkcm9jay5hbWF6b25hd3MuY29t";
+		const string token = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		const string content = "token = \"" + token + "\"";
 
-		Assert.Empty(Detector.Detect(
+		var obvious = Detector.Detect(
+			"obvious.toml",
+			content,
+			TestContext.Current.CancellationToken);
+		var resourceNamed = Detector.Detect(
 			"Infrastructure/Secrets/Rules/gitleaks-v8.30.1.toml",
-			ruleExample,
-			TestContext.Current.CancellationToken));
+			content,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotEmpty(obvious);
+		Assert.Equal(
+			obvious.Select(static finding => (finding.RuleId, finding.Value)),
+			resourceNamed.Select(static finding => (finding.RuleId, finding.Value)));
 	}
 
 	[Fact]
@@ -371,11 +381,14 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
-	public void Detect_GitleaksAllowMarker_SuppressesFindingOnThatLine()
+	public void Detect_GitleaksAllowMarker_IsUntrustedContentAndDoesNotSuppressFinding()
 	{
 		const string content = "const token = \"ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\"; // gitleaks:allow";
 
-		Assert.Empty(Detector.Detect("src/example.cs", content, TestContext.Current.CancellationToken));
+		// Project content cannot grant itself an exception from operator-controlled redaction.
+		Assert.Single(
+			Detector.Detect("src/example.cs", content, TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "github-pat");
 	}
 
 	[Fact]
@@ -392,7 +405,7 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
-	public void Detect_GitleaksAllowMarker_AppliesToTheFullMultilineMatchContext()
+	public void Detect_GitleaksAllowMarker_DoesNotSuppressAMultilineFinding()
 	{
 		const string content =
 			"-----BEGIN " + "PRIVATE KEY-----\n" +
@@ -401,13 +414,14 @@ public sealed class GitleaksSecretDetectorTests
 			"Ks14IReLcYgA" + "DhoXk56ZzXI=\n" +
 			"-----END " + "PRIVATE KEY----- // gitleaks:allow";
 
-		Assert.DoesNotContain(
+		// The marker is untrusted even when it occurs inside the finding's multiline context.
+		Assert.Contains(
 			Detector.Detect("src/key.pem", content, TestContext.Current.CancellationToken),
 			static finding => finding.RuleId == "private-key");
 	}
 
 	[Fact]
-	public void Detect_MultilineAllowMarkerDoesNotSuppressANestedFindingFromALaterRule()
+	public void Detect_MultilineAllowMarkerSuppressesNeitherOuterNorNestedFinding()
 	{
 		var pulumiToken = "pul-" + string.Concat(Enumerable.Repeat("a7d9b3c5", 5));
 		var content =
@@ -419,7 +433,8 @@ public sealed class GitleaksSecretDetectorTests
 
 		var findings = Detector.Detect("src/key.pem", content, TestContext.Current.CancellationToken);
 
-		Assert.DoesNotContain(findings, static finding => finding.RuleId == "private-key");
+		// One content-controlled marker must not suppress either finding.
+		Assert.Contains(findings, static finding => finding.RuleId == "private-key");
 		var nested = Assert.Single(findings, static finding => finding.RuleId == "pulumi-api-token");
 		Assert.Equal(pulumiToken, nested.Value);
 	}
@@ -463,6 +478,7 @@ public sealed class GitleaksSecretDetectorTests
 		var content = new string('x', 1024 * 1024) +
 		              string.Concat(Enumerable.Range(0, findingCount).Select(index =>
 			              $" token{index}=\"{token}\";")) +
+		              " // gitleaks:allow " +
 		              new string('y', 1024 * 1024);
 		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
 
