@@ -11,13 +11,21 @@ internal sealed class McpJsonArguments(
 	public static McpJsonArguments Create(
 		CallToolRequestParams request,
 		params string[] allowed)
+		=> Create(request, allowed.ToFrozenSet(StringComparer.Ordinal));
+
+	public static McpJsonArguments Create(
+		CallToolRequestParams request,
+		IReadOnlySet<string> allowed)
 	{
 		ArgumentNullException.ThrowIfNull(request);
-		var allowedSet = allowed.ToHashSet(StringComparer.Ordinal);
-		var arguments = new McpJsonArguments(request.Arguments, allowedSet);
+		ArgumentNullException.ThrowIfNull(allowed);
+		var arguments = new McpJsonArguments(request.Arguments, allowed);
 		arguments.ValidateNames();
 		return arguments;
 	}
+
+	internal static IReadOnlySet<string> FreezeAllowed(params string[] names) =>
+		names.ToFrozenSet(StringComparer.Ordinal);
 
 	public string? OptionalString(string name)
 	{
