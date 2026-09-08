@@ -127,20 +127,24 @@ public sealed class DependencyFactsEngine : IDisposable
 					return;
 				}
 				var key = CreateFileCacheKey(source);
-				var created = new Lazy<Task<FileFacts>>(
-					() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
-					LazyThreadSafetyMode.ExecutionAndPublication);
-				var lazy = _fileCache.GetOrAdd(key, created);
-				if (ReferenceEquals(lazy, created))
-					_fileCacheOrder.Enqueue(key);
-				else
+				Lazy<Task<FileFacts>>? created = null;
+				if (!_fileCache.TryGetValue(key, out var lazy))
+				{
+					created = new Lazy<Task<FileFacts>>(
+						() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
+						LazyThreadSafetyMode.ExecutionAndPublication);
+					lazy = _fileCache.GetOrAdd(key, created);
+					if (ReferenceEquals(lazy, created))
+						_fileCacheOrder.Enqueue(key);
+				}
+				if (!ReferenceEquals(lazy, created))
 					Interlocked.Increment(ref reusedFiles);
 				try
 				{
 					var extracted = await lazy.Value.ConfigureAwait(false);
 					if (!extracted.CanCache)
 						_fileCache.TryRemove(new KeyValuePair<FileCacheKey, Lazy<Task<FileFacts>>>(key, lazy));
-					else if (ReferenceEquals(lazy, created))
+					else if (created is not null && ReferenceEquals(lazy, created))
 						RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
 					facts[index] = RebindScope(extracted, source.ScopeId);
 					cacheable[index] = source.CanCache && extracted.CanCache;
@@ -168,28 +172,28 @@ public sealed class DependencyFactsEngine : IDisposable
 			configuration.Fingerprint);
 		var allowed = orderedFacts.Select(static fact => fact.Path).ToHashSet(StringComparer.Ordinal);
 		var canCacheIndex = configuration.CanCache && cacheable.All(static value => value);
-		var createdIndex = new Lazy<Task<ResolvedIndex>>(
+		Lazy<Task<ResolvedIndex>> CreateIndex() => new(
 			() => Task.FromResult(GateResolvedIndex(
-				DependencyResolver.Resolve(
-					root,
-					orderedFacts,
-					declarations,
-					configuration,
-					_limits,
-					cancellationToken),
+				DependencyResolver.Resolve(root, orderedFacts, declarations, configuration, _limits, cancellationToken),
 				allowed)),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		ResolvedIndex resolved;
 		var resolutionCacheHit = false;
 		if (!canCacheIndex)
 		{
+			var createdIndex = CreateIndex();
 			resolved = await createdIndex.Value.ConfigureAwait(false);
 		}
 		else
 		{
-			var cachedIndex = _indexCache.GetOrAdd(cacheKey, createdIndex);
-			if (ReferenceEquals(cachedIndex, createdIndex))
-				_indexCacheOrder.Enqueue(cacheKey);
+			Lazy<Task<ResolvedIndex>>? createdIndex = null;
+			if (!_indexCache.TryGetValue(cacheKey, out var cachedIndex))
+			{
+				createdIndex = CreateIndex();
+				cachedIndex = _indexCache.GetOrAdd(cacheKey, createdIndex);
+				if (ReferenceEquals(cachedIndex, createdIndex))
+					_indexCacheOrder.Enqueue(cacheKey);
+			}
 			try
 			{
 				resolved = await cachedIndex.Value.ConfigureAwait(false);
@@ -199,7 +203,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				_indexCache.TryRemove(new KeyValuePair<IndexCacheKey, Lazy<Task<ResolvedIndex>>>(cacheKey, cachedIndex));
 				throw;
 			}
-			resolutionCacheHit = !ReferenceEquals(cachedIndex, createdIndex);
+			resolutionCacheHit = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
 			if (!resolutionCacheHit)
 				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		}

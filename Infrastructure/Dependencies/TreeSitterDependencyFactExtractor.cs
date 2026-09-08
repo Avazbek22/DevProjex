@@ -131,14 +131,13 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				info.CreationTimeUtc.Ticks,
 				language,
 				limits.MaximumCharactersPerFile);
-			var created = new PreparedSourceCacheEntry(
+			var (entry, ownsEntry) = GetOrCreatePreparedSource(
 				key,
-				Interlocked.Increment(ref _preparedSourceGeneration),
 				contentIdentity,
-				new Lazy<Task<PreparedSourceContent>>(
-					() => ReadPreparedSourceAsync(fullPath, language, limits.MaximumCharactersPerFile, cancellationToken),
-					LazyThreadSafetyMode.ExecutionAndPublication));
-			var (entry, ownsEntry) = GetOrReplacePreparedSource(key, created, contentIdentity, cancellationToken);
+				fullPath,
+				language,
+				limits.MaximumCharactersPerFile,
+				cancellationToken);
 			PreparedSourceContent content;
 			try
 			{
@@ -182,26 +181,31 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			RemovePreparedSourceUnderLock(key, entry);
 	}
 
-	private (PreparedSourceCacheEntry Entry, bool OwnsEntry) GetOrReplacePreparedSource(
+	private (PreparedSourceCacheEntry Entry, bool OwnsEntry) GetOrCreatePreparedSource(
 		PreparedSourceCacheKey key,
-		PreparedSourceCacheEntry created,
 		string? requestedIdentity,
+		string fullPath,
+		LanguageId language,
+		int maximumCharacters,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		lock (_preparedSourceTrimSync)
 		{
-			if (!_preparedSources.TryGetValue(key, out var entry))
-			{
-				AddPreparedSourceUnderLock(key, created);
-				return (created, true);
-			}
-			if (requestedIdentity is null ||
+			if (_preparedSources.TryGetValue(key, out var entry) &&
+			    (requestedIdentity is null ||
 			    entry.ContentIdentity is not null &&
-			    string.Equals(entry.ContentIdentity, requestedIdentity, StringComparison.Ordinal))
+			    string.Equals(entry.ContentIdentity, requestedIdentity, StringComparison.Ordinal)))
 				return (entry, false);
-
-			RemovePreparedSourceUnderLock(key, entry);
+			if (entry is not null)
+				RemovePreparedSourceUnderLock(key, entry);
+			var created = new PreparedSourceCacheEntry(
+				key,
+				Interlocked.Increment(ref _preparedSourceGeneration),
+				requestedIdentity,
+				new Lazy<Task<PreparedSourceContent>>(
+					() => ReadPreparedSourceAsync(fullPath, language, maximumCharacters, cancellationToken),
+					LazyThreadSafetyMode.ExecutionAndPublication));
 			AddPreparedSourceUnderLock(key, created);
 			return (created, true);
 		}
