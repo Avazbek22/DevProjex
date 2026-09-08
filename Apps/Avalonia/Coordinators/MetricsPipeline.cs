@@ -162,13 +162,29 @@ internal sealed class MetricsPipeline(
 		FileMetricsVariant raw,
 		MetricsFileSourceVersion sourceVersion)
     {
-        private readonly Dictionary<string, FileMetricsVariant> _transformed = new(StringComparer.Ordinal);
+		private string? _inlineTransformIdentity;
+		private FileMetricsVariant _inlineTransformed;
+		private Dictionary<string, FileMetricsVariant>? _transformed;
 
         public FileMetricsVariant Raw { get; set; } = raw;
 		public MetricsFileSourceVersion SourceVersion { get; } = sourceVersion;
 
-        public void SetTransformed(string identity, FileMetricsVariant metrics) =>
-            _transformed[identity] = metrics;
+		public void SetTransformed(string identity, FileMetricsVariant metrics)
+		{
+			if (_inlineTransformIdentity is null ||
+			    string.Equals(_inlineTransformIdentity, identity, StringComparison.Ordinal))
+			{
+				_inlineTransformIdentity = identity;
+				_inlineTransformed = metrics;
+				return;
+			}
+
+			_transformed ??= new Dictionary<string, FileMetricsVariant>(StringComparer.Ordinal)
+			{
+				[_inlineTransformIdentity] = _inlineTransformed
+			};
+			_transformed[identity] = metrics;
+		}
 
         public bool TryGet(string identity, out FileMetricsVariant metrics)
         {
@@ -178,9 +194,47 @@ internal sealed class MetricsPipeline(
                 return true;
             }
 
-            return _transformed.TryGetValue(identity, out metrics);
+			if (string.Equals(_inlineTransformIdentity, identity, StringComparison.Ordinal))
+			{
+				metrics = _inlineTransformed;
+				return true;
+			}
+
+			if (_transformed is not null && _transformed.TryGetValue(identity, out metrics))
+				return true;
+			metrics = default;
+			return false;
         }
     }
+
+	private sealed class CoalescedMetricsProgress(Action<int> publish)
+	{
+		private int _latest = -1;
+		private int _scheduled;
+
+		public void Report(int value)
+		{
+			Interlocked.Exchange(ref _latest, value);
+			ScheduleIfNeeded();
+		}
+
+		private void ScheduleIfNeeded()
+		{
+			if (Interlocked.CompareExchange(ref _scheduled, 1, 0) != 0)
+				return;
+			Dispatcher.UIThread.Post(Drain);
+		}
+
+		private void Drain()
+		{
+			var delivered = Interlocked.Exchange(ref _latest, -1);
+			if (delivered >= 0)
+				publish(delivered);
+			Interlocked.Exchange(ref _scheduled, 0);
+			if (Volatile.Read(ref _latest) >= 0)
+				ScheduleIfNeeded();
+		}
+	}
 
     private const double CompactStatusMetricsThresholdWidth = 1050;
     private const long MaximumMetricsMaterializationBytes = 10L * 1024 * 1024;
@@ -204,6 +258,7 @@ internal sealed class MetricsPipeline(
     private DispatcherTimer? _metricsDebounceTimer;
     private CancellationTokenSource? _recalculateMetricsCts;
     private volatile bool _isBackgroundMetricsActive;
+	private TaskCompletionSource _backgroundMetricsIdle = CompletedSignal();
     private int _metricsRecalcVersion;
     private int _metricsCacheGeneration;
     private long _lastStatusTreeLines;
@@ -228,6 +283,13 @@ internal sealed class MetricsPipeline(
     private bool _metricsCancellationRequestedByUser;
     private volatile bool _hasCompleteMetricsBaseline;
     private int _disposed;
+
+	private static TaskCompletionSource CompletedSignal()
+	{
+		var signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		signal.TrySetResult();
+		return signal;
+	}
 
     public bool IsBackgroundActive => _isBackgroundMetricsActive;
 
@@ -474,7 +536,7 @@ internal sealed class MetricsPipeline(
         if (_isBackgroundMetricsActive)
             _hasCompleteMetricsBaseline = false;
 
-        _isBackgroundMetricsActive = false;
+		SetBackgroundMetricsActive(false);
         _metricsCalculationCts?.Cancel();
         _recalculateMetricsCts?.Cancel();
         _compressionPrewarmCts?.Cancel();
@@ -853,7 +915,7 @@ internal sealed class MetricsPipeline(
 
         _metricsCancellationRequestedByUser = false;
         _hasCompleteMetricsBaseline = false;
-        _isBackgroundMetricsActive = true;
+		SetBackgroundMetricsActive(true);
         var statusOperationId = statusOperations.Begin(
             viewModel.StatusOperationCalculatingData,
             indeterminate: false,
@@ -909,7 +971,7 @@ internal sealed class MetricsPipeline(
             var totalFiles = filePaths.Count;
             if (totalFiles == 0)
             {
-                _isBackgroundMetricsActive = false;
+				SetBackgroundMetricsActive(false);
                 _hasCompleteMetricsBaseline = true;
                 Recalculate();
                 viewModel.StatusMetricsVisible = true;
@@ -934,7 +996,7 @@ internal sealed class MetricsPipeline(
                 stagedResults,
                 cacheGeneration);
 
-            _isBackgroundMetricsActive = false;
+			SetBackgroundMetricsActive(false);
             _hasCompleteMetricsBaseline = !hadReadFailures;
             if (statusOperations.IsActive(statusOperationId))
                 viewModel.StatusProgressValue = 100;
@@ -959,7 +1021,7 @@ internal sealed class MetricsPipeline(
                 return;
             }
 
-            _isBackgroundMetricsActive = false;
+			SetBackgroundMetricsActive(false);
             _hasCompleteMetricsBaseline = false;
             MergeStagedMetricsIntoCache(
                 stagedFilePaths,
@@ -1000,7 +1062,7 @@ internal sealed class MetricsPipeline(
                 return;
             }
 
-            _isBackgroundMetricsActive = false;
+			SetBackgroundMetricsActive(false);
             _hasCompleteMetricsBaseline = false;
             MergeStagedMetricsIntoCache(
                 stagedFilePaths,
@@ -1094,6 +1156,11 @@ internal sealed class MetricsPipeline(
         var processedCount = 0;
         var lastProgressPercent = 0;
         var hadReadFailures = 0;
+		var progress = new CoalescedMetricsProgress(progressPercent =>
+		{
+			if (_isBackgroundMetricsActive && statusOperations.IsActive(statusOperationId))
+				viewModel.StatusProgressValue = progressPercent;
+		});
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = maxDegreeOfParallelism,
@@ -1106,11 +1173,22 @@ internal sealed class MetricsPipeline(
             : _appliedTransformIdentity;
 
 		await Parallel.ForAsync(0, filePaths.Count, parallelOptions, async (index, ct) =>
-        {
+		{
             var filePath = filePaths[index];
             try
             {
+				ContentReadMetricsFact? retainedMetrics = null;
+				if (readFacts is not null && readFacts.TryGetMetrics(filePath, transformIdentity, out var retained))
+					retainedMetrics = retained;
+				MetricsFileSourceVersion? retainedSourceVersion = retainedMetrics is { } retainedIdentity
+					? new MetricsFileSourceVersion(
+						retainedIdentity.SourceLength,
+						retainedIdentity.SourceLastWriteTimeUtcTicks,
+						IsMissing: false)
+					: null;
 				var sourceVersionBeforeRead = TryCaptureCurrentSourceVersion(filePath);
+				if (retainedSourceVersion != sourceVersionBeforeRead)
+					retainedMetrics = null;
                 if (fileContentAnalyzer.ClassifyWithoutReading(filePath) ==
                     FileContentClassification.Binary)
                 {
@@ -1135,22 +1213,17 @@ internal sealed class MetricsPipeline(
                 TextFileMetrics? rawMetrics;
                 TextFileMetrics? effectiveMetrics;
 				MetricsFileSourceVersion? sourceVersion = null;
-				ContentReadFact? retainedFact = null;
-				if (readFacts is not null && readFacts.TryGet(filePath, out var retained))
-					retainedFact = retained;
-                if (transformationScope is not null && IsCompressible(filePath))
+				if (retainedMetrics is { } compactMetrics)
+				{
+					rawMetrics = compactMetrics.Raw;
+					effectiveMetrics = compactMetrics.Effective;
+					sourceVersion = sourceVersionBeforeRead;
+				}
+				else if (transformationScope is not null && IsCompressible(filePath))
                 {
-					ContentReadFact fact;
-					if (retainedFact is { IsMaterializedText: true })
-					{
-						fact = retainedFact;
-					}
-					else
-					{
-						fact = await fileContentAnalyzer
-							.ReadFactAsync(filePath, MaximumMetricsMaterializationBytes, ct)
-							.ConfigureAwait(false);
-					}
+					var fact = await fileContentAnalyzer
+						.ReadFactAsync(filePath, MaximumMetricsMaterializationBytes, ct)
+						.ConfigureAwait(false);
 					rawMetrics = fact.RawMetrics;
 					effectiveMetrics = rawMetrics is { IsEstimated: false } && fact.IsMaterializedText
 						? MeasureTransformed(
@@ -1165,17 +1238,10 @@ internal sealed class MetricsPipeline(
                 }
                 else
                 {
-					if (retainedFact is not null)
-					{
-						rawMetrics = retainedFact.RawMetrics;
-					}
-					else
-					{
-						var result = await fileContentAnalyzer
-							.GetClassifiedMetricsAsync(filePath, ct)
-							.ConfigureAwait(false);
-						rawMetrics = result.IsText ? result.Metrics : null;
-					}
+					var result = await fileContentAnalyzer
+						.GetClassifiedMetricsAsync(filePath, ct)
+						.ConfigureAwait(false);
+					rawMetrics = result.IsText ? result.Metrics : null;
                     effectiveMetrics = rawMetrics;
                 }
 
@@ -1212,11 +1278,7 @@ internal sealed class MetricsPipeline(
                 if (progressPercent >= observed + 5 &&
                     Interlocked.CompareExchange(ref lastProgressPercent, progressPercent, observed) == observed)
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        if (_isBackgroundMetricsActive && statusOperations.IsActive(statusOperationId))
-                            viewModel.StatusProgressValue = progressPercent;
-                    });
+					progress.Report(progressPercent);
                 }
             }
         });
@@ -1426,9 +1488,26 @@ internal sealed class MetricsPipeline(
 
     private async Task WaitForBackgroundMetricsIdleAsync(CancellationToken cancellationToken)
     {
-        while (_isBackgroundMetricsActive)
-            await Task.Delay(10, cancellationToken);
+		while (_isBackgroundMetricsActive)
+		{
+			var signal = Volatile.Read(ref _backgroundMetricsIdle);
+			await signal.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+		}
     }
+
+	private void SetBackgroundMetricsActive(bool active)
+	{
+		if (active)
+		{
+			var signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+			Volatile.Write(ref _backgroundMetricsIdle, signal);
+			_isBackgroundMetricsActive = true;
+			return;
+		}
+
+		_isBackgroundMetricsActive = false;
+		Volatile.Read(ref _backgroundMetricsIdle).TrySetResult();
+	}
 
     private async Task PublishTreeMetricsWhileContentPendingAsync(
         CancellationToken token,
@@ -1646,7 +1725,7 @@ internal sealed class MetricsPipeline(
         var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
 
         _metricsCancellationRequestedByUser = false;
-        _isBackgroundMetricsActive = true;
+		SetBackgroundMetricsActive(true);
         var statusOperationId = statusOperations.Begin(
             viewModel.StatusOperationCalculatingData,
             indeterminate: false,
@@ -1694,7 +1773,7 @@ internal sealed class MetricsPipeline(
                     Volatile.Read(ref _metricsCalculationCts),
                     metricsCts))
             {
-                _isBackgroundMetricsActive = false;
+				SetBackgroundMetricsActive(false);
             }
 
             statusOperations.Complete(statusOperationId);
@@ -1858,56 +1937,92 @@ internal sealed class MetricsPipeline(
 
 		var orderedPaths = selection.OrderedFilePaths ??
 			BuildOrderedMetricsFilePaths(selection, cancellationToken);
-		var contentOnlyAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		contentOnlyAccumulator.AppendRootHeader(contentOnlyRootPath);
-		lock (_metricsLock)
-        {
-			for (var index = 0; index < orderedPaths.Count; index++)
-            {
-				cancellationToken.ThrowIfCancellationRequested();
-				var path = orderedPaths[index];
-                if (!_fileMetricsCache.TryGetValue(path, out var cacheEntry) ||
-                    !cacheEntry.TryGet(_appliedTransformIdentity, out var variant) ||
-                    !variant.HasMetrics)
-                {
-                    continue;
-                }
+		while (true)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
+			var selected = new List<(string Path, FileMetricsData Metrics)>(orderedPaths.Count);
+			EnterMetricsLock();
+			try
+			{
+				for (var index = 0; index < orderedPaths.Count; index++)
+				{
+					var path = orderedPaths[index];
+					if (_fileMetricsCache.TryGetValue(path, out var cacheEntry) &&
+					    cacheEntry.TryGet(cacheKey.TransformIdentity, out var variant) &&
+					    variant.HasMetrics)
+					{
+						selected.Add((path, variant.Metrics));
+					}
+				}
+			}
+			finally
+			{
+				Monitor.Exit(_metricsLock);
+			}
 
-                var metrics = variant.Metrics;
+			var contentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+			foreach (var selectedFile in selected)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var metrics = selectedFile.Metrics;
 				var contentPath = OutputRootPathPresentation.ResolvePath(
-					MapExportDisplayPath(path, contentPathMapper),
+					MapExportDisplayPath(selectedFile.Path, contentPathMapper),
 					outputPathRedaction).Text;
 				var fileMetrics = new ContentFileMetrics(
-					Path: contentPath,
-                    SizeBytes: metrics.Size,
-                    LineCount: metrics.LineCount,
-                    CharCount: metrics.CharCount,
-                    IsEmpty: metrics.IsEmpty,
-                    IsWhitespaceOnly: metrics.IsWhitespaceOnly,
-                    IsEstimated: metrics.IsEstimated,
-                    CrLfPairCount: metrics.CrLfPairCount,
-					TrailingNewlineChars: metrics.TrailingNewlineChars,
-					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks);
+					contentPath,
+					metrics.Size,
+					metrics.LineCount,
+					metrics.CharCount,
+					metrics.IsEmpty,
+					metrics.IsWhitespaceOnly,
+					metrics.IsEstimated,
+					metrics.CrLfPairCount,
+					metrics.TrailingNewlineChars,
+					metrics.TrailingNewlineLineBreaks);
+				contentAccumulator.AppendFile(fileMetrics);
+			}
 
-				contentOnlyAccumulator.AppendFile(fileMetrics);
-				treeAndContentAccumulator.AppendFile(fileMetrics);
-            }
-        }
+			if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
+				continue;
+			var treeAndContentMetrics = contentAccumulator.ToMetrics();
+			var computed = new ContentMetricsPair(
+				AddContentRootMetrics(treeAndContentMetrics, contentOnlyRootPath, selected.Count > 0),
+				treeAndContentMetrics);
+			lock (_computationCacheLock)
+			{
+				if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
+					continue;
+				_hasContentMetricsCache = true;
+				_contentMetricsCacheKey = cacheKey;
+				_contentMetricsCacheValue = computed;
+			}
+			return computed;
+		}
+	}
 
-		var computed = new ContentMetricsPair(
-            contentOnlyAccumulator.ToMetrics(),
-            treeAndContentAccumulator.ToMetrics());
-		cancellationToken.ThrowIfCancellationRequested();
-        lock (_computationCacheLock)
-        {
-            _hasContentMetricsCache = true;
-            _contentMetricsCacheKey = cacheKey;
-            _contentMetricsCacheValue = computed;
-        }
+	private static ExportOutputMetrics AddContentRootMetrics(
+		ExportOutputMetrics content,
+		string displayRootPath,
+		bool hasFiles)
+	{
+		if (string.IsNullOrWhiteSpace(displayRootPath))
+			return content;
+		var rootCharacters = ContextRootPresentation.FormatLine(displayRootPath).Length;
+		if (!hasFiles)
+			return new ExportOutputMetrics(1, rootCharacters, EstimateTokens(rootCharacters));
 
-        return computed;
-    }
+		// The content-only renderer writes the root line followed by two non-breaking-space
+		// separator lines before the first file. Metrics normalize each newline to one char.
+		var characters = checked(content.Chars + rootCharacters + 5L);
+		return new ExportOutputMetrics(
+			checked(content.Lines + 3L),
+			characters,
+			EstimateTokens(characters));
+	}
+
+	private static long EstimateTokens(long characters) =>
+		characters <= 0 ? 0 : (characters + 3) / 4;
 
     private ExportOutputMetrics GetRenderedStatusContentMetrics()
     {

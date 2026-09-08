@@ -1047,6 +1047,13 @@ public sealed class CodeCompressionScope : IDisposable
 		string relativePath,
 		string content,
 		CancellationToken cancellationToken)
+		=> WarmAndGetPlan(fullPath, relativePath, content, cancellationToken) is not null;
+
+	internal CodeCompressionPlan? WarmAndGetPlan(
+		string fullPath,
+		string relativePath,
+		string content,
+		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
 		var plan = session.Warm(
@@ -1060,10 +1067,10 @@ public sealed class CodeCompressionScope : IDisposable
 			transformIdentity,
 			cancellationToken);
 		if (plan is null)
-			return false;
+			return null;
 
 		RecordPlan(fullPath, plan);
-		return true;
+		return plan;
 	}
 
 	internal bool TryWarmCached(
@@ -1071,6 +1078,14 @@ public sealed class CodeCompressionScope : IDisposable
 		string relativePath,
 		string content,
 		ContentFingerprint fingerprint)
+		=> TryWarmCachedAndGetPlan(fullPath, relativePath, content, fingerprint, out _);
+
+	internal bool TryWarmCachedAndGetPlan(
+		string fullPath,
+		string relativePath,
+		string content,
+		ContentFingerprint fingerprint,
+		out CodeCompressionPlan? plan)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
 		if (!session.TryGetWarmCachedPlan(
@@ -1081,7 +1096,7 @@ public sealed class CodeCompressionScope : IDisposable
 				generation,
 				kinds,
 				transformIdentity,
-				out var plan))
+				out plan))
 		{
 			return false;
 		}
@@ -1090,6 +1105,14 @@ public sealed class CodeCompressionScope : IDisposable
 	}
 
 	internal bool Warm(
+		string fullPath,
+		string relativePath,
+		string content,
+		ContentFingerprint fingerprint,
+		CancellationToken cancellationToken)
+		=> WarmAndGetPlan(fullPath, relativePath, content, fingerprint, cancellationToken) is not null;
+
+	internal CodeCompressionPlan? WarmAndGetPlan(
 		string fullPath,
 		string relativePath,
 		string content,
@@ -1108,9 +1131,9 @@ public sealed class CodeCompressionScope : IDisposable
 			transformIdentity,
 			cancellationToken);
 		if (plan is null)
-			return false;
+			return null;
 		RecordPlan(fullPath, plan);
-		return true;
+		return plan;
 	}
 
 	internal void RecordUnsupported(
