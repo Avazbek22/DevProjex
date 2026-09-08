@@ -295,21 +295,33 @@ public sealed class ImportanceRankingService(
 		IReadOnlyDictionary<string, double?> values,
 		CancellationToken cancellationToken = default)
 	{
+		var compactRanks = TryCreateCompactRanks(values.Values, cancellationToken);
 		var present = values
 			.Where(static pair => pair.Value is not null)
-			.OrderBy(static pair => pair.Value!.Value)
+			.Select(static pair => (pair.Key, Value: pair.Value!.Value));
+		var result = values.Keys.ToDictionary(static path => path, static _ => (double?)null, StringComparer.Ordinal);
+		if (compactRanks is not null)
+		{
+			foreach (var pair in present)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				result[pair.Key] = compactRanks[pair.Value];
+			}
+			return result;
+		}
+		var ordered = present
+			.OrderBy(static pair => pair.Value)
 			.ThenBy(static pair => pair.Key, StringComparer.Ordinal)
 			.ToArray();
-		var result = values.Keys.ToDictionary(static path => path, static _ => (double?)null, StringComparer.Ordinal);
-		if (present.Length == 0)
+		if (ordered.Length == 0)
 			return result;
 		var groupCount = 1;
-		for (var index = 1; index < present.Length; index++)
-			if (!present[index].Value!.Value.Equals(present[index - 1].Value!.Value))
+		for (var index = 1; index < ordered.Length; index++)
+			if (!ordered[index].Value.Equals(ordered[index - 1].Value))
 				groupCount++;
 		if (groupCount == 1)
 		{
-			foreach (var pair in present)
+			foreach (var pair in ordered)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				result[pair.Key] = 0.5;
@@ -317,12 +329,12 @@ public sealed class ImportanceRankingService(
 			return result;
 		}
 		var group = 0;
-		for (var index = 0; index < present.Length; index++)
+		for (var index = 0; index < ordered.Length; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (index > 0 && !present[index].Value!.Value.Equals(present[index - 1].Value!.Value))
+			if (index > 0 && !ordered[index].Value.Equals(ordered[index - 1].Value))
 				group++;
-			result[present[index].Key] = (double)group / (groupCount - 1);
+			result[ordered[index].Key] = (double)group / (groupCount - 1);
 		}
 		return result;
 	}
@@ -332,6 +344,18 @@ public sealed class ImportanceRankingService(
 		RankingValueKind kind,
 		CancellationToken cancellationToken)
 	{
+		var compactRanks = TryCreateCompactRanks(states.Select(state => RawValue(state, kind)), cancellationToken);
+		if (compactRanks is not null)
+		{
+			foreach (var state in states)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var value = RawValue(state, kind);
+				if (value is not null)
+					SetNormalizedValue(state, kind, compactRanks[value.Value]);
+			}
+			return;
+		}
 		var present = states.Select(state => (State: state, Value: RawValue(state, kind)))
 			.Where(static item => item.Value is not null)
 			.OrderBy(static item => item.Value!.Value)
@@ -353,6 +377,25 @@ public sealed class ImportanceRankingService(
 				? 0.5
 				: (double)group / (groupCount - 1));
 		}
+	}
+
+	private static Dictionary<double, double>? TryCreateCompactRanks(
+		IEnumerable<double?> values,
+		CancellationToken cancellationToken)
+	{
+		const int maximumCompactRankCount = 256;
+		var distinct = new HashSet<double>();
+		foreach (var value in values)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (value is not null && distinct.Add(value.Value) && distinct.Count > maximumCompactRankCount)
+				return null;
+		}
+		var ordered = distinct.Order().ToArray();
+		var result = new Dictionary<double, double>(ordered.Length);
+		for (var index = 0; index < ordered.Length; index++)
+			result[ordered[index]] = ordered.Length == 1 ? 0.5 : (double)index / (ordered.Length - 1);
+		return result;
 	}
 
 	private static void NormalizeRoleValues(
