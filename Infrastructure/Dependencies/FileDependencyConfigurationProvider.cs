@@ -236,7 +236,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				.Where(static element => element.Name.LocalName == "ProjectReference")
 				.Select(element => element.Attribute("Include")?.Value)
 				.Where(static value => !string.IsNullOrWhiteSpace(value))
-				.Select(value => Path.GetFullPath(Path.Combine(directory, value!)))
+				.Select(value => Path.GetFullPath(Path.Combine(directory, NormalizeMsBuildInclude(value!))))
 				.Distinct(PathComparer).Order(StringComparer.Ordinal).ToArray());
 		}
 		catch (System.Xml.XmlException exception)
@@ -245,6 +245,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				[], DependencyConfigurationState.Corrupt, OneLine(exception.Message));
 		}
 	}
+
+	private static string NormalizeMsBuildInclude(string value) =>
+		value.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
 
 	private static ConfigurationParseResult<TypeScriptConfiguration> ParseTypeScriptConfig(string content)
 	{

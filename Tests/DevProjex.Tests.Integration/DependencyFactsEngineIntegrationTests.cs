@@ -100,6 +100,43 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task CSharpProjectReference_NormalizesBothMsBuildSeparatorsAndKeepsCrossScopeResolution()
+	{
+		using var fixture = new TemporaryDirectory();
+		var producerProject = fixture.CreateFile("Lib/Lib.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var producer = fixture.CreateFile("Lib/User.cs", "namespace Models; public class User { }");
+		var consumerProject = fixture.CreateFile("App/App.csproj", """
+			<Project Sdk="Microsoft.NET.Sdk">
+			  <ItemGroup>
+			    <ProjectReference Include="../Lib/Lib.csproj" />
+			    <ProjectReference Include="..\Lib\Lib.csproj" />
+			  </ItemGroup>
+			</Project>
+			""");
+		var consumer = fixture.CreateFile("App/Consumer.cs", "using Models; public class Consumer { User Value; }");
+		var manifest = new[] { producerProject, producer, consumerProject, consumer };
+		var provider = new FileDependencyConfigurationProvider();
+
+		var configuration = await provider.ReadAsync(
+			fixture.Path,
+			manifest,
+			TestContext.Current.CancellationToken);
+		var appScope = Assert.Single(configuration.Scopes, scope => scope.ScopeId.EndsWith("App/App.csproj", StringComparison.Ordinal));
+		Assert.Single(appScope.ProjectReferences);
+
+		using var engine = new DependencyFactsEngine(new TreeSitterDependencyFactExtractor(), provider);
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "App/Consumer.cs" && item.Reference == "User");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("Lib/User.cs", edge.Target);
+		Assert.True(edge.CrossScope);
+	}
+
+	[Fact]
 	public async Task CSharpIdentity_PreservesContainingGenericArityAndFileScope()
 	{
 		using var fixture = new TemporaryDirectory();
