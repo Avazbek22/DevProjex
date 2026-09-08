@@ -62,6 +62,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var csharpProjects = new Dictionary<string, (string Scope, string[] References)>(PathComparer);
 		var snapshots = new Dictionary<string, Task<DependencyControlFileSnapshot>>(PathComparer);
 		var packageProjections = new Dictionary<string, Task<ConfigurationParseResult<PackageMapDescriptor>>>(PathComparer);
+		var typeScriptLayerProjections = new Dictionary<string, Task<ConfigurationParseResult<TypeScriptConfigurationLayer>>>(PathComparer);
 		var diagnostics = new List<DependencyConfigurationDiagnostic>();
 		var absentControlFiles = new HashSet<string>(PathComparer);
 		var fingerprintedControlFiles = new HashSet<string>(PathComparer);
@@ -127,6 +128,23 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 					parsed.Reason);
 		}
 
+		Task<ConfigurationParseResult<TypeScriptConfigurationLayer>> ReadTypeScriptLayerProjectionAsync(string path)
+		{
+			if (typeScriptLayerProjections.TryGetValue(path, out var existing)) return existing;
+			var created = ReadTypeScriptLayerProjectionCoreAsync(path);
+			typeScriptLayerProjections[path] = created;
+			return created;
+		}
+
+		async Task<ConfigurationParseResult<TypeScriptConfigurationLayer>> ReadTypeScriptLayerProjectionCoreAsync(string path)
+		{
+			var snapshot = await ReadSnapshotAsync(path).ConfigureAwait(false);
+			AddFingerprint(path, snapshot);
+			return snapshot.State == DependencyConfigurationState.Valid
+				? ParseTypeScriptConfigLayer(path, snapshot.Content)
+				: TypeScriptLayerFailure(snapshot.State, snapshot.Reason);
+		}
+
 		async Task<ConfigurationParseResult<TypeScriptConfigurationLayer>> ReadTypeScriptLayerAsync(
 			string configPath,
 			int depth,
@@ -137,18 +155,15 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 
 			try
 			{
-				var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
-				AddFingerprint(configPath, snapshot);
-				if (snapshot.State != DependencyConfigurationState.Valid)
+				var layer = await ReadTypeScriptLayerProjectionAsync(configPath).ConfigureAwait(false);
+				if (layer.State != DependencyConfigurationState.Valid)
 				{
 					return TypeScriptLayerFailure(
-						snapshot.State,
-						snapshot.State == DependencyConfigurationState.Missing && depth > 0
+						layer.State,
+						layer.State == DependencyConfigurationState.Missing && depth > 0
 							? TypeScriptExtendsUnavailableReason
-							: snapshot.Reason);
+							: layer.Reason);
 				}
-
-				var layer = ParseTypeScriptConfigLayer(configPath, snapshot.Content);
 				if (layer.State != DependencyConfigurationState.Valid || layer.Value.Extends is null)
 					return layer;
 
