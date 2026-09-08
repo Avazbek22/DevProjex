@@ -236,6 +236,16 @@ the current manifest. Files, declarations, edges, candidates, reasons, and outpu
 with ordinal portable paths, so input order, parallel scheduling, cache state, and host OS do not
 change serialized results.
 
+The index pass canonicalizes each manifest path once and keeps that order through extraction and
+resolution. Resolver configuration prepares reusable scope ownership, C# namespace/alias/type-parameter,
+TypeScript path-precedence, Python module, and namespace-package indexes instead of searching the same
+collections for every fact. The manifest gate reuses unchanged `FileFacts` and the published path index;
+ranking consumes that same index. These are implementation details only: cache hits and optimized paths
+must produce the same statuses, targets, candidates, evidence, and ordering as an uncached pass.
+Opt-in dependency diagnostics count canonical path normalization, manifest sorting, dictionary and graph
+construction, gated fact clones, resolver candidate probes, and cache hits. No project text is recorded,
+and when measurement is inactive hot resolver loops do not call the counter path.
+
 ## User-facing results
 
 `devprojex related PATH` and MCP `related_files` show dependencies, dependents, or both. Every row
