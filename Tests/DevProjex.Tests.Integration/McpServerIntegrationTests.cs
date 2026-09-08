@@ -1523,8 +1523,9 @@ public sealed class McpServerIntegrationTests
 			Assert.True(published.GetProperty("uniqueItems").GetBoolean());
 			var propertyNames = schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name).ToArray();
 			var globAnchor = Array.IndexOf(propertyNames, "exclude_patterns");
+			var profileAnchor = Array.IndexOf(propertyNames, "profile");
 			Assert.Equal(
-				globAnchor >= 0 ? globAnchor + 1 : Array.IndexOf(propertyNames, "branch") + 1,
+				Math.Max(globAnchor, Math.Max(profileAnchor, Array.IndexOf(propertyNames, "branch"))) + 1,
 				Array.IndexOf(propertyNames, "exclusions"));
 			var required = schema.TryGetProperty("required", out var requiredElement)
 				? requiredElement.EnumerateArray().Select(static item => item.GetString()).ToArray()
@@ -1833,7 +1834,11 @@ public sealed class McpServerIntegrationTests
 				throw new InvalidOperationException("Project services must remain deferred before EOF.");
 			});
 
-		var packRoot = Path.Combine(temporaryRoot, "DevProjex", "mcp");
+		var productRoot = McpPackRegistry.ResolveProductDirectory(
+			temporaryRoot,
+			xdgRuntimeDirectory: null,
+			Environment.UserName);
+		var packRoot = Path.Combine(productRoot, "mcp");
 		Assert.Empty(Directory.EnumerateDirectories(packRoot));
 		Assert.Equal(0, Volatile.Read(ref serviceCreationCount));
 	}
