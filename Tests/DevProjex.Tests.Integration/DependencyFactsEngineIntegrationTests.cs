@@ -764,6 +764,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains(first.Coverage.ConfigurationDiagnostics, item => item.Path == "tsconfig.json");
+		Assert.All(first.Coverage.ConfigurationDiagnostics, item =>
+			Assert.Equal("configuration file could not be read", item.Reason));
 		Assert.Contains(second.Edges, edge => edge.Source == "main.ts" && edge.Target == "target.ts");
 		Assert.Empty(second.Coverage.ConfigurationDiagnostics);
 		Assert.False(second.Metrics.ResolutionCacheHit);

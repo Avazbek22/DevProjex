@@ -239,10 +239,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				.Select(value => Path.GetFullPath(Path.Combine(directory, NormalizeMsBuildInclude(value!))))
 				.Distinct(PathComparer).Order(StringComparer.Ordinal).ToArray());
 		}
-		catch (System.Xml.XmlException exception)
+		catch (System.Xml.XmlException)
 		{
 			return ConfigurationParseResult<string[]>.Failure(
-				[], DependencyConfigurationState.Corrupt, OneLine(exception.Message));
+				[], DependencyConfigurationState.Corrupt, "invalid project XML");
 		}
 	}
 
@@ -306,12 +306,12 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			return ConfigurationParseResult<TypeScriptConfiguration>.Valid(
 				new TypeScriptConfiguration(moduleResolution, legacy, paths, allowJavaScript));
 		}
-		catch (JsonException exception)
+		catch (JsonException)
 		{
 			return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
 				TypeScriptConfiguration.Default,
 				DependencyConfigurationState.Corrupt,
-				"invalid tsconfig JSON: " + OneLine(exception.Message));
+				"invalid tsconfig JSON");
 		}
 	}
 
@@ -339,9 +339,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		catch (Exception exception) when (exception is JsonException or InvalidOperationException)
 		{
 			return ConfigurationParseResult<PackageMapDescriptor>.Failure(
-				UnavailablePackageMap(directory, DependencyConfigurationState.Corrupt, OneLine(exception.Message)),
+				UnavailablePackageMap(directory, DependencyConfigurationState.Corrupt, "invalid package.json JSON"),
 				DependencyConfigurationState.Corrupt,
-				OneLine(exception.Message));
+				"invalid package.json JSON");
 		}
 	}
 
@@ -676,21 +676,21 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 		{
 			throw;
 		}
-		catch (FileNotFoundException exception)
+		catch (FileNotFoundException)
 		{
-			return Failure(DependencyConfigurationState.Missing, OneLine(exception.Message), 0, 0, canCache: false);
+			return Failure(DependencyConfigurationState.Missing, "configuration file is unavailable", 0, 0, canCache: false);
 		}
-		catch (DirectoryNotFoundException exception)
+		catch (DirectoryNotFoundException)
 		{
-			return Failure(DependencyConfigurationState.Missing, OneLine(exception.Message), 0, 0, canCache: false);
+			return Failure(DependencyConfigurationState.Missing, "configuration file is unavailable", 0, 0, canCache: false);
 		}
-		catch (DecoderFallbackException exception)
+		catch (DecoderFallbackException)
 		{
-			return Failure(DependencyConfigurationState.Corrupt, OneLine(exception.Message), 0, 0);
+			return Failure(DependencyConfigurationState.Corrupt, "configuration is not valid UTF-8", 0, 0);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
 		{
-			return Failure(DependencyConfigurationState.Corrupt, OneLine(exception.Message), 0, 0, canCache: false);
+			return Failure(DependencyConfigurationState.Corrupt, "configuration file could not be read", 0, 0, canCache: false);
 		}
 	}
 
