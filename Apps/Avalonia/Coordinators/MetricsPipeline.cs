@@ -1489,7 +1489,7 @@ internal sealed class MetricsPipeline(
             return;
         }
 
-		if (!hasAnyChecked)
+		if (!hasAnyChecked && currentTree.OrderedFilePaths is { Count: 0 })
 		{
 			await Dispatcher.UIThread.InvokeAsync(() =>
 			{
