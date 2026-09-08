@@ -1549,7 +1549,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
-			var isQualified = reference.Name.Contains('.');
+			var isQualified = reference.IsGlobalQualified || reference.Name.Contains('.');
 			var typeParameterShadowsReference = !isQualified && (source.TypeParameterScopes.Count > 0
 				? source.TypeParameterScopes.Any(parameter =>
 					parameter.Name == simpleName &&
@@ -1558,8 +1558,10 @@ public sealed class DependencyFactsEngine : IDisposable
 				: source.TypeParameters.Contains(simpleName, StringComparer.Ordinal));
 			if (typeParameterShadowsReference)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
-			var expandedName = ExpandQualifiedAlias(source, reference.Name);
-			var candidates = reference.Name.Contains('.')
+			var expandedName = reference.IsGlobalQualified
+				? reference.Name
+				: ExpandQualifiedAlias(source, reference.Name);
+			var candidates = isQualified
 				? LookupQualified(source, expandedName, reference.GenericArity)
 				: LookupSimple(source, simpleName, reference.GenericArity);
 			var attributeName = reference.SyntaxKind == "attribute"
@@ -1577,9 +1579,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (source.Aliases.TryGetValue(simpleName, out var alias) ||
 				    globalAliases?.TryGetValue(simpleName, out alias) == true)
 					candidates = LookupQualified(source, alias, reference.GenericArity);
-				else if (reference.Name.Contains('.') && candidates.Length == 0)
+				else if (!reference.IsGlobalQualified && reference.Name.Contains('.') && candidates.Length == 0)
 					candidates = LookupContextualCSharpQualified(source, reference, expandedName);
-				else if (!reference.Name.Contains('.'))
+				else if (!isQualified)
 					candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
 			}
 			if (candidates.Length == 0)

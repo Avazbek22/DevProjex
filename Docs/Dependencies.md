@@ -27,8 +27,9 @@ an optional file scope. Partial C# declarations share one identity with multiple
 file-local types remain distinct even when their names match. A resolved edge to such a partial
 identity keeps one canonical target and the complete declaration-file list. Related-file projections
 show every declaration file as a resolved part of the same symbol, in both directions; ambiguous
-candidates remain a separate concept. Each reference retains its source line and a compact source
-excerpt. Results use four statuses:
+candidates remain a separate concept. Each reference retains its exact source occurrence, lexical
+owner, source line, and a compact source excerpt; two same-name references on one line are not
+deduplicated before resolution. Results use four statuses:
 
 - **Resolved** — exactly one declaration or module in the allowed manifest is supported by the
   resolver evidence;
@@ -50,7 +51,9 @@ C# compilation scopes come from `.csproj` ownership and `ProjectReference` entri
 Both `/` and `\` in an MSBuild `Include` are normalized as project-reference separators on every OS;
 this normalization never applies to ordinary Unix filenames. Global usings and aliases are shared
 within the owning scope; type parameters shadow global symbols only inside the lexical span of their
-declaring type or method, while a qualified name is never suppressed by its final component;
+declaring type or method, while a qualified name is never suppressed by its final component.
+The `global::` qualifier is retained as absolute-lookup evidence: it bypasses type-parameter
+shadowing and never falls back through the source namespace or imported namespaces;
 nested generic names preserve the arity of every containing type. `InternalsVisibleTo` does not create
 an edge, target-typed `new()` stays unresolved, and source-generator output is unavailable. A simple
 type name can resolve only to a declaration in the current or an enclosing namespace, an exactly

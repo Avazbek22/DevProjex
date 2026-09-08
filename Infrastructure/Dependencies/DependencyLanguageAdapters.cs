@@ -61,7 +61,8 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 
 	protected static IReadOnlyList<ReferenceFact> Distinct(IEnumerable<ReferenceFact> references) =>
 		references.GroupBy(static fact =>
-				(fact.Layer, fact.Name, fact.GenericArity, fact.Site.Line, fact.SyntaxKind))
+			(fact.Layer, fact.Name, fact.GenericArity, fact.Site.Line, fact.SyntaxKind,
+				fact.SourceStartIndex, fact.ContainingNamespace, fact.ContainingType, fact.IsGlobalQualified))
 			.Select(static group => group.First())
 			.OrderBy(static fact => fact.Site.Line)
 			.ThenBy(static fact => fact.Name, StringComparer.Ordinal)
@@ -206,17 +207,19 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		var typeText = capture.Text;
 		foreach (Match match in TypeNameRegex().Matches(typeText))
 		{
+			var isGlobalQualified = match.Value.StartsWith("global::", StringComparison.Ordinal);
 			var name = match.Value.Replace("global::", string.Empty, StringComparison.Ordinal)
 				.Replace("::", ".", StringComparison.Ordinal);
 			var simpleName = name.Split('.', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? name;
 			if (!Keywords.Contains(simpleName))
-				yield return NewReference(
+					yield return NewReference(
 					context,
 					capture,
 					name,
 					GenericArityAt(typeText, match.Index + match.Length),
 					containingNamespace,
-					containingType);
+					containingType,
+					isGlobalQualified);
 		}
 	}
 
@@ -293,7 +296,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		string name,
 		int arity,
 		string containingNamespace,
-		string? containingType) =>
+		string? containingType,
+		bool isGlobalQualified = false) =>
 		new(EvidenceLayer.TypeReference, name, arity,
 			capture.Name.StartsWith("reference.", StringComparison.Ordinal)
 				? capture.Name["reference.".Length..]
@@ -302,7 +306,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		{
 			ContainingNamespace = containingNamespace,
 			ContainingType = containingType,
-			SourceStartIndex = capture.StartIndex
+			SourceStartIndex = capture.StartIndex,
+			IsGlobalQualified = isGlobalQualified
 		};
 
 	private static FileFacts Failure(DependencyExtractionContext context, string reason) => new(

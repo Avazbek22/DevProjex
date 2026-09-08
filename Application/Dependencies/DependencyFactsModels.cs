@@ -96,6 +96,7 @@ public sealed record ReferenceFact(
 	public string ContainingNamespace { get; init; } = string.Empty;
 	public string? ContainingType { get; init; }
 	public int SourceStartIndex { get; init; } = -1;
+	public bool IsGlobalQualified { get; init; }
 }
 
 public sealed record FileFacts(
