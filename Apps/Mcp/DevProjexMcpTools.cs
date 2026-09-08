@@ -11,6 +11,7 @@ internal sealed class DevProjexMcpTools(
 	bool agentExclusions = false)
 {
 	private const int MaximumTreeLines = 2_000;
+	private const int MaximumTreeCharacters = 50_000;
 	private const int MaximumInlinePackCharacters = 50_000;
 	internal const int MaximumStoredPackResponseCharacters = 50_000;
 	private const int MaximumStoredTreePreviewCharacters = 38_000;
@@ -77,7 +78,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Returns the filtered project structure without file contents. Use it to orient before reading; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML and limits large text trees to a complete depth within 2,000 lines. project accepts a unique name or path from list_projects, or an allowed remote Git URL. Key parameters: format=markdown|text|json|xml, max_depth=0..1000, git_scope=staged|changes|diff:<ref>..<ref>, plus include/exclude patterns and max_file_bytes.")]
+		"Returns the filtered project structure without file contents. Use it to orient before reading; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML and limits large text trees within 2,000 lines and 50,000 characters. project accepts a unique name or path from list_projects, or an allowed remote Git URL. Key parameters: paths narrows to literal files or directories; format=markdown|text|json|xml; max_depth=0..1000; git_scope=staged|changes|diff:<ref>..<ref>; include/exclude patterns and max_file_bytes narrow further.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -88,6 +89,7 @@ internal sealed class DevProjexMcpTools(
 				WithAgentArguments(
 					"project",
 					"branch",
+					"paths",
 					"include_patterns",
 					"exclude_patterns",
 					"max_depth",
@@ -96,22 +98,25 @@ internal sealed class DevProjexMcpTools(
 					"max_file_bytes",
 					"format"));
 			var format = ParseTreeFormat(arguments.OptionalString("format") ?? "markdown");
+			var paths = ParsePaths(arguments);
 			var includePatterns = arguments.OptionalStringArray("include_patterns");
 			var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
+			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
+			var maximumFileBytes = arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue);
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
-				paths: null,
+				paths,
 				includePatterns,
 				excludePatterns,
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
 				arguments.OptionalString("git_scope"),
-				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
+				maximumFileBytes,
 				cancellationToken,
 				includeOutputMetrics: false,
-				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
-			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
+				exclusions: ParseExclusionsArgument(arguments),
+				tolerateMissingPaths: true).ConfigureAwait(false);
 			var depthFit = CalculateTreeDepthFit(
 				plan.ProjectedTree,
 				format,
@@ -130,7 +135,7 @@ internal sealed class DevProjexMcpTools(
 					plan.ProjectedTree,
 					effectiveDepth.Value,
 					cancellationToken);
-			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
+			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines, MaximumTreeCharacters);
 			try
 			{
 				await Projects.TreeExportService.WriteFullTreeAsync(
@@ -146,16 +151,19 @@ internal sealed class DevProjexMcpTools(
 			{
 				if (format is TreeTextFormat.Json or TreeTextFormat.Xml)
 				{
+					var guidance = !depthFit.FullTreeFits
+						? $"pass max_depth: {depthFit.DeepestCompleteDepth} for a complete document, " +
+						  "or narrow paths, include_patterns, and exclude_patterns, then retry."
+						: "narrow paths, include_patterns, or exclude_patterns, then retry.";
 					throw new McpToolException(
 						McpErrorCodes.PayloadTruncated,
 						$"{McpErrorCodes.PayloadTruncated}: the {format.ToString().ToLowerInvariant()} tree exceeds " +
-						$"the {MaximumTreeLines}-line result limit; pass max_depth: {depthFit.DeepestCompleteDepth} " +
-						"for a complete document, or narrow include_patterns and exclude_patterns, then retry.");
+						$"the {MaximumTreeLines}-line or {MaximumTreeCharacters}-character result limit; {guidance}");
 				}
 			}
 
 			var treeTruncationNotice = treeWriter.IsTruncated
-				? "[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]"
+				? "[Tree truncated at 2000 lines or 50000 characters. Narrow paths, include_patterns, exclude_patterns, or max_depth.]"
 				: automaticDepth is { } selectedDepth
 					? $"[Tree limited to depth {selectedDepth} of {depthFit.FullDepth} to fit {MaximumTreeLines} lines; " +
 					  "pass max_depth or include_patterns for a subtree.]"
@@ -168,7 +176,7 @@ internal sealed class DevProjexMcpTools(
 					plan,
 					includeFilters: true,
 					new McpSelectionNoticeContext(
-						HasPaths: false,
+						HasPaths: HasItems(paths),
 						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
 		}, cancellationToken);
 
@@ -536,6 +544,7 @@ internal sealed class DevProjexMcpTools(
 			var packId = arguments.RequiredString("pack_id");
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
+			ValidateLineRange(start, end);
 			var pack = packs.ResolveDocument(packId);
 			var page = await ReadFilePageAsync(
 					pack,
@@ -553,7 +562,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regular expression. Use it to locate symbols or phrases; use related_files instead for static dependency links, or get_file for a known file page. Returns path:line:text matches, merged context groups separated by --, and the count of additional matches beyond max_results; line numbers refer to returned text after replacements, and generated redaction replacements never match. Key parameters: pattern, context_lines=0..20, ignore_case=true|false, max_results=1..200, git_scope=staged|changes|diff:<ref>..<ref>, patterns, and max_file_bytes.")]
+		"Searches safe transformed project text with a timed .NET regular expression. Use it to locate symbols or phrases; use related_files instead for static dependency links, or get_file for a known file page. Returns path:line:text matches, merged context groups separated by --, and the count of additional matches beyond max_results; line numbers refer to returned text after replacements, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -565,6 +574,7 @@ internal sealed class DevProjexMcpTools(
 					"project",
 					"branch",
 					"pattern",
+					"paths",
 					"include_patterns",
 					"exclude_patterns",
 					"context_lines",
@@ -578,13 +588,14 @@ internal sealed class DevProjexMcpTools(
 			var ignoreCase = arguments.OptionalBoolean("ignore_case", true);
 			var maximumResults = arguments.OptionalInteger("max_results", 1, 200) ?? 50;
 			var regex = new McpSearchRegex(pattern, ignoreCase);
+			var paths = ParsePaths(arguments);
 			var includePatterns = arguments.OptionalStringArray("include_patterns");
 			var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
 
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
-				paths: null,
+				paths,
 				includePatterns,
 				excludePatterns,
 				profile: null,
@@ -593,7 +604,8 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 				cancellationToken,
 				includeOutputMetrics: false,
-				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
+				exclusions: ParseExclusionsArgument(arguments),
+				tolerateMissingPaths: true).ConfigureAwait(false);
 			var output = new StringBuilder();
 			var totalMatches = 0;
 			var shownMatches = 0;
@@ -652,7 +664,7 @@ internal sealed class DevProjexMcpTools(
 					plan,
 					includeFilters: false,
 					new McpSelectionNoticeContext(
-						HasPaths: false,
+						HasPaths: HasItems(paths),
 						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
 		}, cancellationToken);
 
@@ -742,7 +754,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads one page of one selected file after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context instead for multiple files. Returns untrusted file text up to 1,000 lines or 50,000 characters plus continuation notes; line numbers refer to this returned text after replacements. Required: path. Optional start_line and end_line are inclusive 1-based integers or numeric strings. Files outside effective filters are unavailable; content beyond the safe inspection limit fails explicitly with DPX-MCP-PAYLOAD-TRUNCATED.")]
+		"Reads one page of one selected file after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context instead for multiple files. Returns untrusted file text up to 1,000 lines or 50,000 characters plus continuation notes; line numbers refer to this returned text after replacements. Required: path. Optional profile applies the same selection profile as analyze and pack_context; start_line and end_line are inclusive 1-based integers or numeric strings. Files outside effective filters are unavailable; content beyond the safe inspection limit fails explicitly with DPX-MCP-PAYLOAD-TRUNCATED.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -753,19 +765,23 @@ internal sealed class DevProjexMcpTools(
 				WithAgentArguments(
 					"project",
 					"branch",
+					"profile",
 					"path",
 					"start_line",
 					"end_line"));
 			// get_file honors the delegated set too: a file revealed by get_tree or
 			// search_project under a per-call exclusions value must stay readable.
 			var requestedPath = arguments.RequiredString("path", allowWhitespace: true);
+			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
+			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
+			ValidateLineRange(start, end);
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
 				paths: [requestedPath],
 				includePatterns: null,
 				excludePatterns: null,
-				profile: null,
+				profile: arguments.OptionalString("profile"),
 				trackedOnly: false,
 				gitScope: null,
 				maximumFileBytes: null,
@@ -789,8 +805,6 @@ internal sealed class DevProjexMcpTools(
 					$"Select a file no larger than {SecretRedactionOutputPreparer.MaximumScannableFileBytes} bytes or narrow the project before retrying.");
 			}
 			var content = read.Content;
-			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
-			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var page = McpTextRanges.Slice(
 				content.Content,
 				start,
@@ -844,11 +858,7 @@ internal sealed class DevProjexMcpTools(
 		CancellationToken cancellationToken,
 		bool includeOutputMetrics = true)
 	{
-		var paths = arguments.OptionalStringArray(
-			"paths",
-			allowWhitespace: true,
-			maximumItems: McpProjectService.MaximumRequestedPaths,
-			maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength);
+		var paths = ParsePaths(arguments);
 		var includePatterns = arguments.OptionalStringArray("include_patterns");
 		var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
 		var plan = await Projects.BuildPlanAsync(
@@ -1379,6 +1389,23 @@ internal sealed class DevProjexMcpTools(
 					: $" seeds={item.Seeds.ToString(CultureInfo.InvariantCulture)}"))
 			.ToArray();
 		return notices.Length == 0 ? null : string.Join('\n', notices);
+	}
+
+	private static IReadOnlyList<string>? ParsePaths(McpJsonArguments arguments) =>
+		arguments.OptionalStringArray(
+			"paths",
+			allowWhitespace: true,
+			maximumItems: McpProjectService.MaximumRequestedPaths,
+			maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength);
+
+	private static void ValidateLineRange(int? start, int? end)
+	{
+		if (end is null || end >= (start ?? 1))
+			return;
+		throw new McpToolException(
+			McpErrorCodes.InvalidRange,
+			$"{McpErrorCodes.InvalidRange}: requested line range {start ?? 1}-{end} is invalid. " +
+			"Valid lines start at 1 and start_line must not exceed end_line.");
 	}
 
 	private static bool IsSafeNoFactsReason(string? reason) =>

@@ -153,7 +153,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "array",
 	  "maxItems": 256,
 	  "items": { "type": "string", "minLength": 1, "maxLength": 4096 },
-	  "description": "Existing project-relative files or directories that narrow the selection."
+	  "description": "Existing project-relative files or directories that narrow the selection. Values are literal paths: *, ?, {, and [ are ordinary filename characters here, not glob syntax."
 	}
 	""";
 
@@ -250,6 +250,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    {{ProjectProperty}},
 	    {{BranchProperty}},
+	    {{PathsProperty}},
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{TrackedOnlyProperty}},
@@ -329,6 +330,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProjectProperty}},
 	    {{BranchProperty}},
 	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression, limited to 4,096 characters and a 2-second evaluation timeout, applied after redaction. Text inserted by redaction never matches." },
+	    {{PathsProperty}},
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{TrackedOnlyProperty}},
@@ -348,7 +350,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
-	    {{BranchProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{BranchProperty}},
+	    {{ProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
 	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }

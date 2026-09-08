@@ -88,6 +88,19 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task BoundedTreeWriter_StopsAtTheCharacterLimitWithoutSplittingASurrogatePair()
+	{
+		using var writer = new McpBoundedLineTextWriter(maximumLines: 10, maximumCharacters: 5);
+
+		await Assert.ThrowsAsync<McpLineLimitReachedException>(async () =>
+			await writer.WriteAsync("abcd😀tail".AsMemory(), TestContext.Current.CancellationToken));
+
+		Assert.True(writer.IsTruncated);
+		Assert.True(writer.CharacterLimitReached);
+		Assert.Equal("abcd", writer.Text);
+	}
+
+	[Fact]
 	public void TopFileRanking_RemainsBoundedAndUsesStableContractOrder()
 	{
 		var ranking = new TopFileRanking(capacity: 3);
@@ -1123,7 +1136,9 @@ public sealed class McpInfrastructureTests
 	public async Task PackSweepRemovesOnlyStaleOwnedSessionsAndPreservesAnActiveLease()
 	{
 		using var workspace = new TemporaryDirectory();
-		var baseDirectory = Path.Combine(workspace.Path, "DevProjex", "mcp");
+		var baseDirectory = Path.Combine(
+			McpPackRegistry.ResolveProductDirectory(workspace.Path, null, Environment.UserName),
+			"mcp");
 		var stale = Path.Combine(baseDirectory, new string('a', 32));
 		Directory.CreateDirectory(stale);
 		File.WriteAllText(Path.Combine(stale, ".session.lock"), string.Empty);
@@ -1157,7 +1172,9 @@ public sealed class McpInfrastructureTests
 		File.WriteAllText(protectedFile, "keep");
 		Directory.SetLastWriteTimeUtc(target, DateTime.UtcNow.AddDays(-2));
 
-		var baseDirectory = Path.Combine(workspace.Path, "DevProjex", "mcp");
+		var baseDirectory = Path.Combine(
+			McpPackRegistry.ResolveProductDirectory(workspace.Path, null, Environment.UserName),
+			"mcp");
 		Directory.CreateDirectory(baseDirectory);
 		var link = Path.Combine(baseDirectory, new string('b', 32));
 		try
@@ -1223,7 +1240,10 @@ public sealed class McpInfrastructureTests
 	{
 		using var workspace = new TemporaryDirectory();
 		using var target = new TemporaryDirectory();
-		var productDirectory = Path.Combine(workspace.Path, "DevProjex");
+		var productDirectory = McpPackRegistry.ResolveProductDirectory(
+			workspace.Path,
+			null,
+			Environment.UserName);
 		Directory.CreateDirectory(productDirectory);
 		var link = Path.Combine(productDirectory, "mcp");
 		try
@@ -1247,7 +1267,10 @@ public sealed class McpInfrastructureTests
 	{
 		using var workspace = new TemporaryDirectory();
 		using var target = new TemporaryDirectory();
-		var link = Path.Combine(workspace.Path, "DevProjex");
+		var link = McpPackRegistry.ResolveProductDirectory(
+			workspace.Path,
+			null,
+			Environment.UserName);
 		try
 		{
 			Directory.CreateSymbolicLink(link, target.Path);
@@ -1262,6 +1285,35 @@ public sealed class McpInfrastructureTests
 
 		Assert.Contains("symbolic link", storageException.Message, StringComparison.Ordinal);
 		Assert.Empty(Directory.EnumerateFileSystemEntries(target.Path));
+	}
+
+	[Fact]
+	public void PackStorageUsesXdgRuntimeDirectoryWhenAvailable()
+	{
+		using var runtime = new TemporaryDirectory();
+
+		var productDirectory = McpPackRegistry.ResolveProductDirectory(
+			tempRoot: null,
+			runtime.Path,
+			"alice");
+
+		Assert.Equal(Path.Combine(runtime.Path, "DevProjex"), productDirectory);
+	}
+
+	[Fact]
+	public void ForeignLegacyTempParentDoesNotBlockUserNamespacedStorage()
+	{
+		using var workspace = new TemporaryDirectory();
+		var legacyProductDirectory = Path.Combine(workspace.Path, "DevProjex");
+		File.WriteAllText(legacyProductDirectory, "owned by another account");
+
+		using var registry = new McpPackRegistry(workspace.Path);
+
+		Assert.True(Directory.Exists(registry.SessionDirectory));
+		Assert.False(
+			Path.GetFullPath(registry.SessionDirectory).StartsWith(
+				Path.GetFullPath(legacyProductDirectory) + Path.DirectorySeparatorChar,
+				OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
 	}
 
 	[Fact]
