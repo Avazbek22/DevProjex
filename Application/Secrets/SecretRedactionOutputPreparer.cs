@@ -339,11 +339,16 @@ public sealed class SecretRedactionOutputPreparer
 						: BuildEffectiveFindings(plan.Spans, content.Content, compressed.Map);
 					if (transformedTextConsumer is not null)
 					{
-						var outputText = plan is null
-							? transformedText
-							: plan.BuildResult(transformedText).Text;
+						var outputText = transformedText;
+						IReadOnlyList<TransformedTextRange> replacementRanges = [];
+						if (plan is not null)
+						{
+							var redacted = plan.BuildResult(transformedText);
+							outputText = redacted.Text;
+							replacementRanges = ResolveReplacementRanges(plan.Replacements);
+						}
 						await transformedTextConsumer(
-								new TransformedTextFile(sourcePath, outputText),
+								new TransformedTextFile(sourcePath, outputText, replacementRanges),
 								cancellationToken)
 							.ConfigureAwait(false);
 					}
@@ -1132,6 +1137,25 @@ public sealed class SecretRedactionOutputPreparer
 			FileContentClassification.Text,
 			encoding,
 			[]), metrics);
+	}
+
+	private static IReadOnlyList<TransformedTextRange> ResolveReplacementRanges(
+		IReadOnlyList<SecretReplacement> replacements)
+	{
+		if (replacements.Count == 0)
+			return [];
+
+		var ranges = new List<TransformedTextRange>(replacements.Count);
+		var outputDelta = 0;
+		foreach (var replacement in replacements)
+		{
+			if (replacement.Replacement is not { } output)
+				continue;
+			var start = checked(replacement.SourceStart + outputDelta);
+			ranges.Add(new TransformedTextRange(start, output.Length));
+			outputDelta = checked(outputDelta + output.Length - replacement.SourceLength);
+		}
+		return ranges;
 	}
 
 	private async Task<PreparedCompressionResult> MeasureExactPassThroughAsync(
@@ -2623,7 +2647,15 @@ public sealed record PreparedSecretFile(
 	}
 }
 
-public sealed record TransformedTextFile(string Path, string Content);
+public sealed record TransformedTextFile(
+	string Path,
+	string Content,
+	IReadOnlyList<TransformedTextRange> ReplacementRanges);
+
+public readonly record struct TransformedTextRange(int Start, int Length)
+{
+	public int End => checked(Start + Length);
+}
 
 public sealed record PreparedSecretSpan(int Start, int Length)
 {

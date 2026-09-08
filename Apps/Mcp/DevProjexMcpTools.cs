@@ -547,8 +547,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches selected files with a timed .NET regex after redaction; DEVPROJEX_REDACTED[<category>#<n>] cannot match. Use it to find code; " +
-		"use get_file for a full file. Returns line context, counts extra hits without showing them, and caps max_results at 200 per call.")]
+		"Searches safe transformed project text with a timed .NET regular expression. Use it to locate symbols or phrases; use related_files instead for static dependency links, or get_file for a known file page. Returns path:line:text matches, merged context groups separated by --, and the count of additional matches beyond max_results; generated redaction replacements never match. Key parameters: pattern, context_lines=0..20, ignore_case=true|false, max_results=1..200, git_scope=staged|changes|diff:<ref>..<ref>, patterns, and max_file_bytes.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -602,6 +601,7 @@ internal sealed class DevProjexMcpTools(
 						regex,
 						contextLines,
 						Math.Max(0, maximumResults - totalMatches),
+						file.ReplacementRanges,
 						token);
 					totalMatches += scan.TotalMatches;
 					if (responseLimitReached)
@@ -616,7 +616,7 @@ internal sealed class DevProjexMcpTools(
 							match,
 							MaximumSearchContentCharacters))
 						{
-							shownMatches++;
+							shownMatches += match.MatchLineNumbers.Count;
 						}
 						else
 						{
@@ -1678,10 +1678,22 @@ internal sealed class DevProjexMcpTools(
 		McpSearchMatchContext match,
 		int maximumCharacters)
 	{
+		if (match.StartsNewGroup)
+		{
+			var separator = $"--{Environment.NewLine}";
+			var separatorRemaining = maximumCharacters - output.Length;
+			if (separator.Length > separatorRemaining)
+			{
+				AppendBoundedPrefix(output, separator, Math.Max(0, separatorRemaining));
+				return false;
+			}
+			output.Append(separator);
+		}
 		var safePath = EscapeSingleLine(relativePath);
+		var matchingLines = match.MatchLineNumbers.ToHashSet();
 		foreach (var line in match.Lines)
 		{
-			var marker = line.LineNumber == match.MatchLineNumber ? ':' : '-';
+			var marker = matchingLines.Contains(line.LineNumber) ? ':' : '-';
 			var prefix = $"{safePath}{marker}{line.LineNumber}{marker}";
 			var remaining = maximumCharacters - output.Length;
 			if (prefix.Length > remaining)
