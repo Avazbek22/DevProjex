@@ -603,6 +603,7 @@ internal sealed record DependencyControlFileSnapshot(
 
 internal sealed class BoundedDependencyControlFileReader : IDependencyControlFileReader
 {
+	private static ReadOnlySpan<byte> Utf8Preamble => [0xEF, 0xBB, 0xBF];
 	private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
 	public async ValueTask<DependencyControlFileSnapshot> ReadAsync(
@@ -648,7 +649,7 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 					currentLength,
 					currentLastWrite);
 			}
-			var offset = bytes.AsSpan().StartsWith(StrictUtf8.Preamble) ? StrictUtf8.Preamble.Length : 0;
+			var offset = bytes.AsSpan().StartsWith(Utf8Preamble) ? Utf8Preamble.Length : 0;
 			var content = StrictUtf8.GetString(bytes.AsSpan(offset));
 			return new DependencyControlFileSnapshot(
 				DependencyConfigurationState.Valid,

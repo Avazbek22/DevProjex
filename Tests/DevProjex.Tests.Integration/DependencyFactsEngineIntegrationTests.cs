@@ -555,6 +555,42 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(1, reader.CountFor(nestedConfig));
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task Utf8Bom_PreservesTypeScriptAndPackageConfigurationSemantics(bool includeBom)
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = WriteUtf8ControlFile(
+			fixture,
+			"package.json",
+			"{\"name\":\"fixture\",\"exports\":{\".\":\"./entry.ts\"}}",
+			includeBom);
+		var rootConfig = WriteUtf8ControlFile(
+			fixture,
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}",
+			includeBom);
+		var nestedConfig = WriteUtf8ControlFile(
+			fixture,
+			"nested/tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"paths\":{\"alias\":[\"../entry.ts\"]}}}",
+			includeBom);
+		var rootSource = fixture.CreateFile("main.ts", "import value from 'fixture';");
+		var nestedSource = fixture.CreateFile("nested/main.ts", "import value from 'alias';");
+		var entry = fixture.CreateFile("entry.ts", "export default 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[package, rootConfig, nestedConfig, rootSource, nestedSource, entry],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Empty(result.Coverage.ConfigurationDiagnostics);
+		Assert.Contains(result.Edges, edge => edge.Source == "main.ts" && edge.Target == "entry.ts");
+		Assert.Contains(result.Edges, edge => edge.Source == "nested/main.ts" && edge.Target == "entry.ts");
+	}
+
 	[Fact]
 	public async Task TypeScriptExternalPackageEvidence_DoesNotLeakAcrossPackageScopes()
 	{
@@ -1642,6 +1678,18 @@ public sealed class DependencyFactsEngineIntegrationTests
 	private static DependencyFactsEngine CreateEngine() => new(
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());
+
+	private static string WriteUtf8ControlFile(
+		TemporaryDirectory fixture,
+		string relativePath,
+		string content,
+		bool includeBom)
+	{
+		var path = fixture.CreateFile(relativePath, string.Empty);
+		var encoding = new UTF8Encoding(includeBom, true);
+		File.WriteAllBytes(path, encoding.GetPreamble().Concat(encoding.GetBytes(content)).ToArray());
+		return path;
+	}
 
 	private static DependencyResolverConfiguration EmptyConfiguration() => new(
 		"fixture",
