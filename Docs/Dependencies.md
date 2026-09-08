@@ -83,7 +83,9 @@ relative import needs an explicit extension while a supported CommonJS context c
 and directory probes. `.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ordinary
 `.ts`/`.tsx`/`.js`/`.jsx` files default to CommonJS unless the nearest `package.json` has
 `"type": "module"`. Literal `require(...)` calls are import evidence only in such a CommonJS context.
-`node10` (including its `node` alias) and `baseUrl` are marked legacy under the TypeScript 7 contract.
+`moduleResolution` accepts exactly `node10` (including its `node` alias), `classic`, `node16`,
+`nodenext`, and `bundler`, case-insensitively; any other value is reported as unsupported semantics.
+`node10`/`node` and `baseUrl` are marked legacy under the TypeScript 7 contract.
 DevProjex never guesses a `dist` to `src` mapping without configuration, and module references without
 an owning `tsconfig.json` or `jsconfig.json` stay unresolved.
 

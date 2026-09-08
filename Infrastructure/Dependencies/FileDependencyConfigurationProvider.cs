@@ -18,16 +18,27 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	internal const string TypeScriptExtendsCycleReason = "tsconfig extends cycle is not supported";
 	internal const string TypeScriptExtendsDepthReason = "tsconfig extends exceeds the maximum depth";
 	internal const string TypeScriptExtendsUnavailableReason = "extended tsconfig is unavailable";
+	internal const string TypeScriptModuleResolutionReason = "tsconfig moduleResolution is not supported";
+	internal const string ProjectReferenceConditionReason = "project reference condition could not be evaluated safely";
 	private readonly IDependencyControlFileReader _reader;
+	private readonly IDependencyPathMetadata _pathMetadata;
 
 	public FileDependencyConfigurationProvider()
-		: this(new BoundedDependencyControlFileReader())
+		: this(new BoundedDependencyControlFileReader(), new DependencyPathMetadata())
 	{
 	}
 
 	internal FileDependencyConfigurationProvider(IDependencyControlFileReader reader)
+		: this(reader, new DependencyPathMetadata())
+	{
+	}
+
+	internal FileDependencyConfigurationProvider(
+		IDependencyControlFileReader reader,
+		IDependencyPathMetadata pathMetadata)
 	{
 		_reader = reader ?? throw new ArgumentNullException(nameof(reader));
+		_pathMetadata = pathMetadata ?? throw new ArgumentNullException(nameof(pathMetadata));
 	}
 
 	public async Task<DependencyResolverConfiguration> ReadAsync(
@@ -183,7 +194,14 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			var references = parsed.Value;
 			foreach (var reference in references.Where(reference => !manifest.Contains(reference)))
 			{
-				var exists = File.Exists(reference);
+				if (IsNetworkPath(reference) || !IsWithin(root, reference) ||
+				    !_pathMetadata.TryResolveContainedPath(root, reference, out var physicalReference))
+				{
+					fingerprintParts.Add(Fingerprint(root, project, "project-reference:out-of-manifest"));
+					continue;
+				}
+
+				var exists = _pathMetadata.FileExists(physicalReference);
 				fingerprintParts.Add(Fingerprint(root, reference, exists ? "present" : "missing"));
 				if (!exists)
 					absentControlFiles.Add(reference);
@@ -321,12 +339,29 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		try
 		{
 			var directory = Path.GetDirectoryName(projectPath)!;
-			return ConfigurationParseResult<string[]>.Valid(XDocument.Parse(content).Descendants()
+			var elements = XDocument.Parse(content).Descendants()
 				.Where(static element => element.Name.LocalName == "ProjectReference")
+				.Where(static element => !IsLiteralFalse(element.Attribute("ReferenceOutputAssembly")?.Value))
+				.ToArray();
+			var hasUnknownCondition = elements.Any(static element =>
+			{
+				var condition = element.Attribute("Condition")?.Value;
+				return !string.IsNullOrWhiteSpace(condition) &&
+				       !IsLiteralTrue(condition) &&
+				       !IsLiteralFalse(condition);
+			});
+			var references = elements
+				.Where(static element => IsEnabledProjectReference(element))
 				.Select(element => element.Attribute("Include")?.Value)
 				.Where(static value => !string.IsNullOrWhiteSpace(value))
 				.Select(value => Path.GetFullPath(Path.Combine(directory, NormalizeMsBuildInclude(value!))))
-				.Distinct(PathComparer).Order(StringComparer.Ordinal).ToArray());
+				.Distinct(PathComparer).Order(StringComparer.Ordinal).ToArray();
+			return hasUnknownCondition
+				? ConfigurationParseResult<string[]>.Failure(
+					references,
+					DependencyConfigurationState.UnsupportedSemantics,
+					ProjectReferenceConditionReason)
+				: ConfigurationParseResult<string[]>.Valid(references);
 		}
 		catch (System.Xml.XmlException)
 		{
@@ -373,7 +408,11 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 					"tsconfig compilerOptions.moduleResolution must be a string");
 
 			var hasModuleResolution = options.TryGetProperty("moduleResolution", out mode);
-			var moduleResolution = hasModuleResolution ? mode.GetString() ?? "bundler" : null;
+			var moduleResolution = hasModuleResolution ? mode.GetString()?.ToLowerInvariant() : null;
+			if (hasModuleResolution && !IsSupportedTypeScriptModuleResolution(moduleResolution))
+				return TypeScriptLayerFailure(
+					DependencyConfigurationState.UnsupportedSemantics,
+					TypeScriptModuleResolutionReason);
 			var hasBaseUrl = options.TryGetProperty("baseUrl", out var baseUrlElement);
 			var baseUrl = hasBaseUrl && baseUrlElement.ValueKind == JsonValueKind.String
 				? baseUrlElement.GetString()
@@ -417,6 +456,33 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				DependencyConfigurationState.Corrupt,
 				"invalid tsconfig JSON");
 		}
+	}
+
+	private static bool IsSupportedTypeScriptModuleResolution(string? value) =>
+		value is "node10" or "node" or "classic" or "node16" or "nodenext" or "bundler";
+
+	private static bool IsEnabledProjectReference(XElement element)
+	{
+		if (IsLiteralFalse(element.Attribute("ReferenceOutputAssembly")?.Value))
+			return false;
+		var condition = element.Attribute("Condition")?.Value;
+		return string.IsNullOrWhiteSpace(condition) || IsLiteralTrue(condition);
+	}
+
+	private static bool IsLiteralFalse(string? value) =>
+		NormalizeMsBuildBoolean(value).Equals("false", StringComparison.OrdinalIgnoreCase);
+
+	private static bool IsLiteralTrue(string? value) =>
+		NormalizeMsBuildBoolean(value).Equals("true", StringComparison.OrdinalIgnoreCase);
+
+	private static string NormalizeMsBuildBoolean(string? value)
+	{
+		var normalized = value?.Trim() ?? string.Empty;
+		return normalized.Length >= 2 &&
+		       (normalized[0] == '\'' && normalized[^1] == '\'' ||
+		        normalized[0] == '"' && normalized[^1] == '"')
+			? normalized[1..^1].Trim()
+			: normalized;
 	}
 
 	private static ConfigurationParseResult<string?> ParseTypeScriptExtends(JsonElement root)
@@ -779,6 +845,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var relative = Path.GetRelativePath(root, path);
 		return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) && !Path.IsPathRooted(relative);
 	}
+	private static bool IsNetworkPath(string path) =>
+		path.StartsWith("\\\\", StringComparison.Ordinal) ||
+		path.StartsWith("//", StringComparison.Ordinal);
 	private static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 	private static string OneLine(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
 	private sealed record ConfigurationParseResult<T>(
@@ -829,6 +898,83 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			default,
 			default);
 	}
+}
+
+internal interface IDependencyPathMetadata
+{
+	bool FileExists(string path);
+	bool TryResolveContainedPath(string root, string path, out string resolvedPath);
+}
+
+internal sealed class DependencyPathMetadata : IDependencyPathMetadata
+{
+	public bool FileExists(string path) => File.Exists(path);
+
+	public bool TryResolveContainedPath(string root, string path, out string resolvedPath)
+	{
+		root = Path.GetFullPath(root);
+		path = Path.GetFullPath(path);
+		resolvedPath = path;
+		var relative = Path.GetRelativePath(root, path);
+		if (!IsContainedRelative(relative))
+			return false;
+
+		var current = root;
+		var segments = relative.Split(
+			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+			StringSplitOptions.RemoveEmptyEntries);
+		for (var index = 0; index < segments.Length; index++)
+		{
+			var candidate = Path.Combine(current, segments[index]);
+			FileAttributes attributes;
+			try
+			{
+				attributes = File.GetAttributes(candidate);
+			}
+			catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+			{
+				resolvedPath = Path.Combine(current, Path.Combine(segments[index..]));
+				return true;
+			}
+			catch (Exception exception) when (
+				exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+			{
+				return false;
+			}
+
+			if (!attributes.HasFlag(FileAttributes.ReparsePoint))
+			{
+				current = candidate;
+				continue;
+			}
+
+			FileSystemInfo info = attributes.HasFlag(FileAttributes.Directory)
+				? new DirectoryInfo(candidate)
+				: new FileInfo(candidate);
+			var linkTarget = info.LinkTarget;
+			if (string.IsNullOrWhiteSpace(linkTarget))
+				return false;
+			var target = Path.GetFullPath(
+				Path.IsPathFullyQualified(linkTarget)
+					? linkTarget
+					: Path.Combine(Path.GetDirectoryName(candidate)!, linkTarget));
+			if (IsNetworkPath(target) || !IsContainedRelative(Path.GetRelativePath(root, target)))
+				return false;
+			current = target;
+		}
+
+		resolvedPath = current;
+		return true;
+	}
+
+	private static bool IsContainedRelative(string relative) =>
+		relative != ".." &&
+		!relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+		!Path.IsPathRooted(relative);
+
+	private static bool IsNetworkPath(string path) =>
+		path.StartsWith("\\\\", StringComparison.Ordinal) ||
+		path.StartsWith("//", StringComparison.Ordinal);
 }
 
 internal interface IDependencyControlFileReader

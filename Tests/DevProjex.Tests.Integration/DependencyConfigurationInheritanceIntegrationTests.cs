@@ -161,7 +161,7 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Empty(result.ConfigurationDiagnostics);
-		Assert.Equal("NodeNext", Assert.Single(result.Scopes, scope => scope.HasConfiguration).ModuleResolution);
+		Assert.Equal("nodenext", Assert.Single(result.Scopes, scope => scope.HasConfiguration).ModuleResolution);
 	}
 
 	[Fact]
@@ -189,7 +189,7 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 		Assert.Empty(present.AbsentControlFiles);
 		Assert.Empty(present.ConfigurationDiagnostics);
 		Assert.NotEqual(missing.Fingerprint, present.Fingerprint);
-		Assert.Equal("NodeNext", Assert.Single(present.Scopes, scope => scope.HasConfiguration).ModuleResolution);
+		Assert.Equal("nodenext", Assert.Single(present.Scopes, scope => scope.HasConfiguration).ModuleResolution);
 	}
 
 	[Fact]
@@ -239,6 +239,173 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 		Assert.False(scope.AllowJavaScript);
 		Assert.Empty(scope.TypeScriptPaths);
 		Assert.Empty(result.ConfigurationDiagnostics);
+	}
+
+	[Theory]
+	[InlineData("node10", "node10")]
+	[InlineData("NODE", "node")]
+	[InlineData("Classic", "classic")]
+	[InlineData("node16", "node16")]
+	[InlineData("NodeNext", "nodenext")]
+	[InlineData("BUNDLER", "bundler")]
+	public async Task ModuleResolutionUsesTheSupportedCaseInsensitiveVocabulary(string configured, string expected)
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			$"{{\"compilerOptions\":{{\"moduleResolution\":\"{configured}\"}}}}");
+
+		var result = await new FileDependencyConfigurationProvider().ReadAsync(
+			fixture.Path,
+			[config],
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(result.ConfigurationDiagnostics);
+		Assert.Equal(expected, Assert.Single(result.Scopes, scope => scope.HasConfiguration).ModuleResolution);
+	}
+
+	[Fact]
+	public async Task UnknownModuleResolutionUsesAConstantDiagnostic()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"future-mode\"}}");
+
+		var result = await new FileDependencyConfigurationProvider().ReadAsync(
+			fixture.Path,
+			[config],
+			TestContext.Current.CancellationToken);
+
+		var diagnostic = Assert.Single(result.ConfigurationDiagnostics);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, diagnostic.State);
+		Assert.Equal(FileDependencyConfigurationProvider.TypeScriptModuleResolutionReason, diagnostic.Reason);
+	}
+
+	[Fact]
+	public async Task ProjectReferencesIgnoreFalseAndUnevaluatedConditions()
+	{
+		using var fixture = new TemporaryDirectory();
+		var rootProject = fixture.CreateFile(
+			"Root.csproj",
+			"""
+			<Project>
+			  <ItemGroup>
+			    <ProjectReference Include="Enabled.csproj" Condition="true" />
+			    <ProjectReference Include="False.csproj" Condition="false" />
+			    <ProjectReference Include="Quoted.csproj" Condition="'false'" />
+			    <ProjectReference Include="Unknown.csproj" Condition="'$(Configuration)' == 'Debug'" />
+			    <ProjectReference Include="OutputDisabled.csproj" ReferenceOutputAssembly="false" />
+			  </ItemGroup>
+			</Project>
+			""");
+		var projects = new[]
+		{
+			rootProject,
+			fixture.CreateFile("Enabled.csproj", "<Project />"),
+			fixture.CreateFile("False.csproj", "<Project />"),
+			fixture.CreateFile("Quoted.csproj", "<Project />"),
+			fixture.CreateFile("Unknown.csproj", "<Project />"),
+			fixture.CreateFile("OutputDisabled.csproj", "<Project />")
+		};
+
+		var result = await new FileDependencyConfigurationProvider().ReadAsync(
+			fixture.Path,
+			projects,
+			TestContext.Current.CancellationToken);
+
+		var rootScope = Assert.Single(result.Scopes, scope => scope.ScopeId == "csharp:Root.csproj");
+		Assert.Equal(["csharp:Enabled.csproj"], rootScope.ProjectReferences);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, rootScope.ConfigurationState);
+		Assert.Equal(
+			FileDependencyConfigurationProvider.ProjectReferenceConditionReason,
+			rootScope.ConfigurationDiagnostic);
+	}
+
+	[Fact]
+	public async Task ExternalAndNetworkProjectReferencesAreRejectedBeforeMetadataAccess()
+	{
+		using var fixture = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var safeMissing = Path.Combine(fixture.Path, "Missing.csproj");
+		var project = fixture.CreateFile(
+			"Root.csproj",
+			$"""
+			<Project><ItemGroup>
+			  <ProjectReference Include="Missing.csproj" />
+			  <ProjectReference Include="{Path.Combine(outside.Path, "Outside.csproj")}" />
+			  <ProjectReference Include="\\\\server\\share\\Remote.csproj" />
+			</ItemGroup></Project>
+			""");
+		var metadata = new RecordingPathMetadata();
+		var provider = new FileDependencyConfigurationProvider(
+			new BoundedDependencyControlFileReader(),
+			metadata);
+
+		var result = await provider.ReadAsync(
+			fixture.Path,
+			[project],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([safeMissing], metadata.FileExistenceChecks, PathComparer.Default);
+		Assert.All(metadata.ContainmentChecks, path => Assert.True(IsWithin(fixture.Path, path)));
+		Assert.Contains(safeMissing, result.AbsentControlFiles, PathComparer.Default);
+	}
+
+	[Fact]
+	public async Task ProjectReferenceSymlinkOutsideTheRootIsNotProbedAsAControlFile()
+	{
+		using var fixture = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var outsideProject = outside.CreateFile("Outside.csproj", "<Project />");
+		var link = Path.Combine(fixture.Path, "Linked.csproj");
+		try
+		{
+			File.CreateSymbolicLink(link, outsideProject);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+			return;
+		}
+		var project = fixture.CreateFile(
+			"Root.csproj",
+			"<Project><ItemGroup><ProjectReference Include=\"Linked.csproj\" /></ItemGroup></Project>");
+
+		var result = await new FileDependencyConfigurationProvider().ReadAsync(
+			fixture.Path,
+			[project],
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(link, result.AbsentControlFiles, PathComparer.Default);
+	}
+
+	private static bool IsWithin(string root, string path)
+	{
+		var relative = Path.GetRelativePath(root, path);
+		return relative != ".." &&
+		       !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+		       !Path.IsPathRooted(relative);
+	}
+
+	private sealed class RecordingPathMetadata : IDependencyPathMetadata
+	{
+		public List<string> FileExistenceChecks { get; } = [];
+		public List<string> ContainmentChecks { get; } = [];
+
+		public bool FileExists(string path)
+		{
+			FileExistenceChecks.Add(path);
+			return false;
+		}
+
+		public bool TryResolveContainedPath(string root, string path, out string resolvedPath)
+		{
+			ContainmentChecks.Add(path);
+			resolvedPath = path;
+			return true;
+		}
 	}
 
 	private static DependencyFactsEngine CreateEngine() =>
