@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -1080,6 +1081,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private sealed class ResolverContext
 	{
+		private static readonly ConditionalWeakTable<IReadOnlySet<string>, IReadOnlySet<string>> DotNetSimpleNames = new();
 		private readonly string _root;
 		private readonly IReadOnlyDictionary<string, FileFacts> _files;
 		private readonly IReadOnlyDictionary<SymbolLookupKey, DeclarationFact[]> _symbolsBySimpleName;
@@ -1134,9 +1136,9 @@ public sealed class DependencyFactsEngine : IDisposable
 					.Order(StringComparer.Ordinal)
 					.ToArray(),
 				StringComparer.Ordinal);
-			_dotNetExternalSimpleNames = configuration.DotNetExternalSymbols
-				.Select(SimpleName)
-				.ToHashSet(StringComparer.Ordinal);
+			_dotNetExternalSimpleNames = DotNetSimpleNames.GetValue(
+				configuration.DotNetExternalSymbols,
+				static symbols => symbols.Select(SimpleName).ToHashSet(StringComparer.Ordinal));
 		}
 
 		public DependencyEdge ResolveImport(FileFacts source, ImportFact import) => source.LanguageId switch
