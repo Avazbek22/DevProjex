@@ -442,9 +442,7 @@ public sealed class ImportanceRankingService(
 		var nodeByPath = new Dictionary<string, int>(paths.Length, StringComparer.Ordinal);
 		for (var node = 0; node < paths.Length; node++)
 			nodeByPath.Add(paths[node], node);
-		var outgoingWeights = new Dictionary<int, double>[paths.Length];
-		for (var node = 0; node < outgoingWeights.Length; node++)
-			outgoingWeights[node] = [];
+		var outgoingWeights = new Dictionary<int, double>?[paths.Length];
 		foreach (var edge in snapshot.Edges)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -465,10 +463,11 @@ public sealed class ImportanceRankingService(
 			if (targets.Length == 0)
 				continue;
 			var partWeight = 1d / targets.Length;
+			var sourceWeights = outgoingWeights[sourceNode] ??= [];
 			foreach (var targetNode in targets)
 			{
-				if (!outgoingWeights[sourceNode].TryGetValue(targetNode, out var existing) || partWeight > existing)
-					outgoingWeights[sourceNode][targetNode] = partWeight;
+				if (!sourceWeights.TryGetValue(targetNode, out var existing) || partWeight > existing)
+					sourceWeights[targetNode] = partWeight;
 			}
 		}
 
@@ -481,8 +480,11 @@ public sealed class ImportanceRankingService(
 		for (var source = 0; source < paths.Length; source++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			outgoing[source] = outgoingWeights[source].Keys.Order().ToArray();
-			weights[source] = outgoing[source].Select(target => outgoingWeights[source][target]).ToArray();
+			var sourceWeights = outgoingWeights[source];
+			outgoing[source] = sourceWeights is null ? [] : sourceWeights.Keys.Order().ToArray();
+			weights[source] = sourceWeights is null
+				? []
+				: outgoing[source].Select(target => sourceWeights[target]).ToArray();
 			weightSums[source] = weights[source].Sum();
 			edgeCount += outgoing[source].Length;
 			if (outgoing[source].Length > 0)
