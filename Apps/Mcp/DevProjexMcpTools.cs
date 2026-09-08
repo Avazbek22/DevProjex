@@ -64,8 +64,6 @@ internal sealed class DevProjexMcpTools(
 					.ToArray(),
 				agentExclusions
 			};
-			foreach (var root in validatedRoots)
-				Projects.ScheduleDependencyWarmup(root);
 			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles, baseline }));
 		});
 
@@ -153,7 +151,6 @@ internal sealed class DevProjexMcpTools(
 					? $"[Tree limited to depth {selectedDepth} of {depthFit.FullDepth} to fit {MaximumTreeLines} lines; " +
 					  "pass max_depth or include_patterns for a subtree.]"
 					: null;
-			Projects.ScheduleDependencyWarmup(plan);
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.Text),
 				treeTruncationNotice,
@@ -282,7 +279,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. focus requires rank=importance and seeds graph-hop ordering without widening selection; max_tokens applies greedy content admission and reports its budget.")]
+		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. focus requires rank=importance and seeds graph-hop ordering without widening selection; max_tokens applies greedy content admission and reports heuristic token estimates, not tokenizer counts.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -457,15 +454,14 @@ internal sealed class DevProjexMcpTools(
 					var inlineMessage = AppendTrustedNotices(BuildSpotlightedPackContent(
 						content,
 						writeResult?.TokenBudget),
-						writeResult?.TokenBudget is { } inlineBudget
-							? FormatTokenBudgetAccounting(inlineBudget)
-							: null,
 						FormatRankingReport(writeResult?.Ranking, writeResult?.TokenBudget),
 						FormatUnscannableNotice(
 							writeResult?.UnscannableFiles,
 							UnscannableResultKind.Pack),
 						FormatCompressionUnavailable(prepared?.CompressionSnapshot),
 						trustedPlanWarnings);
+					if (writeResult?.TokenBudget is { } inlineBudget)
+						inlineMessage = AppendBudgetAccounting(inlineMessage, inlineBudget);
 					if (inlineMessage.Length <= MaximumInlinePackCharacters)
 					{
 						await operationProgress.CompleteAsync(
@@ -502,9 +498,6 @@ internal sealed class DevProjexMcpTools(
 						writeResult?.UnscannableFiles,
 						UnscannableResultKind.Pack),
 					CombineTrustedNotices(
-						writeResult?.TokenBudget is { } storedBudget
-							? FormatTokenBudgetAccounting(storedBudget)
-							: null,
 						FormatRankingReport(writeResult?.Ranking, writeResult?.TokenBudget),
 						FormatCompressionUnavailable(prepared?.CompressionSnapshot),
 						trustedPlanWarnings));
@@ -524,7 +517,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads one page of a stored pack created by pack_context in this server process. Use it for a returned pack_id; use pack_context instead to create or recreate context when an id is absent or expired. Returns untrusted pack data up to 1,000 lines or 50,000 characters plus trusted continuation or range-clamp notes. Required: pack_id. Optional start_line and end_line are inclusive 1-based integers or numeric strings.")]
+		"Reads one page of a stored result created by pack_context or related_files in this server process. Use it for a returned pack_id; use pack_context instead, or related_files for dependency results, when an id is absent or expired. Returns untrusted result data up to 1,000 lines or 50,000 characters plus trusted continuation or range-clamp notes. Required: pack_id. Optional start_line and end_line are inclusive 1-based integers or numeric strings.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -551,7 +544,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regular expression. Use it to locate symbols or phrases; use related_files instead for static dependency links, or get_file for a known file page. Returns path:line:text matches, merged context groups separated by --, and the count of additional matches beyond max_results; generated redaction replacements never match. Key parameters: pattern, context_lines=0..20, ignore_case=true|false, max_results=1..200, git_scope=staged|changes|diff:<ref>..<ref>, patterns, and max_file_bytes.")]
+		"Searches safe transformed project text with a timed .NET regular expression. Use it to locate symbols or phrases; use related_files instead for static dependency links, or get_file for a known file page. Returns path:line:text matches, merged context groups separated by --, and the count of additional matches beyond max_results; line numbers refer to returned text after replacements, and generated redaction replacements never match. Key parameters: pattern, context_lines=0..20, ignore_case=true|false, max_results=1..200, git_scope=staged|changes|diff:<ref>..<ref>, patterns, and max_file_bytes.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -596,6 +589,7 @@ internal sealed class DevProjexMcpTools(
 			var totalMatches = 0;
 			var shownMatches = 0;
 			var responseLimitReached = false;
+			var resultGroupTruncated = false;
 			await using var searched = await Projects.ConsumeSearchTextAsync(
 				plan,
 				(file, token) =>
@@ -613,18 +607,18 @@ internal sealed class DevProjexMcpTools(
 
 					foreach (var match in scan.Matches)
 					{
-						if (AppendSearchResult(
+						var appended = AppendSearchResult(
 							output,
 							McpProjectService.ToRelative(plan.SourceRoot, file.Path),
 							file.Content,
 							match,
-							MaximumSearchContentCharacters))
-						{
-							shownMatches += match.MatchLineNumbers.Count;
-						}
-						else
+							MaximumSearchContentCharacters);
+						shownMatches += appended.WrittenMatches;
+						if (appended.Truncated)
 						{
 							responseLimitReached = true;
+							resultGroupTruncated = true;
+							break;
 						}
 					}
 					return ValueTask.CompletedTask;
@@ -644,6 +638,7 @@ internal sealed class DevProjexMcpTools(
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
 				additionalMatchesNotice,
+				resultGroupTruncated ? "[Search group truncated at the response character limit.]" : null,
 				SelectionNotices(
 					plan,
 					includeFilters: false,
@@ -708,16 +703,14 @@ internal sealed class DevProjexMcpTools(
 				? "Dependency index reused"
 				: "Dependency index complete").ConfigureAwait(false);
 
-			var body = FormatRelatedFiles(related, direction);
 			var coverage = related.Index.Coverage;
+			var body = CombineProjectData(
+				FormatRelatedFiles(related, direction),
+				FormatDependencyConfigurationData(coverage.ConfigurationDiagnostics));
 			var selectionContext = new McpSelectionNoticeContext(
 				HasPaths: false,
 				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns));
-			var noFactsNotices = related.Seeds
-				.Where(static seed => seed.NoFactsReason is { Length: > 0 })
-				.Select(static seed => $"[No facts] {McpTextEscaping.EscapeSingleLine(seed.NoFactsReason!)}.")
-				.ToArray();
-			var noRelatedNotice = noFactsNotices.Length == 0 && related.Seeds.All(static seed =>
+			var noRelatedNotice = related.Seeds.All(static seed => seed.NoFactsReason is null) && related.Seeds.All(static seed =>
 				seed.Dependencies.Count == 0 && seed.Dependents.Count == 0)
 				? "[No related files] in the effective selection."
 				: null;
@@ -727,7 +720,7 @@ internal sealed class DevProjexMcpTools(
 				FormatDependencyConfigurationDiagnostics(coverage.ConfigurationDiagnostics),
 				$"[Search scope] files={plan.IncludedFiles.Count}",
 				SelectionNotices(plan, includeFilters: true, selectionContext),
-				string.Join('\n', noFactsNotices),
+				FormatSafeNoFactsNotice(related.Seeds),
 				noRelatedNotice);
 			if (message.Length <= MaximumInlinePackCharacters)
 				return McpToolResults.TextSuccess(message, advertiseLargeResult: true);
@@ -740,7 +733,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads one page of one selected file after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context instead for multiple files. Returns untrusted file text up to 1,000 lines or 50,000 characters plus continuation notes. Required: path. Optional start_line and end_line are inclusive 1-based integers or numeric strings. Files outside effective filters are unavailable; content beyond the safe inspection limit fails explicitly with DPX-MCP-PAYLOAD-TRUNCATED.")]
+		"Reads one page of one selected file after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context instead for multiple files. Returns untrusted file text up to 1,000 lines or 50,000 characters plus continuation notes; line numbers refer to this returned text after replacements. Required: path. Optional start_line and end_line are inclusive 1-based integers or numeric strings. Files outside effective filters are unavailable; content beyond the safe inspection limit fails explicitly with DPX-MCP-PAYLOAD-TRUNCATED.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1034,10 +1027,17 @@ internal sealed class DevProjexMcpTools(
 		var output = new StringBuilder();
 		foreach (var seed in result.Seeds)
 		{
-			if (result.Seeds.Count > 1)
+			if (result.Seeds.Count > 1 || seed.NoFactsReason is not null)
 				output.Append("Seed: ").AppendLine(McpTextEscaping.EscapeSingleLine(seed.Seed));
 			if (seed.NoFactsReason is { Length: > 0 })
+			{
+				output.Append("[No facts] ")
+					.Append(IsSafeMarkdownNoFactsReason(seed.NoFactsReason)
+						? "unsupported language category"
+						: McpTextEscaping.EscapeSingleLine(seed.NoFactsReason))
+					.AppendLine(".");
 				continue;
+			}
 			if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
 				AppendRelatedSection(output, "Dependencies", seed.Dependencies);
 			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
@@ -1106,11 +1106,17 @@ internal sealed class DevProjexMcpTools(
 				forceMarker: false);
 		}
 
-		string Compose() => AppendTrustedNotices(
-			header + McpSpotlight.Wrap(treePreview) +
-			(budgetReport is null ? string.Empty : "\n\n" + McpSpotlight.Wrap(budgetReport)),
-			treePreviewWasTruncated ? StoredTreePreviewTruncationNotice : null,
-			trustedNotices);
+		string Compose()
+		{
+			var response = AppendTrustedNotices(
+				header + McpSpotlight.Wrap(treePreview) +
+				(budgetReport is null ? string.Empty : "\n\n" + McpSpotlight.Wrap(budgetReport)),
+				treePreviewWasTruncated ? StoredTreePreviewTruncationNotice : null,
+				trustedNotices);
+			return report is null
+				? response
+				: AppendBudgetAccounting(response, report, pack.Characters);
+		}
 
 		var message = Compose();
 		if (message.Length <= MaximumStoredPackResponseCharacters)
@@ -1188,6 +1194,11 @@ internal sealed class DevProjexMcpTools(
 		return combined;
 	}
 
+	private static string CombineProjectData(params string?[] sections) =>
+		string.Join(
+			Environment.NewLine,
+			sections.Where(static section => !string.IsNullOrWhiteSpace(section)));
+
 	private static string? FormatUnscannableNotice(
 		IReadOnlyList<UnscannableFile>? files,
 		UnscannableResultKind resultKind)
@@ -1210,10 +1221,18 @@ internal sealed class DevProjexMcpTools(
 		       "or lower, exclude oversized or unsupported files, and retry.";
 	}
 
-	private static string? FormatCompressionUnavailable(CodeCompressionSnapshot? snapshot) =>
-		snapshot?.Availability is { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason }
-			? $"[Compression unavailable] {McpTextEscaping.EscapeSingleLine(reason)}"
-			: null;
+	private static string? FormatCompressionUnavailable(CodeCompressionSnapshot? snapshot)
+	{
+		if (snapshot?.Availability is not { IsUnavailable: true } availability)
+			return null;
+		var languages = availability.Failures
+			.Where(static failure => failure.LanguageId is not null)
+			.Select(static failure => failure.LanguageId!)
+			.Distinct(StringComparer.Ordinal)
+			.Count();
+		return $"[Compression unavailable] failures={availability.Failures.Count.ToString(CultureInfo.InvariantCulture)} · " +
+		       $"languages={languages.ToString(CultureInfo.InvariantCulture)}";
+	}
 
 	private static ProjectContextPlan WithoutWarningDiagnostics(ProjectContextPlan plan)
 	{
@@ -1272,11 +1291,30 @@ internal sealed class DevProjexMcpTools(
 		return output.ToString().TrimEnd('\r', '\n');
 	}
 
-	private static string FormatTokenBudgetAccounting(ProjectContextTokenBudgetReport report)
+	private static string AppendBudgetAccounting(
+		string responseWithoutAccounting,
+		ProjectContextTokenBudgetReport report,
+		long? storedDocumentCharacters = null)
 	{
 		var reportTokens = CodeCompressionSnapshot.EstimateTokens(FormatTokenBudgetReport(report).Length);
-		return $"[Budget accounting] content ≈ {report.IncludedEstimatedTokens.ToString(CultureInfo.InvariantCulture)} tokens of budget " +
-		       $"{report.MaximumEstimatedTokens.ToString(CultureInfo.InvariantCulture)}; report ≈ {reportTokens.ToString(CultureInfo.InvariantCulture)} tokens";
+		var replyTokens = CodeCompressionSnapshot.EstimateTokens(responseWithoutAccounting.Length);
+		string? result = null;
+		for (var attempt = 0; attempt < 8; attempt++)
+		{
+			var accounting = $"[Budget accounting] content ≈ {report.IncludedEstimatedTokens.ToString(CultureInfo.InvariantCulture)} of " +
+			                 $"{report.MaximumEstimatedTokens.ToString(CultureInfo.InvariantCulture)} tokens · budget report ≈ " +
+			                 $"{reportTokens.ToString(CultureInfo.InvariantCulture)}" +
+			                 (storedDocumentCharacters is { } storedCharacters
+				                 ? $" · stored document ≈ {CodeCompressionSnapshot.EstimateTokens(storedCharacters).ToString(CultureInfo.InvariantCulture)}"
+				                 : string.Empty) +
+			                 $" · reply ≈ {replyTokens.ToString(CultureInfo.InvariantCulture)}";
+			result = AppendTrustedNotices(responseWithoutAccounting, accounting);
+			var next = CodeCompressionSnapshot.EstimateTokens(result.Length);
+			if (next == replyTokens)
+				break;
+			replyTokens = next;
+		}
+		return result!;
 	}
 
 	private static string? FormatDependencyConfigurationDiagnostics(
@@ -1284,14 +1322,54 @@ internal sealed class DevProjexMcpTools(
 	{
 		if (diagnostics.Count == 0)
 			return null;
-		return string.Join(
-			'\n',
-			diagnostics.Select(diagnostic =>
-				$"[Facts configuration] scopes={diagnostic.ScopeIds.Count.ToString(CultureInfo.InvariantCulture)} · " +
-				$"type={diagnostic.State.ToString().ToLowerInvariant()} · " +
-				$"path={McpTextEscaping.EscapeSingleLine(diagnostic.Path)} · " +
-				McpTextEscaping.EscapeSingleLine(diagnostic.Reason)));
+		var affectedScopes = diagnostics
+			.SelectMany(static diagnostic => diagnostic.ScopeIds)
+			.Distinct(StringComparer.Ordinal)
+			.Count();
+		return $"[Dependency configuration] problems={diagnostics.Count.ToString(CultureInfo.InvariantCulture)} · " +
+		       $"missing={diagnostics.Count(static diagnostic => diagnostic.State == DependencyConfigurationState.Missing).ToString(CultureInfo.InvariantCulture)} · " +
+		       $"corrupt={diagnostics.Count(static diagnostic => diagnostic.State == DependencyConfigurationState.Corrupt).ToString(CultureInfo.InvariantCulture)} · " +
+		       $"unsupported-semantics={diagnostics.Count(static diagnostic => diagnostic.State == DependencyConfigurationState.UnsupportedSemantics).ToString(CultureInfo.InvariantCulture)} · " +
+		       $"affected-scopes={affectedScopes.ToString(CultureInfo.InvariantCulture)}";
 	}
+
+	private static string? FormatDependencyConfigurationData(
+		IReadOnlyList<DependencyConfigurationDiagnostic> diagnostics)
+	{
+		if (diagnostics.Count == 0)
+			return null;
+		var output = new StringBuilder();
+		foreach (var diagnostic in diagnostics.Take(8))
+		{
+			if (output.Length > 0)
+				output.AppendLine();
+			output.Append("[Dependency configuration] ")
+				.Append(McpTextEscaping.EscapeSingleLine(diagnostic.Path))
+				.Append(" · ")
+				.Append(diagnostic.State.ToString().ToLowerInvariant());
+		}
+		if (diagnostics.Count > 8)
+		{
+			output.AppendLine()
+				.Append("[Dependency configuration] and ")
+				.Append((diagnostics.Count - 8).ToString(CultureInfo.InvariantCulture))
+				.Append(" more");
+		}
+		return output.ToString();
+	}
+
+	private static string? FormatSafeNoFactsNotice(IReadOnlyList<SeedRelatedFiles> seeds)
+	{
+		const string markdownUnsupported = "md is not supported by the dependency engine yet";
+		var markdownSeeds = seeds.Count(seed => IsSafeMarkdownNoFactsReason(seed.NoFactsReason));
+		return markdownSeeds == 0
+			? null
+			: $"[No facts] {markdownUnsupported}." +
+			  (markdownSeeds == 1 ? string.Empty : $" seeds={markdownSeeds.ToString(CultureInfo.InvariantCulture)}");
+	}
+
+	private static bool IsSafeMarkdownNoFactsReason(string? reason) =>
+		string.Equals(reason, "md is not supported by the dependency engine yet", StringComparison.Ordinal);
 
 	private static string? FormatRankingReport(
 		ImportanceRankingReport? report,
@@ -1695,7 +1773,7 @@ internal sealed class DevProjexMcpTools(
 			checkpoint.LineNumber).ConfigureAwait(false);
 	}
 
-	private static bool AppendSearchResult(
+	internal static McpSearchAppendResult AppendSearchResult(
 		StringBuilder output,
 		string relativePath,
 		string content,
@@ -1709,21 +1787,23 @@ internal sealed class DevProjexMcpTools(
 			if (separator.Length > separatorRemaining)
 			{
 				AppendBoundedPrefix(output, separator, Math.Max(0, separatorRemaining));
-				return false;
+				return new McpSearchAppendResult(0, Truncated: true);
 			}
 			output.Append(separator);
 		}
 		var safePath = EscapeSingleLine(relativePath);
 		var matchingLines = match.MatchLineNumbers.ToHashSet();
+		var writtenMatches = 0;
 		foreach (var line in match.Lines)
 		{
-			var marker = matchingLines.Contains(line.LineNumber) ? ':' : '-';
+			var isMatchingLine = matchingLines.Contains(line.LineNumber);
+			var marker = isMatchingLine ? ':' : '-';
 			var prefix = $"{safePath}{marker}{line.LineNumber}{marker}";
 			var remaining = maximumCharacters - output.Length;
 			if (prefix.Length > remaining)
 			{
 				AppendBoundedPrefix(output, prefix, Math.Max(0, remaining));
-				return false;
+				return new McpSearchAppendResult(writtenMatches, Truncated: true);
 			}
 			output.Append(prefix);
 
@@ -1734,19 +1814,21 @@ internal sealed class DevProjexMcpTools(
 				Math.Max(0, remaining));
 			if (!fullyEscaped)
 			{
-				return false;
+				return new McpSearchAppendResult(writtenMatches, Truncated: true);
 			}
+			if (isMatchingLine)
+				writtenMatches++;
 
 			remaining = maximumCharacters - output.Length;
 			if (Environment.NewLine.Length > remaining)
 			{
 				AppendBoundedPrefix(output, Environment.NewLine, Math.Max(0, remaining));
-				return false;
+				return new McpSearchAppendResult(writtenMatches, Truncated: true);
 			}
 
 			output.Append(Environment.NewLine);
 		}
-		return true;
+		return new McpSearchAppendResult(writtenMatches, Truncated: false);
 	}
 
 	private static void AppendBoundedPrefix(StringBuilder output, string value, int maximumCharacters)

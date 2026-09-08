@@ -72,8 +72,7 @@ public static class McpServerHost
 		Func<McpRemoteProjectServices>? remoteServicesFactory = null,
 		GitFilteringMode? gitMode = null,
 		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
-		bool agentExclusions = false,
-		Action<McpProjectService>? projectServiceCreated = null)
+		bool agentExclusions = false)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
@@ -103,7 +102,6 @@ public static class McpServerHost
 					gitMode,
 					exclusions,
 					agentExclusions);
-				projectServiceCreated?.Invoke(created);
 				return created;
 			},
 			LazyThreadSafetyMode.ExecutionAndPublication);

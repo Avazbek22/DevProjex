@@ -636,7 +636,7 @@ public sealed partial class McpServerProcessTests
 			Assert.True(string.Equals(expectedProject, listedProject, PathComparison));
 			Assert.False(string.Equals(expectedIgnoredEnvironmentRoot, listedProject, PathComparison));
 			var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
-			using var textDocument = JsonDocument.Parse(text);
+			using var textDocument = JsonDocument.Parse(ExtractSpotlightBody(text));
 			Assert.True(JsonElement.DeepEquals(structured, textDocument.RootElement));
 
 			var file = await client.CallToolAsync(
@@ -671,7 +671,11 @@ public sealed partial class McpServerProcessTests
 				Assert.IsType<TextContentBlock>(Assert.Single(pack.Content)).Text,
 				StringComparison.Ordinal);
 			Assert.Contains(
-				"tokens of budget 100000; report ≈ ",
+				"of 100000 tokens · budget report ≈ ",
+				Assert.IsType<TextContentBlock>(Assert.Single(pack.Content)).Text,
+				StringComparison.Ordinal);
+			Assert.Contains(
+				" · reply ≈ ",
 				Assert.IsType<TextContentBlock>(Assert.Single(pack.Content)).Text,
 				StringComparison.Ordinal);
 		}
@@ -896,6 +900,16 @@ public sealed partial class McpServerProcessTests
 		start += prefix.Length;
 		var end = text.IndexOf('\'', start);
 		Assert.True(end > start, text);
+		return text[start..end];
+	}
+
+	private static string ExtractSpotlightBody(string text)
+	{
+		var opening = System.Text.RegularExpressions.Regex.Match(text, "<untrusted-data-[0-9a-f]{24}>\\n");
+		Assert.True(opening.Success, text);
+		var start = opening.Index + opening.Length;
+		var end = text.IndexOf("\n</untrusted-data-", start, StringComparison.Ordinal);
+		Assert.True(end >= start, text);
 		return text[start..end];
 	}
 

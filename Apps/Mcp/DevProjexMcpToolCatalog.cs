@@ -184,7 +184,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private const string MaximumTokensProperty = """
 	"max_tokens": {
-	  "description": "Maximum estimated content tokens admitted by the greedy file pass; accepts an integer or numeric string. Document structure and the budget report are outside this content budget.",
+	  "description": "Maximum estimated content tokens admitted by the greedy file pass; accepts an integer or numeric string. Document structure and the budget report are outside this content budget. All token figures use a character heuristic, not a tokenizer.",
 	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
 	}
 	""";
@@ -313,9 +313,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    "pack_id": { "type": "string", "minLength": 1, "description": "Session-scoped id returned by pack_context." },
-	    "start_line": { "description": "First 1-based line; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "end_line": { "description": "Last 1-based line, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "pack_id": { "type": "string", "minLength": 1, "description": "Session-scoped id returned by pack_context or related_files." },
+	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
 	  "required": ["pack_id"],
 	  "additionalProperties": false
@@ -350,8 +350,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProjectProperty}},
 	    {{BranchProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
-	    "start_line": { "description": "First 1-based line; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "end_line": { "description": "Last 1-based line, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
 	  "required": ["path"],
 	  "additionalProperties": false
@@ -445,7 +445,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "type": "object",
 	      "description": "Present when requested code compression could not load all required grammars and content was left complete.",
 	      "properties": {
-	        "reason": { "type": "string", "description": "Trusted reason the grammar delivery or language load failed." },
+	        "reason": { "type": "string", "description": "Reason the grammar delivery or language load failed; the text representation remains untrusted data." },
 	        "languages": { "type": "array", "items": { "type": "string" }, "description": "Language ids whose grammar failed; empty when the entire delivery source is unavailable." }
 	      },
 	      "required": ["reason", "languages"],

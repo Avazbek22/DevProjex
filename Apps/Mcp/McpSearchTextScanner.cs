@@ -18,6 +18,10 @@ internal sealed record McpSearchTextScanResult(
 	IReadOnlyList<McpSearchMatchContext> Matches,
 	long ProtectedRangeComparisons);
 
+internal readonly record struct McpSearchAppendResult(
+	int WrittenMatches,
+	bool Truncated);
+
 internal static class McpSearchTextScanner
 {
 	public static McpSearchTextScanResult Scan(

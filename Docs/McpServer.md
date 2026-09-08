@@ -179,8 +179,9 @@ packs.
 - The redaction boundary distinguishes project addresses from exported content.
   File contents and context packs are always processed by Secrets redaction;
   Private Data processing is added only when the server starts with
-  `--hide-private-data`. Root paths in `list_projects`, `get_tree`, and tool
-  errors are returned as-is; remote tools use the safe Git URL as that address.
+  `--hide-private-data`. Root paths in `list_projects` and project-derived
+  details in tool errors remain data inside the untrusted boundary; remote tools
+  use the safe Git URL as the project address.
   These addresses form the contract for the `project` argument. Without the
   flag, a pack retains real addresses like a default CLI export. With the flag,
   the pack is private-data-redacted in full, including its tree header.
@@ -205,8 +206,9 @@ packs.
   limited to 1 GiB. The server does not evict valid packs; a request that would
   exceed either limit returns `DPX-MCP-PACK-TOO-LARGE` with narrowing guidance.
 
-Errors returned by tools have `isError: true` and stable `DPX-MCP-*` codes. They
-describe the valid roots, ranges, or retry action. Malformed JSON-RPC traffic is
+Errors returned by tools have `isError: true` and stable `DPX-MCP-*` codes. Only
+the code and `request failed` status are trusted; the detailed message, including
+requested paths, names, and ranges, is spotlighted as untrusted data. Malformed JSON-RPC traffic is
 reported as a protocol error; an unknown tool name is also a protocol-level error
 and returns JSON-RPC code `-32602`.
 
@@ -239,10 +241,10 @@ open-world.
 | `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
-| `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call `pack_context` again after server restart. |
-| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches are still counted. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
+| `read_pack` | `pack_id`, `start_line?`, `end_line?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart. |
+| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches are still counted. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
-| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. A non-empty file that cannot be inspected under the 16 MiB mandatory-redaction boundary returns `DPX-MCP-PAYLOAD-TRUNCATED` with its byte size and the limit; it never returns an empty success. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
+| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; line numbers refer to the returned text after replacements. At most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. A non-empty file that cannot be inspected under the 16 MiB mandatory-redaction boundary returns `DPX-MCP-PAYLOAD-TRUNCATED` with its byte size and the limit; it never returns an empty success. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, `related_files`, and `get_file` additionally accept the
@@ -283,10 +285,14 @@ Project-derived paths and evidence remain inside the random `untrusted-data` blo
 Outside that block, the server appends `[Facts coverage] files=N, supported=N,
 unsupported=N, extraction-failed=N` with a short explanation that supported files
 produced facts for a recognized language while unsupported files had no extractor.
-Each configuration problem adds `[Facts configuration] scopes=N · type=<state> ·
-path=<safe-relative-path> · <reason>`. `[Search scope] files=N` and the ordinary
+Configuration state is summarized outside the block as `[Dependency configuration]
+problems=N · missing=A · corrupt=B · unsupported-semantics=C · affected-scopes=M`.
+At most eight `path · problem` rows plus an `and N more` row stay inside the
+untrusted block; parser reasons are not returned. `[Search scope] files=N` and the ordinary
 `[Effective filters]` trailer follow. An unsupported seed is a successful empty result with
-trusted `[No facts] <language> is not supported by the dependency engine yet.`; a
+its `[No facts]` path and project-derived explanation inside the untrusted block. The fixed Markdown
+language-category status remains a path-free trusted line while its path stays untrusted;
+arbitrary extension text never enters the trusted line. A
 supported seed without projected edges receives trusted `[No related files] in the
 effective selection.` No trailer names a file hidden by the manifest. See
 [Dependencies.md](Dependencies.md) for evidence layers, statuses, resolver boundaries,
@@ -296,7 +302,7 @@ limits, caching, and determinism.
 
 Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
 authoritative result is the complete object in `structuredContent`; the first
-text block in `content` is a JSON serialization of that same object.
+text block in `content` is a spotlighted JSON serialization of that same object.
 Every field in these two output schemas has a short description. `analyze`
 results include an `exclusions` array that echoes the exclusion
 tokens effective for the call, so the agent and a human reading the transcript
@@ -349,12 +355,15 @@ the final text; only those ranges are excluded from pattern matches. Placeholder
 source text, including an unfinished `DEVPROJEX_REDACTED[` prefix, remains searchable.
 The search is streamed: no intermediate export is written or read. Context windows that overlap or touch
 are emitted once as a merged grep-style group, with `--` between separate groups.
+If the response character limit cuts a group, only matching lines whose complete
+prefix, text, and line ending were written count as shown; the remaining count is
+exact and `[Search group truncated at the response character limit.]` marks the partial group.
 
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append
-`[Compression unavailable] <reason>` when their effective selection requests
+`[Compression unavailable] failures=N · languages=M` when their effective selection requests
 compression. This trusted trailer is outside every project spotlight block and
-names the delivery directory or grammar resource without including project data.
+contains counts only; structured analysis data remains inside its untrusted representation.
 Unsupported languages and files rejected by parse or structural safety checks are
 separate unchanged-file outcomes and do not produce this trailer.
 
@@ -430,9 +439,12 @@ untrusted-data boundary to skipped file names. The report states the budget,
 included and skipped file counts, estimated tokens for both groups, up to the 25
 largest skipped files, and `and X more` when the list is longer. It recommends
 `detail=compact` or `detail=signatures` when additional files are needed.
-The trusted trailer also includes `[Budget accounting] content ≈ N tokens of
-budget M; report ≈ K tokens`. This separates greedily admitted content from the
-diagnostic report, which is deliberately outside the content budget.
+The trusted trailer also includes `[Budget accounting] content ≈ N of M tokens ·
+budget report ≈ K · reply ≈ E`. Stored responses additionally report
+`stored document ≈ D`. `reply` covers every text block in the assembled response;
+all four figures use the same characters-divided-by-four heuristic, not a tokenizer.
+This separates greedily admitted content from the diagnostic report, which is
+deliberately outside the content budget.
 
 `pack_context` accepts the single optional ranking value `rank: "importance"`.
 It applies experimental `importance-v1` only after the effective selection has
@@ -502,14 +514,6 @@ that token the server sends none. `progressToken` is transport metadata, not a
 tool argument, so tool input schemas are unchanged. Progress is monotonic and
 intermediate file-count updates are rate-limited; the other five tools do not
 report progress.
-
-After the first successful `list_projects` or local `get_tree`, the server queues
-one cancellable, single-worker dependency-index warm-up per local root. It uses the
-same effective baseline and the dependency engine's existing file, edge, memory, and
-cache limits, yields before work, does not delay the discovery response, and is
-cancelled and joined when the server stops. A later `related_files` call can reuse
-that warm index; failures are not permanently cached and a later discovery call may
-retry them.
 
 Defaults:
 

@@ -42,6 +42,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Secret detection is not proof", security, StringComparison.Ordinal);
 		Assert.Contains("ProxyCommand", security, StringComparison.Ordinal);
 		Assert.Contains("same operating-system user", security, StringComparison.Ordinal);
+		Assert.Contains("paths, names, configuration keys, parser reasons", security, StringComparison.Ordinal);
 		Assert.Contains("d318b683471101618febed18996405ad26462110", benchmarks, StringComparison.Ordinal);
 		Assert.Contains("85e3969b010c72b905203812d1a3f5beb84a2102", benchmarks, StringComparison.Ordinal);
 		Assert.Contains("three", benchmarks, StringComparison.OrdinalIgnoreCase);
@@ -120,8 +121,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("merged grep-style group", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("[Budget accounting]", server, StringComparison.Ordinal);
 		Assert.Contains("unique `name` from `list_projects`", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("dependency-index warm-up", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("[Facts configuration]", server, StringComparison.Ordinal);
+		Assert.DoesNotContain("dependency-index warm-up", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("[Dependency configuration]", server, StringComparison.Ordinal);
+		Assert.Contains("spotlighted JSON serialization", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("reply ≈ E", server, StringComparison.Ordinal);
 
 		Assert.Contains("MCP agent ergonomics changes four v5.2 behaviors", normalizedVersion, StringComparison.Ordinal);
 		Assert.Contains("there is no strict-range switch", normalizedVersion, StringComparison.Ordinal);

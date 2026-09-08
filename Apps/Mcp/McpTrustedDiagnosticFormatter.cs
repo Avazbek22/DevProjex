@@ -24,12 +24,13 @@ internal static class McpTrustedDiagnosticFormatter
 		foreach (var group in warnings)
 		{
 			var groupedDiagnostics = group.ToArray();
-			var message = FormatSafeMessage(group.Key, groupedDiagnostics);
+			var safeCode = SafeCode(group.Key);
+			var message = FormatSafeMessage(safeCode, groupedDiagnostics);
 			output ??= new StringBuilder();
 			if (output.Length > 0)
 				output.AppendLine();
 			output.Append("[Warning ")
-				.Append(McpTextEscaping.EscapeSingleLine(group.Key))
+				.Append(safeCode)
 				.Append("] ")
 				.Append(message);
 		}
@@ -42,9 +43,19 @@ internal static class McpTrustedDiagnosticFormatter
 		ArgumentNullException.ThrowIfNull(diagnostic);
 		if (diagnostic.Code != GitScopeFilter.UnsafeFilterDiagnosticCode)
 			return null;
-		var driver = McpTextEscaping.EscapeSingleLine(diagnostic.Detail ?? "unknown");
-		return $"[Error {GitScopeFilter.UnsafeFilterDiagnosticCode}] Exact working-tree comparison was refused because the untrusted Git filter '{driver}' is configured.";
+		return $"[Error {GitScopeFilter.UnsafeFilterDiagnosticCode}] Exact working-tree comparison was refused because an untrusted Git filter is configured.";
 	}
+
+	private static string SafeCode(string code) => code switch
+	{
+		GitScopeFilter.DeletedDiagnosticCode => GitScopeFilter.DeletedDiagnosticCode,
+		GitScopeFilter.UnsafeFilterDiagnosticCode => GitScopeFilter.UnsafeFilterDiagnosticCode,
+		ProjectContextGitReadiness.PartialDiagnosticCode => ProjectContextGitReadiness.PartialDiagnosticCode,
+		MissingSelectedPathCode => MissingSelectedPathCode,
+		PartialProjectAccessCode => PartialProjectAccessCode,
+		ProjectSelectionWarningCode => ProjectSelectionWarningCode,
+		_ => ProjectSelectionWarningCode
+	};
 
 	private static string FormatSafeMessage(
 		string code,

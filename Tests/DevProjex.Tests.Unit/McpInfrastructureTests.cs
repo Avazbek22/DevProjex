@@ -352,7 +352,7 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
-	public void ToolErrorsEscapeControlCharactersIntoOneSafeLine()
+	public void ToolErrorsKeepOnlyTheCodeTrustedAndSpotlightEscapedDetails()
 	{
 		var result = McpToolResults.Error(new McpToolException(
 			McpErrorCodes.RootViolation,
@@ -360,11 +360,13 @@ public sealed class McpInfrastructureTests
 
 		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 		Assert.True(result.IsError);
-		Assert.Equal(
+		Assert.StartsWith($"{McpErrorCodes.RootViolation}: request failed.", text, StringComparison.Ordinal);
+		Assert.Contains(
 			$"{McpErrorCodes.RootViolation}: bad\\r\\npath\\t\\u001B[31m\\u2028tail",
-			text);
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains("<untrusted-data-", text, StringComparison.Ordinal);
 		Assert.DoesNotContain('\r', text);
-		Assert.DoesNotContain('\n', text);
 		Assert.DoesNotContain('\u001b', text);
 	}
 
@@ -992,7 +994,7 @@ public sealed class McpInfrastructureTests
 
 		Assert.NotNull(trailer);
 		Assert.Contains(GitScopeFilter.UnsafeFilterDiagnosticCode, trailer, StringComparison.Ordinal);
-		Assert.Contains("hostile", trailer, StringComparison.Ordinal);
+		Assert.DoesNotContain("hostile", trailer, StringComparison.Ordinal);
 		Assert.DoesNotContain(sensitivePath, trailer, StringComparison.Ordinal);
 		Assert.DoesNotContain("unsafe message", trailer, StringComparison.Ordinal);
 	}
@@ -1866,6 +1868,106 @@ public sealed class McpInfrastructureTests
 			contextLines: 1,
 			maximumStoredMatches: 1,
 			cancellation.Token));
+	}
+
+	[Fact]
+	public void SearchRendererCountsOnlyFullyWrittenMatchingLinesAtEveryBoundary()
+	{
+		const string path = "src/😀.cs";
+		const string content = "context before\r\nneedle 😀\r\ncontext after";
+		var scan = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("needle", ignoreCase: false),
+			contextLines: 1,
+			maximumStoredMatches: 10,
+			protectedRanges: [],
+			TestContext.Current.CancellationToken);
+		var match = Assert.Single(scan.Matches);
+		var complete = new StringBuilder();
+		var completeResult = DevProjexMcpTools.AppendSearchResult(
+			complete,
+			path,
+			content,
+			match,
+			int.MaxValue);
+
+		Assert.Equal(1, completeResult.WrittenMatches);
+		Assert.False(completeResult.Truncated);
+		var rendered = complete.ToString();
+		var matchingPrefix = $"src/😀.cs:2:";
+		var matchingStart = rendered.IndexOf(matchingPrefix, StringComparison.Ordinal);
+		Assert.True(matchingStart > 0);
+		var matchingTextEnd = matchingStart + matchingPrefix.Length + "needle 😀".Length;
+		var matchingLineEnd = matchingTextEnd + Environment.NewLine.Length;
+		var limits = new[]
+		{
+			0,
+			matchingStart - 1,
+			matchingStart + matchingPrefix.Length - 1,
+			matchingTextEnd - 1,
+			matchingTextEnd,
+			matchingLineEnd,
+			rendered.Length - 1,
+			rendered.Length
+		};
+		var expected = new[] { 0, 0, 0, 0, 1, 1, 1, 1 };
+		for (var index = 0; index < limits.Length; index++)
+		{
+			var output = new StringBuilder();
+			var result = DevProjexMcpTools.AppendSearchResult(
+				output,
+				path,
+				content,
+				match,
+				limits[index]);
+			Assert.Equal(expected[index], result.WrittenMatches);
+			Assert.Equal(limits[index] < rendered.Length, result.Truncated);
+			Assert.True(output.Length <= limits[index]);
+			if (output.Length > 0 && char.IsHighSurrogate(output[^1]))
+				Assert.Fail("A bounded search result ended with half of a Unicode scalar.");
+		}
+	}
+
+	[Fact]
+	public void SearchRendererCountsFirstAndLastMatchesIndependentlyAcrossMergedAndSeparateGroups()
+	{
+		const string content = "needle one\ncontext\nneedle two\nfar\nfar\nfar\nneedle three";
+		var scan = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("needle", ignoreCase: false),
+			contextLines: 1,
+			maximumStoredMatches: 10,
+			protectedRanges: [],
+			TestContext.Current.CancellationToken);
+		Assert.Equal(2, scan.Matches.Count);
+
+		var firstComplete = new StringBuilder();
+		var firstResult = DevProjexMcpTools.AppendSearchResult(
+			firstComplete,
+			"multi.txt",
+			content,
+			scan.Matches[0],
+			int.MaxValue);
+		Assert.Equal(2, firstResult.WrittenMatches);
+
+		var lastComplete = new StringBuilder(firstComplete.ToString());
+		var lastResult = DevProjexMcpTools.AppendSearchResult(
+			lastComplete,
+			"multi.txt",
+			content,
+			scan.Matches[1],
+			int.MaxValue);
+		Assert.Equal(1, lastResult.WrittenMatches);
+
+		var truncated = new StringBuilder(firstComplete.ToString());
+		var truncatedResult = DevProjexMcpTools.AppendSearchResult(
+			truncated,
+			"multi.txt",
+			content,
+			scan.Matches[1],
+			firstComplete.Length + 2);
+		Assert.Equal(0, truncatedResult.WrittenMatches);
+		Assert.True(truncatedResult.Truncated);
 	}
 
 	[Fact]
