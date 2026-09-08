@@ -169,6 +169,20 @@ strings. Changed files are rescanned individually; unchanged files reuse their
 findings. Full transformed content is produced lazily for Preview or export, and
 temporary data is removed after completion or cancellation.
 
+The implementation avoids work that cannot affect those decisions. Provider-rule values are
+materialized only for accepted findings; line context is built only for line-target allowlists
+after entropy checks; path allowlists and immutable stopword search tables are reused. Preparation
+passes detection entries forward, measures materialized transformed text while writing it, and
+keeps only compact raw/effective metrics between compression prewarm and the Desktop metrics pass.
+None of these execution shortcuts changes rule inputs, allowlist AND/OR semantics, findings,
+replacement offsets, scan limits, or the fail-closed treatment of unreadable content.
+
+Performance investigations can opt into `ContentPipelineDiagnostics`. Its operation-local counters
+include secondary provider-regex runs, line-index builds, rejected-match line contexts, plan
+applications, and transformed-content-only measurement passes. Diagnostics remain inactive unless
+a measurement scope is explicitly opened. The reproducible detector and line-index harness is in
+`tools/Benchmarks/Secrets`; it is not part of the application or release payload.
+
 ## Folder and ZIP copies
 
 With Hide Secrets enabled, a project copy is intentionally not byte-for-byte
