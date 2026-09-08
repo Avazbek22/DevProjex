@@ -474,6 +474,7 @@ public sealed class ImportanceRankingService(
 
 		var outgoing = new int[paths.Length][];
 		var weights = new double[paths.Length][];
+		var weightSums = new double[paths.Length];
 		var dependents = new int[paths.Length];
 		var filesWithEdges = new bool[paths.Length];
 		var edgeCount = 0;
@@ -482,6 +483,7 @@ public sealed class ImportanceRankingService(
 			cancellationToken.ThrowIfCancellationRequested();
 			outgoing[source] = outgoingWeights[source].Keys.Order().ToArray();
 			weights[source] = outgoing[source].Select(target => outgoingWeights[source][target]).ToArray();
+			weightSums[source] = weights[source].Sum();
 			edgeCount += outgoing[source].Length;
 			if (outgoing[source].Length > 0)
 				filesWithEdges[source] = true;
@@ -496,6 +498,7 @@ public sealed class ImportanceRankingService(
 			nodeByPath,
 			outgoing,
 			weights,
+			weightSums,
 			dependents,
 			edgeCount,
 			filesWithEdges.Count(static value => value));
@@ -536,7 +539,7 @@ public sealed class ImportanceRankingService(
 				if (targets.Length == 0)
 					continue;
 				var weights = graph.OutgoingWeights[source];
-				var totalWeight = weights.Sum();
+				var totalWeight = graph.OutgoingWeightSums[source];
 				var share = damping * rank[source] / totalWeight;
 				for (var targetIndex = 0; targetIndex < targets.Length; targetIndex++)
 					next[targets[targetIndex]] += share * weights[targetIndex];
