@@ -55,6 +55,34 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void EmbeddedConfiguration_PreservesPinnedSnapshotAndAppliesVersionedBooleanOverride()
+	{
+		Assert.Equal(
+			"0CEEB4F9C567F9F80EE05E8E37EEBA4646DF809F69C736A64D5B8B1398EB3E4C",
+			GitleaksSecretDetector.ConfigurationSha256);
+		Assert.Equal(GitleaksSecretDetector.ExpectedRuleCount, Detector.RuleCount);
+		Assert.Contains(GitleaksSecretDetector.PolicyOverrideVersion, Detector.RulesIdentity, StringComparison.Ordinal);
+
+		var patterns = Detector.InspectGlobalAllowlistRegexPatterns();
+
+		Assert.Contains(GitleaksSecretDetector.WholeValueBooleanAllowlistPattern, patterns);
+		Assert.DoesNotContain(GitleaksSecretDetector.UpstreamBooleanAllowlistPattern, patterns);
+	}
+
+	[Fact]
+	public void Detect_GlobalBooleanAllowlistDoesNotSuppressAProviderTokenContainingFalse()
+	{
+		const string token = "ghp_falseA7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2";
+
+		var finding = Assert.Single(
+			Detector.Detect("notes.txt", token, TestContext.Current.CancellationToken),
+			static candidate => candidate.RuleId == "github-pat");
+
+		Assert.Equal(token, finding.Value);
+		Assert.Equal((0, token.Length), (finding.Start, finding.Length));
+	}
+
+	[Fact]
 	public void KeywordPrefilter_MatchesTheLinearCandidateOracleAcrossPinnedCasesAndUnicodeCaseFolding()
 	{
 		var cases = LoadUpstreamCorpus()

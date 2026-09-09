@@ -26,6 +26,9 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private const string ResourceSuffix = ".Secrets.Rules.gitleaks-v8.30.1.toml";
 	private const string GenericApiKeyRuleId = "generic-api-key";
 	private const string PrivateKeyRuleId = "private-key";
+	internal const string PolicyOverrideVersion = "devprojex-export-v1";
+	internal const string UpstreamBooleanAllowlistPattern = "(?i)^true|false|null$";
+	internal const string WholeValueBooleanAllowlistPattern = "(?i)^(?:true|false|null)$";
 	private static readonly SearchValues<char> GenericDelimiters = SearchValues.Create("=>|:?,");
 	// Reviewed override for the upstream private-key rule. The upstream body pattern accepts any
 	// character, so in a file that merely mentions PEM markers - test fixtures, documentation -
@@ -79,7 +82,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	public int RuleCount => _configuration.Value.Rules.Count;
 	// The "+pkb" marker records the reviewed private-key override so cached findings produced by
 	// the unbounded upstream pattern are never mistaken for results of the bounded one.
-	public string RulesIdentity => $"gitleaks:{RulesVersion}:{ConfigurationSha256}+pkb";
+	public string RulesIdentity =>
+		$"gitleaks:{RulesVersion}:{ConfigurationSha256}+pkb+{PolicyOverrideVersion}";
 
 	public void WarmUp(CancellationToken cancellationToken = default)
 	{
@@ -219,6 +223,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	internal IReadOnlyList<string> InspectRuleIds() =>
 		_configuration.Value.Rules.Select(static rule => rule.Id).ToArray();
+
+	internal IReadOnlyList<string> InspectGlobalAllowlistRegexPatterns() =>
+		_configuration.Value.GlobalAllowlists
+			.SelectMany(static allowlist => allowlist.Regexes)
+			.Select(static regex => regex.Value.ToString())
+			.ToArray();
 
 	internal bool InspectRuleSpecificEvidence(string ruleId, ReadOnlySpan<char> content) =>
 		HasRuleSpecificEvidence(ruleId, content);
@@ -1292,7 +1302,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		var globalAllowlists = root.TryGetValue("allowlist", out var globalAllowlistValue) &&
 		                       globalAllowlistValue is TomlTable globalAllowlist
-			? new[] { CompileAllowlist(globalAllowlist) }
+			? new[] { CompileGlobalAllowlist(globalAllowlist) }
 			: [];
 		var rules = new List<CompiledRule>(ruleTables.Count);
 		for (var order = 0; order < ruleTables.Count; order++)
@@ -1362,12 +1372,36 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	// bounded finding context under the same hard timeout; using the interpreted engine here
 	// avoids retaining tens of megabytes of lazy symbolic DFA state for exclusion predicates.
 	private static CompiledAllowlist CompileAllowlist(TomlTable table) =>
+		CompileAllowlist(table, GetStringArray(table, "regexes"));
+
+	private static CompiledAllowlist CompileGlobalAllowlist(TomlTable table)
+	{
+		var regexPatterns = GetStringArray(table, "regexes");
+		var overrideCount = 0;
+		for (var index = 0; index < regexPatterns.Length; index++)
+		{
+			if (!regexPatterns[index].Equals(UpstreamBooleanAllowlistPattern, StringComparison.Ordinal))
+				continue;
+			regexPatterns[index] = WholeValueBooleanAllowlistPattern;
+			overrideCount++;
+		}
+		if (overrideCount != 1)
+		{
+			throw new SecretDetectionException(
+				"The reviewed global boolean allowlist changed and its export-policy override needs a new review.");
+		}
+		return CompileAllowlist(table, regexPatterns);
+	}
+
+	private static CompiledAllowlist CompileAllowlist(
+		TomlTable table,
+		IReadOnlyList<string> regexPatterns) =>
 		new(
 			GetStringArray(table, "paths").Select(pattern => CreateDeferredRegex(
 				pattern,
 				"allowlist path",
 				useNonBacktracking: false)).ToArray(),
-			GetStringArray(table, "regexes").Select(pattern => CreateDeferredRegex(
+			regexPatterns.Select(pattern => CreateDeferredRegex(
 				pattern,
 				"allowlist expression",
 				useNonBacktracking: false)).ToArray(),
