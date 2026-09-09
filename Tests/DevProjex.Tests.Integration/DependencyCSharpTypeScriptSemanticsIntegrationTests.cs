@@ -6,6 +6,33 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New013_QualifiedNameUsesLexicalNamespaceBeforeGlobalNamespace()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var lexical = fixture.CreateFile(
+			"AppItem.cs",
+			"namespace App.Models; public sealed class Item { }");
+		var global = fixture.CreateFile(
+			"GlobalItem.cs",
+			"namespace Models; public sealed class Item { }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"namespace App; public sealed class Consumer { Models.Item Value; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, lexical, global, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "Consumer.cs" && candidate.Reference == "Models.Item");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("AppItem.cs", edge.Target);
+	}
+
+	[Fact]
 	public async Task New012_NestedBlockNamespacesComposeTheirQualifiedName()
 	{
 		using var fixture = new TemporaryDirectory();

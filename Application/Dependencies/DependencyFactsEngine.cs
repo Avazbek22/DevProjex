@@ -1834,8 +1834,12 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			if (source.LanguageId == LanguageId.CSharp)
 			{
-				if (!reference.IsGlobalQualified && reference.Name.Contains('.') && !aliasExpanded && candidates.Length == 0)
-					candidates = LookupContextualCSharpQualified(source, reference, expandedName);
+				if (!reference.IsGlobalQualified && reference.Name.Contains('.') && !aliasExpanded)
+				{
+					var contextual = LookupContextualCSharpQualified(source, reference, expandedName);
+					if (contextual.Length > 0)
+						candidates = contextual;
+				}
 				else if (!requiresQualifiedLookup)
 					candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
 			}
