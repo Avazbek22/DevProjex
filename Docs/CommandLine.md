@@ -775,6 +775,10 @@ Folder and ZIP exports preserve selected binary bytes, timestamps, directory
 structure, and included empty directories. Staging is cleaned after cancellation
 or failure. Canonical destination checks reject destinations equal to or inside
 the source, including paths reached through symlinks or junctions.
+On Unix, folder copies preserve safe permission and executable bits without
+carrying setuid/setgid metadata. ZIP entries record the same modes for conforming
+extractors. Destination staging is private to the current user, and completed ZIP
+files remain user-readable and writable only.
 
 With `--hide-secrets` or `--hide-private-data`, detected values in text files are replaced. Binary files remain
 unchanged. The result is intentionally not byte-for-byte faithful and may not

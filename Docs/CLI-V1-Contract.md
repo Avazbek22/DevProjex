@@ -687,6 +687,11 @@ replacement.
 ZIP output also accepts `-o -` and streams raw ZIP bytes to stdout. Folder output
 with `-o -` is a usage error.
 
+On Unix, adjacent staging directories are mode `0700` and staging files are mode
+`0600`. Completed folder entries preserve source permission and executable bits
+after removing special setuid/setgid bits. ZIP entries carry the corresponding
+safe Unix modes; a completed ZIP file remains mode `0600`.
+
 When `--hide-secrets` is selected, text findings are replaced. Such a copy is intentionally not byte-for-byte faithful
 and may not build or run. Binary files remain unchanged. The normal confirmation
 and dry-run plan state this before writing.
