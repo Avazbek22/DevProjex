@@ -2661,10 +2661,10 @@ public sealed class SecretRedactionScope
 				cancellationToken);
 		}
 
-		EnsureScannableLength(filePath, sourceContent.Length);
 		var inspectionMode = GetContentInspectionMode(filePath);
 		if (inspectionMode == SecretContentInspectionMode.None)
 			return null;
+		EnsureScannableLength(filePath, sourceContent.Length);
 		var sourceEntry = _session.GetOrDetectFindings(
 			_projectRoot,
 			filePath,
