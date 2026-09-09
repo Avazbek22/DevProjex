@@ -26,6 +26,7 @@ $hasReleaseArchives = -not [string]::IsNullOrWhiteSpace($ReleasePublishRoot)
 if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) { $ReleaseVersion = $Version }
 
 . (Join-Path $PSScriptRoot 'release-archive-helpers.ps1')
+. (Join-Path $PSScriptRoot 'HeadlessPackagePublishing.ps1')
 
 if ($manifest.schemaVersion -ne 1) {
     throw "Unsupported headless payload manifest schema: $($manifest.schemaVersion)."
@@ -112,6 +113,12 @@ Assert-Artifact `
     -Condition (-not ($actualNugetNames | Where-Object { $_ -match '\.any\.' })) `
     -ArtifactName $nugetPath `
     -Missing "the no-any-package contract"
+
+foreach ($packageName in $actualNugetNames) {
+    $packagePath = Join-Path $nugetPath $packageName
+    try { $null = Read-NuGetPayloadReceipt $packagePath }
+    catch { throw "Artifact '$packageName' has an invalid payload receipt: $($_.Exception.Message)" }
+}
 
 $pointerName = "devprojex.$Version.nupkg"
 $pointerPackage = Join-Path $nugetPath $pointerName

@@ -19,6 +19,7 @@ $stagingRoot = Join-Path $headlessRoot "staging"
 $releasePublishRoot = Join-Path $headlessRoot "release"
 
 . (Join-Path $PSScriptRoot "release-archive-helpers.ps1")
+. (Join-Path $PSScriptRoot "HeadlessPackagePublishing.ps1")
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
@@ -119,6 +120,10 @@ Invoke-Checked "dotnet" @(
     "/p:DebugType=None",
     "/p:DebugSymbols=false"
 ) $repoRoot
+
+Get-ChildItem -LiteralPath $nugetRoot -Filter '*.nupkg' -File | ForEach-Object {
+    Add-NuGetPayloadReceipt $_.FullName
+}
 
 foreach ($rid in $manifest.rids) {
     $ridPublishRoot = Join-Path $publishRoot $rid.rid
