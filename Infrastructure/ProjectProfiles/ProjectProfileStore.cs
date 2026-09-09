@@ -279,6 +279,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		string localProjectPath,
 		TimeSpan lockTimeout)
 	{
+		ArgumentOutOfRangeException.ThrowIfLessThan(lockTimeout, TimeSpan.Zero);
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 		{
 			return new ProjectProfileLookupResult(
@@ -286,10 +287,21 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				null);
 		}
 
-		lock (_sync)
+		var startedTimestamp = Stopwatch.GetTimestamp();
+		if (!Monitor.TryEnter(_sync, lockTimeout))
+		{
+			return new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.TemporarilyUnavailable,
+				null);
+		}
+
+		try
 		{
 			var fileSet = GetFileSet();
-			if (!CrossProcessFileLock.TryAcquire(fileSet, lockTimeout, out var heldLock))
+			if (!CrossProcessFileLock.TryAcquire(
+				    fileSet,
+				    RemainingTimeout(startedTimestamp, lockTimeout),
+				    out var heldLock))
 			{
 				return new ProjectProfileLookupResult(
 					ProjectProfileLookupStatus.TemporarilyUnavailable,
@@ -313,7 +325,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			{
 				if (primaryRequiresRewrite)
 					TrySaveInternal(fileSet, primaryDb);
-				return ResolveLookup(primaryDb, normalizedPath, fileSet, lockTimeout);
+				return ResolveLookup(
+					primaryDb,
+					normalizedPath,
+					fileSet,
+					RemainingTimeout(startedTimestamp, lockTimeout));
 			}
 
 			if (TryLoadFromPath(
@@ -322,7 +338,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				    out var backupRequiresRewrite))
 			{
 				TrySaveInternal(fileSet, backupDb);
-				return ResolveLookup(backupDb, normalizedPath, fileSet, lockTimeout);
+				return ResolveLookup(
+					backupDb,
+					normalizedPath,
+					fileSet,
+					RemainingTimeout(startedTimestamp, lockTimeout));
 			}
 
 			var status = File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath)
@@ -330,6 +350,16 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				: ProjectProfileLookupStatus.Missing;
 			return new ProjectProfileLookupResult(status, null);
 		}
+		finally
+		{
+			Monitor.Exit(_sync);
+		}
+	}
+
+	private static TimeSpan RemainingTimeout(long startedTimestamp, TimeSpan budget)
+	{
+		var remaining = budget - Stopwatch.GetElapsedTime(startedTimestamp);
+		return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
 	}
 
 	public bool TryDeleteProfile(string localProjectPath)

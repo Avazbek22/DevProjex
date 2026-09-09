@@ -873,6 +873,51 @@ public sealed class ProjectProfileStoreAdditionalTests
 		}
 	}
 
+	[Fact]
+	public async Task LookupProfile_InProcessContentionUsesOneBoundedTimeout()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var syncField = typeof(ProjectProfileStore).GetField(
+				"_sync",
+				System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+			var sync = Assert.IsType<object>(syncField?.GetValue(store));
+			using var entered = new ManualResetEventSlim();
+			using var release = new ManualResetEventSlim();
+			var holder = Task.Run(() =>
+			{
+				Monitor.Enter(sync);
+				try
+				{
+					entered.Set();
+					release.Wait(TestContext.Current.CancellationToken);
+				}
+				finally
+				{
+					Monitor.Exit(sync);
+				}
+			}, TestContext.Current.CancellationToken);
+			entered.Wait(TestContext.Current.CancellationToken);
+			var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+			var result = store.LookupProfile(
+				Path.Combine(tempRoot, "LockedProfile"),
+				TimeSpan.FromMilliseconds(50));
+
+			stopwatch.Stop();
+			release.Set();
+			await holder;
+			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, result.Status);
+			Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
 	private static ProjectSelectionProfile CreateProfile()
 	{
 		return new ProjectSelectionProfile(
