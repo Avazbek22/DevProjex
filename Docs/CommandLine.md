@@ -379,6 +379,16 @@ immediately when stdin is an interactive terminal. Its entries are combined with
 profile path selection as one explicit override. Input is limited to 100,000
 non-empty entries and 16 MiB.
 
+When Git supplies the list, disable its C-style path quoting so non-ASCII names
+remain literal UTF-8 input:
+
+```shell
+git -c core.quotepath=false diff --name-only | devprojex export context . --select-from - -o -
+```
+
+The reader deliberately does not auto-unescape quotes or octal sequences because
+those characters can be part of a real file name.
+
 ## Repository URL Sources
 
 `tui`, `open`, `analyze`, `tree`, `export context`, and `export project` accept either a
@@ -520,7 +530,9 @@ parent directory must already exist.
 detector errors are never emitted. The number of descriptors equals the combined
 effective matched counts from the same inspection session. `--fail-on-findings`
 writes the requested report and returns policy exit code `3` when any effective
-finding exists; unlike `--strict`, it does not gate ordinary diagnostics.
+finding exists or when a selected text file could not be inspected. A broken
+stdout consumer never upgrades that policy result to success. Unlike `--strict`,
+it does not gate ordinary diagnostics.
 Either findings option runs count-only secret detection when it was otherwise
 disabled, but never changes `--hide-secrets` or the emitted content. JSON adds
 `findingCount`; `findings` remains conditional on `--findings`. Text reports
@@ -773,11 +785,23 @@ Folder and ZIP exports preserve selected binary bytes, timestamps, directory
 structure, and included empty directories. Staging is cleaned after cancellation
 or failure. Canonical destination checks reject destinations equal to or inside
 the source, including paths reached through symlinks or junctions.
+On Unix, folder copies preserve safe permission and executable bits without
+carrying setuid/setgid metadata. ZIP entries record the same modes for conforming
+extractors. Destination staging is private to the current user, and completed ZIP
+files remain user-readable and writable only.
 
 With `--hide-secrets` or `--hide-private-data`, detected values in text files are replaced. Binary files remain
 unchanged. The result is intentionally not byte-for-byte faithful and may not
 build or run. `--dry-run` states this before any destination or staging path is
-created.
+created and performs the same transformation-notice collision preflight as the
+real export. A reserved notice file that is outside the effective selection does
+not collide because it is not copied.
+
+v5.2 limitations: code compression in a project copy is best-effort when its
+grammar is unavailable; an unchanged file does not by itself cause a strict
+failure or a generated compression notice. An untransformed folder/ZIP copy also
+does not pin one project-wide source revision, so concurrent source edits can be
+observed at different moments. Stop writers before producing a release archive.
 
 On success, file and folder destinations write exactly one absolute result path
 to stdout. A ZIP destination of `-` writes only the raw archive bytes instead.

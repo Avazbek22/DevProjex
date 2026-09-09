@@ -1190,6 +1190,77 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
+	public async Task FailOnFindingsReturnsPolicyFailureWhenSelectedTextCannotBeScanned()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		await File.WriteAllTextAsync(
+			Path.Combine(workspace.ProjectRoot, "oversized.txt"),
+			new string('x', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1)),
+			TestContext.Current.CancellationToken);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--git-mode", "none",
+				"--fail-on-findings",
+				"--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(0, document.RootElement.GetProperty("findingCount").GetInt32());
+		Assert.Single(document.RootElement
+			.GetProperty("contentInspection")
+			.GetProperty("unscannableFiles")
+			.EnumerateArray());
+	}
+
+	[Theory]
+	[InlineData("hidden-files")]
+	[InlineData("dot-files")]
+	[InlineData("smart-ignore")]
+	public async Task ExportContext_PathExclusionOverridePreservesPortableProfileSecretRedaction(
+		string exclusion)
+	{
+		using var workspace = CreateWorkspace();
+		var profile = workspace.Temporary.WriteFile(
+			"profile.json",
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "hideSecrets": true
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", profile,
+				"--exclude", exclusion,
+				"--view", "content",
+				"--format", "text",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task ExportContext_LocalProfileAppliesSourceBoundMarkToOnlySelectedOccurrence()
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);

@@ -87,9 +87,12 @@ public sealed class ProfileCommandHandler(
 		bool apply,
 		CancellationToken cancellationToken)
 	{
-		var selection = await services.PortableProfileService
-			.LoadAsync(profilePath, cancellationToken)
+		var loaded = await services.PortableProfileService
+			.LoadWithMetadataAsync(profilePath, cancellationToken)
 			.ConfigureAwait(false);
+		var selection = loaded.Selection;
+		if (loaded.SourceSchemaVersion == PortableProjectProfileService.LegacySchemaVersion)
+			environment.Error.WriteLine(PortableProjectProfileService.LegacySchemaNotice);
 		if (apply)
 		{
 			var plan = await services.ContextFactory
@@ -158,6 +161,8 @@ public sealed class ProfileCommandHandler(
 		if (result.IsValid)
 		{
 			environment.Output.WriteLine(services.Localization["Terminal.Profile.Valid"]);
+			if (result.SourceSchemaVersion == PortableProjectProfileService.LegacySchemaVersion)
+				environment.Output.WriteLine(PortableProjectProfileService.LegacySchemaNotice);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -281,9 +286,12 @@ public sealed class ProfileCommandHandler(
 		output.Append(services.Localization["Terminal.Analysis.Extensions"]).Append(": ")
 			.AppendLine(selection.Extensions is { Count: > 0 } extensions ? JoinEscaped(extensions) : all);
 		output.Append(services.Localization["Terminal.Profile.SelectedPaths"]).Append(": ")
-			.AppendLine(selection.SelectedPaths is { Count: > 0 } selectedPaths
-				? JoinEscaped(selectedPaths)
-				: all);
+			.AppendLine(selection.SelectedPaths switch
+			{
+				null => all,
+				{ Count: 0 } => "none",
+				{ } selectedPaths => JoinEscaped(selectedPaths)
+			});
 		if (selection.Exclusions is { Count: > 0 } exclusions)
 		{
 			output.Append(services.Localization["Terminal.Analysis.Exclusions"]).Append(": ")
@@ -322,7 +330,7 @@ public sealed class ProfileCommandHandler(
 		JsonSerializer.Serialize(
 			new
 			{
-				schemaVersion = 1,
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
 				kind = PortableProjectProfileService.DocumentKind,
 				selection = new
 				{
@@ -332,7 +340,7 @@ public sealed class ProfileCommandHandler(
 					extensions = selection.Extensions?
 						.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
 						.ToArray(),
-					selectedPaths = (selection.SelectedPaths ?? [])
+					selectedPaths = selection.SelectedPaths?
 						.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 						.ToArray(),
 					gitMode = selection.GitMode is { } gitMode

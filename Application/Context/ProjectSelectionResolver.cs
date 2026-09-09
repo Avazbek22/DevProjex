@@ -114,10 +114,9 @@ public sealed class ProjectSelectionResolver(
 	{
 		var selected = overrides.Exclusions ?? baseline.Exclusions;
 		var legacyHideSecrets = selected?.Contains(ProjectExclusion.HideSecrets) == true;
-		var hideSecrets = overrides.HideSecrets ??
-		                  (overrides.Exclusions is not null
-			                  ? legacyHideSecrets
-			                  : baseline.HideSecrets ?? legacyHideSecrets);
+		var hideSecrets = overrides.HideSecrets ?? baseline.HideSecrets ?? legacyHideSecrets;
+		if (overrides.HideSecrets is null && legacyHideSecrets)
+			hideSecrets = true;
 		var pathExclusions = selected?
 			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
 			.OrderBy(static exclusion => (int)exclusion)
@@ -142,17 +141,34 @@ public sealed class ProjectSelectionResolver(
 
 	private ProjectSelectionSpec ResolveLocal(string projectPath)
 	{
-		if (!localProfileStore.TryLoadProfile(projectPath, out var profile))
-		{
-			throw new ProjectContextValidationException(
-				"DPX-CLI-PROFILE-NOT-FOUND",
-				"No local profile exists for this project.");
-		}
+		var lookup = localProfileStore.LookupProfile(projectPath, TimeSpan.FromSeconds(5));
+		if (lookup.Status != ProjectProfileLookupStatus.Found || lookup.Profile is null)
+			throw CreateLocalProfileFailure(lookup.Status);
 
-		var snapshot = ProjectSelectionProfileBuilder.Clone(profile);
+		var snapshot = ProjectSelectionProfileBuilder.Clone(lookup.Profile);
 		return ProjectSelectionAdapter.FromLegacyProfile(snapshot, ProjectProfileReference.Local) with
 		{
 			LocalProfileState = new LocalProjectSelectionState(snapshot)
 		};
 	}
+
+	private static ProjectContextValidationException CreateLocalProfileFailure(
+		ProjectProfileLookupStatus status) => status switch
+	{
+		ProjectProfileLookupStatus.Missing => new ProjectContextValidationException(
+			"DPX-CLI-PROFILE-NOT-FOUND",
+			"No local profile exists for this project."),
+		ProjectProfileLookupStatus.TemporarilyUnavailable => new ProjectContextValidationException(
+			"DPX-CLI-PROFILE-BUSY",
+			"The local profile store is temporarily unavailable; retry the command."),
+		ProjectProfileLookupStatus.InvalidStorage => new ProjectContextValidationException(
+			"DPX-CLI-PROFILE-CORRUPT",
+			"The local profile store is corrupt and must be recovered before use."),
+		ProjectProfileLookupStatus.UnsupportedFutureSchema => new ProjectContextValidationException(
+			"DPX-CLI-PROFILE-FUTURE-SCHEMA",
+			"The local profile store was written by a newer incompatible version."),
+		_ => new ProjectContextValidationException(
+			"DPX-CLI-PROFILE-INVALID",
+			"The local profile request is invalid.")
+	};
 }

@@ -820,6 +820,33 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
+	public void SaveProfile_CorruptPrimaryAndBackupRefusesToOverwriteRecoverableBytes()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			Assert.True(store.EnsureStorageExists());
+			const string primaryBytes = "{ invalid-primary";
+			const string backupBytes = "{ invalid-backup";
+			File.WriteAllText(store.GetPath(), primaryBytes);
+			File.WriteAllText(store.GetPath() + ".bak", backupBytes);
+
+			var result = store.TrySaveProfileWithResult(
+				Path.Combine(tempRoot, "Project"),
+				CreateProfile());
+
+			Assert.False(result.Succeeded);
+			Assert.Equal(primaryBytes, File.ReadAllText(store.GetPath()));
+			Assert.Equal(backupBytes, File.ReadAllText(store.GetPath() + ".bak"));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void LookupProfile_HeldStoreLockReportsTemporaryUnavailability()
 	{
 		var tempRoot = CreateTempDirectory();
@@ -839,6 +866,51 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, result.Status);
 			Assert.Null(result.Profile);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public async Task LookupProfile_InProcessContentionUsesOneBoundedTimeout()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var syncField = typeof(ProjectProfileStore).GetField(
+				"_sync",
+				System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+			var sync = Assert.IsType<object>(syncField?.GetValue(store));
+			using var entered = new ManualResetEventSlim();
+			using var release = new ManualResetEventSlim();
+			var holder = Task.Run(() =>
+			{
+				Monitor.Enter(sync);
+				try
+				{
+					entered.Set();
+					release.Wait(TestContext.Current.CancellationToken);
+				}
+				finally
+				{
+					Monitor.Exit(sync);
+				}
+			}, TestContext.Current.CancellationToken);
+			entered.Wait(TestContext.Current.CancellationToken);
+			var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+			var result = store.LookupProfile(
+				Path.Combine(tempRoot, "LockedProfile"),
+				TimeSpan.FromMilliseconds(50));
+
+			stopwatch.Stop();
+			release.Set();
+			await holder;
+			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, result.Status);
+			Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(1));
 		}
 		finally
 		{

@@ -231,6 +231,9 @@ latter reads UTF-8 source-relative entries, one per line, from a file or
 redirected stdin (`-`), ignores empty lines, and rejects interactive stdin.
 Inputs are capped at 100,000 entries and 16 MiB. Entries from both options are
 combined and deduplicated with project path semantics.
+Git pipelines use `git -c core.quotepath=false diff --name-only`; the reader
+consumes literal UTF-8 lines and never guesses whether quotes or backslash-octal
+text should be decoded.
 Names discovered in the project tree retain exact ordinal identity, including
 case-distinct siblings. On Windows, a differently cased input remains compatible
 only when it resolves to one unambiguous discovered entry.
@@ -571,7 +574,8 @@ Text output places descriptors in a separate, localized three-column findings ta
 after the main analysis table. Plain output aligns the same columns with spaces and
 never emits tab characters.
 `--fail-on-findings` writes the report and returns `3` when that effective count
-is nonzero; it is independent from `--strict`. Requesting `--findings` or
+is nonzero or selected text could not be inspected; a closed output pipe does not
+upgrade this policy result to success. It is independent from `--strict`. Requesting `--findings` or
 `--fail-on-findings` runs count-only secret detection when needed but never
 changes the effective `HideSecrets` selection or redacts the emitted report.
 JSON adds the optional `findingCount`; the text redacted-value row is present only
@@ -686,9 +690,21 @@ replacement.
 ZIP output also accepts `-o -` and streams raw ZIP bytes to stdout. Folder output
 with `-o -` is a usage error.
 
+On Unix, adjacent staging directories are mode `0700` and staging files are mode
+`0600`. Completed folder entries preserve source permission and executable bits
+after removing special setuid/setgid bits. ZIP entries carry the corresponding
+safe Unix modes; a completed ZIP file remains mode `0600`.
+
+v5.2 does not make an untransformed project copy a project-wide point-in-time
+snapshot, and unavailable compression grammars do not turn best-effort project
+copy into a strict failure. These limitations do not weaken Hide Secrets scan
+limits or the omission of text that could not be inspected.
+
 When `--hide-secrets` is selected, text findings are replaced. Such a copy is intentionally not byte-for-byte faithful
 and may not build or run. Binary files remain unchanged. The normal confirmation
-and dry-run plan state this before writing.
+and dry-run plan state this before writing. Dry-run and real export apply the
+same reserved transformation-notice collision check to the effective export plan;
+an excluded source notice does not block creation of the generated notice.
 
 ### `recent`
 
@@ -917,7 +933,7 @@ that prevents an accepted option from becoming a no-op.
 | `analyze`, `tree` | `--force` | off | atomically replaces an existing report/tree file | invalid with stdout | success path on stdout; invalid combination exits `2` | parser, destination, process |
 | `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |
 | `analyze` | `--findings` | off | adds sanitized effective redaction descriptors | values, source fragments, fingerprints, and raw detector errors are forbidden | report stays on stdout/file | serializer, sanitation, process |
-| `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings | independent from `--strict` | requested report remains intact; a nonzero finding count exits `3` | handler, process |
+| `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings and incomplete text inspection | independent from `--strict` | a nonzero finding count, an unscannable selected text file, or a broken pipe after policy evaluation exits `3` | handler, process |
 | `analyze` | `--top-files` | absent | appends the N largest selected text files by estimated tokens | range `1..1000`; ranking reflects effective transformations | optional text section or `topFiles` JSON property; invalid value exits `2` | parser, observer metrics, schema, process |
 | `related` | `--project` | current directory | selects the local directory or Git URL whose effective manifest is indexed | the positional `PATH` remains the seed; `--branch` is URL-only | related-files document on stdout; invalid source exits by the existing source rules | parser, source resolver, process |
 | `related` | `--direction` | `both` | emits dependencies, dependents, or both without changing the indexed manifest | values are `dependencies`, `dependents`, `both` | text or JSON payload remains on stdout; invalid value exits `2` | parser, renderer, process |
@@ -1367,9 +1383,18 @@ devprojex-profile-validation
 devprojex-ui-instances
 ```
 
-Newly written portable profiles include `kind: "devprojex-profile"`. Readers
-continue to accept schema-v1 profiles created before the kind discriminator was
-added, but reject any explicit conflicting kind.
+Newly written portable profiles use schema version 2 and include kind
+`devprojex-profile`. In schema v2, `selectedPaths` preserves three distinct
+states: null or omitted means the full effective tree, an empty array means no
+selected paths, and a non-empty array is a literal narrowing selection.
+
+Readers continue to accept schema-v1 portable profiles created by v5.1. For
+schema v1 only, null, an omitted property, and an empty array all mean the full
+effective tree; a non-empty array narrows it. Loading and saving migrates v1 to
+v2, representing the full selection as null. Text `profile validate` appends the
+fixed migration notice after `valid`; `profile import` writes the same notice to
+stderr without changing its single-path stdout contract. Unsupported versions
+remain `DPX-CLI-PROFILE-INVALID`. An explicit conflicting kind is also rejected.
 
 Context XML uses `devprojexContext`, numeric text `schemaVersion="1"`, and
 `kind="devprojex-context"`. Its XML declaration reports UTF-8. Generated JSON and

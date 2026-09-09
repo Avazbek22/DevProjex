@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Runtime.Versioning;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.Secrets;
@@ -7,6 +8,110 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class ProjectCopyExportServiceIntegrationTests
 {
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	[UnsupportedOSPlatform("windows")]
+	public async Task ExportPreservesSafeUnixModesAndExecutableBits(ProjectCopyExportFormat format)
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes are unavailable on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("ModeSample");
+		var outputRoot = workspace.CreateDirectory("output");
+		var scriptPath = Path.Combine(sourceRoot, "run.sh");
+		var textPath = Path.Combine(sourceRoot, "readme.txt");
+		await File.WriteAllTextAsync(scriptPath, "#!/bin/sh\nexit 0\n", TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(textPath, "text\n", TestContext.Current.CancellationToken);
+		var scriptMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+		                 UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+		                 UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+		var textMode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+		               UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+		File.SetUnixFileMode(scriptPath, scriptMode);
+		File.SetUnixFileMode(textPath, textMode);
+		var tree = new TreeNodeDescriptor(
+			"ModeSample", sourceRoot, true, false, "folder",
+			[
+				new TreeNodeDescriptor("run.sh", scriptPath, false, false, "file", []),
+				new TreeNodeDescriptor("readme.txt", textPath, false, false, "file", [])
+			]);
+		var destination = Path.Combine(outputRoot, format == ProjectCopyExportFormat.Zip ? "copy.zip" : "copy");
+
+		var result = await new ProjectCopyExportService(new ProjectCopyExportPlanBuilder()).ExportAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot, "ModeSample", tree, new HashSet<string>(PathComparer.Default),
+				destination, format, ProjectCopyDestinationMode.Exact),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		if (format == ProjectCopyExportFormat.Folder)
+		{
+			Assert.Equal(scriptMode, File.GetUnixFileMode(Path.Combine(result.DestinationPath, "run.sh")));
+			Assert.Equal(textMode, File.GetUnixFileMode(Path.Combine(result.DestinationPath, "readme.txt")));
+		}
+		else
+		{
+			using (var archive = ZipFile.OpenRead(result.DestinationPath))
+			{
+				Assert.Equal((int)scriptMode, Assert.Single(archive.Entries, e => e.Name == "run.sh").ExternalAttributes >> 16 & 0x1ff);
+				Assert.Equal((int)textMode, Assert.Single(archive.Entries, e => e.Name == "readme.txt").ExternalAttributes >> 16 & 0x1ff);
+			}
+			var extracted = Path.Combine(outputRoot, "extracted");
+			ZipFile.ExtractToDirectory(result.DestinationPath, extracted);
+			Assert.Equal(scriptMode, File.GetUnixFileMode(Path.Combine(extracted, "ModeSample", "run.sh")));
+			Assert.Equal(textMode, File.GetUnixFileMode(Path.Combine(extracted, "ModeSample", "readme.txt")));
+		}
+	}
+
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	[UnsupportedOSPlatform("windows")]
+	public async Task ExportCreatesPrivateUnixStaging(ProjectCopyExportFormat format)
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes are unavailable on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("PrivateSample");
+		var outputRoot = workspace.CreateDirectory("output");
+		var sourceFile = Path.Combine(sourceRoot, "file.txt");
+		await File.WriteAllTextAsync(sourceFile, "content\n", TestContext.Current.CancellationToken);
+		var tree = new TreeNodeDescriptor(
+			"PrivateSample", sourceRoot, true, false, "folder",
+			[new TreeNodeDescriptor("file.txt", sourceFile, false, false, "file", [])]);
+		var observed = false;
+		var expected = format == ProjectCopyExportFormat.Folder
+			? UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+			: UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(_ =>
+		{
+			if (observed)
+				return;
+			var staging = Assert.Single(Directory.EnumerateFileSystemEntries(outputRoot, ".devprojex-*.tmp"));
+			Assert.Equal(expected, File.GetUnixFileMode(staging));
+			observed = true;
+		});
+
+		await new ProjectCopyExportService(new ProjectCopyExportPlanBuilder()).ExportAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot, "PrivateSample", tree, new HashSet<string>(PathComparer.Default),
+				Path.Combine(outputRoot, format == ProjectCopyExportFormat.Zip ? "copy.zip" : "copy"),
+				format, ProjectCopyDestinationMode.Exact),
+			progress,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(observed);
+	}
+
+
 	[Theory]
 	[InlineData(ProjectCopyExportFormat.Folder)]
 	[InlineData(ProjectCopyExportFormat.Zip)]

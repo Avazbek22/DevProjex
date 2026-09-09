@@ -148,7 +148,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return new ProjectProfileBatchSaveResult([]);
 			}
 
-			var db = LoadInternal(fileSet, persistRecovery: false);
+			if (!TryLoadForMutation(fileSet, out var db))
+				return new ProjectProfileBatchSaveResult([]);
 			db.SchemaVersion = CurrentSchemaVersion;
 			var alreadySaved = new List<string>();
 			var changedPaths = new List<string>();
@@ -205,7 +206,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			if (HasOversizedDocument(fileSet) ||
 			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
-			var db = LoadInternal(fileSet);
+			if (!TryLoadForMutation(fileSet, out var db))
+				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 			db.SchemaVersion = CurrentSchemaVersion;
 
 			// A delayed retry from another window/process must not stomp a newer profile revision.
@@ -277,6 +279,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		string localProjectPath,
 		TimeSpan lockTimeout)
 	{
+		ArgumentOutOfRangeException.ThrowIfLessThan(lockTimeout, TimeSpan.Zero);
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 		{
 			return new ProjectProfileLookupResult(
@@ -284,10 +287,21 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				null);
 		}
 
-		lock (_sync)
+		var startedTimestamp = Stopwatch.GetTimestamp();
+		if (!Monitor.TryEnter(_sync, lockTimeout))
+		{
+			return new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.TemporarilyUnavailable,
+				null);
+		}
+
+		try
 		{
 			var fileSet = GetFileSet();
-			if (!CrossProcessFileLock.TryAcquire(fileSet, lockTimeout, out var heldLock))
+			if (!CrossProcessFileLock.TryAcquire(
+				    fileSet,
+				    RemainingTimeout(startedTimestamp, lockTimeout),
+				    out var heldLock))
 			{
 				return new ProjectProfileLookupResult(
 					ProjectProfileLookupStatus.TemporarilyUnavailable,
@@ -311,7 +325,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			{
 				if (primaryRequiresRewrite)
 					TrySaveInternal(fileSet, primaryDb);
-				return ResolveLookup(primaryDb, normalizedPath, fileSet, lockTimeout);
+				return ResolveLookup(
+					primaryDb,
+					normalizedPath,
+					fileSet,
+					RemainingTimeout(startedTimestamp, lockTimeout));
 			}
 
 			if (TryLoadFromPath(
@@ -320,7 +338,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				    out var backupRequiresRewrite))
 			{
 				TrySaveInternal(fileSet, backupDb);
-				return ResolveLookup(backupDb, normalizedPath, fileSet, lockTimeout);
+				return ResolveLookup(
+					backupDb,
+					normalizedPath,
+					fileSet,
+					RemainingTimeout(startedTimestamp, lockTimeout));
 			}
 
 			var status = File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath)
@@ -328,6 +350,16 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				: ProjectProfileLookupStatus.Missing;
 			return new ProjectProfileLookupResult(status, null);
 		}
+		finally
+		{
+			Monitor.Exit(_sync);
+		}
+	}
+
+	private static TimeSpan RemainingTimeout(long startedTimestamp, TimeSpan budget)
+	{
+		var remaining = budget - Stopwatch.GetElapsedTime(startedTimestamp);
+		return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
 	}
 
 	public bool TryDeleteProfile(string localProjectPath)
@@ -346,7 +378,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			if (HasOversizedDocument(fileSet) ||
 			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return false;
-			var db = LoadInternal(fileSet);
+			if (!TryLoadForMutation(fileSet, out var db))
+				return false;
 			selectionDeleted = !db.Profiles.Remove(normalizedPath) || TrySaveInternal(fileSet, db);
 		}
 
@@ -436,6 +469,22 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 
 		return CreateDefaultDb();
+	}
+
+	private bool TryLoadForMutation(JsonStoreFileSet fileSet, out ProjectProfileDb database)
+	{
+		if (TryLoadFromPath(fileSet.PrimaryPath, out database, out _))
+			return true;
+		if (TryLoadFromPath(fileSet.BackupPath, out database, out _))
+			return true;
+		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
+		{
+			database = null!;
+			return false;
+		}
+
+		database = CreateDefaultDb();
+		return true;
 	}
 
 	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)

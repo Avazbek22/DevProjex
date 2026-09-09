@@ -27,7 +27,7 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
-	public void TextProfileUsesLocalizedAllForEmptySelections()
+	public void TextProfileDistinguishesEmptySelectedPathsFromUnrestrictedCollections()
 	{
 		using var workspace = new TemporaryDirectory();
 		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
@@ -50,7 +50,7 @@ public sealed class ProfileCommandContractTests
 			text,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			$"{services.Localization["Terminal.Profile.SelectedPaths"]}: {all}",
+			$"{services.Localization["Terminal.Profile.SelectedPaths"]}: none",
 			text,
 			StringComparison.Ordinal);
 	}
@@ -68,7 +68,7 @@ public sealed class ProfileCommandContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
-		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("devprojex-profile", document.RootElement.GetProperty("kind").GetString());
 		var selection = document.RootElement.GetProperty("selection");
 		Assert.Equal("gitignore", selection.GetProperty("gitMode").GetString());
@@ -112,7 +112,7 @@ public sealed class ProfileCommandContractTests
 			workspace,
 			"""
 			{
-			  "schemaVersion": 1,
+			  "schemaVersion": 2,
 			  "futureDocumentField": { "enabled": true },
 			  "selection": {
 			    "roots": null,
@@ -134,6 +134,93 @@ public sealed class ProfileCommandContractTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Equal("valid" + Environment.NewLine, environment.StandardOutput);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task ProfileValidateReportsLegacySchemaUpgradeInText()
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(workspace, environment, "profile", "validate", profile);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(
+			"valid" + Environment.NewLine +
+			"Portable profile uses legacy schema version 1 and will be rewritten as version 2 when saved." +
+			Environment.NewLine,
+			environment.StandardOutput);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("hideSecret")]
+	[InlineData("HideSecrets")]
+	public async Task ProfileValidateRejectsMisspelledSecuritySettings(string propertyName)
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			$$"""
+			{
+			  "schemaVersion": 2,
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "{{propertyName}}": true
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(workspace, environment, "profile", "validate", profile);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("DPX-CLI-PROFILE-INVALID", environment.StandardError, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task PortableProfileExplicitEmptySelectedPathsProducesAnEmptySelection()
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 2,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"analyze", workspace.Path, "--profile", profile, "--format", "json", "--plain");
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(0, document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		Assert.Empty(document.RootElement.GetProperty("selection").GetProperty("selectedPaths").EnumerateArray());
 	}
 
 	[Fact]
@@ -289,7 +376,7 @@ public sealed class ProfileCommandContractTests
 			  "selection": {
 			    "roots": null,
 			    "extensions": [".cs"],
-			    "selectedPaths": [],
+			    "selectedPaths": null,
 			    "gitMode": "gitignore",
 			    "exclusions": ["smart-ignore", "hidden-files"]
 			  }
@@ -343,6 +430,10 @@ public sealed class ProfileCommandContractTests
 				workspace,
 				importEnvironment,
 				"profile", "import", profile, workspace.Path, "--apply"));
+		Assert.Contains(
+			"Portable profile uses legacy schema version 1 and will be rewritten as version 2 when saved.",
+			importEnvironment.StandardError,
+			StringComparison.Ordinal);
 
 		var showEnvironment = new TestTerminalEnvironment();
 		Assert.Equal(
@@ -615,7 +706,7 @@ public sealed class ProfileCommandContractTests
 			"--force");
 		Assert.Equal(CommandLineExitCodes.Success, success);
 		using var document = JsonDocument.Parse(File.ReadAllText(destination));
-		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("devprojex-profile", document.RootElement.GetProperty("kind").GetString());
 		Assert.Equal(Path.GetFullPath(destination) + Environment.NewLine, forceEnvironment.StandardOutput);
 	}

@@ -78,6 +78,9 @@ public sealed record ProjectCopyExportResult(
 	int RedactedValueCount = 0,
 	IReadOnlyList<UnscannableFile>? UnscannableFiles = null);
 
+public sealed record ProjectCopyExportPreflightResult(
+	IReadOnlyList<UnscannableFile> UnscannableFiles);
+
 public sealed record ProjectCopyExportProgress(
 	int ProcessedEntryCount,
 	int TotalEntryCount,

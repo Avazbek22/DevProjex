@@ -202,8 +202,17 @@ public sealed class AnalyzeCommandHandler(
 				Findings = request.IncludeFindings ? effectiveFindings : null
 			};
 		}
-		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
-			.Write(plan.Diagnostics);
+		var policyExitCode = plan.HasErrors ||
+		                     request.Strict && plan.Diagnostics.Any(static diagnostic =>
+			                     diagnostic.Code != CodeCompressionAvailabilitySnapshot.DiagnosticCode) ||
+		                     request.FailOnFindings &&
+		                     (effectiveFindingCount > 0 || plan.UnscannableFiles is { Count: > 0 })
+			? CommandLineExitCodes.PolicyFailure
+			: CommandLineExitCodes.Success;
+		try
+		{
+			new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
+				.Write(plan.Diagnostics);
 
 		var outputPath = request.OutputPath is not null and not "-"
 			? ExactOutputDestinationValidator.ValidateAnalysis(
@@ -276,12 +285,12 @@ public sealed class AnalyzeCommandHandler(
 			TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		}
 
-		return plan.HasErrors ||
-		       request.Strict && plan.Diagnostics.Any(static diagnostic =>
-			       diagnostic.Code != CodeCompressionAvailabilitySnapshot.DiagnosticCode) ||
-		       request.FailOnFindings && effectiveFindingCount > 0
-			? CommandLineExitCodes.PolicyFailure
-			: CommandLineExitCodes.Success;
+			return policyExitCode;
+		}
+		catch (TerminalBrokenPipeException)
+		{
+			return policyExitCode;
+		}
 	}
 
 	internal static bool HasContentTransformations(ProjectSelectionSpec selection) =>
