@@ -579,13 +579,15 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
-	public void Detect_GlobalPathAllowlist_IsAppliedBeforeRules()
+	public void Detect_GlobalPathAllowlist_DoesNotSuppressProviderShapedRules()
 	{
 		const string content = "const token = \"ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\";";
 
-		Assert.False(Detector.ShouldInspectPath("fixtures/image.svg"));
+		Assert.True(Detector.ShouldInspectPath("fixtures/image.svg"));
 		Assert.True(Detector.ShouldInspectPath("src/config.cs"));
-		Assert.Empty(Detector.Detect("fixtures/image.svg", content, TestContext.Current.CancellationToken));
+		Assert.Contains(
+			Detector.Detect("fixtures/image.svg", content, TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "github-pat");
 	}
 
 	[Theory]

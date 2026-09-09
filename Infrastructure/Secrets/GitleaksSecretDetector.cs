@@ -127,16 +127,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	public bool ShouldInspectPath(string repositoryRelativePath)
 	{
 		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
-		try
-		{
-			var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
-			var allowlists = _configuration.Value.GlobalAllowlists;
-			return ShouldInspectPath(allowlists, EvaluateAllowlistPaths(allowlists, normalizedPath));
-		}
-		catch (RegexMatchTimeoutException exception)
-		{
-			throw new SecretDetectionException("Secret path policy evaluation timed out.", exception);
-		}
+		return true;
 	}
 
 	internal GitleaksCandidateStatistics InspectCandidates(
@@ -335,8 +326,6 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		budget.Checkpoint(cancellationToken);
 		var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
 		var globalPathMatches = EvaluateAllowlistPaths(configuration.GlobalAllowlists, normalizedPath);
-		if (!ShouldInspectPath(configuration.GlobalAllowlists, globalPathMatches))
-			return [];
 		Span<ulong> candidateRules = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
 		configuration.KeywordPrefilter.FindCandidates(content, candidateRules, cancellationToken);
 
@@ -370,7 +359,6 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				foreach (var valueMatch in contentRegex.EnumerateMatches(content))
 				{
 					budget.Checkpoint(cancellationToken);
-					rulePathMatches ??= EvaluateRuleAllowlistPaths(rule.Allowlists, normalizedPath);
 					var secretOffset = 0;
 					var secretLength = valueMatch.Length;
 					if (!wholeMatchFastPath)
@@ -386,11 +374,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 					var secret = content.Slice(valueMatch.Index + secretOffset, secretLength);
 					if (rule.Entropy > 0 && CalculateShannonEntropy(secret) <= rule.Entropy)
 						continue;
+					var usePathAllowlists = UsesHeuristicPathPolicy(rule, secret);
+					if (usePathAllowlists)
+						rulePathMatches ??= EvaluateRuleAllowlistPaths(rule.Allowlists, normalizedPath);
 
 					ReadOnlySpan<char> line = default;
 					var inspectedLine = false;
-					if (NeedsLine(configuration.GlobalAllowlists, globalPathMatches) ||
-					    NeedsLine(rule.Allowlists, rulePathMatches))
+					if (NeedsLine(configuration.GlobalAllowlists, globalPathMatches, usePathAllowlists) ||
+					    NeedsLine(rule.Allowlists, rulePathMatches, usePathAllowlists))
 					{
 						var lineRange = lineIndex.GetContainingLine(valueMatch.Index, valueMatch.Length);
 						line = content.Slice(lineRange.Start, lineRange.Length);
@@ -402,8 +393,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 						secret,
 						content.Slice(valueMatch.Index, valueMatch.Length),
 						line);
-					if (Allows(configuration.GlobalAllowlists, globalPathMatches, context) ||
-					    Allows(rule.Allowlists, rulePathMatches, context))
+					if (Allows(configuration.GlobalAllowlists, globalPathMatches, context, usePathAllowlists) ||
+					    Allows(rule.Allowlists, rulePathMatches, context, usePathAllowlists))
 					{
 						if (inspectedLine)
 							ContentPipelineDiagnostics.RecordRejectedMatchLineContext();
@@ -431,13 +422,15 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return findings;
 	}
 
-	private static bool ShouldInspectPath(
-		IReadOnlyList<CompiledAllowlist> allowlists,
-		IReadOnlyList<bool> pathMatches)
+	private static bool UsesHeuristicPathPolicy(CompiledRule rule, ReadOnlySpan<char> secret)
 	{
-		for (var index = 0; index < allowlists.Count; index++)
+		if (rule.Id.Equals(GenericApiKeyRuleId, StringComparison.Ordinal))
+			return true;
+		if (rule.Entropy <= 0)
+			return false;
+		foreach (var keyword in rule.Keywords)
 		{
-			if (allowlists[index].AllowsWholeFileByPath(pathMatches[index]))
+			if (secret.StartsWith(keyword, StringComparison.OrdinalIgnoreCase))
 				return false;
 		}
 		return true;
@@ -1144,11 +1137,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static bool NeedsLine(
 		IReadOnlyList<CompiledAllowlist> allowlists,
-		IReadOnlyList<bool> pathMatches)
+		IReadOnlyList<bool>? pathMatches,
+		bool usePathAllowlists)
 	{
 		for (var index = 0; index < allowlists.Count; index++)
 		{
-			if (allowlists[index].NeedsLine(pathMatches[index]))
+			if (allowlists[index].NeedsLine(
+				    usePathAllowlists && pathMatches is not null && pathMatches[index],
+				    usePathAllowlists))
 				return true;
 		}
 		return false;
@@ -1156,12 +1152,16 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static bool Allows(
 		IReadOnlyList<CompiledAllowlist> allowlists,
-		IReadOnlyList<bool> pathMatches,
-		AllowlistContext context)
+		IReadOnlyList<bool>? pathMatches,
+		AllowlistContext context,
+		bool usePathAllowlists)
 	{
 		for (var index = 0; index < allowlists.Count; index++)
 		{
-			if (allowlists[index].Allows(context, pathMatches[index]))
+			if (allowlists[index].Allows(
+				    context,
+				    usePathAllowlists && pathMatches is not null && pathMatches[index],
+				    usePathAllowlists))
 				return true;
 		}
 		return false;
@@ -1868,12 +1868,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				pathMatches,
 				Regexes.Count > 0 || Stopwords.Count > 0);
 
-		public bool NeedsLine(bool pathMatches) =>
+		public bool NeedsLine(bool pathMatches, bool usePathAllowlists) =>
 			RegexTarget == AllowlistRegexTarget.Line &&
 			Regexes.Count > 0 &&
-			(RequireAll || !pathMatches);
+			(RequireAll || !usePathAllowlists || !pathMatches);
 
-		public bool Allows(AllowlistContext context, bool pathMatches)
+		public bool Allows(AllowlistContext context, bool pathMatches, bool usePathAllowlists)
 		{
 			ReadOnlySpan<char> target = RegexTarget switch
 			{
@@ -1883,13 +1883,13 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			};
 			if (!RequireAll)
 			{
-				return Paths.Count > 0 && pathMatches ||
+				return usePathAllowlists && Paths.Count > 0 && pathMatches ||
 				       _stopwordSearchValues is not null && ContainsAny(context.Secret, _stopwordSearchValues) ||
 				       Regexes.Count > 0 && MatchesAny(target, Regexes);
 			}
 
 			var hasCriterion = false;
-			if (Paths.Count > 0)
+			if (usePathAllowlists && Paths.Count > 0)
 			{
 				hasCriterion = true;
 				if (!pathMatches)

@@ -547,13 +547,42 @@ public sealed class SmartSecretsDetectorTests
 	[InlineData("go.mod")]
 	[InlineData("package-lock.json")]
 	[InlineData("vendor/module/config.txt")]
-	public void Detect_ProviderRulesStillRespectProviderPathAllowlist(string path)
+	public void Detect_ProviderRulesInspectSelectedTextDespiteUpstreamPathAllowlist(string path)
 	{
-		const string providerToken = "AKIAIOSFODNN7EXAMPLE";
+		const string providerToken = "AKIAZ7M3Q5X2P6N4R7T5";
 
 		var findings = Detector.Detect(path, providerToken, TestContext.Current.CancellationToken);
 
-		Assert.DoesNotContain(findings, static finding => finding.RuleId == "aws-access-token");
+		// This intentionally replaces the old upstream repository-scan policy: once a text file is
+		// selected for export, a provider-shaped token must not be trusted because of its file name.
+		Assert.Contains(findings, static finding => finding.RuleId == "aws-access-token");
+	}
+
+	[Fact]
+	public void Detect_PackageLockIntegrityPayloadDoesNotCreateProviderNoise()
+	{
+		const string content =
+			"{ \"integrity\": \"sha512-z7M3Q5X2P6N4R7T5A9C8E2G6H4J1K0L9M8N7P6Q5R4S3T2U1V0W9X8Y7Z6A5B4C3\" }";
+
+		var findings = Detector.Detect(
+			"package-lock.json",
+			content,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(findings);
+	}
+
+	[Fact]
+	public void Detect_GenericEntropyRuleStillRespectsUpstreamPathAllowlist()
+	{
+		const string content = "api_key = \"A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h\"";
+
+		var findings = Detector.Detect(
+			"package-lock.json",
+			content,
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(findings, static finding => finding.RuleId == "generic-api-key");
 	}
 
 	[Theory]
