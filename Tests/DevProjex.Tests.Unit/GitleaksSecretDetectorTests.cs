@@ -455,6 +455,62 @@ public sealed class GitleaksSecretDetectorTests
 		Assert.Equal(genericValue, finding.Value);
 	}
 
+	[Fact]
+	public void Detect_GenericFastGateChecksEveryPermittedSeparatorBoundary()
+	{
+		const string content = "password======aB3dE6gH9jK2";
+		var oracle = Detector.InspectRuleMatch("generic-api-key", content);
+		Assert.True(oracle.IsMatch);
+
+		var finding = Assert.Single(
+			Detector.Detect("src/config.txt", content, TestContext.Current.CancellationToken),
+			static match => match.RuleId == "generic-api-key");
+
+		Assert.Equal(oracle.MatchStart + oracle.SecretStart, finding.Start);
+		Assert.Equal(oracle.SecretLength, finding.Length);
+		Assert.Equal("aB3dE6gH9jK2", finding.Value);
+	}
+
+	[Fact(Timeout = 30_000)]
+	public void Detect_GenericFastGateMatchesRegexAndEntropyOracleAcrossSeparatorCorpus()
+	{
+		var delimiters = new[] { "=", ">", ":", "::=", "||", "=>", "?=", "," };
+		var paddings = new[] { string.Empty, " ", "\t", "'", "\"", "`", "=", "=====" };
+		var terminators = new[] { string.Empty, ";", "\n", "\\n" };
+		var values = new[]
+		{
+			"aB3dE6gH9jK2",
+			"A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h"
+		};
+		var verified = 0;
+
+		foreach (var delimiter in delimiters)
+		foreach (var padding in paddings)
+		foreach (var value in values)
+		foreach (var terminator in terminators)
+		{
+			var content = string.Concat("password", delimiter, padding, value, terminator);
+			var oracle = Detector.InspectRuleMatch("generic-api-key", content);
+			if (!oracle.IsMatch)
+				continue;
+			var expectedValue = content.AsSpan(
+				oracle.MatchStart + oracle.SecretStart,
+				oracle.SecretLength);
+			if (GitleaksSecretDetector.CalculateShannonEntropy(expectedValue.ToString()) <= 3.5d)
+				continue;
+
+			var finding = Assert.Single(
+				Detector.Detect("src/config.txt", content, TestContext.Current.CancellationToken),
+				static match => match.RuleId == "generic-api-key");
+			Assert.Equal(oracle.MatchStart + oracle.SecretStart, finding.Start);
+			Assert.Equal(oracle.SecretLength, finding.Length);
+			Assert.Equal(expectedValue.ToString(), finding.Value);
+			verified++;
+		}
+
+		Assert.True(verified >= 100, $"The generic fast-gate oracle covered only {verified} positive variants.");
+	}
+
 	public static IEnumerable<object[]> GenericApiKeyGateWhitespaceVariants()
 	{
 		yield return [string.Empty];

@@ -482,11 +482,21 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	{
 		// Gitleaks permits up to five separators before the captured value. Try each
 		// legal boundary instead of consuming them greedily: '=' is both a separator
-		// and a legal first character of the provider-neutral value grammar.
+		// and a legal first character of the provider-neutral value grammar. The first
+		// syntactically valid range is not necessarily the range with sufficient entropy.
+		candidate = default;
+		var bestEntropy = double.NegativeInfinity;
 		for (var skipped = 0; skipped <= 5 && valueStart < content.Length; skipped++, valueStart++)
 		{
-			if (TryReadGenericApiKeyCandidate(content, valueStart, out candidate))
-				return true;
+			if (TryReadGenericApiKeyCandidate(content, valueStart, out var current))
+			{
+				var entropy = CalculateShannonEntropy(current);
+				if (entropy > bestEntropy)
+				{
+					candidate = current;
+					bestEntropy = entropy;
+				}
+			}
 			if (skipped == 5 ||
 			    !char.IsWhiteSpace(content[valueStart]) &&
 			    content[valueStart] is not ('=' or '\'' or '"' or '`'))
@@ -495,8 +505,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			}
 		}
 
-		candidate = default;
-		return false;
+		return bestEntropy > double.NegativeInfinity;
 	}
 
 	private static int GetGenericDelimiterLength(ReadOnlySpan<char> content, int start)
