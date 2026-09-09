@@ -1861,7 +1861,13 @@ public sealed class DependencyFactsEngine : IDisposable
 				: null;
 			if (source.LanguageId == LanguageId.CSharp)
 			{
-				if (!reference.IsGlobalQualified && reference.Name.Contains('.') && !aliasExpanded)
+				if (aliasExpanded && candidates.Length == 0)
+				{
+					var contextual = LookupContextualCSharpQualified(source, reference, expandedName);
+					if (contextual.Length > 0)
+						candidates = contextual;
+				}
+				else if (!reference.IsGlobalQualified && reference.Name.Contains('.') && !aliasExpanded)
 				{
 					var contextual = LookupContextualCSharpQualified(source, reference, expandedName);
 					if (contextual.Length > 0)

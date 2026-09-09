@@ -6,6 +6,28 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New014_RelativeAliasTargetFallsBackToLexicalNamespace()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var model = fixture.CreateFile("Model.cs", "namespace App.Models; public sealed class Item { }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"namespace App { using M = Models.Item; public sealed class Consumer { M Value; } }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, model, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "Consumer.cs" && candidate.Reference == "M");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("Model.cs", edge.Target);
+	}
+
+	[Fact]
 	public async Task New096_PackageExportsRejectTargetsOutsidePackage()
 	{
 		using var fixture = new TemporaryDirectory();
