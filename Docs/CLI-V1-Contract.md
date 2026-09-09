@@ -694,7 +694,9 @@ safe Unix modes; a completed ZIP file remains mode `0600`.
 
 When `--hide-secrets` is selected, text findings are replaced. Such a copy is intentionally not byte-for-byte faithful
 and may not build or run. Binary files remain unchanged. The normal confirmation
-and dry-run plan state this before writing.
+and dry-run plan state this before writing. Dry-run and real export apply the
+same reserved transformation-notice collision check to the effective export plan;
+an excluded source notice does not block creation of the generated notice.
 
 ### `recent`
 

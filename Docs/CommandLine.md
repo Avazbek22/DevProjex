@@ -783,7 +783,9 @@ files remain user-readable and writable only.
 With `--hide-secrets` or `--hide-private-data`, detected values in text files are replaced. Binary files remain
 unchanged. The result is intentionally not byte-for-byte faithful and may not
 build or run. `--dry-run` states this before any destination or staging path is
-created.
+created and performs the same transformation-notice collision preflight as the
+real export. A reserved notice file that is outside the effective selection does
+not collide because it is not copied.
 
 On success, file and folder destinations write exactly one absolute result path
 to stdout. A ZIP destination of `-` writes only the raw archive bytes instead.

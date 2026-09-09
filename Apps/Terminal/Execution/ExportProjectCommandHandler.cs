@@ -60,26 +60,34 @@ public sealed class ExportProjectCommandHandler(
 				request.Force);
 		}
 		var requestedOutput = writesToStandardOutput ? "-" : Path.GetFullPath(request.OutputPath);
+		var exportRequest = new ProjectCopyExportRequest(
+			ProjectRootPath: plan.SourceRoot,
+			ProjectName: plan.SourceIdentity?.DisplayName ??
+			             Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
+			TreeRoot: plan.ProjectedTree,
+			SelectedPaths: new HashSet<string>(PathComparer.Default),
+			DestinationPath: requestedOutput,
+			Format: request.Format,
+			DestinationMode: ProjectCopyDestinationMode.Exact,
+			ConflictPolicy: request.Force
+				? ProjectCopyConflictPolicy.ReplaceAtomically
+				: ProjectCopyConflictPolicy.Fail,
+			RedactSecrets: plan.Selection.HideSecrets == true,
+			RedactPrivateData: plan.Selection.HidePrivateData == true,
+			CompressCode: plan.Selection.CompressCode == true,
+			StripComments: plan.Selection.StripComments == true,
+			StripBlankLines: plan.Selection.StripBlankLines == true,
+			NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(services.Localization));
 		if (request.DryRun)
 		{
 			var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
 				plan.Selection.HideSecrets == true,
 				plan.Selection.HidePrivateData == true);
 			var redactContent = redactionFeatures != SecretRedactionFeatures.None;
-			IReadOnlyList<UnscannableFile> unscannableFiles = [];
-			if (redactContent)
-			{
-				var preflight = await services.SecretRedactionOutputPreparer
-					.AnalyzeAsync(
-						new SecretRedactionContext(
-							plan.SourceRoot,
-							services.SecretRedactionSession,
-							redactionFeatures),
-						plan.IncludedFiles,
-						cancellationToken)
-					.ConfigureAwait(false);
-				unscannableFiles = preflight.UnscannableFiles;
-			}
+			var preflight = await services.ProjectCopyExportService
+				.PreflightAsync(exportRequest, cancellationToken)
+				.ConfigureAwait(false);
+			var unscannableFiles = preflight.UnscannableFiles;
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,
@@ -109,24 +117,6 @@ public sealed class ExportProjectCommandHandler(
 			return CommandLineExitCodes.Success;
 		}
 
-		var exportRequest = new ProjectCopyExportRequest(
-			ProjectRootPath: plan.SourceRoot,
-			ProjectName: plan.SourceIdentity?.DisplayName ??
-			             Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
-			TreeRoot: plan.ProjectedTree,
-			SelectedPaths: new HashSet<string>(PathComparer.Default),
-			DestinationPath: requestedOutput,
-			Format: request.Format,
-			DestinationMode: ProjectCopyDestinationMode.Exact,
-			ConflictPolicy: request.Force
-				? ProjectCopyConflictPolicy.ReplaceAtomically
-				: ProjectCopyConflictPolicy.Fail,
-			RedactSecrets: plan.Selection.HideSecrets == true,
-			RedactPrivateData: plan.Selection.HidePrivateData == true,
-			CompressCode: plan.Selection.CompressCode == true,
-			StripComments: plan.Selection.StripComments == true,
-			StripBlankLines: plan.Selection.StripBlankLines == true,
-			NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(services.Localization));
 		if (writesToStandardOutput)
 		{
 			var rawOutput = environment.RawOutput ?? throw new ProjectContextValidationException(

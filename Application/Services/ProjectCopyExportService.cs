@@ -31,6 +31,22 @@ public sealed class ProjectCopyExportService(
 	private const int CleanupAttemptCount = 6;
 	private const int CleanupInitialDelayMilliseconds = 25;
 
+	public async Task<ProjectCopyExportPreflightResult> PreflightAsync(
+		ProjectCopyExportRequest request,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(request);
+		var plan = planBuilder.Build(request, cancellationToken);
+		ValidateSources(plan, cancellationToken);
+		await using var prepared = request.RedactSecrets || request.RedactPrivateData || request.CompressCode ||
+		                           request.StripComments || request.StripBlankLines
+			? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
+			: null;
+		var transformationNotice = BuildTransformationNotice(prepared, plan, request.NoticeText);
+		ValidateTransformationNoticeCollision(plan, transformationNotice);
+		return new ProjectCopyExportPreflightResult(prepared?.UnscannableFiles ?? []);
+	}
+
 	public async Task<ProjectCopyExportResult> ExportAsync(
 		ProjectCopyExportRequest request,
 		IProgress<ProjectCopyExportProgress>? progress = null,
@@ -213,9 +229,7 @@ public sealed class ProjectCopyExportService(
 		if (transformationNotice is null)
 			return;
 
-		var sourceNoticePath = Path.Combine(plan.ProjectRootPath, TransformationNoticeFileName);
-		if (!Path.Exists(sourceNoticePath) &&
-		    !plan.Entries.Any(static entry =>
+		if (!plan.Entries.Any(static entry =>
 			    PathComparer.Default.Equals(entry.RelativePath, TransformationNoticeFileName)))
 		{
 			return;

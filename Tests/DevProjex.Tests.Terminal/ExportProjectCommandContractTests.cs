@@ -298,6 +298,35 @@ public sealed class ExportProjectCommandContractTests
 	}
 
 	[Fact]
+	public async Task DryRunAndRealExportBothRejectSelectedReservedNoticeCollision()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/app.cs",
+			"const string token = \"ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\";");
+		workspace.WriteFile(
+			$"project/{ProjectCopyExportService.TransformationNoticeFileName}",
+			"source notice");
+		var outputRoot = workspace.CreateDirectory("output");
+		foreach (var dryRun in new[] { true, false })
+		{
+			var output = Path.Combine(outputRoot, dryRun ? "dry" : "real");
+			var environment = new TestTerminalEnvironment();
+			var arguments = new List<string> { "--hide-secrets" };
+			if (dryRun)
+				arguments.Add("--dry-run");
+
+			var exitCode = await RunAsync(project, output, "folder", environment, arguments.ToArray());
+
+			Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+			Assert.Contains("DPX-EXPORT-RESERVED-NAME", environment.StandardError, StringComparison.Ordinal);
+			Assert.False(Path.Exists(output));
+			Assert.Empty(Directory.EnumerateFileSystemEntries(outputRoot, ".devprojex-*.tmp"));
+		}
+	}
+
+	[Fact]
 	public async Task PreCanceledExportCreatesNoDestinationOrStaging()
 	{
 		using var workspace = new TemporaryDirectory();
