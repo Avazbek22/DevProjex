@@ -2,6 +2,7 @@
 'use strict';
 
 const { spawnSync } = require('node:child_process');
+const { constants: osConstants } = require('node:os');
 
 const PLATFORM_PACKAGES = Object.freeze({
   'win32-x64': Object.freeze({ packageName: '@devprojex/cli-win32-x64', binary: 'devprojex.exe' }),
@@ -56,6 +57,15 @@ function main() {
   });
   if (result.error) {
     process.stderr.write(`DevProjex could not start ${binary}: ${result.error.message}\n`);
+    return 1;
+  }
+  if (result.signal) {
+    try {
+      process.kill(process.pid, result.signal);
+    } catch {
+      const signalNumber = osConstants.signals[result.signal];
+      return Number.isInteger(signalNumber) ? 128 + signalNumber : 1;
+    }
     return 1;
   }
   return result.status === null ? 1 : result.status;

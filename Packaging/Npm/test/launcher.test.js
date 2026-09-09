@@ -2,7 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const {
   PLATFORM_PACKAGES,
   resolveBinary,
@@ -49,5 +52,23 @@ test('DEVPROJEX_BINARY overrides package resolution', () => {
   } finally {
     if (previous === undefined) delete process.env.DEVPROJEX_BINARY;
     else process.env.DEVPROJEX_BINARY = previous;
+  }
+});
+
+test('launcher preserves a native child termination signal', { skip: process.platform === 'win32' }, () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devprojex-launcher-signal-'));
+  const child = path.join(temporaryRoot, 'terminate.sh');
+  fs.writeFileSync(child, '#!/bin/sh\nkill -TERM $$\n', { mode: 0o700 });
+  try {
+    const result = spawnSync(process.execPath, [
+      path.resolve(__dirname, '../devprojex/bin/devprojex.js'),
+    ], {
+      env: { ...process.env, DEVPROJEX_BINARY: child },
+      stdio: 'pipe',
+    });
+    assert.equal(result.status, null);
+    assert.equal(result.signal, 'SIGTERM');
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
   }
 });
