@@ -6133,12 +6133,20 @@ public sealed class McpServerIntegrationTests
 				finalProgress.TrySetResult();
 		});
 		var token = new ProgressToken(Guid.NewGuid().ToString("N"));
+		await using var registration = server.Client.RegisterNotificationHandler(
+			NotificationMethods.ProgressNotification,
+			(notification, _) =>
+			{
+				if (notification.Params?.Deserialize<ProgressNotificationParams>() is { } value &&
+				    value.ProgressToken == token)
+					progress.Report(value.Progress);
+				return ValueTask.CompletedTask;
+			});
 
 		var result = await server.CallAsync(
 			"related_files",
 			new Dictionary<string, object?> { ["path"] = "File00000.txt" },
-			progress,
-			new RequestOptions { ProgressToken = token });
+			options: new RequestOptions { ProgressToken = token });
 		await finalProgress.Task.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 		var values = progress.Values;
 
