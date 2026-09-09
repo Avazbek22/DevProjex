@@ -170,6 +170,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--progress",
 		"--project",
 		"--rank",
+		"--remote-hosts",
 		"--root",
 		"--screen",
 		"--search",
