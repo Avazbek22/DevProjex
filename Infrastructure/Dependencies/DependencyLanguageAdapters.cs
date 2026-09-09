@@ -798,9 +798,17 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 					capture.NodeType, Site(context, capture)))));
 		if (declarations.Length + imports.Length + references.Count > limits.MaximumFactsPerFile)
 			return Failed(context);
-		var metadata = DynamicAllRegex().IsMatch(context.Source)
-			? new Dictionary<string, string>(StringComparer.Ordinal) { ["$dynamic-all"] = "true" }
-			: new Dictionary<string, string>(StringComparer.Ordinal);
+		var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
+		foreach (var capture in context.References.Where(static capture =>
+			capture.Name == "context.module_assignment" && capture.ContainingDeclaration is null))
+		{
+			var assignment = ModuleAssignmentRegex().Match(capture.Text);
+			if (!assignment.Success) continue;
+			var name = assignment.Groups["name"].Value;
+			metadata["$python-assignment:" + name] = "true";
+			if (name == "__all__" && DynamicAllValueRegex().IsMatch(assignment.Groups["value"].Value))
+				metadata["$dynamic-all"] = "true";
+		}
 		return Complete(context, declarations, imports, references, aliases: metadata);
 	}
 
@@ -824,5 +832,6 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 	private static readonly HashSet<string> Keywords = new(
 		["def", "class", "None", "True", "False", "str", "int", "float", "bool", "bytes", "list", "dict", "tuple", "set", "object", "typing", "self", "cls"], StringComparer.Ordinal);
 	[GeneratedRegex(@"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeRegex();
-	[GeneratedRegex(@"(?m)^\s*__all__\s*=\s*[A-Za-z_]", RegexOptions.CultureInvariant)] private static partial Regex DynamicAllRegex();
+	[GeneratedRegex(@"^\s*(?<name>[^\W\d]\w*)\s*=\s*(?<value>[\s\S]*)$", RegexOptions.CultureInvariant)] private static partial Regex ModuleAssignmentRegex();
+	[GeneratedRegex(@"^\s*[^\W\d]", RegexOptions.CultureInvariant)] private static partial Regex DynamicAllValueRegex();
 }
