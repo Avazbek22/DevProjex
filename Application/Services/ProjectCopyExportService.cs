@@ -1622,7 +1622,7 @@ public sealed class ProjectCopyExportService(
 			if (firstRead)
 			{
 				firstRead = false;
-				ProjectCopyExportTestHooks.AfterFirstSourceRead?.Invoke();
+				ProjectCopyExportTestHooks.AfterFirstSourceRead.Value?.Invoke();
 			}
 
 			await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);

@@ -268,7 +268,7 @@ public sealed class ProfileCommandHandler(
 				"DPX-CLI-PROFILE-WRITE-FAILED",
 				"The local profile store cannot be updated safely.")
 		};
-		ProfileCommandTestHooks.AfterVersionObserved?.Invoke(projectPath, version);
+		ProfileCommandTestHooks.AfterVersionObserved.Value?.Invoke(projectPath, version);
 		return version;
 	}
 
@@ -408,5 +408,5 @@ public sealed class ProfileCommandHandler(
 
 internal static class ProfileCommandTestHooks
 {
-	internal static Action<string, DateTimeOffset?>? AfterVersionObserved { get; set; }
+	internal static AsyncLocal<Action<string, DateTimeOffset?>?> AfterVersionObserved { get; } = new();
 }

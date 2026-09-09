@@ -696,9 +696,13 @@ after removing special setuid/setgid bits. ZIP entries carry the corresponding
 safe Unix modes; a completed ZIP file remains mode `0600`.
 
 v5.2 does not make an untransformed project copy a project-wide point-in-time
-snapshot, and unavailable compression grammars do not turn best-effort project
-copy into a strict failure. These limitations do not weaken Hide Secrets scan
-limits or the omission of text that could not be inspected.
+snapshot. Each pass-through file is copied from one open handle and its captured
+identity is checked again after EOF; a mismatch fails as an unavailable source.
+Unavailable compression grammars add `DPX-COMPRESSION-UNAVAILABLE`, keep the
+complete source, and do not turn best-effort project copy into a strict failure.
+The transformation notice is emitted only when a transformation was applied.
+These rules do not weaken Hide Secrets scan limits or the omission of text that
+could not be inspected.
 
 When `--hide-secrets` is selected, text findings are replaced. Such a copy is intentionally not byte-for-byte faithful
 and may not build or run. Binary files remain unchanged. The normal confirmation
@@ -1316,11 +1320,11 @@ all seven tool descriptions are self-contained for tool search. Cached MCP
 schemas must be refreshed for the additive `topFiles` field and new field
 descriptions.
 
-Compression readiness is also explicit in v5.2. CLI analysis and context export
-add warning `DPX-COMPRESSION-UNAVAILABLE` to stderr and machine diagnostics when an
-empty delivery source or a missing, incompatible, or invalid grammar prevents a
-requested transformation. Safe complete output and all exit codes are unchanged,
-including `analyze --strict`. MCP `analyze`, `pack_context`, and `get_file` append
+Compression readiness is also explicit in v5.2. CLI analysis, context export, and project export
+add warning `DPX-COMPRESSION-UNAVAILABLE` to stderr when an empty delivery source or a missing,
+incompatible, or invalid grammar prevents a requested transformation. Analysis
+and context machine output carry the same diagnostic. Safe complete output and
+all exit codes are unchanged, including `analyze --strict`. MCP `analyze`, `pack_context`, and `get_file` append
 trusted `[Compression unavailable] ...` text outside project data when compression
 is effective; `analyze` additionally exposes optional structured
 `compressionUnavailable` with `reason` and affected `languages`. Consumers that

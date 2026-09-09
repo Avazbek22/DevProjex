@@ -654,6 +654,13 @@ the remaining stage once storage is available.
 its revision but before it committed. The command does not overwrite the newer
 profile; repeat it to plan against the latest revision.
 
+`export project` reports `DPX-COMPRESSION-UNAVAILABLE` on stderr when a requested
+syntax transformation cannot load its grammar. The affected source remains
+complete, success and strict-policy semantics are unchanged, and the copy notice
+is printed only when at least one file was actually transformed. Pass-through
+copy also fails as source unavailable if the identity captured from its open
+source handle changes before EOF.
+
 Secret inspection never emits uninspected text. A selected text file above the supported
 16 MiB limit fails no command: `export context` omits its text, and `export project`
 leaves it out of the copy and names it in `DEVPROJEX-NOTICE.txt`.

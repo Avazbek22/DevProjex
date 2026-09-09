@@ -12,7 +12,7 @@ public sealed class ProfileCommandContractTests
 		var dataRoot = workspace.CreateDirectory("conflict-data");
 		var store = new ProjectProfileStore(() => dataRoot);
 		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs"], []));
-		ProfileCommandTestHooks.AfterVersionObserved = (path, observed) =>
+		ProfileCommandTestHooks.AfterVersionObserved.Value = (path, observed) =>
 		{
 			Assert.Equal(project, path);
 			Assert.NotNull(observed);
@@ -40,7 +40,7 @@ public sealed class ProfileCommandContractTests
 		}
 		finally
 		{
-			ProfileCommandTestHooks.AfterVersionObserved = null;
+			ProfileCommandTestHooks.AfterVersionObserved.Value = null;
 		}
 	}
 

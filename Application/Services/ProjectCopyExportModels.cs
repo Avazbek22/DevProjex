@@ -117,5 +117,5 @@ public sealed class ProjectCopyExportException(
 
 internal static class ProjectCopyExportTestHooks
 {
-	internal static Action? AfterFirstSourceRead { get; set; }
+	internal static AsyncLocal<Action?> AfterFirstSourceRead { get; } = new();
 }

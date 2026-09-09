@@ -12,7 +12,7 @@ public sealed class ProjectCopyExportSourceReadTests
 		var source = workspace.CreateFile("project/source.txt", new string('A', 512 * 1024));
 		var output = Path.Combine(workspace.CreateFolder("output"), "copy");
 		var originalTimestamp = File.GetLastWriteTimeUtc(source);
-		ProjectCopyExportTestHooks.AfterFirstSourceRead = () =>
+		ProjectCopyExportTestHooks.AfterFirstSourceRead.Value = () =>
 			File.SetLastWriteTimeUtc(source, originalTimestamp.AddMinutes(1));
 		try
 		{
@@ -28,7 +28,7 @@ public sealed class ProjectCopyExportSourceReadTests
 		}
 		finally
 		{
-			ProjectCopyExportTestHooks.AfterFirstSourceRead = null;
+			ProjectCopyExportTestHooks.AfterFirstSourceRead.Value = null;
 		}
 	}
 
