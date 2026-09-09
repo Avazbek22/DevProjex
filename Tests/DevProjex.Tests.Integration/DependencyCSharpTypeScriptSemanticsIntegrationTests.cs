@@ -6,6 +6,35 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New012_NestedBlockNamespacesComposeTheirQualifiedName()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var nested = fixture.CreateFile(
+			"Nested.cs",
+			"namespace A { namespace B { public sealed class Item { } } }");
+		var dotted = fixture.CreateFile(
+			"Dotted.cs",
+			"namespace A.B { public sealed class Other { } }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"public sealed class Consumer { A.B.Item First; A.B.Other Second; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, nested, dotted, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Declarations, declaration =>
+			declaration.Identity.QualifiedName == "A.B.Item");
+		Assert.Contains(result.Declarations, declaration =>
+			declaration.Identity.QualifiedName == "A.B.Other");
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumer.cs" && edge.Target == "Nested.cs");
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumer.cs" && edge.Target == "Dotted.cs");
+	}
+
+	[Fact]
 	public async Task New011_TupleCommasDoNotIncreaseConstructedGenericArity()
 	{
 		using var fixture = new TemporaryDirectory();

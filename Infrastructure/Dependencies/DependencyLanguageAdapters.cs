@@ -375,11 +375,29 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		context.Source.Length, DependencyFileStatus.ExtractionFailed, reason, context.HasSyntaxErrors,
 		context.ErrorNodeKinds, [], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
 
-	private static IReadOnlyList<NamespaceSpan> ParseNamespaces(IEnumerable<DependencySyntaxCapture> captures) =>
-		captures.Where(static capture => capture.Name == "context.namespace")
-			.Select(static capture => new NamespaceSpan(capture.CapturedName ?? string.Empty,
-				capture.StartIndex, capture.EndIndex, capture.NodeType == "file_scoped_namespace_declaration"))
-			.Where(static item => item.Name.Length > 0).ToArray();
+	private static IReadOnlyList<NamespaceSpan> ParseNamespaces(IEnumerable<DependencySyntaxCapture> captures)
+	{
+		var result = new List<NamespaceSpan>();
+		foreach (var capture in captures
+			         .Where(static capture => capture.Name == "context.namespace" &&
+			                                  !string.IsNullOrEmpty(capture.CapturedName))
+			         .OrderBy(static capture => capture.StartIndex)
+			         .ThenByDescending(static capture => capture.EndIndex))
+		{
+			var parent = result
+				.Where(item => item.Start < capture.StartIndex && item.End >= capture.EndIndex)
+				.MinBy(static item => item.End - item.Start);
+			var name = parent is null
+				? capture.CapturedName!
+				: parent.Name + "." + capture.CapturedName;
+			result.Add(new NamespaceSpan(
+				name,
+				capture.StartIndex,
+				capture.EndIndex,
+				capture.NodeType == "file_scoped_namespace_declaration"));
+		}
+		return result;
+	}
 
 	private static IReadOnlyList<CSharpUsingDirective> ParseUsings(
 		IEnumerable<DependencySyntaxCapture> captures,
