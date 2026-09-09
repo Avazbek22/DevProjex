@@ -20,6 +20,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	internal const string TypeScriptExtendsDepthReason = "tsconfig extends exceeds the maximum depth";
 	internal const string TypeScriptExtendsUnavailableReason = "extended tsconfig is unavailable";
 	internal const string TypeScriptModuleResolutionReason = "tsconfig moduleResolution is not supported";
+	internal const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
 	internal const string ProjectReferenceConditionReason = "project reference condition could not be evaluated safely";
 	private readonly IDependencyControlFileReader _reader;
 	private readonly IDependencyPathMetadata _pathMetadata;
@@ -450,6 +451,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				return TypeScriptLayerFailure(
 					DependencyConfigurationState.UnsupportedSemantics,
 					"tsconfig compilerOptions.module must be a string");
+			if (options.TryGetProperty("customConditions", out _))
+				return TypeScriptLayerFailure(
+					DependencyConfigurationState.UnsupportedSemantics,
+					TypeScriptCustomConditionsReason);
 
 			var hasModuleResolution = options.TryGetProperty("moduleResolution", out mode);
 			var moduleResolution = hasModuleResolution ? mode.GetString()?.ToLowerInvariant() : null;

@@ -6,6 +6,33 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New063_CustomConditionsFailClosedInsteadOfChoosingDefault()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"customConditions\":[\"browser\"]}}");
+		var package = fixture.CreateFile(
+			"package.json",
+			"{\"imports\":{\"#value\":{\"browser\":\"./browser.ts\",\"default\":\"./default.ts\"}}}");
+		var browser = fixture.CreateFile("browser.ts", "export default 1;");
+		var fallback = fixture.CreateFile("default.ts", "export default 2;");
+		var source = fixture.CreateFile("main.ts", "import value from '#value';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, browser, fallback, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "#value");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Equal("tsconfig customConditions are not supported", Assert.Single(edge.Reasons));
+	}
+
+	[Fact]
 	public async Task New097_BarePackageImportTargetIsNotProbedAsLocalPath()
 	{
 		using var fixture = new TemporaryDirectory();
