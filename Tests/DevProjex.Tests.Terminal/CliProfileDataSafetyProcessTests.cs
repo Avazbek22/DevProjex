@@ -5,6 +5,7 @@ using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Terminal;
 
+[Collection(TerminalProcessCollection.Name)]
 public sealed class CliProfileDataSafetyProcessTests
 {
 	private const string GithubToken = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";

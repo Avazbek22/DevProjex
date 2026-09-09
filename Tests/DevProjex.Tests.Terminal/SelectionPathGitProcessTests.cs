@@ -4,6 +4,7 @@ using System.Text.Json;
 
 namespace DevProjex.Tests.Terminal;
 
+[Collection(TerminalProcessCollection.Name)]
 public sealed class SelectionPathGitProcessTests
 {
 	[Fact]
@@ -54,20 +55,33 @@ public sealed class SelectionPathGitProcessTests
 		process.StartInfo.Environment[InvocationEnvironment.InternalDataRootVariable] =
 			workspace.CreateDirectory("app-data");
 		Assert.True(process.Start());
-		await process.StandardInput.WriteAsync(selected);
-		process.StandardInput.Close();
-		var outputTask = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
-		var errorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
-		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(45));
+		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+		try
+		{
+			await process.StandardInput.WriteAsync(selected.AsMemory(), timeout.Token);
+			process.StandardInput.Close();
+			await process.WaitForExitAsync(timeout.Token);
 
-		Assert.Equal(CommandLineExitCodes.Success, process.ExitCode);
-		Assert.Empty(await errorTask);
-		using var document = JsonDocument.Parse(await outputTask);
-		var paths = document.RootElement.GetProperty("files")
-			.EnumerateArray().Select(file => file.GetProperty("path").GetString()!).ToArray();
-		Assert.Equal(2, paths.Length);
-		Assert.Contains(paths, path => path.EndsWith('/' + quoteName, StringComparison.Ordinal));
-		Assert.Contains(paths, path => path.EndsWith("/Пример.cs", StringComparison.Ordinal));
+			Assert.Equal(CommandLineExitCodes.Success, process.ExitCode);
+			Assert.Empty(await errorTask);
+			using var document = JsonDocument.Parse(await outputTask);
+			var paths = document.RootElement.GetProperty("files")
+				.EnumerateArray().Select(file => file.GetProperty("path").GetString()!).ToArray();
+			Assert.Equal(2, paths.Length);
+			Assert.Contains(paths, path => path.EndsWith('/' + quoteName, StringComparison.Ordinal));
+			Assert.Contains(paths, path => path.EndsWith("/Пример.cs", StringComparison.Ordinal));
+		}
+		finally
+		{
+			if (!process.HasExited)
+			{
+				process.Kill(entireProcessTree: true);
+				await process.WaitForExitAsync(CancellationToken.None);
+			}
+		}
 	}
 
 	private static async Task<string> RunGitAsync(string workingDirectory, params string[] arguments)
@@ -97,10 +111,23 @@ public sealed class SelectionPathGitProcessTests
 			Assert.Skip("Git is unavailable for the process contract.");
 			return string.Empty;
 		}
-		var outputTask = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
-		var errorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
-		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
-		Assert.True(process.ExitCode == 0, await errorTask);
-		return await outputTask;
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(30));
+		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+		try
+		{
+			await process.WaitForExitAsync(timeout.Token);
+			Assert.True(process.ExitCode == 0, await errorTask);
+			return await outputTask;
+		}
+		finally
+		{
+			if (!process.HasExited)
+			{
+				process.Kill(entireProcessTree: true);
+				await process.WaitForExitAsync(CancellationToken.None);
+			}
+		}
 	}
 }
