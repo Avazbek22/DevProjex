@@ -30,6 +30,7 @@ public sealed class ProjectCopyExportService(
 	public const string TransformationNoticeFileName = "DEVPROJEX-NOTICE.txt";
 	private const int CleanupAttemptCount = 6;
 	private const int CleanupInitialDelayMilliseconds = 25;
+	internal const string SourceChangedDuringCopyMessage = "A source file changed during copy.";
 
 	public async Task<ProjectCopyExportPreflightResult> PreflightAsync(
 		ProjectCopyExportRequest request,
@@ -584,9 +585,10 @@ public sealed class ProjectCopyExportService(
 						file.SourcePath,
 						contentPath,
 						preparedFile);
+					var sourceIdentity = CapturePassThroughSourceIdentity(preparedFile, source);
 					await using var destination = entry.Open();
 					var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
-					ValidatePreparedSourceVersion(preparedFile, source);
+					ValidateSourceVersion(preparedFile, source, sourceIdentity);
 					bytesWritten += copiedBytes;
 					processedEntries++;
 					processedFiles++;
@@ -715,10 +717,11 @@ public sealed class ProjectCopyExportService(
 					file.SourcePath,
 					contentPath,
 					preparedFile);
+				var sourceIdentity = CapturePassThroughSourceIdentity(preparedFile, source);
 				await using var entryDestination = entry.Open();
 				var copiedBytes = await CopyStreamAsync(source, entryDestination, buffer, cancellationToken)
 					.ConfigureAwait(false);
-				ValidatePreparedSourceVersion(preparedFile, source);
+				ValidateSourceVersion(preparedFile, source, sourceIdentity);
 				bytesWritten += copiedBytes;
 				processedEntries++;
 				processedFiles++;
@@ -1534,9 +1537,10 @@ public sealed class ProjectCopyExportService(
 			originalSourcePath,
 			contentPath,
 			preparedFile);
+		var sourceIdentity = CapturePassThroughSourceIdentity(preparedFile, source);
 		await using var destination = OpenDestinationFile(destinationPath);
 		var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
-		ValidatePreparedSourceVersion(preparedFile, source);
+		ValidateSourceVersion(preparedFile, source, sourceIdentity);
 		return copiedBytes;
 	}
 
@@ -1609,11 +1613,17 @@ public sealed class ProjectCopyExportService(
 		CancellationToken cancellationToken)
 	{
 		long copiedBytes = 0;
+		var firstRead = true;
 		while (true)
 		{
 			var read = await source.ReadAsync(buffer.AsMemory(0, CopyBufferSize), cancellationToken).ConfigureAwait(false);
 			if (read == 0)
 				return copiedBytes;
+			if (firstRead)
+			{
+				firstRead = false;
+				ProjectCopyExportTestHooks.AfterFirstSourceRead?.Invoke();
+			}
 
 			await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
 			copiedBytes += read;
@@ -1641,6 +1651,31 @@ public sealed class ProjectCopyExportService(
 		if (!OperatingSystem.IsWindows())
 			options.UnixCreateMode = PrivateFileMode;
 		return new FileStream(path, options);
+	}
+
+	private static FileContentIdentity? CapturePassThroughSourceIdentity(
+		PreparedSecretFile? preparedFile,
+		FileStream source)
+	{
+		if (preparedFile is not null)
+			return null;
+		return FileContentIdentity.TryCapture(source) ??
+		       throw SourceUnavailable(SourceChangedDuringCopyMessage);
+	}
+
+	private static void ValidateSourceVersion(
+		PreparedSecretFile? preparedFile,
+		FileStream source,
+		FileContentIdentity? passThroughIdentity)
+	{
+		ValidatePreparedSourceVersion(preparedFile, source);
+		if (preparedFile is not null)
+			return;
+		if (passThroughIdentity is not { } expected ||
+		    FileContentIdentity.TryCapture(source) != expected)
+		{
+			throw SourceUnavailable(SourceChangedDuringCopyMessage);
+		}
 	}
 
 	private static string BuildZipEntryName(string projectName, string relativePath, bool isDirectory)

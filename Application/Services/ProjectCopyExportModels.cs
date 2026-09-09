@@ -114,3 +114,8 @@ public sealed class ProjectCopyExportException(
 	public ProjectCopyExportError Error { get; } = error;
 	public string? PathContext { get; } = pathContext;
 }
+
+internal static class ProjectCopyExportTestHooks
+{
+	internal static Action? AfterFirstSourceRead { get; set; }
+}
