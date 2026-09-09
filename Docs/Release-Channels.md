@@ -35,7 +35,9 @@ Perform these steps in order:
     mutation gate, and all three OS smoke jobs are green.
 8. Re-run the same workflow and version with `channels=both` and `dry_run=false`.
     The workflow publishes six NuGet RID packages before the pointer, and six npm
-    platform packages before the launcher; it does not use skip-duplicate behavior.
+    platform packages before the launcher. A retry verifies an existing NuGet
+    payload receipt or npm `dist.integrity` and skips only identical content; a
+    mismatch fails closed and no package is overwritten.
 
 ## Dry-run package sizes
 

@@ -17,6 +17,14 @@ function Invoke-Container([string[]] $Arguments, [int] $ExpectedExitCode = 0) {
     return @($output)
 }
 
+function Invoke-ContainerFailure([string[]] $Arguments) {
+    $output = & docker run --rm --read-only --tmpfs /tmp --volume "${script:SampleRoot}:/project:ro" $Image @Arguments 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        throw "Container command '$($Arguments -join ' ')' unexpectedly succeeded."
+    }
+    return @($output)
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $script:SampleRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('devprojex-container-smoke-' + [guid]::NewGuid().ToString('N'))
 [System.IO.Directory]::CreateDirectory($script:SampleRoot) | Out-Null
@@ -41,6 +49,12 @@ public static class Program {
     $tree = (Invoke-Container @('tree', '/project', '--git-mode', 'none', '--exclude', 'none')) -join "`n"
     if (-not $tree.Contains('Program.cs', [System.StringComparison]::Ordinal)) {
         throw 'Container tree smoke did not report Program.cs.'
+    }
+
+    $gitUnavailable = (Invoke-ContainerFailure @(
+        'tree', '/project', '--git-mode', 'tracked', '--exclude', 'none')) -join "`n"
+    if (-not $gitUnavailable.Contains('DPX-GIT-STATE-UNAVAILABLE', [System.StringComparison]::Ordinal)) {
+        throw 'The Git-free container did not report an explicit Git-state diagnostic.'
     }
 
     $full = ((Invoke-Container @(

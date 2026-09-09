@@ -212,6 +212,27 @@ uploads are prepared locally, AppImage is attached by the release workflow, and
 NuGet/npm are published through `publish-packages.yml` after their own static,
 mutation, and three-OS functional gates.
 
+Every packaging wrapper resolves its checkout once to a full commit SHA. All
+downstream build, gate, artifact, and publish jobs use that immutable SHA, and the
+package and container artifacts carry it in their receipts. Privileged release
+workflows pin third-party actions to reviewed commit SHAs.
+
+NuGet and npm publication is resumable without allowing overwrite. Before each
+package is pushed, the workflow queries the registry. For NuGet it downloads the
+published package and compares the embedded payload receipt and every semantic
+payload entry, ignoring signing-only ZIP metadata rather than comparing signed
+package bytes. For npm it compares `npm view ... dist.integrity` with the SHA-512
+integrity of the local `npm pack` tarball. Identical content is logged and skipped;
+different content for an existing identity is a hard failure. RID/platform
+packages remain ordered before the NuGet pointer and npm launcher. The read-only
+package gate simulates interruption after three packages, resumes to all fourteen,
+then proves both the identical-skip and mismatch-failure paths.
+
+The NuGet smoke uses a generated configuration with `<clear/>`, the local artifact
+feed as its only source, and isolated package and HTTP caches. It verifies the
+installed pointer and RID payload receipts against the gated packages before
+running the public CLI and MCP smoke.
+
 ## CI-owned headless archives
 
 `.github/workflows/package-headless.yml` builds all six
@@ -241,9 +262,10 @@ CI. Two independent producers cannot atomically update one checksum manifest.
 ## CI-owned Docker image
 
 `.github/workflows/publish-container.yml` builds amd64 and arm64 from the root
-`Dockerfile`, but pushes `ghcr.io/avazbek22/devprojex:<version>` and `latest` only
-for `release: published`. Pull requests and manual runs build, validate, and smoke
-without pushing. The SDK stage cross-publishes linux-arm64 on the x64 runner;
+`Dockerfile` once in its read-only build job. It records each tested archive hash,
+image ID, source SHA, and version, then pushes those saved images without rebuilding
+only for `release: published`. Pull requests and manual runs build, validate, and
+smoke without pushing. The SDK stage cross-publishes linux-arm64 on the x64 runner;
 `BUILDPLATFORM` keeps the compiler native, and the final multi-architecture image
 contains the prebuilt output without a target-architecture build step.
 
@@ -257,9 +279,12 @@ The container channel meets the same connection contract:
    extracted payload and proves the common diff rejects it.
 4. amd64 and native arm64 jobs run version, tree, compression, secret, and MCP
    smoke with `--read-only`, `--tmpfs /tmp`, and a read-only project mount.
-5. The published multi-architecture manifest receives version and `latest` tags
-   plus build-provenance attestation; Docker and MCP client recipes are documented
-   in `Docs/Installation.md` and `Docs/McpServer.md`.
+5. The published multi-architecture manifest is assembled from the exact registry
+   digests of the tested archives. Build provenance attests that manifest digest.
+   The version tag is always published; `latest` moves only when that version is
+   stable and not older than the maximum stable semantic version already in GHCR.
+   Prereleases never move `latest`. Docker and MCP
+   client recipes are documented in `Docs/Installation.md` and `Docs/McpServer.md`.
 
 The image is a folder publish with `DevProjexGrammarDelivery=Content`. Grammar
 libraries stay beside the executable, and `CodeCompressionFactory` selects content
@@ -267,3 +292,8 @@ delivery from the presence of that `grammars` directory on every OS. It does not
 fall back to embedded delivery when a shipped grammar is missing. Neither .NET
 single-file extraction nor grammar materialization needs a writable filesystem at
 startup.
+
+The runtime image deliberately omits Git and SSH. Its smoke proves `--git-mode none`
+works and a Git-backed scope fails explicitly with
+`DPX-GIT-STATE-UNAVAILABLE`; the user-facing limitation and alternatives are in
+`Docs/Installation.md`.
