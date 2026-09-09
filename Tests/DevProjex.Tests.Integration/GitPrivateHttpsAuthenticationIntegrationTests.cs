@@ -42,7 +42,8 @@ public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 		await using var server = await AuthenticatedGitHttpsServer.StartAsync(
 			bare,
 			"private-user",
-			"private-password");
+			"private-password",
+			TestContext.Current.CancellationToken);
 		var caFile = Path.Combine(temporary.Path, "test-ca.pem");
 		await File.WriteAllTextAsync(
 			caFile,
@@ -136,6 +137,10 @@ public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 
 	private sealed class AuthenticatedGitHttpsServer : IAsyncDisposable
 	{
+		private const string FixtureUnavailableReason =
+			"HTTPS Git fixture is unavailable on this platform.";
+		private const string Pkcs12Password = "DevProjex HTTPS fixture";
+		private static readonly TimeSpan TlsProbeTimeout = TimeSpan.FromSeconds(10);
 		private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
 		private readonly CancellationTokenSource _shutdown = new();
 		private readonly string _repositoryRoot;
@@ -172,19 +177,70 @@ public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 		public string? LastError => Volatile.Read(ref _lastError);
 		public string? LastBackendResponse => Volatile.Read(ref _lastBackendResponse);
 
-		public static Task<AuthenticatedGitHttpsServer> StartAsync(
+		public static async Task<AuthenticatedGitHttpsServer> StartAsync(
 			string repositoryRoot,
 			string userName,
-			string password)
+			string password,
+			CancellationToken cancellationToken)
 		{
-			var certificates = CreateCertificates();
-			return Task.FromResult(new AuthenticatedGitHttpsServer(
-				repositoryRoot,
-				userName,
-				password,
-				certificates.Authority,
-				certificates.Server));
+			AuthenticatedGitHttpsServer? server = null;
+			X509Certificate2? certificateAuthority = null;
+			X509Certificate2? serverCertificate = null;
+			try
+			{
+				var certificates = CreateCertificates();
+				certificateAuthority = certificates.Authority;
+				serverCertificate = certificates.Server;
+				server = new AuthenticatedGitHttpsServer(
+					repositoryRoot,
+					userName,
+					password,
+					certificateAuthority,
+					serverCertificate);
+				certificateAuthority = null;
+				serverCertificate = null;
+				await server.VerifyTlsFixtureAsync(cancellationToken);
+				return server;
+			}
+			catch (Exception exception) when (
+				!cancellationToken.IsCancellationRequested &&
+				IsTlsFixtureUnavailable(exception))
+			{
+				if (server is not null)
+					await server.DisposeAsync();
+				certificateAuthority?.Dispose();
+				serverCertificate?.Dispose();
+				Assert.Skip(FixtureUnavailableReason);
+				throw;
+			}
 		}
+
+		private async Task VerifyTlsFixtureAsync(CancellationToken cancellationToken)
+		{
+			using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+			deadline.CancelAfter(TlsProbeTimeout);
+			using var client = new TcpClient();
+			var endpoint = (IPEndPoint)_listener.LocalEndpoint;
+			await client.ConnectAsync(endpoint.Address, endpoint.Port, deadline.Token);
+			await using var tls = new SslStream(
+				client.GetStream(),
+				leaveInnerStreamOpen: false);
+			await tls.AuthenticateAsClientAsync(
+				new SslClientAuthenticationOptions
+				{
+					TargetHost = endpoint.Address.ToString(),
+					EnabledSslProtocols = SslProtocols.Tls12,
+					CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+					RemoteCertificateValidationCallback =
+						static (_, _, _, _) => true
+				},
+				deadline.Token);
+		}
+
+		private static bool IsTlsFixtureUnavailable(Exception exception) =>
+			exception is AuthenticationException or CryptographicException or
+				IOException or SocketException or PlatformNotSupportedException or
+				OperationCanceledException;
 
 		private async Task ServeAsync()
 		{
@@ -229,7 +285,9 @@ public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 					new SslServerAuthenticationOptions
 					{
 						ServerCertificate = _serverCertificate,
-						EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+						EnabledSslProtocols = SslProtocols.Tls12,
+						ClientCertificateRequired = false,
+						CertificateRevocationCheckMode = X509RevocationMode.NoCheck
 					},
 					_shutdown.Token);
 				var request = await ReadRequestAsync(tls, _shutdown.Token);
@@ -432,18 +490,20 @@ public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 				DateTimeOffset.UtcNow.AddMinutes(-5),
 				DateTimeOffset.UtcNow.AddDays(1),
 				serial);
-			var ephemeralServer = publicServer.CopyWithPrivateKey(serverKey);
+			var exportableServer = publicServer.CopyWithPrivateKey(serverKey);
 			publicServer.Dispose();
-			if (!OperatingSystem.IsWindows())
-				return (authority, ephemeralServer);
-
-			using (ephemeralServer)
+			using (exportableServer)
 			{
+				var storageFlags = OperatingSystem.IsMacOS()
+					? X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.Exportable
+					: OperatingSystem.IsWindows()
+						? X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.Exportable
+						: X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable;
+				var pkcs12 = exportableServer.Export(X509ContentType.Pfx, Pkcs12Password);
 				var server = X509CertificateLoader.LoadPkcs12(
-					ephemeralServer.Export(X509ContentType.Pfx),
-					password: null,
-					X509KeyStorageFlags.MachineKeySet |
-					X509KeyStorageFlags.Exportable);
+					pkcs12,
+					Pkcs12Password,
+					storageFlags);
 				return (authority, server);
 			}
 		}
