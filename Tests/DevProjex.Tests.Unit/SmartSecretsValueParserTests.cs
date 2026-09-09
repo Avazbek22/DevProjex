@@ -154,6 +154,14 @@ public sealed class SmartSecretsValueParserTests
 		Assert.Empty(Find(content, "appsettings.json", "config-secret"));
 	}
 
+	[Fact]
+	public void Json_SensitiveNestedContainersAndCommentsPreserveAdjacentSyntax()
+	{
+		const string content = "{/* retained */\"Password\":{\"primary\":\"ab12\",\"backup\":[\"cd34\"]},\"Port\":8080}";
+
+		AssertExactCoverage(content, Find(content, "appsettings.json", "config-secret"), "ab12", "cd34");
+	}
+
 	// YAML 1.2 comments require separation in plain scalars, single quotes escape by doubling,
 	// and block scalar content is selected by indentation rather than the physical line.
 	// Source: https://yaml.org/spec/1.2.2/
@@ -222,6 +230,14 @@ public sealed class SmartSecretsValueParserTests
 		const string content = "<Password>left<![CDATA[mid]]>right</Password><Port>8080</Port>";
 
 		AssertExactCoverage(content, Find(content, "web.config", "config-secret"), "left", "mid", "right");
+	}
+
+	[Fact]
+	public void Xml_MultilineAttributesAndCommentsPreserveMarkup()
+	{
+		const string content = "<!-- retained -->\r\n<add\r\n key=\"Password\"\r\n value=\"ab12\" />";
+
+		AssertExactCoverage(content, Find(content, "web.config", "config-secret"), "ab12");
 	}
 
 	[Fact]
@@ -348,6 +364,24 @@ public sealed class SmartSecretsValueParserTests
 				SmartSecretStack.None,
 				TestContext.Current.CancellationToken));
 		Assert.Equal(nameof(SecretInspectionLimits.MaximumFindingsPerFile), exception.LimitName);
+	}
+
+	[Theory]
+	[InlineData(".env", "DB_PASSWORD=\"unterminated")]
+	[InlineData("appsettings.json", "{\"Password\":\"unterminated}")]
+	[InlineData("application.yml", "password: 'unterminated")]
+	[InlineData("web.config", "<Password><![CDATA[unterminated</Password>")]
+	[InlineData("settings.py", "SECRET_KEY = \"\"\"unterminated")]
+	[InlineData("Dockerfile", "ENV DB_PASSWORD=\"unterminated")]
+	[InlineData(".netrc", "machine host password \"unterminated")]
+	public void IncompleteStructuredValueDoesNotBecomeAConfidentPartialFinding(string path, string content)
+	{
+		Assert.Throws<SecretDetectionException>(() =>
+			StructuredSecretDetector.Detect(
+				path,
+				content,
+				SmartSecretStack.None,
+				TestContext.Current.CancellationToken));
 	}
 
 	private static DetectedSecret[] Find(string content, string path, string ruleId) =>
