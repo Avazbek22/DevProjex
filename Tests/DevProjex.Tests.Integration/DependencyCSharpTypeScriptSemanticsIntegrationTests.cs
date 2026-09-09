@@ -6,6 +6,32 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New096_PackageExportsRejectTargetsOutsidePackage()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var package = fixture.CreateFile(
+			"pkg/package.json",
+			"{\"name\":\"pkg\",\"exports\":{\"./value\":\"../outside.js\"}}");
+		var outside = fixture.CreateFile("outside.js", "export default 1;");
+		var source = fixture.CreateFile("pkg/main.ts", "import value from 'pkg/value';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, outside, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "pkg/main.ts" && candidate.Reference == "pkg/value");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Equal("package exports target is invalid", Assert.Single(edge.Reasons));
+	}
+
+	[Fact]
 	public async Task New095_RequireParameterDoesNotCreateModuleImport()
 	{
 		using var fixture = new TemporaryDirectory();

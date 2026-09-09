@@ -1439,6 +1439,8 @@ public sealed class DependencyFactsEngine : IDisposable
 					var mappedPath = wildcard.Length == 0
 						? selected.Path
 						: selected.Path.Replace("*", wildcard, StringComparison.Ordinal);
+					if (exports && !IsValidPackageExportTarget(mappedPath))
+						return new PackageMapProbe([], "package exports target is invalid");
 					return new PackageMapProbe(
 						ProbeTypeScript(
 							Path.GetFullPath(Path.Combine(directory, mappedPath)),
@@ -1452,6 +1454,16 @@ public sealed class DependencyFactsEngine : IDisposable
 				directory = Path.GetDirectoryName(directory)!;
 			}
 			return new PackageMapProbe([], null);
+		}
+
+		private static bool IsValidPackageExportTarget(string target)
+		{
+			if (!target.StartsWith("./", StringComparison.Ordinal) || target.Length == 2 || target.Contains('\\'))
+				return false;
+			return !target[2..].Split('/').Any(segment =>
+				segment.Length == 0 ||
+				segment is "." or ".." ||
+				segment.Equals("node_modules", StringComparison.OrdinalIgnoreCase));
 		}
 
 		private PackageMapDescriptor? FindNearestPackageMap(FileFacts source)
