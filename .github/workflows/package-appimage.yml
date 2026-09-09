@@ -81,6 +81,7 @@ jobs:
       version: ${{ steps.metadata.outputs.version }}
       release_tag: ${{ steps.metadata.outputs.release_tag }}
       upload_release: ${{ steps.metadata.outputs.upload_release }}
+      source_sha: ${{ steps.metadata.outputs.source_sha }}
 
     steps:
       - uses: actions/checkout@v7
@@ -122,6 +123,7 @@ jobs:
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
           echo "upload_release=${upload_release}" >> "${GITHUB_OUTPUT}"
+          echo "source_sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
       - name: Validate release version metadata
         shell: pwsh
@@ -136,7 +138,7 @@ jobs:
     needs: prepare
     uses: ./.github/workflows/appimage-build.yml
     with:
-      checkout_ref: ${{ github.ref }}
+      checkout_ref: ${{ needs.prepare.outputs.source_sha }}
       version: ${{ needs.prepare.outputs.version }}
 
   release-upload:

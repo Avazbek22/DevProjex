@@ -12,6 +12,7 @@ Set-StrictMode -Version Latest
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+. (Join-Path $PSScriptRoot "HeadlessPackagePublishing.ps1")
 
 $sourceRoot = [System.IO.Path]::GetFullPath($ArtifactsRoot)
 $mutationRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("devprojex-headless-mutation-" + [guid]::NewGuid().ToString("N"))
@@ -73,6 +74,7 @@ try {
         $packagePath,
         [System.IO.Compression.CompressionLevel]::Optimal,
         $false)
+    Add-NuGetPayloadReceipt -PackagePath $packagePath
 
     $failedClosed = $false
     $failureMessage = ""

@@ -330,7 +330,16 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("windows-latest", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("ubuntu-latest", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("macos-latest", buildWorkflow, StringComparison.Ordinal);
-		Assert.Contains("NuGet/login@v1", workflow, StringComparison.Ordinal);
+		Assert.Contains("Publish-HeadlessPackages.ps1", workflow, StringComparison.Ordinal);
+		Assert.Contains("Test-ResumableHeadlessPublish.ps1", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("'Scripts/ci/Test-ResumableHeadlessPublish.ps1'", workflow, StringComparison.Ordinal);
+		Assert.Contains("source-sha.txt", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("<clear />", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("NUGET_PACKAGES", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-InstalledNuGetPayloadReceipt", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("microsoft.netcore.app.host.$rid", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("if ($IsMacOS)", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("@('--arch', $architecture)", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("inputs.dry_run == false", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("--skip-duplicate", workflow, StringComparison.Ordinal);
 	}
@@ -444,21 +453,64 @@ public sealed class DocumentationAndPackagingContractTests
 
 		Assert.Contains("uses: ./.github/workflows/container-build.yml", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("ubuntu-24.04-arm", containerBuildWorkflow, StringComparison.Ordinal);
-		Assert.Contains("linux/amd64,linux/arm64", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("docker/setup-buildx-action@v4", containerBuildWorkflow, StringComparison.Ordinal);
-		Assert.Contains("docker/login-action@v4", containerWorkflow, StringComparison.Ordinal);
-		Assert.Contains("docker/build-push-action@v7", containerWorkflow, StringComparison.Ordinal);
-		Assert.Contains("actions/attest-build-provenance@v4", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("devprojex-container-images", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("container-images.json", containerBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Publish-HeadlessContainer.ps1", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("'Scripts/ContainerPublishing.ps1'", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("'Scripts/ci/Test-ContainerPromotionPolicy.ps1'", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("steps.promote.outputs.manifest_digest", containerWorkflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("docker/build-push-action", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("packages: write", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("id-token: write", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("attestations: write", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("--read-only", containerSmoke, StringComparison.Ordinal);
 		Assert.Contains("--tmpfs /tmp", containerSmoke, StringComparison.Ordinal);
+		Assert.Contains("DPX-GIT-STATE-UNAVAILABLE", containerSmoke, StringComparison.Ordinal);
+		Assert.Contains("DPX-GIT-TRACKED-INDEX-UNAVAILABLE", containerSmoke, StringComparison.Ordinal);
 		Assert.DoesNotContain("setup-qemu", containerWorkflow + containerBuildWorkflow, StringComparison.OrdinalIgnoreCase);
 
 		Assert.Contains("DevProjex-headless.v<version>.<rid>", installation, StringComparison.Ordinal);
 		Assert.Contains("ghcr.io/avazbek22/devprojex", installation, StringComparison.Ordinal);
+		Assert.Contains("intentionally contains no Git", installation, StringComparison.Ordinal);
+		Assert.Contains("latest", releaseProcess, StringComparison.Ordinal);
+		Assert.Contains("exact registry", releaseProcess, StringComparison.Ordinal);
 		Assert.Contains("Two independent producers cannot atomically update one checksum manifest", releaseProcess, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void PrivilegedReleaseWorkflowsPinThirdPartyActions()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflows = new[]
+		{
+			"publish-packages.yml",
+			"publish-container.yml",
+			"release-candidate.yml",
+			"store-package-smoke.yml"
+		};
+		var expectedPins = new[]
+		{
+			"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+			"actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0",
+			"actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
+			"actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+			"actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+			"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0",
+			"docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0",
+			"docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0",
+			"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2"
+		};
+		var combined = string.Join(Environment.NewLine, workflows.Select(name => File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			name))));
+		foreach (var expectedPin in expectedPins)
+			Assert.Contains(expectedPin, combined, StringComparison.Ordinal);
+
+		Assert.DoesNotMatch(@"uses:\s+[^\s]+@v\d", combined);
+		Assert.DoesNotContain("npm@latest", combined, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -489,6 +541,8 @@ public sealed class DocumentationAndPackagingContractTests
 				workflowName));
 			Assert.Contains("Policy: .github/workflows/README.md", workflow, StringComparison.Ordinal);
 			Assert.Contains("concurrency:", workflow, StringComparison.Ordinal);
+			Assert.Contains("source_sha", workflow, StringComparison.Ordinal);
+			Assert.Contains("needs.prepare.outputs.source_sha", workflow, StringComparison.Ordinal);
 			Assert.Contains("github.event.pull_request.number || github.ref", workflow, StringComparison.Ordinal);
 			Assert.Contains(
 				"cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}",
@@ -514,6 +568,7 @@ public sealed class DocumentationAndPackagingContractTests
 		var appImage = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-appimage.yml"));
 		Assert.Contains("Policy: .github/workflows/README.md", appImage, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/appimage-build.yml", appImage, StringComparison.Ordinal);
+		Assert.Contains("checkout_ref: ${{ needs.prepare.outputs.source_sha }}", appImage, StringComparison.Ordinal);
 		var appImagePush = TriggerSection(appImage, "push");
 		Assert.Contains("'v*'", appImagePush, StringComparison.Ordinal);
 		Assert.Contains("Application/**", appImagePush, StringComparison.Ordinal);
@@ -529,6 +584,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("force_full:", storeSmoke, StringComparison.Ordinal);
 		Assert.Contains("Select-CiPlan.ps1 -Full", storeSmoke, StringComparison.Ordinal);
 		Assert.DoesNotContain(": write", storeSmoke, StringComparison.Ordinal);
+		Assert.Contains("ref: ${{ needs.plan-store.outputs.source_sha }}", storeSmoke, StringComparison.Ordinal);
 
 		var grammarDelivery = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "grammar-delivery.yml"));
 		Assert.Contains("workflow_call:", grammarDelivery, StringComparison.Ordinal);
