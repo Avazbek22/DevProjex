@@ -338,7 +338,8 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("NUGET_PACKAGES", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("Test-InstalledNuGetPayloadReceipt", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("microsoft.netcore.app.host.$rid", buildWorkflow, StringComparison.Ordinal);
-		Assert.Contains("--arch $architecture", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("if ($IsMacOS)", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("@('--arch', $architecture)", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("inputs.dry_run == false", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("--skip-duplicate", workflow, StringComparison.Ordinal);
 	}

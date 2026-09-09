@@ -174,12 +174,16 @@ jobs:
             </packageSources>
           </configuration>
           "@ | Set-Content -LiteralPath $nugetConfig -Encoding utf8NoBOM
-          dotnet tool install devprojex `
-            --tool-path $toolRoot `
-            --version $env:VERSION `
-            --configfile $nugetConfig `
-            --no-cache `
-            --arch $architecture
+          $toolInstallArguments = @(
+            'tool', 'install', 'devprojex',
+            '--tool-path', $toolRoot,
+            '--version', $env:VERSION,
+            '--configfile', $nugetConfig,
+            '--no-cache')
+          if ($IsMacOS) {
+            $toolInstallArguments += @('--arch', $architecture)
+          }
+          dotnet @toolInstallArguments
           if ($LASTEXITCODE -ne 0) { throw 'dotnet tool install failed.' }
           $binaryCandidates = @(Get-ChildItem -LiteralPath $toolRoot -File | Where-Object {
             $_.BaseName -ceq 'devprojex' -or $_.Name -ceq 'devprojex'
