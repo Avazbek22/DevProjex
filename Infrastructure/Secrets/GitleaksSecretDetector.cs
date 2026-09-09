@@ -26,6 +26,9 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private const string ResourceSuffix = ".Secrets.Rules.gitleaks-v8.30.1.toml";
 	private const string GenericApiKeyRuleId = "generic-api-key";
 	private const string PrivateKeyRuleId = "private-key";
+	internal const string PolicyOverrideVersion = "devprojex-export-v1";
+	internal const string UpstreamBooleanAllowlistPattern = "(?i)^true|false|null$";
+	internal const string WholeValueBooleanAllowlistPattern = "(?i)^(?:true|false|null)$";
 	private static readonly SearchValues<char> GenericDelimiters = SearchValues.Create("=>|:?,");
 	// Reviewed override for the upstream private-key rule. The upstream body pattern accepts any
 	// character, so in a file that merely mentions PEM markers - test fixtures, documentation -
@@ -79,7 +82,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	public int RuleCount => _configuration.Value.Rules.Count;
 	// The "+pkb" marker records the reviewed private-key override so cached findings produced by
 	// the unbounded upstream pattern are never mistaken for results of the bounded one.
-	public string RulesIdentity => $"gitleaks:{RulesVersion}:{ConfigurationSha256}+pkb";
+	public string RulesIdentity =>
+		$"gitleaks:{RulesVersion}:{ConfigurationSha256}+pkb+{PolicyOverrideVersion}";
 
 	public void WarmUp(CancellationToken cancellationToken = default)
 	{
@@ -123,16 +127,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	public bool ShouldInspectPath(string repositoryRelativePath)
 	{
 		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
-		try
-		{
-			var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
-			var allowlists = _configuration.Value.GlobalAllowlists;
-			return ShouldInspectPath(allowlists, EvaluateAllowlistPaths(allowlists, normalizedPath));
-		}
-		catch (RegexMatchTimeoutException exception)
-		{
-			throw new SecretDetectionException("Secret path policy evaluation timed out.", exception);
-		}
+		return true;
 	}
 
 	internal GitleaksCandidateStatistics InspectCandidates(
@@ -219,6 +214,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	internal IReadOnlyList<string> InspectRuleIds() =>
 		_configuration.Value.Rules.Select(static rule => rule.Id).ToArray();
+
+	internal IReadOnlyList<string> InspectGlobalAllowlistRegexPatterns() =>
+		_configuration.Value.GlobalAllowlists
+			.SelectMany(static allowlist => allowlist.Regexes)
+			.Select(static regex => regex.Value.ToString())
+			.ToArray();
 
 	internal bool InspectRuleSpecificEvidence(string ruleId, ReadOnlySpan<char> content) =>
 		HasRuleSpecificEvidence(ruleId, content);
@@ -325,8 +326,6 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		budget.Checkpoint(cancellationToken);
 		var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
 		var globalPathMatches = EvaluateAllowlistPaths(configuration.GlobalAllowlists, normalizedPath);
-		if (!ShouldInspectPath(configuration.GlobalAllowlists, globalPathMatches))
-			return [];
 		Span<ulong> candidateRules = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
 		configuration.KeywordPrefilter.FindCandidates(content, candidateRules, cancellationToken);
 
@@ -360,7 +359,6 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				foreach (var valueMatch in contentRegex.EnumerateMatches(content))
 				{
 					budget.Checkpoint(cancellationToken);
-					rulePathMatches ??= EvaluateRuleAllowlistPaths(rule.Allowlists, normalizedPath);
 					var secretOffset = 0;
 					var secretLength = valueMatch.Length;
 					if (!wholeMatchFastPath)
@@ -376,11 +374,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 					var secret = content.Slice(valueMatch.Index + secretOffset, secretLength);
 					if (rule.Entropy > 0 && CalculateShannonEntropy(secret) <= rule.Entropy)
 						continue;
+					var usePathAllowlists = UsesHeuristicPathPolicy(rule, secret);
+					if (usePathAllowlists)
+						rulePathMatches ??= EvaluateRuleAllowlistPaths(rule.Allowlists, normalizedPath);
 
 					ReadOnlySpan<char> line = default;
 					var inspectedLine = false;
-					if (NeedsLine(configuration.GlobalAllowlists, globalPathMatches) ||
-					    NeedsLine(rule.Allowlists, rulePathMatches))
+					if (NeedsLine(configuration.GlobalAllowlists, globalPathMatches, usePathAllowlists) ||
+					    NeedsLine(rule.Allowlists, rulePathMatches, usePathAllowlists))
 					{
 						var lineRange = lineIndex.GetContainingLine(valueMatch.Index, valueMatch.Length);
 						line = content.Slice(lineRange.Start, lineRange.Length);
@@ -392,8 +393,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 						secret,
 						content.Slice(valueMatch.Index, valueMatch.Length),
 						line);
-					if (Allows(configuration.GlobalAllowlists, globalPathMatches, context) ||
-					    Allows(rule.Allowlists, rulePathMatches, context))
+					if (Allows(configuration.GlobalAllowlists, globalPathMatches, context, usePathAllowlists) ||
+					    Allows(rule.Allowlists, rulePathMatches, context, usePathAllowlists))
 					{
 						if (inspectedLine)
 							ContentPipelineDiagnostics.RecordRejectedMatchLineContext();
@@ -421,13 +422,15 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return findings;
 	}
 
-	private static bool ShouldInspectPath(
-		IReadOnlyList<CompiledAllowlist> allowlists,
-		IReadOnlyList<bool> pathMatches)
+	private static bool UsesHeuristicPathPolicy(CompiledRule rule, ReadOnlySpan<char> secret)
 	{
-		for (var index = 0; index < allowlists.Count; index++)
+		if (rule.Id.Equals(GenericApiKeyRuleId, StringComparison.Ordinal))
+			return true;
+		if (rule.Entropy <= 0)
+			return false;
+		foreach (var keyword in rule.Keywords)
 		{
-			if (allowlists[index].AllowsWholeFileByPath(pathMatches[index]))
+			if (secret.StartsWith(keyword, StringComparison.OrdinalIgnoreCase))
 				return false;
 		}
 		return true;
@@ -479,11 +482,21 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	{
 		// Gitleaks permits up to five separators before the captured value. Try each
 		// legal boundary instead of consuming them greedily: '=' is both a separator
-		// and a legal first character of the provider-neutral value grammar.
+		// and a legal first character of the provider-neutral value grammar. The first
+		// syntactically valid range is not necessarily the range with sufficient entropy.
+		candidate = default;
+		var bestEntropy = double.NegativeInfinity;
 		for (var skipped = 0; skipped <= 5 && valueStart < content.Length; skipped++, valueStart++)
 		{
-			if (TryReadGenericApiKeyCandidate(content, valueStart, out candidate))
-				return true;
+			if (TryReadGenericApiKeyCandidate(content, valueStart, out var current))
+			{
+				var entropy = CalculateShannonEntropy(current);
+				if (entropy > bestEntropy)
+				{
+					candidate = current;
+					bestEntropy = entropy;
+				}
+			}
 			if (skipped == 5 ||
 			    !char.IsWhiteSpace(content[valueStart]) &&
 			    content[valueStart] is not ('=' or '\'' or '"' or '`'))
@@ -492,8 +505,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			}
 		}
 
-		candidate = default;
-		return false;
+		return bestEntropy > double.NegativeInfinity;
 	}
 
 	private static int GetGenericDelimiterLength(ReadOnlySpan<char> content, int start)
@@ -1134,11 +1146,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static bool NeedsLine(
 		IReadOnlyList<CompiledAllowlist> allowlists,
-		IReadOnlyList<bool> pathMatches)
+		IReadOnlyList<bool>? pathMatches,
+		bool usePathAllowlists)
 	{
 		for (var index = 0; index < allowlists.Count; index++)
 		{
-			if (allowlists[index].NeedsLine(pathMatches[index]))
+			if (allowlists[index].NeedsLine(
+				    usePathAllowlists && pathMatches is not null && pathMatches[index],
+				    usePathAllowlists))
 				return true;
 		}
 		return false;
@@ -1146,12 +1161,16 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static bool Allows(
 		IReadOnlyList<CompiledAllowlist> allowlists,
-		IReadOnlyList<bool> pathMatches,
-		AllowlistContext context)
+		IReadOnlyList<bool>? pathMatches,
+		AllowlistContext context,
+		bool usePathAllowlists)
 	{
 		for (var index = 0; index < allowlists.Count; index++)
 		{
-			if (allowlists[index].Allows(context, pathMatches[index]))
+			if (allowlists[index].Allows(
+				    context,
+				    usePathAllowlists && pathMatches is not null && pathMatches[index],
+				    usePathAllowlists))
 				return true;
 		}
 		return false;
@@ -1292,7 +1311,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		var globalAllowlists = root.TryGetValue("allowlist", out var globalAllowlistValue) &&
 		                       globalAllowlistValue is TomlTable globalAllowlist
-			? new[] { CompileAllowlist(globalAllowlist) }
+			? new[] { CompileGlobalAllowlist(globalAllowlist) }
 			: [];
 		var rules = new List<CompiledRule>(ruleTables.Count);
 		for (var order = 0; order < ruleTables.Count; order++)
@@ -1362,12 +1381,36 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	// bounded finding context under the same hard timeout; using the interpreted engine here
 	// avoids retaining tens of megabytes of lazy symbolic DFA state for exclusion predicates.
 	private static CompiledAllowlist CompileAllowlist(TomlTable table) =>
+		CompileAllowlist(table, GetStringArray(table, "regexes"));
+
+	private static CompiledAllowlist CompileGlobalAllowlist(TomlTable table)
+	{
+		var regexPatterns = GetStringArray(table, "regexes");
+		var overrideCount = 0;
+		for (var index = 0; index < regexPatterns.Length; index++)
+		{
+			if (!regexPatterns[index].Equals(UpstreamBooleanAllowlistPattern, StringComparison.Ordinal))
+				continue;
+			regexPatterns[index] = WholeValueBooleanAllowlistPattern;
+			overrideCount++;
+		}
+		if (overrideCount != 1)
+		{
+			throw new SecretDetectionException(
+				"The reviewed global boolean allowlist changed and its export-policy override needs a new review.");
+		}
+		return CompileAllowlist(table, regexPatterns);
+	}
+
+	private static CompiledAllowlist CompileAllowlist(
+		TomlTable table,
+		IReadOnlyList<string> regexPatterns) =>
 		new(
 			GetStringArray(table, "paths").Select(pattern => CreateDeferredRegex(
 				pattern,
 				"allowlist path",
 				useNonBacktracking: false)).ToArray(),
-			GetStringArray(table, "regexes").Select(pattern => CreateDeferredRegex(
+			regexPatterns.Select(pattern => CreateDeferredRegex(
 				pattern,
 				"allowlist expression",
 				useNonBacktracking: false)).ToArray(),
@@ -1834,12 +1877,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				pathMatches,
 				Regexes.Count > 0 || Stopwords.Count > 0);
 
-		public bool NeedsLine(bool pathMatches) =>
+		public bool NeedsLine(bool pathMatches, bool usePathAllowlists) =>
 			RegexTarget == AllowlistRegexTarget.Line &&
 			Regexes.Count > 0 &&
-			(RequireAll || !pathMatches);
+			(RequireAll || !usePathAllowlists || !pathMatches);
 
-		public bool Allows(AllowlistContext context, bool pathMatches)
+		public bool Allows(AllowlistContext context, bool pathMatches, bool usePathAllowlists)
 		{
 			ReadOnlySpan<char> target = RegexTarget switch
 			{
@@ -1849,13 +1892,13 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			};
 			if (!RequireAll)
 			{
-				return Paths.Count > 0 && pathMatches ||
+				return usePathAllowlists && Paths.Count > 0 && pathMatches ||
 				       _stopwordSearchValues is not null && ContainsAny(context.Secret, _stopwordSearchValues) ||
 				       Regexes.Count > 0 && MatchesAny(target, Regexes);
 			}
 
 			var hasCriterion = false;
-			if (Paths.Count > 0)
+			if (usePathAllowlists && Paths.Count > 0)
 			{
 				hasCriterion = true;
 				if (!pathMatches)

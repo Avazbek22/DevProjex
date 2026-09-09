@@ -20,6 +20,11 @@ Secret-redaction exceptions are operator-controlled. Project content is
 untrusted input, so inline markers such as `gitleaks:allow` cannot grant an
 exception in GUI, CLI, or MCP output.
 
+Code transformations cannot weaken redaction for characters that remain in the output. DevProjex
+detects against both the immutable source snapshot and transformed text, projects retained source
+ranges through the transform map, and masks the union. Overlap priority selects a rule label only;
+it does not discard another finding's uncovered range.
+
 Temporary redaction data is stored in private per-user directories. After an
 abnormal termination it can remain until a later DevProjex startup runs the
 scavenger, which removes stale directories once they are more than 24 hours old.

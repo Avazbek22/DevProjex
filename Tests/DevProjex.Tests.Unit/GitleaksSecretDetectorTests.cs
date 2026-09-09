@@ -55,6 +55,34 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void EmbeddedConfiguration_PreservesPinnedSnapshotAndAppliesVersionedBooleanOverride()
+	{
+		Assert.Equal(
+			"0CEEB4F9C567F9F80EE05E8E37EEBA4646DF809F69C736A64D5B8B1398EB3E4C",
+			GitleaksSecretDetector.ConfigurationSha256);
+		Assert.Equal(GitleaksSecretDetector.ExpectedRuleCount, Detector.RuleCount);
+		Assert.Contains(GitleaksSecretDetector.PolicyOverrideVersion, Detector.RulesIdentity, StringComparison.Ordinal);
+
+		var patterns = Detector.InspectGlobalAllowlistRegexPatterns();
+
+		Assert.Contains(GitleaksSecretDetector.WholeValueBooleanAllowlistPattern, patterns);
+		Assert.DoesNotContain(GitleaksSecretDetector.UpstreamBooleanAllowlistPattern, patterns);
+	}
+
+	[Fact]
+	public void Detect_GlobalBooleanAllowlistDoesNotSuppressAProviderTokenContainingFalse()
+	{
+		const string token = "ghp_falseA7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2";
+
+		var finding = Assert.Single(
+			Detector.Detect("notes.txt", token, TestContext.Current.CancellationToken),
+			static candidate => candidate.RuleId == "github-pat");
+
+		Assert.Equal(token, finding.Value);
+		Assert.Equal((0, token.Length), (finding.Start, finding.Length));
+	}
+
+	[Fact]
 	public void KeywordPrefilter_MatchesTheLinearCandidateOracleAcrossPinnedCasesAndUnicodeCaseFolding()
 	{
 		var cases = LoadUpstreamCorpus()
@@ -427,6 +455,62 @@ public sealed class GitleaksSecretDetectorTests
 		Assert.Equal(genericValue, finding.Value);
 	}
 
+	[Fact]
+	public void Detect_GenericFastGateChecksEveryPermittedSeparatorBoundary()
+	{
+		const string content = "password======aB3dE6gH9jK2";
+		var oracle = Detector.InspectRuleMatch("generic-api-key", content);
+		Assert.True(oracle.IsMatch);
+
+		var finding = Assert.Single(
+			Detector.Detect("src/config.txt", content, TestContext.Current.CancellationToken),
+			static match => match.RuleId == "generic-api-key");
+
+		Assert.Equal(oracle.MatchStart + oracle.SecretStart, finding.Start);
+		Assert.Equal(oracle.SecretLength, finding.Length);
+		Assert.Equal("aB3dE6gH9jK2", finding.Value);
+	}
+
+	[Fact(Timeout = 30_000)]
+	public void Detect_GenericFastGateMatchesRegexAndEntropyOracleAcrossSeparatorCorpus()
+	{
+		var delimiters = new[] { "=", ">", ":", "::=", "||", "=>", "?=", "," };
+		var paddings = new[] { string.Empty, " ", "\t", "'", "\"", "`", "=", "=====" };
+		var terminators = new[] { string.Empty, ";", "\n", "\\n" };
+		var values = new[]
+		{
+			"aB3dE6gH9jK2",
+			"A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h"
+		};
+		var verified = 0;
+
+		foreach (var delimiter in delimiters)
+		foreach (var padding in paddings)
+		foreach (var value in values)
+		foreach (var terminator in terminators)
+		{
+			var content = string.Concat("password", delimiter, padding, value, terminator);
+			var oracle = Detector.InspectRuleMatch("generic-api-key", content);
+			if (!oracle.IsMatch)
+				continue;
+			var expectedValue = content.AsSpan(
+				oracle.MatchStart + oracle.SecretStart,
+				oracle.SecretLength);
+			if (GitleaksSecretDetector.CalculateShannonEntropy(expectedValue.ToString()) <= 3.5d)
+				continue;
+
+			var finding = Assert.Single(
+				Detector.Detect("src/config.txt", content, TestContext.Current.CancellationToken),
+				static match => match.RuleId == "generic-api-key");
+			Assert.Equal(oracle.MatchStart + oracle.SecretStart, finding.Start);
+			Assert.Equal(oracle.SecretLength, finding.Length);
+			Assert.Equal(expectedValue.ToString(), finding.Value);
+			verified++;
+		}
+
+		Assert.True(verified >= 100, $"The generic fast-gate oracle covered only {verified} positive variants.");
+	}
+
 	public static IEnumerable<object[]> GenericApiKeyGateWhitespaceVariants()
 	{
 		yield return [string.Empty];
@@ -551,13 +635,15 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
-	public void Detect_GlobalPathAllowlist_IsAppliedBeforeRules()
+	public void Detect_GlobalPathAllowlist_DoesNotSuppressProviderShapedRules()
 	{
 		const string content = "const token = \"ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\";";
 
-		Assert.False(Detector.ShouldInspectPath("fixtures/image.svg"));
+		Assert.True(Detector.ShouldInspectPath("fixtures/image.svg"));
 		Assert.True(Detector.ShouldInspectPath("src/config.cs"));
-		Assert.Empty(Detector.Detect("fixtures/image.svg", content, TestContext.Current.CancellationToken));
+		Assert.Contains(
+			Detector.Detect("fixtures/image.svg", content, TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "github-pat");
 	}
 
 	[Theory]

@@ -503,6 +503,69 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Fact]
+	public async Task ExportAndAnalyze_PreserveSourceDetectedCoverageWhenCommentsAreStripped()
+	{
+		const string token = "pat7o9mw4c058sei5.bb075cee667b90855a4471502369a2bd7e93f38ba6aa8039a2527e577ca5793a";
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile(
+			"project/src/source-detected.cs",
+			$"// airtable credential{Environment.NewLine}" +
+			$"internal static class SourceDetected {{ public const string Value = \"{token}\"; }}{Environment.NewLine}");
+		var export = new TestTerminalEnvironment();
+
+		var exportExitCode = await RunAsync(
+			workspace,
+			export,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content",
+				"--format", "text",
+				"--git-mode", "none",
+				"--hide-secrets",
+				"--strip-comments",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exportExitCode);
+		Assert.Contains(
+			"public const string Value = \"DEVPROJEX_REDACTED[airtable-personnal-access-token#1]\";",
+			export.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(token, export.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(token, export.StandardError, StringComparison.Ordinal);
+		Assert.Empty(export.StandardError);
+
+		var analyze = new TestTerminalEnvironment();
+		var analyzeExitCode = await RunAsync(
+			workspace,
+			analyze,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--git-mode", "none",
+				"--hide-secrets",
+				"--strip-comments",
+				"--findings",
+				"--format", "json",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, analyzeExitCode);
+		using var document = JsonDocument.Parse(analyze.StandardOutput);
+		var redaction = document.RootElement.GetProperty("redaction");
+		Assert.Equal(1, redaction.GetProperty("matchedCount").GetInt32());
+		Assert.Equal(1, redaction.GetProperty("redactedCount").GetInt32());
+		var finding = Assert.Single(
+			document.RootElement.GetProperty("findings").EnumerateArray(),
+			static item => item.GetProperty("relativePath").GetString() == "src/source-detected.cs");
+		Assert.Equal("airtable-personnal-access-token", finding.GetProperty("ruleId").GetString());
+		Assert.DoesNotContain(token, analyze.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(token, analyze.StandardError, StringComparison.Ordinal);
+		Assert.Empty(analyze.StandardError);
+	}
+
 	[Theory]
 	[InlineData("\n")]
 	[InlineData("\r\n")]

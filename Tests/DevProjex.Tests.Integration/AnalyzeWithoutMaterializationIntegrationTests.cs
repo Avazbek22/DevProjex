@@ -40,11 +40,12 @@ public sealed class AnalyzeWithoutMaterializationIntegrationTests
 		var measuredDiagnostics = diagnostics.Capture();
 		Assert.Equal(0, measuredDiagnostics.PreparedWriteBytes);
 		Assert.Equal(0, measuredDiagnostics.PreparedReadBytes);
-		Assert.Equal(1, measuredDiagnostics.MeasurementPasses);
+		// Selected lock files still reach fixed-prefix provider rules; only heuristic rules retain path allowlists.
+		Assert.Equal(2, measuredDiagnostics.MeasurementPasses);
 		Assert.Equal(3, measured.TransformedFileMetrics.Count);
 		Assert.Single(measured.GetEffectiveFindings());
 		Assert.DoesNotContain("detector-excluded.txt", measuredDetector.InspectedPaths);
-		Assert.DoesNotContain("package-lock.json", measuredDetector.InspectedPaths);
+		Assert.Contains("package-lock.json", measuredDetector.InspectedPaths);
 
 		using var materializedSession = new SecretRedactionSession(
 			new SelectiveCountingDetector("detector-excluded.txt"));
