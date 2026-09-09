@@ -4,6 +4,30 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class RelatedCommandProcessTests
 {
+	[Fact]
+	public void RealPublishedCommandUsesPythonDottedImportBindingAndPackageBoundaries()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/pyproject.toml", "[project]\nname = \"fixture\"\n");
+		workspace.WriteFile("project/pkg/__init__.py", string.Empty);
+		workspace.WriteFile("project/pkg/sub.py", "class Item: pass\n");
+		workspace.WriteFile("project/facade.py", "import pkg.sub\n");
+		workspace.WriteFile("project/consumer.py", "from facade import pkg\n");
+
+		var result = Run(
+			workspace,
+			"related", "consumer.py",
+			"--project", project,
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.True(result.ExitCode == 0, result.StandardError + result.StandardOutput);
+		Assert.Contains("pkg/sub.py", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("unresolved", result.StandardOutput, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData("text")]
 	[InlineData("json")]

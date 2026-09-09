@@ -32,6 +32,10 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("project/consumer.py", "from model import (\n    Item,\n)\n");
 		workspace.WriteFile("project/local_model.py", "def loader():\n    from impl import Item as LocalItem\n");
 		workspace.WriteFile("project/local_consumer.py", "from local_model import LocalItem\n");
+		workspace.WriteFile("project/pkg/__init__.py", string.Empty);
+		workspace.WriteFile("project/pkg/sub.py", "class Item: pass\n");
+		workspace.WriteFile("project/facade.py", "import pkg.sub\n");
+		workspace.WriteFile("project/dotted_consumer.py", "from facade import pkg\n");
 		var startInfo = new ProcessStartInfo("dotnet")
 		{
 			UseShellExecute = false,
@@ -75,6 +79,9 @@ public sealed partial class McpServerProcessTests
 			var localModel = await client.CallToolAsync("related_files",
 				new Dictionary<string, object?> { ["path"] = "local_model.py", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
+			var dottedPython = await client.CallToolAsync("related_files",
+				new Dictionary<string, object?> { ["path"] = "dotted_consumer.py", ["direction"] = "dependencies" },
+				progress: null, options: null, TestContext.Current.CancellationToken);
 			var typeScriptText = Assert.IsType<TextContentBlock>(Assert.Single(typeScript.Content)).Text;
 			Assert.Contains("register.ts", typeScriptText, StringComparison.Ordinal);
 			Assert.Contains("View.tsx", typeScriptText, StringComparison.Ordinal);
@@ -93,6 +100,9 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("[No related files]", localPythonText, StringComparison.Ordinal);
 			Assert.Contains("impl.py", Assert.IsType<TextContentBlock>(Assert.Single(localModel.Content)).Text,
 				StringComparison.Ordinal);
+			var dottedPythonText = Assert.IsType<TextContentBlock>(Assert.Single(dottedPython.Content)).Text;
+			Assert.Contains("pkg/sub.py", dottedPythonText, StringComparison.Ordinal);
+			Assert.DoesNotContain(" — unresolved — ", dottedPythonText, StringComparison.Ordinal);
 		}
 		process.StandardInput.Close();
 		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
