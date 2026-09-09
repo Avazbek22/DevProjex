@@ -16,7 +16,13 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("project/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
 		workspace.WriteFile("project/package.json", "{\"imports\":{\"#dual\":{\"import\":\"./import.mts\",\"require\":\"./require.cts\"}}}\n");
 		workspace.WriteFile("project/register.ts", "export const ready = true;\n");
-		workspace.WriteFile("project/main.ts", "import \"./register.js\";\n");
+		workspace.WriteFile("project/View.tsx", "export default function View() { return null; }\n");
+		workspace.WriteFile("project/main.ts", "import \"./register.js\"; import View from './View.jsx';\n");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Holder.cs",
+			"namespace Company; public static class Holder { public sealed class Nested { } }\n");
+		workspace.WriteFile("project/StaticConsumer.cs",
+			"using static Company.Holder; public sealed class StaticConsumer { Nested Value; }\n");
 		workspace.WriteFile("project/import.mts", "export const value = 1;\n");
 		workspace.WriteFile("project/require.cts", "export const value = 2;\n");
 		workspace.WriteFile("project/dual.cts", "import('#dual'); require('#dual');\n");
@@ -54,6 +60,9 @@ public sealed partial class McpServerProcessTests
 			var typeScript = await client.CallToolAsync("related_files",
 				new Dictionary<string, object?> { ["path"] = "main.ts", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
+			var staticUsing = await client.CallToolAsync("related_files",
+				new Dictionary<string, object?> { ["path"] = "StaticConsumer.cs", ["direction"] = "dependencies" },
+				progress: null, options: null, TestContext.Current.CancellationToken);
 			var python = await client.CallToolAsync("related_files",
 				new Dictionary<string, object?> { ["path"] = "consumer.py", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
@@ -68,7 +77,11 @@ public sealed partial class McpServerProcessTests
 				progress: null, options: null, TestContext.Current.CancellationToken);
 			var typeScriptText = Assert.IsType<TextContentBlock>(Assert.Single(typeScript.Content)).Text;
 			Assert.Contains("register.ts", typeScriptText, StringComparison.Ordinal);
+			Assert.Contains("View.tsx", typeScriptText, StringComparison.Ordinal);
 			Assert.Contains("import ./register.js at line 1", typeScriptText, StringComparison.Ordinal);
+			Assert.Contains("Holder.cs",
+				Assert.IsType<TextContentBlock>(Assert.Single(staticUsing.Content)).Text,
+				StringComparison.Ordinal);
 			var conditionalText = Assert.IsType<TextContentBlock>(Assert.Single(conditional.Content)).Text;
 			Assert.Contains("import.mts", conditionalText, StringComparison.Ordinal);
 			Assert.Contains("require.cts", conditionalText, StringComparison.Ordinal);

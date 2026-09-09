@@ -143,10 +143,15 @@ public sealed class RelatedCommandProcessTests
 		workspace.WriteFile("project/Models.cs", "namespace Models; public sealed class User { }\n");
 		workspace.WriteFile("project/Consumers.cs",
 			"using Models; class Box<User> { User a; } class Consumer { User b; }\n");
+		workspace.WriteFile("project/Holder.cs",
+			"namespace Company; public static class Holder { public sealed class Nested { } }\n");
+		workspace.WriteFile("project/StaticConsumer.cs",
+			"using static Company.Holder; public sealed class StaticConsumer { Nested Value; }\n");
 		workspace.WriteFile("project/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
 		workspace.WriteFile("project/package.json", "{\"imports\":{\"#dual\":{\"import\":\"./import.mts\",\"require\":\"./require.cts\"}}}\n");
 		workspace.WriteFile("project/register.ts", "export const ready = true;\n");
-		workspace.WriteFile("project/main.ts", "import \"./register.js\";\n");
+		workspace.WriteFile("project/View.tsx", "export default function View() { return null; }\n");
+		workspace.WriteFile("project/main.ts", "import \"./register.js\"; import View from './View.jsx';\n");
 		workspace.WriteFile("project/import.mts", "export const value = 1;\n");
 		workspace.WriteFile("project/require.cts", "export const value = 2;\n");
 		workspace.WriteFile("project/dual.cts", "import('#dual'); require('#dual');\n");
@@ -158,6 +163,8 @@ public sealed class RelatedCommandProcessTests
 		workspace.WriteFile("project/local_consumer.py", "from local_model import LocalItem\n");
 
 		var csharp = Run(workspace, "related", "Consumers.cs", "--project", project,
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		var staticUsing = Run(workspace, "related", "StaticConsumer.cs", "--project", project,
 			"--format", "json", "--git-mode", "none", "--exclude", "none");
 		var typeScript = Run(workspace, "related", "main.ts", "--project", project,
 			"--format", "json", "--git-mode", "none", "--exclude", "none");
@@ -177,8 +184,11 @@ public sealed class RelatedCommandProcessTests
 				.GetProperty("dependencies").EnumerateArray().ToArray();
 			Assert.Contains(dependencies, item => item.GetProperty("path").GetString() == "Models.cs");
 		}
+		Assert.Equal(0, staticUsing.ExitCode);
+		Assert.Contains("Holder.cs", staticUsing.StandardOutput, StringComparison.Ordinal);
 		Assert.Equal(0, typeScript.ExitCode);
 		Assert.Contains("register.ts", typeScript.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("View.tsx", typeScript.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("import ./register.js at line 1", typeScript.StandardOutput, StringComparison.Ordinal);
 		Assert.Equal(0, conditional.ExitCode);
 		Assert.Contains("import.mts", conditional.StandardOutput, StringComparison.Ordinal);
