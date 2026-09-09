@@ -148,7 +148,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return new ProjectProfileBatchSaveResult([]);
 			}
 
-			var db = LoadInternal(fileSet, persistRecovery: false);
+			if (!TryLoadForMutation(fileSet, out var db))
+				return new ProjectProfileBatchSaveResult([]);
 			db.SchemaVersion = CurrentSchemaVersion;
 			var alreadySaved = new List<string>();
 			var changedPaths = new List<string>();
@@ -205,7 +206,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			if (HasOversizedDocument(fileSet) ||
 			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
-			var db = LoadInternal(fileSet);
+			if (!TryLoadForMutation(fileSet, out var db))
+				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 			db.SchemaVersion = CurrentSchemaVersion;
 
 			// A delayed retry from another window/process must not stomp a newer profile revision.
@@ -346,7 +348,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			if (HasOversizedDocument(fileSet) ||
 			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return false;
-			var db = LoadInternal(fileSet);
+			if (!TryLoadForMutation(fileSet, out var db))
+				return false;
 			selectionDeleted = !db.Profiles.Remove(normalizedPath) || TrySaveInternal(fileSet, db);
 		}
 
@@ -436,6 +439,22 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 
 		return CreateDefaultDb();
+	}
+
+	private bool TryLoadForMutation(JsonStoreFileSet fileSet, out ProjectProfileDb database)
+	{
+		if (TryLoadFromPath(fileSet.PrimaryPath, out database, out _))
+			return true;
+		if (TryLoadFromPath(fileSet.BackupPath, out database, out _))
+			return true;
+		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
+		{
+			database = null!;
+			return false;
+		}
+
+		database = CreateDefaultDb();
+		return true;
 	}
 
 	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)

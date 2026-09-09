@@ -820,6 +820,33 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
+	public void SaveProfile_CorruptPrimaryAndBackupRefusesToOverwriteRecoverableBytes()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			Assert.True(store.EnsureStorageExists());
+			const string primaryBytes = "{ invalid-primary";
+			const string backupBytes = "{ invalid-backup";
+			File.WriteAllText(store.GetPath(), primaryBytes);
+			File.WriteAllText(store.GetPath() + ".bak", backupBytes);
+
+			var result = store.TrySaveProfileWithResult(
+				Path.Combine(tempRoot, "Project"),
+				CreateProfile());
+
+			Assert.False(result.Succeeded);
+			Assert.Equal(primaryBytes, File.ReadAllText(store.GetPath()));
+			Assert.Equal(backupBytes, File.ReadAllText(store.GetPath() + ".bak"));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void LookupProfile_HeldStoreLockReportsTemporaryUnavailability()
 	{
 		var tempRoot = CreateTempDirectory();

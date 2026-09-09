@@ -153,7 +153,10 @@ settings for that project; an absent local profile is a usage error. Local looku
 reports missing (`DPX-CLI-PROFILE-NOT-FOUND`), temporary contention
 (`DPX-CLI-PROFILE-BUSY`), corrupt storage (`DPX-CLI-PROFILE-CORRUPT`), and a
 newer unsupported schema (`DPX-CLI-PROFILE-FUTURE-SCHEMA`) separately. These
-failures never fall back to the broader standard profile.
+failures never fall back to the broader standard profile. Saving is refused when
+both the primary profile database and its backup are corrupt; their original
+bytes are retained for manual recovery instead of being replaced by an empty
+database.
 
 Legacy local state with both Git options enabled is normalized by the existing
 security-first profile logic before conversion. The v1 portable schema cannot
