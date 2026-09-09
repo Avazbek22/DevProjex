@@ -225,12 +225,14 @@ public sealed class PortableProjectProfileService
 				exclusions.Add(exclusion);
 		}
 
-		var selectedPaths = NormalizeSelectedPathsOrThrow(document.Selection.SelectedPaths);
+		var selectedPaths = document.Selection.SelectedPaths is null
+			? null
+			: NormalizeSelectedPathsOrThrow(document.Selection.SelectedPaths);
 
 		return new ProjectSelectionSpec(
 			Roots: NormalizeRootNames(document.Selection.Roots),
 			Extensions: NormalizeExtensionNames(document.Selection.Extensions),
-			SelectedPaths: selectedPaths.Count == 0 ? null : selectedPaths,
+			SelectedPaths: selectedPaths,
 			GitMode: gitMode,
 			Exclusions: ProjectSelectionTokens.OrderExclusions(exclusions),
 			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
@@ -363,7 +365,7 @@ public sealed class PortableProjectProfileService
 	{
 		public IReadOnlyList<string>? Roots { get; set; }
 		public IReadOnlyList<string>? Extensions { get; set; }
-		public IReadOnlyList<string> SelectedPaths { get; set; } = [];
+		public IReadOnlyList<string>? SelectedPaths { get; set; }
 		public string? GitMode { get; set; }
 		public IReadOnlyList<string> Exclusions { get; set; } = [];
 		public bool? HideSecrets { get; set; }

@@ -74,7 +74,7 @@ as `false`.
   "selection": {
     "roots": null,
     "extensions": null,
-    "selectedPaths": [],
+    "selectedPaths": null,
     "gitMode": "gitignore",
     "hideSecrets": false,
     "hidePrivateData": false,
@@ -94,7 +94,9 @@ Semantics:
 
 - `roots: null` means all currently available roots;
 - `extensions: null` means all currently available extensions;
-- an empty `selectedPaths` means the full effective tree;
+- `selectedPaths: null` (or an omitted property) means the full effective tree;
+- an empty `selectedPaths` array means an explicit empty selection;
+- a non-empty `selectedPaths` array narrows the effective tree to those paths;
 - selected file and directory paths are relative to the source root;
 - a directory includes its effective subtree;
 - Git mode is exactly one of `none`, `gitignore`, or `tracked`;

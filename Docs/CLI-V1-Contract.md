@@ -1371,6 +1371,9 @@ devprojex-ui-instances
 Newly written portable profiles include `kind: "devprojex-profile"`. Readers
 continue to accept schema-v1 profiles created before the kind discriminator was
 added, but reject any explicit conflicting kind.
+Portable `selectedPaths` preserves three distinct states: null or omitted means
+the full effective tree, an empty array means no selected paths, and a non-empty
+array is a literal narrowing selection.
 
 Context XML uses `devprojexContext`, numeric text `schemaVersion="1"`, and
 `kind="devprojex-context"`. Its XML declaration reports UTF-8. Generated JSON and

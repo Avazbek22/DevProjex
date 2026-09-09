@@ -137,6 +137,37 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task PortableProfileExplicitEmptySelectedPathsProducesAnEmptySelection()
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"analyze", workspace.Path, "--profile", profile, "--format", "json", "--plain");
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(0, document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		Assert.Empty(document.RootElement.GetProperty("selection").GetProperty("selectedPaths").EnumerateArray());
+	}
+
+	[Fact]
 	public async Task ValidateJsonUsesTheStableSchemaForValidAndInvalidProfiles()
 	{
 		using var workspace = CreateWorkspace();

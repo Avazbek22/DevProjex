@@ -94,7 +94,7 @@ public sealed class PortableProjectProfileServiceTests
 	}
 
 	[Fact]
-	public async Task EmptyPortableSelectedPathsRetainUnrestrictedHistoricalMeaning()
+	public async Task EmptyPortableSelectedPathsRepresentAnExplicitEmptySelection()
 	{
 		using var workspace = new TemporaryDirectory();
 		var profile = workspace.CreateFile(
@@ -106,6 +106,30 @@ public sealed class PortableProjectProfileServiceTests
 			    "roots": null,
 			    "extensions": null,
 			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+
+		var loaded = await new PortableProjectProfileService().LoadAsync(
+			profile,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(loaded.SelectedPaths);
+		Assert.Empty(loaded.SelectedPaths);
+	}
+
+	[Fact]
+	public async Task MissingPortableSelectedPathsRetainUnrestrictedMeaning()
+	{
+		using var workspace = new TemporaryDirectory();
+		var profile = workspace.CreateFile(
+			"portable.json",
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
 			    "gitMode": "none",
 			    "exclusions": []
 			  }
