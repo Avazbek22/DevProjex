@@ -273,7 +273,9 @@ public sealed class PortableProjectProfileService
 				"Momentary Git scopes cannot be saved in a portable profile.");
 		}
 
-		var selectedPaths = NormalizeSelectedPathsOrThrow(selection.SelectedPaths);
+		var selectedPaths = selection.SelectedPaths is null
+			? null
+			: NormalizeSelectedPathsOrThrow(selection.SelectedPaths);
 		return new PortableProfileDocument
 		{
 			SchemaVersion = CurrentSchemaVersion,
@@ -284,7 +286,7 @@ public sealed class PortableProjectProfileService
 					.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 					.ToArray(),
 				Extensions = selection.Extensions?.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
-				SelectedPaths = selectedPaths.ToArray(),
+				SelectedPaths = selectedPaths?.ToArray(),
 				GitMode = ProjectSelectionTokens.ToToken(selection.GitMode.Value),
 				Exclusions = ProjectSelectionTokens.OrderExclusions(selection.Exclusions)
 					.Select(ProjectSelectionTokens.ToToken)

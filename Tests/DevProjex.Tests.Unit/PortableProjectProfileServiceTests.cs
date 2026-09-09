@@ -169,6 +169,36 @@ public sealed class PortableProjectProfileServiceTests
 	}
 
 	[Fact]
+	public async Task NullPortableSelectedPathsRoundTripAsUnrestricted()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var destination = Path.Combine(workspace.Path, "portable.json");
+		var service = new PortableProjectProfileService();
+
+		await service.SaveAsync(
+			sourceRoot,
+			destination,
+			new ProjectSelectionSpec(
+				SelectedPaths: null,
+				GitMode: GitFilteringMode.None,
+				Exclusions: []),
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		using (var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+			       destination,
+			       TestContext.Current.CancellationToken)))
+		{
+			Assert.Equal(
+				JsonValueKind.Null,
+				document.RootElement.GetProperty("selection").GetProperty("selectedPaths").ValueKind);
+		}
+		var loaded = await service.LoadAsync(destination, TestContext.Current.CancellationToken);
+		Assert.Null(loaded.SelectedPaths);
+	}
+
+	[Fact]
 	public async Task SaveAsyncRejectsASelectedPathThatIsUnsafeOnAnotherPlatform()
 	{
 		using var workspace = new TemporaryDirectory();
