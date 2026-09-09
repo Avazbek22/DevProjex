@@ -1302,7 +1302,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			IEnumerable<string> candidates;
 			if (import.Specifier.StartsWith(".", StringComparison.Ordinal))
 			{
-				if (Path.GetExtension(import.Specifier).Length == 0 && RequiresExplicitRelativeExtension(source, scope))
+				if (Path.GetExtension(import.Specifier).Length == 0 &&
+				    RequiresExplicitRelativeExtension(source, scope, import))
 				{
 					return Edge(source, import, ResolutionStatus.Unresolved, null,
 						"extension required for a relative ESM import under node16/nodenext", []);
@@ -1358,12 +1359,15 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private static bool IsRequire(ImportFact import) => import.ImportKind == ModuleImportKind.Require;
 
-		private bool RequiresExplicitRelativeExtension(FileFacts source, DependencyScopeDescriptor scope)
+		private bool RequiresExplicitRelativeExtension(
+			FileFacts source,
+			DependencyScopeDescriptor scope,
+			ImportFact import)
 		{
 			var mode = scope.ModuleResolution ?? "bundler";
 			return (mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
 			        mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase)) &&
-			       !SupportsCommonJs(source, scope);
+			       (import.ImportKind == ModuleImportKind.DynamicImport || !SupportsCommonJs(source, scope));
 		}
 
 		private IEnumerable<string> ResolvePaths(

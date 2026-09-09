@@ -6,6 +6,32 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New053_DynamicImportInCommonJsRequiresRelativeExtension()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"nodenext\"}}");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		var source = fixture.CreateFile(
+			"main.cts",
+			"import('./target');\nimport('./target.js');");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var extensionless = Assert.Single(result.Edges, edge =>
+			edge.Source == "main.cts" && edge.Reference == "./target");
+		Assert.Equal(ResolutionStatus.Unresolved, extensionless.Status);
+		Assert.Contains("extension required", Assert.Single(extensionless.Reasons), StringComparison.Ordinal);
+		Assert.Equal("target.ts", Assert.Single(result.Edges, edge =>
+			edge.Source == "main.cts" && edge.Reference == "./target.js").Target);
+	}
+
+	[Fact]
 	public async Task New021_NodeConditionIsActiveForNodeNextButNotBundler()
 	{
 		using var fixture = new TemporaryDirectory();
