@@ -65,11 +65,13 @@ Blank-line removal is stored as the independent `stripBlankLines` Boolean. It re
 in the built-in `standard` profile, and profiles created before the field existed load it
 as `false`.
 
-## Schema v1
+## Portable schema versions
+
+DevProjex writes schema version 2:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "kind": "devprojex-profile",
   "selection": {
     "roots": null,
@@ -90,7 +92,7 @@ as `false`.
 }
 ```
 
-Semantics:
+Schema-v2 semantics:
 
 - `roots: null` means all currently available roots;
 - `extensions: null` means all currently available extensions;
@@ -106,6 +108,14 @@ Semantics:
 - `stripComments` independently removes syntax-tree comments and Python docstrings from output;
 - `stripBlankLines` independently removes unprotected whitespace-only source lines from output;
 - Exclusions contain only known path-filter tokens.
+
+The reader also accepts schema version 1 profiles written by v5.1. In schema v1,
+an omitted or null `selectedPaths` and an empty `selectedPaths` array all mean the
+full effective tree; only a non-empty array narrows the selection. This preserves
+the v5.1 representation, which wrote an empty array for a full selection. Loading
+and then saving such a profile writes schema version 2 with `selectedPaths: null`.
+`profile validate` and `profile import` report that a valid schema-v1 document is
+legacy and will be rewritten as version 2 when saved.
 
 Profiles written by current DevProjex versions keep `hideSecrets` separate. For
 v5 compatibility, a portable profile containing `hide-secrets` in `exclusions`
@@ -148,7 +158,9 @@ to both writing and reading, so every successful save can be loaded again. A
 profile-store or file-write failure is a
 runtime error with exit code `1`, not a syntax error.
 `profile import` validates without modifying local state unless `--apply` is
-present. Use `--profile local` only after Desktop or TUI has created valid local
+present. For a schema-v1 import, the migration notice is written to stderr while
+the existing success path remains the only stdout line. Use `--profile local`
+only after Desktop or TUI has created valid local
 settings for that project; an absent local profile is a usage error. Local lookup
 reports missing (`DPX-CLI-PROFILE-NOT-FOUND`), temporary contention
 (`DPX-CLI-PROFILE-BUSY`), corrupt storage (`DPX-CLI-PROFILE-CORRUPT`), and a

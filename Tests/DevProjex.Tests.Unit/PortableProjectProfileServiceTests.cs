@@ -94,11 +94,38 @@ public sealed class PortableProjectProfileServiceTests
 	}
 
 	[Fact]
-	public async Task EmptyPortableSelectedPathsRepresentAnExplicitEmptySelection()
+	public async Task Version2EmptySelectedPathsRepresentAnExplicitEmptySelection()
 	{
 		using var workspace = new TemporaryDirectory();
 		var profile = workspace.CreateFile(
 			"portable.json",
+			"""
+			{
+			  "schemaVersion": 2,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+
+		var loaded = await new PortableProjectProfileService().LoadAsync(
+			profile,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(loaded.SelectedPaths);
+		Assert.Empty(loaded.SelectedPaths);
+	}
+
+	[Fact]
+	public async Task Version1EmptySelectedPathsRetainUnrestrictedSelection()
+	{
+		using var workspace = new TemporaryDirectory();
+		var profile = workspace.CreateFile(
+			"portable-v1.json",
 			"""
 			{
 			  "schemaVersion": 1,
@@ -116,8 +143,32 @@ public sealed class PortableProjectProfileServiceTests
 			profile,
 			TestContext.Current.CancellationToken);
 
-		Assert.NotNull(loaded.SelectedPaths);
-		Assert.Empty(loaded.SelectedPaths);
+		Assert.Null(loaded.SelectedPaths);
+	}
+
+	[Fact]
+	public async Task UnknownPortableSchemaVersionRemainsInvalid()
+	{
+		using var workspace = new TemporaryDirectory();
+		var profile = workspace.CreateFile(
+			"portable-future.json",
+			"""
+			{
+			  "schemaVersion": 3,
+			  "selection": {
+			    "selectedPaths": null,
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+
+		var exception = await Assert.ThrowsAsync<PortableProjectProfileException>(() =>
+			new PortableProjectProfileService().LoadAsync(
+				profile,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("DPX-CLI-PROFILE-INVALID", exception.Code);
 	}
 
 	[Fact]
@@ -153,7 +204,7 @@ public sealed class PortableProjectProfileServiceTests
 			"portable.json",
 			"""
 			{
-			  "schemaVersion": 1,
+			  "schemaVersion": 2,
 			  "selection": {
 			    "gitMode": "none",
 			    "exclusions": []
@@ -196,6 +247,43 @@ public sealed class PortableProjectProfileServiceTests
 		}
 		var loaded = await service.LoadAsync(destination, TestContext.Current.CancellationToken);
 		Assert.Null(loaded.SelectedPaths);
+	}
+
+	[Fact]
+	public async Task Version1EmptySelectionIsRewrittenAsVersion2NullOnSave()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var source = workspace.CreateFile(
+			"portable-v1.json",
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var destination = Path.Combine(workspace.Path, "portable-v2.json");
+		var service = new PortableProjectProfileService();
+
+		var loaded = await service.LoadAsync(source, TestContext.Current.CancellationToken);
+		await service.SaveAsync(
+			sourceRoot,
+			destination,
+			loaded,
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken));
+		Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(
+			JsonValueKind.Null,
+			document.RootElement.GetProperty("selection").GetProperty("selectedPaths").ValueKind);
 	}
 
 	[Fact]

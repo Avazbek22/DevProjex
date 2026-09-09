@@ -1383,12 +1383,18 @@ devprojex-profile-validation
 devprojex-ui-instances
 ```
 
-Newly written portable profiles include `kind: "devprojex-profile"`. Readers
-continue to accept schema-v1 profiles created before the kind discriminator was
-added, but reject any explicit conflicting kind.
-Portable `selectedPaths` preserves three distinct states: null or omitted means
-the full effective tree, an empty array means no selected paths, and a non-empty
-array is a literal narrowing selection.
+Newly written portable profiles use schema version 2 and include kind
+`devprojex-profile`. In schema v2, `selectedPaths` preserves three distinct
+states: null or omitted means the full effective tree, an empty array means no
+selected paths, and a non-empty array is a literal narrowing selection.
+
+Readers continue to accept schema-v1 portable profiles created by v5.1. For
+schema v1 only, null, an omitted property, and an empty array all mean the full
+effective tree; a non-empty array narrows it. Loading and saving migrates v1 to
+v2, representing the full selection as null. Text `profile validate` appends the
+fixed migration notice after `valid`; `profile import` writes the same notice to
+stderr without changing its single-path stdout contract. Unsupported versions
+remain `DPX-CLI-PROFILE-INVALID`. An explicit conflicting kind is also rejected.
 
 Context XML uses `devprojexContext`, numeric text `schemaVersion="1"`, and
 `kind="devprojex-context"`. Its XML declaration reports UTF-8. Generated JSON and

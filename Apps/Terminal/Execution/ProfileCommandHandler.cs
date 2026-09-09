@@ -87,9 +87,12 @@ public sealed class ProfileCommandHandler(
 		bool apply,
 		CancellationToken cancellationToken)
 	{
-		var selection = await services.PortableProfileService
-			.LoadAsync(profilePath, cancellationToken)
+		var loaded = await services.PortableProfileService
+			.LoadWithMetadataAsync(profilePath, cancellationToken)
 			.ConfigureAwait(false);
+		var selection = loaded.Selection;
+		if (loaded.SourceSchemaVersion == PortableProjectProfileService.LegacySchemaVersion)
+			environment.Error.WriteLine(PortableProjectProfileService.LegacySchemaNotice);
 		if (apply)
 		{
 			var plan = await services.ContextFactory
@@ -158,6 +161,8 @@ public sealed class ProfileCommandHandler(
 		if (result.IsValid)
 		{
 			environment.Output.WriteLine(services.Localization["Terminal.Profile.Valid"]);
+			if (result.SourceSchemaVersion == PortableProjectProfileService.LegacySchemaVersion)
+				environment.Output.WriteLine(PortableProjectProfileService.LegacySchemaNotice);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -325,7 +330,7 @@ public sealed class ProfileCommandHandler(
 		JsonSerializer.Serialize(
 			new
 			{
-				schemaVersion = 1,
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
 				kind = PortableProjectProfileService.DocumentKind,
 				selection = new
 				{

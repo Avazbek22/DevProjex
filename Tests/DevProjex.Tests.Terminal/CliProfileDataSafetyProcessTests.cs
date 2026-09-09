@@ -82,7 +82,7 @@ public sealed class CliProfileDataSafetyProcessTests
 			"profile.json",
 			"""
 			{
-			  "schemaVersion": 1,
+			  "schemaVersion": 2,
 			  "selection": {
 			    "roots": null,
 			    "extensions": null,
@@ -105,6 +105,49 @@ public sealed class CliProfileDataSafetyProcessTests
 		using var document = JsonDocument.Parse(result.StandardOutput);
 		Assert.Equal(0, document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
 		Assert.Empty(document.RootElement.GetProperty("selection").GetProperty("selectedPaths").EnumerateArray());
+	}
+
+	[Fact]
+	public async Task Version1EmptySelectionExportsTheWholeProjectInRealProcess()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/first.txt", "first\n");
+		workspace.WriteFile("project/second.txt", "second\n");
+		var profile = workspace.WriteFile(
+			"profile-v1.json",
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+
+		var result = await RunAsync(
+			workspace,
+			"export", "context", project,
+			"--profile", profile,
+			"--view", "content",
+			"--format", "json",
+			"--plain", "-o", "-");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Empty(result.StandardError);
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		var files = document.RootElement.GetProperty("files").EnumerateArray().ToArray();
+		Assert.Equal(2, files.Length);
+		Assert.Contains(
+			files,
+			file => file.GetProperty("path").GetString()!.EndsWith("/first.txt", StringComparison.Ordinal));
+		Assert.Contains(
+			files,
+			file => file.GetProperty("path").GetString()!.EndsWith("/second.txt", StringComparison.Ordinal));
 	}
 
 	private static async Task<ProcessResult> RunAsync(
