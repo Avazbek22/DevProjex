@@ -123,6 +123,21 @@ public static class ContentPipelineDiagnostics
 	public static void RecordOccurrenceIdComputation() =>
 		Increment(static state => ref state.OccurrenceIdComputations);
 
+	public static void RecordSecondarySecretRegexRun() =>
+		Increment(static state => ref state.SecondarySecretRegexRuns);
+
+	public static void RecordRejectedMatchLineContext() =>
+		Increment(static state => ref state.RejectedMatchLineContexts);
+
+	public static void RecordLineIndexBuild() =>
+		Increment(static state => ref state.LineIndexBuilds);
+
+	public static void RecordRulePathAllowlistEvaluation() =>
+		Increment(static state => ref state.RulePathAllowlistEvaluations);
+
+	public static void RecordMeasurementPass() =>
+		Increment(static state => ref state.MeasurementPasses);
+
 	private delegate ref long CounterSelector(MeasurementState state);
 	private delegate ref long ByteCounterSelector(MeasurementState state);
 
@@ -188,6 +203,11 @@ public static class ContentPipelineDiagnostics
 		public long SourceVersionHashBytes;
 		public long PlanApplications;
 		public long OccurrenceIdComputations;
+		public long SecondarySecretRegexRuns;
+		public long RejectedMatchLineContexts;
+		public long LineIndexBuilds;
+		public long RulePathAllowlistEvaluations;
+		public long MeasurementPasses;
 		public long SourceReadBytes;
 		public long PreparedReadBytes;
 		public long PreparedWriteBytes;
@@ -231,7 +251,12 @@ public static class ContentPipelineDiagnostics
 				SourceVersionHashBytes = Volatile.Read(ref SourceVersionHashBytes),
 				QueueWaitTimeTicks = ToTimeSpanTicks(Volatile.Read(ref QueueWaitStopwatchTicks)),
 				ByteBudgetWaitTimeTicks = ToTimeSpanTicks(Volatile.Read(ref ByteBudgetWaitStopwatchTicks)),
-				ByteBudgetRequestedBytes = Volatile.Read(ref ByteBudgetRequestedBytes)
+				ByteBudgetRequestedBytes = Volatile.Read(ref ByteBudgetRequestedBytes),
+				SecondarySecretRegexRuns = Volatile.Read(ref SecondarySecretRegexRuns),
+				RejectedMatchLineContexts = Volatile.Read(ref RejectedMatchLineContexts),
+				LineIndexBuilds = Volatile.Read(ref LineIndexBuilds),
+				RulePathAllowlistEvaluations = Volatile.Read(ref RulePathAllowlistEvaluations),
+				MeasurementPasses = Volatile.Read(ref MeasurementPasses)
 			};
 		}
 	}
@@ -333,6 +358,11 @@ public sealed record ContentPipelineDiagnosticSnapshot(
 	public long QueueWaitTimeTicks { get; init; }
 	public long ByteBudgetWaitTimeTicks { get; init; }
 	public long ByteBudgetRequestedBytes { get; init; }
+	public long SecondarySecretRegexRuns { get; init; }
+	public long RejectedMatchLineContexts { get; init; }
+	public long LineIndexBuilds { get; init; }
+	public long RulePathAllowlistEvaluations { get; init; }
+	public long MeasurementPasses { get; init; }
 }
 
 public readonly record struct ContentPipelineStageDiagnosticSnapshot(long ElapsedTicks, long InvocationCount);

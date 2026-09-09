@@ -136,7 +136,12 @@ public sealed class CodeCompressionSessionTests
 		Assert.Equal(0, session.Diagnostics.HashComputations);
 		Assert.NotNull(warmup.ReadFacts);
 		Assert.True(warmup.ReadFacts.TryGet(path, out var retainedFact));
+		Assert.Null(retainedFact.Content);
 		Assert.Equal(ContentFingerprint.Compute("same-content"), retainedFact.Fingerprint);
+		Assert.True(warmup.ReadFacts.TryGetMetrics(path, context.TransformIdentity, out var retainedMetrics));
+		Assert.Equal(retainedFact.RawMetrics, retainedMetrics.Raw);
+		Assert.Equal(retainedFact.RawMetrics, retainedMetrics.Effective);
+		Assert.Equal(256, warmup.ReadFacts.RetainedBytes);
 		using var output = context.BeginOutput([path]);
 		_ = output.Transform(path, "sample.cs", "same-content", TestContext.Current.CancellationToken);
 		_ = output.Complete();
@@ -314,7 +319,7 @@ public sealed class CodeCompressionSessionTests
 		Assert.Equal(1, contentDiagnostics.FullFileReads);
 		Assert.Equal(0, contentDiagnostics.ContentFingerprintComputations);
 		Assert.NotNull(result.ReadFacts);
-		Assert.Equal(128, result.ReadFacts.RetainedBytes);
+		Assert.Equal(256, result.ReadFacts.RetainedBytes);
 		Assert.True(result.ReadFacts.TryGet(path, out var retainedFact));
 		Assert.Null(retainedFact.Content);
 		Assert.Null(retainedFact.Fingerprint);
@@ -389,7 +394,7 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
-	public async Task Prewarm_FileGrowthCannotRetainFactsBeyondTheFinalBudget()
+	public async Task Prewarm_FileGrowthRetainsOnlyCompactMetricsWithinTheFinalBudget()
 	{
 		const int grownCharacters = 9 * 1024 * 1024;
 		const long maximumRetainedBytes = 64L * 1024 * 1024;
@@ -408,7 +413,8 @@ public sealed class CodeCompressionSessionTests
 
 		Assert.Equal(paths.Length, result.WarmedFiles);
 		Assert.NotNull(result.ReadFacts);
-		Assert.True(result.ReadFacts.Count < paths.Length);
+		Assert.Equal(paths.Length, result.ReadFacts.Count);
+		Assert.Equal(paths.Length * 256, result.ReadFacts.RetainedBytes);
 		Assert.InRange(result.ReadFacts.RetainedBytes, 1, maximumRetainedBytes);
 	}
 

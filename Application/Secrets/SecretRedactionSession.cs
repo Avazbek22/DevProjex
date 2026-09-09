@@ -2495,6 +2495,27 @@ public sealed class SecretRedactionScope
 		}
 	}
 
+	internal void ProcessDetectedEntry(
+		string filePath,
+		SecretScanCacheEntry? entry,
+		ContentTransformMap transformMap,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		EnterOrderedConsumer();
+		try
+		{
+			EnsureActive();
+			if (entry?.IsUnscannable == true)
+				RecordUnscannable(filePath);
+			AccumulateFindings(filePath, entry, transformMap);
+		}
+		finally
+		{
+			ExitOrderedConsumer();
+		}
+	}
+
 	public SecretTextRedactionResult Redact(
 		string filePath,
 		string content,
@@ -2720,6 +2741,8 @@ public sealed class SecretRedactionScope
 		var candidates = entry?.Candidates ?? [];
 		var segments = entry?.Segments ?? [];
 		_outputInspectionBudget.RegisterFindings(segments.Count);
+		if (candidates.Count == 0 && segments.Count == 0)
+			return SecretFileRedactionPlan.Empty;
 		var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
 		var occurrenceIds = BuildOccurrenceIds(relativePath, entry, candidates, transformMap);
 		var identityIndexes = new int[candidates.Count];
@@ -3217,6 +3240,12 @@ internal sealed class SecretFileRedactionPlan(
 	int detectedCount,
 	int redactedCount)
 {
+	public static SecretFileRedactionPlan Empty { get; } = new(
+		Array.Empty<SecretReplacement>(),
+		Array.Empty<SecretPreviewSpan>(),
+		0,
+		0);
+
 	public IReadOnlyList<SecretReplacement> Replacements { get; } = replacements;
 	public IReadOnlyList<SecretPreviewSpan> Spans { get; } = spans;
 	public int DetectedCount { get; } = detectedCount;

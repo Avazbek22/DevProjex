@@ -358,7 +358,8 @@ public sealed class MetricsPipelineWarmupTests
 		await delayedMetrics.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, compressor.AnalysisCount);
-		Assert.True(compressionSession.Diagnostics.CacheHits > 0);
+		Assert.Equal(0, compressionSession.Diagnostics.CacheHits);
+		Assert.Equal(1, compressionSession.Diagnostics.PrewarmAnalyses);
 		Assert.True(pipeline.HasCompleteBaseline);
 	}
 

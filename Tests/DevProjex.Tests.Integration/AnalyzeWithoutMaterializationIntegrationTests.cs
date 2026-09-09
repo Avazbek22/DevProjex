@@ -37,8 +37,10 @@ public sealed class AnalyzeWithoutMaterializationIntegrationTests
 			captureEffectiveFindings: true,
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Equal(0, diagnostics.Capture().PreparedWriteBytes);
-		Assert.Equal(0, diagnostics.Capture().PreparedReadBytes);
+		var measuredDiagnostics = diagnostics.Capture();
+		Assert.Equal(0, measuredDiagnostics.PreparedWriteBytes);
+		Assert.Equal(0, measuredDiagnostics.PreparedReadBytes);
+		Assert.Equal(1, measuredDiagnostics.MeasurementPasses);
 		Assert.Equal(3, measured.TransformedFileMetrics.Count);
 		Assert.Single(measured.GetEffectiveFindings());
 		Assert.DoesNotContain("detector-excluded.txt", measuredDetector.InspectedPaths);
@@ -60,6 +62,31 @@ public sealed class AnalyzeWithoutMaterializationIntegrationTests
 
 		Assert.Equal(expected, measured.GetTransformedMetrics());
 		Assert.Equal(materialized.GetEffectiveFindings(), measured.GetEffectiveFindings());
+	}
+
+	[Fact]
+	public async Task PrepareAsync_CapturesTransformedMetricsDuringThePreparedWrite()
+	{
+		using var temporary = new TemporaryDirectory();
+		var root = temporary.CreateDirectory("project");
+		var token = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		var path = temporary.CreateFile("project/source.cs", $"const string Token = \"{token}\";\r\n");
+		using var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		using var diagnostics = ContentPipelineDiagnostics.BeginMeasurement();
+
+		await using var prepared = await new SecretRedactionOutputPreparer(new FileContentAnalyzer())
+			.PrepareAsync(
+				new ContentTransformationContext(null, new SecretRedactionContext(root, session)),
+				[path],
+				captureEffectiveFindings: true,
+				captureTransformedMetrics: true,
+				TestContext.Current.CancellationToken);
+		var snapshot = diagnostics.Capture();
+
+		Assert.Single(prepared.TransformedFileMetrics);
+		Assert.True(snapshot.PreparedWriteBytes > 0);
+		Assert.Equal(0, snapshot.MeasurementPasses);
+		Assert.Equal(1, snapshot.PreparedFilesMaterialized);
 	}
 
 	private sealed class SelectiveCountingDetector(string excludedFileName) : ISecretDetector

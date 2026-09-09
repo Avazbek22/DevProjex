@@ -18,7 +18,14 @@ public readonly record struct CodeCompressionWarmupProgress(
 	int ProcessedFiles,
 	int TotalFiles);
 
-/// <summary>Bounded operation-local content reused by the immediately following metrics phase.</summary>
+public readonly record struct ContentReadMetricsFact(
+	TextFileMetrics Raw,
+	TextFileMetrics Effective,
+	string TransformIdentity,
+	long SourceLength,
+	long SourceLastWriteTimeUtcTicks);
+
+/// <summary>Bounded operation-local raw and transformed metrics reused by the next metrics phase.</summary>
 public sealed class ContentReadFactSnapshot
 {
 	private readonly IReadOnlyDictionary<string, RetainedContentReadFact> _facts;
@@ -49,9 +56,23 @@ public sealed class ContentReadFactSnapshot
 		return false;
 	}
 
+	public bool TryGetMetrics(string path, string transformIdentity, out ContentReadMetricsFact metrics)
+	{
+		if (_facts.TryGetValue(path, out var retained) &&
+		    string.Equals(retained.Metrics.TransformIdentity, transformIdentity, StringComparison.Ordinal))
+		{
+			metrics = retained.Metrics;
+			return true;
+		}
+
+		metrics = default;
+		return false;
+	}
+
 	internal sealed record RetainedContentReadFact(
 		ContentReadFact Fact,
-		FileContentIdentity Identity);
+		FileContentIdentity Identity,
+		ContentReadMetricsFact Metrics);
 }
 
 /// <summary>
@@ -65,6 +86,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 	private const long MaximumInFlightBytes = 32L * 1024 * 1024;
 	private const long MaximumMaterializedFactBytes = 128L + MaximumReadBytes * sizeof(char);
 	private const long MaximumRetainedReadFactBytes = 64L * 1024 * 1024;
+	private const long CompactRetainedFactBytes = 256;
 	private const int MaximumIoParallelism = 4;
 
 	public Task<CodeCompressionWarmupResult> WarmAsync(
@@ -111,7 +133,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 					0));
 		}
 
-		var retainedPaths = BuildRetainedPathSet(context, candidates, cancellationToken);
+		var retainedPaths = BuildRetainedPathSet(candidates, cancellationToken);
 		var retainedFacts = new ConcurrentDictionary<
 			string,
 			ContentReadFactSnapshot.RetainedContentReadFact>(ProjectTreePathIdentity.CanonicalComparer);
@@ -254,7 +276,13 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 									Classification: FileContentClassification.Text,
 									RawMetrics: metrics,
 									Fingerprint: null),
-								metricsIdentity));
+								metricsIdentity,
+								new ContentReadMetricsFact(
+									metrics,
+									metrics,
+									context.TransformIdentity,
+									metricsIdentity.Length,
+									metricsIdentity.LastWriteTimeUtcTicks)));
 						}
 						scope.RecordUnsupported(path, relativePath, metrics.CharCount);
 						Increment(WarmFileOutcome.Warmed, ref warmed, ref skipped, ref failed);
@@ -303,14 +331,14 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 						continue;
 					}
 
-					if (retainedPaths.Contains(path) && identity is { } contentIdentity)
+					if (scope.TryWarmCachedAndGetPlan(
+						    path,
+						    relativePath,
+						    fact.Content!,
+						    fingerprint,
+						    out var cachedPlan))
 					{
-						TryRetainFact(path, new ContentReadFactSnapshot.RetainedContentReadFact(
-							fact,
-							contentIdentity));
-					}
-					if (scope.TryWarmCached(path, relativePath, fact.Content!, fingerprint))
-					{
+						TryRetainTransformedMetrics(path, fact, fingerprint, identity, cachedPlan!);
 						Increment(WarmFileOutcome.Warmed, ref warmed, ref skipped, ref failed);
 						ReportProgress(progress, ref processed, candidates.Count);
 						continue;
@@ -322,6 +350,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 							relativePath,
 							fact,
 							fingerprint,
+							identity,
 							lease ?? throw new InvalidOperationException("A materialized fact has no byte-budget lease.")),
 						pipelineToken).ConfigureAwait(false);
 					lease = null;
@@ -364,14 +393,20 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 				{
 					try
 					{
-						var recorded = scope.Warm(
+						var plan = scope.WarmAndGetPlan(
 							item.Path,
 							item.RelativePath,
 							item.Fact.Content!,
 							item.Fingerprint,
 							pipelineToken);
+						TryRetainTransformedMetrics(
+							item.Path,
+							item.Fact,
+							item.Fingerprint,
+							item.Identity,
+							plan);
 						Increment(
-							recorded ? WarmFileOutcome.Warmed : WarmFileOutcome.Skipped,
+							plan is not null ? WarmFileOutcome.Warmed : WarmFileOutcome.Skipped,
 							ref warmed,
 							ref skipped,
 							ref failed);
@@ -413,7 +448,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 			string path,
 			ContentReadFactSnapshot.RetainedContentReadFact retainedFact)
 		{
-			var actualBytes = retainedFact.Fact.ApproximateRetainedBytes;
+			var actualBytes = CompactRetainedFactBytes;
 			lock (retainedFactsSync)
 			{
 				if (actualBytes > MaximumRetainedReadFactBytes - retainedFactBytes ||
@@ -423,6 +458,39 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 				}
 				retainedFactBytes += actualBytes;
 			}
+		}
+
+		void TryRetainTransformedMetrics(
+			string path,
+			ContentReadFact fact,
+			ContentFingerprint fingerprint,
+			FileContentIdentity? identity,
+			CodeCompressionPlan? plan)
+		{
+			if (!retainedPaths.Contains(path) || identity is not { } contentIdentity ||
+			    fact.RawMetrics is not { IsEstimated: false } raw || !fact.IsMaterializedText ||
+			    plan is null)
+			{
+				return;
+			}
+			var effective = plan.HasEdits
+				? FileContentAnalyzer.ComputeTransformedMetrics(fact.Content, plan)
+				: raw;
+			var compact = new ContentReadFact(
+				Content: null,
+				FileContentClassification.Text,
+				raw,
+				fingerprint,
+				fact.Encoding);
+			TryRetainFact(path, new ContentReadFactSnapshot.RetainedContentReadFact(
+				compact,
+				contentIdentity,
+				new ContentReadMetricsFact(
+					raw,
+					effective,
+					context.TransformIdentity,
+					contentIdentity.Length,
+					contentIdentity.LastWriteTimeUtcTicks)));
 		}
 
 		static async Task ObserveCompletionAsync(Task[] tasks)
@@ -438,8 +506,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		}
 	}
 
-	private HashSet<string> BuildRetainedPathSet(
-		CodeCompressionContext context,
+	private static HashSet<string> BuildRetainedPathSet(
 		IReadOnlyList<string> paths,
 		CancellationToken cancellationToken)
 	{
@@ -448,24 +515,10 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		foreach (var path in paths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (contentAnalyzer.ClassifyWithoutReading(path) == FileContentClassification.Binary)
-				continue;
-			var relativePath = BuildRelativePath(context.ProjectRoot, path);
-			if (!context.IsSupported(relativePath))
-			{
-				if (bytes + 128L > MaximumRetainedReadFactBytes)
-					continue;
-				retained.Add(path);
-				bytes += 128L;
-				continue;
-			}
-			if (!TryGetLength(path, out var length) || length > MaximumReadBytes)
-				continue;
-			var estimate = 128L + length * sizeof(char);
-			if (bytes + estimate > MaximumRetainedReadFactBytes)
+			if (bytes + CompactRetainedFactBytes > MaximumRetainedReadFactBytes)
 				continue;
 			retained.Add(path);
-			bytes += estimate;
+			bytes += CompactRetainedFactBytes;
 		}
 		return retained;
 	}
@@ -479,21 +532,6 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		catch (ArgumentException)
 		{
 			return fullPath;
-		}
-	}
-
-	private static bool TryGetLength(string path, out long length)
-	{
-		try
-		{
-			length = new FileInfo(path).Length;
-			return true;
-		}
-		catch (Exception exception) when (
-			exception is IOException or UnauthorizedAccessException or NotSupportedException or SecurityException)
-		{
-			length = 0;
-			return false;
 		}
 	}
 
@@ -531,6 +569,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		string RelativePath,
 		ContentReadFact Fact,
 		ContentFingerprint Fingerprint,
+		FileContentIdentity? Identity,
 		WeightedByteBudget.Lease Lease);
 
 	private enum WarmFileOutcome

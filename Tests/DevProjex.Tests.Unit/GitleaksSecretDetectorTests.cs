@@ -1,4 +1,5 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Tests.Unit;
@@ -338,6 +339,60 @@ public sealed class GitleaksSecretDetectorTests
 			static match => match.RuleId == "generic-api-key");
 
 		Assert.Equal(genericValue, finding.Value);
+	}
+
+	[Fact]
+	public void Detect_WholeMatchRuleAvoidsSecondaryRegexAndLineIndex()
+	{
+		var detector = new GitleaksSecretDetector();
+		detector.WarmUp(TestContext.Current.CancellationToken);
+		var token = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		var finding = Assert.Single(
+			detector.Detect("src/token.cs", token, TestContext.Current.CancellationToken),
+			static candidate => candidate.RuleId == "github-pat");
+		var diagnostics = measurement.Capture();
+
+		Assert.Equal(token, finding.Value);
+		Assert.Equal(0, diagnostics.SecondarySecretRegexRuns);
+		Assert.Equal(0, diagnostics.LineIndexBuilds);
+	}
+
+	[Fact]
+	public void Detect_RulePathAllowlistsAreEvaluatedOnlyAfterTheRuleMatches()
+	{
+		var detector = new GitleaksSecretDetector();
+		detector.WarmUp(TestContext.Current.CancellationToken);
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		var findings = detector.Detect(
+			"src/clean.cs",
+			"public sealed class Widget { public int Value { get; init; } }",
+			TestContext.Current.CancellationToken);
+		var diagnostics = measurement.Capture();
+
+		Assert.Empty(findings);
+		Assert.Equal(0, diagnostics.RulePathAllowlistEvaluations);
+	}
+
+	[Fact]
+	public void Detect_RejectedEntropyDoesNotBuildLineContext()
+	{
+		var detector = new GitleaksSecretDetector();
+		detector.WarmUp(TestContext.Current.CancellationToken);
+		var content = new string('x', 64 * 1024) + "\napiKey = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"";
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		var findings = detector.Detect(
+			"src/config.cs",
+			content,
+			new SecretFileInspectionBudget(TimeSpan.FromSeconds(10)),
+			TestContext.Current.CancellationToken);
+		var diagnostics = measurement.Capture();
+
+		Assert.DoesNotContain(findings, static candidate => candidate.RuleId == "generic-api-key");
+		Assert.Equal(0, diagnostics.LineIndexBuilds);
 	}
 
 	[Theory]
