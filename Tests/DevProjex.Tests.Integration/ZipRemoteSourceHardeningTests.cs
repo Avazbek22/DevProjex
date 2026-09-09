@@ -8,7 +8,7 @@ namespace DevProjex.Tests.Integration;
 public sealed class ZipRemoteSourceHardeningTests
 {
 	[Fact]
-	public async Task New028_StalledArchiveBodyFailsWithinProgressDeadline()
+	public async Task StalledArchiveBodyFailsWithinProgressDeadline()
 	{
 		using var temporary = new TemporaryDirectory();
 		using var service = new ZipDownloadService(
@@ -30,7 +30,7 @@ public sealed class ZipRemoteSourceHardeningTests
 	}
 
 	[Fact]
-	public async Task New030_MetadataTimeoutIsAnOperationFailureInsteadOfCallerCancellation()
+	public async Task MetadataTimeoutIsAnOperationFailureInsteadOfCallerCancellation()
 	{
 		using var temporary = new TemporaryDirectory();
 		using var service = new ZipDownloadService(new MetadataTimeoutHandler());
@@ -45,7 +45,7 @@ public sealed class ZipRemoteSourceHardeningTests
 	}
 
 	[Fact]
-	public async Task New029_MetadataFallbackReportsTheBranchThatWasActuallyDownloaded()
+	public async Task MetadataFallbackReportsTheBranchThatWasActuallyDownloaded()
 	{
 		using var temporary = new TemporaryDirectory();
 		var archive = CreateArchive(("repository-master/app.txt", "master"));
@@ -62,7 +62,7 @@ public sealed class ZipRemoteSourceHardeningTests
 	}
 
 	[Fact]
-	public async Task New032_SymbolicLinkArchiveEntriesAreSkippedWithCountedDiagnostic()
+	public async Task SymbolicLinkArchiveEntriesAreSkippedWithCountedDiagnostic()
 	{
 		using var temporary = new TemporaryDirectory();
 		var archive = CreateArchiveWithSymbolicLink();

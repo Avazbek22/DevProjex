@@ -9,7 +9,7 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 	[InlineData("ssh://alice@git.example.test/team/repo.git", "ssh://bob@git.example.test/team/repo.git")]
 	[InlineData("https://alice@git.example.test/team/repo.git", "https://bob@git.example.test/team/repo.git")]
 	[InlineData("https://git.example.test/team/repo.git", "ssh://git.example.test/team/repo.git")]
-	public void New026_CacheIdentityPreservesUserAndTransport(string left, string right)
+	public void CacheIdentityPreservesUserAndTransport(string left, string right)
 	{
 		Assert.NotEqual(
 			RepositoryUrlUtility.GetSourceCacheKey(left),
@@ -19,7 +19,7 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 	[Theory]
 	[InlineData("https://git.example.test/team/repo", "https://GIT.EXAMPLE.TEST/team/repo.git")]
 	[InlineData("ssh://git@git.example.test/team/repo", "git@git.example.test:team/repo.git")]
-	public void New026_RemoteGitSuffixAndEquivalentSshFormsShareIdentity(string left, string right)
+	public void RemoteGitSuffixAndEquivalentSshFormsShareIdentity(string left, string right)
 	{
 		Assert.Equal(
 			RepositoryUrlUtility.GetSourceCacheKey(left),
@@ -27,7 +27,7 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 	}
 
 	[Fact]
-	public void New027_DistinctLocalGitDirectoriesDoNotShareCacheIdentity()
+	public void DistinctLocalGitDirectoriesDoNotShareCacheIdentity()
 	{
 		using var temporary = new TemporaryDirectory();
 		var repository = temporary.CreateDirectory("repo");
@@ -51,7 +51,7 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 	}
 
 	[Fact]
-	public void New027_LocalGitSuffixAliasSharesIdentityOnlyWhenItTargetsTheSameDirectory()
+	public void LocalGitSuffixAliasSharesIdentityOnlyWhenItTargetsTheSameDirectory()
 	{
 		using var temporary = new TemporaryDirectory();
 		var repository = temporary.CreateDirectory("repository");
@@ -75,13 +75,13 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 	[InlineData("http://example.test/team/repo.git")]
 	[InlineData("git://example.test/team/repo.git")]
 	[InlineData("file:///tmp/repo.git")]
-	public void New043_ProductionSourceValidatorRejectsDisallowedTransports(string source)
+	public void ProductionSourceValidatorRejectsDisallowedTransports(string source)
 	{
 		Assert.False(RepositoryUrlUtility.IsSupportedCloneSource(source));
 	}
 
 	[Fact]
-	public void New045And046_ExplicitNetworkPreservesOnlyTrustedProxyAndCertificateEnvironment()
+	public void ExplicitNetworkPreservesOnlyTrustedProxyAndCertificateEnvironment()
 	{
 		var names = new[]
 		{
@@ -118,7 +118,7 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 	}
 
 	[Fact]
-	public async Task New048_ActiveLocalBranchDeletedFromRemoteRemainsVisible()
+	public async Task ActiveLocalBranchDeletedFromRemoteRemainsVisible()
 	{
 		using var temporary = new TemporaryDirectory();
 		var source = temporary.CreateDirectory("source");
@@ -163,7 +163,7 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 	}
 
 	[Fact]
-	public async Task New047_RealGitCloneIsStoppedWhenCacheQuotaIsExceeded()
+	public async Task RealGitCloneIsStoppedWhenCacheQuotaIsExceeded()
 	{
 		using var temporary = new TemporaryDirectory();
 		var source = temporary.CreateDirectory("quota-source");
@@ -206,7 +206,7 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 	}
 
 	[Fact]
-	public async Task New047_CloneFailsBeforeStartingWhenDestinationReserveIsUnavailable()
+	public async Task CloneFailsBeforeStartingWhenDestinationReserveIsUnavailable()
 	{
 		using var temporary = new TemporaryDirectory();
 		var target = Path.Combine(temporary.Path, "reserve-target");
@@ -232,7 +232,7 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 	}
 
 	[Fact]
-	public void New031_FreeSpaceProbeChoosesTheLongestDestinationMount()
+	public void FreeSpaceProbeChoosesTheLongestDestinationMount()
 	{
 		using var temporary = new TemporaryDirectory();
 		var targetMount = temporary.CreateDirectory("mounted-cache");

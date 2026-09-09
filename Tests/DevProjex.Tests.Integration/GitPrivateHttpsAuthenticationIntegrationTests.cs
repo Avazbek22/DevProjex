@@ -13,7 +13,7 @@ namespace DevProjex.Tests.Integration;
 public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 {
 	[Fact]
-	public async Task New044_PrivateCloneBranchFetchAndUpdateReuseAskPassSession()
+	public async Task PrivateCloneBranchFetchAndUpdateReuseAskPassSession()
 	{
 		using var temporary = new TemporaryDirectory();
 		var source = temporary.CreateDirectory("source");

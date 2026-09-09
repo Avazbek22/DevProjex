@@ -7,7 +7,7 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 {
 	[Fact]
-	public async Task New025_DottedImportsBindTheTopLevelNameUnlessAliased()
+	public async Task DottedImportsBindTheTopLevelNameUnlessAliased()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -27,7 +27,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New057_ReExportDoesNotTreatAnOrdinaryModuleAsAPackage()
+	public async Task ReExportDoesNotTreatAnOrdinaryModuleAsAPackage()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -50,7 +50,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New067_PyProjectDependenciesUseTomlArrayBoundaries()
+	public async Task PyProjectDependenciesUseTomlArrayBoundaries()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -80,7 +80,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	[Theory]
 	[InlineData("[project]\nname = \"unterminated")]
 	[InlineData("[project]\ndependencies = [\n  \"requests\",")]
-	public async Task New068_InvalidPyProjectTomlIsCorrupt(string content)
+	public async Task InvalidPyProjectTomlIsCorrupt(string content)
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", content);
@@ -100,7 +100,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New069_NamedDirectUrlDependencyRetainsItsDistributionName()
+	public async Task NamedDirectUrlDependencyRetainsItsDistributionName()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -120,7 +120,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New069_BareDirectUrlDoesNotInventAPackageName()
+	public async Task BareDirectUrlDoesNotInventAPackageName()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -136,7 +136,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New070_NestedPyProjectDoesNotChangeUnownedRootFiles()
+	public async Task NestedPyProjectDoesNotChangeUnownedRootFiles()
 	{
 		using var fixture = new TemporaryDirectory();
 		var module = fixture.CreateFile("module.py", "VALUE = 1");
@@ -162,7 +162,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New071_ModuleFileBlocksDottedChildResolution()
+	public async Task ModuleFileBlocksDottedChildResolution()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -182,7 +182,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New071_RegularPackageBlocksChildrenFromAnotherRoot()
+	public async Task RegularPackageBlocksChildrenFromAnotherRoot()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -202,7 +202,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New072_LastUnconditionalReExportBindingWins()
+	public async Task LastUnconditionalReExportBindingWins()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -224,7 +224,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New072_ConditionalReExportDoesNotClaimOneTarget()
+	public async Task ConditionalReExportDoesNotClaimOneTarget()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -249,7 +249,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New073_DocstringAndLocalAllAssignmentsDoNotSetModulePolicy()
+	public async Task DocstringAndLocalAllAssignmentsDoNotSetModulePolicy()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -277,7 +277,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New073_ModuleLevelDynamicAllRemainsExplicitlyUnresolved()
+	public async Task ModuleLevelDynamicAllRemainsExplicitlyUnresolved()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -299,7 +299,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New024_ModuleAssignmentsHaveAnExplicitResolutionLimitation()
+	public async Task ModuleAssignmentsHaveAnExplicitResolutionLimitation()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -319,7 +319,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New074_WildcardReExportHasAnExplicitResolutionLimitation()
+	public async Task WildcardReExportHasAnExplicitResolutionLimitation()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -340,7 +340,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New064_EqualRootConfigurationsFailClosedAsAmbiguousOwnership()
+	public async Task EqualRootConfigurationsFailClosedAsAmbiguousOwnership()
 	{
 		using var fixture = new TemporaryDirectory();
 		var pyproject = fixture.CreateFile(
@@ -363,7 +363,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New065_StaticCompileItemsFailClosedWithoutEvaluatingMsBuild()
+	public async Task StaticCompileItemsFailClosedWithoutEvaluatingMsBuild()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile(
@@ -386,7 +386,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New066_FilteredOwningConfigurationHasAnExplicitMissingReason()
+	public async Task FilteredOwningConfigurationHasAnExplicitMissingReason()
 	{
 		using var fixture = new TemporaryDirectory();
 		fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -466,7 +466,7 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New078_TransientGrammarResolutionFailureIsRetried()
+	public async Task TransientGrammarResolutionFailureIsRetried()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");

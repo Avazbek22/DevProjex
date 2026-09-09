@@ -6,7 +6,7 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
-	public async Task New093_UnknownCrossProjectAccessibilityRemainsAmbiguous()
+	public async Task UnknownCrossProjectAccessibilityRemainsAmbiguous()
 	{
 		using var fixture = new TemporaryDirectory();
 		var projectA = fixture.CreateFile(
@@ -32,7 +32,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New094_OnlyPreprocessorDependentReferencesAreHonestlyUnresolved()
+	public async Task OnlyPreprocessorDependentReferencesAreHonestlyUnresolved()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -84,7 +84,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New094_NestedConditionalRegionsRemainBoundedByTheOuterDirective()
+	public async Task NestedConditionalRegionsRemainBoundedByTheOuterDirective()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -124,7 +124,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New094_UnterminatedConditionalRegionDegradesOnlyTheFileTail()
+	public async Task UnterminatedConditionalRegionDegradesOnlyTheFileTail()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -157,7 +157,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New094_RegionAndNullableDirectivesAreNotConditionalRegions()
+	public async Task RegionAndNullableDirectivesAreNotConditionalRegions()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -192,7 +192,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New092_NestedGenericSegmentIsHonestlyUnresolved()
+	public async Task NestedGenericSegmentIsHonestlyUnresolved()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -216,7 +216,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New015_UsingStaticExposesNestedTypes()
+	public async Task UsingStaticExposesNestedTypes()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -240,7 +240,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New059_ExportsFallbackArrayIsHonestlyUnresolved()
+	public async Task ExportsFallbackArrayIsHonestlyUnresolved()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -266,7 +266,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New023_DirectoryPackageMetadataDoesNotFallBackToIndex()
+	public async Task DirectoryPackageMetadataDoesNotFallBackToIndex()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -290,7 +290,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New022_ExcludedPrimaryPathMappingDoesNotSelectFallback()
+	public async Task ExcludedPrimaryPathMappingDoesNotSelectFallback()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -314,7 +314,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New063_CustomConditionsFailClosedOnlyForConditionalPackageMaps()
+	public async Task CustomConditionsFailClosedOnlyForConditionalPackageMaps()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -363,7 +363,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New097_BarePackageImportTargetIsNotProbedAsLocalPath()
+	public async Task BarePackageImportTargetIsNotProbedAsLocalPath()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -388,7 +388,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New061_ModuleNodeNextInfersNodeNextResolution()
+	public async Task ModuleNodeNextInfersNodeNextResolution()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -411,7 +411,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New060_RelativeModuleUrlSuffixUsesPhysicalPath()
+	public async Task RelativeModuleUrlSuffixUsesPhysicalPath()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -436,7 +436,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New052_OrdinaryCSharpTypePositionsProduceReferences()
+	public async Task OrdinaryCSharpTypePositionsProduceReferences()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -486,7 +486,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New014_RelativeAliasTargetFallsBackToLexicalNamespace()
+	public async Task RelativeAliasTargetFallsBackToLexicalNamespace()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -508,7 +508,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New096_PackageExportsRejectTargetsOutsidePackage()
+	public async Task PackageExportsRejectTargetsOutsidePackage()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -534,7 +534,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New095_RequireParameterDoesNotCreateModuleImport()
+	public async Task RequireParameterDoesNotCreateModuleImport()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -559,7 +559,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New091_TupleElementNamesAreNotTypeReferences()
+	public async Task TupleElementNamesAreNotTypeReferences()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -582,7 +582,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New090_UnknownQualifiedTypeIsNotExternalByItsLastName()
+	public async Task UnknownQualifiedTypeIsNotExternalByItsLastName()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -605,7 +605,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New058_JsxSpecifierProbesTsxSource()
+	public async Task JsxSpecifierProbesTsxSource()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -627,7 +627,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New056_GlobalNamespaceTypePrecedesImportedTypeAtTopLevel()
+	public async Task GlobalNamespaceTypePrecedesImportedTypeAtTopLevel()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -650,7 +650,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New055_AttributeShortNameFallbackRunsAfterVisibilityFiltering()
+	public async Task AttributeShortNameFallbackRunsAfterVisibilityFiltering()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -671,7 +671,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New054_ExactPackageExportDoesNotProbeDirectoryIndex()
+	public async Task ExactPackageExportDoesNotProbeDirectoryIndex()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -696,7 +696,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New053_DynamicImportInCommonJsRequiresRelativeExtension()
+	public async Task DynamicImportInCommonJsRequiresRelativeExtension()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -722,7 +722,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New021_NodeConditionIsActiveForNodeNextButNotBundler()
+	public async Task NodeConditionIsActiveForNodeNextButNotBundler()
 	{
 		using var fixture = new TemporaryDirectory();
 		var bundlerConfig = fixture.CreateFile(
@@ -760,7 +760,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New020_InactiveUnknownPackageConditionDoesNotBlockDefault()
+	public async Task InactiveUnknownPackageConditionDoesNotBlockDefault()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -785,7 +785,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New019_PackageWildcardPrefersLongestStaticPrefix()
+	public async Task PackageWildcardPrefersLongestStaticPrefix()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -811,7 +811,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New018_MultilineGenericReferenceUsesTokenCoordinates()
+	public async Task MultilineGenericReferenceUsesTokenCoordinates()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -833,7 +833,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New017_NonAsciiIdentifierStartIsExtractedAsTypeReference()
+	public async Task NonAsciiIdentifierStartIsExtractedAsTypeReference()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -853,7 +853,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New016_GenericUsingAliasPreservesContainerAndArgumentReferences()
+	public async Task GenericUsingAliasPreservesContainerAndArgumentReferences()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -878,7 +878,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New013_QualifiedNameUsesLexicalNamespaceBeforeGlobalNamespace()
+	public async Task QualifiedNameUsesLexicalNamespaceBeforeGlobalNamespace()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -905,7 +905,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New012_NestedBlockNamespacesComposeTheirQualifiedName()
+	public async Task NestedBlockNamespacesComposeTheirQualifiedName()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -934,7 +934,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New011_TupleCommasDoNotIncreaseConstructedGenericArity()
+	public async Task TupleCommasDoNotIncreaseConstructedGenericArity()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -957,7 +957,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New010_DynamicImportAttributesPreserveEveryImportFact()
+	public async Task DynamicImportAttributesPreserveEveryImportFact()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
