@@ -111,6 +111,13 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.McpAllowRemote")
 		};
+		var remoteHosts = new Option<string[]>("--remote-hosts")
+		{
+			Description = "Allow only these comma-separated remote Git hosts when --allow-remote is enabled.",
+			HelpName = "HOST[,HOST...]",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
 		var gitMode = CreateMcpGitModeOption();
 		var exclude = CreateMcpExcludeOption();
 		// Arity is pinned to zero: command validators run before arity validation in
@@ -132,6 +139,7 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(roots);
 		command.Options.Add(hidePrivateData);
 		command.Options.Add(allowRemote);
+		command.Options.Add(remoteHosts);
 		command.Options.Add(gitMode);
 		command.Options.Add(exclude);
 		command.Options.Add(unrestricted);
@@ -187,7 +195,10 @@ public sealed class DevProjexCommandTree
 						baselineExclusions,
 						parseResult.GetValue(allowAgentExclusions),
 						_serviceFactory.AppDataPathProvider,
-						cancellationToken)
+						cancellationToken,
+						parseResult.GetResult(remoteHosts) is null
+							? null
+							: parseResult.GetValue(remoteHosts) ?? [])
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}

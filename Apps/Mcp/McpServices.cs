@@ -144,7 +144,9 @@ internal sealed class McpServices : IDisposable
 					preparedContentAnalyzer: preparedContentAnalyzer),
 				treeExport,
 				contentAnalyzer,
-				new ProjectSelectionResolver(profileStore, new PortableProjectProfileService().LoadAsync),
+				new ProjectSelectionResolver(
+					profileStore,
+					(path, token) => LoadPortableProfileAsync(guardedFileOpener, path, token)),
 				profileStore,
 				new GitScopePathProvider(gitPathComparisonSemanticsResolver),
 				redactionSession,
@@ -158,6 +160,72 @@ internal sealed class McpServices : IDisposable
 			compressionSession.Dispose();
 			redactionSession.Dispose();
 			throw;
+		}
+	}
+
+	private static async Task<ProjectSelectionSpec> LoadPortableProfileAsync(
+		McpRootJailFileStreamOpener guardedFileOpener,
+		string path,
+		CancellationToken cancellationToken)
+	{
+		var stagingDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "McpProfiles");
+		Directory.CreateDirectory(stagingDirectory);
+		var stagingPath = Path.Combine(stagingDirectory, $"{Guid.NewGuid():N}.json");
+		try
+		{
+			await using (var source = guardedFileOpener.OpenRead(
+				path,
+				16 * 1024,
+				FileShare.ReadWrite | FileShare.Delete,
+				asynchronous: true))
+			await using (var destination = new FileStream(
+				stagingPath,
+				FileMode.CreateNew,
+				FileAccess.Write,
+				FileShare.None,
+				16 * 1024,
+				FileOptions.Asynchronous | FileOptions.SequentialScan))
+			{
+				var buffer = new byte[16 * 1024];
+				long copied = 0;
+				try
+				{
+					while (true)
+					{
+						var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+						if (read == 0)
+							break;
+						copied += read;
+						if (copied > 4L * 1024 * 1024)
+							throw new PortableProjectProfileException(
+								"DPX-CLI-PROFILE-INVALID",
+								"The portable profile could not be read.");
+						await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+							.ConfigureAwait(false);
+					}
+				}
+				finally
+				{
+					System.Security.Cryptography.CryptographicOperations.ZeroMemory(buffer);
+				}
+			}
+			return await new PortableProjectProfileService()
+				.LoadAsync(stagingPath, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		finally
+		{
+			try
+			{
+				File.Delete(stagingPath);
+				Directory.Delete(stagingDirectory, recursive: false);
+			}
+			catch (IOException)
+			{
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
 		}
 	}
 

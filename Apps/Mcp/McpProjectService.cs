@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Ranking;
 
 namespace DevProjex.Mcp;
 
@@ -26,6 +27,8 @@ internal sealed class McpProjectService(
 	private readonly object rootMonitorSync = new();
 	private readonly ConditionalWeakTable<ProjectContextPlan, PlanMembership> planMembership = new();
 	private long cacheGeneration;
+	private long planMembershipBuildCount;
+	private long profileCatalogReadCount;
 	private int disposed;
 
 	/// <summary>The Git baseline every call starts from when it names no profile.</summary>
@@ -34,6 +37,10 @@ internal sealed class McpProjectService(
 	/// <summary>The exclusion baseline every call starts from when it names no profile.</summary>
 	public IReadOnlyCollection<ProjectExclusion> ServerExclusions =>
 		serverExclusions ?? McpServerBaseline.DefaultExclusions;
+
+	public bool HidePrivateData => hidePrivateData;
+	internal long PlanMembershipBuildCount => Volatile.Read(ref planMembershipBuildCount);
+	internal long ProfileCatalogReadCount => Volatile.Read(ref profileCatalogReadCount);
 
 	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
@@ -840,6 +847,43 @@ internal sealed class McpProjectService(
 				cancellationToken)
 			.ConfigureAwait(false);
 
+	public string RedactSyntheticText(
+		ProjectContextPlan plan,
+		string identityPath,
+		string content,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentException.ThrowIfNullOrWhiteSpace(identityPath);
+		ArgumentNullException.ThrowIfNull(content);
+		var redaction = CreateTransformationContext(plan).Redaction ??
+		                throw new InvalidOperationException("MCP text redaction is unavailable.");
+		var scope = redaction.BeginOutput([identityPath], cancellationToken);
+		var result = scope.Redact(identityPath, content, cancellationToken).Text;
+		_ = scope.Complete();
+		return result;
+	}
+
+	public static async Task EnsureRankingSourcesCurrentAsync(
+		ImportanceRankingReport? ranking,
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken)
+	{
+		if (ranking is null)
+			return;
+		foreach (var path in paths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!ranking.SourceVersions.TryGetValue(Path.GetFullPath(path), out var expected) ||
+			    !await expected.IsCurrentAsync(path, cancellationToken).ConfigureAwait(false))
+			{
+				throw new McpToolException(
+					McpErrorCodes.ProjectUnavailable,
+					$"{McpErrorCodes.ProjectUnavailable}: selection changed during packing; retry");
+			}
+		}
+	}
+
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
 		services.OutputPreparer.CreatePreparedAnalyzer(prepared);
 
@@ -910,6 +954,64 @@ internal sealed class McpProjectService(
 
 	public bool HasLocalProfile(string projectRoot) =>
 		services.ProfileStore.TryLoadProfile(projectRoot, out _);
+
+	public async Task<McpLocalProfileCatalog> ReadLocalProfileCatalogAsync(
+		IReadOnlyList<string> projectRoots,
+		CancellationToken cancellationToken)
+	{
+		if (services.ProfileStore is not ProjectProfileStore store)
+		{
+			var fallback = new HashSet<string>(PathComparer.Default);
+			foreach (var root in projectRoots)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (services.ProfileStore.TryLoadProfile(root, out _))
+					fallback.Add(root);
+			}
+			return new McpLocalProfileCatalog(fallback, "available");
+		}
+
+		try
+		{
+			var path = store.GetPath();
+			if (!File.Exists(path))
+				return new McpLocalProfileCatalog(new HashSet<string>(PathComparer.Default), "available");
+			Interlocked.Increment(ref profileCatalogReadCount);
+			await using var stream = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				16 * 1024,
+				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			if (stream.Length > 4L * 1024 * 1024)
+				return new McpLocalProfileCatalog(new HashSet<string>(PathComparer.Default), "unavailable");
+			using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+			if (!document.RootElement.TryGetProperty("profiles", out var profiles) ||
+			    profiles.ValueKind != JsonValueKind.Object)
+			{
+				return new McpLocalProfileCatalog(new HashSet<string>(PathComparer.Default), "unavailable");
+			}
+			var requested = projectRoots.Select(Path.GetFullPath).ToHashSet(PathComparer.Default);
+			var found = new HashSet<string>(PathComparer.Default);
+			foreach (var profile in profiles.EnumerateObject())
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (requested.Contains(profile.Name))
+					found.Add(profile.Name);
+			}
+			return new McpLocalProfileCatalog(found, "available");
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+		{
+			return new McpLocalProfileCatalog(new HashSet<string>(PathComparer.Default), "unavailable");
+		}
+	}
 
 	public TreeExportService TreeExportService => services.TreeExportService;
 	public ProjectContextDocumentService DocumentService => services.DocumentService;
@@ -1024,6 +1126,8 @@ internal sealed class McpProjectService(
 		ProjectContextPlan plan,
 		RequestedPathSelection requested)
 	{
+		if (requested.Tokens.Count == 0)
+			return plan;
 		var membership = Membership(plan);
 		var missing = requested.Tokens.Where(token =>
 			token.ResolutionError is not null ||
@@ -1119,7 +1223,13 @@ internal sealed class McpProjectService(
 	}
 
 	private PlanMembership Membership(ProjectContextPlan plan) =>
-		planMembership.GetValue(plan, static value => PlanMembership.Create(value));
+		planMembership.GetValue(plan, CreatePlanMembership);
+
+	private PlanMembership CreatePlanMembership(ProjectContextPlan plan)
+	{
+		Interlocked.Increment(ref planMembershipBuildCount);
+		return PlanMembership.Create(plan);
+	}
 
 	private static string NormalizeRequestedPathToken(string projectRoot, string path)
 	{
@@ -1405,3 +1515,5 @@ internal sealed class McpProjectService(
 	internal static bool IsGitRepository(string root) =>
 		GitRepositoryBoundaryProbe.ExistsAtOrAbove(root);
 }
+
+internal sealed record McpLocalProfileCatalog(IReadOnlySet<string> ProjectRoots, string Status);

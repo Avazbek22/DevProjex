@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -32,7 +33,8 @@ public static class McpServerHost
 			exclusions,
 			agentExclusions,
 			appDataPathProvider: null,
-			cancellationToken);
+			cancellationToken,
+			remoteHosts: null);
 
 	internal static Task RunWithStandardStreamsAsync(
 		IReadOnlyList<string> roots,
@@ -42,10 +44,12 @@ public static class McpServerHost
 		IReadOnlyCollection<ProjectExclusion>? exclusions,
 		bool agentExclusions,
 		Func<string>? appDataPathProvider,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyCollection<string>? remoteHosts = null)
 	{
 		ValidateGitMode(gitMode);
 		ValidateExclusions(exclusions);
+		var normalizedRemoteHosts = NormalizeRemoteHosts(remoteHosts);
 		return RunWithStreamsAsync(
 			roots,
 			Console.OpenStandardInput(),
@@ -56,7 +60,8 @@ public static class McpServerHost
 			allowRemote: allowRemote,
 			gitMode: gitMode,
 			exclusions: exclusions,
-			agentExclusions: agentExclusions);
+			agentExclusions: agentExclusions,
+			remoteHosts: normalizedRemoteHosts);
 	}
 
 	internal static async Task RunWithStreamsAsync(
@@ -72,7 +77,8 @@ public static class McpServerHost
 		Func<McpRemoteProjectServices>? remoteServicesFactory = null,
 		GitFilteringMode? gitMode = null,
 		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
-		bool agentExclusions = false)
+		bool agentExclusions = false,
+		IReadOnlySet<string>? remoteHosts = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
@@ -85,7 +91,8 @@ public static class McpServerHost
 			rootRegistry,
 			allowRemote,
 			() => remoteServicesFactory?.Invoke() ??
-			      McpRemoteProjectServices.Create(appDataPathProvider));
+			      McpRemoteProjectServices.Create(appDataPathProvider),
+			remoteHosts: remoteHosts);
 		var rootJail = new McpProjectRootJail(rootRegistry, projectSources);
 		var services = new Lazy<McpServices>(
 			() => servicesFactory?.Invoke(rootJail) ?? McpServices.Create(rootJail, appDataPathProvider),
@@ -105,7 +112,13 @@ public static class McpServerHost
 				return created;
 			},
 			LazyThreadSafetyMode.ExecutionAndPublication);
-		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs, agentExclusions);
+		var tools = new DevProjexMcpTools(
+			rootRegistry,
+			projectService,
+			packs,
+			agentExclusions,
+			allowRemote,
+			remoteHosts);
 		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions);
 
 		var builder = Host.CreateApplicationBuilder([]);
@@ -177,6 +190,33 @@ public static class McpServerHost
 					"The MCP server exclusion baseline accepts only path exclusion toggles.");
 			}
 		}
+	}
+
+	internal static IReadOnlySet<string>? NormalizeRemoteHosts(IReadOnlyCollection<string>? hosts)
+	{
+		if (hosts is null)
+			return null;
+		var normalized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var raw in hosts)
+		{
+			foreach (var token in raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+			{
+				var bracketed = token.Length >= 2 && token[0] == '[' && token[^1] == ']';
+				var host = bracketed ? token[1..^1] : token;
+				var kind = Uri.CheckHostName(host);
+				if (host.Length == 0 || host.Contains('/') || host.Contains('@') ||
+				    (!bracketed && host.Contains(':')) || kind == UriHostNameType.Unknown)
+				{
+					throw new ArgumentException("Remote hosts must be comma-separated host names without schemes, ports, or paths.", nameof(hosts));
+				}
+				normalized.Add(kind == UriHostNameType.Dns
+					? new IdnMapping().GetAscii(host).ToLowerInvariant()
+					: host.ToLowerInvariant());
+			}
+		}
+		if (normalized.Count == 0)
+			throw new ArgumentException("At least one remote host is required.", nameof(hosts));
+		return normalized;
 	}
 
 	private static string ResolveVersion() =>

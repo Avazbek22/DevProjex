@@ -6,6 +6,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 	private readonly McpRootRegistry _localRoots;
 	private readonly bool _allowRemote;
 	private readonly int _maximumRemoteSources;
+	private readonly IReadOnlySet<string>? _remoteHosts;
 	private readonly Lazy<McpRemoteProjectServices> _remoteServices;
 	private readonly object _sync = new();
 	private readonly Dictionary<RemoteProjectKey, McpResolvedProjectSource> _remoteSources = [];
@@ -18,12 +19,14 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		McpRootRegistry localRoots,
 		bool allowRemote,
 		Func<McpRemoteProjectServices> remoteServicesFactory,
-		int maximumRemoteSources = DefaultMaximumRemoteSources)
+		int maximumRemoteSources = DefaultMaximumRemoteSources,
+		IReadOnlySet<string>? remoteHosts = null)
 	{
 		_localRoots = localRoots ?? throw new ArgumentNullException(nameof(localRoots));
 		_allowRemote = allowRemote;
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumRemoteSources);
 		_maximumRemoteSources = maximumRemoteSources;
+		_remoteHosts = remoteHosts;
 		ArgumentNullException.ThrowIfNull(remoteServicesFactory);
 		_remoteServices = new Lazy<McpRemoteProjectServices>(
 			remoteServicesFactory,
@@ -63,6 +66,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 				$"{McpErrorCodes.InvalidArguments}: 'project' is not a supported Git URL.");
 		}
 		ValidateRemoteSource(project!, safeUrl);
+		ValidateRemoteHost(project!);
 		if (branch is not null && !GitBranchNameValidator.IsValid(branch))
 		{
 			throw new McpToolException(
@@ -188,7 +192,8 @@ internal sealed class McpProjectSourceResolver : IDisposable
 					branch,
 					cancellationToken).ConfigureAwait(false);
 				if (cached is not null)
-					return RegisterRemote(key, safeUrl, branch, cached);
+					return await RegisterRemoteAsync(key, safeUrl, branch, cached, cancellationToken)
+						.ConfigureAwait(false);
 
 				if (!await services.GitRepositoryService
 					    .IsGitAvailableAsync(cancellationToken)
@@ -229,7 +234,8 @@ internal sealed class McpProjectSourceResolver : IDisposable
 				if (session is null)
 					throw RemoteFailed(safeUrl, "the cached checkout could not be pinned");
 
-				return RegisterRemote(key, safeUrl, branch, session);
+				return await RegisterRemoteAsync(key, safeUrl, branch, session, cancellationToken)
+					.ConfigureAwait(false);
 			}
 		}
 		catch (McpToolException)
@@ -251,23 +257,29 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		}
 	}
 
-	private McpResolvedProjectSource RegisterRemote(
+	private async Task<McpResolvedProjectSource> RegisterRemoteAsync(
 		RemoteProjectKey key,
 		string safeUrl,
 		string? requestedBranch,
-		IRepositoryCacheSession session)
+		IRepositoryCacheSession session,
+		CancellationToken cancellationToken)
 	{
 		McpResolvedProjectSource source;
 		try
 		{
 			var registry = new McpRootRegistry([session.RepositoryPath]);
 			var root = registry.Roots[0];
+			var commitHash = ResolveSessionCommitHash(session) ??
+			                 await _remoteServices.Value.GitRepositoryService
+				                 .GetHeadCommitAsync(session.RepositoryPath, cancellationToken)
+				                 .ConfigureAwait(false);
 			var identity = new ProjectSourceIdentity(
 				RepositoryUrlUtility.GetRepositoryName(safeUrl),
 				ProjectSourceType.GitClone,
 				safeUrl,
 				safeUrl,
 				session.Branch ?? requestedBranch,
+				commitHash,
 				IsCachedRepository: true);
 			source = McpResolvedProjectSource.Remote(root, safeUrl, registry, identity, session);
 		}
@@ -326,6 +338,41 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		var colon = source.IndexOf(':');
 		return colon > 0 &&
 		       (source[..colon].Contains('@') || source[..colon].Contains('.'));
+	}
+
+	private string? ResolveSessionCommitHash(IRepositoryCacheSession session) =>
+		_remoteServices.Value.RepoCacheService.ListIndexedRepositories()
+			.Where(entry =>
+				(PathComparer.Default.Equals(entry.LocalPath, session.RepositoryPath) ||
+				 PathUtility.IsPathInside(session.RepositoryPath, entry.LocalPath) ||
+				 StringComparer.OrdinalIgnoreCase.Equals(entry.RepositoryUrl, session.RepositoryUrl)) &&
+				StringComparer.Ordinal.Equals(entry.Branch, session.Branch))
+			.OrderByDescending(static entry => entry.LastOpenedUtc)
+			.Select(static entry => entry.CommitHash)
+			.FirstOrDefault(static hash => !string.IsNullOrWhiteSpace(hash));
+
+	private void ValidateRemoteHost(string source)
+	{
+		if (_remoteHosts is null)
+			return;
+		var host = ResolveRemoteHost(source);
+		if (host is null || _remoteHosts.Contains(host))
+			return;
+		throw new McpToolException(
+			McpErrorCodes.RemoteHostDenied,
+			$"{McpErrorCodes.RemoteHostDenied}: the remote repository host is not permitted by this server.");
+	}
+
+	internal static string? ResolveRemoteHost(string source)
+	{
+		var value = source.Trim();
+		if (Uri.TryCreate(value.Replace('\\', '/'), UriKind.Absolute, out var uri))
+			return uri.IsFile ? null : uri.IdnHost.ToLowerInvariant();
+		var at = value.LastIndexOf('@');
+		var colon = value.IndexOf(':', Math.Max(0, at + 1));
+		if (colon <= at + 1)
+			return null;
+		return value[(at + 1)..colon].Trim('[', ']').ToLowerInvariant();
 	}
 
 	private int GetActiveRemoteSourceCountNoLock()

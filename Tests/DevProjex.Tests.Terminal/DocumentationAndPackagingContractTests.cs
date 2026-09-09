@@ -129,6 +129,13 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("The entries name literal files or directories", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("at most 2,000 lines and 50,000 characters", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`profile` applies the same effective selection", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("### Batch `get_file`", server, StringComparison.Ordinal);
+		Assert.Contains("one to eight records", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("at most sixteen ranges", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("`ok` when complete, `partial`", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("`--remote-hosts`", server, StringComparison.Ordinal);
+		Assert.Contains("[Remote] commit=<sha> branch=<name>", server, StringComparison.Ordinal);
+		Assert.Contains("selection changed during packing; retry", server, StringComparison.Ordinal);
 
 		Assert.Contains("MCP agent ergonomics changes four v5.2 behaviors", normalizedVersion, StringComparison.Ordinal);
 		Assert.Contains("there is no strict-range switch", normalizedVersion, StringComparison.Ordinal);

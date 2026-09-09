@@ -19,7 +19,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
 			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions), openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions), largeResult: true, openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote)
 		];
 	}
@@ -354,11 +354,43 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{BranchProperty}},
 	    {{ProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
+	    "requests": {
+	      "type": "array",
+	      "minItems": 1,
+	      "maxItems": 8,
+	      "description": "Batch form: up to eight file requests and sixteen ranges total. Mutually exclusive with path and its range arguments.",
+	      "items": {
+	        "type": "object",
+	        "properties": {
+	          "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Existing file path inside the effective project selection." },
+	          "ranges": {
+	            "type": "array",
+	            "minItems": 1,
+	            "maxItems": 16,
+	            "description": "Inclusive transformed-text line ranges requested for this file.",
+	            "items": {
+	              "type": "object",
+	              "properties": {
+	                "start_line": { "description": "First 1-based transformed-text line, inclusive.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	                "end_line": { "description": "Last 1-based transformed-text line, inclusive.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	              },
+	              "required": ["start_line", "end_line"],
+	              "additionalProperties": false
+	            }
+	          }
+	        },
+	        "required": ["path", "ranges"],
+	        "additionalProperties": false
+	      }
+	    },
 	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
-	  "required": ["path"],
+	  "oneOf": [
+	    { "required": ["path"], "not": { "required": ["requests"] } },
+	    { "required": ["requests"], "not": { "required": ["path"] } }
+	  ],
 	  "additionalProperties": false
 	}
 	""";
@@ -420,19 +452,40 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "additionalProperties": false
 	      }
 	    },
+	    "profilesStatus": { "type": "string", "enum": ["available", "unavailable"], "description": "Whether the single bounded profile-catalog read succeeded." },
 	    "baseline": {
 	      "type": "object",
-	      "description": "The selection baseline every call starts from unless it names a profile: the Git filtering mode, the active exclusion toggles, and whether calls may pass their own exclusions.",
+	      "description": "The server-wide selection, protection, and remote-source policy active for this session.",
 	      "properties": {
 	        "git": { "type": "string", "enum": ["none", "gitignore", "tracked"], "description": "Server Git filtering mode." },
 	        "exclusions": { "type": "array", "items": { "type": "string" }, "description": "Server exclusion tokens in catalog order." },
-	        "agentExclusions": { "type": "boolean", "description": "Whether calls may replace the server exclusion set." }
+	        "agentExclusions": { "type": "boolean", "description": "Whether calls may replace the server exclusion set." },
+	        "protection": {
+	          "type": "object",
+	          "description": "Content-protection policy enforced by every project tool.",
+	          "properties": {
+	            "secrets": { "type": "string", "const": "always", "description": "Mandatory secret-redaction state." },
+	            "privateData": { "type": "string", "enum": ["enabled", "disabled"], "description": "Server-startup private-data redaction state." }
+	          },
+	          "required": ["secrets", "privateData"],
+	          "additionalProperties": false
+	        },
+	        "remote": {
+	          "type": "object",
+	          "description": "Remote Git acquisition policy for this server.",
+	          "properties": {
+	            "enabled": { "type": "boolean", "description": "Whether remote Git sources are enabled." },
+	            "hosts": { "type": "array", "items": { "type": "string" }, "description": "Exact allowed hosts; empty means unrestricted when remote sources are enabled." }
+	          },
+	          "required": ["enabled", "hosts"],
+	          "additionalProperties": false
+	        }
 	      },
-	      "required": ["git", "exclusions", "agentExclusions"],
+	      "required": ["git", "exclusions", "agentExclusions", "protection", "remote"],
 	      "additionalProperties": false
 	    }
 	  },
-	  "required": ["projects", "profiles", "baseline"],
+	  "required": ["projects", "profiles", "profilesStatus", "baseline"],
 	  "additionalProperties": false
 	}
 	""";
@@ -456,6 +509,26 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "required": ["reason", "languages"],
 	      "additionalProperties": false
 	    },
+	    "protection": {
+	      "type": "object",
+	      "description": "Content-protection policy applied to this analysis.",
+	      "properties": {
+	        "secrets": { "type": "string", "const": "always", "description": "Mandatory secret-redaction state." },
+	        "privateData": { "type": "string", "enum": ["enabled", "disabled"], "description": "Server-startup private-data redaction state." }
+	      },
+	      "required": ["secrets", "privateData"],
+	      "additionalProperties": false
+	    },
+	    "remote": {
+	      "type": "object",
+	      "description": "Pinned remote checkout identity; absent for local projects.",
+	      "properties": {
+	        "commit": { "type": "string", "description": "Commit SHA selected by the repository-cache session." },
+	        "branch": { "type": "string", "description": "Requested or resolved checkout branch." }
+	      },
+	      "required": ["commit", "branch"],
+	      "additionalProperties": false
+	    },
 	    "topFiles": {
 	      "type": "array",
 	      "description": "Largest selected text files ordered by estimated tokens, then path.",
@@ -469,9 +542,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "required": ["path", "tokens"],
 	        "additionalProperties": false
 	      }
-	    }
+	    },
+	    "topFilesTruncated": { "type": "boolean", "description": "True when the aggregate top-files character budget omitted remaining entries." },
+	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Number of requested top-file entries omitted by the aggregate character budget." }
 	  },
-	  "required": ["files", "characters", "tokens", "detail", "exclusions", "topFiles"],
+	  "required": ["files", "characters", "tokens", "detail", "exclusions", "protection", "topFiles", "topFilesTruncated", "topFilesRemaining"],
 	  "additionalProperties": false
 	}
 	""";

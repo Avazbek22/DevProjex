@@ -75,6 +75,28 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RemoteHostAllowlistNormalizesCommaSeparatedDnsNamesAndIpv6()
+	{
+		var hosts = Assert.IsAssignableFrom<IReadOnlySet<string>>(
+			McpServerHost.NormalizeRemoteHosts(["GitHub.COM,example.com", "[2001:db8::1]"]));
+
+		Assert.Equal(3, hosts.Count);
+		Assert.Contains("github.com", hosts);
+		Assert.Contains("example.com", hosts);
+		Assert.Contains("2001:db8::1", hosts);
+	}
+
+	[Theory]
+	[InlineData("https://github.com")]
+	[InlineData("github.com:443")]
+	[InlineData("user@github.com")]
+	[InlineData("")]
+	public void RemoteHostAllowlistRejectsNonHostValues(string value)
+	{
+		Assert.Throws<ArgumentException>(() => McpServerHost.NormalizeRemoteHosts([value]));
+	}
+
+	[Fact]
 	public async Task BoundedTreeWriter_StopsBeforeMaterializingLinesBeyondTheLimit()
 	{
 		using var writer = new McpBoundedLineTextWriter(maximumLines: 2);

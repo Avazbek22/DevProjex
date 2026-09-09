@@ -282,7 +282,7 @@ public sealed partial class McpServerProcessTests
 				["read_pack"] = ("Reads one page", "pack_context instead", "1,000 lines"),
 				["search_project"] = ("Searches safe transformed project text", "related_files instead", "max_results=1..200"),
 				["related_files"] = ("Finds statically evidenced", "search_project instead", "direction=dependencies|dependents|both"),
-				["get_file"] = ("Reads one page", "pack_context instead", "DPX-MCP-PAYLOAD-TRUNCATED")
+				["get_file"] = ("Reads selected file text", "pack_context for", "sixteen inclusive ranges")
 			};
 			foreach (var tool in tools)
 			{
@@ -716,6 +716,9 @@ public sealed partial class McpServerProcessTests
 		await RunGitAsync(repository, "config", "user.name", "DevProjex Tests");
 		await RunGitAsync(repository, "add", ".");
 		await RunGitAsync(repository, "commit", "-m", "initial");
+		var commitResult = await RunProcessAsync("git", repository, ["rev-parse", "HEAD"]);
+		Assert.Equal(0, commitResult.ExitCode);
+		var commit = commitResult.Output.Trim();
 
 		var dataRoot = workspace.CreateDirectory("data");
 		var repositoryUrl = new Uri(Path.GetFullPath(repository)).AbsoluteUri;
@@ -768,6 +771,7 @@ public sealed partial class McpServerProcessTests
 			Assert.DoesNotContain(new string('a', 40), text, StringComparison.Ordinal);
 			Assert.Contains("Included: 1 file (1 estimated tokens).", text, StringComparison.Ordinal);
 			Assert.Contains("Skipped: 1 file", text, StringComparison.Ordinal);
+			Assert.Contains($"[Remote] commit={commit}", text, StringComparison.Ordinal);
 			Assert.DoesNotContain(dataRoot, text, PathComparison);
 		}
 		finally
