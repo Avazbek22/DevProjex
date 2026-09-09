@@ -10,7 +10,7 @@ public class GitRepositoryServiceUnitTests
 	[Theory]
 	[InlineData(5, 100, 100)]
 	[InlineData(25, 100, 250)]
-	public void New047_QuotaPollDelayBoundsMonitorDutyCycle(
+	public void QuotaPollDelayBoundsMonitorDutyCycle(
 		int scanMilliseconds,
 		int pollMilliseconds,
 		int expectedMilliseconds)
@@ -23,7 +23,7 @@ public class GitRepositoryServiceUnitTests
 	}
 
 	[Fact]
-	public void New047_FinalQuotaScanRunsOnlyWhenLastObservationIsStale()
+	public void FinalQuotaScanRunsOnlyWhenLastObservationIsStale()
 	{
 		var interval = TimeSpan.FromMilliseconds(100);
 

@@ -6,7 +6,7 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyTypeScriptRootDirsIntegrationTests
 {
 	[Fact]
-	public async Task New062_RootDirsResolveTheSameVirtualRelativePath()
+	public async Task RootDirsResolveTheSameVirtualRelativePath()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -29,7 +29,7 @@ public sealed class DependencyTypeScriptRootDirsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New062_RootDirsReportEveryManifestCandidateAsAmbiguous()
+	public async Task RootDirsReportEveryManifestCandidateAsAmbiguous()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -53,7 +53,7 @@ public sealed class DependencyTypeScriptRootDirsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New062_RootDirsDoNotExposeTargetsOutsideTheManifest()
+	public async Task RootDirsDoNotExposeTargetsOutsideTheManifest()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -77,7 +77,7 @@ public sealed class DependencyTypeScriptRootDirsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New062_RootDirsChangeReresolvesWithoutReparsingSources()
+	public async Task RootDirsChangeReresolvesWithoutReparsingSources()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -112,7 +112,7 @@ public sealed class DependencyTypeScriptRootDirsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New062_WindowsSeparatorsAndFileSystemCaseResolveRootDirs()
+	public async Task WindowsSeparatorsAndFileSystemCaseResolveRootDirs()
 	{
 		if (!OperatingSystem.IsWindows())
 			Assert.Skip("Windows path identity is required for this assertion.");
@@ -136,7 +136,7 @@ public sealed class DependencyTypeScriptRootDirsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New062_UnsafeRootDirsAreIgnoredWithoutInvalidatingTheScope()
+	public async Task UnsafeRootDirsAreIgnoredWithoutInvalidatingTheScope()
 	{
 		using var fixture = new TemporaryDirectory();
 		using var outside = new TemporaryDirectory();
@@ -160,7 +160,7 @@ public sealed class DependencyTypeScriptRootDirsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New062_RootDirsUseInheritedOriginModuleSuffixesAndDirectoryIndexes()
+	public async Task RootDirsUseInheritedOriginModuleSuffixesAndDirectoryIndexes()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
@@ -185,7 +185,7 @@ public sealed class DependencyTypeScriptRootDirsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New062_RootDirectorySymlinkOutsideTheProjectIsIgnored()
+	public async Task RootDirectorySymlinkOutsideTheProjectIsIgnored()
 	{
 		using var fixture = new TemporaryDirectory();
 		using var outside = new TemporaryDirectory();
@@ -217,7 +217,7 @@ public sealed class DependencyTypeScriptRootDirsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New062_NonStringRootDirectoryMakesConfigurationUnsupported()
+	public async Task NonStringRootDirectoryMakesConfigurationUnsupported()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
