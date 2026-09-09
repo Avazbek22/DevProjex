@@ -1856,6 +1856,8 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		public DependencyEdge ResolveType(FileFacts source, ReferenceFact reference)
 		{
+			if (!string.Equals(reference.Reason, "not resolved yet", StringComparison.Ordinal))
+				return Edge(source, reference, ResolutionStatus.Unresolved, null, reference.Reason, []);
 			if (reference.Name == "<target-typed-new>")
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "target-typed new has no explicit type", []);
 			var simpleName = SimpleName(reference.Name);

@@ -6,6 +6,30 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New092_NestedGenericSegmentIsHonestlyUnresolved()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var plain = fixture.CreateFile("Plain.cs", "public class Outer { public class Inner { } }");
+		var generic = fixture.CreateFile("Generic.cs", "public class Outer<T> { public class Inner { } }");
+		var source = fixture.CreateFile("Consumer.cs", "public class Consumer { Outer<int>.Inner Value; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, plain, generic, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var nested = Assert.Single(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "Inner");
+		Assert.Equal(ResolutionStatus.Unresolved, nested.Status);
+		Assert.Empty(nested.Candidates);
+		Assert.Equal("nested generic type resolution is not supported", Assert.Single(nested.Reasons));
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumer.cs" && edge.Target == "Generic.cs");
+		Assert.DoesNotContain(result.Edges, edge => edge.Source == "Consumer.cs" && edge.Target == "Plain.cs");
+	}
+
+	[Fact]
 	public async Task New015_UsingStaticExposesNestedTypes()
 	{
 		using var fixture = new TemporaryDirectory();

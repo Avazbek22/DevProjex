@@ -265,7 +265,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				var tokenCapture = CaptureToken(
 					capture,
 					new TypeTextToken(match.Value, match.Index, match.Length));
-					yield return NewReference(
+				var reference = NewReference(
 					context,
 					tokenCapture,
 					name,
@@ -273,8 +273,21 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 					containingNamespace,
 					containingType,
 					isGlobalQualified);
+				yield return IsNestedSegmentAfterGeneric(typeText, match.Index)
+					? reference with { Reason = "nested generic type resolution is not supported" }
+					: reference;
 			}
 		}
+	}
+
+	private static bool IsNestedSegmentAfterGeneric(string typeText, int matchIndex)
+	{
+		var index = matchIndex - 1;
+		while (index >= 0 && char.IsWhiteSpace(typeText[index])) index--;
+		if (index < 0 || typeText[index] != '.') return false;
+		index--;
+		while (index >= 0 && char.IsWhiteSpace(typeText[index])) index--;
+		return index >= 0 && typeText[index] == '>';
 	}
 
 	private static bool IsTupleElementName(string typeText, Match match)
