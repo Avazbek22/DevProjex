@@ -159,3 +159,19 @@ Use an explicit version tag for reproducible automation, for example
 `ghcr.io/avazbek22/devprojex:5.2`. The untagged examples use Docker's `latest`
 tag only after a release workflow has published it. Alpine and other musl hosts
 are not supported.
+
+## Remote sources
+
+Remote Git sources accept HTTPS URLs, SSH URLs, and SCP-style SSH sources. Plain
+HTTP, the unauthenticated `git://` protocol, and `file://` URLs are rejected before
+cache staging begins. A normal existing local directory remains a local project,
+not a remote source.
+
+HTTPS credentials may be supplied through URL user information for an explicit
+remote operation. The password is passed only through the temporary non-interactive
+askpass channel; it is not stored in the repository URL or cache index. Branch
+listing, switching, and updates reuse that source session. Corporate proxies and
+certificate bundles may be supplied through `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`,
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, or `GIT_SSL_CAINFO` in the DevProjex process
+environment. Repository-local credential helpers, proxy settings, URL rewrites,
+and TLS overrides are not used.
