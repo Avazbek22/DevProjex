@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO.Enumeration;
 using System.Runtime.ExceptionServices;
 using System.Security;
 using DevProjex.Infrastructure.Processes;
@@ -982,7 +983,7 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 		var quotaExceeded = 0;
 		using var quotaMonitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
 		var quotaMonitor = quotaPath is null
-			? Task.CompletedTask
+			? Task.FromResult(default(QuotaMonitorState))
 			: MonitorRepositoryQuotaAsync(
 				process,
 				quotaPath,
@@ -1003,9 +1004,20 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
         try
         {
 			await WaitForExitOrTerminateAsync(process, operationToken);
+			var processExitTimestamp = Stopwatch.GetTimestamp();
 			quotaMonitorCancellation.Cancel();
-			await ObserveQuotaMonitorAsync(quotaMonitor).ConfigureAwait(false);
-			if (quotaPath is not null && ExceedsRepositoryQuota(quotaPath))
+			var quotaMonitorState = await ObserveQuotaMonitorAsync(quotaMonitor).ConfigureAwait(false);
+			TimeSpan? lastScanAge = quotaMonitorState.LastScanCompletedTimestamp switch
+			{
+				{ } lastScanTimestamp when processExitTimestamp > lastScanTimestamp =>
+					Stopwatch.GetElapsedTime(lastScanTimestamp, processExitTimestamp),
+				{ } => TimeSpan.Zero,
+				_ => null
+			};
+			if (quotaPath is not null &&
+			    Volatile.Read(ref quotaExceeded) == 0 &&
+			    ShouldPerformFinalQuotaScan(lastScanAge, _resourceLimits.PollInterval) &&
+			    ExceedsRepositoryQuota(quotaPath))
 				Interlocked.Exchange(ref quotaExceeded, 1);
 			var outputCompleted = await GitProcessOutputReader
 				.WaitForCompletionAfterExitAsync(process, outputPump, errorPump)
@@ -1091,17 +1103,22 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 		}
 	}
 
-	private async Task MonitorRepositoryQuotaAsync(
+	private async Task<QuotaMonitorState> MonitorRepositoryQuotaAsync(
 		Process process,
 		string path,
 		Action markExceeded,
 		CancellationToken cancellationToken)
 	{
+		long? lastScanCompletedTimestamp = null;
 		try
 		{
+			await Task.Yield();
 			while (!process.HasExited)
 			{
-				if (ExceedsRepositoryQuota(path))
+				var scanStartedTimestamp = Stopwatch.GetTimestamp();
+				var exceeded = ExceedsRepositoryQuota(path);
+				lastScanCompletedTimestamp = Stopwatch.GetTimestamp();
+				if (exceeded)
 				{
 					markExceeded();
 					try
@@ -1114,15 +1131,35 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 					       System.ComponentModel.Win32Exception)
 					{
 					}
-					return;
+					return new QuotaMonitorState(lastScanCompletedTimestamp);
 				}
-				await Task.Delay(_resourceLimits.PollInterval, cancellationToken).ConfigureAwait(false);
+				var scanDuration = Stopwatch.GetElapsedTime(
+					scanStartedTimestamp,
+					lastScanCompletedTimestamp.Value);
+				var delay = CalculateQuotaPollDelay(scanDuration, _resourceLimits.PollInterval);
+				await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 			}
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
 		}
+		return new QuotaMonitorState(lastScanCompletedTimestamp);
 	}
+
+	internal static TimeSpan CalculateQuotaPollDelay(
+		TimeSpan scanDuration,
+		TimeSpan minimumPollInterval)
+	{
+		var adaptiveTicks = scanDuration.Ticks > TimeSpan.MaxValue.Ticks / 10
+			? TimeSpan.MaxValue.Ticks
+			: scanDuration.Ticks * 10;
+		return TimeSpan.FromTicks(Math.Max(minimumPollInterval.Ticks, adaptiveTicks));
+	}
+
+	internal static bool ShouldPerformFinalQuotaScan(
+		TimeSpan? lastScanAge,
+		TimeSpan pollInterval) =>
+		lastScanAge is null || lastScanAge.Value >= pollInterval;
 
 	private bool ExceedsRepositoryQuota(string path)
 	{
@@ -1131,19 +1168,23 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 		{
 			if (!Directory.Exists(path))
 				return false;
-			foreach (var file in Directory.EnumerateFiles(
-				         path,
-				         "*",
-				         new EnumerationOptions
-				         {
-					         RecurseSubdirectories = true,
-					         AttributesToSkip = FileAttributes.ReparsePoint,
-					         IgnoreInaccessible = true
-				         }))
+			var files = new FileSystemEnumerable<long>(
+				path,
+				static (ref FileSystemEntry entry) => entry.Length,
+				new EnumerationOptions
+				{
+					RecurseSubdirectories = true,
+					AttributesToSkip = FileAttributes.ReparsePoint,
+					IgnoreInaccessible = true
+				})
+			{
+				ShouldIncludePredicate = static (ref FileSystemEntry entry) => !entry.IsDirectory
+			};
+			foreach (var length in files)
 			{
 				try
 				{
-					total = checked(total + new FileInfo(file).Length);
+					total = checked(total + length);
 					if (total > _resourceLimits.MaximumRepositoryBytes)
 						return true;
 				}
@@ -1158,16 +1199,20 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 		return false;
 	}
 
-	private static async Task ObserveQuotaMonitorAsync(Task monitor)
+	private static async Task<QuotaMonitorState> ObserveQuotaMonitorAsync(
+		Task<QuotaMonitorState> monitor)
 	{
 		try
 		{
-			await monitor.ConfigureAwait(false);
+			return await monitor.ConfigureAwait(false);
 		}
 		catch (OperationCanceledException)
 		{
+			return default;
 		}
 	}
+
+	private readonly record struct QuotaMonitorState(long? LastScanCompletedTimestamp);
 
 	private static GitCloneResult FailedClone(
 		string localPath,

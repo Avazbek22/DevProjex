@@ -7,6 +7,33 @@ public class GitRepositoryServiceUnitTests
 {
     private readonly GitRepositoryService _service = new();
 
+	[Theory]
+	[InlineData(5, 100, 100)]
+	[InlineData(25, 100, 250)]
+	public void New047_QuotaPollDelayBoundsMonitorDutyCycle(
+		int scanMilliseconds,
+		int pollMilliseconds,
+		int expectedMilliseconds)
+	{
+		Assert.Equal(
+			TimeSpan.FromMilliseconds(expectedMilliseconds),
+			GitRepositoryService.CalculateQuotaPollDelay(
+				TimeSpan.FromMilliseconds(scanMilliseconds),
+				TimeSpan.FromMilliseconds(pollMilliseconds)));
+	}
+
+	[Fact]
+	public void New047_FinalQuotaScanRunsOnlyWhenLastObservationIsStale()
+	{
+		var interval = TimeSpan.FromMilliseconds(100);
+
+		Assert.True(GitRepositoryService.ShouldPerformFinalQuotaScan(null, interval));
+		Assert.False(GitRepositoryService.ShouldPerformFinalQuotaScan(
+			TimeSpan.FromMilliseconds(99),
+			interval));
+		Assert.True(GitRepositoryService.ShouldPerformFinalQuotaScan(interval, interval));
+	}
+
     [Fact]
     public void GitCommandsUseNonInteractiveStandardTransports()
     {
