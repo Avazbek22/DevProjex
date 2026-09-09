@@ -119,9 +119,11 @@ identity, so case-distinct entries survive even on a case-sensitive Windows volu
 When a profile is applied on Windows, a differently cased legacy name is accepted
 only if it resolves to one unambiguous discovered entry.
 
-Unknown additive JSON properties are allowed for forward compatibility. A missing
-or unsupported schema, unknown required Git mode, unknown exclusion token, or
-invalid selected path is a validation failure.
+Unknown additive JSON properties are allowed for forward compatibility. An
+unrecognized selection property that looks like a misspelled or incorrectly
+cased security setting is rejected so it cannot silently disable redaction. A
+missing or unsupported schema, unknown required Git mode, unknown exclusion
+token, or invalid selected path is also a validation failure.
 
 ## Commands
 

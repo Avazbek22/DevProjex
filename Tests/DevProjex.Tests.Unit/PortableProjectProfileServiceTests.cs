@@ -327,6 +327,35 @@ public sealed class PortableProjectProfileServiceTests
 		Assert.False(selection.HidePrivateData);
 	}
 
+	[Theory]
+	[InlineData("hideSecret")]
+	[InlineData("HideSecrets")]
+	[InlineData("hide-private-data")]
+	public async Task LoadAsyncRejectsUnrecognizedSecurityLikeSelectionFields(string propertyName)
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = Path.Combine(workspace.Path, "profile.json");
+		await File.WriteAllTextAsync(
+			path,
+			$$"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "{{propertyName}}": true
+			  }
+			}
+			""",
+			TestContext.Current.CancellationToken);
+
+		var exception = await Assert.ThrowsAsync<PortableProjectProfileException>(() =>
+			new PortableProjectProfileService().LoadAsync(path, TestContext.Current.CancellationToken));
+
+		Assert.Equal("DPX-CLI-PROFILE-INVALID", exception.Code);
+		Assert.Equal("Portable profile contains an unrecognized security setting.", exception.Message);
+	}
+
 	[Fact]
 	public async Task CompressCodeRoundTripsAsAnIndependentContentTransformation()
 	{

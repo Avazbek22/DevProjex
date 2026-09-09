@@ -136,6 +136,33 @@ public sealed class ProfileCommandContractTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Theory]
+	[InlineData("hideSecret")]
+	[InlineData("HideSecrets")]
+	public async Task ProfileValidateRejectsMisspelledSecuritySettings(string propertyName)
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			$$"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "{{propertyName}}": true
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(workspace, environment, "profile", "validate", profile);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("DPX-CLI-PROFILE-INVALID", environment.StandardError, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardOutput);
+	}
+
 	[Fact]
 	public async Task PortableProfileExplicitEmptySelectedPathsProducesAnEmptySelection()
 	{

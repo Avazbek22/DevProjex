@@ -194,6 +194,12 @@ public sealed class PortableProjectProfileService
 				"DPX-CLI-PROFILE-INVALID",
 				"Portable profile schema is missing or unsupported.");
 		}
+		if (document.Selection.AdditionalProperties?.Keys.Any(IsUnrecognizedSecuritySetting) == true)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				"Portable profile contains an unrecognized security setting.");
+		}
 
 		if (!ProjectSelectionTokens.TryParseGitMode(document.Selection.GitMode, out var gitMode))
 		{
@@ -241,6 +247,13 @@ public sealed class PortableProjectProfileService
 			StripComments: document.Selection.StripComments ?? false,
 			StripBlankLines: document.Selection.StripBlankLines ?? false,
 			ProfileSource: new ProjectProfileReference(ProjectProfileSourceKind.Portable, fullPath));
+	}
+
+	private static bool IsUnrecognizedSecuritySetting(string name)
+	{
+		var normalized = string.Concat(name.Where(char.IsLetterOrDigit)).ToLowerInvariant();
+		return normalized.StartsWith("hidesecret", StringComparison.Ordinal) ||
+		       normalized.StartsWith("hideprivate", StringComparison.Ordinal);
 	}
 
 	private static PortableProfileDocument ToDocument(ProjectSelectionSpec selection)
