@@ -6,6 +6,26 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New017_NonAsciiIdentifierStartIsExtractedAsTypeReference()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var declaration = fixture.CreateFile("Data.cs", "public sealed class Данные { }");
+		var source = fixture.CreateFile("Consumer.cs", "public sealed class Consumer { Данные Value; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, declaration, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "Consumer.cs" && candidate.Reference == "Данные");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("Data.cs", edge.Target);
+	}
+
+	[Fact]
 	public async Task New016_GenericUsingAliasPreservesContainerAndArgumentReferences()
 	{
 		using var fixture = new TemporaryDirectory();

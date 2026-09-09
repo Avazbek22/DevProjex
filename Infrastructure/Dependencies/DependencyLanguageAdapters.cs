@@ -534,9 +534,9 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		["public", "private", "protected", "internal", "static", "readonly", "ref", "out", "in", "params", "this", "where", "new", "class", "struct", "interface", "record", "enum", "delegate", "void", "var", "get", "set", "init", "return", "true", "false", "null"],
 		StringComparer.Ordinal);
 
-	[GeneratedRegex(@"\b(?:global\s+)?using\s+(?<static>static\s+)?(?:(?<alias>[A-Za-z_]\w*)\s*=\s*)?(?<target>(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*)(?<arguments>\s*<[\s\S]+>)?\s*;", RegexOptions.CultureInvariant)] private static partial Regex UsingRegex();
-	[GeneratedRegex(@"(?<name>[A-Za-z_]\w*)", RegexOptions.CultureInvariant)] private static partial Regex TypeParameterRegex();
-	[GeneratedRegex(@"(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeNameRegex();
+	[GeneratedRegex(@"\b(?:global\s+)?using\s+(?<static>static\s+)?(?:(?<alias>[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)\s*=\s*)?(?<target>(?:global::)?[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*(?:(?:\.|::)[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)*)(?<arguments>\s*<[\s\S]+>)?\s*;", RegexOptions.CultureInvariant)] private static partial Regex UsingRegex();
+	[GeneratedRegex(@"(?<name>[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)", RegexOptions.CultureInvariant)] private static partial Regex TypeParameterRegex();
+	[GeneratedRegex(@"(?:global::)?[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*(?:(?:\.|::)[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeNameRegex();
 }
 
 internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLanguageAdapter
