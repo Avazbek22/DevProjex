@@ -1488,7 +1488,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				wildcard = string.Empty;
 				return true;
 			}
-			foreach (var pair in map.Where(static pair => pair.Key.Contains('*')).OrderByDescending(static pair => pair.Key.Length))
+			foreach (var pair in map.Where(static pair => pair.Key.Contains('*'))
+			             .OrderByDescending(static pair => pair.Key.IndexOf('*'))
+			             .ThenByDescending(static pair => pair.Key.Length))
 			{
 				var star = pair.Key.IndexOf('*');
 				var prefix = pair.Key[..star];

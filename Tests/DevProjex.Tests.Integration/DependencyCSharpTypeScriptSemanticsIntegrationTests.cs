@@ -6,6 +6,32 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New019_PackageWildcardPrefersLongestStaticPrefix()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var package = fixture.CreateFile(
+			"package.json",
+			"{\"imports\":{\"#a*-long-suffix\":\"./wrong.ts\",\"#ab*\":\"./right.ts\"}}");
+		var wrong = fixture.CreateFile("wrong.ts", "export default 1;");
+		var right = fixture.CreateFile("right.ts", "export default 2;");
+		var source = fixture.CreateFile("main.ts", "import value from '#abc-long-suffix';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, wrong, right, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "#abc-long-suffix");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("right.ts", edge.Target);
+	}
+
+	[Fact]
 	public async Task New018_MultilineGenericReferenceUsesTokenCoordinates()
 	{
 		using var fixture = new TemporaryDirectory();
