@@ -689,7 +689,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		{
 			var argument = node.GetChildForField("arguments")?.NamedChildren
 				.Where(static child => child.Type != "comment")
-				.SingleOrDefault();
+				.FirstOrDefault();
 			var specifier = argument is null ? null : ReadJavaScriptStringLiteral(argument, materialization);
 			return new DependencyImportSyntax(
 				specifier ?? string.Empty,
