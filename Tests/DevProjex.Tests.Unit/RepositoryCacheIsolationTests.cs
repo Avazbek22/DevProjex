@@ -180,6 +180,41 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	}
 
 	[Fact]
+	public async Task RepositoryPublicationReturnsBeforeCancellableSizeRefreshCompletes()
+	{
+		var refreshStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var allowRefresh = new ManualResetEventSlim();
+		var hooks = new RepoCacheTestHooks
+		{
+			BeforeRepositorySizeRefresh = _ =>
+			{
+				refreshStarted.TrySetResult();
+				allowRefresh.Wait(TestContext.Current.CancellationToken);
+			}
+		};
+		var service = CreateService(new FakeWorktreeManager(supported: true), hooks: hooks);
+		try
+		{
+			var staging = service.CreateRepositoryStagingDirectory(RepositoryUrl);
+			for (var index = 0; index <= 1024; index++)
+				File.WriteAllText(Path.Combine(staging, $"file-{index:D4}.txt"), "x");
+
+			var published = service.PublishRepositoryDirectory(staging, RepositoryUrl);
+
+			Assert.True(Directory.Exists(published));
+			Assert.Equal(0, service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes);
+			await refreshStarted.Task.WaitAsync(
+				BackgroundOperationTimeout,
+				TestContext.Current.CancellationToken);
+		}
+		finally
+		{
+			allowRefresh.Set();
+			await service.DisposeAsync();
+		}
+	}
+
+	[Fact]
 	public async Task GitSessionReturnsBeforeRepositorySizeRefreshAndBackgroundRefreshUpdatesIndex()
 	{
 		var refreshStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

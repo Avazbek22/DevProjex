@@ -181,7 +181,7 @@ public class RepoCacheServiceTests : IDisposable
         const string damagedUrl = "https://github.com/example/damaged.git";
         const string missingUrl = "https://github.com/example/missing.git";
         const string missingLegacyUrl = "https://github.com/example/missing-legacy.git";
-        var sharedIdentity = RepositoryUrlUtility.GetComparisonKey(sharedUrl);
+        var sharedIdentity = RepositoryUrlUtility.GetSourceCacheKey(sharedUrl);
         var older = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var newer = older.AddDays(2);
         var newest = older.AddDays(3);
@@ -199,7 +199,7 @@ public class RepoCacheServiceTests : IDisposable
                     200,
                     RepositoryCacheContentKind.Git),
                 new RepositoryCacheIndexEntry(
-                    RepositoryUrlUtility.GetComparisonKey(damagedUrl),
+                    RepositoryUrlUtility.GetSourceCacheKey(damagedUrl),
                     damagedUrl,
                     damagedRepository,
                     "main",
@@ -209,7 +209,7 @@ public class RepoCacheServiceTests : IDisposable
                     300,
                     RepositoryCacheContentKind.Git),
                 new RepositoryCacheIndexEntry(
-                    RepositoryUrlUtility.GetComparisonKey(missingUrl),
+                    RepositoryUrlUtility.GetSourceCacheKey(missingUrl),
                     missingUrl,
                     missingRepository,
                     "main",
@@ -243,7 +243,7 @@ public class RepoCacheServiceTests : IDisposable
                     900,
                     RepositoryCacheContentKind.Git),
                 new RepositoryCacheIndexEntry(
-                    RepositoryUrlUtility.GetComparisonKey(legacyOnlyUrl),
+                    RepositoryUrlUtility.GetSourceCacheKey(legacyOnlyUrl),
                     legacyOnlyUrl,
                     legacyOnlyRepository,
                     "archive",
@@ -253,7 +253,7 @@ public class RepoCacheServiceTests : IDisposable
                     500,
                     RepositoryCacheContentKind.Zip),
                 new RepositoryCacheIndexEntry(
-                    RepositoryUrlUtility.GetComparisonKey(missingLegacyUrl),
+                    RepositoryUrlUtility.GetSourceCacheKey(missingLegacyUrl),
                     missingLegacyUrl,
                     missingLegacyRepository,
                     "main",
@@ -375,7 +375,7 @@ public class RepoCacheServiceTests : IDisposable
 				Entries = new[]
 				{
 					new RepositoryCacheIndexEntry(
-						RepositoryUrlUtility.GetComparisonKey(repositoryUrl),
+						RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl),
 						repositoryUrl,
 						repositoryPath,
 						null,
@@ -418,7 +418,7 @@ public class RepoCacheServiceTests : IDisposable
             _testCacheRoot,
             [
                 new RepositoryCacheIndexEntry(
-                    RepositoryUrlUtility.GetComparisonKey(repositoryUrl),
+                    RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl),
                     repositoryUrl,
                     repositoryPath,
                     "main",
@@ -443,7 +443,7 @@ public class RepoCacheServiceTests : IDisposable
         const string repositoryUrl = "https://github.com/example/timestamp.git";
         var corruptPath = _service.CreateRepositoryDirectory(repositoryUrl);
         var validPath = _service.CreateRepositoryDirectory(repositoryUrl);
-        var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+        var identity = RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl);
         var validTimestamp = DateTimeOffset.UtcNow.AddMinutes(-1);
         WriteCacheIndex(
             _testCacheRoot,
@@ -486,7 +486,7 @@ public class RepoCacheServiceTests : IDisposable
             _testCacheRoot,
             [
                 new RepositoryCacheIndexEntry(
-                    RepositoryUrlUtility.GetComparisonKey(firstUrl),
+                    RepositoryUrlUtility.GetSourceCacheKey(firstUrl),
                     firstUrl,
                     firstPath,
                     null,
@@ -496,7 +496,7 @@ public class RepoCacheServiceTests : IDisposable
                     long.MaxValue,
                     RepositoryCacheContentKind.Zip),
                 new RepositoryCacheIndexEntry(
-                    RepositoryUrlUtility.GetComparisonKey(secondUrl),
+                    RepositoryUrlUtility.GetSourceCacheKey(secondUrl),
                     secondUrl,
                     secondPath,
                     null,
@@ -620,7 +620,7 @@ public class RepoCacheServiceTests : IDisposable
         Assert.Contains(entries, entry => PathComparer.Default.Equals(entry.LocalPath, currentCachePath));
         Assert.Contains($"\"identity\": \"{legacyIdentity}\"", indexPayload, StringComparison.Ordinal);
         Assert.Contains(
-            $"\"identity\": \"{RepositoryUrlUtility.GetComparisonKey(repositoryUrl)}\"",
+            $"\"identity\": \"{RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl)}\"",
             indexPayload,
             StringComparison.Ordinal);
     }
@@ -647,7 +647,7 @@ public class RepoCacheServiceTests : IDisposable
                     RepositoryCacheEntryState.Ready,
                     ContentKind: RepositoryCacheContentKind.Zip),
                 new RepositoryCacheIndexEntry(
-                    RepositoryUrlUtility.GetComparisonKey(validUrl),
+                    RepositoryUrlUtility.GetSourceCacheKey(validUrl),
                     validUrl,
                     validPath,
                     "main",
@@ -795,7 +795,7 @@ public class RepoCacheServiceTests : IDisposable
 
         var published = _service.PublishRepositoryDirectory(staging, repositoryUrl);
         var indexed = _service.FindIndexedRepository(
-            "git@github.com:user/repository.git");
+            "https://GITHUB.com/user/repository");
 
         Assert.NotNull(indexed);
         Assert.Equal(published, indexed.LocalPath, PathComparer.Default);
@@ -811,7 +811,7 @@ public class RepoCacheServiceTests : IDisposable
 
         _service.RecordIndexedRepository(repositoryUrl, cachePath, "main", "1111111");
         _service.RecordIndexedRepository(
-            "git@github.com:user/repository.git",
+            "https://GITHUB.com/user/repository",
             cachePath,
             "release",
             "2222222");
@@ -976,7 +976,7 @@ public class RepoCacheServiceTests : IDisposable
 					Entries = new[]
 					{
 						new RepositoryCacheIndexEntry(
-							RepositoryUrlUtility.GetComparisonKey(unsafeUrl),
+							RepositoryUrlUtility.GetSourceCacheKey(safeUrl),
 							unsafeUrl,
 							repositoryPath,
 							"main",

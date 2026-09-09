@@ -6,6 +6,9 @@ namespace DevProjex.Kernel.Models;
 public static class RepositoryUrlUtility
 {
 	private const string ComparisonIdentityVersionPrefix = "v2:";
+	private const string SourceCacheIdentityVersionPrefix = "v3:";
+	private const string TestFileTransportPolicyVariable =
+		"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT";
 	private static readonly HashSet<string> CaseInsensitiveRepositoryPathHosts = new(
 		StringComparer.OrdinalIgnoreCase)
 	{
@@ -20,7 +23,13 @@ public static class RepositoryUrlUtility
 		return normalizedUrl.Length > 0;
 	}
 
-	public static string Normalize(string? repositoryUrl)
+	public static string Normalize(string? repositoryUrl) =>
+		Normalize(repositoryUrl, preserveHttpUserName: false);
+
+	public static string ToSafeSourceIdentity(string? repositoryUrl) =>
+		Normalize(repositoryUrl, preserveHttpUserName: true);
+
+	private static string Normalize(string? repositoryUrl, bool preserveHttpUserName)
 	{
 		if (string.IsNullOrWhiteSpace(repositoryUrl))
 			return string.Empty;
@@ -57,7 +66,7 @@ public static class RepositoryUrlUtility
 				Password = string.Empty,
 				Host = uri.Host.ToLowerInvariant()
 			};
-			if (uri.Scheme is "http" or "https")
+			if (!preserveHttpUserName && uri.Scheme is "http" or "https")
 				builder.UserName = string.Empty;
 
 			var sanitizedUri = builder.Uri;
@@ -89,12 +98,12 @@ public static class RepositoryUrlUtility
 				uri.AbsolutePath);
 		}
 		if (uri?.IsFile == true)
-			return BuildVersionedFileSystemKey(uri.LocalPath);
+			return BuildVersionedFileSystemKey(TrimGitSuffix(uri.LocalPath));
 
 		try
 		{
 			if (Path.IsPathFullyQualified(normalized))
-				return BuildVersionedFileSystemKey(normalized);
+				return BuildVersionedFileSystemKey(TrimGitSuffix(normalized));
 		}
 		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
 		{
@@ -102,6 +111,48 @@ public static class RepositoryUrlUtility
 		}
 
 		return VersionIdentity(TrimGitSuffix(normalized));
+	}
+
+	public static string GetSourceCacheKey(string? repositoryUrl)
+	{
+		var normalized = ToSafeSourceIdentity(repositoryUrl);
+		if (normalized.Length == 0)
+			return string.Empty;
+
+		if (TryParseScpSyntax(normalized, out var scp))
+		{
+			return BuildSourceCacheHostPathKey(
+				"ssh",
+				scp.UserPrefix.TrimEnd('@'),
+				scp.Host,
+				22,
+				scp.Path);
+		}
+
+		if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri) &&
+		    uri.Scheme is "http" or "https" or "ssh" or "git")
+		{
+			return BuildSourceCacheHostPathKey(
+				uri.Scheme.ToLowerInvariant(),
+				GetUserName(uri),
+				uri.Host,
+				GetEffectivePort(uri),
+				uri.AbsolutePath);
+		}
+		if (uri?.IsFile == true)
+			return BuildSourceCacheFileSystemKey(uri.LocalPath);
+
+		try
+		{
+			if (Path.IsPathFullyQualified(normalized))
+				return BuildSourceCacheFileSystemKey(normalized);
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		{
+			return string.Empty;
+		}
+
+		return SourceCacheIdentity(normalized);
 	}
 
 	public static bool AreEquivalent(string? left, string? right)
@@ -162,6 +213,21 @@ public static class RepositoryUrlUtility
 
 	public static bool IsSupportedCloneSource(string? repositoryUrl)
 	{
+		try
+		{
+			var localCandidate = repositoryUrl?.Trim();
+			if (!string.IsNullOrEmpty(localCandidate) &&
+			    !localCandidate.StartsWith("file:", StringComparison.OrdinalIgnoreCase) &&
+			    Path.IsPathFullyQualified(localCandidate) &&
+			    Directory.Exists(localCandidate))
+			{
+				return true;
+			}
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		{
+		}
+
 		if (!TryNormalize(repositoryUrl, out var normalized) ||
 		    normalized.StartsWith("-", StringComparison.Ordinal))
 		{
@@ -173,7 +239,11 @@ public static class RepositoryUrlUtility
 
 		if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
 		{
-			return uri.Scheme is "http" or "https" or "ssh" or "git" or "file";
+			return uri.Scheme is "https" or "ssh" ||
+			       uri.IsFile && string.Equals(
+				       Environment.GetEnvironmentVariable(TestFileTransportPolicyVariable),
+				       "1",
+				       StringComparison.Ordinal);
 		}
 
 		try
@@ -207,15 +277,81 @@ public static class RepositoryUrlUtility
 		return VersionIdentity($"{normalizedHost}{portSuffix}/{normalizedPath.TrimStart('/')}");
 	}
 
+	private static string BuildSourceCacheHostPathKey(
+		string scheme,
+		string user,
+		string host,
+		int port,
+		string path)
+	{
+		var normalizedHost = host.Trim().ToLowerInvariant();
+		var caseInsensitivePath = CaseInsensitiveRepositoryPathHosts.Contains(normalizedHost);
+		var normalizedPath = TrimGitSuffix(
+			NormalizePath(path),
+			StringComparison.OrdinalIgnoreCase);
+		if (caseInsensitivePath)
+			normalizedPath = normalizedPath.ToLowerInvariant();
+		return SourceCacheIdentity(
+			$"{scheme.ToLowerInvariant()}://{user}@{normalizedHost}:{port}/{normalizedPath.TrimStart('/')}");
+	}
+
 	private static string BuildVersionedFileSystemKey(string path)
 	{
-		var normalizedPath = PathUtility.NormalizeForCacheKey(TrimGitSuffix(path));
+		var normalizedPath = PathUtility.NormalizeForCacheKey(path);
 		return VersionIdentity(
 			$"file/{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath)))}");
 	}
 
+	private static string BuildSourceCacheFileSystemKey(string path)
+	{
+		var normalizedPath = PathUtility.NormalizeForCacheKey(ResolveLocalIdentityPath(path));
+		return SourceCacheIdentity(
+			$"file/{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath)))}");
+	}
+
+	private static string ResolveLocalIdentityPath(string path)
+	{
+		var fullPath = Path.GetFullPath(path);
+		try
+		{
+			var info = new DirectoryInfo(fullPath);
+			if (info.Exists && info.LinkTarget is not null)
+				return info.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fullPath;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+		}
+		return fullPath;
+	}
+
+	private static string GetUserName(Uri uri)
+	{
+		if (string.IsNullOrEmpty(uri.UserInfo))
+			return string.Empty;
+		var separator = uri.UserInfo.IndexOf(':');
+		var encoded = separator >= 0 ? uri.UserInfo[..separator] : uri.UserInfo;
+		return Uri.UnescapeDataString(encoded);
+	}
+
+	private static int GetEffectivePort(Uri uri)
+	{
+		if (!uri.IsDefaultPort)
+			return uri.Port;
+		return uri.Scheme.ToLowerInvariant() switch
+		{
+			"http" => 80,
+			"https" => 443,
+			"ssh" => 22,
+			"git" => 9418,
+			_ => -1
+		};
+	}
+
 	private static string VersionIdentity(string identity) =>
 		$"{ComparisonIdentityVersionPrefix}{identity}";
+
+	private static string SourceCacheIdentity(string identity) =>
+		$"{SourceCacheIdentityVersionPrefix}{identity}";
 
 	private static string GetLastPathSegment(string value)
 	{
