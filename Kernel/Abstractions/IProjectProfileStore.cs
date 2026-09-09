@@ -10,6 +10,11 @@ public interface IProjectProfileStore
 		string localProjectPath,
 		ProjectSelectionProfile profile) =>
 		new(TrySaveProfile(localProjectPath, profile), WasTruncated: false);
+	ProjectProfileSaveResult TrySaveProfileWithResult(
+		string localProjectPath,
+		ProjectSelectionProfile profile,
+		DateTimeOffset? expectedUpdatedUtc) =>
+		TrySaveProfileWithResult(localProjectPath, profile);
 	ProjectProfileBatchSaveResult TrySaveProfilesWithResult(
 		IReadOnlyList<ProjectProfileSaveRequest> requests,
 		TimeSpan lockTimeout)

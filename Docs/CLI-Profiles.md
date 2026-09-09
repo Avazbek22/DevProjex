@@ -180,7 +180,10 @@ Selection profiles and persistent secret marks use separate durable stores. Rese
 removes persistent marks first. If that stage fails, selection remains unchanged.
 If the later selection-store stage fails, the command reports
 `DPX-CLI-PROFILE-PARTIAL` and policy exit code `3`; repeat the command to finish
-the idempotent cleanup.
+the idempotent cleanup. CLI profile saves compare the profile revision observed
+before planning with the revision held under the store lock. A concurrent update
+returns `DPX-CLI-PROFILE-CONFLICT` and policy exit code `3`; repeating the command
+reloads the newer profile before planning again.
 
 The durable JSON writer commits the primary before refreshing its backup. A
 backup-copy failure can therefore report a failed save after the primary already

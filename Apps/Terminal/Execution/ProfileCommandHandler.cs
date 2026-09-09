@@ -95,6 +95,7 @@ public sealed class ProfileCommandHandler(
 			environment.Error.WriteLine(PortableProjectProfileService.LegacySchemaNotice);
 		if (apply)
 		{
+			var expectedUpdatedUtc = ObserveExpectedProfileVersion(projectPath);
 			var plan = await services.ContextFactory
 				.BuildAsync(projectPath, selection, cancellationToken: cancellationToken)
 				.ConfigureAwait(false);
@@ -108,7 +109,10 @@ public sealed class ProfileCommandHandler(
 				return CommandLineExitCodes.PolicyFailure;
 			}
 			var legacy = ToLegacyProfile(plan, selection);
-			var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(projectPath, legacy);
+			var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(
+				projectPath,
+				legacy,
+				expectedUpdatedUtc);
 			if (saveResult.WasTruncated)
 			{
 				throw new PortableProjectProfileException(
@@ -117,6 +121,8 @@ public sealed class ProfileCommandHandler(
 			}
 			if (!saveResult.Succeeded)
 			{
+				if (saveResult.Status == ProjectProfileSaveStatus.Conflict)
+					throw ProfileConflict();
 				throw new PortableProjectProfileException(
 					"DPX-CLI-PROFILE-WRITE-FAILED",
 					"The local project profile could not be saved.");
@@ -183,6 +189,7 @@ public sealed class ProfileCommandHandler(
 				services.Localization["Terminal.Error.ProfileTransientGitMode"]);
 		}
 
+		var expectedUpdatedUtc = ObserveExpectedProfileVersion(projectPath);
 		var plan = await services.ContextFactory
 			.BuildAsync(projectPath, selection, cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
@@ -193,7 +200,7 @@ public sealed class ProfileCommandHandler(
 			return CommandLineExitCodes.PolicyFailure;
 		}
 
-		SaveLocalProfile(projectPath, plan, selection);
+		SaveLocalProfile(projectPath, plan, selection, expectedUpdatedUtc);
 		TerminalTextEscaping.WriteSingleLine(environment.Output, PathUtility.Normalize(projectPath));
 		return CommandLineExitCodes.Success;
 	}
@@ -223,10 +230,14 @@ public sealed class ProfileCommandHandler(
 	private void SaveLocalProfile(
 		string projectPath,
 		ProjectContextPlan plan,
-		ProjectSelectionSpec selection)
+		ProjectSelectionSpec selection,
+		DateTimeOffset? expectedUpdatedUtc)
 	{
 		var legacy = ToLegacyProfile(plan, selection);
-		var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(projectPath, legacy);
+		var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(
+			projectPath,
+			legacy,
+			expectedUpdatedUtc);
 		if (saveResult.WasTruncated)
 		{
 			throw new PortableProjectProfileException(
@@ -235,11 +246,36 @@ public sealed class ProfileCommandHandler(
 		}
 		if (!saveResult.Succeeded)
 		{
+			if (saveResult.Status == ProjectProfileSaveStatus.Conflict)
+				throw ProfileConflict();
 			throw new PortableProjectProfileException(
 				"DPX-CLI-PROFILE-WRITE-FAILED",
 				"The local project profile could not be saved.");
 		}
 	}
+
+	private DateTimeOffset? ObserveExpectedProfileVersion(string projectPath)
+	{
+		var lookup = services.LocalProfileStore.LookupProfile(projectPath, TimeSpan.FromSeconds(5));
+		var version = lookup.Status switch
+		{
+			ProjectProfileLookupStatus.Found => lookup.UpdatedUtc,
+			ProjectProfileLookupStatus.Missing => null,
+			ProjectProfileLookupStatus.TemporarilyUnavailable => throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-WRITE-FAILED",
+				"The local profile store is temporarily unavailable."),
+			_ => throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-WRITE-FAILED",
+				"The local profile store cannot be updated safely.")
+		};
+		ProfileCommandTestHooks.AfterVersionObserved?.Invoke(projectPath, version);
+		return version;
+	}
+
+	private static PortableProjectProfileException ProfileConflict() =>
+		new(
+			"DPX-CLI-PROFILE-CONFLICT",
+			"The local profile changed while this command was preparing its update. Repeat the command.");
 
 	private static ProjectSelectionProfile ToLegacyProfile(
 		ProjectContextPlan plan,
@@ -368,4 +404,9 @@ public sealed class ProfileCommandHandler(
 				WriteIndented = true,
 				PropertyNamingPolicy = JsonNamingPolicy.CamelCase
 			});
+}
+
+internal static class ProfileCommandTestHooks
+{
+	internal static Action<string, DateTimeOffset?>? AfterVersionObserved { get; set; }
 }

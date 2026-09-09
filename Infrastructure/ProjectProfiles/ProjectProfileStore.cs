@@ -85,12 +85,23 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		=> TrySaveProfileWithResult(localProjectPath, profile).Succeeded;
 
 	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
-		=> TrySaveProfileWithResult(localProjectPath, profile, updatedUtc).Succeeded;
+		=> TrySaveProfileWithResultCore(localProjectPath, profile, updatedUtc).Succeeded;
 
 	public ProjectProfileSaveResult TrySaveProfileWithResult(
 		string localProjectPath,
 		ProjectSelectionProfile profile) =>
-		TrySaveProfileWithResult(localProjectPath, profile, DateTimeOffset.UtcNow);
+		TrySaveProfileWithResultCore(localProjectPath, profile, DateTimeOffset.UtcNow);
+
+	public ProjectProfileSaveResult TrySaveProfileWithResult(
+		string localProjectPath,
+		ProjectSelectionProfile profile,
+		DateTimeOffset? expectedUpdatedUtc) =>
+		TrySaveProfileWithResultCore(
+			localProjectPath,
+			profile,
+			DateTimeOffset.UtcNow,
+			expectedUpdatedUtc,
+			enforceExpectedVersion: true);
 
 	public ProjectProfileBatchSaveResult TrySaveProfilesWithResult(
 		IReadOnlyList<ProjectProfileSaveRequest> requests,
@@ -183,10 +194,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
-	private ProjectProfileSaveResult TrySaveProfileWithResult(
+	private ProjectProfileSaveResult TrySaveProfileWithResultCore(
 		string localProjectPath,
 		ProjectSelectionProfile profile,
-		DateTimeOffset updatedUtc)
+		DateTimeOffset updatedUtc,
+		DateTimeOffset? expectedUpdatedUtc = null,
+		bool enforceExpectedVersion = false)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 			return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
@@ -209,12 +222,18 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			if (!TryLoadForMutation(fileSet, out var db))
 				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 			db.SchemaVersion = CurrentSchemaVersion;
+			var hasExisting = db.Profiles.TryGetValue(normalizedPath, out var existing) && existing is not null;
+			if (enforceExpectedVersion &&
+			    (hasExisting != expectedUpdatedUtc.HasValue ||
+			     hasExisting && NormalizeProfileTimestamp(existing!.UpdatedUtc) !=
+			     NormalizeProfileTimestamp(expectedUpdatedUtc!.Value)))
+			{
+				return new ProjectProfileSaveResult(ProjectProfileSaveStatus.Conflict);
+			}
 
 			// A delayed retry from another window/process must not stomp a newer profile revision.
 			// The caller-provided timestamp reflects when the profile became user-approved.
-			if (db.Profiles.TryGetValue(normalizedPath, out var existing) &&
-				existing is not null &&
-				existing.UpdatedUtc > normalizedUpdatedUtc)
+			if (hasExisting && existing!.UpdatedUtc > normalizedUpdatedUtc)
 			{
 				return new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
 			}
@@ -426,7 +445,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 		return new ProjectProfileLookupResult(
 			ProjectProfileLookupStatus.Found,
-			ToProfile(entry, marks.Snapshot.Marks));
+			ToProfile(entry, marks.Snapshot.Marks),
+			NormalizeProfileTimestamp(entry.UpdatedUtc));
 	}
 
 	private static ProjectProfileLookupStatus MapMarkStoreStatus(PersistentSecretMarkStoreStatus status) =>

@@ -649,6 +649,11 @@ stack trace, and request identifier, but never file content or secrets.
 profile could not be removed. The operation is idempotent; repeating it completes
 the remaining stage once storage is available.
 
+`profile save` and applying `profile import` return policy exit code `3` with
+`DPX-CLI-PROFILE-CONFLICT` if the local profile changed after the command observed
+its revision but before it committed. The command does not overwrite the newer
+profile; repeat it to plan against the latest revision.
+
 Secret inspection never emits uninspected text. A selected text file above the supported
 16 MiB limit fails no command: `export context` omits its text, and `export project`
 leaves it out of the copy and names it in `DEVPROJEX-NOTICE.txt`.

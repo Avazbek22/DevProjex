@@ -1,7 +1,49 @@
+using DevProjex.Infrastructure.ProjectProfiles;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class ProfileCommandContractTests
 {
+	[Fact]
+	public async Task ProfileSaveRejectsAConcurrentUpdateObservedBeforePlanning()
+	{
+		using var workspace = CreateWorkspace();
+		var project = workspace.Path;
+		var dataRoot = workspace.CreateDirectory("conflict-data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs"], []));
+		ProfileCommandTestHooks.AfterVersionObserved = (path, observed) =>
+		{
+			Assert.Equal(project, path);
+			Assert.NotNull(observed);
+			Assert.True(new ProjectProfileStore(() => dataRoot).TrySaveProfile(
+				project,
+				new ProjectSelectionProfile([], [".json"], []),
+				observed.Value.AddMinutes(1)));
+		};
+		try
+		{
+			var environment = new TestTerminalEnvironment();
+			var exitCode = await new TerminalApplication(
+					environment,
+					new TerminalServiceFactory(() => dataRoot))
+				.RunAsync(
+					["profile", "save", project, "--extension", ".md", "--language", "en"],
+					TestContext.Current.CancellationToken);
+
+			Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+			Assert.Empty(environment.StandardOutput);
+			Assert.Contains("DPX-CLI-PROFILE-CONFLICT", environment.StandardError, StringComparison.Ordinal);
+			Assert.Contains("Repeat the command", environment.StandardError, StringComparison.Ordinal);
+			Assert.True(store.TryLoadProfile(project, out var current));
+			Assert.Equal([".json"], current.SelectedExtensions);
+		}
+		finally
+		{
+			ProfileCommandTestHooks.AfterVersionObserved = null;
+		}
+	}
+
 	[Fact]
 	public void TextProfileEscapesControlCharactersInSelectionValues()
 	{
