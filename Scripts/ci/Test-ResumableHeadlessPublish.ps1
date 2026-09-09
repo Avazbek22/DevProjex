@@ -72,6 +72,33 @@ try {
     }
     New-NpmFixture 'devprojex'
 
+    $pointerPackage = Join-Path $artifacts "nuget/devprojex.$version.nupkg"
+    $pointerReceipt = Join-Path $temporaryRoot 'installed-payload-receipt.json'
+    $pointerArchive = [System.IO.Compression.ZipFile]::OpenRead($pointerPackage)
+    try {
+        $receiptEntry = $pointerArchive.GetEntry('devprojex/payload-receipt.json')
+        $receiptStream = $receiptEntry.Open()
+        try {
+            $receiptFile = [System.IO.File]::Create($pointerReceipt)
+            try { $receiptStream.CopyTo($receiptFile) }
+            finally { $receiptFile.Dispose() }
+        }
+        finally { $receiptStream.Dispose() }
+    }
+    finally { $pointerArchive.Dispose() }
+    if (-not (Test-InstalledNuGetPayloadReceipt $pointerPackage $pointerReceipt)) {
+        throw 'An extracted payload receipt did not match its source package.'
+    }
+    $modifiedReceipt = Get-Content -LiteralPath $pointerReceipt -Raw | ConvertFrom-Json
+    $modifiedReceipt.packageVersion = '0.0.0'
+    [System.IO.File]::WriteAllText(
+        $pointerReceipt,
+        ($modifiedReceipt | ConvertTo-Json -Depth 6 -Compress),
+        [System.Text.UTF8Encoding]::new($false))
+    if (Test-InstalledNuGetPayloadReceipt $pointerPackage $pointerReceipt) {
+        throw 'A modified extracted payload receipt was accepted.'
+    }
+
     $failedAsPlanned = $false
     try {
         & $publishScript -ArtifactsRoot $artifacts -Channels both -FixtureRegistryRoot $registry `

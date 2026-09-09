@@ -336,7 +336,9 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("source-sha.txt", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("<clear />", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("NUGET_PACKAGES", buildWorkflow, StringComparison.Ordinal);
-		Assert.Contains("Test-NuGetPayloadEquivalent", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-InstalledNuGetPayloadReceipt", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("microsoft.netcore.app.host.$rid", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("--arch $architecture", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("inputs.dry_run == false", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("--skip-duplicate", workflow, StringComparison.Ordinal);
 	}

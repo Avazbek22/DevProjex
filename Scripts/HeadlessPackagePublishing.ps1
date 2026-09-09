@@ -132,6 +132,36 @@ function Test-NuGetPayloadEquivalent([string] $LocalPath, [string] $PublishedPat
         $local.CanonicalReceipt -ceq $published.CanonicalReceipt
 }
 
+function Test-InstalledNuGetPayloadReceipt([string] $PackagePath, [string] $InstalledReceiptPath) {
+    $local = Read-NuGetPayloadReceipt $PackagePath
+    $receipt = Get-Content -LiteralPath $InstalledReceiptPath -Raw | ConvertFrom-Json
+    if ($receipt.schemaVersion -ne 1 -or
+        [string]$receipt.packageId -cne $local.Id -or
+        [string]$receipt.packageVersion -cne $local.Version) {
+        return $false
+    }
+    return ($receipt | ConvertTo-Json -Depth 6 -Compress) -ceq $local.CanonicalReceipt
+}
+
+function Get-NuGetToolRuntimeVersion([string] $PackagePath, [string] $RuntimeIdentifier) {
+    $archive = [System.IO.Compression.ZipFile]::OpenRead([System.IO.Path]::GetFullPath($PackagePath))
+    try {
+        $entryPath = "tools/any/$RuntimeIdentifier/devprojex.runtimeconfig.json"
+        $entry = $archive.GetEntry($entryPath)
+        if ($null -eq $entry) {
+            throw "NuGet package '$PackagePath' has no runtime configuration for '$RuntimeIdentifier'."
+        }
+        $configuration = [System.Text.Encoding]::UTF8.GetString((Get-ArchiveEntryBytes $entry)) | ConvertFrom-Json
+        $framework = @($configuration.runtimeOptions.includedFrameworks |
+            Where-Object { [string]$_.name -ceq 'Microsoft.NETCore.App' })
+        if ($framework.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$framework[0].version)) {
+            throw "NuGet package '$PackagePath' has no included Microsoft.NETCore.App version."
+        }
+        return [string]$framework[0].version
+    }
+    finally { $archive.Dispose() }
+}
+
 function Get-NpmPackageIdentity([string] $PackagePath) {
     $file = [System.IO.File]::OpenRead([System.IO.Path]::GetFullPath($PackagePath))
     try {

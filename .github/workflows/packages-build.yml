@@ -146,6 +146,22 @@ jobs:
           $localFeed = (Resolve-Path artifacts/headless/nuget).Path
           $nugetConfig = Join-Path $env:RUNNER_TEMP 'devprojex-local-feed.config'
           $toolRoot = Join-Path $env:RUNNER_TEMP 'devprojex-local-tool'
+          $architecture = switch ($env:RUNNER_ARCH) {
+            'X64' { 'x64' }
+            'ARM64' { 'arm64' }
+            default { throw "Unsupported runner architecture '$env:RUNNER_ARCH'." }
+          }
+          $platform = if ($IsWindows) { 'win' } elseif ($IsMacOS) { 'osx' } else { 'linux' }
+          $rid = "$platform-$architecture"
+          $ridArtifact = Join-Path $localFeed "devprojex.$rid.$env:VERSION.nupkg"
+
+          . ./Scripts/HeadlessPackagePublishing.ps1
+          $runtimeVersion = Get-NuGetToolRuntimeVersion $ridArtifact $rid
+          $hostPackageId = "microsoft.netcore.app.host.$rid"
+          $hostPackageName = "$hostPackageId.$runtimeVersion.nupkg"
+          $hostPackageUri = "https://api.nuget.org/v3-flatcontainer/$hostPackageId/$runtimeVersion/$hostPackageName"
+          Invoke-WebRequest -Uri $hostPackageUri -OutFile (Join-Path $localFeed $hostPackageName)
+
           $env:NUGET_PACKAGES = Join-Path $env:RUNNER_TEMP 'devprojex-local-packages'
           $env:NUGET_HTTP_CACHE_PATH = Join-Path $env:RUNNER_TEMP 'devprojex-local-http-cache'
           $escapedFeed = [System.Security.SecurityElement]::Escape($localFeed)
@@ -162,7 +178,8 @@ jobs:
             --tool-path $toolRoot `
             --version $env:VERSION `
             --configfile $nugetConfig `
-            --no-cache
+            --no-cache `
+            --arch $architecture
           if ($LASTEXITCODE -ne 0) { throw 'dotnet tool install failed.' }
           $binaryCandidates = @(Get-ChildItem -LiteralPath $toolRoot -File | Where-Object {
             $_.BaseName -ceq 'devprojex' -or $_.Name -ceq 'devprojex'
@@ -176,15 +193,12 @@ jobs:
             throw "NuGet tool version mismatch: expected '${{ inputs.display_version }}', got '$actualVersion'."
           }
 
-          . ./Scripts/HeadlessPackagePublishing.ps1
-          $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
-          $platform = if ($IsWindows) { 'win' } elseif ($IsMacOS) { 'osx' } else { 'linux' }
-          $rid = "$platform-$architecture"
           foreach ($id in @('devprojex', "devprojex.$rid")) {
             $artifact = Join-Path $localFeed "$id.$env:VERSION.nupkg"
-            $cached = @(Get-ChildItem -LiteralPath (Join-Path $env:NUGET_PACKAGES "$id/$env:VERSION") `
-              -Filter '*.nupkg' -File)
-            if ($cached.Count -ne 1 -or -not (Test-NuGetPayloadEquivalent $artifact $cached[0].FullName)) {
+            $installedRoot = Join-Path $toolRoot ".store/devprojex/$env:VERSION/$id/$env:VERSION"
+            $installedReceipts = @(Get-ChildItem -LiteralPath $installedRoot -Filter 'payload-receipt.json' -File -Recurse)
+            if ($installedReceipts.Count -ne 1 -or
+                -not (Test-InstalledNuGetPayloadReceipt $artifact $installedReceipts[0].FullName)) {
               throw "Installed NuGet payload receipt does not match artifact '$id@$env:VERSION'."
             }
           }
