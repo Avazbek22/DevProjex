@@ -1888,9 +1888,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			                    TryExpandCSharpAlias(source, reference, out expandedAlias);
 			var expandedName = aliasExpanded ? expandedAlias! : reference.Name;
 			var requiresQualifiedLookup = isSyntacticallyQualified || aliasExpanded;
-			var lookupArity = aliasExpanded
-				? GenericArityFromQualifiedName(expandedName)
-				: reference.GenericArity;
+			var expandedArity = aliasExpanded ? GenericArityFromQualifiedName(expandedName) : 0;
+			var lookupArity = expandedArity > 0 ? expandedArity : reference.GenericArity;
 			var candidates = requiresQualifiedLookup
 				? LookupQualified(source, expandedName, lookupArity)
 				: LookupSimple(source, simpleName, reference.GenericArity);

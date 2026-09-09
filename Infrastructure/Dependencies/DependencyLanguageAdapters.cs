@@ -164,13 +164,18 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			out var usingNamespaces,
 			out var globalNamespaces,
 			out var globalAliases);
+		var typeParameterOwners = context.Declarations
+			.Where(capture => Kinds.ContainsKey(capture.Name))
+			.Concat(context.References.Where(static capture => capture.Name == "context.type_parameter_owner"))
+			.ToArray();
 		var typeParameterScopes = context.References
 			.Where(static capture => capture.Name == "context.type_parameters")
-			.SelectMany(static capture => TypeParameterRegex().Matches(capture.Text)
-				.Select(match => new TypeParameterScope(
-					match.Groups["name"].Value,
-					capture.StartIndex,
-					capture.EndIndex)))
+			.SelectMany(capture =>
+			{
+				var range = ContainingDeclarationRange(typeParameterOwners, capture);
+				return TypeParameterRegex().Matches(capture.Text)
+					.Select(match => new TypeParameterScope(match.Groups["name"].Value, range.Start, range.End));
+			})
 			.Distinct().OrderBy(static scope => scope.StartIndex)
 			.ThenBy(static scope => scope.Name, StringComparer.Ordinal).ToArray();
 		var typeParameters = typeParameterScopes.Select(static scope => scope.Name)
@@ -504,6 +509,19 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			EndIndex = capture.StartIndex + token.Index + token.Length,
 			Evidence = OneLine(token.Value)
 		};
+	}
+
+	private static (int Start, int End) ContainingDeclarationRange(
+		IReadOnlyList<DependencySyntaxCapture> captures,
+		DependencySyntaxCapture typeParameters)
+	{
+		var declaration = captures
+			.Where(capture => capture.StartIndex <= typeParameters.StartIndex &&
+			                  capture.EndIndex >= typeParameters.EndIndex)
+			.MinBy(static capture => capture.EndIndex - capture.StartIndex);
+		return declaration is null
+			? (typeParameters.StartIndex, typeParameters.EndIndex)
+			: (declaration.StartIndex, declaration.EndIndex);
 	}
 
 	private static IReadOnlyList<CSharpUsingDirective> ParseUsings(

@@ -118,6 +118,11 @@ public sealed class DependencyFactsEngineIntegrationTests
 				public User NeighborValue { get; }
 				public void Map<User>(User value) { }
 				public User OutsideMethod { get; }
+				public User LocalFunctionOwner()
+				{
+					User Local<User>(User value) => value;
+					return new User();
+				}
 			}
 			""");
 		using var engine = CreateEngine();
@@ -139,6 +144,11 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
 			edge.Status == ResolutionStatus.Resolved && edge.Target == "Models/User.cs" &&
 			edge.Evidence.Any(site => site.Line == 11));
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Unresolved && edge.Evidence.Any(site => site.Line == 14));
+		Assert.Contains(result.Edges, edge => edge.Source == "Consumers.cs" && edge.Reference == "User" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "Models/User.cs" &&
+			edge.Evidence.Any(site => site.Line == 15));
 	}
 
 	[Fact]
@@ -556,7 +566,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
-	public async Task TypeScriptConditionalExports_ResolveNestedEsmConditionsAndFailClosedOnUnknownConditions()
+	public async Task TypeScriptConditionalExports_ResolveNestedEsmConditionsAndSkipInactiveUnknownConditions()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"node16\"}}");
@@ -576,10 +586,9 @@ public sealed class DependencyFactsEngineIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal("valid/entry.mjs", Assert.Single(result.Edges, item => item.Reference == "valid").Target);
-		var unsupported = Assert.Single(result.Edges, item => item.Reference == "unknown");
-		Assert.Equal(ResolutionStatus.Unresolved, unsupported.Status);
-		// Project-controlled condition names stay out of trusted resolution reasons.
-		Assert.Equal("package condition is not supported", Assert.Single(unsupported.Reasons));
+		var inactiveUnknown = Assert.Single(result.Edges, item => item.Reference == "unknown");
+		Assert.Equal(ResolutionStatus.Resolved, inactiveUnknown.Status);
+		Assert.Equal("unknown/default.js", inactiveUnknown.Target);
 	}
 
 	[Fact]

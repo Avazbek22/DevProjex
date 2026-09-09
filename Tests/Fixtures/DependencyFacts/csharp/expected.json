@@ -1,7 +1,7 @@
 {
   "name": "csharp",
   "edges": [
-    { "source": "Ambiguous.cs", "reference": "User", "status": "Ambiguous" },
+    { "source": "Ambiguous.cs", "reference": "User", "status": "Resolved", "target": "TypeParameter.cs" },
     { "source": "Partial.Consumer.cs", "reference": "PartialThing", "status": "Resolved", "target": "Partial.One.cs" },
     { "source": "FileOne.cs", "reference": "Helper", "status": "Resolved", "target": "FileOne.cs" },
     { "source": "FileTwo.cs", "reference": "Helper", "status": "Resolved", "target": "FileTwo.cs" },
