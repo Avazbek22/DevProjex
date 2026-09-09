@@ -1391,12 +1391,17 @@ public sealed class DependencyFactsEngine : IDisposable
 					specifier[mapping.Star..(specifier.Length - (mapping.Pattern.Length - mapping.Star - 1))];
 			foreach (var target in mapping.Targets)
 			{
-				var resolved = ProbeTypeScript(
-					Path.GetFullPath(Path.Combine(scope.Root, target.Replace("*", wildcard, StringComparison.Ordinal))),
-					scope,
-					source).FirstOrDefault();
-				if (resolved is not null)
-					return [resolved];
+				var candidate = Path.GetFullPath(Path.Combine(
+					scope.Root,
+					target.Replace("*", wildcard, StringComparison.Ordinal)));
+				foreach (var probe in EnumerateTypeScriptProbes(candidate, scope, source, allowDirectoryIndex: true))
+				{
+					var relative = PortableRelative(_root, probe);
+					if (_files.ContainsKey(relative))
+						return [relative];
+					if (File.Exists(probe))
+						return [];
+				}
 			}
 			return [];
 		}
@@ -1593,6 +1598,21 @@ public sealed class DependencyFactsEngine : IDisposable
 			FileFacts source,
 			bool allowDirectoryIndex = true)
 		{
+			foreach (var probe in EnumerateTypeScriptProbes(candidate, scope, source, allowDirectoryIndex))
+			{
+				var relative = PortableRelative(_root, probe);
+				if (_files.ContainsKey(relative))
+					return [relative];
+			}
+			return [];
+		}
+
+		private IEnumerable<string> EnumerateTypeScriptProbes(
+			string candidate,
+			DependencyScopeDescriptor? scope,
+			FileFacts source,
+			bool allowDirectoryIndex)
+		{
 			var extension = Path.GetExtension(candidate).ToLowerInvariant();
 			var probes = new List<string>();
 			if (extension is ".js" or ".jsx" or ".mjs" or ".cjs")
@@ -1632,13 +1652,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				: [""];
 			foreach (var baseProbe in probes)
 			foreach (var suffix in suffixes)
-			{
-				var probe = ApplyTypeScriptModuleSuffix(baseProbe, suffix);
-				var relative = PortableRelative(_root, probe);
-				if (_files.ContainsKey(relative))
-					return [relative];
-			}
-			return [];
+				yield return ApplyTypeScriptModuleSuffix(baseProbe, suffix);
 		}
 
 		private static string ApplyTypeScriptModuleSuffix(string path, string suffix)

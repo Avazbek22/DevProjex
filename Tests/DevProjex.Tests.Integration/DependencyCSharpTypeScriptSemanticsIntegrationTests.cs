@@ -6,6 +6,30 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New022_ExcludedPrimaryPathMappingDoesNotSelectFallback()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"paths\":{\"alias\":[\"primary/value\",\"fallback/value\"]}}}");
+		_ = fixture.CreateFile("primary/value.ts", "export default 1;");
+		var fallback = fixture.CreateFile("fallback/value.ts", "export default 2;");
+		var source = fixture.CreateFile("main.ts", "import value from 'alias';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, fallback, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "alias");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.DoesNotContain("fallback/value.ts", edge.Candidates);
+	}
+
+	[Fact]
 	public async Task New063_CustomConditionsFailClosedInsteadOfChoosingDefault()
 	{
 		using var fixture = new TemporaryDirectory();
