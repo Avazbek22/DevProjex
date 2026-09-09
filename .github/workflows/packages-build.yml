@@ -51,9 +51,18 @@ jobs:
       - name: Test npm launcher contract
         run: node --test Packaging/Npm/test/*.test.js
 
+      - name: Test resumable package publication
+        shell: pwsh
+        run: ./Scripts/ci/Test-ResumableHeadlessPublish.ps1
+
       - name: Build packages through the release entry point
         shell: pwsh
-        run: ./Scripts/build-headless-packages.ps1 -Version '${{ inputs.display_version }}' -DryRun
+        run: |
+          ./Scripts/build-headless-packages.ps1 -Version '${{ inputs.display_version }}' -DryRun
+          [System.IO.File]::WriteAllText(
+            'artifacts/headless/source-sha.txt',
+            '${{ inputs.checkout_ref }}' + [Environment]::NewLine,
+            [System.Text.UTF8Encoding]::new($false))
 
       - name: Upload headless packages
         uses: actions/upload-artifact@v7
@@ -63,6 +72,7 @@ jobs:
             artifacts/headless/nuget/*.nupkg
             artifacts/headless/npm/*.tgz
             artifacts/headless/package-sizes.md
+            artifacts/headless/source-sha.txt
           if-no-files-found: error
           retention-days: 7
 
@@ -133,16 +143,68 @@ jobs:
           VERSION: ${{ inputs.package_version }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
-          dotnet tool install --global devprojex `
-            --version $env:VERSION `
-            --add-source (Resolve-Path artifacts/headless/nuget) `
-            --ignore-failed-sources
+          $localFeed = (Resolve-Path artifacts/headless/nuget).Path
+          $nugetConfig = Join-Path $env:RUNNER_TEMP 'devprojex-local-feed.config'
+          $toolRoot = Join-Path $env:RUNNER_TEMP 'devprojex-local-tool'
+          $architecture = switch ($env:RUNNER_ARCH) {
+            'X64' { 'x64' }
+            'ARM64' { 'arm64' }
+            default { throw "Unsupported runner architecture '$env:RUNNER_ARCH'." }
+          }
+          $platform = if ($IsWindows) { 'win' } elseif ($IsMacOS) { 'osx' } else { 'linux' }
+          $rid = "$platform-$architecture"
+          $ridArtifact = Join-Path $localFeed "devprojex.$rid.$env:VERSION.nupkg"
+
+          . ./Scripts/HeadlessPackagePublishing.ps1
+          $runtimeVersion = Get-NuGetToolRuntimeVersion $ridArtifact $rid
+          $hostPackageId = "microsoft.netcore.app.host.$rid"
+          $hostPackageName = "$hostPackageId.$runtimeVersion.nupkg"
+          $hostPackageUri = "https://api.nuget.org/v3-flatcontainer/$hostPackageId/$runtimeVersion/$hostPackageName"
+          Invoke-WebRequest -Uri $hostPackageUri -OutFile (Join-Path $localFeed $hostPackageName)
+
+          $env:NUGET_PACKAGES = Join-Path $env:RUNNER_TEMP 'devprojex-local-packages'
+          $env:NUGET_HTTP_CACHE_PATH = Join-Path $env:RUNNER_TEMP 'devprojex-local-http-cache'
+          $escapedFeed = [System.Security.SecurityElement]::Escape($localFeed)
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="headless-artifacts" value="$escapedFeed" />
+            </packageSources>
+          </configuration>
+          "@ | Set-Content -LiteralPath $nugetConfig -Encoding utf8NoBOM
+          $toolInstallArguments = @(
+            'tool', 'install', 'devprojex',
+            '--tool-path', $toolRoot,
+            '--version', $env:VERSION,
+            '--configfile', $nugetConfig,
+            '--no-cache')
+          if ($IsMacOS) {
+            $toolInstallArguments += @('--arch', $architecture)
+          }
+          dotnet @toolInstallArguments
           if ($LASTEXITCODE -ne 0) { throw 'dotnet tool install failed.' }
-          $toolRoot = if ($IsWindows) { Join-Path $env:USERPROFILE '.dotnet/tools' } else { Join-Path $HOME '.dotnet/tools' }
-          $binary = Join-Path $toolRoot $(if ($IsWindows) { 'devprojex.cmd' } else { 'devprojex' })
+          $binaryCandidates = @(Get-ChildItem -LiteralPath $toolRoot -File | Where-Object {
+            $_.BaseName -ceq 'devprojex' -or $_.Name -ceq 'devprojex'
+          })
+          if ($binaryCandidates.Count -ne 1) {
+            throw "Expected one installed DevProjex shim, found $($binaryCandidates.Count)."
+          }
+          $binary = $binaryCandidates[0].FullName
           $actualVersion = (& $binary --version).Trim()
           if ($actualVersion -ne '${{ inputs.display_version }}') {
             throw "NuGet tool version mismatch: expected '${{ inputs.display_version }}', got '$actualVersion'."
+          }
+
+          foreach ($id in @('devprojex', "devprojex.$rid")) {
+            $artifact = Join-Path $localFeed "$id.$env:VERSION.nupkg"
+            $installedRoot = Join-Path $toolRoot ".store/devprojex/$env:VERSION/$id/$env:VERSION"
+            $installedReceipts = @(Get-ChildItem -LiteralPath $installedRoot -Filter 'payload-receipt.json' -File -Recurse)
+            if ($installedReceipts.Count -ne 1 -or
+                -not (Test-InstalledNuGetPayloadReceipt $artifact $installedReceipts[0].FullName)) {
+              throw "Installed NuGet payload receipt does not match artifact '$id@$env:VERSION'."
+            }
           }
 
           $sample = Join-Path $env:RUNNER_TEMP 'devprojex-headless-sample'
@@ -174,13 +236,12 @@ jobs:
           if ($LASTEXITCODE -ne 3 -or -not $findingsText.Contains('findingCount', [System.StringComparison]::Ordinal)) {
             throw 'NuGet secret gate smoke failed.'
           }
-          $mcpBinary = $binary
           if ($IsWindows) {
-            $installedPayloads = @(Get-ChildItem (Join-Path $toolRoot '.store') -Filter 'devprojex.exe' -File -Recurse)
-            if ($installedPayloads.Count -ne 1) { throw "Expected one installed Windows payload, found $($installedPayloads.Count)." }
-            $mcpBinary = $installedPayloads[0].FullName
+            node Scripts/smoke-headless-mcp.mjs $env:ComSpec $sample /d /s /c $binary
           }
-          node Scripts/smoke-headless-mcp.mjs $mcpBinary $sample
+          else {
+            node Scripts/smoke-headless-mcp.mjs $binary $sample
+          }
           if ($LASTEXITCODE -ne 0) { throw 'NuGet MCP initialize smoke failed.' }
 
       - name: Smoke npx through a local registry

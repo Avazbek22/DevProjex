@@ -142,8 +142,8 @@ to control an already running Desktop instance.
 
 The release workflow is configured to publish a glibc-based, multi-architecture
 image for amd64 and arm64 to `ghcr.io/avazbek22/devprojex`. The image contains no
-desktop application and runs as a non-root user. Mount project input read-only by
-default:
+desktop application, intentionally contains no Git or SSH executable, and runs as
+a non-root user. Mount project input read-only by default:
 
 ```bash
 docker run --rm -i --read-only --tmpfs /tmp \
@@ -159,6 +159,15 @@ Use an explicit version tag for reproducible automation, for example
 `ghcr.io/avazbek22/devprojex:5.2`. The untagged examples use Docker's `latest`
 tag only after a release workflow has published it. Alpine and other musl hosts
 are not supported.
+
+Because the minimal image has no Git executable, use `--git-mode none` for project
+selection inside the container. Tracked, staged, changes, and diff scopes, Git
+history ranking, and remote clone workflows are unavailable there; requesting a
+Git-backed scope fails with `DPX-GIT-STATE-UNAVAILABLE` instead of silently
+returning a complete-looking result; tracked-index selection uses the equally
+explicit `DPX-GIT-TRACKED-INDEX-UNAVAILABLE`. Use a headless archive or package on a host
+with Git, or build a derived image that installs Git, when those workflows are
+required.
 
 ## Remote sources
 

@@ -41,12 +41,18 @@ jobs:
     timeout-minutes: 5
     outputs:
       run_store: ${{ steps.plan.outputs.run_store }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
           fetch-depth: 0
+
+      - name: Pin Store validation source
+        id: source
+        shell: bash
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
       - name: Validate CI planner contracts
         shell: pwsh
@@ -82,17 +88,17 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.checkout_ref || github.ref }}
+          ref: ${{ needs.plan-store.outputs.source_sha }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}

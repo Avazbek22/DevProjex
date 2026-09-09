@@ -63,11 +63,47 @@ jobs:
           docker save devprojex-ci:amd64 | gzip -9 > artifacts/container-images/devprojex-amd64.tar.gz
           docker save devprojex-ci:arm64 | gzip -9 > artifacts/container-images/devprojex-arm64.tar.gz
 
+      - name: Record tested image identities
+        shell: pwsh
+        run: |
+          $images = @(
+            [ordered]@{
+              platform = 'linux/amd64'
+              localTag = 'devprojex-ci:amd64'
+              archive = 'devprojex-amd64.tar.gz'
+              imageId = (& docker image inspect --format '{{.Id}}' devprojex-ci:amd64).Trim()
+              sha256 = (Get-FileHash artifacts/container-images/devprojex-amd64.tar.gz -Algorithm SHA256).Hash.ToLowerInvariant()
+            },
+            [ordered]@{
+              platform = 'linux/arm64'
+              localTag = 'devprojex-ci:arm64'
+              archive = 'devprojex-arm64.tar.gz'
+              imageId = (& docker image inspect --format '{{.Id}}' devprojex-ci:arm64).Trim()
+              sha256 = (Get-FileHash artifacts/container-images/devprojex-arm64.tar.gz -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          )
+          $receipt = [ordered]@{
+            schemaVersion = 1
+            sourceSha = '${{ inputs.checkout_ref }}'
+            version = '${{ inputs.version }}'
+            images = $images
+          }
+          [System.IO.File]::WriteAllText(
+            'artifacts/container-images/container-images.json',
+            (($receipt | ConvertTo-Json -Depth 5) + [Environment]::NewLine),
+            [System.Text.UTF8Encoding]::new($false))
+
       - name: Validate image payload receipts and mutation gates
         shell: pwsh
         run: |
+          ./Scripts/ci/Test-ContainerPromotionPolicy.ps1
           ./Scripts/Test-HeadlessContainer.ps1 -Image devprojex-ci:amd64 -Version '${{ inputs.version }}' -Rid linux-x64
           ./Scripts/Test-HeadlessContainer.ps1 -Image devprojex-ci:arm64 -Version '${{ inputs.version }}' -Rid linux-arm64
+          ./Scripts/Test-ContainerImageArtifacts.ps1 `
+            -ArtifactsRoot artifacts/container-images `
+            -Version '${{ inputs.version }}' `
+            -SourceSha '${{ inputs.checkout_ref }}' `
+            -VerifyLoadedImages
 
       - name: Smoke amd64 with a read-only root
         shell: pwsh
@@ -81,11 +117,14 @@ jobs:
             "- ``$($_.Name)``: $($_.Length) bytes compressed" >> $env:GITHUB_STEP_SUMMARY
           }
 
-      - name: Upload arm64 image for native smoke
+      - name: Upload tested images for native smoke and publication
         uses: actions/upload-artifact@v7
         with:
-          name: devprojex-container-arm64
-          path: artifacts/container-images/devprojex-arm64.tar.gz
+          name: devprojex-container-images
+          path: |
+            artifacts/container-images/devprojex-amd64.tar.gz
+            artifacts/container-images/devprojex-arm64.tar.gz
+            artifacts/container-images/container-images.json
           if-no-files-found: error
           retention-days: 1
 
@@ -106,7 +145,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: devprojex-container-arm64
+          name: devprojex-container-images
           path: artifacts/container-images
 
       - name: Load and smoke arm64 with a read-only root
@@ -114,4 +153,10 @@ jobs:
         run: |
           docker load -i artifacts/container-images/devprojex-arm64.tar.gz
           if ($LASTEXITCODE -ne 0) { throw 'Could not load the arm64 image.' }
+          ./Scripts/Test-ContainerImageArtifacts.ps1 `
+            -ArtifactsRoot artifacts/container-images `
+            -Version '${{ inputs.version }}' `
+            -SourceSha '${{ inputs.checkout_ref }}' `
+            -VerifyLoadedImages `
+            -LoadedPlatform linux/arm64
           ./Scripts/Test-HeadlessContainerSmoke.ps1 -Image devprojex-ci:arm64 -Version '${{ inputs.version }}'

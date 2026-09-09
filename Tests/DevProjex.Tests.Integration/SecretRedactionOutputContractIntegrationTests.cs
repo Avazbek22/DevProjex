@@ -84,13 +84,13 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			session,
 			ProjectCopyExportFormat.Zip);
 
-		// The previous count encoded the discarded tail of an overlapping config-secret finding.
-		// Coverage-preserving segmentation represents both valid findings without exposing that tail.
-		Assert.Equal(11, preview.Redactions.Count);
-		Assert.Equal(11, preview.Redactions.Count(static span =>
+		// The format-aware JSON lexer no longer treats Password= inside a connection-string
+		// scalar as a second JSON property. The connection-password span preserves the same coverage.
+		Assert.Equal(10, preview.Redactions.Count);
+		Assert.Equal(10, preview.Redactions.Count(static span =>
 			span.State == SecretPreviewSpanState.Redacted));
-		Assert.Equal(11, folder.RedactedValueCount);
-		Assert.Equal(11, zip.RedactedValueCount);
+		Assert.Equal(10, folder.RedactedValueCount);
+		Assert.Equal(10, zip.RedactedValueCount);
 		Assert.Equal(NormalizeForClipboard(selectedContent), contentPreviewPayload);
 		Assert.All(
 			new[] { previewPayload, contentPreviewPayload, selectedContent }.Concat(contextDocuments.Values),
@@ -2917,9 +2917,9 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			content,
 			StringComparison.Ordinal);
 		Assert.EndsWith("}}\n", content, StringComparison.Ordinal);
-		Assert.Equal(1, CountOccurrences(content, "DEVPROJEX_REDACTED[config-secret#1]"));
+		Assert.Equal(0, CountOccurrences(content, "DEVPROJEX_REDACTED[config-secret#1]"));
 		Assert.Equal(1, CountOccurrences(content, "DEVPROJEX_REDACTED[connection-password#1]"));
-		Assert.DoesNotContain(";Database=app", content, StringComparison.Ordinal);
+		Assert.Contains(";Database=app", content, StringComparison.Ordinal);
 	}
 
 	private sealed class CategorizedExactValueDetector(
