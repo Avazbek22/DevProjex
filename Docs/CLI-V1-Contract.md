@@ -571,7 +571,8 @@ Text output places descriptors in a separate, localized three-column findings ta
 after the main analysis table. Plain output aligns the same columns with spaces and
 never emits tab characters.
 `--fail-on-findings` writes the report and returns `3` when that effective count
-is nonzero; it is independent from `--strict`. Requesting `--findings` or
+is nonzero or selected text could not be inspected; a closed output pipe does not
+upgrade this policy result to success. It is independent from `--strict`. Requesting `--findings` or
 `--fail-on-findings` runs count-only secret detection when needed but never
 changes the effective `HideSecrets` selection or redacts the emitted report.
 JSON adds the optional `findingCount`; the text redacted-value row is present only
@@ -917,7 +918,7 @@ that prevents an accepted option from becoming a no-op.
 | `analyze`, `tree` | `--force` | off | atomically replaces an existing report/tree file | invalid with stdout | success path on stdout; invalid combination exits `2` | parser, destination, process |
 | `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |
 | `analyze` | `--findings` | off | adds sanitized effective redaction descriptors | values, source fragments, fingerprints, and raw detector errors are forbidden | report stays on stdout/file | serializer, sanitation, process |
-| `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings | independent from `--strict` | requested report remains intact; a nonzero finding count exits `3` | handler, process |
+| `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings and incomplete text inspection | independent from `--strict` | a nonzero finding count, an unscannable selected text file, or a broken pipe after policy evaluation exits `3` | handler, process |
 | `analyze` | `--top-files` | absent | appends the N largest selected text files by estimated tokens | range `1..1000`; ranking reflects effective transformations | optional text section or `topFiles` JSON property; invalid value exits `2` | parser, observer metrics, schema, process |
 | `related` | `--project` | current directory | selects the local directory or Git URL whose effective manifest is indexed | the positional `PATH` remains the seed; `--branch` is URL-only | related-files document on stdout; invalid source exits by the existing source rules | parser, source resolver, process |
 | `related` | `--direction` | `both` | emits dependencies, dependents, or both without changing the indexed manifest | values are `dependencies`, `dependents`, `both` | text or JSON payload remains on stdout; invalid value exits `2` | parser, renderer, process |

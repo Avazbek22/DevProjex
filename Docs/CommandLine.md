@@ -520,7 +520,9 @@ parent directory must already exist.
 detector errors are never emitted. The number of descriptors equals the combined
 effective matched counts from the same inspection session. `--fail-on-findings`
 writes the requested report and returns policy exit code `3` when any effective
-finding exists; unlike `--strict`, it does not gate ordinary diagnostics.
+finding exists or when a selected text file could not be inspected. A broken
+stdout consumer never upgrades that policy result to success. Unlike `--strict`,
+it does not gate ordinary diagnostics.
 Either findings option runs count-only secret detection when it was otherwise
 disabled, but never changes `--hide-secrets` or the emitted content. JSON adds
 `findingCount`; `findings` remains conditional on `--findings`. Text reports

@@ -1189,6 +1189,35 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Fact]
+	public async Task FailOnFindingsReturnsPolicyFailureWhenSelectedTextCannotBeScanned()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		await File.WriteAllTextAsync(
+			Path.Combine(workspace.ProjectRoot, "oversized.txt"),
+			new string('x', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1)),
+			TestContext.Current.CancellationToken);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--git-mode", "none",
+				"--fail-on-findings",
+				"--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(0, document.RootElement.GetProperty("findingCount").GetInt32());
+		Assert.Single(document.RootElement
+			.GetProperty("contentInspection")
+			.GetProperty("unscannableFiles")
+			.EnumerateArray());
+	}
+
 	[Theory]
 	[InlineData("hidden-files")]
 	[InlineData("dot-files")]

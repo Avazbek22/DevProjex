@@ -202,7 +202,9 @@ unchanged-file outcomes and do not use this code.
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
 `--fail-on-findings` likewise writes the requested document before returning
-policy exit code `3` when effective findings exist; the two gates are independent.
+policy exit code `3` when effective findings exist or selected text could not be
+inspected. A broken output pipe does not turn that policy result into success; the
+two gates are independent.
 
 ## Related-files JSON
 
