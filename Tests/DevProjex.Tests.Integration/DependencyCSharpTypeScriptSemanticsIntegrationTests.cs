@@ -6,6 +6,42 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New094_PreprocessorDependentReferencesAreHonestlyUnresolved()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var debug = fixture.CreateFile("DebugValue.cs", "public sealed class DebugValue { }");
+		var release = fixture.CreateFile("ReleaseValue.cs", "public sealed class ReleaseValue { }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"""
+			public sealed class Consumer
+			{
+			#if DEBUG
+			    DebugValue Value;
+			#else
+			    ReleaseValue Value;
+			#endif
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, debug, release, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var conditional = result.Edges.Where(edge => edge.Source == "Consumer.cs").ToArray();
+		Assert.Equal(2, conditional.Length);
+		Assert.All(conditional, edge =>
+		{
+			Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+			Assert.Null(edge.Target);
+			Assert.Equal("C# preprocessor configuration is not available", Assert.Single(edge.Reasons));
+		});
+	}
+
+	[Fact]
 	public async Task New092_NestedGenericSegmentIsHonestlyUnresolved()
 	{
 		using var fixture = new TemporaryDirectory();

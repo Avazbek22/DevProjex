@@ -219,6 +219,13 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				.SelectMany(capture => ExtractGenericAliasReferences(context, capture, namespaces)))
 			.Where(reference => !declarationOccurrences.Contains((reference.SourceStartIndex, reference.Name)))
 			.Take(limits.MaximumFactsPerFile + 1).ToArray();
+		if (ConditionalCompilationRegex().IsMatch(context.Source))
+		{
+			references = references.Select(static reference => reference with
+			{
+				Reason = "C# preprocessor configuration is not available"
+			}).ToArray();
+		}
 		if (declarations.Count + references.Length > limits.MaximumFactsPerFile)
 			return Failure(context, "fact limit exceeded");
 		return Complete(
@@ -579,6 +586,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 	[GeneratedRegex(@"\b(?:global\s+)?using\s+(?<static>static\s+)?(?:(?<alias>[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)\s*=\s*)?(?<target>(?:global::)?[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*(?:(?:\.|::)[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)*)(?<arguments>\s*<[\s\S]+>)?\s*;", RegexOptions.CultureInvariant)] private static partial Regex UsingRegex();
 	[GeneratedRegex(@"(?<name>[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)", RegexOptions.CultureInvariant)] private static partial Regex TypeParameterRegex();
 	[GeneratedRegex(@"(?:global::)?[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*(?:(?:\.|::)[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeNameRegex();
+	[GeneratedRegex(@"^[\t ]*#(?:if|elif|else|endif)\b", RegexOptions.Multiline | RegexOptions.CultureInvariant)] private static partial Regex ConditionalCompilationRegex();
 }
 
 internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLanguageAdapter
