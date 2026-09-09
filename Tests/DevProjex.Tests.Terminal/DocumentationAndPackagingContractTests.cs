@@ -332,6 +332,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("macos-latest", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("Publish-HeadlessPackages.ps1", workflow, StringComparison.Ordinal);
 		Assert.Contains("Test-ResumableHeadlessPublish.ps1", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("'Scripts/ci/Test-ResumableHeadlessPublish.ps1'", workflow, StringComparison.Ordinal);
 		Assert.Contains("source-sha.txt", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("<clear />", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("NUGET_PACKAGES", buildWorkflow, StringComparison.Ordinal);
@@ -453,6 +454,8 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("devprojex-container-images", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("container-images.json", containerBuildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("Publish-HeadlessContainer.ps1", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("'Scripts/ContainerPublishing.ps1'", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("'Scripts/ci/Test-ContainerPromotionPolicy.ps1'", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("steps.promote.outputs.manifest_digest", containerWorkflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("docker/build-push-action", containerWorkflow, StringComparison.Ordinal);
 		Assert.Contains("packages: write", containerWorkflow, StringComparison.Ordinal);

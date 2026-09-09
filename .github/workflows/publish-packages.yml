@@ -27,6 +27,7 @@ on:
       - 'Packaging/Headless/**'
       - 'Packaging/Npm/**'
       - 'Scripts/*Headless*'
+      - 'Scripts/ci/Test-ResumableHeadlessPublish.ps1'
       - 'Tests/DevProjex.Tests.Terminal/**'
       - 'Directory.Build.props'
       - 'Directory.Build.targets'
@@ -41,6 +42,7 @@ on:
       - 'Packaging/Headless/**'
       - 'Packaging/Npm/**'
       - 'Scripts/*Headless*'
+      - 'Scripts/ci/Test-ResumableHeadlessPublish.ps1'
       - 'Scripts/ci/Test-ReleaseVersion.ps1'
       - 'Directory.Build.targets'
   workflow_dispatch:
