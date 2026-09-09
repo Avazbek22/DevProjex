@@ -52,8 +52,11 @@ C# compilation scopes come from `.csproj` ownership and `ProjectReference` entri
 Both `/` and `\` in an MSBuild `Include` are normalized as project-reference separators on every OS;
 this normalization never applies to ordinary Unix filenames. Project-reference visibility is
 transitive, matching the SDK default: if A references B and B references C, source in A can resolve
-declarations from C. The configuration model does not yet expose
-`DisableTransitiveProjectReferences`; a project that opts out cannot currently narrow that visibility.
+declarations from C. A literal `DisableTransitiveProjectReferences=true` narrows the owning project's
+visibility to itself and its direct project references; literal `false` and the SDK default remain
+transitive. A non-literal value is diagnosed and treated as absent because DevProjex does not evaluate
+MSBuild properties. Static `Compile Include`, `Compile Remove`, and linked-file membership likewise
+remain unsupported: the affected compilation scope stays unresolved instead of guessing membership.
 Global usings and aliases are shared
 within the owning scope. Non-global usings and aliases apply only inside their compilation-unit or
 namespace-block lexical scope; repeated blocks for the same namespace do not leak aliases into one
@@ -145,6 +148,12 @@ output uses the same three values in a trusted `[Dependency configuration]` line
 once, then derives all scope, package-name, package-map, and external-package projections from that same
 snapshot, so a result cannot mix two versions of one configuration file. UTF-8 control files are
 accepted with or without a BOM; malformed byte sequences remain corrupt.
+`pyproject.toml` is parsed as TOML, including multiline dependency arrays, optional dependency tables,
+Poetry dependency tables, extras, environment markers, and named direct-URL requirements. Malformed
+TOML is corrupt rather than a partially accepted configuration. When multiple otherwise-valid owning
+configuration files of one language have the same root, ownership is diagnosed as unsupported instead
+of choosing one by filename order. A nested Python configuration owns only its subtree; files outside
+that subtree retain the root fallback scope.
 
 Python relative imports start at the source package. `from module import Name` first checks classes,
 functions, and static import aliases provided by either an ordinary module or a package initializer.
@@ -158,10 +167,17 @@ Only a package may then fall back to a child module of that name. Regular and na
 combined as package entities rather than being represented by an arbitrary file under the namespace;
 a requested child is resolved to that child. A package initializer takes precedence over a same-named module file. Within a package,
 a statically provided or re-exported name is resolved before a same-named child module. `.py` is
-preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and `__all__` affects
+preferred to `.pyi`, bounded static re-exports through `__init__` are followed, and the last repeated
+unconditional binding wins. A conditional re-export remains unresolved because its active branch is
+not evaluated. A direct dotted import binds its top-level name unless it has an alias.
+Every dotted segment must remain within the regular or namespace package selected by its parent; an
+ordinary module cannot acquire children from a same-named directory. `__all__` affects
 wildcard imports only. A missing imported name remains `Unresolved` with a constant reason instead of
 turning the existence of the module into evidence for that name. Relative imports that would escape the top-level package remain unresolved.
-Dynamic `__all__`, `setup.py`, and import hooks are not executed and remain unresolved. Separate
+Only a module-level assignment can establish `__all__` policy; docstrings and assignments inside a
+function or class do not. Module-level value assignments and wildcard re-export expansion are not
+indexed, and report explicit unresolved limitations rather than guessed bindings. Dynamic `__all__`,
+`setup.py`, and import hooks are not executed and remain unresolved. Separate
 complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;
 otherwise only names found in both snapshots are classified as external.

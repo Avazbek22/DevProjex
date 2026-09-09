@@ -570,6 +570,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		{
 			var text = materialization.Read(node);
 			return CreateCapture(captureName, node, text, null, 0, false,
+				captureName == "context.module_assignment"
+					? FindContainingDeclaration(node, materialization)
+					: null,
 				evidence: OneLineEvidence(text));
 		}
 
@@ -653,10 +656,17 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private static string? FindImportOwner(
 		string captureName,
 		Node node,
-		NodeTextMaterializationCounter materialization) =>
-		captureName is "import.direct" or "import.from"
-			? FindContainingDeclaration(node, materialization)
-			: null;
+		NodeTextMaterializationCounter materialization)
+	{
+		if (captureName is not ("import.direct" or "import.from")) return null;
+		var declaration = FindContainingDeclaration(node, materialization);
+		if (declaration is not null) return declaration;
+		for (var parent = node.Parent; parent is not null; parent = parent.Parent)
+			if (parent.Type is "if_statement" or "for_statement" or "while_statement" or
+			    "try_statement" or "with_statement" or "match_statement")
+				return "$conditional-import";
+		return null;
+	}
 
 	private static DependencySyntaxCapture CreateCapture(
 		string captureName,

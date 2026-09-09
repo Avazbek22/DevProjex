@@ -6,6 +6,8 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using DevProjex.Application.Dependencies;
 using DevProjex.Application.Services;
+using Tomlyn;
+using Tomlyn.Model;
 
 namespace DevProjex.Infrastructure.Dependencies;
 
@@ -22,6 +24,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	internal const string TypeScriptModuleResolutionReason = "tsconfig moduleResolution is not supported";
 	internal const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
 	internal const string ProjectReferenceConditionReason = "project reference condition could not be evaluated safely";
+	internal const string CompileItemMembershipReason = "C# Compile item membership is not supported";
+	internal const string DisableTransitiveProjectReferencesReason = "DisableTransitiveProjectReferences could not be evaluated safely";
+	internal const string InvalidPyProjectReason = "invalid pyproject TOML";
+	internal const string AmbiguousConfigurationOwnershipReason = "multiple owning dependency configurations";
 	private readonly IDependencyControlFileReader _reader;
 	private readonly IDependencyPathMetadata _pathMetadata;
 
@@ -63,6 +69,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var csharpProjects = new Dictionary<string, (
 			string Scope,
 			string[] References,
+			bool DisableTransitiveReferences,
 			DependencyConfigurationState State,
 			string? Reason)>(PathComparer);
 		var snapshots = new Dictionary<string, Task<DependencyControlFileSnapshot>>(PathComparer);
@@ -230,8 +237,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			var scope = "csharp:" + PortableRelative(root, project);
 			var parsed = snapshot.State == DependencyConfigurationState.Valid
 				? ParseProjectReferences(project, snapshot.Content)
-				: ConfigurationParseResult<string[]>.Failure([], snapshot.State, snapshot.Reason);
-			var references = parsed.Value;
+				: ConfigurationParseResult<CSharpProjectConfiguration>.Failure(
+					CSharpProjectConfiguration.Default, snapshot.State, snapshot.Reason);
+			var references = parsed.Value.ProjectReferences;
 			foreach (var reference in references.Where(reference => !manifest.Contains(reference)))
 			{
 				if (IsNetworkPath(reference) || !IsWithin(root, reference) ||
@@ -246,8 +254,21 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				if (!exists)
 					absentControlFiles.Add(reference);
 			}
-			csharpProjects[project] = (scope, references, parsed.State, parsed.Reason);
+			csharpProjects[project] = (
+				scope,
+				references,
+				parsed.Value.DisableTransitiveProjectReferences,
+				parsed.State,
+				parsed.Reason);
 			AddDiagnostic(project, parsed.State, parsed.Reason, scope);
+			if (parsed.Value.HasInvalidDisableTransitiveProjectReferences)
+			{
+				diagnostics.Add(new DependencyConfigurationDiagnostic(
+					PortableRelative(root, project),
+					DependencyConfigurationState.UnsupportedSemantics,
+					DisableTransitiveProjectReferencesReason,
+					[scope]));
+			}
 		}
 		foreach (var pair in csharpProjects.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
 		{
@@ -269,7 +290,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				true)
 			{
 				ConfigurationState = pair.Value.State,
-				ConfigurationDiagnostic = pair.Value.Reason
+				ConfigurationDiagnostic = pair.Value.Reason,
+				DisableTransitiveProjectReferences = pair.Value.DisableTransitiveReferences
 			});
 		}
 
@@ -308,24 +330,28 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			AddFingerprint(configPath, snapshot);
 			var directory = Path.GetDirectoryName(configPath)!;
 			var scopeId = "python:" + PortableRelative(root, configPath);
-			AddDiagnostic(configPath, snapshot.State, snapshot.Reason, scopeId);
+			var python = snapshot.State == DependencyConfigurationState.Valid
+				? ParsePythonConfiguration(configPath, snapshot.Content)
+				: ConfigurationParseResult<PythonConfiguration>.Failure(
+					PythonConfiguration.Default, snapshot.State, snapshot.Reason);
+			AddDiagnostic(configPath, python.State, python.Reason, scopeId);
 			scopes.Add(new DependencyScopeDescriptor(
 				scopeId,
 				directory,
 				LanguageId.Python,
 				[], null, false,
 				new Dictionary<string, IReadOnlyList<string>>(), null,
-				snapshot.State == DependencyConfigurationState.Valid
-					? ParsePythonDependencies(configPath, snapshot.Content)
-					: new HashSet<string>(),
+				python.Value.Dependencies,
 				new[] { directory, Path.Combine(directory, "src") },
 				true,
-				snapshot.State == DependencyConfigurationState.Valid ? ParsePythonVersion(snapshot.Content) : null)
+				python.Value.Version)
 			{
-				ConfigurationState = snapshot.State,
-				ConfigurationDiagnostic = snapshot.Reason
+				ConfigurationState = python.State,
+				ConfigurationDiagnostic = python.Reason
 			});
 		}
+
+		MarkAmbiguousScopeOwnership(scopes, diagnostics, root);
 
 		AddFallbackScope(scopes, root, LanguageId.CSharp);
 		AddFallbackScope(scopes, root, LanguageId.TypeScript);
@@ -375,12 +401,29 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		return result;
 	}
 
-	private static ConfigurationParseResult<string[]> ParseProjectReferences(string projectPath, string content)
+	private static ConfigurationParseResult<CSharpProjectConfiguration> ParseProjectReferences(string projectPath, string content)
 	{
 		try
 		{
 			var directory = Path.GetDirectoryName(projectPath)!;
-			var elements = XDocument.Parse(content).Descendants()
+			var document = XDocument.Parse(content);
+			var compileItems = document.Descendants()
+				.Where(static element => element.Name.LocalName == "Compile")
+				.Where(static element => element.Attributes().Any(attribute =>
+					attribute.Name.LocalName is "Include" or "Remove" or "Link"))
+				.ToArray();
+			var disableValues = document.Descendants()
+				.Where(static element => element.Name.LocalName == "DisableTransitiveProjectReferences")
+				.Select(static element => element.Value.Trim())
+				.ToArray();
+			var disableTransitive = disableValues.LastOrDefault() switch
+			{
+				var candidate when IsLiteralTrue(candidate) => true,
+				_ => false
+			};
+			var invalidDisableTransitive = disableValues.Any(static value =>
+				!IsLiteralTrue(value) && !IsLiteralFalse(value));
+			var elements = document.Descendants()
 				.Where(static element => element.Name.LocalName == "ProjectReference")
 				.Where(static element => !IsLiteralFalse(element.Attribute("ReferenceOutputAssembly")?.Value))
 				.ToArray();
@@ -397,17 +440,28 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				.Where(static value => !string.IsNullOrWhiteSpace(value))
 				.Select(value => Path.GetFullPath(Path.Combine(directory, NormalizeMsBuildInclude(value!))))
 				.Distinct(PathComparer).Order(StringComparer.Ordinal).ToArray();
+			var projectConfiguration = new CSharpProjectConfiguration(
+				references,
+				disableTransitive,
+				invalidDisableTransitive);
+			if (compileItems.Length > 0)
+				return ConfigurationParseResult<CSharpProjectConfiguration>.Failure(
+					projectConfiguration,
+					DependencyConfigurationState.UnsupportedSemantics,
+					CompileItemMembershipReason);
 			return hasUnknownCondition
-				? ConfigurationParseResult<string[]>.Failure(
-					references,
+				? ConfigurationParseResult<CSharpProjectConfiguration>.Failure(
+					projectConfiguration,
 					DependencyConfigurationState.UnsupportedSemantics,
 					ProjectReferenceConditionReason)
-				: ConfigurationParseResult<string[]>.Valid(references);
+				: ConfigurationParseResult<CSharpProjectConfiguration>.Valid(projectConfiguration);
 		}
 		catch (System.Xml.XmlException)
 		{
-			return ConfigurationParseResult<string[]>.Failure(
-				[], DependencyConfigurationState.Corrupt, "invalid project XML");
+			return ConfigurationParseResult<CSharpProjectConfiguration>.Failure(
+				CSharpProjectConfiguration.Default,
+				DependencyConfigurationState.Corrupt,
+				"invalid project XML");
 		}
 	}
 
@@ -761,11 +815,94 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	private static PackageTargetDescriptor UnsupportedPackageTarget(string reason) =>
 		new(PackageTargetKind.Unsupported, null, [], reason);
 
+	private static ConfigurationParseResult<PythonConfiguration> ParsePythonConfiguration(
+		string path,
+		string content)
+	{
+		if (!Path.GetFileName(path).Equals("pyproject.toml", StringComparison.OrdinalIgnoreCase))
+		{
+			return ConfigurationParseResult<PythonConfiguration>.Valid(new PythonConfiguration(
+				ParseSetupDependencies(content),
+				ParsePythonVersion(content)));
+		}
+
+		try
+		{
+			var root = TomlSerializer.Deserialize<TomlTable>(content) ??
+				throw new InvalidOperationException("TOML root is unavailable.");
+			var dependencies = new HashSet<string>(StringComparer.Ordinal);
+			string? version = null;
+			if (TryGetTable(root, "project", out var project))
+			{
+				AddTomlRequirements(project, "dependencies", dependencies);
+				if (project.TryGetValue("requires-python", out var requiresPython) && requiresPython is string constraint)
+					version = ParsePythonVersionConstraint(constraint);
+				if (TryGetTable(project, "optional-dependencies", out var optional))
+					foreach (var value in optional.Values.OfType<TomlArray>())
+						AddTomlRequirements(value, dependencies);
+			}
+			if (TryGetTable(root, "tool", out var tool) &&
+			    TryGetTable(tool, "poetry", out var poetry))
+			{
+				if (TryGetTable(poetry, "dependencies", out var poetryDependencies))
+				{
+					foreach (var key in poetryDependencies.Keys)
+						AddRequirement(key, dependencies);
+					if (poetryDependencies.TryGetValue("python", out var pythonConstraint) && pythonConstraint is string constraint)
+						version ??= ParsePythonVersionConstraint(constraint);
+				}
+				if (TryGetTable(poetry, "group", out var groups))
+				{
+					foreach (var group in groups.Values.OfType<TomlTable>())
+						if (TryGetTable(group, "dependencies", out var groupDependencies))
+							foreach (var key in groupDependencies.Keys)
+								AddRequirement(key, dependencies);
+				}
+			}
+			return ConfigurationParseResult<PythonConfiguration>.Valid(
+				new PythonConfiguration(dependencies, version));
+		}
+		catch (Exception exception) when (exception is TomlException or InvalidOperationException)
+		{
+			return ConfigurationParseResult<PythonConfiguration>.Failure(
+				PythonConfiguration.Default,
+				DependencyConfigurationState.Corrupt,
+				InvalidPyProjectReason);
+		}
+	}
+
+	private static bool TryGetTable(TomlTable table, string key, out TomlTable value)
+	{
+		if (table.TryGetValue(key, out var candidate) && candidate is TomlTable nested)
+		{
+			value = nested;
+			return true;
+		}
+		value = null!;
+		return false;
+	}
+
+	private static void AddTomlRequirements(TomlTable table, string key, ISet<string> result)
+	{
+		if (table.TryGetValue(key, out var value) && value is TomlArray requirements)
+			AddTomlRequirements(requirements, result);
+	}
+
+	private static void AddTomlRequirements(TomlArray requirements, ISet<string> result)
+	{
+		foreach (var requirement in requirements.OfType<string>())
+			AddRequirement(requirement, result);
+	}
+
 	private static string? ParsePythonVersion(string content)
 	{
 		var match = PythonVersionRegex.Match(content);
-		if (!match.Success) return null;
-		var constraint = match.Groups["constraint"].Value.Replace(" ", string.Empty, StringComparison.Ordinal);
+		return match.Success ? ParsePythonVersionConstraint(match.Groups["constraint"].Value) : null;
+	}
+
+	private static string? ParsePythonVersionConstraint(string value)
+	{
+		var constraint = value.Replace(" ", string.Empty, StringComparison.Ordinal);
 		if (constraint.Contains(">=3.13", StringComparison.Ordinal) ||
 		    constraint.Contains("==3.13", StringComparison.Ordinal) ||
 		    constraint.Contains("~=3.13", StringComparison.Ordinal))
@@ -777,12 +914,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		return null;
 	}
 
-	private static IReadOnlySet<string> ParsePythonDependencies(string path, string content)
+	private static IReadOnlySet<string> ParseSetupDependencies(string content)
 	{
 		var result = new HashSet<string>(StringComparer.Ordinal);
-		var isToml = Path.GetFileName(path).Equals("pyproject.toml", StringComparison.OrdinalIgnoreCase);
 		var section = string.Empty;
-		var dependencyList = false;
 		var setupRequirementList = false;
 		foreach (var line in content.Split('\n'))
 		{
@@ -790,25 +925,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			if (value.StartsWith('[') && value.EndsWith(']'))
 			{
 				section = value.Trim('[', ']').Trim();
-				dependencyList = false;
 				setupRequirementList = false;
-				continue;
-			}
-			if (isToml)
-			{
-				var optional = section.Equals("project.optional-dependencies", StringComparison.OrdinalIgnoreCase);
-				var poetry = section.Equals("tool.poetry.dependencies", StringComparison.OrdinalIgnoreCase) ||
-				             section.Equals("tool.poetry.group.dev.dependencies", StringComparison.OrdinalIgnoreCase);
-				if (section.Equals("project", StringComparison.OrdinalIgnoreCase) &&
-				    value.StartsWith("dependencies", StringComparison.OrdinalIgnoreCase) &&
-				    value.Contains('='))
-					dependencyList = !value.Contains(']');
-				if (dependencyList || optional ||
-				    section.Equals("project", StringComparison.OrdinalIgnoreCase) && value.StartsWith("dependencies", StringComparison.OrdinalIgnoreCase))
-					AddQuotedRequirements(value, result);
-				if (poetry && value.Contains('='))
-					AddRequirement(value[..value.IndexOf('=')], result);
-				if (dependencyList && value.Contains(']')) dependencyList = false;
 				continue;
 			}
 
@@ -834,25 +951,16 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		return result;
 	}
 
-	private static void AddQuotedRequirements(string value, ISet<string> result)
-	{
-		foreach (Match match in QuotedRequirementRegex.Matches(value))
-			AddRequirement(match.Groups["requirement"].Value, result);
-	}
-
 	private static void AddRequirement(string value, ISet<string> result)
 	{
 		var candidate = value.Trim().Trim('"', '\'', ',', '[', ']');
-		if (candidate.Length == 0 || candidate.Contains("://", StringComparison.Ordinal) ||
+		if (candidate.Length == 0 || candidate.Contains("://", StringComparison.Ordinal) && !candidate.Contains('@') ||
 		    candidate.Contains("::", StringComparison.Ordinal)) return;
 		var match = RequirementNameRegex.Match(candidate);
 		if (match.Success && !match.Groups["name"].Value.Equals("python", StringComparison.OrdinalIgnoreCase))
 			result.Add(match.Groups["name"].Value.Replace('-', '_'));
 	}
 
-	private static readonly Regex QuotedRequirementRegex = new(
-		"[\\\"'](?<requirement>[^\\\"']+)[\\\"']",
-		RegexOptions.CultureInvariant);
 	private static readonly Regex RequirementNameRegex = new(
 		"^(?<name>[A-Za-z0-9][A-Za-z0-9_.-]*)",
 		RegexOptions.CultureInvariant);
@@ -892,6 +1000,44 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 
 	private static bool IsTypeScriptConfig(string path) => Path.GetFileName(path) is "tsconfig.json" or "jsconfig.json";
 	private static bool IsPythonConfig(string path) => Path.GetFileName(path) is "pyproject.toml" or "setup.cfg";
+	private static void MarkAmbiguousScopeOwnership(
+		IList<DependencyScopeDescriptor> scopes,
+		ICollection<DependencyConfigurationDiagnostic> diagnostics,
+		string root)
+	{
+		var ambiguous = scopes
+			.Where(static scope => scope.HasConfiguration)
+			.GroupBy(scope => (scope.LanguageId, Root: Path.GetFullPath(scope.Root)))
+			.Where(static group => group.Count() > 1 && group.All(scope =>
+				scope.ConfigurationState == DependencyConfigurationState.Valid))
+			.ToArray();
+		foreach (var group in ambiguous)
+		{
+			var scopeIds = group.Select(static scope => scope.ScopeId)
+				.Order(StringComparer.Ordinal).ToArray();
+			foreach (var scope in group)
+			{
+				var index = scopes.IndexOf(scope);
+				scopes[index] = scope with
+				{
+					ConfigurationState = DependencyConfigurationState.UnsupportedSemantics,
+					ConfigurationDiagnostic = AmbiguousConfigurationOwnershipReason
+				};
+				diagnostics.Add(new DependencyConfigurationDiagnostic(
+					ScopeConfigurationPath(scope.ScopeId),
+					DependencyConfigurationState.UnsupportedSemantics,
+					AmbiguousConfigurationOwnershipReason,
+					scopeIds));
+			}
+		}
+	}
+
+	private static string ScopeConfigurationPath(string scopeId)
+	{
+		var separator = scopeId.IndexOf(':');
+		return separator < 0 ? scopeId : scopeId[(separator + 1)..];
+	}
+
 	private static string? FindNearestManifestFile(string directory, string root, string name, IReadOnlySet<string> manifest)
 	{
 		while (IsWithin(root, directory))
@@ -905,7 +1051,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	}
 	private static void AddFallbackScope(ICollection<DependencyScopeDescriptor> scopes, string root, LanguageId language)
 	{
-		if (scopes.Any(scope => scope.LanguageId == language)) return;
+		if (scopes.Any(scope => scope.LanguageId == language &&
+		    (language != LanguageId.Python || PathComparer.Equals(
+			    Path.GetFullPath(scope.Root), Path.GetFullPath(root))))) return;
 		scopes.Add(new DependencyScopeDescriptor(
 			$"root:{language.ToString().ToLowerInvariant()}", root, language, [],
 			language == LanguageId.TypeScript ? "bundler" : null, false,
@@ -942,6 +1090,17 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			T value,
 			DependencyConfigurationState state,
 			string? reason) => new(value, state, reason ?? "configuration is unavailable");
+	}
+	private sealed record CSharpProjectConfiguration(
+		string[] ProjectReferences,
+		bool DisableTransitiveProjectReferences,
+		bool HasInvalidDisableTransitiveProjectReferences)
+	{
+		public static CSharpProjectConfiguration Default { get; } = new([], false, false);
+	}
+	private sealed record PythonConfiguration(IReadOnlySet<string> Dependencies, string? Version)
+	{
+		public static PythonConfiguration Default { get; } = new(new HashSet<string>(), null);
 	}
 	private sealed record TypeScriptConfiguration(
 		string ModuleResolution,

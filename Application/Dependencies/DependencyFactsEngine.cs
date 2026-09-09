@@ -1714,10 +1714,14 @@ public sealed class DependencyFactsEngine : IDisposable
 				? import.Specifier
 				: string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
 			var candidates = ProbePythonModule(source, module).ToList();
-			var moduleEntityExists = candidates.Count > 0;
+			var moduleCandidates = candidates.ToArray();
+			var moduleEntityExists = moduleCandidates.Length > 0;
 			if (import.ImportedName is { Length: > 0 } and not "*")
 			{
-				var provided = candidates
+				if (moduleCandidates.Any(candidate => HasConditionalPythonBinding(candidate, import.ImportedName)))
+					return Edge(source, import, ResolutionStatus.Unresolved, null,
+						"conditional Python re-export bindings are not indexed", []);
+				var provided = moduleCandidates
 					.SelectMany(candidate => ResolvePythonStaticBinding(
 						candidate,
 						import.ImportedName,
@@ -1743,8 +1747,16 @@ public sealed class DependencyFactsEngine : IDisposable
 						return FinishImport(source, import, candidates);
 				}
 				if (candidates.Count == 0 && moduleEntityExists)
+				{
+					if (moduleCandidates.Any(candidate => HasPythonModuleAssignment(candidate, import.ImportedName)))
+						return Edge(source, import, ResolutionStatus.Unresolved, null,
+							"Python module assignment bindings are not indexed", []);
+					if (moduleCandidates.Any(HasPythonWildcardReExport))
+						return Edge(source, import, ResolutionStatus.Unresolved, null,
+							"Python wildcard re-export bindings are not indexed", []);
 					return Edge(source, import, ResolutionStatus.Unresolved, null,
 						"name not found in module", []);
+				}
 			}
 			if (candidates.Count == 0 && !moduleEntityExists)
 			{
@@ -1776,7 +1788,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				SimpleName(declaration.Identity.QualifiedName) == name))
 				return [candidate];
 			foreach (var import in facts.Imports.Where(import => import.ContainingDeclaration is null &&
-				string.Equals(import.Alias ?? import.ImportedName ?? import.Specifier.Split('.').Last(), name, StringComparison.Ordinal)))
+				string.Equals(PythonBoundName(import), name, StringComparison.Ordinal)).Reverse())
 			{
 				var sourceModule = PythonModule(facts);
 				var sourcePackage = Path.GetFileNameWithoutExtension(candidate) == "__init__"
@@ -1806,8 +1818,11 @@ public sealed class DependencyFactsEngine : IDisposable
 						.Order(StringComparer.Ordinal)
 						.ToArray();
 					if (nested.Length > 0) return nested;
-					var childTargets = ProbePythonModule(facts, child).ToArray();
-					if (childTargets.Length > 0) return childTargets;
+					if (moduleTargets.Any(IsPythonPackageInitializer))
+					{
+						var childTargets = ProbePythonModule(facts, child).ToArray();
+						if (childTargets.Length > 0) return childTargets;
+					}
 				}
 				else
 				{
@@ -1820,41 +1835,105 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private int CountPythonNamespacePortions(FileFacts source, string module)
 		{
-			if (module.Length == 0) return 0;
-			var relative = module.Replace('.', '/').Trim('/') + '/';
-			var portions = 0;
-			foreach (var root in PythonRootPrefixes(source))
+			var segments = module.Split('.', StringSplitOptions.RemoveEmptyEntries);
+			if (segments.Length == 0) return 0;
+			var searchDirectories = PythonRootPrefixes(source).ToList();
+			for (var segmentIndex = 0; segmentIndex < segments.Length; segmentIndex++)
 			{
-				var prefix = string.Join('/', new[] { root, relative }.Where(static value => value.Length > 0));
-				var init = prefix + "__init__.py";
-				if (!_files.ContainsKey(init) && _manifestDirectoryPrefixes.Contains(prefix))
-					portions++;
+				var namespaceDirectories = new List<string>();
+				string? concrete = null;
+				foreach (var directory in searchDirectories)
+				{
+					var prefix = string.Join('/', new[] { directory, segments[segmentIndex] }
+						.Where(static value => value.Length > 0));
+					concrete = new[]
+					{
+						prefix + "/__init__.py",
+						prefix + ".py",
+						prefix + "/__init__.pyi",
+						prefix + ".pyi"
+					}.FirstOrDefault(_files.ContainsKey);
+					if (concrete is not null) break;
+					if (_manifestDirectoryPrefixes.Contains(prefix + '/'))
+						namespaceDirectories.Add(prefix);
+				}
+				var isLast = segmentIndex == segments.Length - 1;
+				if (concrete is not null)
+				{
+					if (isLast || !IsPythonPackageInitializer(concrete)) return 0;
+					searchDirectories = [concrete[..concrete.LastIndexOf('/')]];
+					continue;
+				}
+				if (namespaceDirectories.Count == 0) return 0;
+				if (isLast) return namespaceDirectories.Count;
+				searchDirectories = namespaceDirectories;
 			}
-			return portions;
+			return 0;
 		}
 
 		private IEnumerable<string> ProbePythonModule(FileFacts source, string module)
 		{
-			var relative = module.Replace('.', '/');
-			foreach (var root in PythonRootPrefixes(source))
+			var segments = module.Split('.', StringSplitOptions.RemoveEmptyEntries);
+			if (segments.Length == 0) yield break;
+			var searchDirectories = PythonRootPrefixes(source).ToList();
+			for (var segmentIndex = 0; segmentIndex < segments.Length; segmentIndex++)
 			{
-				var prefix = string.Join('/', new[] { root, relative }.Where(static value => value.Length > 0));
-				var implementation = new[] { prefix + "/__init__.py", prefix + ".py" }
-					.FirstOrDefault(_files.ContainsKey);
-				if (implementation is not null)
+				var isLast = segmentIndex == segments.Length - 1;
+				var namespaceDirectories = new List<string>();
+				string? concrete = null;
+				var concreteIsPackage = false;
+				foreach (var directory in searchDirectories)
 				{
-					yield return implementation;
-					yield break;
+					var prefix = string.Join('/', new[] { directory, segments[segmentIndex] }
+						.Where(static value => value.Length > 0));
+					concrete = new[]
+					{
+						prefix + "/__init__.py",
+						prefix + ".py",
+						prefix + "/__init__.pyi",
+						prefix + ".pyi"
+					}.FirstOrDefault(_files.ContainsKey);
+					if (concrete is not null)
+					{
+						concreteIsPackage = IsPythonPackageInitializer(concrete);
+						break;
+					}
+					if (_manifestDirectoryPrefixes.Contains(prefix + '/'))
+						namespaceDirectories.Add(prefix);
 				}
-				var stub = new[] { prefix + "/__init__.pyi", prefix + ".pyi" }
-					.FirstOrDefault(_files.ContainsKey);
-				if (stub is not null)
+				if (concrete is not null)
 				{
-					yield return stub;
-					yield break;
+					if (isLast)
+					{
+						yield return concrete;
+						yield break;
+					}
+					else if (!concreteIsPackage)
+						yield break;
+					searchDirectories = [concrete[..concrete.LastIndexOf('/')]];
+					continue;
 				}
+				if (namespaceDirectories.Count == 0)
+					yield break;
+				searchDirectories = namespaceDirectories;
 			}
 		}
+
+		private bool HasPythonModuleAssignment(string candidate, string name) =>
+			_files.TryGetValue(candidate, out var facts) &&
+			facts.Aliases.ContainsKey("$python-assignment:" + name);
+
+		private bool HasPythonWildcardReExport(string candidate) =>
+			_files.TryGetValue(candidate, out var facts) && facts.Imports.Any(static import =>
+				import.ContainingDeclaration is null && import.IsWildcard);
+
+		private bool HasConditionalPythonBinding(string candidate, string name) =>
+			_files.TryGetValue(candidate, out var facts) && facts.Imports.Any(import =>
+				import.ContainingDeclaration == "$conditional-import" &&
+				string.Equals(PythonBoundName(import), name, StringComparison.Ordinal));
+
+		private static string PythonBoundName(ImportFact import) =>
+			import.Alias ?? import.ImportedName ?? import.Specifier.Split('.')[0];
 
 		private IReadOnlyList<string> PythonRootPrefixes(FileFacts source)
 		{
@@ -2321,6 +2400,15 @@ public sealed class DependencyFactsEngine : IDisposable
 			var result = new Dictionary<string, string[]>(StringComparer.Ordinal);
 			foreach (var scope in scopes.Values)
 			{
+				if (scope.LanguageId == LanguageId.CSharp && scope.DisableTransitiveProjectReferences)
+				{
+					result[scope.ScopeId] = new[] { scope.ScopeId }
+						.Concat(scope.ProjectReferences.Where(scopes.ContainsKey))
+						.Distinct(StringComparer.Ordinal)
+						.Order(StringComparer.Ordinal)
+						.ToArray();
+					continue;
+				}
 				var pending = new Queue<string>();
 				var visited = new HashSet<string>(StringComparer.Ordinal);
 				pending.Enqueue(scope.ScopeId);
