@@ -6,6 +6,32 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New059_ExportsFallbackArrayIsHonestlyUnresolved()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var package = fixture.CreateFile(
+			"package.json",
+			"{\"name\":\"fixture\",\"exports\":{\".\":[\"./missing.js\",\"./value.js\"]}}");
+		var target = fixture.CreateFile("value.ts", "export default 1;");
+		var source = fixture.CreateFile("main.ts", "import value from 'fixture';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "fixture");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Equal("package target kind is not supported", Assert.Single(edge.Reasons));
+	}
+
+	[Fact]
 	public async Task New023_DirectoryPackageMetadataDoesNotFallBackToIndex()
 	{
 		using var fixture = new TemporaryDirectory();
