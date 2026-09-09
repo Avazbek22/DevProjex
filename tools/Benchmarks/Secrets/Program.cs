@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
 using BenchmarkDotNet.Attributes;
@@ -21,7 +22,6 @@ if (args is ["--diagnostics"])
 BenchmarkSwitcher.FromAssembly(typeof(SecretDetectorBenchmarks).Assembly).Run(args);
 
 [MemoryDiagnoser]
-[SimpleJob(warmupCount: 3, iterationCount: 5)]
 public class SecretDetectorBenchmarks
 {
 	private readonly GitleaksSecretDetector _detector = new();
@@ -104,7 +104,6 @@ internal static class BenchmarkVerification
 }
 
 [MemoryDiagnoser]
-[SimpleJob(warmupCount: 3, iterationCount: 5)]
 public class LineRangeIndexBenchmarks
 {
 	private string _content = string.Empty;
@@ -151,5 +150,80 @@ public class LineRangeIndexBenchmarks
 	{
 		var index = new GitleaksSecretDetector.LineRangeIndex(_content);
 		return index.GetContainingLine(_content.Length - 1, 1).Start;
+	}
+}
+
+[MemoryDiagnoser]
+public class StopwordLookupBenchmarks
+{
+	private string[] _stopwords = [];
+	private SearchValues<string> _searchValues = null!;
+	private string _value = string.Empty;
+
+	[Params(2, 1446)]
+	public int StopwordCount { get; set; }
+
+	[Params(false, true)]
+	public bool Match { get; set; }
+
+	[GlobalSetup]
+	public void Setup()
+	{
+		_stopwords = ReadPinnedStopwordLists().Single(list => list.Length == StopwordCount);
+		_searchValues = SearchValues.Create(_stopwords, StringComparison.OrdinalIgnoreCase);
+		_value = Match
+			? $"prefix-{_stopwords[^1]}-suffix"
+			: "A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h";
+	}
+
+	[Benchmark(Baseline = true)]
+	public bool LinearContains()
+	{
+		foreach (var candidate in _stopwords)
+			if (_value.Contains(candidate, StringComparison.OrdinalIgnoreCase))
+				return true;
+		return false;
+	}
+
+	[Benchmark]
+	public bool SearchValuesContains() => _value.AsSpan().IndexOfAny(_searchValues) >= 0;
+
+	private static IReadOnlyList<string[]> ReadPinnedStopwordLists()
+	{
+		var directory = new DirectoryInfo(AppContext.BaseDirectory);
+		while (directory is not null)
+		{
+			var candidate = Path.Combine(directory.FullName, "Infrastructure", "Secrets", "Rules", "gitleaks-v8.30.1.toml");
+			if (File.Exists(candidate))
+				return ParseStopwordLists(File.ReadLines(candidate));
+			directory = directory.Parent;
+		}
+		throw new FileNotFoundException("Pinned Gitleaks rules were not found.");
+	}
+
+	private static IReadOnlyList<string[]> ParseStopwordLists(IEnumerable<string> lines)
+	{
+		var result = new List<string[]>();
+		List<string>? current = null;
+		foreach (var line in lines)
+		{
+			if (line.StartsWith("stopwords = [", StringComparison.Ordinal))
+			{
+				current = [];
+				continue;
+			}
+			if (current is null)
+				continue;
+			if (line == "]")
+			{
+				result.Add(current.ToArray());
+				current = null;
+				continue;
+			}
+			var value = line.Trim().TrimEnd(',');
+			if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+				current.Add(value[1..^1]);
+		}
+		return result;
 	}
 }

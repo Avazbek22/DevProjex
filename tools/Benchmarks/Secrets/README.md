@@ -6,9 +6,10 @@ Run from the repository root:
 dotnet run -c Release --project tools/Benchmarks/Secrets
 ```
 
-The BenchmarkDotNet suite uses five measured iterations with `MemoryDiagnoser`. Detector inputs
+The BenchmarkDotNet suite uses its default warm-up and measurement policy with `MemoryDiagnoser`. Detector inputs
 cover clean source, high-volume rejected candidates, and accepted findings; the line-index cases
-cover LF, CRLF, and mixed line endings. Operational counters for analyze, context export, the
+cover LF, CRLF, and mixed line endings. Stop-word cases compare the linear lookup with
+`SearchValues` on the actual pinned allowlist sizes. Operational counters for analyze, context export, the
 nonmaterializing measure path, and GUI metrics are reported by the focused integration tests that
 use `ContentPipelineDiagnostics` and `MetricsPipelineIoTestPoint`.
 

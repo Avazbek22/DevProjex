@@ -2,27 +2,56 @@
 
 Measured on 2026-09-09 on Windows 11, .NET SDK 10.0.401, on an Intel Core
 i9-13900HX. The baseline is `fe210408c2cc038cd2c1b0adf61a9130bab52b13`;
-the optimized product tree is `906da078`. BenchmarkDotNet used three warm-up
-iterations and five measured iterations. Values below are medians; the range
-or standard deviation is included so differences inside host noise stay visible.
+the candidate includes the lazy rule-path correction and the measured rollback
+of vectorized line indexing. BenchmarkDotNet used its default warm-up and
+measurement policy with `MemoryDiagnoser`.
 
 ## Detector and line index
 
-| Benchmark | Baseline median | Optimized median | Change | Baseline / optimized allocation |
+| Benchmark | Baseline mean (standard deviation) | Candidate mean (standard deviation) | Change | Baseline / candidate allocation |
 |---|---:|---:|---:|---:|
-| clean source | 529.6 us | 628.5 us | +18.7% | 416 B / 416 B |
-| rejected-candidate noise | 1,567.2 us | 1,317.5 us | -15.9% | 504 B / 504 B |
-| accepted findings | 3,656.0 us | 4,082.1 us | +11.7% | 131,936 B / 131,936 B |
-| line index, LF | 247.2 us | 245.1 us | -0.9% | 342,701 B / 342,699 B |
-| line index, CRLF | 305.5 us | 302.2 us | -1.1% | 342,701 B / 342,689 B |
-| line index, mixed | 277.2 us | 284.2 us | +2.5% | 342,707 B / 342,688 B |
+| clean source | 467.9 us (26.0 us) | 458.9 us (14.8 us) | -1.9% | 344 B / 416 B |
+| rejected-candidate noise | 1,122.4 us (27.7 us) | 1,032.5 us (16.3 us) | -8.0% | 432 B / 504 B |
+| accepted findings | 4,327.0 us (236.8 us) | 3,077.5 us (80.7 us) | -28.9% | 161,880 B / 131,936 B |
 
-The clean optimized run had a 149.9 us standard deviation versus 18.5 us at
-baseline; the accepted-finding run was 256.4 us versus 78.2 us. Those two
-regressions are therefore retained as observations, not claimed as stable
-effects. All line-index differences are within the measured spread. The
-rejected-candidate corpus was the intended hot path and improved while retaining
-the same allocation reading.
+The fixed 72-byte difference on the no-finding cases is retained in the table;
+the accepted-finding corpus removes 29,944 bytes per detection. The confidence
+intervals for clean source overlap slightly; no speedup is claimed there, only
+the absence of the previously observed regression.
+
+The rule-path change was also measured directly against the otherwise identical
+pre-fix tree. Clean source moved from 465.6 us (23.5 us standard deviation) to
+458.9 us (14.8 us); accepted findings from 3,087.5 us (140.5 us) to 3,077.5 us
+(80.7 us); rejected noise from 1,018.2 us (14.3 us) to 1,032.5 us (16.3 us).
+Those differences are within the observed distributions. The deterministic
+counter is the deciding evidence: a clean file performs zero rule-path allowlist
+evaluations, while matched rules evaluate each allowlist path only once.
+
+The earlier line-index experiment measured LF -0.9%, CRLF -1.1%, and mixed
++2.5%, all within run spread. It was reverted to the simpler scalar traversal.
+
+Stop-word lookup used the actual pinned lists (2 and 1,446 entries):
+
+| Stop words / result | Linear `Contains` | `SearchValues` | Allocation |
+|---|---:|---:|---:|
+| 2 / absent | 8.612 ns | 4.752 ns | 0 B / 0 B |
+| 2 / present | 10.143 ns | 13.901 ns | 0 B / 0 B |
+| 1,446 / absent | 5,476.239 ns | 104.359 ns | 0 B / 0 B |
+| 1,446 / present | 1,420.147 ns | 16.514 ns | 0 B / 0 B |
+
+The detector retains `SearchValues`: the dominant absent case wins for both
+real list sizes, and the large list wins in both branches.
+
+The six detector changes were accepted independently as follows:
+
+| Change | Measurement | Decision |
+|---|---|---|
+| defer match and capture materialization | accepted findings allocate 161,880 B at baseline and 131,936 B in the candidate | retained |
+| defer line lookup until an allowlist needs it | rejected-noise builds zero line contexts and runs 1,122.4 -> 1,032.5 us for the complete candidate | retained |
+| evaluate rule path allowlists on first match | zero evaluations on clean input; isolated timings overlap as recorded above | retained for eliminated work with no measured regression |
+| use immutable stop-word search | absent 2-word case is 1.8x faster and absent 1,446-word case is 52.5x faster | retained |
+| reuse group-zero matches | provider-shaped rules run zero secondary regex matches; rules with captures retain the reviewed path | retained |
+| vectorize line-start discovery | -1.1% to +2.5%, entirely inside noise | reverted |
 
 Operation-local diagnostics for the optimized detector were:
 
@@ -38,16 +67,16 @@ bounded second match.
 
 ## Real-process operations
 
-One unmeasured warm-up preceded five alternating baseline/optimized runs against
+One unmeasured warm-up preceded five alternating baseline/candidate runs against
 the DevProjex tree. Peak working set was sampled while each process was alive.
 
-| Operation | Baseline time, median (range) | Optimized time, median (range) | Baseline / optimized peak RSS | Interpretation |
+| Operation | Baseline time, median (range) | Candidate time, median (range) | Baseline / candidate peak RSS | Interpretation |
 |---|---:|---:|---:|---|
-| `analyze --format json` | 8,623.81 ms (8,230.73-12,603.79) | 8,012.67 ms (7,755.92-8,463.86) | 517.61 / 519.20 MiB | -7.1% time; RSS unchanged within 0.3% |
-| `export context --format json` | 8,847.50 ms (7,984.35-9,677.31) | 9,250.56 ms (8,219.17-10,755.82) | 518.38 / 516.53 MiB | +4.6% time, within run spread |
-| `export context --dry-run` | 7,913.79 ms (7,345.99-8,966.16) | 7,947.32 ms (6,876.98-8,272.02) | 513.63 / 511.97 MiB | +0.4% time, within noise |
+| `analyze --format json` | 5,473.91 ms (4,843.66-7,286.29) | 5,483.98 ms (4,704.49-6,575.66) | 521.07 / 519.55 MiB | +0.2%; distributions overlap |
+| `export context --format markdown` | 5,596.14 ms (5,403.49-7,273.35) | 5,677.66 ms (5,056.86-6,654.00) | 521.84 / 523.96 MiB | +1.5%; distributions overlap |
+| `export context --dry-run` | 5,062.91 ms (4,953.70-6,875.95) | 5,466.14 ms (5,009.98-6,854.42) | 520.38 / 521.86 MiB | +8.0%; distributions overlap |
 
-The dry-run response was 304 bytes in both builds. Analyze and export responses
+The dry-run response was 302 bytes in both builds. Analyze and export responses
 differed by one byte because the compared revisions format a progress/localized
 line differently; content equivalence is covered separately by the redaction
 contract tests rather than inferred from response size.
