@@ -3388,7 +3388,28 @@ public sealed class SecretRedactionScope
 			.ThenBy(static match => match.Start)
 			.ThenByDescending(static match => match.Length)
 			.ToArray();
-		var candidates = merged;
+		var survivors = new List<DetectedSecret>(merged.Length);
+		var acceptedDetectorIntervals = new Dictionary<RedactionFindingCategory, SortedSet<DetectorInterval>>();
+		foreach (var candidate in merged)
+		{
+			if (!IsMarked(candidate))
+			{
+				if (!acceptedDetectorIntervals.TryGetValue(candidate.Category, out var intervals))
+				{
+					intervals = new SortedSet<DetectorInterval>(DetectorIntervalStartComparer.Instance);
+					acceptedDetectorIntervals.Add(candidate.Category, intervals);
+				}
+				var interval = new DetectorInterval(
+					candidate.Start,
+					checked(candidate.Start + candidate.Length));
+				if (IsGenericRule(candidate.RuleId) && HasOverlap(intervals, interval))
+					continue;
+				AddCoveredInterval(intervals, interval);
+			}
+			survivors.Add(candidate);
+		}
+
+		var candidates = survivors.ToArray();
 		var starts = new Dictionary<int, List<int>>();
 		var ends = new Dictionary<int, List<int>>();
 		var boundaries = new int[candidates.Length * 2];
@@ -3449,6 +3470,56 @@ public sealed class SecretRedactionScope
 		candidates.Add(candidateIndex);
 	}
 
+	private static bool HasOverlap(
+		SortedSet<DetectorInterval> intervals,
+		DetectorInterval candidate)
+	{
+		if (intervals.Count == 0)
+			return false;
+		var predecessors = intervals.GetViewBetween(
+			DetectorInterval.Minimum,
+			new DetectorInterval(candidate.Start, int.MaxValue));
+		if (predecessors.Count > 0 && predecessors.Max.End > candidate.Start)
+			return true;
+		var successors = intervals.GetViewBetween(
+			new DetectorInterval(candidate.Start, int.MinValue),
+			DetectorInterval.Maximum);
+		return successors.Count > 0 && successors.Min.Start < candidate.End;
+	}
+
+	private static void AddCoveredInterval(
+		SortedSet<DetectorInterval> intervals,
+		DetectorInterval candidate)
+	{
+		var start = candidate.Start;
+		var end = candidate.End;
+		var predecessors = intervals.GetViewBetween(
+			DetectorInterval.Minimum,
+			new DetectorInterval(start, int.MaxValue));
+		if (predecessors.Count > 0 && predecessors.Max.End >= start)
+		{
+			var predecessor = predecessors.Max;
+			start = predecessor.Start;
+			end = Math.Max(end, predecessor.End);
+			intervals.Remove(predecessor);
+		}
+		while (true)
+		{
+			var successors = intervals.GetViewBetween(
+				new DetectorInterval(start, int.MinValue),
+				DetectorInterval.Maximum);
+			if (successors.Count == 0 || successors.Min.Start > end)
+				break;
+			var successor = successors.Min;
+			end = Math.Max(end, successor.End);
+			intervals.Remove(successor);
+		}
+		intervals.Add(new DetectorInterval(start, end));
+	}
+
+	private static bool IsMarked(DetectedSecret match) =>
+		(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0;
+
 	private static DetectedSecret MergeExactMatches(IEnumerable<DetectedSecret> group)
 	{
 		var matches = group.ToArray();
@@ -3497,6 +3568,12 @@ public sealed class SecretRedactionScope
 		public static ResolvedSecretFindingSet Empty { get; } = new([], []);
 	}
 
+	private readonly record struct DetectorInterval(int Start, int End)
+	{
+		public static DetectorInterval Minimum { get; } = new(int.MinValue, int.MinValue);
+		public static DetectorInterval Maximum { get; } = new(int.MaxValue, int.MaxValue);
+	}
+
 	private sealed class DetectedSecretPriorityComparer : IComparer<DetectedSecret>
 	{
 		public static DetectedSecretPriorityComparer Instance { get; } = new();
@@ -3526,6 +3603,17 @@ public sealed class SecretRedactionScope
 
 		private static bool IsMarked(DetectedSecret match) =>
 			(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0;
+	}
+
+	private sealed class DetectorIntervalStartComparer : IComparer<DetectorInterval>
+	{
+		public static DetectorIntervalStartComparer Instance { get; } = new();
+
+		public int Compare(DetectorInterval left, DetectorInterval right)
+		{
+			var startComparison = left.Start.CompareTo(right.Start);
+			return startComparison != 0 ? startComparison : left.End.CompareTo(right.End);
+		}
 	}
 
 }
