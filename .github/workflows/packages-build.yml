@@ -232,7 +232,12 @@ jobs:
           if ($LASTEXITCODE -ne 3 -or -not $findingsText.Contains('findingCount', [System.StringComparison]::Ordinal)) {
             throw 'NuGet secret gate smoke failed.'
           }
-          node Scripts/smoke-headless-mcp.mjs $binary $sample
+          if ($IsWindows) {
+            node Scripts/smoke-headless-mcp.mjs $env:ComSpec $sample /d /s /c $binary
+          }
+          else {
+            node Scripts/smoke-headless-mcp.mjs $binary $sample
+          }
           if ($LASTEXITCODE -ne 0) { throw 'NuGet MCP initialize smoke failed.' }
 
       - name: Smoke npx through a local registry
