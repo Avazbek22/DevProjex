@@ -155,6 +155,9 @@ public static class RepositoryUrlUtility
 		return SourceCacheIdentity(normalized);
 	}
 
+	public static bool IsCurrentSourceCacheKey(string? identity) =>
+		identity?.StartsWith(SourceCacheIdentityVersionPrefix, StringComparison.Ordinal) == true;
+
 	public static bool AreEquivalent(string? left, string? right)
 	{
 		var leftKey = GetComparisonKey(left);

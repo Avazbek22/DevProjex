@@ -582,47 +582,114 @@ public class RepoCacheServiceTests : IDisposable
     }
 
     [Fact]
-    public void LegacyRepositoryIdentityRemainsUnchangedAndCoexistsAfterVersionedCacheMiss()
+    public async Task V51VersionedIdentityMigratesInPlaceAndOpensOfflineIdempotently()
     {
         const string repositoryUrl = "https://example.com/Owner/Repo.git";
-        const string legacyIdentity = "example.com/owner/repo";
+        const string scpUrl = "git@example.com:Owner/Repo.git";
         var legacyCachePath = _service.CreateRepositoryDirectory(repositoryUrl);
+        Directory.CreateDirectory(Path.Combine(legacyCachePath, ".git"));
+        File.WriteAllText(
+            Path.Combine(legacyCachePath, ".git", "devprojex.remote-identity"),
+            repositoryUrl + "\n");
+        File.WriteAllText(Path.Combine(legacyCachePath, "README.md"), "cached");
         WriteCacheIndex(
             _testCacheRoot,
             [
                 new RepositoryCacheIndexEntry(
-                    legacyIdentity,
+                    RepositoryUrlUtility.GetComparisonKey(repositoryUrl),
+                    repositoryUrl,
+                    legacyCachePath,
+                    "main",
+                    "0123456789abcdef",
+                    DateTimeOffset.UtcNow,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Git)
+            ]);
+        var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+        var git = new OfflineGitRepositoryService(legacyCachePath, repositoryUrl);
+        var catalog = new RepositoryCacheCatalog(git, _service);
+
+        var indexed = Assert.IsType<RepositoryCacheIndexEntry>(
+            _service.FindIndexedRepository(repositoryUrl));
+        var cached = await catalog.FindAsync(
+            repositoryUrl,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(legacyCachePath, indexed.LocalPath, PathComparer.Default);
+        Assert.Equal(RepositoryCacheState.Ready, cached.State);
+        Assert.Equal(0, git.NetworkOperationCount);
+        Assert.Single(_service.ListIndexedRepositories());
+        Assert.Null(_service.FindIndexedRepository(scpUrl));
+        using (var index = JsonDocument.Parse(File.ReadAllBytes(indexPath)))
+        {
+            var entry = Assert.Single(index.RootElement.GetProperty("entries").EnumerateArray());
+            Assert.Equal(
+                RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl),
+                entry.GetProperty("identity").GetString());
+        }
+        var migratedIndexBytes = File.ReadAllBytes(indexPath);
+
+        Assert.NotNull(_service.FindIndexedRepository(repositoryUrl));
+        Assert.Single(_service.ListIndexedRepositories());
+        Assert.Equal(migratedIndexBytes, File.ReadAllBytes(indexPath));
+    }
+
+    [Fact]
+    public void RecordingUserAwareIdentityRemovesMigratedLegacySafeUrlEntry()
+    {
+        const string repositoryUrl = "https://example.com/owner/repo.git";
+        const string userSourceUrl = "https://alice@example.com/owner/repo.git";
+        var legacyCachePath = _service.CreateRepositoryDirectory(repositoryUrl);
+        Directory.CreateDirectory(Path.Combine(legacyCachePath, ".git"));
+        File.WriteAllText(
+            Path.Combine(legacyCachePath, ".git", "devprojex.remote-identity"),
+            repositoryUrl + "\n");
+        WriteCacheIndex(
+            _testCacheRoot,
+            [
+                new RepositoryCacheIndexEntry(
+                    RepositoryUrlUtility.GetComparisonKey(repositoryUrl),
                     repositoryUrl,
                     legacyCachePath,
                     "main",
                     null,
                     DateTimeOffset.UtcNow,
                     RepositoryCacheEntryState.Ready,
-                    ContentKind: RepositoryCacheContentKind.Zip)
+                    ContentKind: RepositoryCacheContentKind.Git)
             ]);
-        var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
-        var legacyIndexBytes = File.ReadAllBytes(indexPath);
-
-        Assert.Null(_service.FindIndexedRepository(repositoryUrl));
-        Assert.Equal(legacyIndexBytes, File.ReadAllBytes(indexPath));
-
         var currentCachePath = _service.CreateRepositoryDirectory(repositoryUrl);
-        _service.RecordIndexedRepository(
-            repositoryUrl,
-            currentCachePath,
-            "main");
+        Directory.CreateDirectory(Path.Combine(currentCachePath, ".git"));
+        File.WriteAllText(
+            Path.Combine(currentCachePath, ".git", "devprojex.remote-identity"),
+            repositoryUrl + "\n" + userSourceUrl + "\n");
 
-        var entries = _service.ListIndexedRepositories();
-        var indexPayload = File.ReadAllText(indexPath);
+        _service.RecordIndexedRepository(repositoryUrl, currentCachePath, "main");
 
-        Assert.Equal(2, entries.Count);
-        Assert.Contains(entries, entry => PathComparer.Default.Equals(entry.LocalPath, legacyCachePath));
-        Assert.Contains(entries, entry => PathComparer.Default.Equals(entry.LocalPath, currentCachePath));
-        Assert.Contains($"\"identity\": \"{legacyIdentity}\"", indexPayload, StringComparison.Ordinal);
-        Assert.Contains(
-            $"\"identity\": \"{RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl)}\"",
-            indexPayload,
-            StringComparison.Ordinal);
+        var catalogEntry = Assert.Single(_service.ListIndexedRepositories());
+        var entry = Assert.IsType<RepositoryCacheIndexEntry>(
+            _service.FindIndexedRepository(userSourceUrl));
+        Assert.Equal(currentCachePath, catalogEntry.LocalPath, PathComparer.Default);
+        Assert.Equal(
+            RepositoryUrlUtility.GetSourceCacheKey(userSourceUrl),
+            entry.Identity);
+    }
+
+    [Fact]
+    public void RemoteIdentityStoreMatchesV51SingleLineTransportWithoutCrossingScheme()
+    {
+        const string repositoryUrl = "https://example.com/owner/repo.git";
+        var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+        Directory.CreateDirectory(Path.Combine(repositoryPath, ".git"));
+        File.WriteAllText(
+            Path.Combine(repositoryPath, ".git", "devprojex.remote-identity"),
+            repositoryUrl + "\n");
+
+        Assert.True(GitRemoteIdentityStore.Matches(
+            repositoryPath,
+            "https://EXAMPLE.com:443/owner/repo"));
+        Assert.False(GitRemoteIdentityStore.Matches(
+            repositoryPath,
+            "git@example.com:owner/repo.git"));
     }
 
     [Fact]

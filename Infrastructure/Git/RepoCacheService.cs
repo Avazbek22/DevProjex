@@ -1929,11 +1929,30 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			var entries = document.Entries
 				.Where(candidate =>
 					!string.Equals(candidate.Identity, identity, StringComparison.Ordinal) &&
-					!ArePathsInSameRepository(candidate.LocalPath, normalizedPath))
+					!ArePathsInSameRepository(candidate.LocalPath, normalizedPath) &&
+					!IsLegacySafeUrlIdentity(candidate, safeUrl, identity))
 				.ToList();
 			entries.Add(entry);
 			WriteIndex(fileSet, entries);
 		}
+	}
+
+	private static bool IsLegacySafeUrlIdentity(
+		RepositoryCacheIndexEntry candidate,
+		string safeUrl,
+		string replacementIdentity)
+	{
+		if (!string.Equals(
+				RepositoryUrlUtility.ToSafeDisplay(candidate.RepositoryUrl),
+				safeUrl,
+				StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		var anonymousIdentity = RepositoryUrlUtility.GetSourceCacheKey(candidate.RepositoryUrl);
+		return !string.Equals(anonymousIdentity, replacementIdentity, StringComparison.Ordinal) &&
+		       string.Equals(candidate.Identity, anonymousIdentity, StringComparison.Ordinal);
 	}
 
 	private RepositoryCacheIndexEntry? FindIndexedRepositoryByIdentity(string identity)
@@ -2748,7 +2767,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		return new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries);
 	}
 
-	private static RepositoryCacheIndexEntry? NormalizeIndexEntryOrNull(
+	private RepositoryCacheIndexEntry? NormalizeIndexEntryOrNull(
 		RepositoryCacheIndexEntry entry,
 		DateTimeOffset maximumAcceptedTimestamp)
 	{
@@ -2757,8 +2776,21 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			var safeUrl = RepositoryUrlUtility.ToSafeDisplay(entry.RepositoryUrl);
 			if (safeUrl.Length == 0)
 				return null;
+			var identity = entry.Identity;
+			if (!RepositoryUrlUtility.IsCurrentSourceCacheKey(identity))
+			{
+				var identitySource = GitRemoteIdentityStore.TryReadSourceIdentity(
+					entry.LocalPath,
+					out var storedSourceIdentity)
+					? storedSourceIdentity
+					: safeUrl;
+				identity = RepositoryUrlUtility.GetSourceCacheKey(identitySource);
+				if (identity.Length == 0)
+					return null;
+			}
 			return entry with
 			{
+				Identity = identity,
 				RepositoryUrl = safeUrl,
 				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
 				              entry.LastUsedUtc > maximumAcceptedTimestamp
