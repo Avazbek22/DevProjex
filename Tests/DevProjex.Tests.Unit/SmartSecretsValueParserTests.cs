@@ -261,6 +261,16 @@ public sealed class SmartSecretsValueParserTests
 		Assert.Empty(Find(content, "settings.py", "config-secret"));
 	}
 
+	[Fact]
+	public void Python_EnvironmentReferenceStaysVisibleButLiteralFallbackIsSensitive()
+	{
+		const string reference = "SECRET_KEY = os.environ[\"SECRET_KEY\"]";
+		const string fallback = "SECRET_KEY = os.getenv(\"SECRET_KEY\", r\"ab12\")";
+
+		Assert.Empty(Find(reference, "settings.py", "config-secret"));
+		AssertExactCoverage(fallback, Find(fallback, "settings.py", "config-secret"), "ab12");
+	}
+
 	// Dockerfile instructions use logical continuation lines and the active escape directive.
 	// Source: https://docs.docker.com/reference/dockerfile/#escape
 	[Theory]

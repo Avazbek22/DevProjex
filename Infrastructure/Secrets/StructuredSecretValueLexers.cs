@@ -204,14 +204,18 @@ internal static class StructuredSecretValueLexers
 			}
 			cursor += equals + 1;
 			var resumeAt = lineEnd;
+			var foundLiteral = false;
 			while (true)
 			{
 				cursor = SkipHorizontalWhitespace(content, cursor, FindLineEnd(content, cursor));
 				if (!TryReadPythonLiteral(content, cursor, out var literal, out resumeAt))
 					break;
 				AddSpan(content, spans, literal);
+				foundLiteral = true;
 				cursor = resumeAt;
 			}
+			if (!foundLiteral && TryReadPythonFallbackLiteral(content, cursor, out var fallback, out resumeAt))
+				AddSpan(content, spans, fallback);
 			lineStart = AdvancePastLineBreak(content, FindLineEnd(content, resumeAt));
 		}
 		return spans;
@@ -796,6 +800,64 @@ internal static class StructuredSecretValueLexers
 			cursor++;
 		}
 		throw Incomplete("Python");
+	}
+
+	private static bool TryReadPythonFallbackLiteral(
+		ReadOnlySpan<char> content,
+		int start,
+		out StructuredSecretValueSpan span,
+		out int resumeAt)
+	{
+		var expression = content[start..];
+		var functionLength = expression.StartsWith("os.getenv", StringComparison.Ordinal)
+			? "os.getenv".Length
+			: expression.StartsWith("os.environ.get", StringComparison.Ordinal)
+				? "os.environ.get".Length
+				: 0;
+		if (functionLength == 0)
+		{
+			span = default;
+			resumeAt = start;
+			return false;
+		}
+
+		var cursor = SkipLogicalWhitespace(content, start + functionLength);
+		if (cursor >= content.Length || content[cursor++] != '(')
+		{
+			span = default;
+			resumeAt = start;
+			return false;
+		}
+		var depth = 1;
+		var quote = '\0';
+		for (; cursor < content.Length && depth > 0; cursor++)
+		{
+			var character = content[cursor];
+			if (quote != '\0')
+			{
+				if (character == quote && !IsEscaped(content, start, cursor))
+					quote = '\0';
+				continue;
+			}
+			if (character is '\'' or '"')
+			{
+				quote = character;
+				continue;
+			}
+			if (character == '(')
+				depth++;
+			else if (character == ')')
+				depth--;
+			else if (character == ',' && depth == 1)
+			{
+				var literalStart = SkipLogicalWhitespace(content, cursor + 1);
+				return TryReadPythonLiteral(content, literalStart, out span, out resumeAt);
+			}
+		}
+
+		span = default;
+		resumeAt = start;
+		return false;
 	}
 
 	private static DockerLogicalLine ReadDockerLogicalLine(

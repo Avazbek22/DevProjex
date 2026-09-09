@@ -126,7 +126,8 @@ inherit a sensitive element; Python prefixes and triple quotes are recognized; D
 continuations and escape directives form logical instructions; `.netrc` is read as a token stream;
 and npm authentication keys are recognized after an optional registry scope. Delimiters, quote
 marks, container punctuation, comments, and adjacent non-sensitive fields stay outside replacement
-spans.
+spans. In `settings.py`, direct `os.environ[...]` lookups remain references, while a literal default
+passed to `os.getenv` or `os.environ.get` is treated as the sensitive fallback value.
 
 The structured tier reuses Smart Ignore's project-scope resolver and root facts.
 The nearest marked project owns its descendants, so stack-specific vocabulary
