@@ -32,39 +32,163 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New094_PreprocessorDependentReferencesAreHonestlyUnresolved()
+	public async Task New094_OnlyPreprocessorDependentReferencesAreHonestlyUnresolved()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var before = fixture.CreateFile("BeforeValue.cs", "public sealed class BeforeValue { }");
 		var debug = fixture.CreateFile("DebugValue.cs", "public sealed class DebugValue { }");
+		var staging = fixture.CreateFile("StagingValue.cs", "public sealed class StagingValue { }");
 		var release = fixture.CreateFile("ReleaseValue.cs", "public sealed class ReleaseValue { }");
+		var after = fixture.CreateFile("AfterValue.cs", "public sealed class AfterValue { }");
 		var source = fixture.CreateFile(
 			"Consumer.cs",
 			"""
 			public sealed class Consumer
 			{
+			    // Не-ASCII text keeps the byte-offset contract covered.
+			    BeforeValue Before;
 			#if DEBUG
 			    DebugValue Value;
+			#elif STAGING
+			    StagingValue Value;
 			#else
 			    ReleaseValue Value;
 			#endif
+			    AfterValue After;
 			}
 			""");
 		using var engine = CreateEngine();
 
 		var result = await engine.IndexAsync(
 			fixture.Path,
-			[project, debug, release, source],
+			[project, before, debug, staging, release, after, source],
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		var conditional = result.Edges.Where(edge => edge.Source == "Consumer.cs").ToArray();
-		Assert.Equal(2, conditional.Length);
+		var conditional = result.Edges.Where(edge =>
+			edge.Source == "Consumer.cs" &&
+			edge.Reference is "DebugValue" or "StagingValue" or "ReleaseValue").ToArray();
+		Assert.Equal(3, conditional.Length);
 		Assert.All(conditional, edge =>
 		{
 			Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
 			Assert.Null(edge.Target);
 			Assert.Equal("C# preprocessor configuration is not available", Assert.Single(edge.Reasons));
 		});
+		Assert.Contains(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "BeforeValue" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "BeforeValue.cs");
+		Assert.Contains(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "AfterValue" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "AfterValue.cs");
+	}
+
+	[Fact]
+	public async Task New094_NestedConditionalRegionsRemainBoundedByTheOuterDirective()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var outer = fixture.CreateFile("OuterValue.cs", "public sealed class OuterValue { }");
+		var inner = fixture.CreateFile("InnerValue.cs", "public sealed class InnerValue { }");
+		var outside = fixture.CreateFile("OutsideValue.cs", "public sealed class OutsideValue { }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"""
+			public sealed class Consumer
+			{
+			#if OUTER
+			    OuterValue Outer;
+			#if INNER
+			    InnerValue Inner;
+			#endif
+			#endif
+			    OutsideValue Outside;
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, outer, inner, outside, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.All(result.Edges.Where(edge =>
+			edge.Source == "Consumer.cs" && edge.Reference is "OuterValue" or "InnerValue"), edge =>
+		{
+			Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+			Assert.Equal("C# preprocessor configuration is not available", Assert.Single(edge.Reasons));
+		});
+		Assert.Contains(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "OutsideValue" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "OutsideValue.cs");
+	}
+
+	[Fact]
+	public async Task New094_UnterminatedConditionalRegionDegradesOnlyTheFileTail()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var before = fixture.CreateFile("BeforeValue.cs", "public sealed class BeforeValue { }");
+		var tail = fixture.CreateFile("TailValue.cs", "public sealed class TailValue { }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"""
+			public sealed class Consumer
+			{
+			    BeforeValue Before;
+			#if DEBUG
+			    TailValue Tail;
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, before, tail, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "BeforeValue" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "BeforeValue.cs");
+		var conditional = Assert.Single(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "TailValue");
+		Assert.Equal(ResolutionStatus.Unresolved, conditional.Status);
+		Assert.Equal("C# preprocessor configuration is not available", Assert.Single(conditional.Reasons));
+	}
+
+	[Fact]
+	public async Task New094_RegionAndNullableDirectivesAreNotConditionalRegions()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var region = fixture.CreateFile("RegionValue.cs", "public sealed class RegionValue { }");
+		var nullable = fixture.CreateFile("NullableValue.cs", "public sealed class NullableValue { }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"""
+			#nullable enable
+			public sealed class Consumer
+			{
+			#region Values
+			    RegionValue Region;
+			#endregion
+			    NullableValue? Nullable;
+			}
+			#nullable restore
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, region, nullable, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "RegionValue" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "RegionValue.cs");
+		Assert.Contains(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "NullableValue" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "NullableValue.cs");
 	}
 
 	[Fact]

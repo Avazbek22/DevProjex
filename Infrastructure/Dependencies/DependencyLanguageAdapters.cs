@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using DevProjex.Application.Dependencies;
 
@@ -142,6 +143,7 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLanguageAdapter
 {
 	private const string StaticUsingPrefix = "static::";
+	private const string ConditionalCompilationReason = "C# preprocessor configuration is not available";
 	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
 		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
 		{
@@ -224,12 +226,13 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				.SelectMany(capture => ExtractGenericAliasReferences(context, capture, namespaces)))
 			.Where(reference => !declarationOccurrences.Contains((reference.SourceStartIndex, reference.Name)))
 			.Take(limits.MaximumFactsPerFile + 1).ToArray();
-		if (ConditionalCompilationRegex().IsMatch(context.Source))
+		var conditionalRegions = FindConditionalCompilationRegions(context.Source);
+		if (conditionalRegions.Count > 0)
 		{
-			references = references.Select(static reference => reference with
-			{
-				Reason = "C# preprocessor configuration is not available"
-			}).ToArray();
+			references = references.Select(reference =>
+				IsWithinConditionalRegion(reference.SourceStartIndex, conditionalRegions)
+					? reference with { Reason = ConditionalCompilationReason }
+					: reference).ToArray();
 		}
 		if (declarations.Count + references.Length > limits.MaximumFactsPerFile)
 			return Failure(context, "fact limit exceeded");
@@ -587,6 +590,82 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		return arity < 0 ? value : value[..arity];
 	}
 	private static string AritySuffix(int arity) => arity == 0 ? string.Empty : $"`{arity}";
+	private static IReadOnlyList<SourceRange> FindConditionalCompilationRegions(string source)
+	{
+		var regions = new List<SourceRange>();
+		var depth = 0;
+		var regionStart = -1;
+		var lineStart = 0;
+		var lineStartOffset = 0;
+		while (lineStart < source.Length)
+		{
+			var lineEnd = lineStart;
+			while (lineEnd < source.Length && source[lineEnd] is not ('\r' or '\n'))
+				lineEnd++;
+			var nextLineStart = lineEnd;
+			if (nextLineStart < source.Length && source[nextLineStart] == '\r')
+				nextLineStart++;
+			if (nextLineStart < source.Length && source[nextLineStart] == '\n')
+				nextLineStart++;
+			var nextLineOffset = lineStartOffset + Encoding.UTF8.GetByteCount(
+				source.AsSpan(lineStart, nextLineStart - lineStart));
+
+			switch (ConditionalDirective(source.AsSpan(lineStart, lineEnd - lineStart)))
+			{
+				case ConditionalDirectiveKind.If:
+					if (depth == 0)
+						regionStart = nextLineOffset;
+					depth++;
+					break;
+				case ConditionalDirectiveKind.EndIf when depth > 0:
+					depth--;
+					if (depth == 0)
+					{
+						regions.Add(new SourceRange(regionStart, lineStartOffset));
+						regionStart = -1;
+					}
+					break;
+			}
+
+			lineStart = nextLineStart;
+			lineStartOffset = nextLineOffset;
+		}
+		if (depth > 0)
+			regions.Add(new SourceRange(regionStart, lineStartOffset));
+		return regions;
+	}
+
+	private static ConditionalDirectiveKind ConditionalDirective(ReadOnlySpan<char> line)
+	{
+		line = TrimDirectiveWhitespace(line);
+		if (line.IsEmpty || line[0] != '#') return ConditionalDirectiveKind.None;
+		line = TrimDirectiveWhitespace(line[1..]);
+		var keywordLength = 0;
+		while (keywordLength < line.Length && char.IsLetter(line[keywordLength]))
+			keywordLength++;
+		if (keywordLength == 0 || keywordLength < line.Length && !char.IsWhiteSpace(line[keywordLength]))
+			return ConditionalDirectiveKind.None;
+		return line[..keywordLength] switch
+		{
+			"if" => ConditionalDirectiveKind.If,
+			"elif" => ConditionalDirectiveKind.Branch,
+			"else" => ConditionalDirectiveKind.Branch,
+			"endif" => ConditionalDirectiveKind.EndIf,
+			_ => ConditionalDirectiveKind.None
+		};
+	}
+
+	private static ReadOnlySpan<char> TrimDirectiveWhitespace(ReadOnlySpan<char> value)
+	{
+		var start = 0;
+		while (start < value.Length && value[start] is ' ' or '\t')
+			start++;
+		return value[start..];
+	}
+
+	private static bool IsWithinConditionalRegion(int sourceOffset, IReadOnlyList<SourceRange> regions) =>
+		regions.Any(region => sourceOffset >= region.Start && sourceOffset < region.End);
+
 	private sealed record DeclarationScope(
 		DependencySyntaxCapture Capture,
 		string ContainingNamespace,
@@ -597,6 +676,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		IReadOnlyList<DeclarationScope> Ordered);
 	private sealed record NamespaceSpan(string Name, int Start, int End, bool FileScoped);
 	private readonly record struct TypeTextToken(string Value, int Index, int Length);
+	private readonly record struct SourceRange(int Start, int End);
+	private enum ConditionalDirectiveKind { None, If, Branch, EndIf }
 	private static readonly HashSet<string> Keywords = new(
 		["public", "private", "protected", "internal", "static", "readonly", "ref", "out", "in", "params", "this", "where", "new", "class", "struct", "interface", "record", "enum", "delegate", "void", "var", "get", "set", "init", "return", "true", "false", "null"],
 		StringComparer.Ordinal);
@@ -604,7 +685,6 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 	[GeneratedRegex(@"\b(?:global\s+)?using\s+(?<static>static\s+)?(?:(?<alias>[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)\s*=\s*)?(?<target>(?:global::)?[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*(?:(?:\.|::)[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)*)(?<arguments>\s*<[\s\S]+>)?\s*;", RegexOptions.CultureInvariant)] private static partial Regex UsingRegex();
 	[GeneratedRegex(@"(?<name>[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)", RegexOptions.CultureInvariant)] private static partial Regex TypeParameterRegex();
 	[GeneratedRegex(@"(?:global::)?[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*(?:(?:\.|::)[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeNameRegex();
-	[GeneratedRegex(@"^[\t ]*#(?:if|elif|else|endif)\b", RegexOptions.Multiline | RegexOptions.CultureInvariant)] private static partial Regex ConditionalCompilationRegex();
 }
 
 internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLanguageAdapter
