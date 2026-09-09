@@ -18,10 +18,7 @@ public sealed class SelectionPathGitProcessTests
 		await File.WriteAllTextAsync(unicodePath, "class Пример {}\n", TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(quotePath, "class Quote {}\n", TestContext.Current.CancellationToken);
 		await RunGitAsync(project, "init");
-		await RunGitAsync(project, "config", "user.email", "test@example.invalid");
-		await RunGitAsync(project, "config", "user.name", "Test");
 		await RunGitAsync(project, "add", "--", ".");
-		await RunGitAsync(project, "commit", "-m", "initial");
 		await File.AppendAllTextAsync(unicodePath, "// changed\n", TestContext.Current.CancellationToken);
 		await File.AppendAllTextAsync(quotePath, "// changed\n", TestContext.Current.CancellationToken);
 		var selected = await RunGitAsync(
