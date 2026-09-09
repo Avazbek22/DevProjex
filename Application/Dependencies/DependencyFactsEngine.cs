@@ -1140,6 +1140,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		private static readonly ConditionalWeakTable<IReadOnlySet<string>, IReadOnlySet<string>> DotNetSimpleNames = new();
 		private readonly string _root;
 		private readonly IReadOnlyDictionary<string, FileFacts> _files;
+		private readonly IReadOnlyDictionary<string, FileFacts> _manifestFiles;
 		private readonly IReadOnlyDictionary<SymbolLookupKey, DeclarationFact[]> _symbolsBySimpleName;
 		private readonly IReadOnlyDictionary<QualifiedSymbolLookupKey, DeclarationFact[]> _symbolsByQualifiedName;
 		private readonly DependencyResolverConfiguration _configuration;
@@ -1166,6 +1167,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			_root = root;
 			_diagnosticsEnabled = DependencyEngineDiagnostics.IsEnabled;
 			_files = files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+			_manifestFiles = files.ToDictionary(static file => file.Path, PathComparer);
 			DependencyEngineDiagnostics.RecordDictionaryBuild();
 			_symbolsBySimpleName = declarations
 				.GroupBy(static declaration => new SymbolLookupKey(
@@ -1312,7 +1314,14 @@ public sealed class DependencyFactsEngine : IDisposable
 						"extension required for a relative ESM import under node16/nodenext", []);
 				}
 				var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
-				candidates = ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, physicalSpecifier)), scope, source);
+				var rootDirectoryCandidates = ProbeTypeScriptRootDirectories(
+					directory,
+					physicalSpecifier,
+					scope,
+					source).ToArray();
+				candidates = rootDirectoryCandidates.Length > 0
+					? rootDirectoryCandidates
+					: ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, physicalSpecifier)), scope, source);
 			}
 			else if (import.Specifier.StartsWith("#", StringComparison.Ordinal))
 			{
@@ -1399,8 +1408,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				foreach (var probe in EnumerateTypeScriptProbes(candidate, scope, source, allowDirectoryIndex: true))
 				{
 					var relative = PortableRelative(_root, probe);
-					if (_files.ContainsKey(relative))
-						return [relative];
+					if (TryGetManifestPath(relative, out var manifestPath))
+						return [manifestPath];
 					if (File.Exists(probe))
 						return [];
 				}
@@ -1611,10 +1620,49 @@ public sealed class DependencyFactsEngine : IDisposable
 			foreach (var probe in EnumerateTypeScriptProbes(candidate, scope, source, allowDirectoryIndex))
 			{
 				var relative = PortableRelative(_root, probe);
-				if (_files.ContainsKey(relative))
-					return [relative];
+				if (TryGetManifestPath(relative, out var manifestPath))
+					return [manifestPath];
 			}
 			return [];
+		}
+
+		private IEnumerable<string> ProbeTypeScriptRootDirectories(
+			string sourceDirectory,
+			string physicalSpecifier,
+			DependencyScopeDescriptor scope,
+			FileFacts source)
+		{
+			if (scope.TypeScriptRootDirectories is not { Count: > 0 } rootDirectories)
+				return [];
+			var candidates = new List<string>();
+			foreach (var sourceRoot in rootDirectories)
+			{
+				if (!IsWithin(sourceRoot, sourceDirectory))
+					continue;
+				var virtualCandidate = Path.GetFullPath(Path.Combine(sourceDirectory, physicalSpecifier));
+				if (!IsWithin(sourceRoot, virtualCandidate))
+					continue;
+				var virtualPath = Path.GetRelativePath(sourceRoot, virtualCandidate);
+				foreach (var destinationRoot in rootDirectories)
+				{
+					var destination = Path.GetFullPath(Path.Combine(destinationRoot, virtualPath));
+					if (!IsWithin(destinationRoot, destination))
+						continue;
+					candidates.AddRange(ProbeTypeScript(destination, scope, source));
+				}
+			}
+			return candidates;
+		}
+
+		private bool TryGetManifestPath(string relative, out string manifestPath)
+		{
+			if (_manifestFiles.TryGetValue(relative, out var file))
+			{
+				manifestPath = file.Path;
+				return true;
+			}
+			manifestPath = string.Empty;
+			return false;
 		}
 
 		private IEnumerable<string> EnumerateTypeScriptProbes(

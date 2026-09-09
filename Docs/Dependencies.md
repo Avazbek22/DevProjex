@@ -105,6 +105,12 @@ When `compilerOptions.moduleSuffixes` is present, every path probe applies its s
 order; an empty suffix is the explicit unsuffixed fallback. Thus `[".ios", ""]` selects `v.ios.ts`
 before `v.ts`. A non-string entry makes the configuration unsupported instead of silently reverting
 to unsuffixed resolution.
+When `compilerOptions.rootDirs` is present, relative imports use the configured directories as one
+virtual tree. A path found under exactly one root resolves normally; paths present under multiple
+roots remain `Ambiguous`. The usual extension, directory-index, and `moduleSuffixes` probe order is
+preserved. Roots are relative to the configuration file that declared them, including through
+`extends`; roots outside the project or escaping it through a symbolic link are ignored and reported
+with a constant configuration diagnostic.
 Conditional package targets distinguish syntax from the source module kind: runtime `import(...)`
 selects the `import` condition even in a `.cts` or `.cjs` file, while literal `require(...)` selects
 the `require` condition. The `node` condition is active only in Node resolution modes, not in bundler
