@@ -379,6 +379,16 @@ immediately when stdin is an interactive terminal. Its entries are combined with
 profile path selection as one explicit override. Input is limited to 100,000
 non-empty entries and 16 MiB.
 
+When Git supplies the list, disable its C-style path quoting so non-ASCII names
+remain literal UTF-8 input:
+
+```shell
+git -c core.quotepath=false diff --name-only | devprojex export context . --select-from - -o -
+```
+
+The reader deliberately does not auto-unescape quotes or octal sequences because
+those characters can be part of a real file name.
+
 ## Repository URL Sources
 
 `tui`, `open`, `analyze`, `tree`, `export context`, and `export project` accept either a

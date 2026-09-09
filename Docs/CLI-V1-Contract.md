@@ -231,6 +231,9 @@ latter reads UTF-8 source-relative entries, one per line, from a file or
 redirected stdin (`-`), ignores empty lines, and rejects interactive stdin.
 Inputs are capped at 100,000 entries and 16 MiB. Entries from both options are
 combined and deduplicated with project path semantics.
+Git pipelines use `git -c core.quotepath=false diff --name-only`; the reader
+consumes literal UTF-8 lines and never guesses whether quotes or backslash-octal
+text should be decoded.
 Names discovered in the project tree retain exact ordinal identity, including
 case-distinct siblings. On Windows, a differently cased input remains compatible
 only when it resolves to one unambiguous discovered entry.
