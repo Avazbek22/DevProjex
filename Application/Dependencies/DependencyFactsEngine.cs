@@ -1135,6 +1135,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private sealed class ResolverContext
 	{
+		private const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
 		private const string StaticUsingPrefix = "static::";
 		private static readonly ConditionalWeakTable<IReadOnlySet<string>, IReadOnlySet<string>> DotNetSimpleNames = new();
 		private readonly string _root;
@@ -1511,16 +1512,19 @@ public sealed class DependencyFactsEngine : IDisposable
 			                 mode.Equals("node", StringComparison.OrdinalIgnoreCase) ||
 			                 mode.Equals("node10", StringComparison.OrdinalIgnoreCase);
 			if (IsRequire(import))
-				return new PackageResolutionConditions("require", nodeActive);
+				return new PackageResolutionConditions(
+					"require", nodeActive, scope?.HasTypeScriptCustomConditions == true);
 			if (import.ImportKind == ModuleImportKind.DynamicImport)
-				return new PackageResolutionConditions("import", nodeActive);
+				return new PackageResolutionConditions(
+					"import", nodeActive, scope?.HasTypeScriptCustomConditions == true);
 			var moduleCondition = scope is not null &&
 			       (mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
 			        mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase)) &&
 			       SupportsCommonJs(source, scope)
 				? "require"
 				: "import";
-			return new PackageResolutionConditions(moduleCondition, nodeActive);
+			return new PackageResolutionConditions(
+				moduleCondition, nodeActive, scope?.HasTypeScriptCustomConditions == true);
 		}
 
 		private static bool TryMap(
@@ -1567,6 +1571,11 @@ public sealed class DependencyFactsEngine : IDisposable
 					PackageTargetSelectionKind.Unsupported,
 					null,
 					target.UnsupportedReason ?? "unsupported package target");
+			if (conditions.HasTypeScriptCustomConditions)
+				return new PackageTargetSelection(
+					PackageTargetSelectionKind.Unsupported,
+					null,
+					TypeScriptCustomConditionsReason);
 			foreach (var branch in target.Conditions)
 			{
 				if (!IsActivePackageCondition(branch.Name, conditions))
@@ -2349,7 +2358,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			string? Reason);
 		private readonly record struct PackageResolutionConditions(
 			string ModuleCondition,
-			bool NodeActive);
+			bool NodeActive,
+			bool HasTypeScriptCustomConditions);
 		private enum PackageTargetSelectionKind
 		{
 			NoMatch,

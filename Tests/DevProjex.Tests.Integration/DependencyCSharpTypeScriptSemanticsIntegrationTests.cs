@@ -314,30 +314,52 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task New063_CustomConditionsFailClosedInsteadOfChoosingDefault()
+	public async Task New063_CustomConditionsFailClosedOnlyForConditionalPackageMaps()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile(
 			"tsconfig.json",
-			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"customConditions\":[\"browser\"]}}");
+			"{\"extends\":\"./base.json\",\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"paths\":{\"mapped\":[\"mapped/value\"]}}}");
+		var baseConfig = fixture.CreateFile(
+			"base.json",
+			"{\"compilerOptions\":{\"customConditions\":[\"browser\"]}}");
 		var package = fixture.CreateFile(
 			"package.json",
-			"{\"imports\":{\"#value\":{\"browser\":\"./browser.ts\",\"default\":\"./default.ts\"}}}");
+			"{\"name\":\"fixture\",\"imports\":{\"#value\":{\"browser\":\"./browser.ts\",\"default\":\"./default.ts\"}},\"exports\":{\"./value\":{\"browser\":\"./browser.ts\",\"default\":\"./default.ts\"},\"./direct\":\"./direct.ts\"}}");
 		var browser = fixture.CreateFile("browser.ts", "export default 1;");
 		var fallback = fixture.CreateFile("default.ts", "export default 2;");
-		var source = fixture.CreateFile("main.ts", "import value from '#value';");
+		var direct = fixture.CreateFile("direct.ts", "export default 5;");
+		var relative = fixture.CreateFile("relative.ts", "export default 3;");
+		var mapped = fixture.CreateFile("mapped/value.ts", "export default 4;");
+		var source = fixture.CreateFile(
+			"main.ts",
+			"import internal from '#value';\nimport value from 'fixture/value';\nimport direct from 'fixture/direct';\nimport relative from './relative';\nimport mapped from 'mapped';");
 		using var engine = CreateEngine();
 
 		var result = await engine.IndexAsync(
 			fixture.Path,
-			[config, package, browser, fallback, source],
+			[config, baseConfig, package, browser, fallback, direct, relative, mapped, source],
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		var edge = Assert.Single(result.Edges, candidate =>
-			candidate.Source == "main.ts" && candidate.Reference == "#value");
+			candidate.Source == "main.ts" && candidate.Reference == "fixture/value");
 		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
 		Assert.Null(edge.Target);
 		Assert.Equal("tsconfig customConditions are not supported", Assert.Single(edge.Reasons));
+		var internalEdge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "#value");
+		Assert.Equal(ResolutionStatus.Unresolved, internalEdge.Status);
+		Assert.Equal("tsconfig customConditions are not supported", Assert.Single(internalEdge.Reasons));
+		Assert.Empty(result.Coverage.ConfigurationDiagnostics);
+		Assert.Contains(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "fixture/direct" &&
+			candidate.Status == ResolutionStatus.Resolved && candidate.Target == "direct.ts");
+		Assert.Contains(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "./relative" &&
+			candidate.Status == ResolutionStatus.Resolved && candidate.Target == "relative.ts");
+		Assert.Contains(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "mapped" &&
+			candidate.Status == ResolutionStatus.Resolved && candidate.Target == "mapped/value.ts");
 	}
 
 	[Fact]

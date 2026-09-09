@@ -64,6 +64,7 @@ public sealed record DependencyScopeDescriptor(
 {
 	public DependencyConfigurationState ConfigurationState { get; init; } = DependencyConfigurationState.Valid;
 	public string? ConfigurationDiagnostic { get; init; }
+	public bool HasTypeScriptCustomConditions { get; init; }
 }
 
 public sealed record PackageMapDescriptor(

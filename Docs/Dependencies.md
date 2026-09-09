@@ -105,8 +105,9 @@ to unsuffixed resolution.
 Conditional package targets distinguish syntax from the source module kind: runtime `import(...)`
 selects the `import` condition even in a `.cts` or `.cjs` file, while literal `require(...)` selects
 the `require` condition. The `node` condition is active only in Node resolution modes, not in bundler
-mode; inactive unknown conditions do not block a later `default`. A configured `customConditions`
-list is reported as unsupported semantics instead of silently choosing a different branch.
+mode; inactive unknown conditions do not block a later `default`. When `customConditions` is
+configured, only imports that traverse conditional package `exports` or `imports` are unresolved;
+relative imports and configured `paths` keep their normal resolution behavior.
 Directory-index fallback is allowed by `node10` and `bundler`; under `node16`/`nodenext`, an ESM
 relative import needs an explicit extension while a supported CommonJS context can use extensionless
 and directory probes. A relative directory containing `package.json` stays unresolved because
