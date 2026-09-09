@@ -445,6 +445,11 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				return TypeScriptLayerFailure(
 					DependencyConfigurationState.UnsupportedSemantics,
 					"tsconfig compilerOptions.moduleResolution must be a string");
+			if (options.TryGetProperty("module", out var moduleElement) &&
+			    moduleElement.ValueKind != JsonValueKind.String)
+				return TypeScriptLayerFailure(
+					DependencyConfigurationState.UnsupportedSemantics,
+					"tsconfig compilerOptions.module must be a string");
 
 			var hasModuleResolution = options.TryGetProperty("moduleResolution", out mode);
 			var moduleResolution = hasModuleResolution ? mode.GetString()?.ToLowerInvariant() : null;
@@ -452,6 +457,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				return TypeScriptLayerFailure(
 					DependencyConfigurationState.UnsupportedSemantics,
 					TypeScriptModuleResolutionReason);
+			var hasModule = options.TryGetProperty("module", out moduleElement);
+			var module = hasModule ? moduleElement.GetString()?.ToLowerInvariant() : null;
 			var hasBaseUrl = options.TryGetProperty("baseUrl", out var baseUrlElement);
 			var baseUrl = hasBaseUrl && baseUrlElement.ValueKind == JsonValueKind.String
 				? baseUrlElement.GetString()
@@ -493,6 +500,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				new TypeScriptConfigurationLayer(
 					extends.Value,
 					new OptionalConfigurationValue<string>(hasModuleResolution, moduleResolution),
+					new OptionalConfigurationValue<string>(hasModule, module),
 					new OptionalConfigurationValue<TypeScriptBaseUrl>(
 						hasBaseUrl,
 						hasBaseUrl ? new TypeScriptBaseUrl(Path.GetDirectoryName(configPath)!, baseUrl) : null),
@@ -589,6 +597,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		new(
 			Extends: null,
 			child.ModuleResolution.IsSpecified ? child.ModuleResolution : inherited.ModuleResolution,
+			child.Module.IsSpecified ? child.Module : inherited.Module,
 			child.BaseUrl.IsSpecified ? child.BaseUrl : inherited.BaseUrl,
 			child.Paths.IsSpecified ? child.Paths : inherited.Paths,
 			child.AllowJavaScript.IsSpecified ? child.AllowJavaScript : inherited.AllowJavaScript,
@@ -600,7 +609,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	{
 		var moduleResolution = layer.ModuleResolution.IsSpecified
 			? layer.ModuleResolution.Value ?? "bundler"
-			: "bundler";
+			: layer.Module.Value is "node16" or "nodenext"
+				? layer.Module.Value
+				: "bundler";
 		var mappings = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 		if (layer.Paths.Value is { } paths)
 		{
@@ -945,6 +956,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	private sealed record TypeScriptConfigurationLayer(
 		string? Extends,
 		OptionalConfigurationValue<string> ModuleResolution,
+		OptionalConfigurationValue<string> Module,
 		OptionalConfigurationValue<TypeScriptBaseUrl> BaseUrl,
 		OptionalConfigurationValue<TypeScriptPathMappings> Paths,
 		OptionalConfigurationValue<bool> AllowJavaScript,
@@ -952,6 +964,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	{
 		public static readonly TypeScriptConfigurationLayer Empty = new(
 			null,
+			default,
 			default,
 			default,
 			default,

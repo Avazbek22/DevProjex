@@ -6,6 +6,29 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New061_ModuleNodeNextInfersNodeNextResolution()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"module\":\"NodeNext\"}}");
+		var package = fixture.CreateFile("package.json", "{\"type\":\"module\"}");
+		var target = fixture.CreateFile("target.ts", "export default 1;");
+		var source = fixture.CreateFile("main.ts", "import value from './target';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "./target");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Contains("extension required", Assert.Single(edge.Reasons), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task New060_RelativeModuleUrlSuffixUsesPhysicalPath()
 	{
 		using var fixture = new TemporaryDirectory();
