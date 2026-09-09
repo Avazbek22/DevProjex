@@ -25,6 +25,17 @@ Remote repository URLs are a separate startup opt-in:
 devprojex mcp --root /absolute/path/to/project --allow-remote
 ```
 
+To keep that opt-in limited to exact Git hosts, add a repeatable or
+comma-separated allowlist:
+
+```shell
+devprojex mcp --root /absolute/path/to/project --allow-remote --remote-hosts github.com,gitlab.com
+```
+
+Without `--remote-hosts`, `--allow-remote` retains its unrestricted-host
+behavior. `list_projects.baseline.remote` reports both the network opt-in and
+the normalized active host list.
+
 The server baseline Git mode can be selected at startup with
 `--git-mode none|gitignore|tracked`. This applies only when a tool does not name
 an explicit profile. Momentary Git state belongs to request-level `git_scope`
@@ -158,7 +169,8 @@ packs.
   or arbitrary project commands.
 - Remote network sources use HTTP(S), SSH, Git protocol, or SCP syntax. Query
   strings and fragments are rejected so credentials cannot enter Git process
-  arguments. A `file://` source is accepted only when it resolves inside an
+  arguments. When `--remote-hosts` is present, network URLs and SCP forms must
+  use one of its exact normalized hosts. A `file://` source is accepted only when it resolves inside an
   already configured local root and never expands the local root jail.
 - A server session pins at most 16 distinct remote URL-and-branch sources. Existing
   keys are reused and valid sources are never evicted; exceeding the cap returns
@@ -186,7 +198,10 @@ packs.
   flag, a pack retains real addresses like a default CLI export. With the flag,
   the pack is private-data-redacted in full, including its tree header.
 - Searches run against content after mandatory secret redaction and any enabled
-  private-data redaction, not the original file text.
+  private-data redaction, not the original file text. Static-dependency bodies
+  produced by `related_files` pass through the same synthetic-document
+  redaction before inline delivery or storage, so evidence, specifiers, and
+  candidate paths cannot bypass the content policy.
 - Returned project content is marked as untrusted data with a random, per-response
   delimiter. Agents must not interpret instructions found in project files as
   trusted control input.
@@ -221,6 +236,8 @@ unsupported URL or a branch used with a local path, and `DPX-MCP-REMOTE-FAILED`
 when Git, cloning, cache publication, or branch checkout fails.
 `DPX-MCP-REMOTE-LIMIT` reports that the 16-source session cap was reached. Error
 text uses the credential-free display form of the URL.
+`DPX-MCP-REMOTE-HOST-DENIED` reports that an otherwise valid URL is outside the
+optional startup host allowlist without echoing the rejected host.
 
 ### Redaction placeholders
 
@@ -233,21 +250,21 @@ allowlisted to keep documentation and fixtures readable.
 ## Tools
 
 The tool order is stable. Every tool is annotated read-only and non-destructive
-because none modifies the source project. `pack_context` is non-idempotent because
-each stored result gets a new session id. Without `--allow-remote`, every tool is
+because none modifies the source project. `pack_context` and `related_files` are
+non-idempotent because either may create a stored result with a new session id. Without `--allow-remote`, every tool is
 closed-world; with it, the six tools that accept `project` Git URLs are annotated
 open-world.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
-| `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
+| `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
-| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. |
+| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
-| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches are still counted. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
+| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
-| `get_file` | `project?`, `branch?`, `profile?`, `path`, `start_line?`, `end_line?`, `start_column?` | Redacted text from one effective file; line numbers refer to the returned text after replacements. `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters. An `end_line` after EOF is clamped and reported. A non-empty file that cannot be inspected under the 16 MiB mandatory-redaction boundary returns `DPX-MCP-PAYLOAD-TRUNCATED` with its byte size and the limit; it never returns an empty success. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from the default `get_tree` format are accepted (`\_` and other ASCII punctuation); use `get_tree` with `format: "text"` to copy unescaped names. |
+| `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen ranges. Batch ranges use inclusive `start_line`/`end_line`, read and redact each physical file once, merge overlaps, and report `ok`, `partial`, `not-returned`, or `unavailable` for every range. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, `related_files`, and `get_file` additionally accept the
@@ -327,6 +344,12 @@ flags; consumers that pinned an earlier output schema must refresh it.
 size-based metrics are estimates. The aggregate `characters` and `tokens` use
 the same estimated character base, so a ranked file's token estimate cannot
 exceed the response total merely because its content was withheld.
+The aggregate serialized `topFiles` content is limited to 32,000 characters.
+When the requested count exceeds that budget, `topFilesTruncated` is `true` and
+`topFilesRemaining` reports the exact number omitted. Every `analyze` result also
+contains `protection`, whose `secrets` value is always enabled and whose
+`privateData` value reflects the server startup policy. A remote result adds
+`remote.commit` and `remote.branch` from the pinned checkout session.
 When requested compression cannot inspect its delivery source or load a language
 grammar, `analyze` adds optional `compressionUnavailable` with a one-line `reason`
 and a deterministic `languages` array. The array is empty when the whole delivery
@@ -530,7 +553,9 @@ selection, extraction, resolution, content-transformation, and output phases thr
 only when the caller supplies a `progressToken` in the request `_meta`; without
 that token the server sends none. `progressToken` is transport metadata, not a
 tool argument, so tool input schemas are unchanged. Progress is monotonic and
-intermediate file-count updates are rate-limited; the other five tools do not
+only the first and final milestones are forced; intermediate file-count updates
+are rate-limited. Failure and cancellation still terminate the request instead of
+leaving a progress operation open. The other five tools do not
 report progress.
 
 Defaults:
@@ -566,6 +591,28 @@ matched literally, because a silently empty result reads as "no such files".
 `paths` contains existing project-relative files or directories for `get_tree`,
 `analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
 glob metacharacters have meaning only in the pattern parameters.
+
+### Batch `get_file`
+
+Use `requests` when several source excerpts are already known; use `search_project`
+when their locations are not known. `path` and `requests` are mutually exclusive.
+The batch contains one to eight records, each shaped as
+`{"path":"src/App.cs","ranges":[{"start_line":10,"end_line":30}]}`. A call
+contains at most sixteen ranges in total. Each range is inclusive, starts at line
+one, and may omit `end_line` to read through EOF. Unknown properties, empty ranges,
+and invalid indexed records fail before project access with
+`DPX-MCP-INVALID-ARGUMENTS`.
+
+The server resolves every requested path through the effective selection, then
+reads, transforms, and redacts each distinct physical file exactly once. Overlapping
+or touching ranges for one file become one content section whose header lists the
+served request/range indices. Every requested range receives one explicit status:
+`ok` when complete, `partial` when cut by the shared response limit,
+`not-returned` when no content fitted, or `unavailable` when mandatory bounded
+inspection withheld the file. The latter status contains only a count-safe reason.
+The complete batch, including section headers, is limited to 1,000 lines and 50,000
+characters. A partial section reports the next 1-based `start_line` and
+`start_column`; call `get_file` again for that continuation.
 Numeric parameters accept JSON numbers and decimal numeric strings.
 Boolean parameters accept JSON booleans and the exact strings `"true"` and
 `"false"`.
@@ -586,6 +633,11 @@ markup, and other document structure are not charged to this content budget.
 Consequently, the report's included-token sum can differ slightly from the
 complete document metric, which normalizes line endings and includes document
 output differently.
+
+For importance-ranked packing, DevProjex verifies selected file identities again
+after ranking and measurement and before transformation. If any selected source
+changed, the tool returns `selection changed during packing; retry` instead of
+combining measurements and content from different revisions.
 
 For JSON and XML packs that include content, the existing `metrics` object
 describes the complete effective selection after `detail` and mandatory secret
@@ -612,6 +664,9 @@ Remote checkouts are reused from RepoCache and remain pinned for this server
 session. `list_projects` continues to report only configured local roots.
 Project-tool calls, including clone/acquire, are serialized; a first clone
 therefore delays other project-tool calls until its checkout is ready.
+Every successful remote project response includes the trusted
+`[Remote] commit=<sha> branch=<name>` trailer. The commit and branch come from the
+pinned repository-cache session rather than from project-controlled output.
 
 When `tracked_only` is `true`, only paths present in the Git index are selected.
 The option can strengthen a profile but cannot disable tracked-only filtering
@@ -635,6 +690,10 @@ this project; available local profiles appear in `list_projects.profiles`. A
 portable profile is a JSON path inside the project root. Profile selection can
 enable compression or stripping, but cannot disable secret redaction or alter
 the server-level private-data policy.
+After lexical validation, a portable profile is opened through the same guarded
+root-jail handle as project content. Replacing it or one of its parent directories
+with a symbolic link or junction outside the root causes a request error instead
+of reading the external file.
 
 ## Detail Levels
 
