@@ -121,6 +121,31 @@ public sealed class PortableProjectProfileServiceTests
 	}
 
 	[Fact]
+	public async Task SaveAsyncRejectsDocumentPastLoadLimitBeforeReplacingDestination()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var destination = workspace.CreateFile("portable.json", "original");
+		var service = new PortableProjectProfileService();
+		var oversizedRoot = new string('r', checked((int)PortableProjectProfileService.MaximumDocumentBytes));
+
+		var exception = await Assert.ThrowsAsync<PortableProjectProfileException>(() =>
+			service.SaveAsync(
+				sourceRoot,
+				destination,
+				new ProjectSelectionSpec(
+					Roots: [oversizedRoot],
+					GitMode: GitFilteringMode.None,
+					Exclusions: []),
+				overwrite: true,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("DPX-CLI-PROFILE-SELECTION-TOO-LARGE", exception.Code);
+		Assert.Equal("original", await File.ReadAllTextAsync(destination, TestContext.Current.CancellationToken));
+		Assert.Empty(Directory.EnumerateFiles(workspace.Path, ".portable.json.*.tmp"));
+	}
+
+	[Fact]
 	public async Task MissingPortableSelectedPathsRetainUnrestrictedMeaning()
 	{
 		using var workspace = new TemporaryDirectory();

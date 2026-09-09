@@ -143,7 +143,9 @@ destination must resolve outside the source project, including filesystem
 aliases, and its parent directory must already exist. Source-safety failures are
 reported before destination conflicts. Existing output returns exit code `4`;
 `--force` atomically replaces an external file but never a directory. Success
-prints the absolute committed path. A profile-store or file-write failure is a
+prints the absolute committed path. The same bounded document-size limit applies
+to both writing and reading, so every successful save can be loaded again. A
+profile-store or file-write failure is a
 runtime error with exit code `1`, not a syntax error.
 `profile import` validates without modifying local state unless `--apply` is
 present. Use `--profile local` only after Desktop or TUI has created valid local

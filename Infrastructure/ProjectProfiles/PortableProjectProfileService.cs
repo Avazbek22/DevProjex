@@ -91,17 +91,19 @@ public sealed class PortableProjectProfileService
 		var document = ToDocument(selection);
 		try
 		{
+			var payload = JsonSerializer.SerializeToUtf8Bytes(document, WriteOptions);
+			if (payload.LongLength > MaximumDocumentBytes)
+			{
+				throw new PortableProjectProfileException(
+					"DPX-CLI-PROFILE-SELECTION-TOO-LARGE",
+					"Portable profile exceeds the document limit.");
+			}
 			var requestedPath = NormalizeProfilePath(path);
 			_ = ValidateSaveDestination(sourceRoot, requestedPath, overwrite);
 			return await AtomicFileOutput.WriteAsync(
 					requestedPath,
 					overwrite,
-					(stream, token) =>
-						JsonSerializer.SerializeAsync(
-							stream,
-							document,
-							WriteOptions,
-							token),
+					(stream, token) => stream.WriteAsync(payload, token).AsTask(),
 					cancellationToken,
 					candidate => ExactFileOutputDestinationPolicy.Resolve(
 						sourceRoot,
