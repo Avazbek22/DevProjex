@@ -6,6 +6,28 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New018_MultilineGenericReferenceUsesTokenCoordinates()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var declaration = fixture.CreateFile("Model.cs", "public sealed class Model { }");
+		const string content = "public sealed class Consumer { Dictionary<\nstring,\nModel> Value; }";
+		var source = fixture.CreateFile("Consumer.cs", content);
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, declaration, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var reference = Assert.Single(
+			result.Files.Single(file => file.Path == "Consumer.cs").References,
+			candidate => candidate.Name == "Model");
+		Assert.Equal(3, reference.Site.Line);
+		Assert.Equal(content.IndexOf("Model", StringComparison.Ordinal), reference.SourceStartIndex);
+	}
+
+	[Fact]
 	public async Task New017_NonAsciiIdentifierStartIsExtractedAsTypeReference()
 	{
 		using var fixture = new TemporaryDirectory();

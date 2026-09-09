@@ -258,14 +258,19 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				.Replace("::", ".", StringComparison.Ordinal);
 			var simpleName = name.Split('.', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? name;
 			if (!Keywords.Contains(simpleName))
+			{
+				var tokenCapture = CaptureToken(
+					capture,
+					new TypeTextToken(match.Value, match.Index, match.Length));
 					yield return NewReference(
 					context,
-					capture,
+					tokenCapture,
 					name,
 					GenericArityAt(typeText, match.Index + match.Length),
 					containingNamespace,
 					containingType,
 					isGlobalQualified);
+			}
 		}
 	}
 
