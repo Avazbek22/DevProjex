@@ -6126,7 +6126,12 @@ public sealed class McpServerIntegrationTests
 		for (var index = 0; index < 10_000; index++)
 			File.WriteAllText(Path.Combine(project, $"File{index:D5}.txt"), "value\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
-		var progress = new InlineProgress<ProgressNotificationValue>();
+		var finalProgress = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var progress = new InlineProgress<ProgressNotificationValue>(value =>
+		{
+			if (value.Progress == 100f)
+				finalProgress.TrySetResult();
+		});
 		var token = new ProgressToken(Guid.NewGuid().ToString("N"));
 
 		var result = await server.CallAsync(
@@ -6134,6 +6139,7 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?> { ["path"] = "File00000.txt" },
 			progress,
 			new RequestOptions { ProgressToken = token });
+		await finalProgress.Task.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 		var values = progress.Values;
 
 		Assert.NotEqual(true, result.IsError);
@@ -7211,8 +7217,11 @@ public sealed class McpServerIntegrationTests
 	{
 		private readonly List<T> _values = [];
 		private readonly object _sync = new();
+		private readonly Action<T>? _onReport;
 		private readonly TaskCompletionSource _firstValue =
 			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public InlineProgress(Action<T>? onReport = null) => _onReport = onReport;
 
 		public IReadOnlyList<T> Values
 		{
@@ -7228,6 +7237,7 @@ public sealed class McpServerIntegrationTests
 			lock (_sync)
 				_values.Add(value);
 			_firstValue.TrySetResult();
+			_onReport?.Invoke(value);
 		}
 
 		// Generous on purpose: the assertions cover ordering and token scoping, not
