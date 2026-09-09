@@ -149,7 +149,11 @@ profile-store or file-write failure is a
 runtime error with exit code `1`, not a syntax error.
 `profile import` validates without modifying local state unless `--apply` is
 present. Use `--profile local` only after Desktop or TUI has created valid local
-settings for that project; an absent local profile is a usage error.
+settings for that project; an absent local profile is a usage error. Local lookup
+reports missing (`DPX-CLI-PROFILE-NOT-FOUND`), temporary contention
+(`DPX-CLI-PROFILE-BUSY`), corrupt storage (`DPX-CLI-PROFILE-CORRUPT`), and a
+newer unsupported schema (`DPX-CLI-PROFILE-FUTURE-SCHEMA`) separately. These
+failures never fall back to the broader standard profile.
 
 Legacy local state with both Git options enabled is normalized by the existing
 security-first profile logic before conversion. The v1 portable schema cannot
