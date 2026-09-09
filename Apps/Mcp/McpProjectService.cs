@@ -12,7 +12,8 @@ internal sealed class McpProjectService(
 	GitFilteringMode? serverGitMode,
 	IReadOnlyCollection<ProjectExclusion>? serverExclusions = null,
 	bool agentExclusions = false,
-	Func<string, CancellationToken, ValueTask>? inventoryBuilt = null) : IDisposable
+	Func<string, CancellationToken, ValueTask>? inventoryBuilt = null,
+	Action<string>? effectiveFileSizeRead = null) : IDisposable
 {
 	internal const int MaximumRequestedPaths = 256;
 	internal const int MaximumRequestedPathLength = 4096;
@@ -23,6 +24,7 @@ internal sealed class McpProjectService(
 	private readonly ConcurrentDictionary<McpProjectionCacheKey, CachedProjectionPlan> projectionCache = [];
 	private readonly Dictionary<string, RootChangeMonitor> rootMonitors = new(PathComparer.Default);
 	private readonly object rootMonitorSync = new();
+	private readonly ConditionalWeakTable<ProjectContextPlan, PlanMembership> planMembership = new();
 	private long cacheGeneration;
 	private int disposed;
 
@@ -143,8 +145,6 @@ internal sealed class McpProjectService(
 				"Fix the reported project access or Git state and retry.");
 		}
 		ValidateRequestedPathCasing(plan, requested, tolerateMissingPaths);
-		if (maximumFileBytes is not null)
-			plan = RefreshEffectiveFileSizes(plan);
 		var allowProjectionReuse = parsedScope is null &&
 		                           profileReference.Kind != ProjectProfileSourceKind.Local &&
 		                           maximumFileBytes is null &&
@@ -255,6 +255,8 @@ internal sealed class McpProjectService(
 			}
 		}
 
+		if (maximumFileBytes is not null)
+			narrowed = RefreshEffectiveFileSizes(narrowed);
 		var final = await ProjectFileSizeFilter
 			.ApplyAsync(services.Planner, narrowed, maximumFileBytes, cancellationToken)
 			.ConfigureAwait(false);
@@ -355,11 +357,12 @@ internal sealed class McpProjectService(
 			: services.Planner.BuildStructureAsync(request, cancellationToken);
 	}
 
-	private static ProjectContextPlan RefreshEffectiveFileSizes(ProjectContextPlan plan)
+	private ProjectContextPlan RefreshEffectiveFileSizes(ProjectContextPlan plan)
 	{
 		var sizes = new Dictionary<string, long>(plan.IncludedFiles.Count, ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var path in plan.IncludedFiles)
 		{
+			effectiveFileSizeRead?.Invoke(path);
 			try
 			{
 				sizes[path] = Math.Max(0, new FileInfo(path).Length);
@@ -851,15 +854,25 @@ internal sealed class McpProjectService(
 		{
 			throw ResolveCaseMismatch(plan, path) ?? exception;
 		}
-		if (Directory.Exists(physical))
+		ValidateResolvedFile(plan, path, physical, Directory.Exists(physical));
+		return physical;
+	}
+
+	private void ValidateResolvedFile(
+		ProjectContextPlan plan,
+		string requestedPath,
+		string physicalPath,
+		bool isDirectory)
+	{
+		if (isDirectory)
 		{
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: '{path}' is a directory; provide a file path returned by get_tree or search_project.");
+				$"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; provide a file path returned by get_tree or search_project.");
 		}
-		if (!plan.IncludedFiles.Contains(physical, StringComparer.Ordinal))
+		if (!Membership(plan).Files.Contains(physicalPath))
 		{
-			var caseMismatch = ResolveCaseMismatch(plan, path);
+			var caseMismatch = ResolveCaseMismatch(plan, requestedPath);
 			if (caseMismatch is not null)
 				throw caseMismatch;
 
@@ -870,10 +883,9 @@ internal sealed class McpProjectService(
 				: $"Per-call arguments cannot widen these filters; only the server startup line can ({McpEffectiveFilters.StartupFlags}).";
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: file '{path}' is not in the effective project selection " +
+				$"{McpErrorCodes.PathNotFound}: file '{requestedPath}' is not in the effective project selection " +
 				$"(effective filters: {McpEffectiveFilters.Describe(plan)}). {remedy}");
 		}
-		return physical;
 	}
 
 	public IReadOnlyList<string> ResolveRequestedFiles(
@@ -883,7 +895,17 @@ internal sealed class McpProjectService(
 	{
 		var requested = ResolveRequestedPaths(plan.SourceRoot, paths, cancellationToken);
 		ValidateRequestedPathCasing(plan, requested);
-		return paths.Select(path => ResolveFile(plan, path)).ToArray();
+		var resolved = new string[requested.InputTokens.Count];
+		for (var index = 0; index < requested.InputTokens.Count; index++)
+		{
+			var token = requested.InputTokens[index];
+			var physical = token.ResolvedPath ?? throw token.ResolutionError ?? new McpToolException(
+				McpErrorCodes.PathNotFound,
+				$"{McpErrorCodes.PathNotFound}: file '{token.Value}' was not found.");
+			ValidateResolvedFile(plan, token.Value, physical, token.IsDirectory);
+			resolved[index] = physical;
+		}
+		return resolved;
 	}
 
 	public bool HasLocalProfile(string projectRoot) =>
@@ -935,12 +957,19 @@ internal sealed class McpProjectService(
 		var resolved = new HashSet<string>(StringComparer.Ordinal);
 		var directories = new HashSet<string>(StringComparer.Ordinal);
 		var tokens = new List<RequestedPathToken>(paths.Count);
+		var inputTokens = new List<RequestedPathToken>(paths.Count);
+		var tokensByNormalizedPath = new Dictionary<string, RequestedPathToken>(StringComparer.Ordinal);
 		foreach (var path in paths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (!seen.Add(NormalizeRequestedPathToken(projectRoot, path)))
+			var normalizedToken = NormalizeRequestedPathToken(projectRoot, path);
+			if (!seen.Add(normalizedToken))
+			{
+				inputTokens.Add(tokensByNormalizedPath[normalizedToken]);
 				continue;
+			}
 
+			RequestedPathToken token;
 			string fullPath;
 			try
 			{
@@ -948,22 +977,28 @@ internal sealed class McpProjectService(
 			}
 			catch (McpToolException exception) when (exception.Code == McpErrorCodes.PathNotFound)
 			{
-				tokens.Add(new RequestedPathToken(path, null, IsDirectory: false, exception));
+				token = new RequestedPathToken(path, null, IsDirectory: false, exception);
+				tokens.Add(token);
+				inputTokens.Add(token);
+				tokensByNormalizedPath.Add(normalizedToken, token);
 				continue;
 			}
 
 			var isDirectory = Directory.Exists(fullPath);
-			tokens.Add(new RequestedPathToken(path, fullPath, isDirectory, ResolutionError: null));
+			token = new RequestedPathToken(path, fullPath, isDirectory, ResolutionError: null);
+			tokens.Add(token);
+			inputTokens.Add(token);
+			tokensByNormalizedPath.Add(normalizedToken, token);
 			if (!resolved.Add(fullPath))
 				continue;
 			if (isDirectory)
 				directories.Add(fullPath);
 		}
 
-		return new RequestedPathSelection(resolved, directories, tokens);
+		return new RequestedPathSelection(resolved, directories, tokens, inputTokens);
 	}
 
-	private static void ValidateRequestedPathCasing(
+	private void ValidateRequestedPathCasing(
 		ProjectContextPlan plan,
 		RequestedPathSelection requested,
 		bool tolerateMissingPaths = false)
@@ -972,8 +1007,8 @@ internal sealed class McpProjectService(
 		{
 			var matchesExactly = token.ResolvedPath is { } resolvedPath &&
 				(token.IsDirectory
-					? plan.IncludedFolders.Contains(resolvedPath, StringComparer.Ordinal)
-					: plan.IncludedFiles.Contains(resolvedPath, StringComparer.Ordinal));
+					? Membership(plan).Folders.Contains(resolvedPath)
+					: Membership(plan).Files.Contains(resolvedPath));
 			if (matchesExactly)
 				continue;
 
@@ -985,16 +1020,17 @@ internal sealed class McpProjectService(
 		}
 	}
 
-	private static ProjectContextPlan AddMissingRequestedPathDiagnostics(
+	private ProjectContextPlan AddMissingRequestedPathDiagnostics(
 		ProjectContextPlan plan,
 		RequestedPathSelection requested)
 	{
+		var membership = Membership(plan);
 		var missing = requested.Tokens.Where(token =>
 			token.ResolutionError is not null ||
 			token.ResolvedPath is { } resolved &&
 			!(token.IsDirectory
-				? plan.IncludedFolders.Contains(resolved, StringComparer.Ordinal)
-				: plan.IncludedFiles.Contains(resolved, StringComparer.Ordinal))).ToArray();
+				? membership.Folders.Contains(resolved)
+				: membership.Files.Contains(resolved))).ToArray();
 		if (missing.Length == 0)
 			return plan;
 		return plan with
@@ -1053,7 +1089,7 @@ internal sealed class McpProjectService(
 		}
 	}
 
-	private static McpToolException? ResolveCaseMismatch(ProjectContextPlan plan, string requestedPath)
+	private McpToolException? ResolveCaseMismatch(ProjectContextPlan plan, string requestedPath)
 	{
 		string requestedRelative;
 		try
@@ -1069,12 +1105,9 @@ internal sealed class McpProjectService(
 			return null;
 		}
 
-		var matches = plan.IncludedFiles
-			.Select(file => PathUtility.GetPortableRelativePath(plan.SourceRoot, file))
-			.Where(path => path.Equals(requestedRelative, StringComparison.OrdinalIgnoreCase))
-			.Distinct(StringComparer.Ordinal)
-			.Take(2)
-			.ToArray();
+		var matches = Membership(plan).CaseFoldedFiles.TryGetValue(requestedRelative, out var candidates)
+			? candidates
+			: [];
 		if (matches.Length != 1 || matches[0].Equals(requestedRelative, StringComparison.Ordinal))
 			return null;
 
@@ -1084,6 +1117,9 @@ internal sealed class McpProjectService(
 			$"from the listed path '{McpTextEscaping.EscapeSingleLine(matches[0])}'; paths are case-sensitive on every platform — " +
 			"retry with the listed spelling.");
 	}
+
+	private PlanMembership Membership(ProjectContextPlan plan) =>
+		planMembership.GetValue(plan, static value => PlanMembership.Create(value));
 
 	private static string NormalizeRequestedPathToken(string projectRoot, string path)
 	{
@@ -1170,11 +1206,13 @@ internal sealed class McpProjectService(
 	private sealed record RequestedPathSelection(
 		IReadOnlySet<string> Paths,
 		IReadOnlySet<string> Directories,
-		IReadOnlyList<RequestedPathToken> Tokens)
+		IReadOnlyList<RequestedPathToken> Tokens,
+		IReadOnlyList<RequestedPathToken> InputTokens)
 	{
 		public static RequestedPathSelection Empty { get; } = new(
 			new HashSet<string>(StringComparer.Ordinal),
 			new HashSet<string>(StringComparer.Ordinal),
+			[],
 			[]);
 	}
 
@@ -1183,6 +1221,27 @@ internal sealed class McpProjectService(
 		string? ResolvedPath,
 		bool IsDirectory,
 		McpToolException? ResolutionError);
+
+	private sealed record PlanMembership(
+		IReadOnlySet<string> Files,
+		IReadOnlySet<string> Folders,
+		IReadOnlyDictionary<string, string[]> CaseFoldedFiles)
+	{
+		public static PlanMembership Create(ProjectContextPlan plan)
+		{
+			var hints = plan.IncludedFiles
+				.Select(file => PathUtility.GetPortableRelativePath(plan.SourceRoot, file))
+				.GroupBy(static path => path, StringComparer.OrdinalIgnoreCase)
+				.ToDictionary(
+					static group => group.Key,
+					static group => group.Distinct(StringComparer.Ordinal).Take(2).ToArray(),
+					StringComparer.OrdinalIgnoreCase);
+			return new PlanMembership(
+				plan.IncludedFiles.ToFrozenSet(StringComparer.Ordinal),
+				plan.IncludedFolders.ToFrozenSet(StringComparer.Ordinal),
+				hints);
+		}
+	}
 
 	private readonly record struct McpInventoryCacheKey(
 		string ProjectRoot,

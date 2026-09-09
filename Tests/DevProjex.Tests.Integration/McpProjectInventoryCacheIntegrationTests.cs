@@ -9,6 +9,34 @@ namespace DevProjex.Tests.Integration;
 public sealed class McpProjectInventoryCacheIntegrationTests
 {
 	[Fact]
+	public async Task MaximumFileSizeRefreshReadsOnlyTheNarrowedCandidates()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 100; index++)
+			workspace.CreateFile($"project/src/File{index:D3}.txt", new string('x', index + 1));
+		var sizeReads = new List<string>();
+		await using var harness = CreateHarness(project, effectiveFileSizeRead: sizeReads.Add);
+
+		var plan = await harness.Service.BuildPlanAsync(
+			project: null,
+			branch: null,
+			paths: ["src/File099.txt"],
+			includePatterns: null,
+			excludePatterns: null,
+			profile: null,
+			trackedOnly: false,
+			gitScope: null,
+			maximumFileBytes: 1_024,
+			TestContext.Current.CancellationToken,
+			includeOutputMetrics: false);
+
+		Assert.Single(plan.IncludedFiles);
+		Assert.Single(sizeReads);
+		Assert.EndsWith(Path.Combine("src", "File099.txt"), sizeReads[0], StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task BuildPlan_NarrowProjectionReusesInventoryAndTreeChangeRebuildsIt()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -255,7 +283,8 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 
 	private static CacheHarness CreateHarness(
 		string project,
-		Func<string, CancellationToken, ValueTask>? inventoryBuilt = null)
+		Func<string, CancellationToken, ValueTask>? inventoryBuilt = null,
+		Action<string>? effectiveFileSizeRead = null)
 	{
 		var registry = new McpRootRegistry([project]);
 		var sources = new McpProjectSourceResolver(
@@ -272,7 +301,8 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 			services,
 			hidePrivateData: false,
 			serverGitMode: GitFilteringMode.RespectGitIgnore,
-			inventoryBuilt: inventoryBuilt);
+			inventoryBuilt: inventoryBuilt,
+			effectiveFileSizeRead: effectiveFileSizeRead);
 		return new CacheHarness(service, services, sources);
 	}
 

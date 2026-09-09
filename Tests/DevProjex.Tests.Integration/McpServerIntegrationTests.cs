@@ -1935,10 +1935,10 @@ public sealed class McpServerIntegrationTests
 			["get_tree"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "max_depth", "format"],
 			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "top_files", "max_file_bytes"],
 			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "rank", "focus", "max_tokens", "max_file_bytes", "view", "format"],
-			["read_pack"] = ["pack_id", "start_line", "end_line"],
+			["read_pack"] = ["pack_id", "start_line", "end_line", "start_column"],
 			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "max_results"],
 			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
-			["get_file"] = ["project", "branch", "profile", "path", "start_line", "end_line"]
+			["get_file"] = ["project", "branch", "profile", "path", "start_line", "end_line", "start_column"]
 		};
 		foreach (var tool in tools)
 		{
@@ -2072,11 +2072,13 @@ public sealed class McpServerIntegrationTests
 			("pack_context", "max_tokens"),
 			("read_pack", "start_line"),
 			("read_pack", "end_line"),
+			("read_pack", "start_column"),
 			("search_project", "max_file_bytes"),
 			("search_project", "max_results"),
 			("related_files", "max_file_bytes"),
 			("get_file", "start_line"),
-			("get_file", "end_line")
+			("get_file", "end_line"),
+			("get_file", "start_column")
 		};
 		foreach (var (toolName, propertyName) in positiveNumericStrings)
 		{
@@ -3104,6 +3106,74 @@ public sealed class McpServerIntegrationTests
 		AssertTrustedTrailerOutsideSpotlight(
 			firstPage,
 			"[Showing lines 1-1000 of 1005; continue with start_line=1001.]");
+	}
+
+	[Fact]
+	public async Task FileAndStoredPackLongLineContinuationReadsEveryUnicodeScalarExactlyOnce()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var content = string.Concat(
+			string.Concat(Enumerable.Repeat("x ", 24_999)),
+			"😀",
+			string.Concat(Enumerable.Repeat("β ", 35_000)));
+		File.WriteAllText(Path.Combine(project, "Long.txt"), content);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var filePages = new List<string>();
+		var startColumn = 1;
+		for (var pageNumber = 0; pageNumber < 3; pageNumber++)
+		{
+			var response = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?>
+				{
+					["path"] = "Long.txt",
+					["start_line"] = 1,
+					["start_column"] = startColumn
+				});
+			Assert.NotEqual(true, response.IsError);
+			filePages.Add(ExtractSpotlightBody(Text(response)));
+			if (pageNumber < 2)
+			{
+				var continuation = Regex.Match(Text(response), @"continue with start_line=1 start_column=(?<column>\d+)\.");
+				Assert.True(
+					continuation.Success,
+					$"page={pageNumber}, startColumn={startColumn}, bodyLength={filePages[^1].Length}, " +
+					$"tail={Text(response)[Math.Max(0, Text(response).Length - 300)..]}");
+				startColumn = int.Parse(
+					continuation.Groups["column"].Value,
+					System.Globalization.CultureInfo.InvariantCulture);
+			}
+		}
+		Assert.Equal(content, string.Concat(filePages));
+		Assert.All(filePages, static page => Assert.False(
+			page.Length > 0 && (char.IsHighSurrogate(page[^1]) || char.IsLowSurrogate(page[0]))));
+
+		var stored = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Long.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var packId = ExtractPackId(Text(stored));
+		var first = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId });
+		var lineContinuation = Regex.Match(Text(first), @"continue with start_line=(?<line>\d+)\.");
+		Assert.True(lineContinuation.Success, Text(first));
+		var longLinePage = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?>
+			{
+				["pack_id"] = packId,
+				["start_line"] = int.Parse(
+					lineContinuation.Groups["line"].Value,
+					System.Globalization.CultureInfo.InvariantCulture)
+			});
+		Assert.Contains("start_column=", Text(longLinePage), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -5904,6 +5974,115 @@ public sealed class McpServerIntegrationTests
 			StringComparison.Ordinal);
 		Assert.Contains("[Dependency configuration] tsconfig.json · corrupt", ExtractSpotlightBody(text), StringComparison.Ordinal);
 		Assert.DoesNotContain("compilerOptions must be an object", text, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public async Task GetFileConsumesTransformedTextWithoutPreparedFileIo()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Sensitive.txt"), $"before {Secret} after\n");
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Sensitive.txt" });
+		var diagnostics = measurement.Capture();
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.DoesNotContain(Secret, Text(result), StringComparison.Ordinal);
+		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
+		Assert.Equal(0, diagnostics.PreparedWriteBytes);
+		Assert.Equal(0, diagnostics.PreparedReadBytes);
+		Assert.Equal(0, diagnostics.DocumentWriteBytes);
+	}
+
+	[Fact]
+	public async Task PackTokenBudgetMaterializesOnlyAdmittedFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "A.txt"), "aaaa");
+		File.WriteAllText(Path.Combine(project, "B.txt"), "bbbb");
+		File.WriteAllText(Path.Combine(project, "C.txt"), "cccc");
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = 1
+			});
+		var diagnostics = measurement.Capture();
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("Included: 1 file", Text(result), StringComparison.Ordinal);
+		Assert.Equal(1, diagnostics.PreparedFilesMaterialized);
+	}
+
+	[Fact]
+	public async Task RelatedFilesDistinguishesNoResolvedEdgesFromUnresolvedReferences()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "main.ts"), "import value from './missing.js';\nconsole.log(value);\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "main.ts",
+				["direction"] = "dependencies"
+			});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("[Resolution] resolved=0 · ambiguous=0 · unresolved=1 · external=0", text,
+			StringComparison.Ordinal);
+		Assert.Contains("[No related files] in the effective selection; unresolved references=1.", text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LargeRelatedFilesResultSpillsIntoReadablePackStorage()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "tsconfig.json"),
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		var imports = new StringBuilder();
+		for (var index = 0; index < 700; index++)
+		{
+			var name = $"target{index:D4}";
+			File.WriteAllText(Path.Combine(project, name + ".ts"), $"export default {index};\n");
+			imports.Append("import ").Append(name).Append(" from './").Append(name).AppendLine(".js';");
+		}
+		File.WriteAllText(Path.Combine(project, "Main.ts"), imports.ToString());
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "Main.ts",
+				["direction"] = "dependencies"
+			});
+		var resultText = Text(result);
+		var packMatch = Regex.Match(resultText, "Related-files result stored as '([^']+)'");
+		Assert.True(packMatch.Success, resultText);
+		var packId = packMatch.Groups[1].Value;
+		var firstPage = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId });
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("Related-files result stored", resultText, StringComparison.Ordinal);
+		Assert.Contains("target0000.ts", Text(firstPage), StringComparison.Ordinal);
 	}
 
 	[Theory]

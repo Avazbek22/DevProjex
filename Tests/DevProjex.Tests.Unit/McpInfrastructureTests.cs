@@ -1700,9 +1700,17 @@ public sealed class McpInfrastructureTests
 			CaptureAsync(CreatePackAsync()),
 			CaptureAsync(CreatePackAsync()));
 
-		Assert.Single(results, static result => result is McpPackDocument);
-		var failure = Assert.IsType<McpToolException>(Assert.Single(results, static result => result is Exception));
-		Assert.Equal(McpErrorCodes.PackTooLarge, failure.Code);
+		var documents = results.OfType<McpPackDocument>().ToArray();
+		if (documents.Length == 1)
+		{
+			var failure = Assert.IsType<McpToolException>(Assert.Single(results, static result => result is Exception));
+			Assert.Equal(McpErrorCodes.PackTooLarge, failure.Code);
+		}
+		else
+		{
+			Assert.Equal(2, documents.Length);
+			Assert.Equal(1, documents.Sum(static document => document.EvictedPackCount));
+		}
 		Assert.Single(Directory.EnumerateFiles(registry.SessionDirectory, "*.pack"));
 	}
 
@@ -1746,6 +1754,130 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(3, page.EndLine);
 		Assert.Equal(5, page.TotalLines);
 		Assert.True(page.IsTruncated);
+	}
+
+	[Fact]
+	public void JsonArgumentsFrozenAllowlistAvoidsPerRequestSetAllocation()
+	{
+		var request = new CallToolRequestParams
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>()
+		};
+		var frozen = McpJsonArguments.FreezeAllowed("limit", "path", "profile");
+		_ = McpJsonArguments.Create(request, frozen);
+		_ = McpJsonArguments.Create(request, "limit", "path", "profile");
+
+		var beforeFrozen = GC.GetAllocatedBytesForCurrentThread();
+		for (var index = 0; index < 1_000; index++)
+			_ = McpJsonArguments.Create(request, frozen);
+		var frozenBytes = GC.GetAllocatedBytesForCurrentThread() - beforeFrozen;
+
+		var beforeTransient = GC.GetAllocatedBytesForCurrentThread();
+		for (var index = 0; index < 1_000; index++)
+			_ = McpJsonArguments.Create(request, "limit", "path", "profile");
+		var transientBytes = GC.GetAllocatedBytesForCurrentThread() - beforeTransient;
+
+		Assert.True(frozenBytes < transientBytes / 2,
+			$"frozen={frozenBytes}, transient={transientBytes}");
+	}
+
+	[Fact]
+	public void GlobCompilationCacheReusesValidatedPatternSet()
+	{
+		var pattern = $"src/{Guid.NewGuid():N}/**/*.cs";
+		var before = McpGlobSet.CompiledRegexCount;
+
+		_ = McpGlobSet.Create([pattern], ["**/*.generated.cs"]);
+		var afterFirst = McpGlobSet.CompiledRegexCount;
+		_ = McpGlobSet.Create([pattern], ["**/*.generated.cs"]);
+
+		Assert.Equal(2, afterFirst - before);
+		Assert.Equal(afterFirst, McpGlobSet.CompiledRegexCount);
+	}
+
+	[Fact]
+	public void BoundedStringWriterNeverBuffersPastItsInlineLimit()
+	{
+		using var writer = new McpBoundedStringTextWriter(50_000);
+
+		Assert.Throws<McpLineLimitReachedException>(() =>
+		{
+			for (var index = 0; index < 51; index++)
+				writer.Write(new string('x', 1_000));
+		});
+
+		Assert.True(writer.IsTruncated);
+		Assert.Equal(50_000, writer.BufferedCharacters);
+		Assert.Equal(50_000, writer.Text.Length);
+	}
+
+	[Fact]
+	public async Task PackQuotaEvictsLeastRecentlyReadPackAndProtectsAnActiveReader()
+	{
+		using var workspace = new TemporaryDirectory();
+		var time = new MutablePackTimeProvider(new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero));
+		using var registry = new McpPackRegistry(
+			workspace.Path,
+			time,
+			maximumPackBytes: 8,
+			maximumSessionBytes: 12);
+		var first = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[6], token),
+			TestContext.Current.CancellationToken);
+		time.Advance();
+		var second = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[6], token),
+			TestContext.Current.CancellationToken);
+		time.Advance();
+		await using var active = registry.OpenReadDocument(first.Id);
+
+		var third = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[6], token),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, third.EvictedPackCount);
+		Assert.Equal(first.Id, active.Document.Id);
+		Assert.Equal(McpErrorCodes.PackExpired,
+			Assert.Throws<McpToolException>(() => registry.Resolve(second.Id)).Code);
+		Assert.Contains("session quota", Assert.Throws<McpToolException>(() => registry.Resolve(second.Id)).Message,
+			StringComparison.Ordinal);
+	}
+
+	private sealed class MutablePackTimeProvider(DateTimeOffset now) : TimeProvider
+	{
+		public override DateTimeOffset GetUtcNow() => now;
+		public void Advance() => now = now.AddSeconds(1);
+	}
+
+	[Fact]
+	public void TextPageSliceContinuesInsideALongLineWithoutSplittingSurrogatePairs()
+	{
+		var text = new string('a', 49_999) + "😀" + new string('β', 70_000);
+
+		var first = McpTextRanges.Slice(text, 1, null, 1_000, 50_000, CancellationToken.None);
+		var second = McpTextRanges.Slice(
+			text,
+			first.NextLine,
+			null,
+			1_000,
+			50_000,
+			CancellationToken.None,
+			first.NextColumn);
+		var third = McpTextRanges.Slice(
+			text,
+			second.NextLine,
+			null,
+			1_000,
+			50_000,
+			CancellationToken.None,
+			second.NextColumn);
+
+		Assert.Equal(text, first.Text + second.Text + third.Text);
+		Assert.Equal(1, first.NextLine);
+		Assert.Equal(50_000, first.NextColumn);
+		Assert.False(char.IsHighSurrogate(first.Text[^1]));
+		Assert.False(char.IsLowSurrogate(second.Text[0]));
 	}
 
 	[Fact]

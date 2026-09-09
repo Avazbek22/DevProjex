@@ -572,6 +572,31 @@ public sealed class ExportContextDocumentContractTests
 			diagnostics.SourceVersionHashBytes);
 	}
 
+	[Fact]
+	public async Task TokenBudgetedExportMaterializesOnlyAdmittedFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("A.txt", "aaaa");
+		workspace.WriteFile("B.txt", "bbbb");
+		workspace.WriteFile("C.txt", "cccc");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				"text",
+				maximumEstimatedTokens: 1,
+				view: "content",
+				hideSecrets: true));
+		var diagnostics = measurement.Capture();
+
+		Assert.Contains("Included files: 1", environment.StandardError, StringComparison.Ordinal);
+		Assert.Equal(1, diagnostics.PreparedFilesMaterialized);
+	}
+
 	[Theory]
 	[InlineData("utf8-crlf-below", -1L)]
 	[InlineData("utf8-nonascii-exact", 0L)]
@@ -941,7 +966,8 @@ public sealed class ExportContextDocumentContractTests
 		bool dryRun = false,
 		string view = "tree-content",
 		bool compressCode = false,
-		bool rank = false)
+		bool rank = false,
+		bool hideSecrets = false)
 	{
 		var arguments = new List<string>
 		{
@@ -962,6 +988,8 @@ public sealed class ExportContextDocumentContractTests
 			arguments.Add("--dry-run");
 		if (compressCode)
 			arguments.Add("--compress-code");
+		if (hideSecrets)
+			arguments.Add("--hide-secrets");
 		if (rank)
 		{
 			arguments.Add("--rank");

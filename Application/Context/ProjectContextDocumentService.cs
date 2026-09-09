@@ -132,7 +132,8 @@ public sealed class ProjectContextDocumentService(
 		bool useSourceMappedStructuredPaths = false,
 		IProgress<ProjectCopyExportProgress>? writeProgress = null,
 		long? maximumEstimatedTokens = null,
-		ImportanceRankingReport? ranking = null)
+		ImportanceRankingReport? ranking = null,
+		ProjectContextTokenBudgetReport? precomputedTokenBudget = null)
 	{
 		_ = await WriteCompleteWithReportAsync(
 				plan,
@@ -144,7 +145,8 @@ public sealed class ProjectContextDocumentService(
 				useSourceMappedStructuredPaths,
 				writeProgress,
 				maximumEstimatedTokens,
-				ranking)
+				ranking,
+				precomputedTokenBudget)
 			.ConfigureAwait(false);
 	}
 
@@ -158,7 +160,8 @@ public sealed class ProjectContextDocumentService(
 		bool useSourceMappedStructuredPaths = false,
 		IProgress<ProjectCopyExportProgress>? writeProgress = null,
 		long? maximumEstimatedTokens = null,
-		ImportanceRankingReport? ranking = null)
+		ImportanceRankingReport? ranking = null,
+		ProjectContextTokenBudgetReport? precomputedTokenBudget = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		ArgumentNullException.ThrowIfNull(destination);
@@ -190,7 +193,7 @@ public sealed class ProjectContextDocumentService(
 					ranking)
 				.ConfigureAwait(false);
 		}
-		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens);
+		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, precomputedTokenBudget);
 		using var cancellationDestination = new CancellationBoundWriteStream(
 			destination,
 			cancellationToken);
@@ -274,7 +277,9 @@ public sealed class ProjectContextDocumentService(
 		bool useSourceMappedStructuredPaths = false,
 		IProgress<ProjectCopyExportProgress>? writeProgress = null,
 		long? maximumEstimatedTokens = null,
-		ImportanceRankingReport? ranking = null)
+		ImportanceRankingReport? ranking = null,
+		ProjectContextTokenBudgetReport? precomputedTokenBudget = null,
+		bool preserveContentMetrics = false)
 	{
 		ArgumentNullException.ThrowIfNull(prepared);
 		var analyzer = CreatePreparedAnalyzer(prepared);
@@ -287,7 +292,7 @@ public sealed class ProjectContextDocumentService(
 		var pathRedaction = outputPathRedactionDecision ??
 		                    OutputRootPathPresentation.CaptureRedactionDecision(
 			                    CreateTransformationContext(plan));
-		plan = await RefreshStructuredContentMetricsAsync(
+		plan = preserveContentMetrics ? plan : await RefreshStructuredContentMetricsAsync(
 				plan,
 				view,
 				format,
@@ -312,7 +317,8 @@ public sealed class ProjectContextDocumentService(
 				useSourceMappedStructuredPaths,
 				writeProgress,
 				maximumEstimatedTokens,
-				ranking)
+				ranking,
+				precomputedTokenBudget)
 			.ConfigureAwait(false);
 		return result with { UnscannableFiles = prepared.UnscannableFiles };
 	}
@@ -505,10 +511,13 @@ public sealed class ProjectContextDocumentService(
 	}
 
 	private static ProjectContextTokenBudgetAccumulator? CreateTokenBudget(
-		long? maximumEstimatedTokens) =>
-		maximumEstimatedTokens is null
-			? null
-			: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value);
+		long? maximumEstimatedTokens,
+		ProjectContextTokenBudgetReport? precomputedTokenBudget = null) =>
+		precomputedTokenBudget is not null
+			? new ProjectContextTokenBudgetAccumulator(precomputedTokenBudget)
+			: maximumEstimatedTokens is null
+				? null
+				: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value);
 
 	private static bool TryIncludeInBudget(
 		ProjectContextTokenBudgetAccumulator tokenBudget,
@@ -527,7 +536,8 @@ public sealed class ProjectContextDocumentService(
 			rankingEntriesByFullPath is null ? null : admissionIndex + 1,
 			entry?.Hop,
 			entry?.BaseImportancePriority,
-			entry?.Via);
+			entry?.Via,
+			fullPath);
 	}
 
 	private static IReadOnlyDictionary<string, ImportanceRankingEntry>? CreateRankingEntryLookup(
