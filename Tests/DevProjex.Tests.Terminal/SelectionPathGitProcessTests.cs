@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -15,14 +16,18 @@ public sealed class SelectionPathGitProcessTests
 		var unicodePath = Path.Combine(project, "Пример.cs");
 		const string quoteName = "literal'quote.cs";
 		var quotePath = Path.Combine(project, quoteName);
+		var globalConfig = workspace.WriteFile("gitconfig", string.Empty);
+		var emptyTemplate = workspace.CreateDirectory("git-template");
 		await File.WriteAllTextAsync(unicodePath, "class Пример {}\n", TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(quotePath, "class Quote {}\n", TestContext.Current.CancellationToken);
-		await RunGitAsync(project, "init");
-		await RunGitAsync(project, "add", "--", ".");
+		await RunGitAsync(project, globalConfig, emptyTemplate, "init", $"--template={emptyTemplate}");
+		await RunGitAsync(project, globalConfig, emptyTemplate, "add", "--", ".");
 		await File.AppendAllTextAsync(unicodePath, "// changed\n", TestContext.Current.CancellationToken);
 		await File.AppendAllTextAsync(quotePath, "// changed\n", TestContext.Current.CancellationToken);
 		var selected = await RunGitAsync(
 			project,
+			globalConfig,
+			emptyTemplate,
 			"-c", "core.quotepath=false", "diff", "--name-only");
 
 		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
@@ -81,16 +86,21 @@ public sealed class SelectionPathGitProcessTests
 		}
 	}
 
-	private static async Task<string> RunGitAsync(string workingDirectory, params string[] arguments)
+	private static async Task<string> RunGitAsync(
+		string workingDirectory,
+		string globalConfig,
+		string templateDirectory,
+		params string[] arguments)
 	{
 		using var process = new Process
 		{
 			StartInfo = new ProcessStartInfo
 			{
-				FileName = "git",
+				FileName = GitRuntime.GitExecutable,
 				WorkingDirectory = workingDirectory,
 				UseShellExecute = false,
 				CreateNoWindow = true,
+				RedirectStandardInput = true,
 				RedirectStandardOutput = true,
 				RedirectStandardError = true,
 				StandardOutputEncoding = new UTF8Encoding(false),
@@ -99,9 +109,15 @@ public sealed class SelectionPathGitProcessTests
 		};
 		foreach (var argument in arguments)
 			process.StartInfo.ArgumentList.Add(argument);
+		process.StartInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+		process.StartInfo.Environment["GIT_CONFIG_GLOBAL"] = globalConfig;
+		process.StartInfo.Environment["GIT_TEMPLATE_DIR"] = templateDirectory;
+		process.StartInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+		process.StartInfo.Environment["GCM_INTERACTIVE"] = "Never";
 		try
 		{
 			Assert.True(process.Start());
+			process.StandardInput.Close();
 		}
 		catch (Exception exception) when (exception is System.ComponentModel.Win32Exception)
 		{
