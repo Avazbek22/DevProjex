@@ -6,6 +6,56 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New052_OrdinaryCSharpTypePositionsProduceReferences()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var types = new[]
+		{
+			fixture.CreateFile("LocalItem.cs", "public sealed class LocalItem { }"),
+			fixture.CreateFile("LoopItem.cs", "public sealed class LoopItem { }"),
+			fixture.CreateFile("DomainError.cs", "public sealed class DomainError : System.Exception { }"),
+			fixture.CreateFile("Signal.cs", "public delegate void Signal();"),
+			fixture.CreateFile("IndexValue.cs", "public sealed class IndexValue { }"),
+			fixture.CreateFile("LocalResult.cs", "public sealed class LocalResult { }"),
+			fixture.CreateFile("DelegateResult.cs", "public sealed class DelegateResult { }"),
+			fixture.CreateFile("Factory.cs", "public delegate DelegateResult Factory();")
+		};
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"""
+			public sealed class Consumer
+			{
+			    public event Signal Changed;
+			    public event Signal Detailed { add { } remove { } }
+			    public IndexValue this[int index] => null;
+			    public void Run(System.Collections.IEnumerable values)
+			    {
+			        LocalItem local = null;
+			        foreach (LoopItem value in values) { }
+			        try { } catch (DomainError) { }
+			        LocalResult Build() => null;
+			    }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, .. types, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		foreach (var target in new[]
+		         {
+			         "LocalItem.cs", "LoopItem.cs", "DomainError.cs", "Signal.cs", "IndexValue.cs", "LocalResult.cs"
+		         })
+			Assert.Contains(result.Edges, edge => edge.Source == "Consumer.cs" && edge.Target == target);
+		Assert.Contains(result.Edges, edge => edge.Source == "Factory.cs" && edge.Target == "DelegateResult.cs");
+		Assert.Equal(2, result.Files.Single(file => file.Path == "Consumer.cs").References.Count(reference =>
+			reference.Name == "Signal"));
+	}
+
+	[Fact]
 	public async Task New014_RelativeAliasTargetFallsBackToLexicalNamespace()
 	{
 		using var fixture = new TemporaryDirectory();
