@@ -6,6 +6,32 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New093_UnknownCrossProjectAccessibilityRemainsAmbiguous()
+	{
+		using var fixture = new TemporaryDirectory();
+		var projectA = fixture.CreateFile(
+			"A/A.csproj",
+			"<Project Sdk=\"Microsoft.NET.Sdk\"><ItemGroup><ProjectReference Include=\"../B/B.csproj\" /><ProjectReference Include=\"../C/C.csproj\" /></ItemGroup></Project>");
+		var projectB = fixture.CreateFile("B/B.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var projectC = fixture.CreateFile("C/C.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var publicType = fixture.CreateFile("B/Widget.cs", "namespace Shared; public sealed class Widget { }");
+		var internalType = fixture.CreateFile("C/Widget.cs", "namespace Shared; internal sealed class Widget { }");
+		var source = fixture.CreateFile("A/Consumer.cs", "using Shared; public sealed class Consumer { Widget Value; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[projectA, projectB, projectC, publicType, internalType, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "A/Consumer.cs" && candidate.Reference == "Widget");
+		Assert.Equal(ResolutionStatus.Ambiguous, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Equal(["B/Widget.cs", "C/Widget.cs"], edge.Candidates);
+	}
+
+	[Fact]
 	public async Task New094_PreprocessorDependentReferencesAreHonestlyUnresolved()
 	{
 		using var fixture = new TemporaryDirectory();
