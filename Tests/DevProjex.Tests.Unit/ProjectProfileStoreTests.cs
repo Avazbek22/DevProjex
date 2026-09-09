@@ -307,7 +307,7 @@ public sealed class ProjectProfileStoreTests
 	}
 
 	[Fact]
-	public void TryLoadProfile_CorruptedJson_ReturnsFalseAndRecoversOnNextSave()
+	public void TryLoadProfile_CorruptedJson_ReturnsFalseAndRefusesDestructiveSave()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -315,7 +315,8 @@ public sealed class ProjectProfileStoreTests
 			var store = CreateStore(tempRoot);
 			var path = store.GetPath();
 			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-			File.WriteAllText(path, "{ this is not valid json");
+			const string corruptPayload = "{ this is not valid json";
+			File.WriteAllText(path, corruptPayload);
 
 			Assert.False(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out _));
 
@@ -323,12 +324,8 @@ public sealed class ProjectProfileStoreTests
 				SelectedRootFolders: ["src"],
 				SelectedExtensions: [".cs"],
 				SelectedIgnoreOptions: [IgnoreOptionId.HiddenFiles]);
-			store.SaveProfile(Path.Combine(tempRoot, "RepoA"), profile);
-
-			Assert.True(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out var loaded));
-			Assert.Single(loaded.SelectedRootFolders);
-			Assert.Single(loaded.SelectedExtensions);
-			Assert.Single(loaded.SelectedIgnoreOptions);
+			Assert.False(store.TrySaveProfile(Path.Combine(tempRoot, "RepoA"), profile));
+			Assert.Equal(corruptPayload, File.ReadAllText(path));
 		}
 		finally
 		{

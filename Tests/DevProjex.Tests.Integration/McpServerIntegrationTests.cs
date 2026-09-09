@@ -3646,7 +3646,7 @@ public sealed class McpServerIntegrationTests
 				{
 					roots = (string[]?)null,
 					extensions = new[] { ".txt" },
-					selectedPaths = Array.Empty<string>(),
+					selectedPaths = (string[]?)null,
 					gitMode = "none",
 					exclusions = Array.Empty<string>(),
 					hideSecrets = false,
@@ -5710,7 +5710,7 @@ public sealed class McpServerIntegrationTests
 			  "selection": {
 			    "roots": null,
 			    "extensions": null,
-			    "selectedPaths": [],
+			    "selectedPaths": null,
 			    "gitMode": "none",
 			    "exclusions": [],
 			    "hideSecrets": false,

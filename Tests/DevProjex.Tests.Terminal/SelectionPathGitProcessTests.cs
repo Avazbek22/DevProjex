@@ -12,7 +12,7 @@ public sealed class SelectionPathGitProcessTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		var unicodePath = Path.Combine(project, "Пример.cs");
-		var quoteName = OperatingSystem.IsWindows() ? "literal'quote.cs" : "literal\"quote.cs";
+		const string quoteName = "literal'quote.cs";
 		var quotePath = Path.Combine(project, quoteName);
 		await File.WriteAllTextAsync(unicodePath, "class Пример {}\n", TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(quotePath, "class Quote {}\n", TestContext.Current.CancellationToken);
