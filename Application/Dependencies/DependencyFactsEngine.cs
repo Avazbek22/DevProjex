@@ -1523,13 +1523,13 @@ public sealed class DependencyFactsEngine : IDisposable
 					target.UnsupportedReason ?? "unsupported package target");
 			foreach (var branch in target.Conditions)
 			{
+				if (!IsActivePackageCondition(branch.Name, moduleCondition))
+					continue;
 				if (!IsSupportedPackageCondition(branch.Name))
 					return new PackageTargetSelection(
 						PackageTargetSelectionKind.Unsupported,
 						null,
 						"package condition is not supported");
-				if (!IsActivePackageCondition(branch.Name, moduleCondition))
-					continue;
 				var selected = SelectPackageTarget(branch.Target, moduleCondition);
 				if (selected.Kind != PackageTargetSelectionKind.NoMatch)
 					return selected;
