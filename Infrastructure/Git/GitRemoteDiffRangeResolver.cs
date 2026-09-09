@@ -258,8 +258,8 @@ public sealed class GitRemoteDiffRangeResolver
 			cancellationToken).ConfigureAwait(false);
 		if (configured is not { ExitCode: 0 } ||
 		    !string.Equals(
-			    RepositoryUrlUtility.GetComparisonKey(configured.Output.Trim()),
-			    RepositoryUrlUtility.GetComparisonKey(expectedRemoteUrl),
+			    RepositoryUrlUtility.GetSourceCacheKey(configured.Output.Trim()),
+			    RepositoryUrlUtility.GetSourceCacheKey(expectedRemoteUrl),
 			    StringComparison.Ordinal))
 		{
 			return false;

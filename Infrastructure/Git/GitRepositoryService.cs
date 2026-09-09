@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
+using System.IO.Enumeration;
 using System.Runtime.ExceptionServices;
+using System.Security;
 using DevProjex.Infrastructure.Processes;
 using DevProjex.Kernel;
 
@@ -22,17 +25,25 @@ namespace DevProjex.Infrastructure.Git;
 /// - Force operations (-B checkout, --hard reset) are safe for cached copies
 /// - AI assistants: Do NOT change these optimizations without understanding the read-only cache context
 /// </summary>
-public sealed class GitRepositoryService : IGitRepositoryService
+public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 {
 	internal const string TestFileTransportPolicyVariable =
 		"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT";
     private const int CommandOutputBufferChars = 64 * 1024;
     private const int CommandErrorBufferChars = 64 * 1024;
-    internal const int MaximumProgressFrameCharacters = 4 * 1024;
+	internal const int MaximumProgressFrameCharacters = 4 * 1024;
+	internal const string CacheQuotaDiagnostic =
+		"DPX-GIT-CACHE-QUOTA: Git cache size exceeds the configured limit.";
+	internal const string CacheReserveDiagnostic =
+		"DPX-GIT-CACHE-RESERVE: Git cache destination does not have the required free-space reserve.";
     private readonly string? _gitExecutable;
     private readonly bool _allowFileTransport;
 	private readonly bool _materializeTestClone;
 	private readonly bool _retainTestManagedMarker;
+	private readonly GitRepositoryResourceLimits _resourceLimits;
+	private readonly ConcurrentDictionary<string, GitAskPassSession> _authenticationSessions =
+		new(StringComparer.Ordinal);
+	private int _disposed;
 
     public GitRepositoryService()
     {
@@ -43,6 +54,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
 			"1",
 			StringComparison.Ordinal);
 		_materializeTestClone = _allowFileTransport;
+		_resourceLimits = GitRepositoryResourceLimits.Default;
         _ = GitRuntime.VersionDisplay;
         _ = GitRuntime.SshExecutable;
     }
@@ -51,6 +63,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gitExecutable);
         _gitExecutable = gitExecutable;
+		_resourceLimits = GitRepositoryResourceLimits.Default;
     }
 
     internal GitRepositoryService(bool allowFileTransportForTests)
@@ -61,10 +74,22 @@ public sealed class GitRepositoryService : IGitRepositoryService
 	internal GitRepositoryService(
 		bool allowFileTransportForTests,
 		bool retainTestManagedMarker)
+		: this(
+			allowFileTransportForTests,
+			retainTestManagedMarker,
+			GitRepositoryResourceLimits.Default)
+	{
+	}
+
+	internal GitRepositoryService(
+		bool allowFileTransportForTests,
+		bool retainTestManagedMarker,
+		GitRepositoryResourceLimits resourceLimits)
     {
         _allowFileTransport = allowFileTransportForTests;
 		_materializeTestClone = allowFileTransportForTests;
 		_retainTestManagedMarker = allowFileTransportForTests && retainTestManagedMarker;
+		_resourceLimits = (resourceLimits ?? throw new ArgumentNullException(nameof(resourceLimits))).Validate();
         _ = GitRuntime.VersionDisplay;
         _ = GitRuntime.SshExecutable;
     }
@@ -97,7 +122,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
             url,
             out var cloneUrl,
             out var authentication);
-        var resultRepositoryUrl = RepositoryUrlUtility.ToSafeDisplay(cloneUrl);
+		var resultRepositoryUrl = RepositoryUrlUtility.ToSafeDisplay(url);
         var repoName = RepositoryUrlUtility.GetRepositoryName(resultRepositoryUrl);
 
         try
@@ -114,15 +139,24 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     ErrorMessage: "Clone failed");
             }
 
+			if (!HasTransferAdmission(targetDirectory))
+				return FailedClone(
+					targetDirectory,
+					repoName,
+					resultRepositoryUrl,
+					CacheReserveDiagnostic);
+
             // Note: progress status is set by caller to show localized message
             // We only report dynamic progress (git output with percentages)
 
             // Git suppresses transfer progress when stderr is redirected. --progress is required
             // here so a long clone cannot look frozen while the external process is still active.
             // SHALLOW CLONE: --depth 1 downloads only 1 commit for speed.
-            using var askPass = authentication is null
-                ? null
-                : GitAskPassSession.Create(authentication);
+			var askPass = authentication is null
+				? null
+				: GetOrCreateAuthenticationSession(
+					RepositoryUrlUtility.ToSafeSourceIdentity(url),
+					authentication);
             var result = await RunGitCommandAsync(
                 null,
 				GitProcessOperation.CloneRepository(
@@ -131,12 +165,15 @@ public sealed class GitRepositoryService : IGitRepositoryService
 					_allowFileTransport),
                 cancellationToken,
                 progress,
-                askPass);
+				askPass,
+				quotaPath: targetDirectory);
 
             if (result.ExitCode != 0)
             {
                 // Parse git error and provide user-friendly message
-                var errorMessage = ParseGitCloneError(result.Error);
+				var errorMessage = result.Error.Contains(CacheQuotaDiagnostic, StringComparison.Ordinal)
+					? CacheQuotaDiagnostic
+					: ParseGitCloneError(result.Error);
 
                 return new GitCloneResult(
                     Success: false,
@@ -148,7 +185,11 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     ErrorMessage: errorMessage);
             }
 
-			GitRemoteIdentityStore.Write(targetDirectory, cloneUrl, _allowFileTransport);
+			GitRemoteIdentityStore.Write(
+				targetDirectory,
+				cloneUrl,
+				url,
+				_allowFileTransport);
 
             // After clone, determine which branch we're on (usually main or master)
             var defaultBranch = await GetDefaultBranchAsync(targetDirectory, cancellationToken);
@@ -317,7 +358,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
 						GitBranchListKind.RemoteHeads,
 						remoteUrl,
 						_allowFileTransport),
-					cancellationToken).ConfigureAwait(false);
+					cancellationToken,
+					askPass: GetAuthenticationSession(repositoryPath)).ConfigureAwait(false);
 
             var seen = new HashSet<string>(StringComparer.Ordinal);
 
@@ -394,6 +436,14 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     }
                 }
             }
+
+			if (!string.IsNullOrWhiteSpace(currentBranch) && seen.Add(currentBranch))
+			{
+				branches.Add(new GitBranch(
+					Name: currentBranch,
+					IsActive: true,
+					IsRemote: false));
+			}
 
             // Sort: active branch first, then alphabetically
             branches.Sort((a, b) =>
@@ -513,6 +563,11 @@ public sealed class GitRepositoryService : IGitRepositoryService
 				.ConfigureAwait(false);
 			if (remoteUrl is null)
 				return false;
+			if (!HasTransferAdmission(RepositoryCacheLayout.GetContainer(repositoryPath)))
+			{
+				progress?.Report(CacheReserveDiagnostic);
+				return false;
+			}
 			await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(
 				RepositoryCacheLayout.GetBaseOperationLockPath(
 					RepositoryCacheLayout.GetContainer(repositoryPath),
@@ -529,7 +584,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
 					remoteUrl,
 					currentBranch,
 					allowFileTransport: _allowFileTransport),
-				cancellationToken);
+				cancellationToken,
+				askPass: GetAuthenticationSession(repositoryPath),
+				quotaPath: RepositoryCacheLayout.GetContainer(repositoryPath));
 
             if (fetchResult.ExitCode != 0)
                 return false;  // Network error or branch doesn't exist
@@ -668,6 +725,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
 				.ConfigureAwait(false);
 			if (remoteUrl is null)
 				return false;
+			if (!HasTransferAdmission(container))
+				return false;
             var setBranches = await RunGitCommandAsync(
                 repositoryPath,
 				GitProcessOperation.ManagedConfigWrite(
@@ -680,7 +739,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
 					remoteUrl,
 					branchName,
 					allowFileTransport: _allowFileTransport),
-                cancellationToken);
+				cancellationToken,
+				askPass: GetAuthenticationSession(repositoryPath),
+				quotaPath: RepositoryCacheLayout.GetContainer(repositoryPath));
             if (setBranches.ExitCode != 0 || fetch.ExitCode != 0)
                 return false;
         }
@@ -849,6 +910,38 @@ public sealed class GitRepositoryService : IGitRepositoryService
 		}
 	}
 
+	private GitAskPassSession GetOrCreateAuthenticationSession(
+		string sourceIdentity,
+		GitCloneAuthentication authentication)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(sourceIdentity);
+		if (identity.Length == 0)
+			throw new InvalidOperationException("The authenticated source identity is invalid.");
+		return _authenticationSessions.GetOrAdd(
+			identity,
+			_ => GitAskPassSession.Create(authentication));
+	}
+
+	private GitAskPassSession? GetAuthenticationSession(string repositoryPath)
+	{
+		if (!GitRemoteIdentityStore.TryReadSourceIdentity(repositoryPath, out var sourceIdentity))
+			return null;
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(sourceIdentity);
+		return identity.Length > 0 && _authenticationSessions.TryGetValue(identity, out var session)
+			? session
+			: null;
+	}
+
+	public void Dispose()
+	{
+		if (Interlocked.Exchange(ref _disposed, 1) != 0)
+			return;
+		foreach (var session in _authenticationSessions.Values)
+			session.Dispose();
+		_authenticationSessions.Clear();
+	}
+
     /// <summary>
     /// Executes a git command asynchronously with proper output capture.
     ///
@@ -858,12 +951,13 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// - Supports cancellation with process termination
     /// - Uses UTF-8 encoding for international characters
     /// </summary>
-    private async Task<GitCommandResult> RunGitCommandAsync(
+	private async Task<GitCommandResult> RunGitCommandAsync(
         string? workingDirectory,
 		GitProcessOperation operation,
         CancellationToken cancellationToken,
         IProgress<string>? progress = null,
-        GitAskPassSession? askPass = null)
+		GitAskPassSession? askPass = null,
+		string? quotaPath = null)
     {
         // Honor pre-canceled tokens before spawning git. Without this guard a very fast
         // command such as "git --version" can complete before WaitForExitAsync observes
@@ -888,6 +982,15 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
         process.Start();
         process.StandardInput.Close();
+		var quotaExceeded = 0;
+		using var quotaMonitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
+		var quotaMonitor = quotaPath is null
+			? Task.FromResult(default(QuotaMonitorState))
+			: MonitorRepositoryQuotaAsync(
+				process,
+				quotaPath,
+				() => Interlocked.Exchange(ref quotaExceeded, 1),
+				quotaMonitorCancellation.Token);
 
         var outputPump = GitProcessLinePump.ReadAsync(
             process.StandardOutput,
@@ -903,6 +1006,21 @@ public sealed class GitRepositoryService : IGitRepositoryService
         try
         {
 			await WaitForExitOrTerminateAsync(process, operationToken);
+			var processExitTimestamp = Stopwatch.GetTimestamp();
+			quotaMonitorCancellation.Cancel();
+			var quotaMonitorState = await ObserveQuotaMonitorAsync(quotaMonitor).ConfigureAwait(false);
+			TimeSpan? lastScanAge = quotaMonitorState.LastScanCompletedTimestamp switch
+			{
+				{ } lastScanTimestamp when processExitTimestamp > lastScanTimestamp =>
+					Stopwatch.GetElapsedTime(lastScanTimestamp, processExitTimestamp),
+				{ } => TimeSpan.Zero,
+				_ => null
+			};
+			if (quotaPath is not null &&
+			    Volatile.Read(ref quotaExceeded) == 0 &&
+			    ShouldPerformFinalQuotaScan(lastScanAge, _resourceLimits.PollInterval) &&
+			    ExceedsRepositoryQuota(quotaPath))
+				Interlocked.Exchange(ref quotaExceeded, 1);
 			var outputCompleted = await GitProcessOutputReader
 				.WaitForCompletionAfterExitAsync(process, outputPump, errorPump)
 				.ConfigureAwait(false);
@@ -912,12 +1030,20 @@ public sealed class GitRepositoryService : IGitRepositoryService
         }
 		catch (OperationCanceledException)
 		{
+			quotaMonitorCancellation.Cancel();
+			await ObserveQuotaMonitorAsync(quotaMonitor).ConfigureAwait(false);
 			await GitProcessOutputReader
 				.ObserveAfterTerminationAsync(process, outputPump, errorPump)
 				.ConfigureAwait(false);
 			if (cancellationToken.IsCancellationRequested)
 				throw;
 			return GitCommandResult.Failed("Git operation exceeded its safety deadline.");
+		}
+
+		if (Volatile.Read(ref quotaExceeded) != 0)
+		{
+			progress?.Report(CacheQuotaDiagnostic);
+			return GitCommandResult.Failed(CacheQuotaDiagnostic);
 		}
 
 		var outputExceeded = outputBuffer.ExceededLimit || errorBuffer.ExceededLimit;
@@ -965,6 +1091,144 @@ public sealed class GitRepositoryService : IGitRepositoryService
             }
         }
     }
+
+	private bool HasTransferAdmission(string destinationPath)
+	{
+		try
+		{
+			return _resourceLimits.GetAvailableFreeSpace(destinationPath) >=
+			       _resourceLimits.FreeSpaceReserveBytes;
+		}
+		catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or SecurityException or NotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private async Task<QuotaMonitorState> MonitorRepositoryQuotaAsync(
+		Process process,
+		string path,
+		Action markExceeded,
+		CancellationToken cancellationToken)
+	{
+		long? lastScanCompletedTimestamp = null;
+		try
+		{
+			await Task.Yield();
+			while (!process.HasExited)
+			{
+				var scanStartedTimestamp = Stopwatch.GetTimestamp();
+				var exceeded = ExceedsRepositoryQuota(path);
+				lastScanCompletedTimestamp = Stopwatch.GetTimestamp();
+				if (exceeded)
+				{
+					markExceeded();
+					try
+					{
+						process.Kill(entireProcessTree: true);
+					}
+					catch (Exception exception) when (exception is
+					       InvalidOperationException or
+					       NotSupportedException or
+					       System.ComponentModel.Win32Exception)
+					{
+					}
+					return new QuotaMonitorState(lastScanCompletedTimestamp);
+				}
+				var scanDuration = Stopwatch.GetElapsedTime(
+					scanStartedTimestamp,
+					lastScanCompletedTimestamp.Value);
+				var delay = CalculateQuotaPollDelay(scanDuration, _resourceLimits.PollInterval);
+				await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+			}
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+		return new QuotaMonitorState(lastScanCompletedTimestamp);
+	}
+
+	internal static TimeSpan CalculateQuotaPollDelay(
+		TimeSpan scanDuration,
+		TimeSpan minimumPollInterval)
+	{
+		var adaptiveTicks = scanDuration.Ticks > TimeSpan.MaxValue.Ticks / 10
+			? TimeSpan.MaxValue.Ticks
+			: scanDuration.Ticks * 10;
+		return TimeSpan.FromTicks(Math.Max(minimumPollInterval.Ticks, adaptiveTicks));
+	}
+
+	internal static bool ShouldPerformFinalQuotaScan(
+		TimeSpan? lastScanAge,
+		TimeSpan pollInterval) =>
+		lastScanAge is null || lastScanAge.Value >= pollInterval;
+
+	private bool ExceedsRepositoryQuota(string path)
+	{
+		long total = 0;
+		try
+		{
+			if (!Directory.Exists(path))
+				return false;
+			var files = new FileSystemEnumerable<long>(
+				path,
+				static (ref FileSystemEntry entry) => entry.Length,
+				new EnumerationOptions
+				{
+					RecurseSubdirectories = true,
+					AttributesToSkip = FileAttributes.ReparsePoint,
+					IgnoreInaccessible = true
+				})
+			{
+				ShouldIncludePredicate = static (ref FileSystemEntry entry) => !entry.IsDirectory
+			};
+			foreach (var length in files)
+			{
+				try
+				{
+					total = checked(total + length);
+					if (total > _resourceLimits.MaximumRepositoryBytes)
+						return true;
+				}
+				catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or OverflowException)
+				{
+				}
+			}
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+		}
+		return false;
+	}
+
+	private static async Task<QuotaMonitorState> ObserveQuotaMonitorAsync(
+		Task<QuotaMonitorState> monitor)
+	{
+		try
+		{
+			return await monitor.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException)
+		{
+			return default;
+		}
+	}
+
+	private readonly record struct QuotaMonitorState(long? LastScanCompletedTimestamp);
+
+	private static GitCloneResult FailedClone(
+		string localPath,
+		string repositoryName,
+		string repositoryUrl,
+		string errorMessage) =>
+		new(
+			Success: false,
+			LocalPath: localPath,
+			SourceType: ProjectSourceType.GitClone,
+			DefaultBranch: null,
+			RepositoryName: repositoryName,
+			RepositoryUrl: repositoryUrl,
+			ErrorMessage: errorMessage);
 
     private static string SanitizeProgressFrame(string value)
     {

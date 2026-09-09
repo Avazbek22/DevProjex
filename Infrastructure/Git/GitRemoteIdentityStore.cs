@@ -11,6 +11,7 @@ internal static class GitRemoteIdentityStore
 	public static void Write(
 		string repositoryPath,
 		string remoteUrl,
+		string? sourceIdentityUrl = null,
 		bool allowFileTransport = false)
 	{
 		var gitDirectory = ResolveCommonGitDirectory(repositoryPath);
@@ -18,7 +19,11 @@ internal static class GitRemoteIdentityStore
 			throw new InvalidOperationException("The cloned repository metadata is unavailable.");
 		var safeUrl = GitNetworkPolicy.ValidateUrl(remoteUrl, allowFileTransport);
 		var path = Path.Combine(gitDirectory, IdentityFileName);
-		File.WriteAllText(path, safeUrl, new UTF8Encoding(false));
+		var safeSourceIdentity = RepositoryUrlUtility.ToSafeSourceIdentity(sourceIdentityUrl ?? safeUrl);
+		File.WriteAllText(
+			path,
+			safeUrl + "\n" + safeSourceIdentity,
+			new UTF8Encoding(false));
 		if (!OperatingSystem.IsWindows())
 			File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 	}
@@ -34,14 +39,39 @@ internal static class GitRemoteIdentityStore
 			{
 				return false;
 			}
-			var saved = File.ReadAllText(path).Trim();
+			var saved = File.ReadLines(path).FirstOrDefault()?.Trim();
+			if (string.IsNullOrEmpty(saved))
+				return false;
 			return string.Equals(
-				RepositoryUrlUtility.GetComparisonKey(saved),
-				RepositoryUrlUtility.GetComparisonKey(remoteUrl),
+				RepositoryUrlUtility.GetSourceCacheKey(saved),
+				RepositoryUrlUtility.GetSourceCacheKey(remoteUrl),
 				StringComparison.Ordinal);
 		}
 		catch
 		{
+			return false;
+		}
+	}
+
+	public static bool TryReadSourceIdentity(string repositoryPath, out string sourceIdentity)
+	{
+		sourceIdentity = string.Empty;
+		try
+		{
+			var path = Path.Combine(ResolveCommonGitDirectory(repositoryPath), IdentityFileName);
+			var info = new FileInfo(path);
+			if (!info.Exists || info.Length <= 0 || info.Length > MaximumIdentityLength ||
+			    !UnixFileTypeInspector.IsRegularFile(path))
+			{
+				return false;
+			}
+			var lines = File.ReadLines(path).Take(2).ToArray();
+			sourceIdentity = (lines.Length > 1 ? lines[1] : lines[0]).Trim();
+			return RepositoryUrlUtility.GetSourceCacheKey(sourceIdentity).Length > 0;
+		}
+		catch
+		{
+			sourceIdentity = string.Empty;
 			return false;
 		}
 	}

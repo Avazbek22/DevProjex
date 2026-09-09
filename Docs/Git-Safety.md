@@ -50,7 +50,17 @@ The child environment starts with only the available values from this allowlist:
 PATH HOME USERPROFILE TEMP TMP SystemRoot LANG LC_ALL
 ```
 
-`SSH_AUTH_SOCK` is added only for `ExplicitNetwork`. Repository-selection variables such as `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, object-directory variables, namespaces, discovery overrides, and external `GIT_CONFIG_*` injection are removed. DevProjex then adds its own profile variables. A password, when explicitly supplied for a remote source, exists only in the temporary askpass environment and never in argv or a persisted remote URL.
+`ExplicitNetwork` additionally inherits only `SSH_AUTH_SOCK` and the operator's
+`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, and
+`GIT_SSL_CAINFO` values. These values come from the DevProjex process environment,
+not repository configuration. Repository-selection variables such as `GIT_DIR`,
+`GIT_WORK_TREE`, `GIT_INDEX_FILE`, object-directory variables, namespaces,
+discovery overrides, and external `GIT_CONFIG_*` injection are removed. DevProjex
+then adds its own profile variables. A password, when explicitly supplied for a
+remote source, exists only in the temporary askpass environment and never in argv
+or a persisted remote URL. The same in-memory askpass session is reused for
+explicit branch listing and update operations for that source and is disposed with
+the Git service.
 
 ## LocalRead
 
@@ -147,6 +157,18 @@ Online branch listing uses `ls-remote --heads <saved-url>`. Before fetch or `ls-
 
 HTTPS allows only `https`; SSH/SCP sources allow only `ssh`. The v5.2 product has no explicit opt-in surface for `http`, `git`, or `file`, so those transports are rejected. `ext` and unknown remote helpers are always rejected. SSH uses one absolute executable selected from safe `PATH` entries and retains non-interactive `BatchMode=yes`. Network operations have a ten-minute deadline. Credential helpers remain disabled; the existing temporary DevProjex askpass flow is the only password path.
 
+Clone and fetch also share the repository-cache resource policy. DevProjex checks
+free space on the destination filesystem before clone, monitors the application-owned
+staging or cache directory while Git runs, and terminates the complete process tree
+with `DPX-GIT-CACHE-QUOTA` if the configured cache-size limit is exceeded. A transfer
+rejected before launch because the destination filesystem lacks the required reserve
+reports `DPX-GIT-CACHE-RESERVE`; the diagnostic does not disclose filesystem sizes.
+
+GitHub ZIP fallback applies a separate no-progress deadline while reading the
+response body as well as compressed and extracted byte limits. It reports the ref
+that was actually downloaded. Unix symbolic-link entries are skipped with a counted
+`DPX-ZIP-SYMLINK-SKIPPED` diagnostic instead of being materialized as regular files.
+
 ## Operation registry
 
 | Operation | Profile | Pinned purpose |
@@ -173,7 +195,10 @@ No MCP argument, repository value, profile file, or command-line token selects a
 
 - Full no-demand-fetch guarantees require Git 2.45 or newer. Older versions ignore `GIT_NO_LAZY_FETCH`; ordinary repositories continue to work, but DevProjex refuses LocalRead for a partial clone with a promisor remote.
 - Disabling fsmonitor can make reads slower in very large working trees. It avoids executing an untrusted monitor and does not change the selected file set.
-- Isolating system/global config intentionally removes user `insteadOf`, proxy, exclude, and credential-helper behavior. Explicit credentials still use the DevProjex askpass session.
+- Isolating system/global config intentionally removes user `insteadOf`, exclude,
+  and credential-helper behavior. Explicit network operations retain only the
+  operator environment proxy and certificate variables listed above; repository
+  proxy, TLS, header, cookie, and transport overrides remain rejected.
 - Disabling smudge/clean/process during managed materialization leaves LFS and similar pointer files unchanged. No background download is attempted.
 - The `changes` scope cannot reproduce Git's exact working comparison without a configured clean/process filter. It fails with `DPX-GIT-UNSAFE-FILTER` and names the driver. Staged and ref-to-ref comparisons remain available because they do not require that working-tree conversion.
 

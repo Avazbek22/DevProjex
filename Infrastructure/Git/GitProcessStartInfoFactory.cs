@@ -6,6 +6,16 @@ internal static class GitProcessStartInfoFactory
 	[
 		"PATH", "HOME", "USERPROFILE", "TEMP", "TMP", "SystemRoot", "LANG", "LC_ALL"
 	];
+	private static readonly string[] ExplicitNetworkEnvironmentVariables =
+	[
+		"SSH_AUTH_SOCK",
+		"HTTPS_PROXY",
+		"HTTP_PROXY",
+		"NO_PROXY",
+		"SSL_CERT_FILE",
+		"SSL_CERT_DIR",
+		"GIT_SSL_CAINFO"
+	];
 
 	public static ProcessStartInfo Create(
 		string? workingDirectory,
@@ -128,7 +138,12 @@ internal static class GitProcessStartInfoFactory
 				AddConfig(startInfo, $"protocol.allow={operation.AllowedProtocols}");
 				AddConfig(startInfo, "http.extraHeader=");
 				AddConfig(startInfo, "http.cookieFile=");
-				AddConfig(startInfo, "http.proxy=");
+				if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GIT_SSL_CAINFO")))
+				{
+					AddConfig(startInfo, "http.schannelUseSSLCAInfo=true");
+					if (OperatingSystem.IsWindows())
+						AddConfig(startInfo, "http.sslBackend=openssl");
+				}
 				AddConfig(startInfo, "remote.origin.uploadpack=");
 				break;
 			default:
@@ -150,7 +165,10 @@ internal static class GitProcessStartInfoFactory
 		foreach (var name in CommonEnvironmentVariables)
 			inherited[name] = Environment.GetEnvironmentVariable(name);
 		if (profile == GitProcessProfile.ExplicitNetwork)
-			inherited["SSH_AUTH_SOCK"] = Environment.GetEnvironmentVariable("SSH_AUTH_SOCK");
+		{
+			foreach (var name in ExplicitNetworkEnvironmentVariables)
+				inherited[name] = Environment.GetEnvironmentVariable(name);
+		}
 
 		startInfo.Environment.Clear();
 		foreach (var (name, value) in inherited)

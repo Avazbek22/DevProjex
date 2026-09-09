@@ -487,6 +487,9 @@ public sealed class McpServerIntegrationTests
 		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
 		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
 		var cachePath = Path.Combine(workspace.Path, "repo-cache");
+		using var fileTransportPolicy = new TestEnvironmentVariableScope(
+			"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT",
+			"1");
 		await using var server = await McpTestServer.StartAsync(
 			localProject,
 			workspace.Path,
@@ -2420,7 +2423,7 @@ public sealed class McpServerIntegrationTests
 
 		Assert.True(localFile.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(localFile), StringComparison.Ordinal);
-		Assert.Contains("outside the configured roots", Text(localFile), StringComparison.Ordinal);
+		Assert.Contains("not a supported Git URL", Text(localFile), StringComparison.Ordinal);
 		Assert.True(queryCredential.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(queryCredential), StringComparison.Ordinal);
 		Assert.Contains("must not contain a query string or fragment", Text(queryCredential), StringComparison.Ordinal);
@@ -2456,6 +2459,9 @@ public sealed class McpServerIntegrationTests
 		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
 		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
 		var cachePath = Path.Combine(workspace.Path, "repo-cache");
+		using var fileTransportPolicy = new TestEnvironmentVariableScope(
+			"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT",
+			"1");
 		var git = new CountingGitRepositoryService(
 			new GitRepositoryService(allowFileTransportForTests: true));
 		await using var server = await McpTestServer.StartAsync(
@@ -6657,6 +6663,21 @@ public sealed class McpServerIntegrationTests
 		string ToolName,
 		IReadOnlyDictionary<string, object?> Arguments,
 		IReadOnlyList<string> ExpectedPhases);
+
+	private sealed class TestEnvironmentVariableScope : IDisposable
+	{
+		private readonly string _name;
+		private readonly string? _previousValue;
+
+		public TestEnvironmentVariableScope(string name, string value)
+		{
+			_name = name;
+			_previousValue = Environment.GetEnvironmentVariable(name);
+			Environment.SetEnvironmentVariable(name, value);
+		}
+
+		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
+	}
 
 	private sealed class InlineProgress<T> : IProgress<T>
 	{

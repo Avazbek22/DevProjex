@@ -8,6 +8,34 @@ namespace DevProjex.Tests.Terminal;
 public sealed class CliUrlSourceCommandTests
 {
 	[Theory]
+	[InlineData("http://example.test/team/repository.git")]
+	[InlineData("git://example.test/team/repository.git")]
+	[InlineData("file:///tmp/repository.git")]
+	public async Task DisallowedRemoteTransportFailsBeforeGitOrCacheAccess(string source)
+	{
+		using var data = new TemporaryDirectory();
+		var git = new CountingGitRepositoryService();
+		var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En) with
+		{
+			GitRepositoryService = git
+		};
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(_ => services))
+			.RunAsync(
+				["analyze", source, "--format", "json"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(0, git.CallCount);
+		Assert.Empty(services.RepoCacheService.ListCacheEntriesForManagement().Entries);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-GIT-URL-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
 	[InlineData(false, true, false)]
 	[InlineData(true, false, false)]
 	[InlineData(true, true, true)]
@@ -120,6 +148,9 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task LocalUrlSourceClonesReusesCacheSelectsBranchWithoutRecordingRecentHistory()
 	{
+		using var fileTransport = new EnvironmentVariableScope(
+			GitRepositoryService.TestFileTransportPolicyVariable,
+			"1");
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -194,6 +225,9 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task UrlSourceFlowsThroughTreeAndExportsUsingTheManagedCache()
 	{
+		using var fileTransport = new EnvironmentVariableScope(
+			GitRepositoryService.TestFileTransportPolicyVariable,
+			"1");
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -258,6 +292,9 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task RemoteShallowDiffIsConsistentAcrossCliContentCommands()
 	{
+		using var fileTransport = new EnvironmentVariableScope(
+			GitRepositoryService.TestFileTransportPolicyVariable,
+			"1");
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -332,6 +369,9 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task RedirectedUrlCloneProgressNeverContaminatesContextPayloadAndStaysBounded()
 	{
+		using var fileTransport = new EnvironmentVariableScope(
+			GitRepositoryService.TestFileTransportPolicyVariable,
+			"1");
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -383,6 +423,9 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task MissingFileRemoteReturnsRuntimeFailureWithoutPayload()
 	{
+		using var fileTransport = new EnvironmentVariableScope(
+			GitRepositoryService.TestFileTransportPolicyVariable,
+			"1");
 		using var workspace = new TemporaryDirectory();
 		using var data = new TemporaryDirectory();
 		var missing = Path.Combine(workspace.Path, "missing.git");
@@ -503,6 +546,21 @@ public sealed class CliUrlSourceCommandTests
 		Assert.True(
 			result.ExitCode == 0,
 			$"git {string.Join(' ', arguments)} failed: {result.StandardOutput}{result.StandardError}");
+	}
+
+	private sealed class EnvironmentVariableScope : IDisposable
+	{
+		private readonly string _name;
+		private readonly string? _previousValue;
+
+		public EnvironmentVariableScope(string name, string value)
+		{
+			_name = name;
+			_previousValue = Environment.GetEnvironmentVariable(name);
+			Environment.SetEnvironmentVariable(name, value);
+		}
+
+		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
 	}
 
 	private sealed class BlockingCloneService : IGitRepositoryService
