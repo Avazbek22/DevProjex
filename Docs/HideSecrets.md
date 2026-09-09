@@ -2,10 +2,12 @@
 
 Hide Secrets and [Hide private data](HidePrivateData.md) share one redaction pipeline and
 one set of Preview decisions. Overlapping findings are rendered as non-overlapping segments with
-an ordered candidate stack. Keeping a secret finding changes that whole occurrence across all of
-its fragments, while text still covered by non-kept private-data findings remains redacted. The
-original segment appears only after every candidate in its stack is kept. The full overlap
-contract is described in [HidePrivateData.md](HidePrivateData.md).
+an ordered candidate stack. Their replacement coverage is the union of every valid finding; rule
+priority chooses the label for a segment, never removes an uncovered tail of another finding.
+Keeping a secret finding changes that whole occurrence across all of its fragments, while text
+still covered by non-kept private-data findings remains redacted. The original segment appears
+only after every candidate in its stack is kept. The full overlap contract is described in
+[HidePrivateData.md](HidePrivateData.md).
 
 **Smart Secrets** is DevProjex's local, deterministic credential-detection engine.
 **Hide Secrets** is the opt-in switch that applies its decisions to produced output.
@@ -76,7 +78,8 @@ DevProjex ships a reviewed managed port of the default Gitleaks
 - the one path-only PKCS#12 rule is intentionally excluded because a filename or
   opaque binary payload cannot be redacted in place;
 - keyword prescreening limits which bounded regular expressions inspect a file;
-- entropy thresholds and upstream allowlists preserve the pinned rule semantics;
+- entropy thresholds preserve the pinned rule semantics, while reviewed export-policy overrides
+  are versioned separately from the pinned source;
 - inline markers such as `gitleaks:allow` in project content do not suppress findings;
 - expressions use the managed non-backtracking .NET engine with a timeout.
 
@@ -146,6 +149,13 @@ does not bundle or launch Gitleaks and has no native scanning dependency.
 Attribution is recorded in
 [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md).
 
+Two reviewed export-policy differences apply after that verified snapshot is loaded. The upstream
+boolean expression is scoped to the whole candidate value, so `true`, `false`, and `null` remain
+examples without suppressing provider-shaped values that merely contain those words. Upstream path
+allowlists remain noise controls for `generic-api-key` and entropy-only candidates. A selected text
+file is still inspected by rules with a fixed provider prefix, including lock, vendor, and SVG
+paths; selecting text for export is not evidence that its contents are safe.
+
 ## Text, binary files, and limits
 
 Only selected text files are inspected. Binary files are not scanned and pass
@@ -163,19 +173,22 @@ Detection errors and regex timeouts still stop the operation on every surface. T
 was never inspected is never emitted, an uninspected file is never passed off as
 inspected, and a file left out of a copy is always named.
 
-The count scan stores compact spans, rule ids, file fingerprints, and hashed value
-identities in a bounded LRU cache. It does not retain complete source or redacted
-strings. Changed files are rescanned individually; unchanged files reuse their
-findings. Full transformed content is produced lazily for Preview or export, and
-temporary data is removed after completion or cancellation.
+The count scan stores compact spans, rule ids, file fingerprints, transform identities, and hashed
+value identities in a bounded LRU cache. It does not retain complete source or redacted strings.
+Changed files are rescanned individually; unchanged source and transformation results reuse their
+findings. When code transformations change the text, detection runs on the immutable source and on
+the transformed result. Retained source findings are projected through the transform map and their
+coverage is merged with findings created by the transformed text. An identity transform scans only
+once. Full transformed content is produced lazily for Preview or export, and temporary data is
+removed after completion or cancellation.
 
 The implementation avoids work that cannot affect those decisions. Provider-rule values are
 materialized only for accepted findings; line context is built only for line-target allowlists
 after entropy checks; path allowlists and immutable stopword search tables are reused. Preparation
 passes detection entries forward, measures materialized transformed text while writing it, and
 keeps only compact raw/effective metrics between compression prewarm and the Desktop metrics pass.
-None of these execution shortcuts changes rule inputs, allowlist AND/OR semantics, findings,
-replacement offsets, scan limits, or the fail-closed treatment of unreadable content.
+These execution shortcuts preserve authoritative regex matches, complete finding coverage,
+replacement offsets, scan limits, and the fail-closed treatment of unreadable content.
 
 Performance investigations can opt into `ContentPipelineDiagnostics`. Its operation-local counters
 include secondary provider-regex runs, line-index builds, rejected-match line contexts, plan
