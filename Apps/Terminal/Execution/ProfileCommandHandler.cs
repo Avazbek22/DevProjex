@@ -281,9 +281,12 @@ public sealed class ProfileCommandHandler(
 		output.Append(services.Localization["Terminal.Analysis.Extensions"]).Append(": ")
 			.AppendLine(selection.Extensions is { Count: > 0 } extensions ? JoinEscaped(extensions) : all);
 		output.Append(services.Localization["Terminal.Profile.SelectedPaths"]).Append(": ")
-			.AppendLine(selection.SelectedPaths is { Count: > 0 } selectedPaths
-				? JoinEscaped(selectedPaths)
-				: all);
+			.AppendLine(selection.SelectedPaths switch
+			{
+				null => all,
+				{ Count: 0 } => "none",
+				{ } selectedPaths => JoinEscaped(selectedPaths)
+			});
 		if (selection.Exclusions is { Count: > 0 } exclusions)
 		{
 			output.Append(services.Localization["Terminal.Analysis.Exclusions"]).Append(": ")
@@ -332,7 +335,7 @@ public sealed class ProfileCommandHandler(
 					extensions = selection.Extensions?
 						.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
 						.ToArray(),
-					selectedPaths = (selection.SelectedPaths ?? [])
+					selectedPaths = selection.SelectedPaths?
 						.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 						.ToArray(),
 					gitMode = selection.GitMode is { } gitMode

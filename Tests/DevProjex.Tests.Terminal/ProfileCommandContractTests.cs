@@ -27,7 +27,7 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
-	public void TextProfileUsesLocalizedAllForEmptySelections()
+	public void TextProfileDistinguishesEmptySelectedPathsFromUnrestrictedCollections()
 	{
 		using var workspace = new TemporaryDirectory();
 		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
@@ -50,7 +50,7 @@ public sealed class ProfileCommandContractTests
 			text,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			$"{services.Localization["Terminal.Profile.SelectedPaths"]}: {all}",
+			$"{services.Localization["Terminal.Profile.SelectedPaths"]}: none",
 			text,
 			StringComparison.Ordinal);
 	}
