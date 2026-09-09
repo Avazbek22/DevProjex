@@ -432,14 +432,20 @@ public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 				DateTimeOffset.UtcNow.AddMinutes(-5),
 				DateTimeOffset.UtcNow.AddDays(1),
 				serial);
-			using var ephemeralServer = publicServer.CopyWithPrivateKey(serverKey);
-			var server = X509CertificateLoader.LoadPkcs12(
-				ephemeralServer.Export(X509ContentType.Pfx),
-				password: null,
-				X509KeyStorageFlags.MachineKeySet |
-				X509KeyStorageFlags.Exportable);
+			var ephemeralServer = publicServer.CopyWithPrivateKey(serverKey);
 			publicServer.Dispose();
-			return (authority, server);
+			if (!OperatingSystem.IsWindows())
+				return (authority, ephemeralServer);
+
+			using (ephemeralServer)
+			{
+				var server = X509CertificateLoader.LoadPkcs12(
+					ephemeralServer.Export(X509ContentType.Pfx),
+					password: null,
+					X509KeyStorageFlags.MachineKeySet |
+					X509KeyStorageFlags.Exportable);
+				return (authority, server);
+			}
 		}
 
 		public async ValueTask DisposeAsync()
