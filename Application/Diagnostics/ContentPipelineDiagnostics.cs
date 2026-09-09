@@ -132,6 +132,9 @@ public static class ContentPipelineDiagnostics
 	public static void RecordLineIndexBuild() =>
 		Increment(static state => ref state.LineIndexBuilds);
 
+	public static void RecordRulePathAllowlistEvaluation() =>
+		Increment(static state => ref state.RulePathAllowlistEvaluations);
+
 	public static void RecordMeasurementPass() =>
 		Increment(static state => ref state.MeasurementPasses);
 
@@ -203,6 +206,7 @@ public static class ContentPipelineDiagnostics
 		public long SecondarySecretRegexRuns;
 		public long RejectedMatchLineContexts;
 		public long LineIndexBuilds;
+		public long RulePathAllowlistEvaluations;
 		public long MeasurementPasses;
 		public long SourceReadBytes;
 		public long PreparedReadBytes;
@@ -251,6 +255,7 @@ public static class ContentPipelineDiagnostics
 				SecondarySecretRegexRuns = Volatile.Read(ref SecondarySecretRegexRuns),
 				RejectedMatchLineContexts = Volatile.Read(ref RejectedMatchLineContexts),
 				LineIndexBuilds = Volatile.Read(ref LineIndexBuilds),
+				RulePathAllowlistEvaluations = Volatile.Read(ref RulePathAllowlistEvaluations),
 				MeasurementPasses = Volatile.Read(ref MeasurementPasses)
 			};
 		}
@@ -356,6 +361,7 @@ public sealed record ContentPipelineDiagnosticSnapshot(
 	public long SecondarySecretRegexRuns { get; init; }
 	public long RejectedMatchLineContexts { get; init; }
 	public long LineIndexBuilds { get; init; }
+	public long RulePathAllowlistEvaluations { get; init; }
 	public long MeasurementPasses { get; init; }
 }
 

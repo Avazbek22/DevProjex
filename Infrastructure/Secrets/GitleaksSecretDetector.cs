@@ -351,7 +351,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			if (!rule.AppliesToPath(normalizedPath))
 				continue;
 			budget.RunRuleInitialization(rule.EnsureContentAndAllowlistsCompiled);
-			var rulePathMatches = EvaluateAllowlistPaths(rule.Allowlists, normalizedPath);
+			bool[]? rulePathMatches = null;
 			budget.Checkpoint(cancellationToken);
 			try
 			{
@@ -360,6 +360,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				foreach (var valueMatch in contentRegex.EnumerateMatches(content))
 				{
 					budget.Checkpoint(cancellationToken);
+					rulePathMatches ??= EvaluateRuleAllowlistPaths(rule.Allowlists, normalizedPath);
 					var secretOffset = 0;
 					var secretLength = valueMatch.Length;
 					if (!wholeMatchFastPath)
@@ -1121,6 +1122,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		for (var index = 0; index < allowlists.Count; index++)
 			matches[index] = allowlists[index].AllowsPath(path);
 		return matches;
+	}
+
+	private static bool[] EvaluateRuleAllowlistPaths(
+		IReadOnlyList<CompiledAllowlist> allowlists,
+		string path)
+	{
+		ContentPipelineDiagnostics.RecordRulePathAllowlistEvaluation();
+		return EvaluateAllowlistPaths(allowlists, path);
 	}
 
 	private static bool NeedsLine(

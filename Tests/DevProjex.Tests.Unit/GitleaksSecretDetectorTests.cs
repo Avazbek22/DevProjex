@@ -360,6 +360,23 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void Detect_RulePathAllowlistsAreEvaluatedOnlyAfterTheRuleMatches()
+	{
+		var detector = new GitleaksSecretDetector();
+		detector.WarmUp(TestContext.Current.CancellationToken);
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		var findings = detector.Detect(
+			"src/clean.cs",
+			"public sealed class Widget { public int Value { get; init; } }",
+			TestContext.Current.CancellationToken);
+		var diagnostics = measurement.Capture();
+
+		Assert.Empty(findings);
+		Assert.Equal(0, diagnostics.RulePathAllowlistEvaluations);
+	}
+
+	[Fact]
 	public void Detect_RejectedEntropyDoesNotBuildLineContext()
 	{
 		var detector = new GitleaksSecretDetector();
