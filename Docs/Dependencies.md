@@ -13,9 +13,10 @@ The current engine records two evidence layers:
 - **ExplicitImport** covers TypeScript/JavaScript `import`, `export ... from`, and supported
   CommonJS `require` forms, plus Python `import` and `from ... import`. C# `using`, `global using`,
   and aliases supply lookup context but never create file edges by themselves.
-- **TypeReference** covers C# type positions: field, property, parameter, return and base types;
-  generic arguments and constraints; attributes; object creation; `typeof`, `sizeof`, `default`,
-  casts, `as`, `is`, and declaration-pattern types. Bare identifiers, method names, variable names,
+- **TypeReference** covers C# type positions: field, local, `foreach`, property, event, indexer,
+  parameter, method, local-function and delegate return, base and `catch` types; generic arguments
+  and constraints; attributes; object creation; `typeof`, `sizeof`, `default`, casts, `as`, `is`,
+  and declaration-pattern types. Tuple element names, bare identifiers, method names, variable names,
   string matches, and dependency-injection registrations are not edges.
 
 Layer C semantic and runtime evidence is deliberately absent. Reflection, DI registrations,
@@ -61,8 +62,11 @@ bypasses alias expansion. Type parameters shadow global symbols only inside the 
 declaring type or method, while a qualified name is never suppressed by its final component.
 The `global::` qualifier is retained as absolute-lookup evidence: it bypasses type-parameter
 shadowing and never falls back through the source namespace or imported namespaces;
-nested generic names preserve the arity of every containing type. `InternalsVisibleTo` does not create
-an edge, target-typed `new()` stays unresolved, and source-generator output is unavailable. A simple
+nested generic declarations preserve the arity of every containing type. A reference to a nested
+segment after a generic container stays `Unresolved` until segment-aware binding is available.
+Generic aliases retain both their container and argument references, relative alias targets can fall
+back through the lexical namespace, and `using static` exposes nested types. `InternalsVisibleTo`
+does not create an edge, target-typed `new()` stays unresolved, and source-generator output is unavailable. A simple
 type name can resolve only to a declaration in the current or an enclosing namespace, an exactly
 imported namespace, the current type's nesting chain, or the global namespace. Importing `Company`
 does not expose `Company.Internal`, and a sole same-named declaration elsewhere in the project is not
@@ -71,6 +75,10 @@ multiple visible imported declarations remain ambiguous. Namespace lookup consid
 members of that namespace: a nested type is visible through an explicit qualification such as
 `Holder.Task` or through the source type's nearest-to-farthest containing-type chain. Without an
 owning `.csproj` inside the effective manifest, cross-file C# type references stay unresolved.
+Declaration accessibility is not modeled across project boundaries; candidates that differ only by
+that unavailable evidence remain `Ambiguous`. Files containing conditional-compilation directives
+do not claim configuration-specific type edges: their type references stay `Unresolved` because no
+`DefineConstants` set is available.
 
 TypeScript and JavaScript use the nearest `tsconfig.json` or `jsconfig.json`. The resolver distinguishes
 relative, bare, package-self, and `#imports` specifiers and follows ordered substitution: the first
@@ -78,27 +86,38 @@ existing probe wins, so multiple files found later in the same probe sequence ar
 Module specifiers are read from parsed `import`, `export`, dynamic `import(...)`, and supported
 literal `require(...)` syntax, including side-effect imports. A variable or template expression in
 place of a string literal remains `Unresolved`; it is never treated as a guessed path.
-`.js`, `.mjs`, and `.cjs` specifiers probe their TypeScript and declaration counterparts before the
-literal JavaScript file. Extensionless imports and directory indexes always probe `.js` and `.jsx`
+`.js`, `.jsx`, `.mjs`, and `.cjs` specifiers probe their TypeScript and declaration counterparts before the
+literal JavaScript file; `.jsx` probes `.tsx` first. Query and fragment suffixes on a relative module
+URL remain part of the evidence while its physical path is probed without the suffix. Extensionless imports and directory indexes always probe `.js` and `.jsx`
 after `.ts`, `.tsx`, and `.d.ts`; `allowJs` controls compilation membership, not resolution of files
 already present in the manifest. Exact `paths` entries precede wildcard entries; among matching
 wildcards, the longest prefix before `*` wins. Only that pattern's targets are tried, in declaration
 order. A wildcard whose prefix and suffix overlap in the specifier is not a match; the same guard
 applies to package maps. `package.json` `exports`, conditions, and explicit `null` blocking remain authoritative.
+An existing priority `paths` target outside the allowed manifest stops fallback without exposing that
+path. Invalid `exports` targets cannot leave their package, and exact exports never gain a directory-index
+fallback. A bare `#imports` target is classified from declared external-package evidence rather than
+being probed as a local filename. Ordered exports arrays remain unsupported and therefore unresolved.
 When `compilerOptions.moduleSuffixes` is present, every path probe applies its suffixes in declared
 order; an empty suffix is the explicit unsuffixed fallback. Thus `[".ios", ""]` selects `v.ios.ts`
 before `v.ts`. A non-string entry makes the configuration unsupported instead of silently reverting
 to unsuffixed resolution.
 Conditional package targets distinguish syntax from the source module kind: runtime `import(...)`
 selects the `import` condition even in a `.cts` or `.cjs` file, while literal `require(...)` selects
-the `require` condition.
+the `require` condition. The `node` condition is active only in Node resolution modes, not in bundler
+mode; inactive unknown conditions do not block a later `default`. A configured `customConditions`
+list is reported as unsupported semantics instead of silently choosing a different branch.
 Directory-index fallback is allowed by `node10` and `bundler`; under `node16`/`nodenext`, an ESM
 relative import needs an explicit extension while a supported CommonJS context can use extensionless
-and directory probes. `.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ordinary
+and directory probes. A relative directory containing `package.json` stays unresolved because
+`main`/`types` entry-point semantics are not emulated; its `index.*` file is not guessed instead.
+`.mts`/`.mjs` are ESM, `.cts`/`.cjs` are CommonJS, and ordinary
 `.ts`/`.tsx`/`.js`/`.jsx` files default to CommonJS unless the nearest `package.json` has
 `"type": "module"`. Literal `require(...)` calls are import evidence only in such a CommonJS context.
 `moduleResolution` accepts exactly `node10` (including its `node` alias), `classic`, `node16`,
 `nodenext`, and `bundler`, case-insensitively; any other value is reported as unsupported semantics.
+When `moduleResolution` is absent, `module: node16` or `module: nodenext` selects the matching
+resolution mode; other module values keep the existing bundler default.
 `node10`/`node` and `baseUrl` are marked legacy under the TypeScript 7 contract.
 DevProjex never guesses a `dist` to `src` mapping without configuration, and module references without
 an owning `tsconfig.json` or `jsconfig.json` stay unresolved.
