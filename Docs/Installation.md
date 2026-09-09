@@ -164,6 +164,7 @@ Because the minimal image has no Git executable, use `--git-mode none` for proje
 selection inside the container. Tracked, staged, changes, and diff scopes, Git
 history ranking, and remote clone workflows are unavailable there; requesting a
 Git-backed scope fails with `DPX-GIT-STATE-UNAVAILABLE` instead of silently
-returning a complete-looking result. Use a headless archive or package on a host
+returning a complete-looking result; tracked-index selection uses the equally
+explicit `DPX-GIT-TRACKED-INDEX-UNAVAILABLE`. Use a headless archive or package on a host
 with Git, or build a derived image that installs Git, when those workflows are
 required.

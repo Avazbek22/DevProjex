@@ -51,10 +51,15 @@ public static class Program {
         throw 'Container tree smoke did not report Program.cs.'
     }
 
-    $gitUnavailable = (Invoke-ContainerFailure @(
+    $trackedUnavailable = (Invoke-ContainerFailure @(
         'tree', '/project', '--git-mode', 'tracked', '--exclude', 'none')) -join "`n"
-    if (-not $gitUnavailable.Contains('DPX-GIT-STATE-UNAVAILABLE', [System.StringComparison]::Ordinal)) {
-        throw 'The Git-free container did not report an explicit Git-state diagnostic.'
+    if (-not $trackedUnavailable.Contains('DPX-GIT-TRACKED-INDEX-UNAVAILABLE', [System.StringComparison]::Ordinal)) {
+        throw "The Git-free container did not report the tracked-index diagnostic: $trackedUnavailable"
+    }
+    $changesUnavailable = (Invoke-ContainerFailure @(
+        'tree', '/project', '--git-mode', 'changes', '--exclude', 'none')) -join "`n"
+    if (-not $changesUnavailable.Contains('DPX-GIT-STATE-UNAVAILABLE', [System.StringComparison]::Ordinal)) {
+        throw "The Git-free container did not report the Git-state diagnostic: $changesUnavailable"
     }
 
     $full = ((Invoke-Container @(

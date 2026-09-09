@@ -464,6 +464,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("--read-only", containerSmoke, StringComparison.Ordinal);
 		Assert.Contains("--tmpfs /tmp", containerSmoke, StringComparison.Ordinal);
 		Assert.Contains("DPX-GIT-STATE-UNAVAILABLE", containerSmoke, StringComparison.Ordinal);
+		Assert.Contains("DPX-GIT-TRACKED-INDEX-UNAVAILABLE", containerSmoke, StringComparison.Ordinal);
 		Assert.DoesNotContain("setup-qemu", containerWorkflow + containerBuildWorkflow, StringComparison.OrdinalIgnoreCase);
 
 		Assert.Contains("DevProjex-headless.v<version>.<rid>", installation, StringComparison.Ordinal);

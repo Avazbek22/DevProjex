@@ -294,6 +294,7 @@ single-file extraction nor grammar materialization needs a writable filesystem a
 startup.
 
 The runtime image deliberately omits Git and SSH. Its smoke proves `--git-mode none`
-works and a Git-backed scope fails explicitly with
-`DPX-GIT-STATE-UNAVAILABLE`; the user-facing limitation and alternatives are in
+works and both tracked-index and momentary Git scopes fail explicitly with
+`DPX-GIT-TRACKED-INDEX-UNAVAILABLE` or `DPX-GIT-STATE-UNAVAILABLE`; the
+user-facing limitation and alternatives are in
 `Docs/Installation.md`.
