@@ -213,6 +213,9 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				capture,
 				referenceScopes.GetValueOrDefault(capture),
 				namespaces))
+			.Concat(context.Declarations
+				.Where(static capture => capture.Name == "context.using")
+				.SelectMany(capture => ExtractGenericAliasReferences(context, capture, namespaces)))
 			.Where(reference => !declarationOccurrences.Contains((reference.SourceStartIndex, reference.Name)))
 			.Take(limits.MaximumFactsPerFile + 1).ToArray();
 		if (declarations.Count + references.Length > limits.MaximumFactsPerFile)
@@ -399,6 +402,64 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		return result;
 	}
 
+	private static IEnumerable<ReferenceFact> ExtractGenericAliasReferences(
+		DependencyExtractionContext context,
+		DependencySyntaxCapture capture,
+		IReadOnlyList<NamespaceSpan> namespaces)
+	{
+		var usingMatch = UsingRegex().Match(capture.Text);
+		if (!usingMatch.Success || !usingMatch.Groups["alias"].Success ||
+		    !usingMatch.Groups["arguments"].Success)
+			return [];
+		var containingNamespace = FindContainingNamespace(capture, namespaces, context.Work);
+		var target = usingMatch.Groups["target"];
+		var tokens = new List<TypeTextToken> { new(target.Value, target.Index, target.Length) };
+		var arguments = usingMatch.Groups["arguments"];
+		tokens.AddRange(TypeNameRegex().Matches(arguments.Value)
+			.Select(match => new TypeTextToken(
+				match.Value,
+				arguments.Index + match.Index,
+				match.Length)));
+		return tokens.Select(token =>
+		{
+			var referenceCapture = CaptureToken(capture, token);
+			var isGlobalQualified = token.Value.StartsWith("global::", StringComparison.Ordinal);
+			var name = token.Value.Replace("global::", string.Empty, StringComparison.Ordinal)
+				.Replace("::", ".", StringComparison.Ordinal);
+			return NewReference(
+				context,
+				referenceCapture,
+				name,
+				GenericArityAt(capture.Text, token.Index + token.Length),
+				containingNamespace,
+				null,
+				isGlobalQualified);
+		});
+	}
+
+	private static DependencySyntaxCapture CaptureToken(
+		DependencySyntaxCapture capture,
+		TypeTextToken token)
+	{
+		var prefix = capture.Text.AsSpan(0, token.Index);
+		var lineOffset = 0;
+		for (var index = 0; index < prefix.Length; index++)
+		{
+			if (prefix[index] == '\n' || prefix[index] == '\r' &&
+			    (index + 1 >= prefix.Length || prefix[index + 1] != '\n'))
+				lineOffset++;
+		}
+		return capture with
+		{
+			Name = "reference.using_alias",
+			Text = token.Value,
+			Line = capture.Line + lineOffset,
+			StartIndex = capture.StartIndex + token.Index,
+			EndIndex = capture.StartIndex + token.Index + token.Length,
+			Evidence = OneLine(token.Value)
+		};
+	}
+
 	private static IReadOnlyList<CSharpUsingDirective> ParseUsings(
 		IEnumerable<DependencySyntaxCapture> captures,
 		IReadOnlyList<NamespaceSpan> namespaceSpans,
@@ -419,6 +480,11 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			if (!match.Success || match.Groups["static"].Success)
 				continue;
 			var target = match.Groups["target"].Value.Replace("global::", string.Empty, StringComparison.Ordinal);
+			var targetArity = GenericArityAt(
+				capture.Text,
+				match.Groups["target"].Index + match.Groups["target"].Length);
+			if (targetArity > 0)
+				target += $"`{targetArity}";
 			var isGlobal = capture.Text.TrimStart().StartsWith("global using ", StringComparison.Ordinal);
 			var alias = match.Groups["alias"].Success ? match.Groups["alias"].Value : null;
 			if (isGlobal)
@@ -463,11 +529,12 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		IReadOnlyDictionary<DependencySyntaxCapture, DeclarationScope> ByCapture,
 		IReadOnlyList<DeclarationScope> Ordered);
 	private sealed record NamespaceSpan(string Name, int Start, int End, bool FileScoped);
+	private readonly record struct TypeTextToken(string Value, int Index, int Length);
 	private static readonly HashSet<string> Keywords = new(
 		["public", "private", "protected", "internal", "static", "readonly", "ref", "out", "in", "params", "this", "where", "new", "class", "struct", "interface", "record", "enum", "delegate", "void", "var", "get", "set", "init", "return", "true", "false", "null"],
 		StringComparer.Ordinal);
 
-	[GeneratedRegex(@"\b(?:global\s+)?using\s+(?<static>static\s+)?(?:(?<alias>[A-Za-z_]\w*)\s*=\s*)?(?<target>(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*)\s*;", RegexOptions.CultureInvariant)] private static partial Regex UsingRegex();
+	[GeneratedRegex(@"\b(?:global\s+)?using\s+(?<static>static\s+)?(?:(?<alias>[A-Za-z_]\w*)\s*=\s*)?(?<target>(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*)(?<arguments>\s*<[\s\S]+>)?\s*;", RegexOptions.CultureInvariant)] private static partial Regex UsingRegex();
 	[GeneratedRegex(@"(?<name>[A-Za-z_]\w*)", RegexOptions.CultureInvariant)] private static partial Regex TypeParameterRegex();
 	[GeneratedRegex(@"(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeNameRegex();
 }

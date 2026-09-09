@@ -6,6 +6,31 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New016_GenericUsingAliasPreservesContainerAndArgumentReferences()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var container = fixture.CreateFile(
+			"Container.cs",
+			"namespace Company; public sealed class Container<T> { }");
+		var model = fixture.CreateFile("Model.cs", "public sealed class Model { }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"using Items = Company.Container<Model>; public sealed class Consumer { Items Value; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, container, model, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Target == "Container.cs");
+		Assert.Contains(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Target == "Model.cs");
+	}
+
+	[Fact]
 	public async Task New013_QualifiedNameUsesLexicalNamespaceBeforeGlobalNamespace()
 	{
 		using var fixture = new TemporaryDirectory();

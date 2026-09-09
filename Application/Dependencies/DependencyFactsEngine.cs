@@ -1820,8 +1820,11 @@ public sealed class DependencyFactsEngine : IDisposable
 			                    TryExpandCSharpAlias(source, reference, out expandedAlias);
 			var expandedName = aliasExpanded ? expandedAlias! : reference.Name;
 			var requiresQualifiedLookup = isSyntacticallyQualified || aliasExpanded;
+			var lookupArity = aliasExpanded
+				? GenericArityFromQualifiedName(expandedName)
+				: reference.GenericArity;
 			var candidates = requiresQualifiedLookup
-				? LookupQualified(source, expandedName, reference.GenericArity)
+				? LookupQualified(source, expandedName, lookupArity)
 				: LookupSimple(source, simpleName, reference.GenericArity);
 			var attributeName = reference.SyntaxKind == "attribute"
 				? expandedName + "Attribute"
@@ -2122,6 +2125,18 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (index + 1 < qualified.Length && char.IsAsciiDigit(qualified[index + 1])) index++;
 			}
 			return result.ToString();
+		}
+
+		private static int GenericArityFromQualifiedName(string qualified)
+		{
+			var marker = qualified.LastIndexOf('`');
+			if (marker < 0 || marker + 1 >= qualified.Length)
+				return 0;
+			var end = marker + 1;
+			while (end < qualified.Length && char.IsAsciiDigit(qualified[end])) end++;
+			return int.TryParse(qualified.AsSpan(marker + 1, end - marker - 1), out var arity)
+				? arity
+				: 0;
 		}
 
 		private static string SimpleName(string qualified)
