@@ -42,7 +42,7 @@ public sealed class ProfileHardeningProcessTests
 		var dataRoot = workspace.CreateDirectory("data");
 		var store = new ProjectProfileStore(() => dataRoot);
 		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs"], []));
-		var pipeName = $"devprojex-profile-conflict-{Guid.NewGuid():N}";
+		var pipeName = $"dpx-{Guid.NewGuid():N}";
 		using var barrier = new NamedPipeClientStream(
 			".",
 			pipeName,
