@@ -6,6 +6,44 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New021_NodeConditionIsActiveForNodeNextButNotBundler()
+	{
+		using var fixture = new TemporaryDirectory();
+		var bundlerConfig = fixture.CreateFile(
+			"bundler/tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var bundlerPackage = fixture.CreateFile(
+			"bundler/package.json",
+			"{\"imports\":{\"#value\":{\"node\":\"./node.ts\",\"default\":\"./default.ts\"}}}");
+		var bundlerNode = fixture.CreateFile("bundler/node.ts", "export default 1;");
+		var bundlerDefault = fixture.CreateFile("bundler/default.ts", "export default 2;");
+		var bundlerSource = fixture.CreateFile("bundler/main.ts", "import value from '#value';");
+		var nodeConfig = fixture.CreateFile(
+			"node/tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"nodenext\"}}");
+		var nodePackage = fixture.CreateFile(
+			"node/package.json",
+			"{\"type\":\"module\",\"imports\":{\"#value\":{\"node\":\"./node.ts\",\"default\":\"./default.ts\"}}}");
+		var nodeTarget = fixture.CreateFile("node/node.ts", "export default 1;");
+		var nodeDefault = fixture.CreateFile("node/default.ts", "export default 2;");
+		var nodeSource = fixture.CreateFile("node/main.ts", "import value from '#value';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[
+				bundlerConfig, bundlerPackage, bundlerNode, bundlerDefault, bundlerSource,
+				nodeConfig, nodePackage, nodeTarget, nodeDefault, nodeSource
+			],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal("bundler/default.ts", Assert.Single(result.Edges, edge =>
+			edge.Source == "bundler/main.ts" && edge.Reference == "#value").Target);
+		Assert.Equal("node/node.ts", Assert.Single(result.Edges, edge =>
+			edge.Source == "node/main.ts" && edge.Reference == "#value").Target);
+	}
+
+	[Fact]
 	public async Task New020_InactiveUnknownPackageConditionDoesNotBlockDefault()
 	{
 		using var fixture = new TemporaryDirectory();

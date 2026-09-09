@@ -1461,20 +1461,25 @@ public sealed class DependencyFactsEngine : IDisposable
 			return null;
 		}
 
-		private string PackageCondition(FileFacts source, ImportFact import)
+		private PackageResolutionConditions PackageCondition(FileFacts source, ImportFact import)
 		{
-			if (IsRequire(import))
-				return "require";
-			if (import.ImportKind == ModuleImportKind.DynamicImport)
-				return "import";
 			var scope = FindScope(source.ScopeId);
 			var mode = scope?.ModuleResolution ?? "bundler";
-			return scope is not null &&
+			var nodeActive = mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
+			                 mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase) ||
+			                 mode.Equals("node", StringComparison.OrdinalIgnoreCase) ||
+			                 mode.Equals("node10", StringComparison.OrdinalIgnoreCase);
+			if (IsRequire(import))
+				return new PackageResolutionConditions("require", nodeActive);
+			if (import.ImportKind == ModuleImportKind.DynamicImport)
+				return new PackageResolutionConditions("import", nodeActive);
+			var moduleCondition = scope is not null &&
 			       (mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
 			        mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase)) &&
 			       SupportsCommonJs(source, scope)
 				? "require"
 				: "import";
+			return new PackageResolutionConditions(moduleCondition, nodeActive);
 		}
 
 		private static bool TryMap(
@@ -1510,7 +1515,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private static PackageTargetSelection SelectPackageTarget(
 			PackageTargetDescriptor target,
-			string moduleCondition)
+			PackageResolutionConditions conditions)
 		{
 			if (target.Kind == PackageTargetKind.Path)
 				return new PackageTargetSelection(PackageTargetSelectionKind.Path, target.Path, null);
@@ -1523,14 +1528,14 @@ public sealed class DependencyFactsEngine : IDisposable
 					target.UnsupportedReason ?? "unsupported package target");
 			foreach (var branch in target.Conditions)
 			{
-				if (!IsActivePackageCondition(branch.Name, moduleCondition))
+				if (!IsActivePackageCondition(branch.Name, conditions))
 					continue;
 				if (!IsSupportedPackageCondition(branch.Name))
 					return new PackageTargetSelection(
 						PackageTargetSelectionKind.Unsupported,
 						null,
 						"package condition is not supported");
-				var selected = SelectPackageTarget(branch.Target, moduleCondition);
+				var selected = SelectPackageTarget(branch.Target, conditions);
 				if (selected.Kind != PackageTargetSelectionKind.NoMatch)
 					return selected;
 			}
@@ -1540,8 +1545,12 @@ public sealed class DependencyFactsEngine : IDisposable
 		private static bool IsSupportedPackageCondition(string condition) =>
 			condition is "types" or "import" or "require" or "node" or "default";
 
-		private static bool IsActivePackageCondition(string condition, string moduleCondition) =>
-			condition is "types" or "node" or "default" || condition == moduleCondition;
+		private static bool IsActivePackageCondition(
+			string condition,
+			PackageResolutionConditions conditions) =>
+			condition is "types" or "default" ||
+			condition == "node" && conditions.NodeActive ||
+			condition == conditions.ModuleCondition;
 
 		private IEnumerable<string> ProbeTypeScript(
 			string candidate,
@@ -2229,6 +2238,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			PackageTargetSelectionKind Kind,
 			string? Path,
 			string? Reason);
+		private readonly record struct PackageResolutionConditions(
+			string ModuleCondition,
+			bool NodeActive);
 		private enum PackageTargetSelectionKind
 		{
 			NoMatch,
