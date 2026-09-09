@@ -595,7 +595,34 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	{
 		var function = node.GetChildForField("function");
 		functionName = function is null ? null : materialization.Read(function);
-		return functionName is "require" or "import";
+		return (functionName is "require" or "import") &&
+		       (functionName != "require" || !HasRequireParameter(node, materialization));
+	}
+
+	private static bool HasRequireParameter(
+		Node call,
+		NodeTextMaterializationCounter materialization)
+	{
+		for (var ancestor = call.Parent; ancestor is not null; ancestor = ancestor.Parent)
+		{
+			var parameters = ancestor.GetChildForField("parameters");
+			if (parameters is not null && ContainsIdentifier(parameters, "require", materialization))
+				return true;
+			var parameter = ancestor.GetChildForField("parameter");
+			if (parameter is not null && ContainsIdentifier(parameter, "require", materialization))
+				return true;
+		}
+		return false;
+	}
+
+	private static bool ContainsIdentifier(
+		Node node,
+		string identifier,
+		NodeTextMaterializationCounter materialization)
+	{
+		if (node.Type == "identifier" && materialization.Read(node) == identifier)
+			return true;
+		return node.NamedChildren.Any(child => ContainsIdentifier(child, identifier, materialization));
 	}
 
 	private static string CreateCompactImportEvidence(
@@ -689,7 +716,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		{
 			var argument = node.GetChildForField("arguments")?.NamedChildren
 				.Where(static child => child.Type != "comment")
-				.SingleOrDefault();
+				.FirstOrDefault();
 			var specifier = argument is null ? null : ReadJavaScriptStringLiteral(argument, materialization);
 			return new DependencyImportSyntax(
 				specifier ?? string.Empty,

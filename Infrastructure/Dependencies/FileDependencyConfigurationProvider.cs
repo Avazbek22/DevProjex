@@ -20,6 +20,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	internal const string TypeScriptExtendsDepthReason = "tsconfig extends exceeds the maximum depth";
 	internal const string TypeScriptExtendsUnavailableReason = "extended tsconfig is unavailable";
 	internal const string TypeScriptModuleResolutionReason = "tsconfig moduleResolution is not supported";
+	internal const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
 	internal const string ProjectReferenceConditionReason = "project reference condition could not be evaluated safely";
 	private readonly IDependencyControlFileReader _reader;
 	private readonly IDependencyPathMetadata _pathMetadata;
@@ -296,7 +297,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				TypeScriptModuleSuffixes: parsed.Value.ModuleSuffixes)
 			{
 				ConfigurationState = parsed.State,
-				ConfigurationDiagnostic = parsed.Reason
+				ConfigurationDiagnostic = parsed.Reason,
+				HasTypeScriptCustomConditions = parsed.Value.HasCustomConditions
 			});
 		}
 
@@ -445,6 +447,19 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				return TypeScriptLayerFailure(
 					DependencyConfigurationState.UnsupportedSemantics,
 					"tsconfig compilerOptions.moduleResolution must be a string");
+			if (options.TryGetProperty("module", out var moduleElement) &&
+			    moduleElement.ValueKind != JsonValueKind.String)
+				return TypeScriptLayerFailure(
+					DependencyConfigurationState.UnsupportedSemantics,
+					"tsconfig compilerOptions.module must be a string");
+			var hasCustomConditions = options.TryGetProperty("customConditions", out var customConditions);
+			if (hasCustomConditions &&
+			    (customConditions.ValueKind != JsonValueKind.Array ||
+			     customConditions.EnumerateArray().Any(static item => item.ValueKind != JsonValueKind.String)))
+				return TypeScriptLayerFailure(
+					DependencyConfigurationState.UnsupportedSemantics,
+					TypeScriptCustomConditionsReason);
+			var usesCustomConditions = hasCustomConditions && customConditions.GetArrayLength() > 0;
 
 			var hasModuleResolution = options.TryGetProperty("moduleResolution", out mode);
 			var moduleResolution = hasModuleResolution ? mode.GetString()?.ToLowerInvariant() : null;
@@ -452,6 +467,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				return TypeScriptLayerFailure(
 					DependencyConfigurationState.UnsupportedSemantics,
 					TypeScriptModuleResolutionReason);
+			var hasModule = options.TryGetProperty("module", out moduleElement);
+			var module = hasModule ? moduleElement.GetString()?.ToLowerInvariant() : null;
 			var hasBaseUrl = options.TryGetProperty("baseUrl", out var baseUrlElement);
 			var baseUrl = hasBaseUrl && baseUrlElement.ValueKind == JsonValueKind.String
 				? baseUrlElement.GetString()
@@ -493,6 +510,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				new TypeScriptConfigurationLayer(
 					extends.Value,
 					new OptionalConfigurationValue<string>(hasModuleResolution, moduleResolution),
+					new OptionalConfigurationValue<string>(hasModule, module),
 					new OptionalConfigurationValue<TypeScriptBaseUrl>(
 						hasBaseUrl,
 						hasBaseUrl ? new TypeScriptBaseUrl(Path.GetDirectoryName(configPath)!, baseUrl) : null),
@@ -500,7 +518,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 						hasPaths,
 						hasPaths ? new TypeScriptPathMappings(Path.GetDirectoryName(configPath)!, paths) : null),
 					new OptionalConfigurationValue<bool>(hasAllowJavaScript, allowJavaScript),
-					new OptionalConfigurationValue<IReadOnlyList<string>>(hasModuleSuffixes, moduleSuffixes)));
+					new OptionalConfigurationValue<IReadOnlyList<string>>(hasModuleSuffixes, moduleSuffixes),
+					new OptionalConfigurationValue<bool>(hasCustomConditions, usesCustomConditions)));
 		}
 		catch (JsonException)
 		{
@@ -589,10 +608,12 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		new(
 			Extends: null,
 			child.ModuleResolution.IsSpecified ? child.ModuleResolution : inherited.ModuleResolution,
+			child.Module.IsSpecified ? child.Module : inherited.Module,
 			child.BaseUrl.IsSpecified ? child.BaseUrl : inherited.BaseUrl,
 			child.Paths.IsSpecified ? child.Paths : inherited.Paths,
 			child.AllowJavaScript.IsSpecified ? child.AllowJavaScript : inherited.AllowJavaScript,
-			child.ModuleSuffixes.IsSpecified ? child.ModuleSuffixes : inherited.ModuleSuffixes);
+			child.ModuleSuffixes.IsSpecified ? child.ModuleSuffixes : inherited.ModuleSuffixes,
+			child.CustomConditions.IsSpecified ? child.CustomConditions : inherited.CustomConditions);
 
 	private static TypeScriptConfiguration MaterializeTypeScriptConfiguration(
 		TypeScriptConfigurationLayer layer,
@@ -600,7 +621,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	{
 		var moduleResolution = layer.ModuleResolution.IsSpecified
 			? layer.ModuleResolution.Value ?? "bundler"
-			: "bundler";
+			: layer.Module.Value is "node16" or "nodenext"
+				? layer.Module.Value
+				: "bundler";
 		var mappings = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 		if (layer.Paths.Value is { } paths)
 		{
@@ -624,7 +647,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			layer.AllowJavaScript.IsSpecified && layer.AllowJavaScript.Value,
 			layer.ModuleSuffixes.IsSpecified
 				? layer.ModuleSuffixes.Value ?? []
-				: [""]);
+				: [""],
+			layer.CustomConditions.IsSpecified && layer.CustomConditions.Value);
 	}
 
 	private static string ResolveTypeScriptOptionDirectory(string declaringDirectory, string? relative) =>
@@ -924,14 +948,16 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		bool Legacy,
 		IReadOnlyDictionary<string, IReadOnlyList<string>> Paths,
 		bool AllowJavaScript,
-		IReadOnlyList<string> ModuleSuffixes)
+		IReadOnlyList<string> ModuleSuffixes,
+		bool HasCustomConditions)
 	{
 		public static readonly TypeScriptConfiguration Default = new(
 			"bundler",
 			false,
 			new Dictionary<string, IReadOnlyList<string>>(),
 			false,
-			[""]);
+			[""],
+			false);
 	}
 
 	private readonly record struct OptionalConfigurationValue<T>(bool IsSpecified, T? Value);
@@ -945,13 +971,17 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	private sealed record TypeScriptConfigurationLayer(
 		string? Extends,
 		OptionalConfigurationValue<string> ModuleResolution,
+		OptionalConfigurationValue<string> Module,
 		OptionalConfigurationValue<TypeScriptBaseUrl> BaseUrl,
 		OptionalConfigurationValue<TypeScriptPathMappings> Paths,
 		OptionalConfigurationValue<bool> AllowJavaScript,
-		OptionalConfigurationValue<IReadOnlyList<string>> ModuleSuffixes)
+		OptionalConfigurationValue<IReadOnlyList<string>> ModuleSuffixes,
+		OptionalConfigurationValue<bool> CustomConditions)
 	{
 		public static readonly TypeScriptConfigurationLayer Empty = new(
 			null,
+			default,
+			default,
 			default,
 			default,
 			default,

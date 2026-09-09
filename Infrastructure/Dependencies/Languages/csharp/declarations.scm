@@ -7,3 +7,5 @@
 (record_declaration) @declaration.record
 (enum_declaration) @declaration.enum
 (delegate_declaration) @declaration.delegate
+(method_declaration) @context.type_parameter_owner
+(local_function_statement) @context.type_parameter_owner

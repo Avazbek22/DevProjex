@@ -1135,6 +1135,8 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private sealed class ResolverContext
 	{
+		private const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
+		private const string StaticUsingPrefix = "static::";
 		private static readonly ConditionalWeakTable<IReadOnlySet<string>, IReadOnlySet<string>> DotNetSimpleNames = new();
 		private readonly string _root;
 		private readonly IReadOnlyDictionary<string, FileFacts> _files;
@@ -1302,19 +1304,24 @@ public sealed class DependencyFactsEngine : IDisposable
 			IEnumerable<string> candidates;
 			if (import.Specifier.StartsWith(".", StringComparison.Ordinal))
 			{
-				if (Path.GetExtension(import.Specifier).Length == 0 && RequiresExplicitRelativeExtension(source, scope))
+				var physicalSpecifier = PhysicalModuleSpecifier(import.Specifier);
+				if (Path.GetExtension(physicalSpecifier).Length == 0 &&
+				    RequiresExplicitRelativeExtension(source, scope, import))
 				{
 					return Edge(source, import, ResolutionStatus.Unresolved, null,
 						"extension required for a relative ESM import under node16/nodenext", []);
 				}
 				var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
-				candidates = ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, import.Specifier)), scope, source);
+				candidates = ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, physicalSpecifier)), scope, source);
 			}
 			else if (import.Specifier.StartsWith("#", StringComparison.Ordinal))
 			{
 				var packageTarget = ResolvePackageMap(source, import, import.Specifier, exports: false);
 				if (packageTarget.FailureReason is { } reason)
 					return Edge(source, import, ResolutionStatus.Unresolved, null, reason, []);
+				if (packageTarget.IsExternal)
+					return Edge(source, import, ResolutionStatus.External, null,
+						"declared Node package outside the manifest", []);
 				candidates = packageTarget.Candidates;
 			}
 			else if ((scope.PackageName ?? FindNearestPackageMap(source)?.PackageName) is { } package &&
@@ -1358,12 +1365,15 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private static bool IsRequire(ImportFact import) => import.ImportKind == ModuleImportKind.Require;
 
-		private bool RequiresExplicitRelativeExtension(FileFacts source, DependencyScopeDescriptor scope)
+		private bool RequiresExplicitRelativeExtension(
+			FileFacts source,
+			DependencyScopeDescriptor scope,
+			ImportFact import)
 		{
 			var mode = scope.ModuleResolution ?? "bundler";
 			return (mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
 			        mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase)) &&
-			       !SupportsCommonJs(source, scope);
+			       (import.ImportKind == ModuleImportKind.DynamicImport || !SupportsCommonJs(source, scope));
 		}
 
 		private IEnumerable<string> ResolvePaths(
@@ -1383,12 +1393,17 @@ public sealed class DependencyFactsEngine : IDisposable
 					specifier[mapping.Star..(specifier.Length - (mapping.Pattern.Length - mapping.Star - 1))];
 			foreach (var target in mapping.Targets)
 			{
-				var resolved = ProbeTypeScript(
-					Path.GetFullPath(Path.Combine(scope.Root, target.Replace("*", wildcard, StringComparison.Ordinal))),
-					scope,
-					source).FirstOrDefault();
-				if (resolved is not null)
-					return [resolved];
+				var candidate = Path.GetFullPath(Path.Combine(
+					scope.Root,
+					target.Replace("*", wildcard, StringComparison.Ordinal)));
+				foreach (var probe in EnumerateTypeScriptProbes(candidate, scope, source, allowDirectoryIndex: true))
+				{
+					var relative = PortableRelative(_root, probe);
+					if (_files.ContainsKey(relative))
+						return [relative];
+					if (File.Exists(probe))
+						return [];
+				}
 			}
 			return [];
 		}
@@ -1435,11 +1450,20 @@ public sealed class DependencyFactsEngine : IDisposable
 					var mappedPath = wildcard.Length == 0
 						? selected.Path
 						: selected.Path.Replace("*", wildcard, StringComparison.Ordinal);
+					if (!exports && !mappedPath.StartsWith("./", StringComparison.Ordinal))
+					{
+						return map.ExternalPackages.Contains(BarePackageName(mappedPath))
+							? new PackageMapProbe([], null, IsExternal: true)
+							: new PackageMapProbe([], "package imports target has no external-package evidence");
+					}
+					if (exports && !IsValidPackageExportTarget(mappedPath))
+						return new PackageMapProbe([], "package exports target is invalid");
 					return new PackageMapProbe(
 						ProbeTypeScript(
 							Path.GetFullPath(Path.Combine(directory, mappedPath)),
 							FindScope(source.ScopeId),
-							source).ToArray(),
+							source,
+							allowDirectoryIndex: !exports).ToArray(),
 						null);
 				}
 				if (Path.GetFullPath(directory) == Path.GetFullPath(_root))
@@ -1447,6 +1471,24 @@ public sealed class DependencyFactsEngine : IDisposable
 				directory = Path.GetDirectoryName(directory)!;
 			}
 			return new PackageMapProbe([], null);
+		}
+
+		private static string PhysicalModuleSpecifier(string specifier)
+		{
+			var query = specifier.IndexOf('?');
+			var fragment = specifier.IndexOf('#');
+			var suffix = query < 0 ? fragment : fragment < 0 ? query : Math.Min(query, fragment);
+			return suffix < 0 ? specifier : specifier[..suffix];
+		}
+
+		private static bool IsValidPackageExportTarget(string target)
+		{
+			if (!target.StartsWith("./", StringComparison.Ordinal) || target.Length == 2 || target.Contains('\\'))
+				return false;
+			return !target[2..].Split('/').Any(segment =>
+				segment.Length == 0 ||
+				segment is "." or ".." ||
+				segment.Equals("node_modules", StringComparison.OrdinalIgnoreCase));
 		}
 
 		private PackageMapDescriptor? FindNearestPackageMap(FileFacts source)
@@ -1461,20 +1503,28 @@ public sealed class DependencyFactsEngine : IDisposable
 			return null;
 		}
 
-		private string PackageCondition(FileFacts source, ImportFact import)
+		private PackageResolutionConditions PackageCondition(FileFacts source, ImportFact import)
 		{
-			if (IsRequire(import))
-				return "require";
-			if (import.ImportKind == ModuleImportKind.DynamicImport)
-				return "import";
 			var scope = FindScope(source.ScopeId);
 			var mode = scope?.ModuleResolution ?? "bundler";
-			return scope is not null &&
+			var nodeActive = mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
+			                 mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase) ||
+			                 mode.Equals("node", StringComparison.OrdinalIgnoreCase) ||
+			                 mode.Equals("node10", StringComparison.OrdinalIgnoreCase);
+			if (IsRequire(import))
+				return new PackageResolutionConditions(
+					"require", nodeActive, scope?.HasTypeScriptCustomConditions == true);
+			if (import.ImportKind == ModuleImportKind.DynamicImport)
+				return new PackageResolutionConditions(
+					"import", nodeActive, scope?.HasTypeScriptCustomConditions == true);
+			var moduleCondition = scope is not null &&
 			       (mode.Equals("node16", StringComparison.OrdinalIgnoreCase) ||
 			        mode.Equals("nodenext", StringComparison.OrdinalIgnoreCase)) &&
 			       SupportsCommonJs(source, scope)
 				? "require"
 				: "import";
+			return new PackageResolutionConditions(
+				moduleCondition, nodeActive, scope?.HasTypeScriptCustomConditions == true);
 		}
 
 		private static bool TryMap(
@@ -1488,7 +1538,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				wildcard = string.Empty;
 				return true;
 			}
-			foreach (var pair in map.Where(static pair => pair.Key.Contains('*')).OrderByDescending(static pair => pair.Key.Length))
+			foreach (var pair in map.Where(static pair => pair.Key.Contains('*'))
+			             .OrderByDescending(static pair => pair.Key.IndexOf('*'))
+			             .ThenByDescending(static pair => pair.Key.Length))
 			{
 				var star = pair.Key.IndexOf('*');
 				var prefix = pair.Key[..star];
@@ -1508,7 +1560,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private static PackageTargetSelection SelectPackageTarget(
 			PackageTargetDescriptor target,
-			string moduleCondition)
+			PackageResolutionConditions conditions)
 		{
 			if (target.Kind == PackageTargetKind.Path)
 				return new PackageTargetSelection(PackageTargetSelectionKind.Path, target.Path, null);
@@ -1519,16 +1571,21 @@ public sealed class DependencyFactsEngine : IDisposable
 					PackageTargetSelectionKind.Unsupported,
 					null,
 					target.UnsupportedReason ?? "unsupported package target");
+			if (conditions.HasTypeScriptCustomConditions)
+				return new PackageTargetSelection(
+					PackageTargetSelectionKind.Unsupported,
+					null,
+					TypeScriptCustomConditionsReason);
 			foreach (var branch in target.Conditions)
 			{
+				if (!IsActivePackageCondition(branch.Name, conditions))
+					continue;
 				if (!IsSupportedPackageCondition(branch.Name))
 					return new PackageTargetSelection(
 						PackageTargetSelectionKind.Unsupported,
 						null,
 						"package condition is not supported");
-				if (!IsActivePackageCondition(branch.Name, moduleCondition))
-					continue;
-				var selected = SelectPackageTarget(branch.Target, moduleCondition);
+				var selected = SelectPackageTarget(branch.Target, conditions);
 				if (selected.Kind != PackageTargetSelectionKind.NoMatch)
 					return selected;
 			}
@@ -1538,23 +1595,44 @@ public sealed class DependencyFactsEngine : IDisposable
 		private static bool IsSupportedPackageCondition(string condition) =>
 			condition is "types" or "import" or "require" or "node" or "default";
 
-		private static bool IsActivePackageCondition(string condition, string moduleCondition) =>
-			condition is "types" or "node" or "default" || condition == moduleCondition;
+		private static bool IsActivePackageCondition(
+			string condition,
+			PackageResolutionConditions conditions) =>
+			condition is "types" or "default" ||
+			condition == "node" && conditions.NodeActive ||
+			condition == conditions.ModuleCondition;
 
 		private IEnumerable<string> ProbeTypeScript(
 			string candidate,
 			DependencyScopeDescriptor? scope,
-			FileFacts source)
+			FileFacts source,
+			bool allowDirectoryIndex = true)
+		{
+			foreach (var probe in EnumerateTypeScriptProbes(candidate, scope, source, allowDirectoryIndex))
+			{
+				var relative = PortableRelative(_root, probe);
+				if (_files.ContainsKey(relative))
+					return [relative];
+			}
+			return [];
+		}
+
+		private IEnumerable<string> EnumerateTypeScriptProbes(
+			string candidate,
+			DependencyScopeDescriptor? scope,
+			FileFacts source,
+			bool allowDirectoryIndex)
 		{
 			var extension = Path.GetExtension(candidate).ToLowerInvariant();
 			var probes = new List<string>();
-			if (extension is ".js" or ".mjs" or ".cjs")
+			if (extension is ".js" or ".jsx" or ".mjs" or ".cjs")
 			{
 				var stem = candidate[..^extension.Length];
 				probes.AddRange(extension switch
 				{
 					".mjs" => [stem + ".mts", stem + ".d.mts", candidate],
 					".cjs" => [stem + ".cts", stem + ".d.cts", candidate],
+					".jsx" => [stem + ".tsx", stem + ".d.ts", candidate],
 					_ => [stem + ".ts", stem + ".tsx", stem + ".d.ts", candidate]
 				});
 			}
@@ -1570,7 +1648,10 @@ public sealed class DependencyFactsEngine : IDisposable
 					candidate + ".jsx"]);
 			}
 			var mode = scope?.ModuleResolution ?? "bundler";
-			if (SupportsDirectoryIndex(mode, source, scope))
+			var candidateDirectory = PortableRelative(_root, candidate);
+			if (allowDirectoryIndex &&
+			    !_configuration.PackageMaps.ContainsKey(candidateDirectory) &&
+			    SupportsDirectoryIndex(mode, source, scope))
 			{
 				probes.AddRange([
 					Path.Combine(candidate, "index.ts"),
@@ -1584,13 +1665,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				: [""];
 			foreach (var baseProbe in probes)
 			foreach (var suffix in suffixes)
-			{
-				var probe = ApplyTypeScriptModuleSuffix(baseProbe, suffix);
-				var relative = PortableRelative(_root, probe);
-				if (_files.ContainsKey(relative))
-					return [relative];
-			}
-			return [];
+				yield return ApplyTypeScriptModuleSuffix(baseProbe, suffix);
 		}
 
 		private static string ApplyTypeScriptModuleSuffix(string path, string suffix)
@@ -1790,6 +1865,8 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		public DependencyEdge ResolveType(FileFacts source, ReferenceFact reference)
 		{
+			if (!string.Equals(reference.Reason, "not resolved yet", StringComparison.Ordinal))
+				return Edge(source, reference, ResolutionStatus.Unresolved, null, reference.Reason, []);
 			if (reference.Name == "<target-typed-new>")
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "target-typed new has no explicit type", []);
 			var simpleName = SimpleName(reference.Name);
@@ -1820,24 +1897,47 @@ public sealed class DependencyFactsEngine : IDisposable
 			                    TryExpandCSharpAlias(source, reference, out expandedAlias);
 			var expandedName = aliasExpanded ? expandedAlias! : reference.Name;
 			var requiresQualifiedLookup = isSyntacticallyQualified || aliasExpanded;
+			var expandedArity = aliasExpanded ? GenericArityFromQualifiedName(expandedName) : 0;
+			var lookupArity = expandedArity > 0 ? expandedArity : reference.GenericArity;
 			var candidates = requiresQualifiedLookup
-				? LookupQualified(source, expandedName, reference.GenericArity)
+				? LookupQualified(source, expandedName, lookupArity)
 				: LookupSimple(source, simpleName, reference.GenericArity);
 			var attributeName = reference.SyntaxKind == "attribute"
 				? expandedName + "Attribute"
 				: null;
+			if (source.LanguageId == LanguageId.CSharp)
+			{
+				if (aliasExpanded && candidates.Length == 0)
+				{
+					var contextual = LookupContextualCSharpQualified(source, reference, expandedName);
+					if (contextual.Length > 0)
+						candidates = contextual;
+				}
+				else if (!reference.IsGlobalQualified && reference.Name.Contains('.') && !aliasExpanded)
+				{
+					var contextual = LookupContextualCSharpQualified(source, reference, expandedName);
+					if (contextual.Length > 0)
+						candidates = contextual;
+				}
+				else if (!requiresQualifiedLookup)
+					candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
+			}
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
 					? LookupQualified(source, attributeName, reference.GenericArity)
 					: LookupSimple(source, attributeName, reference.GenericArity);
-			}
-			if (source.LanguageId == LanguageId.CSharp)
-			{
-				if (!reference.IsGlobalQualified && reference.Name.Contains('.') && !aliasExpanded && candidates.Length == 0)
-					candidates = LookupContextualCSharpQualified(source, reference, expandedName);
-				else if (!requiresQualifiedLookup)
-					candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
+				if (source.LanguageId == LanguageId.CSharp)
+				{
+					if (!reference.IsGlobalQualified && attributeName.Contains('.'))
+					{
+						var contextual = LookupContextualCSharpQualified(source, reference, attributeName);
+						if (contextual.Length > 0)
+							candidates = contextual;
+					}
+					else if (!attributeName.Contains('.'))
+						candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
+				}
 			}
 			if (candidates.Length == 0)
 			{
@@ -1910,6 +2010,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 
 			var namespaceName = reference.ContainingNamespace;
+			if (namespaceName.Length == 0)
+			{
+				var global = candidates.Where(candidate =>
+					candidate.ContainingType is null &&
+					candidate.ContainingNamespace.Length == 0).ToArray();
+				if (global.Length > 0)
+					return global;
+			}
 			while (namespaceName.Length > 0)
 			{
 				var lexical = candidates.Where(candidate =>
@@ -1922,6 +2030,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 
 			var importedNamespaces = ActiveCSharpNamespaces(source, reference);
+			var importedStaticTypes = ActiveCSharpStaticTypes(source, reference);
+			var importedNested = candidates.Where(candidate =>
+				candidate.ContainingType is not null &&
+				importedStaticTypes.Contains(
+					QualifiedLookupName(candidate.ContainingType),
+					StringComparer.Ordinal)).ToArray();
+			if (importedNested.Length > 0)
+				return importedNested;
 			var imported = candidates.Where(candidate =>
 				candidate.ContainingType is null &&
 				importedNamespaces.Contains(candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
@@ -2032,7 +2148,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		private bool IsDotNetExternal(string reference) =>
 			DependencyPlatformCatalog.IsDotNetAlias(reference) ||
 			_configuration.DotNetExternalSymbols.Contains(reference) ||
-			_dotNetExternalSimpleNames.Contains(SimpleName(reference));
+			!reference.Contains('.') && !reference.Contains("::", StringComparison.Ordinal) &&
+			_dotNetExternalSimpleNames.Contains(reference);
 		private bool TryExpandCSharpAlias(
 			FileFacts source,
 			ReferenceFact reference,
@@ -2062,6 +2179,20 @@ public sealed class DependencyFactsEngine : IDisposable
 		private IReadOnlyList<string> ActiveCSharpNamespaces(FileFacts source, ReferenceFact reference) =>
 			_csharpNamespaceRegionsByFile.GetValueOrDefault(source.Path)?.At(reference.SourceStartIndex) ?? [];
 
+		private IReadOnlyList<string> ActiveCSharpStaticTypes(
+			FileFacts source,
+			ReferenceFact reference) =>
+			(_globalNamespaces.GetValueOrDefault(source.ScopeId) ?? [])
+			.Concat(source.CSharpUsingDirectives
+				.Where(directive => directive.Alias is null &&
+				                    directive.Target.StartsWith(StaticUsingPrefix, StringComparison.Ordinal) &&
+				                    IsActive(directive, reference.SourceStartIndex))
+				.Select(static directive => directive.Target))
+			.Where(static target => target.StartsWith(StaticUsingPrefix, StringComparison.Ordinal))
+			.Select(static target => QualifiedLookupName(target[StaticUsingPrefix.Length..]))
+			.Distinct(StringComparer.Ordinal)
+			.ToArray();
+
 		private static bool IsActive(CSharpUsingDirective directive, int sourceStartIndex) =>
 			directive.ScopeStartIndex <= sourceStartIndex && directive.ScopeEndIndex >= sourceStartIndex;
 
@@ -2079,7 +2210,11 @@ public sealed class DependencyFactsEngine : IDisposable
 				IEnumerable<string> baseNamespaces,
 				IReadOnlyList<CSharpUsingDirective> directives)
 			{
-				var local = directives.Where(static directive => directive.Alias is null).ToArray();
+				var baseValues = baseNamespaces
+					.Where(static value => !value.StartsWith(StaticUsingPrefix, StringComparison.Ordinal));
+				var local = directives.Where(static directive =>
+					directive.Alias is null &&
+					!directive.Target.StartsWith(StaticUsingPrefix, StringComparison.Ordinal)).ToArray();
 				var boundaries = new SortedSet<int> { int.MinValue };
 				foreach (var directive in local)
 				{
@@ -2092,7 +2227,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				for (var index = 0; index < starts.Length; index++)
 				{
 					var position = starts[index];
-					values[index] = baseNamespaces.Concat(local
+					values[index] = baseValues.Concat(local
 							.Where(directive => IsActive(directive, position))
 							.Select(static directive => directive.Target))
 						.Distinct(StringComparer.Ordinal)
@@ -2118,6 +2253,18 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (index + 1 < qualified.Length && char.IsAsciiDigit(qualified[index + 1])) index++;
 			}
 			return result.ToString();
+		}
+
+		private static int GenericArityFromQualifiedName(string qualified)
+		{
+			var marker = qualified.LastIndexOf('`');
+			if (marker < 0 || marker + 1 >= qualified.Length)
+				return 0;
+			var end = marker + 1;
+			while (end < qualified.Length && char.IsAsciiDigit(qualified[end])) end++;
+			return int.TryParse(qualified.AsSpan(marker + 1, end - marker - 1), out var arity)
+				? arity
+				: 0;
 		}
 
 		private static string SimpleName(string qualified)
@@ -2203,11 +2350,16 @@ public sealed class DependencyFactsEngine : IDisposable
 			int Star);
 		private readonly record struct PackageMapProbe(
 			IReadOnlyList<string> Candidates,
-			string? FailureReason);
+			string? FailureReason,
+			bool IsExternal = false);
 		private readonly record struct PackageTargetSelection(
 			PackageTargetSelectionKind Kind,
 			string? Path,
 			string? Reason);
+		private readonly record struct PackageResolutionConditions(
+			string ModuleCondition,
+			bool NodeActive,
+			bool HasTypeScriptCustomConditions);
 		private enum PackageTargetSelectionKind
 		{
 			NoMatch,

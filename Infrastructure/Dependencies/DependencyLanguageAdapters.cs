@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using DevProjex.Application.Dependencies;
 
@@ -71,6 +72,9 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 		while (position < text.Length && char.IsWhiteSpace(text[position])) position++;
 		if (position >= text.Length || text[position] != '<') return 0;
 		var depth = 0;
+		var parenthesisDepth = 0;
+		var bracketDepth = 0;
+		var braceDepth = 0;
 		var arity = 1;
 		for (var index = position; index < text.Length; index++)
 		{
@@ -78,7 +82,15 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 			{
 				case '<': depth++; break;
 				case '>' when --depth == 0: return arity;
-				case ',' when depth == 1: arity++; break;
+				case '(' when depth > 0: parenthesisDepth++; break;
+				case ')' when parenthesisDepth > 0: parenthesisDepth--; break;
+				case '[' when depth > 0: bracketDepth++; break;
+				case ']' when bracketDepth > 0: bracketDepth--; break;
+				case '{' when depth > 0: braceDepth++; break;
+				case '}' when braceDepth > 0: braceDepth--; break;
+				case ',' when depth == 1 && parenthesisDepth == 0 && bracketDepth == 0 && braceDepth == 0:
+					arity++;
+					break;
 			}
 		}
 		return 0;
@@ -130,6 +142,8 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 
 internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLanguageAdapter
 {
+	private const string StaticUsingPrefix = "static::";
+	private const string ConditionalCompilationReason = "C# preprocessor configuration is not available";
 	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
 		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
 		{
@@ -152,13 +166,18 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			out var usingNamespaces,
 			out var globalNamespaces,
 			out var globalAliases);
+		var typeParameterOwners = context.Declarations
+			.Where(capture => Kinds.ContainsKey(capture.Name))
+			.Concat(context.References.Where(static capture => capture.Name == "context.type_parameter_owner"))
+			.ToArray();
 		var typeParameterScopes = context.References
 			.Where(static capture => capture.Name == "context.type_parameters")
-			.SelectMany(static capture => TypeParameterRegex().Matches(capture.Text)
-				.Select(match => new TypeParameterScope(
-					match.Groups["name"].Value,
-					capture.StartIndex,
-					capture.EndIndex)))
+			.SelectMany(capture =>
+			{
+				var range = ContainingDeclarationRange(typeParameterOwners, capture);
+				return TypeParameterRegex().Matches(capture.Text)
+					.Select(match => new TypeParameterScope(match.Groups["name"].Value, range.Start, range.End));
+			})
 			.Distinct().OrderBy(static scope => scope.StartIndex)
 			.ThenBy(static scope => scope.Name, StringComparer.Ordinal).ToArray();
 		var typeParameters = typeParameterScopes.Select(static scope => scope.Name)
@@ -202,8 +221,19 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				capture,
 				referenceScopes.GetValueOrDefault(capture),
 				namespaces))
+			.Concat(context.Declarations
+				.Where(static capture => capture.Name == "context.using")
+				.SelectMany(capture => ExtractGenericAliasReferences(context, capture, namespaces)))
 			.Where(reference => !declarationOccurrences.Contains((reference.SourceStartIndex, reference.Name)))
 			.Take(limits.MaximumFactsPerFile + 1).ToArray();
+		var conditionalRegions = FindConditionalCompilationRegions(context.Source);
+		if (conditionalRegions.Count > 0)
+		{
+			references = references.Select(reference =>
+				IsWithinConditionalRegion(reference.SourceStartIndex, conditionalRegions)
+					? reference with { Reason = ConditionalCompilationReason }
+					: reference).ToArray();
+		}
 		if (declarations.Count + references.Length > limits.MaximumFactsPerFile)
 			return Failure(context, "fact limit exceeded");
 		return Complete(
@@ -239,20 +269,59 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		var typeText = capture.Text;
 		foreach (Match match in TypeNameRegex().Matches(typeText))
 		{
+			if (IsTupleElementName(typeText, match))
+				continue;
 			var isGlobalQualified = match.Value.StartsWith("global::", StringComparison.Ordinal);
 			var name = match.Value.Replace("global::", string.Empty, StringComparison.Ordinal)
 				.Replace("::", ".", StringComparison.Ordinal);
 			var simpleName = name.Split('.', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? name;
 			if (!Keywords.Contains(simpleName))
-					yield return NewReference(
-					context,
+			{
+				var tokenCapture = CaptureToken(
 					capture,
+					new TypeTextToken(match.Value, match.Index, match.Length));
+				var reference = NewReference(
+					context,
+					tokenCapture,
 					name,
 					GenericArityAt(typeText, match.Index + match.Length),
 					containingNamespace,
 					containingType,
 					isGlobalQualified);
+				yield return IsNestedSegmentAfterGeneric(typeText, match.Index)
+					? reference with { Reason = "nested generic type resolution is not supported" }
+					: reference;
+			}
 		}
+	}
+
+	private static bool IsNestedSegmentAfterGeneric(string typeText, int matchIndex)
+	{
+		var index = matchIndex - 1;
+		while (index >= 0 && char.IsWhiteSpace(typeText[index])) index--;
+		if (index < 0 || typeText[index] != '.') return false;
+		index--;
+		while (index >= 0 && char.IsWhiteSpace(typeText[index])) index--;
+		return index >= 0 && typeText[index] == '>';
+	}
+
+	private static bool IsTupleElementName(string typeText, Match match)
+	{
+		var previous = match.Index - 1;
+		while (previous >= 0 && char.IsWhiteSpace(typeText[previous])) previous--;
+		if (previous < 0 || typeText[previous] is '(' or ',')
+			return false;
+		var next = match.Index + match.Length;
+		while (next < typeText.Length && char.IsWhiteSpace(typeText[next])) next++;
+		if (next >= typeText.Length || typeText[next] is not (',' or ')'))
+			return false;
+		var parenthesisDepth = 0;
+		for (var index = 0; index < match.Index; index++)
+		{
+			if (typeText[index] == '(') parenthesisDepth++;
+			else if (typeText[index] == ')' && parenthesisDepth > 0) parenthesisDepth--;
+		}
+		return parenthesisDepth > 0;
 	}
 
 	private static DeclarationScopeIndex BuildDeclarationScopes(
@@ -364,11 +433,99 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		context.Source.Length, DependencyFileStatus.ExtractionFailed, reason, context.HasSyntaxErrors,
 		context.ErrorNodeKinds, [], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
 
-	private static IReadOnlyList<NamespaceSpan> ParseNamespaces(IEnumerable<DependencySyntaxCapture> captures) =>
-		captures.Where(static capture => capture.Name == "context.namespace")
-			.Select(static capture => new NamespaceSpan(capture.CapturedName ?? string.Empty,
-				capture.StartIndex, capture.EndIndex, capture.NodeType == "file_scoped_namespace_declaration"))
-			.Where(static item => item.Name.Length > 0).ToArray();
+	private static IReadOnlyList<NamespaceSpan> ParseNamespaces(IEnumerable<DependencySyntaxCapture> captures)
+	{
+		var result = new List<NamespaceSpan>();
+		foreach (var capture in captures
+			         .Where(static capture => capture.Name == "context.namespace" &&
+			                                  !string.IsNullOrEmpty(capture.CapturedName))
+			         .OrderBy(static capture => capture.StartIndex)
+			         .ThenByDescending(static capture => capture.EndIndex))
+		{
+			var parent = result
+				.Where(item => item.Start < capture.StartIndex && item.End >= capture.EndIndex)
+				.MinBy(static item => item.End - item.Start);
+			var name = parent is null
+				? capture.CapturedName!
+				: parent.Name + "." + capture.CapturedName;
+			result.Add(new NamespaceSpan(
+				name,
+				capture.StartIndex,
+				capture.EndIndex,
+				capture.NodeType == "file_scoped_namespace_declaration"));
+		}
+		return result;
+	}
+
+	private static IEnumerable<ReferenceFact> ExtractGenericAliasReferences(
+		DependencyExtractionContext context,
+		DependencySyntaxCapture capture,
+		IReadOnlyList<NamespaceSpan> namespaces)
+	{
+		var usingMatch = UsingRegex().Match(capture.Text);
+		if (!usingMatch.Success || !usingMatch.Groups["alias"].Success ||
+		    !usingMatch.Groups["arguments"].Success)
+			return [];
+		var containingNamespace = FindContainingNamespace(capture, namespaces, context.Work);
+		var target = usingMatch.Groups["target"];
+		var tokens = new List<TypeTextToken> { new(target.Value, target.Index, target.Length) };
+		var arguments = usingMatch.Groups["arguments"];
+		tokens.AddRange(TypeNameRegex().Matches(arguments.Value)
+			.Select(match => new TypeTextToken(
+				match.Value,
+				arguments.Index + match.Index,
+				match.Length)));
+		return tokens.Select(token =>
+		{
+			var referenceCapture = CaptureToken(capture, token) with { Name = "reference.using_alias" };
+			var isGlobalQualified = token.Value.StartsWith("global::", StringComparison.Ordinal);
+			var name = token.Value.Replace("global::", string.Empty, StringComparison.Ordinal)
+				.Replace("::", ".", StringComparison.Ordinal);
+			return NewReference(
+				context,
+				referenceCapture,
+				name,
+				GenericArityAt(capture.Text, token.Index + token.Length),
+				containingNamespace,
+				null,
+				isGlobalQualified);
+		});
+	}
+
+	private static DependencySyntaxCapture CaptureToken(
+		DependencySyntaxCapture capture,
+		TypeTextToken token)
+	{
+		var prefix = capture.Text.AsSpan(0, token.Index);
+		var lineOffset = 0;
+		for (var index = 0; index < prefix.Length; index++)
+		{
+			if (prefix[index] == '\n' || prefix[index] == '\r' &&
+			    (index + 1 >= prefix.Length || prefix[index + 1] != '\n'))
+				lineOffset++;
+		}
+		return capture with
+		{
+			Text = token.Value,
+			Line = capture.Line + lineOffset,
+			StartIndex = capture.StartIndex + token.Index,
+			EndIndex = capture.StartIndex + token.Index + token.Length,
+			Evidence = OneLine(token.Value)
+		};
+	}
+
+	private static (int Start, int End) ContainingDeclarationRange(
+		IReadOnlyList<DependencySyntaxCapture> captures,
+		DependencySyntaxCapture typeParameters)
+	{
+		var declaration = captures
+			.Where(capture => capture.StartIndex <= typeParameters.StartIndex &&
+			                  capture.EndIndex >= typeParameters.EndIndex)
+			.MinBy(static capture => capture.EndIndex - capture.StartIndex);
+		return declaration is null
+			? (typeParameters.StartIndex, typeParameters.EndIndex)
+			: (declaration.StartIndex, declaration.EndIndex);
+	}
 
 	private static IReadOnlyList<CSharpUsingDirective> ParseUsings(
 		IEnumerable<DependencySyntaxCapture> captures,
@@ -387,9 +544,17 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		foreach (var capture in captures.Where(static capture => capture.Name == "context.using"))
 		{
 			var match = UsingRegex().Match(capture.Text);
-			if (!match.Success || match.Groups["static"].Success)
+			if (!match.Success)
 				continue;
+			var isStatic = match.Groups["static"].Success;
 			var target = match.Groups["target"].Value.Replace("global::", string.Empty, StringComparison.Ordinal);
+			var targetArity = GenericArityAt(
+				capture.Text,
+				match.Groups["target"].Index + match.Groups["target"].Length);
+			if (targetArity > 0)
+				target += $"`{targetArity}";
+			if (isStatic)
+				target = StaticUsingPrefix + target;
 			var isGlobal = capture.Text.TrimStart().StartsWith("global using ", StringComparison.Ordinal);
 			var alias = match.Groups["alias"].Success ? match.Groups["alias"].Value : null;
 			if (isGlobal)
@@ -405,7 +570,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			var scopeStart = lexicalNamespace?.Start ?? 0;
 			var scopeEnd = lexicalNamespace?.End ?? sourceLength;
 			directives.Add(new CSharpUsingDirective(target, alias, scopeStart, scopeEnd));
-			if (lexicalNamespace is not null) continue;
+			if (lexicalNamespace is not null || isStatic) continue;
 			if (alias is null) namespaces.Add(target);
 			else aliases[alias] = target;
 		}
@@ -425,6 +590,82 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		return arity < 0 ? value : value[..arity];
 	}
 	private static string AritySuffix(int arity) => arity == 0 ? string.Empty : $"`{arity}";
+	private static IReadOnlyList<SourceRange> FindConditionalCompilationRegions(string source)
+	{
+		var regions = new List<SourceRange>();
+		var depth = 0;
+		var regionStart = -1;
+		var lineStart = 0;
+		var lineStartOffset = 0;
+		while (lineStart < source.Length)
+		{
+			var lineEnd = lineStart;
+			while (lineEnd < source.Length && source[lineEnd] is not ('\r' or '\n'))
+				lineEnd++;
+			var nextLineStart = lineEnd;
+			if (nextLineStart < source.Length && source[nextLineStart] == '\r')
+				nextLineStart++;
+			if (nextLineStart < source.Length && source[nextLineStart] == '\n')
+				nextLineStart++;
+			var nextLineOffset = lineStartOffset + Encoding.UTF8.GetByteCount(
+				source.AsSpan(lineStart, nextLineStart - lineStart));
+
+			switch (ConditionalDirective(source.AsSpan(lineStart, lineEnd - lineStart)))
+			{
+				case ConditionalDirectiveKind.If:
+					if (depth == 0)
+						regionStart = nextLineOffset;
+					depth++;
+					break;
+				case ConditionalDirectiveKind.EndIf when depth > 0:
+					depth--;
+					if (depth == 0)
+					{
+						regions.Add(new SourceRange(regionStart, lineStartOffset));
+						regionStart = -1;
+					}
+					break;
+			}
+
+			lineStart = nextLineStart;
+			lineStartOffset = nextLineOffset;
+		}
+		if (depth > 0)
+			regions.Add(new SourceRange(regionStart, lineStartOffset));
+		return regions;
+	}
+
+	private static ConditionalDirectiveKind ConditionalDirective(ReadOnlySpan<char> line)
+	{
+		line = TrimDirectiveWhitespace(line);
+		if (line.IsEmpty || line[0] != '#') return ConditionalDirectiveKind.None;
+		line = TrimDirectiveWhitespace(line[1..]);
+		var keywordLength = 0;
+		while (keywordLength < line.Length && char.IsLetter(line[keywordLength]))
+			keywordLength++;
+		if (keywordLength == 0 || keywordLength < line.Length && !char.IsWhiteSpace(line[keywordLength]))
+			return ConditionalDirectiveKind.None;
+		return line[..keywordLength] switch
+		{
+			"if" => ConditionalDirectiveKind.If,
+			"elif" => ConditionalDirectiveKind.Branch,
+			"else" => ConditionalDirectiveKind.Branch,
+			"endif" => ConditionalDirectiveKind.EndIf,
+			_ => ConditionalDirectiveKind.None
+		};
+	}
+
+	private static ReadOnlySpan<char> TrimDirectiveWhitespace(ReadOnlySpan<char> value)
+	{
+		var start = 0;
+		while (start < value.Length && value[start] is ' ' or '\t')
+			start++;
+		return value[start..];
+	}
+
+	private static bool IsWithinConditionalRegion(int sourceOffset, IReadOnlyList<SourceRange> regions) =>
+		regions.Any(region => sourceOffset >= region.Start && sourceOffset < region.End);
+
 	private sealed record DeclarationScope(
 		DependencySyntaxCapture Capture,
 		string ContainingNamespace,
@@ -434,13 +675,16 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		IReadOnlyDictionary<DependencySyntaxCapture, DeclarationScope> ByCapture,
 		IReadOnlyList<DeclarationScope> Ordered);
 	private sealed record NamespaceSpan(string Name, int Start, int End, bool FileScoped);
+	private readonly record struct TypeTextToken(string Value, int Index, int Length);
+	private readonly record struct SourceRange(int Start, int End);
+	private enum ConditionalDirectiveKind { None, If, Branch, EndIf }
 	private static readonly HashSet<string> Keywords = new(
 		["public", "private", "protected", "internal", "static", "readonly", "ref", "out", "in", "params", "this", "where", "new", "class", "struct", "interface", "record", "enum", "delegate", "void", "var", "get", "set", "init", "return", "true", "false", "null"],
 		StringComparer.Ordinal);
 
-	[GeneratedRegex(@"\b(?:global\s+)?using\s+(?<static>static\s+)?(?:(?<alias>[A-Za-z_]\w*)\s*=\s*)?(?<target>(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*)\s*;", RegexOptions.CultureInvariant)] private static partial Regex UsingRegex();
-	[GeneratedRegex(@"(?<name>[A-Za-z_]\w*)", RegexOptions.CultureInvariant)] private static partial Regex TypeParameterRegex();
-	[GeneratedRegex(@"(?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeNameRegex();
+	[GeneratedRegex(@"\b(?:global\s+)?using\s+(?<static>static\s+)?(?:(?<alias>[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)\s*=\s*)?(?<target>(?:global::)?[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*(?:(?:\.|::)[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)*)(?<arguments>\s*<[\s\S]+>)?\s*;", RegexOptions.CultureInvariant)] private static partial Regex UsingRegex();
+	[GeneratedRegex(@"(?<name>[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)", RegexOptions.CultureInvariant)] private static partial Regex TypeParameterRegex();
+	[GeneratedRegex(@"(?:global::)?[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*(?:(?:\.|::)[_\p{L}\p{Nl}][_\p{L}\p{Nl}\p{Nd}\p{Mn}\p{Mc}\p{Cf}]*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeNameRegex();
 }
 
 internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLanguageAdapter
