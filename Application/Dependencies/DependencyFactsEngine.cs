@@ -1565,13 +1565,14 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			var extension = Path.GetExtension(candidate).ToLowerInvariant();
 			var probes = new List<string>();
-			if (extension is ".js" or ".mjs" or ".cjs")
+			if (extension is ".js" or ".jsx" or ".mjs" or ".cjs")
 			{
 				var stem = candidate[..^extension.Length];
 				probes.AddRange(extension switch
 				{
 					".mjs" => [stem + ".mts", stem + ".d.mts", candidate],
 					".cjs" => [stem + ".cts", stem + ".d.cts", candidate],
+					".jsx" => [stem + ".tsx", stem + ".d.ts", candidate],
 					_ => [stem + ".ts", stem + ".tsx", stem + ".d.ts", candidate]
 				});
 			}

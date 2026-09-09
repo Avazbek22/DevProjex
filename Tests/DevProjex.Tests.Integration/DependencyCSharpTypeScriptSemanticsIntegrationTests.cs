@@ -6,6 +6,28 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New058_JsxSpecifierProbesTsxSource()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"jsx\":\"react-jsx\"}}");
+		var view = fixture.CreateFile("View.tsx", "export default function View() { return null; }");
+		var source = fixture.CreateFile("main.ts", "import View from './View.jsx';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, view, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "./View.jsx");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("View.tsx", edge.Target);
+	}
+
+	[Fact]
 	public async Task New056_GlobalNamespaceTypePrecedesImportedTypeAtTopLevel()
 	{
 		using var fixture = new TemporaryDirectory();
