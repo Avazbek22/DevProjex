@@ -1205,18 +1205,15 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		{
 			ContentPipelineDiagnostics.RecordLineIndexBuild();
 			var starts = new List<int> { 0 };
-			var consumed = 0;
-			while (consumed < text.Length)
+			for (var index = 0; index < text.Length; index++)
 			{
-				var relative = text[consumed..].IndexOfAny('\r', '\n');
-				if (relative < 0)
-					break;
-				var separator = consumed + relative;
-				consumed = separator + 1;
-				if (text[separator] == '\r' && consumed < text.Length && text[consumed] == '\n')
-					consumed++;
-				if (consumed < text.Length)
-					starts.Add(consumed);
+				if (text[index] == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
+					index++;
+				else if (text[index] is not ('\r' or '\n'))
+					continue;
+
+				if (index + 1 < text.Length)
+					starts.Add(index + 1);
 			}
 			return starts.ToArray();
 		}
