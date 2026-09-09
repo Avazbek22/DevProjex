@@ -106,7 +106,7 @@ internal static class SecretDetectionTextPolicy
 			wrapperEnd++;
 
 		return content[start] == '%' && wrapperEnd < content.Length && content[wrapperEnd] == '%' ||
-		       HasSurroundingPureDollarBraceReference(content, wrapperStart, wrapperEnd) ||
+		       HasSurroundingWrapper(content, wrapperStart, wrapperEnd, "${", "}") ||
 		       HasSurroundingWrapper(content, wrapperStart, wrapperEnd, "$(", ")") ||
 		       HasSurroundingWrapper(content, wrapperStart, wrapperEnd, "{{", "}}") ||
 		       HasSurroundingWrapper(content, wrapperStart, wrapperEnd, "<", ">") ||
@@ -185,16 +185,6 @@ internal static class SecretDetectionTextPolicy
 		valueEnd <= content.Length - suffix.Length &&
 		content.Slice(valueStart - prefix.Length, prefix.Length).SequenceEqual(prefix) &&
 		content.Slice(valueEnd, suffix.Length).SequenceEqual(suffix);
-
-	private static bool HasSurroundingPureDollarBraceReference(
-		ReadOnlySpan<char> content,
-		int valueStart,
-		int valueEnd) =>
-		valueStart >= 2 &&
-		valueEnd < content.Length &&
-		content.Slice(valueStart - 2, 2).SequenceEqual("${") &&
-		content[valueEnd] == '}' &&
-		IsPureDollarBraceReference(content[(valueStart - 2)..(valueEnd + 1)]);
 
 	private static bool IsHostOrSubdomainOf(ReadOnlySpan<char> host, string domain) =>
 		host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
