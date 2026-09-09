@@ -15,10 +15,12 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
     private const int ExtractionProgressReportInterval = 50;
 	private const long MaximumRepositoryMetadataBytes = 64 * 1024;
     private static readonly TimeSpan DefaultHttpTimeout = TimeSpan.FromMinutes(10);
+	private static readonly TimeSpan DefaultBodyProgressTimeout = TimeSpan.FromSeconds(30);
 
     private readonly HttpClient _httpClient;
     private readonly ZipResourceLimits _limits;
     private readonly Func<ZipArchiveEntry, Stream> _openEntryStream;
+	private readonly TimeSpan _bodyProgressTimeout;
     private bool _disposed;
 
     public ZipDownloadService()
@@ -63,6 +65,9 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
         _openEntryStream = openEntryStream ?? throw new ArgumentNullException(nameof(openEntryStream));
         _limits.Validate();
         _httpClient.Timeout = httpTimeout;
+		_bodyProgressTimeout = httpTimeout < DefaultBodyProgressTimeout
+			? httpTimeout
+			: DefaultBodyProgressTimeout;
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("DevProjex/1.0");
     }
 
@@ -87,8 +92,23 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                 ErrorMessage: "Could not determine ZIP download URL");
         }
 
-        var metadataBranch = await TryGetDefaultBranchAsync(owner, repository, cancellationToken)
-            .ConfigureAwait(false);
+		string? metadataBranch;
+		try
+		{
+			metadataBranch = await TryGetDefaultBranchAsync(owner, repository, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+		{
+			return new GitCloneResult(
+				Success: false,
+				LocalPath: targetDirectory,
+				SourceType: ProjectSourceType.ZipDownload,
+				DefaultBranch: null,
+				RepositoryName: repoName,
+				RepositoryUrl: resultRepositoryUrl,
+				ErrorMessage: "DPX-ZIP-METADATA-TIMEOUT: ZIP metadata request timed out.");
+		}
         var branch = metadataBranch ?? "main";
         var zipUrl = CreateZipUrl(owner, repository, branch);
         var tempZipPath = Path.Combine(Path.GetTempPath(), $"devprojex_{Guid.NewGuid():N}.zip");
@@ -140,9 +160,11 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                     ReportPercent(progress, 0, ref lastDownloadPercent);
 
                     int bytesRead;
-                    while ((bytesRead = await contentStream
-                               .ReadAsync(buffer.AsMemory(0, StreamBufferSize), cancellationToken)
-                               .ConfigureAwait(false)) > 0)
+					while ((bytesRead = await ReadArchiveBodyAsync(
+					           contentStream,
+					           buffer.AsMemory(0, StreamBufferSize),
+					           cancellationToken)
+					       .ConfigureAwait(false)) > 0)
                     {
                         if (bytesRead > _limits.MaxDownloadedArchiveBytes - totalRead)
                             throw ZipResourceLimits.CreateLimitException(
@@ -244,7 +266,17 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 
         var declaredTotal = ValidateArchiveMetadata(archive, archiveSize);
         EnsureAvailableFreeSpace(targetDirectory, declaredTotal);
-        var extractionPlan = BuildExtractionPlan(archive, targetDirectory);
+		var extractionPlan = BuildExtractionPlan(
+			archive,
+			targetDirectory,
+			out var skippedSymbolicLinks);
+		if (skippedSymbolicLinks > 0)
+		{
+			progress?.Report(
+				skippedSymbolicLinks == 1
+					? "DPX-ZIP-SYMLINK-SKIPPED: 1 symbolic link entry was skipped."
+					: $"DPX-ZIP-SYMLINK-SKIPPED: {skippedSymbolicLinks} symbolic link entries were skipped.");
+		}
         Directory.CreateDirectory(targetDirectory);
 
         var extractionBudget = new ZipExtractionBudget(archiveSize, _limits);
@@ -464,8 +496,10 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 
 	private static IReadOnlyList<ZipExtractionEntry> BuildExtractionPlan(
 		ZipArchive archive,
-		string targetDirectory)
+		string targetDirectory,
+		out int skippedSymbolicLinks)
 	{
+		skippedSymbolicLinks = 0;
 		var planned = new List<ZipExtractionEntry>(archive.Entries.Count);
 		var explicitEntries = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 		var explicitFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -476,6 +510,11 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 
 		foreach (var entry in archive.Entries)
 		{
+			if (IsSymbolicLinkEntry(entry))
+			{
+				skippedSymbolicLinks++;
+				continue;
+			}
 			var entryPath = entry.FullName;
 			if (!string.IsNullOrEmpty(rootFolder) && StartsWithFolderPrefix(entryPath, rootFolder))
 				entryPath = entryPath[(rootFolder.Length + 1)..];
@@ -628,10 +667,31 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
         return destinationPath;
     }
 
-    private static bool IsDirectoryEntry(ZipArchiveEntry entry)
+	private static bool IsDirectoryEntry(ZipArchiveEntry entry)
         => entry.FullName.EndsWith("/", StringComparison.Ordinal) ||
            entry.FullName.EndsWith("\\", StringComparison.Ordinal) ||
            string.IsNullOrEmpty(entry.Name);
+
+	private static bool IsSymbolicLinkEntry(ZipArchiveEntry entry) =>
+		((uint)entry.ExternalAttributes >> 16 & 0xF000u) == 0xA000u;
+
+	private async ValueTask<int> ReadArchiveBodyAsync(
+		Stream contentStream,
+		Memory<byte> buffer,
+		CancellationToken cancellationToken)
+	{
+		using var progressDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		progressDeadline.CancelAfter(_bodyProgressTimeout);
+		try
+		{
+			return await contentStream.ReadAsync(buffer, progressDeadline.Token).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+		{
+			throw new IOException(
+				"DPX-ZIP-BODY-TIMEOUT: ZIP archive body made no progress within the configured deadline.");
+		}
+	}
 
     private static bool IsPathWithinDirectory(string path, string directory)
     {
@@ -697,11 +757,10 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
         try
         {
             var fullPath = Path.GetFullPath(targetDirectory);
-            var root = Path.GetPathRoot(fullPath);
-            if (string.IsNullOrEmpty(root))
-                return;
-
-            availableBytes = new DriveInfo(root).AvailableFreeSpace;
+			var root = GitRepositoryResourceLimits.ResolveDestinationDriveRoot(
+				fullPath,
+				DriveInfo.GetDrives().Select(static drive => drive.Name));
+			availableBytes = new DriveInfo(root).AvailableFreeSpace;
         }
         catch (Exception exception) when (
             exception is ArgumentException or
