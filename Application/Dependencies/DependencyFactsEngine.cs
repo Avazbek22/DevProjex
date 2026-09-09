@@ -2076,7 +2076,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		private bool IsDotNetExternal(string reference) =>
 			DependencyPlatformCatalog.IsDotNetAlias(reference) ||
 			_configuration.DotNetExternalSymbols.Contains(reference) ||
-			_dotNetExternalSimpleNames.Contains(SimpleName(reference));
+			!reference.Contains('.') && !reference.Contains("::", StringComparison.Ordinal) &&
+			_dotNetExternalSimpleNames.Contains(reference);
 		private bool TryExpandCSharpAlias(
 			FileFacts source,
 			ReferenceFact reference,

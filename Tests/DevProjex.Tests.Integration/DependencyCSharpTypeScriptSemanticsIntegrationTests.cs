@@ -6,6 +6,29 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New090_UnknownQualifiedTypeIsNotExternalByItsLastName()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"public sealed class Consumer { Acme.Task Value; System.Threading.Tasks.Task Known; };");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var unknown = Assert.Single(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "Acme.Task");
+		Assert.Equal(ResolutionStatus.Unresolved, unknown.Status);
+		var known = Assert.Single(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "System.Threading.Tasks.Task");
+		Assert.Equal(ResolutionStatus.External, known.Status);
+	}
+
+	[Fact]
 	public async Task New058_JsxSpecifierProbesTsxSource()
 	{
 		using var fixture = new TemporaryDirectory();
