@@ -105,11 +105,12 @@ public sealed class ProfileHardeningProcessTests
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
-		foreach (var argument in new[]
-		         {
-		         	"--profile-conflict", dataRoot, pipeName,
-		         	"profile", "save", project, "--extension", ".md", "--language", "en", "--plain"
-		         })
+		string[] arguments =
+		[
+			"--profile-conflict", dataRoot, pipeName,
+			"profile", "save", project, "--extension", ".md", "--language", "en", "--plain"
+		];
+		foreach (var argument in arguments)
 		{
 			startInfo.ArgumentList.Add(argument);
 		}
