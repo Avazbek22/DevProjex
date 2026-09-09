@@ -52,6 +52,18 @@ public sealed class SmartSecretsValueParserTests
 		AssertExactCoverage(content, Find(content, "settings.txt", "connection-password"), expected);
 	}
 
+	[Theory]
+	[InlineData("{\"Connection\":\"Server=db;Password=ab&cd;Database=app\"}", "ab&cd")]
+	[InlineData("const string value = \"Server=db;Password=ab&cd;Database=app\";", "ab&cd")]
+	[InlineData("<add value=\"Server=db;Password=ab&amp;cd;Database=app\" />", "ab&amp;cd")]
+	[InlineData("{\"Connection\":\"Server=db;Password=\\\"ab\\\"\\\"cd\\\";Database=app\"}", "ab\\\"\\\"cd")]
+	public void AdoNetConnectionString_PreservesBoundariesInsideHostLanguageEscaping(
+		string content,
+		string expected)
+	{
+		AssertExactCoverage(content, Find(content, "settings.txt", "connection-password"), expected);
+	}
+
 	[Fact]
 	public void JdbcConnectionString_UsesQueryParameterGrammar()
 	{
@@ -89,12 +101,33 @@ public sealed class SmartSecretsValueParserTests
 		AssertExactCoverage(content, Find(content, "appsettings.json", "config-secret"), "ab12");
 	}
 
-	[Fact]
-	public void Json_EvenBackslashesCloseTheValueWithoutCapturingTheNextProperty()
+	[Theory]
+	[InlineData(0)]
+	[InlineData(2)]
+	[InlineData(4)]
+	[InlineData(6)]
+	public void Json_EvenBackslashesCloseTheValueWithoutCapturingTheNextProperty(int slashCount)
 	{
-		const string content = "{\"Password\":\"ab\\\\\",\"Host\":\"db\"}";
+		var expected = "ab" + new string('\\', slashCount);
+		var content = "{\"Password\":\"" + expected + "\",\"Host\":\"db\"}";
 
-		AssertExactCoverage(content, Find(content, "appsettings.json", "config-secret"), "ab\\\\");
+		AssertExactCoverage(content, Find(content, "appsettings.json", "config-secret"), expected);
+	}
+
+	[Theory]
+	[InlineData(1)]
+	[InlineData(3)]
+	[InlineData(5)]
+	public void Json_OddBackslashesWithoutAClosingStringReportIncompleteSyntax(int slashCount)
+	{
+		var content = "{\"Password\":\"ab" + new string('\\', slashCount) + "\"}";
+
+		Assert.Throws<SecretDetectionException>(() =>
+			StructuredSecretDetector.Detect(
+				"appsettings.json",
+				content,
+				SmartSecretStack.None,
+				TestContext.Current.CancellationToken));
 	}
 
 	[Fact]

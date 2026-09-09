@@ -720,20 +720,22 @@ internal static class StructuredSecretDetector
 		if (start >= line.Length)
 			return new TextSpan(start, 0);
 
-		if (line[start] is '\'' or '"')
+		if (TryGetConnectionQuoteToken(line[start..], out var quoteToken))
 		{
-			var quote = line[start++];
+			start += quoteToken.Length;
 			var quotedEnd = start;
 			while (quotedEnd < line.Length)
 			{
-				if (line[quotedEnd] != quote)
+				if (!line[quotedEnd..].StartsWith(quoteToken, StringComparison.Ordinal))
 				{
 					quotedEnd++;
 					continue;
 				}
-				if (quotedEnd + 1 < line.Length && line[quotedEnd + 1] == quote)
+				var nextQuote = quotedEnd + quoteToken.Length;
+				if (nextQuote < line.Length &&
+				    line[nextQuote..].StartsWith(quoteToken, StringComparison.Ordinal))
 				{
-					quotedEnd += 2;
+					quotedEnd = nextQuote + quoteToken.Length;
 					continue;
 				}
 				break;
@@ -742,8 +744,70 @@ internal static class StructuredSecretDetector
 		}
 
 		var endDelimiter = queryStyle ? '&' : ';';
-		var delimiterOffset = line[start..].IndexOf(endDelimiter);
-		return TrimEnd(line, start, delimiterOffset < 0 ? line.Length : start + delimiterOffset);
+		var end = start;
+		while (end < line.Length)
+		{
+			if (line[end] == endDelimiter &&
+			    (queryStyle || !IsXmlEntityTerminator(line, start, end)))
+			{
+				break;
+			}
+			end++;
+		}
+		return TrimEnd(line, start, end);
+	}
+
+	private static bool TryGetConnectionQuoteToken(ReadOnlySpan<char> value, out string quoteToken)
+	{
+		if (!value.IsEmpty && value[0] is '\'' or '"')
+		{
+			quoteToken = value[0] == '\'' ? "'" : "\"";
+			return true;
+		}
+		if (value.StartsWith("\\\"", StringComparison.Ordinal))
+			quoteToken = "\\\"";
+		else if (value.StartsWith("\\'", StringComparison.Ordinal))
+			quoteToken = "\\'";
+		else if (value.StartsWith("&quot;", StringComparison.Ordinal))
+			quoteToken = "&quot;";
+		else if (value.StartsWith("&apos;", StringComparison.Ordinal))
+			quoteToken = "&apos;";
+		else
+		{
+			quoteToken = string.Empty;
+			return false;
+		}
+		return true;
+	}
+
+	private static bool IsXmlEntityTerminator(ReadOnlySpan<char> value, int valueStart, int semicolon)
+	{
+		var entityStart = semicolon - 1;
+		while (entityStart >= valueStart && semicolon - entityStart <= 10 && value[entityStart] != '&')
+			entityStart--;
+		if (entityStart < valueStart || value[entityStart] != '&')
+			return false;
+		var entity = value[(entityStart + 1)..semicolon];
+		if (entity.Equals("amp", StringComparison.Ordinal) ||
+		    entity.Equals("quot", StringComparison.Ordinal) ||
+		    entity.Equals("apos", StringComparison.Ordinal) ||
+		    entity.Equals("lt", StringComparison.Ordinal) ||
+		    entity.Equals("gt", StringComparison.Ordinal))
+		{
+			return true;
+		}
+		if (entity.Length < 2 || entity[0] != '#')
+			return false;
+		var hexadecimal = entity[1] is 'x' or 'X';
+		var digits = hexadecimal ? entity[2..] : entity[1..];
+		if (digits.IsEmpty)
+			return false;
+		foreach (var digit in digits)
+		{
+			if (hexadecimal ? !Uri.IsHexDigit(digit) : !char.IsAsciiDigit(digit))
+				return false;
+		}
+		return true;
 	}
 
 	private static bool LooksLikeConnectionString(ReadOnlySpan<char> line)
