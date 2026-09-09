@@ -1878,7 +1878,9 @@ public sealed class McpServerIntegrationTests
 			var protocol = tool.ProtocolTool;
 			Assert.False(string.IsNullOrWhiteSpace(protocol.Title));
 			Assert.True(protocol.Annotations?.ReadOnlyHint);
-			Assert.Equal(tool.Name != "pack_context", protocol.Annotations?.IdempotentHint);
+			Assert.Equal(
+				tool.Name is not ("pack_context" or "related_files"),
+				protocol.Annotations?.IdempotentHint);
 			Assert.Equal(
 				allowRemote && remoteProjectTools.Contains(tool.Name),
 				protocol.Annotations?.OpenWorldHint);
@@ -1938,7 +1940,7 @@ public sealed class McpServerIntegrationTests
 			["read_pack"] = ["pack_id", "start_line", "end_line", "start_column"],
 			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "max_results"],
 			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
-			["get_file"] = ["project", "branch", "profile", "path", "start_line", "end_line", "start_column"]
+			["get_file"] = ["project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column"]
 		};
 		foreach (var tool in tools)
 		{
@@ -1965,6 +1967,13 @@ public sealed class McpServerIntegrationTests
 				paths.GetProperty("items").GetProperty("maxLength").GetInt32());
 			Assert.Contains("literal paths", paths.GetProperty("description").GetString(), StringComparison.Ordinal);
 		}
+		var getFileSchema = tools.Single(static tool => tool.Name == "get_file").ProtocolTool.InputSchema;
+		var batchRequests = getFileSchema.GetProperty("properties").GetProperty("requests");
+		Assert.Equal(McpGetFileRequestSet.MaximumFiles, batchRequests.GetProperty("maxItems").GetInt32());
+		Assert.Equal(
+			McpGetFileRequestSet.MaximumRanges,
+			batchRequests.GetProperty("items").GetProperty("properties").GetProperty("ranges").GetProperty("maxItems").GetInt32());
+		Assert.Equal(2, getFileSchema.GetProperty("oneOf").GetArrayLength());
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("ignore_case");
 		Assert.Equal(2, searchBoolean.GetProperty("oneOf").GetArrayLength());
@@ -2044,18 +2053,22 @@ public sealed class McpServerIntegrationTests
 		var listOutput = tools.Single(static tool => tool.Name == "list_projects")
 			.ProtocolTool.OutputSchema!.Value.GetProperty("properties");
 		Assert.All(
-			new[] { "projects", "profiles", "baseline" },
+			new[] { "projects", "profiles", "profilesStatus", "baseline" },
 			name => Assert.False(string.IsNullOrWhiteSpace(
 				listOutput.GetProperty(name).GetProperty("description").GetString())));
 		var baselineOutput = listOutput.GetProperty("baseline").GetProperty("properties");
 		Assert.All(
-			new[] { "git", "exclusions", "agentExclusions" },
+			new[] { "git", "exclusions", "agentExclusions", "protection", "remote" },
 			name => Assert.False(string.IsNullOrWhiteSpace(
 				baselineOutput.GetProperty(name).GetProperty("description").GetString())));
 		var analyzeOutput = tools.Single(static tool => tool.Name == "analyze")
 			.ProtocolTool.OutputSchema!.Value.GetProperty("properties");
 		Assert.All(
-			new[] { "files", "characters", "tokens", "detail", "topFiles" },
+			new[]
+			{
+				"files", "characters", "tokens", "detail", "topFiles", "topFilesTruncated",
+				"topFilesRemaining", "protection", "remote"
+			},
 			name => Assert.False(string.IsNullOrWhiteSpace(
 				analyzeOutput.GetProperty(name).GetProperty("description").GetString())));
 		var topFileOutput = analyzeOutput.GetProperty("topFiles").GetProperty("items").GetProperty("properties");
@@ -2429,6 +2442,37 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task RemoteHostAllowlistRejectsOtherHostsBeforeRemoteServicesAreCreatedAndIsListed()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var remoteServicesCreated = 0;
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: true,
+			remoteServicesFactory: () =>
+			{
+				Interlocked.Increment(ref remoteServicesCreated);
+				throw new InvalidOperationException("Denied hosts must not create remote services.");
+			},
+			remoteHosts: new HashSet<string>(["github.com"], StringComparer.OrdinalIgnoreCase));
+
+		var listed = await server.CallAsync("list_projects");
+		var denied = await server.CallAsync("get_tree", new Dictionary<string, object?>
+		{
+			["project"] = "https://gitlab.com/owner/repository.git"
+		});
+
+		Assert.Equal("github.com", Assert.Single(listed.StructuredContent!.Value
+			.GetProperty("baseline").GetProperty("remote").GetProperty("hosts").EnumerateArray()).GetString());
+		Assert.True(denied.IsError);
+		Assert.StartsWith(McpErrorCodes.RemoteHostDenied, Text(denied), StringComparison.Ordinal);
+		Assert.DoesNotContain("gitlab.com", Text(denied), StringComparison.Ordinal);
+		Assert.Equal(0, Volatile.Read(ref remoteServicesCreated));
+	}
+
+	[Fact]
 	public async Task RemoteProjectClonesSelectsBranchReusesPinnedCacheAndKeepsJailAndRedaction()
 	{
 		if (!IsGitAvailable())
@@ -2451,6 +2495,7 @@ public sealed class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(source, "FeatureTail.txt"), "remote-tail-marker\n");
 		RunGit(source, "add", "FeatureTail.txt");
 		RunGit(source, "commit", "--quiet", "-m", "feature tail");
+		var featureCommit = ReadGit(source, "rev-parse", "HEAD");
 
 		var origin = Path.Combine(localProject, "origin.git");
 		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
@@ -2541,6 +2586,9 @@ public sealed class McpServerIntegrationTests
 
 		Assert.NotEqual(true, tree.IsError);
 		Assert.Contains("Feature.txt", Text(tree), StringComparison.Ordinal);
+		var remoteNotice = Regex.Match(Text(tree), @"\[Remote\] commit=(\S+) branch=feature");
+		Assert.True(remoteNotice.Success, Text(tree));
+		Assert.Equal(featureCommit, remoteNotice.Groups[1].Value);
 		Assert.Contains(repositoryUrl, Text(tree), StringComparison.Ordinal);
 		Assert.DoesNotContain(cachePath, Text(tree), PathComparison);
 		Assert.NotEqual(true, pack.IsError);
@@ -2563,6 +2611,8 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain("Feature.txt", Text(diffTree), StringComparison.Ordinal);
 		Assert.DoesNotContain("Main.txt", Text(diffTree), StringComparison.Ordinal);
 		Assert.Equal(1, diffAnalyze.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Equal(featureCommit,
+			diffAnalyze.StructuredContent?.GetProperty("remote").GetProperty("commit").GetString());
 		Assert.Contains("remote-tail-marker", Text(diffPack), StringComparison.Ordinal);
 		Assert.Contains("FeatureTail.txt:1:", Text(diffSearch), StringComparison.Ordinal);
 		Assert.Contains("Feature.txt", Text(branchDiff), StringComparison.Ordinal);
@@ -3762,11 +3812,11 @@ public sealed class McpServerIntegrationTests
 					["format"] = "text",
 					["max_tokens"] = 1
 				},
-				["selecting files", "transforming content", "writing pack"]),
+				["selecting files", "writing pack"]),
 			new ProgressCase(
 				"analyze",
 				new Dictionary<string, object?>(),
-				["selecting files", "transforming content", "analyzing content"])
+				["selecting files", "building analysis"])
 		};
 
 		foreach (var testCase in cases)
@@ -5998,6 +6048,325 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(0, diagnostics.DocumentWriteBytes);
 	}
 
+	[Fact(Timeout = 60_000)]
+	public async Task DependencyProgressForTenThousandFilesStaysThrottledAndKeepsEndpoints()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 10_000; index++)
+			File.WriteAllText(Path.Combine(project, $"File{index:D5}.txt"), "value\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var progress = new InlineProgress<ProgressNotificationValue>();
+		var token = new ProgressToken(Guid.NewGuid().ToString("N"));
+
+		var result = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = "File00000.txt" },
+			progress,
+			new RequestOptions { ProgressToken = token });
+		var values = progress.Values;
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.InRange(values.Count, 2, 20);
+		Assert.Equal(5f, values[0].Progress);
+		Assert.Equal(100f, values[^1].Progress);
+	}
+
+	[Fact]
+	public async Task GetFileBatchReadsEachPhysicalFileOnceAndMergesOverlappingRanges()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Sensitive.txt"), $"one\ntwo {Secret}\nthree\nfour\nfive\n");
+		File.WriteAllText(Path.Combine(project, "Other.txt"), "alpha\nbeta\n");
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[]
+			{
+				new { path = "Sensitive.txt", ranges = new[] { new { start_line = 1, end_line = 3 } } },
+				new { path = "Sensitive.txt", ranges = new[] { new { start_line = 3, end_line = 8 } } },
+				new { path = "Other.txt", ranges = new[] { new { start_line = 1, end_line = 1 } } }
+			}
+		});
+		var text = Text(result).Replace("\r\n", "\n", StringComparison.Ordinal);
+		var diagnostics = measurement.Capture();
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
+		Assert.Single(Regex.Matches(text, "File: Sensitive\\.txt").Cast<Match>());
+		Assert.Contains("Requests: 1.1, 2.1", text, StringComparison.Ordinal);
+		Assert.Contains("[Range clamped] requests=1.1, 2.1", text, StringComparison.Ordinal);
+		Assert.Contains("[Batch read] ok=3 · partial=0 · not-returned=0 · unavailable=0.", text,
+			StringComparison.Ordinal);
+		Assert.Equal(2, diagnostics.FullFileReads);
+		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
+	}
+
+	[Fact]
+	public async Task GetFileBatchMatchesSinglePagesForEightUnicodeFilesAndReportsUnavailableSafely()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 8; index++)
+		{
+			File.WriteAllText(
+				Path.Combine(project, $"File{index}.txt"),
+				$"α{index}\r\nvalue-{index}-{Secret}\r\nomega-{index}\r\n",
+				new UTF8Encoding(encoderShouldEmitUTF8Identifier: index == 0));
+		}
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var singleBodies = new List<string>();
+		for (var index = 0; index < 8; index++)
+		{
+			var single = await server.CallAsync("get_file", new Dictionary<string, object?>
+			{
+				["path"] = $"File{index}.txt",
+				["start_line"] = 1,
+				["end_line"] = 50
+			});
+			singleBodies.Add(ExtractSpotlightBody(Text(single)));
+		}
+
+		var batch = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = Enumerable.Range(0, 8).Select(index => (object)new
+			{
+				path = $"File{index}.txt",
+				ranges = new[] { new { start_line = 1, end_line = 50 } }
+			}).ToArray()
+		});
+		var batchText = Text(batch);
+		var batchBody = ExtractSpotlightBody(batchText);
+
+		Assert.NotEqual(true, batch.IsError);
+		Assert.All(singleBodies, body => Assert.Contains(body, batchBody, StringComparison.Ordinal));
+		Assert.Contains("α0", batchBody, StringComparison.Ordinal);
+		Assert.Contains("[Range clamped]", batchText, StringComparison.Ordinal);
+		var singlePlaceholders = singleBodies
+			.SelectMany(static body => Regex.Matches(body, "DEVPROJEX_REDACTED\\[[^]]+\\]").Select(static match => match.Value))
+			.ToHashSet(StringComparer.Ordinal);
+		var batchPlaceholders = Regex.Matches(batchBody, "DEVPROJEX_REDACTED\\[[^]]+\\]")
+			.Select(static match => match.Value)
+			.ToHashSet(StringComparer.Ordinal);
+		Assert.True(singlePlaceholders.SetEquals(batchPlaceholders));
+
+		var unavailable = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[]
+			{
+				new { path = "File0.txt", ranges = new[] { new { start_line = 1, end_line = 1 } } },
+				new { path = "Missing-token-shaped-ghp_abcdefghijklmnopqrstuvwxyz012345.txt", ranges = new[] { new { start_line = 1, end_line = 1 } } }
+			}
+		});
+		var unavailableText = Text(unavailable);
+		Assert.NotEqual(true, unavailable.IsError);
+		Assert.Contains("2.1 — unavailable — outside effective selection", unavailableText, StringComparison.Ordinal);
+		Assert.Contains("[Batch unavailable] files=1 · ranges=1", unavailableText, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"Missing-token-shaped",
+			unavailableText.Replace(ExtractSpotlightBody(unavailableText), string.Empty, StringComparison.Ordinal),
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileBatchReportsEveryRangeWithinTheSharedResponseLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 4; index++)
+			File.WriteAllText(Path.Combine(project, $"File{index}.txt"), string.Concat(
+				Enumerable.Range(1, 400).Select(line => $"{index}:{line:D3}:{new string('x', 24)}\n")));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = Enumerable.Range(0, 4).Select(index => (object)new
+			{
+				path = $"File{index}.txt",
+				ranges = new[] { new { start_line = 1, end_line = 400 } }
+			}).ToArray()
+		});
+		var text = Text(result).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+		Assert.NotEqual(true, result.IsError);
+		var body = ExtractSpotlightBody(text);
+		Assert.True(body.Length <= 50_000, body.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+		Assert.True(body.Count(static character => character == '\n') + 1 <= 1_000);
+		foreach (var request in Enumerable.Range(1, 4))
+			Assert.Matches($@"{request}\.1 — (ok|partial|not-returned|unavailable)", text);
+		Assert.Contains("partial=", text, StringComparison.Ordinal);
+		Assert.Contains("not-returned=", text, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("both")]
+	[InlineData("missing-path")]
+	[InlineData("too-many-requests")]
+	[InlineData("too-many-ranges")]
+	public async Task GetFileBatchRejectsInvalidShapesBeforeReading(string shape)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "A.txt"), "a\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var request = new Dictionary<string, object?>
+		{
+			["requests"] = shape switch
+			{
+				"missing-path" => new object[] { new { ranges = new[] { new { start_line = 1, end_line = 1 } } } },
+				"too-many-requests" => Enumerable.Range(0, 9)
+					.Select(static _ => (object)new { path = "A.txt", ranges = new[] { new { start_line = 1, end_line = 1 } } })
+					.ToArray(),
+				"too-many-ranges" => new object[]
+				{
+					new
+					{
+						path = "A.txt",
+						ranges = Enumerable.Range(0, 17)
+							.Select(static _ => new { start_line = 1, end_line = 1 }).ToArray()
+					}
+				},
+				_ => new object[] { new { path = "A.txt", ranges = new[] { new { start_line = 1, end_line = 1 } } } }
+			}
+		};
+		if (shape == "both")
+			request["path"] = "A.txt";
+
+		var result = await server.CallAsync("get_file", request);
+
+		Assert.True(result.IsError);
+		Assert.StartsWith(McpErrorCodes.InvalidArguments, Text(result), StringComparison.Ordinal);
+		if (shape == "missing-path")
+			Assert.Contains("requests[0]", Text(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RelatedFilesRedactsProviderShapedProjectStringsBeforeInlineAndStoredOutput()
+	{
+		const string token = Secret;
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "tsconfig.json"),
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		File.WriteAllText(Path.Combine(project, "Main.ts"), $"import value from './{token}.js';\n");
+		File.WriteAllText(Path.Combine(project, token + ".ts"), "export default 1;\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var inline = await server.CallAsync("related_files", new Dictionary<string, object?>
+		{
+			["path"] = "Main.ts",
+			["direction"] = "dependencies"
+		});
+		Assert.NotEqual(true, inline.IsError);
+		Assert.DoesNotContain(token, Text(inline), StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[", Text(inline), StringComparison.Ordinal);
+
+		var imports = new StringBuilder();
+		for (var index = 0; index < 700; index++)
+		{
+			var name = $"target{index:D4}-{token}";
+			File.WriteAllText(Path.Combine(project, name + ".ts"), $"export default {index};\n");
+			imports.Append("import value").Append(index).Append(" from './").Append(name).AppendLine(".js';");
+		}
+		File.WriteAllText(Path.Combine(project, "Large.ts"), imports.ToString());
+		var stored = await server.CallAsync("related_files", new Dictionary<string, object?>
+		{
+			["path"] = "Large.ts",
+			["direction"] = "dependencies"
+		});
+		var packMatch = Regex.Match(Text(stored), "Related-files result stored as '([^']+)'");
+		Assert.True(packMatch.Success, Text(stored));
+		var packId = packMatch.Groups[1].Value;
+		var page = await server.CallAsync("read_pack", new Dictionary<string, object?> { ["pack_id"] = packId });
+
+		Assert.DoesNotContain(token, Text(stored), StringComparison.Ordinal);
+		Assert.DoesNotContain(token, Text(page), StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[", Text(page), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task AnalyzeBoundsTopFilesAndReportsPrivateDataPolicy()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 1000; index++)
+			File.WriteAllText(Path.Combine(project, $"file-{index:D4}-{new string('x', 80)}.txt"), "x");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, hidePrivateData: true);
+
+		var result = await server.CallAsync("analyze", new Dictionary<string, object?> { ["top_files"] = 1000 });
+		var structured = result.StructuredContent!.Value;
+		var serializedTopFiles = JsonSerializer.Serialize(structured.GetProperty("topFiles"));
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.True(structured.GetProperty("topFilesTruncated").GetBoolean());
+		Assert.True(structured.GetProperty("topFilesRemaining").GetInt32() > 0);
+		Assert.True(serializedTopFiles.Length <= 32_000);
+		Assert.Equal("enabled", structured.GetProperty("protection").GetProperty("privateData").GetString());
+	}
+
+	[Fact]
+	public async Task PortableProfileReadRejectsASymlinkSwapAfterPathValidation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var outside = workspace.CreateDirectory("outside");
+		var profileDirectory = workspace.CreateDirectory("project/profiles");
+		var profilePath = Path.Combine(profileDirectory, "profile.json");
+		File.WriteAllText(profilePath, JsonSerializer.Serialize(new
+		{
+			schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+			kind = PortableProjectProfileService.DocumentKind,
+			selection = new { gitMode = "none", exclusions = Array.Empty<string>() }
+		}));
+		var outsidePath = Path.Combine(outside, "profile.json");
+		File.WriteAllText(outsidePath, File.ReadAllText(profilePath));
+		var registry = new McpRootRegistry([project]);
+		var validatedPath = registry.ResolveExistingPath(registry.Roots[0], "profiles/profile.json");
+		Directory.Delete(profileDirectory, recursive: true);
+		CreateDirectoryAliasOrSkip(profileDirectory, outside);
+
+		using var services = McpServices.Create(
+			new McpProjectRootJail(registry),
+			() => workspace.CreateDirectory("app-data"));
+		var failure = await Assert.ThrowsAsync<McpToolException>(() => services.SelectionResolver.ResolveAsync(
+			project,
+			new ProjectProfileReference(ProjectProfileSourceKind.Portable, validatedPath),
+			new ProjectSelectionSpec(),
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(McpErrorCodes.RootViolation, failure.Code);
+	}
+
+	[Fact]
+	public async Task SearchProjectStopsAtTheRequestByteBudgetAndReportsPartialCounts()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 5; index++)
+		{
+			var prefix = index == 4 ? "needle-after-budget\n" : "clean\n";
+			File.WriteAllText(Path.Combine(project, $"Large{index}.txt"), prefix + new string('x', 14 * 1024 * 1024));
+		}
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "needle-after-budget",
+			["ignore_case"] = false,
+			["context_lines"] = 0
+		});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.DoesNotContain("Large4.txt:1:", text, StringComparison.Ordinal);
+		Assert.Contains("[Search incomplete] The inspected-text byte budget was reached; " +
+		                "additional selected files were not searched and match counts are partial.", text,
+			StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task PackTokenBudgetMaterializesOnlyAdmittedFiles()
 	{
@@ -6842,13 +7211,14 @@ public sealed class McpServerIntegrationTests
 			}
 		}
 
-		using var process = Process.Start(new ProcessStartInfo("cmd.exe")
+		using var process = Process.Start(new ProcessStartInfo(
+			"cmd.exe",
+			$"/d /c mklink /J \"{linkPath}\" \"{targetPath}\"")
 		{
 			UseShellExecute = false,
 			CreateNoWindow = true,
 			RedirectStandardOutput = true,
-			RedirectStandardError = true,
-			ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath }
+			RedirectStandardError = true
 		});
 		if (process is null ||
 		    !process.WaitForExit(TimeSpan.FromSeconds(5)) ||
@@ -7106,7 +7476,8 @@ public sealed class McpServerIntegrationTests
 			GitFilteringMode? gitMode = null,
 			IReadOnlyCollection<ProjectExclusion>? exclusions = null,
 			bool agentExclusions = false,
-			DependencyFactsEngine? dependencyFactsEngine = null)
+			DependencyFactsEngine? dependencyFactsEngine = null,
+			IReadOnlySet<string>? remoteHosts = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -7132,7 +7503,8 @@ public sealed class McpServerIntegrationTests
 				remoteServicesFactory,
 				gitMode,
 				exclusions,
-				agentExclusions);
+				agentExclusions,
+				remoteHosts);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

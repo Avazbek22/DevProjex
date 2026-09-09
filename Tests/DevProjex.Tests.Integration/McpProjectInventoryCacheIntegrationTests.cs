@@ -263,6 +263,40 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		Assert.Null(typeof(McpProjectService).GetField("projectionCacheOrder", BindingFlags.Instance | BindingFlags.NonPublic));
 	}
 
+	[Fact]
+	public async Task BuildPlanWithoutRequestedPathsDoesNotBuildThePathMembershipIndex()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 2_000; index++)
+			workspace.CreateFile($"project/Source{index:D4}.cs", "source\n");
+		await using var harness = CreateHarness(project);
+
+		_ = await BuildAsync(harness.Service);
+
+		Assert.Equal(0, harness.Service.PlanMembershipBuildCount);
+	}
+
+	[Fact]
+	public async Task LocalProfilesAreReadOnceForEveryRootInOneListOperation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var appData = Path.Combine(workspace.Path, "app-data");
+		new ProjectProfileStore(() => appData).SaveProfile(
+			McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true),
+			new ProjectSelectionProfile([], [".cs"], []));
+		await using var harness = CreateHarness(project);
+
+		var catalog = await harness.Service.ReadLocalProfileCatalogAsync(
+			Enumerable.Repeat(project, 100).ToArray(),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal("available", catalog.Status);
+		Assert.Contains(project, catalog.ProjectRoots, PathComparer.Default);
+		Assert.Equal(1, harness.Service.ProfileCatalogReadCount);
+	}
+
 	private static Task<ProjectContextPlan> BuildAsync(
 		McpProjectService service,
 		bool trackedOnly = false,
