@@ -107,8 +107,8 @@ carries the full desired toggle set for that call; an empty array turns every
 toggle off, and the value outranks both the server baseline and profile
 exclusions. Tokens match case-insensitively and duplicates are rejected.
 Without the flag the parameter does not exist in any schema and is rejected as
-an unknown argument, so a default server keeps today's narrowing-only contract
-unchanged. Turning toggles off widens the per-call scan to trees the baseline
+an unknown argument, so a default server keeps its startup-controlled exclusion
+contract unchanged. Turning toggles off widens the per-call scan to trees the baseline
 skips (subject to the Git baseline), so enable this delegation only for
 agents you trust with full-project walks. Both the startup baseline and the
 delegated set apply to opt-in remote checkouts exactly as they do to local
@@ -197,6 +197,10 @@ packs.
   These addresses form the contract for the `project` argument. Without the
   flag, a pack retains real addresses like a default CLI export. With the flag,
   the pack is private-data-redacted in full, including its tree header.
+  File names and paths are address fields and are not masked by secret or
+  private-data protection. Callers need their literal values for `project`,
+  `path`, and `paths`; when response text contains project-controlled addresses,
+  they stay inside the per-response untrusted-data boundary.
 - Searches run against content after mandatory secret redaction and any enabled
   private-data redaction, not the original file text. Static-dependency bodies
   produced by `related_files` pass through the same synthetic-document
@@ -259,7 +263,7 @@ open-world.
 |---|---|---|
 | `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
-| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level; an uninspected ranked file carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. |
+| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
 | `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
@@ -326,6 +330,15 @@ No trailer names a file hidden by the manifest. See
 [Dependencies.md](Dependencies.md) for evidence layers, statuses, resolver boundaries,
 limits, caching, and determinism.
 
+The dependency graph cache is metadata-keyed. It reuses extracted facts for the
+same canonical manifest paths and unchanged file identities, while configuration
+fingerprints cover applicable project files, project references, TypeScript and
+package maps, Python configuration, and Git-shaped selection. A manifest change,
+a source identity change, or a change to an observed control file invalidates the
+affected snapshot. Changing only `related_files` seeds or `direction` does not;
+those are projections over the same immutable index. This is an optimization,
+not a strict filesystem snapshot mode, and no strict cache switch is offered.
+
 ## Result Contract
 
 Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
@@ -339,11 +352,17 @@ include a `baseline` object with the server `git` mode token, the baseline
 `exclusions` tokens, and an `agentExclusions` flag. Both fields are new in v5.2
 and required on every server, including servers started without the exclusion
 flags; consumers that pinned an earlier output schema must refresh it.
+`analyze.topFiles[].estimated` is required and marks whether an entry came from
+size-based rather than inspected transformed-content metrics.
 `analyze.topFiles[].uninspected` is an optional v5.2 addition: it is present and
 `true` only when mandatory bounded inspection could not read that file and its
-size-based metrics are estimates. The aggregate `characters` and `tokens` use
-the same estimated character base, so a ranked file's token estimate cannot
-exceed the response total merely because its content was withheld.
+size-based metrics are estimates. `contentMetrics.measured` reports file, line,
+character, and token totals only for inspected transformed file bodies;
+`contentMetrics.estimated` separately reports the count, characters, and tokens
+of estimated files. `documentMetrics` reports the canonical content/text pack
+shape, including the Root line and project-relative file headings; its
+`estimated` flag is true if any body is estimated or lacks text metrics. The legacy aggregate
+`characters` and `tokens` retain their v5.2 rendered-estimate meaning.
 The aggregate serialized `topFiles` content is limited to 32,000 characters.
 When the requested count exceeds that budget, `topFilesTruncated` is `true` and
 `topFilesRemaining` reports the exact number omitted. Every `analyze` result also
@@ -665,8 +684,11 @@ session. `list_projects` continues to report only configured local roots.
 Project-tool calls, including clone/acquire, are serialized; a first clone
 therefore delays other project-tool calls until its checkout is ready.
 Every successful remote project response includes the trusted
-`[Remote] commit=<sha> branch=<name>` trailer. The commit and branch come from the
-pinned repository-cache session rather than from project-controlled output.
+`[Remote] commit=<sha>` trailer. The value is a validated lowercase hexadecimal
+commit id from the pinned repository-cache session; an invalid or unavailable
+value is rendered as `commit=unknown`. A branch name is repository-controlled,
+so it appears only as `analyze.remote.branch` inside the untrusted structured
+payload and never in the trusted trailer.
 
 When `tracked_only` is `true`, only paths present in the Git index are selected.
 The option can strengthen a profile but cannot disable tracked-only filtering
@@ -690,6 +712,11 @@ this project; available local profiles appear in `list_projects.profiles`. A
 portable profile is a JSON path inside the project root. Profile selection can
 enable compression or stripping, but cannot disable secret redaction or alter
 the server-level private-data policy.
+An explicitly selected profile may broaden file selection relative to the
+server's startup exclusion set. `--allow-agent-exclusions` likewise delegates
+the documented exclusion toggles. Neither mechanism can cross the configured
+root jail, disable mandatory Hide Secrets, or bypass an active remote-host
+allowlist; those are the hard authorization and protection ceilings.
 After lexical validation, a portable profile is opened through the same guarded
 root-jail handle as project content. Replacing it or one of its parent directories
 with a symbolic link or junction outside the root causes a request error instead

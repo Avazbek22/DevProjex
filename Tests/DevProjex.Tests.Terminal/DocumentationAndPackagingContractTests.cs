@@ -134,7 +134,13 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("at most sixteen ranges", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`ok` when complete, `partial`", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`--remote-hosts`", server, StringComparison.Ordinal);
-		Assert.Contains("[Remote] commit=<sha> branch=<name>", server, StringComparison.Ordinal);
+		Assert.Contains("[Remote] commit=<sha>", server, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Remote] commit=<sha> branch=<name>", server, StringComparison.Ordinal);
+		Assert.Contains("File names and paths are address fields", server, StringComparison.Ordinal);
+		Assert.Contains("An explicitly selected profile may broaden", server, StringComparison.Ordinal);
+		Assert.Contains("The dependency graph cache is metadata-keyed", server, StringComparison.Ordinal);
+		Assert.Contains("contentMetrics.measured", server, StringComparison.Ordinal);
+		Assert.Contains("documentMetrics", server, StringComparison.Ordinal);
 		Assert.Contains("selection changed during packing; retry", server, StringComparison.Ordinal);
 
 		Assert.Contains("MCP agent ergonomics changes four v5.2 behaviors", normalizedVersion, StringComparison.Ordinal);
