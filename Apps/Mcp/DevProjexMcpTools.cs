@@ -8,7 +8,9 @@ internal sealed class DevProjexMcpTools(
 	McpRootRegistry roots,
 	Lazy<McpProjectService> projectService,
 	McpPackRegistry packs,
-	bool agentExclusions = false)
+	bool agentExclusions = false,
+	bool allowRemote = false,
+	IReadOnlySet<string>? remoteHosts = null)
 {
 	private const int MaximumTreeLines = 2_000;
 	private const int MaximumTreeCharacters = 50_000;
@@ -21,6 +23,8 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumPageCharacters = 50_000;
 	private const int MaximumExclusionTokenLength = 32;
 	private const int MaximumSearchContentCharacters = 49_000;
+	private const int MaximumAnalyzeTopFilesCharacters = 32_000;
+	private const long MaximumSearchInspectedBytes = 64L * 1024 * 1024;
 	private const string StoredTreePreviewTruncationNotice =
 		"[Tree preview truncated to fit the stored-pack response limit. Use read_pack for the complete pack.]";
 	private const string StoredBudgetReportTruncationNotice =
@@ -56,7 +60,7 @@ internal sealed class DevProjexMcpTools(
 		"project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile",
 		"tracked_only", "git_scope", "max_file_bytes");
 	private readonly IReadOnlySet<string> getFileArgumentNames = Allowed(agentExclusions,
-		"project", "branch", "profile", "path", "start_line", "end_line", "start_column");
+		"project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column");
 	private McpProjectService Projects => projectService.Value;
 
 	[Description(
@@ -64,7 +68,7 @@ internal sealed class DevProjexMcpTools(
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		ExecuteAsync(() =>
+		ExecuteAsync(async () =>
 		{
 			_ = McpJsonArguments.Create(request.Params, EmptyArgumentNames);
 			var validatedRoots = roots.Roots
@@ -78,8 +82,11 @@ internal sealed class DevProjexMcpTools(
 					type = McpProjectService.IsGitRepository(root) ? "git-repository" : "local-folder"
 				})
 				.ToArray();
+			var profileCatalog = await Projects
+				.ReadLocalProfileCatalogAsync(validatedRoots, cancellationToken)
+				.ConfigureAwait(false);
 			var profiles = validatedRoots
-				.Where(Projects.HasLocalProfile)
+				.Where(profileCatalog.ProjectRoots.Contains)
 				.Select(root => new { project = root, name = "local" })
 				.ToArray();
 			// The baseline is server-wide, so the first call in the recommended sequence is
@@ -92,9 +99,25 @@ internal sealed class DevProjexMcpTools(
 					.OrderExclusions(Projects.ServerExclusions)
 					.Select(ProjectSelectionTokens.ToToken)
 					.ToArray(),
-				agentExclusions
+				agentExclusions,
+				protection = new
+				{
+					secrets = "always",
+					privateData = Projects.HidePrivateData ? "enabled" : "disabled"
+				},
+				remote = new
+				{
+					enabled = allowRemote,
+					hosts = remoteHosts?.Order(StringComparer.Ordinal).ToArray() ?? []
+				}
 			};
-			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles, baseline }));
+			return McpToolResults.StructuredSuccess(new
+			{
+				projects = projectItems,
+				profiles,
+				profilesStatus = profileCatalog.Status,
+				baseline
+			});
 		});
 
 	[Description(
@@ -250,7 +273,7 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(
 				99,
 				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var top = largest.Project(item =>
+			var allTop = largest.Project(item =>
 			{
 				var topFile = new Dictionary<string, object>(3, StringComparer.Ordinal)
 				{
@@ -261,6 +284,17 @@ internal sealed class DevProjexMcpTools(
 					topFile["uninspected"] = true;
 				return topFile;
 			});
+			var top = new List<Dictionary<string, object>>(allTop.Length);
+			var topCharacters = 2;
+			foreach (var item in allTop)
+			{
+				var itemCharacters = JsonSerializer.Serialize(item).Length + (top.Count == 0 ? 0 : 1);
+				if (topCharacters + itemCharacters > MaximumAnalyzeTopFilesCharacters)
+					break;
+				top.Add(item);
+				topCharacters += itemCharacters;
+			}
+			var topFilesRemaining = allTop.Length - top.Count;
 			var totalCharacters = metrics.Chars > long.MaxValue - estimatedContentCharacters
 				? long.MaxValue
 				: metrics.Chars + estimatedContentCharacters;
@@ -277,8 +311,23 @@ internal sealed class DevProjexMcpTools(
 				["tokens"] = CodeCompressionSnapshot.EstimateTokens(totalCharacters),
 				["detail"] = effectiveDetail.Token,
 				["exclusions"] = activeExclusions,
-				["topFiles"] = top
+				["topFiles"] = top,
+				["topFilesTruncated"] = topFilesRemaining > 0,
+				["topFilesRemaining"] = topFilesRemaining
 			};
+			envelope["protection"] = new
+			{
+				secrets = "always",
+				privateData = Projects.HidePrivateData ? "enabled" : "disabled"
+			};
+			if (plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } sourceIdentity)
+			{
+				envelope["remote"] = new
+				{
+					commit = sourceIdentity.CommitHash ?? "unknown",
+					branch = sourceIdentity.Branch ?? "default"
+				};
+			}
 			if (prepared.CompressionSnapshot?.Availability is
 			    { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason } availability)
 			{
@@ -300,7 +349,7 @@ internal sealed class DevProjexMcpTools(
 					FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
 					FormatCompressionUnavailable(prepared.CompressionSnapshot),
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
-					SelectionNotices(plan, includeFilters: false, selection.NoticeContext)));
+					SelectionNotices(plan, includeFilters: false, selection.NoticeContext, includeProtection: false)));
 		}, cancellationToken);
 
 	[Description(
@@ -423,6 +472,10 @@ internal sealed class DevProjexMcpTools(
 				plan = admission.Plan;
 				admissionResult = admission.WriteResult;
 			}
+			await McpProjectService.EnsureRankingSourcesCurrentAsync(
+				ranking,
+				plan.IncludedFiles,
+				cancellationToken).ConfigureAwait(false);
 			var outputPlan = WithoutWarningDiagnostics(plan);
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(30, $"transforming content 0/{transformedFileCount}");
@@ -631,8 +684,21 @@ internal sealed class DevProjexMcpTools(
 			var shownMatches = 0;
 			var responseLimitReached = false;
 			var resultGroupTruncated = false;
+			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
+			long inspectedBytes = 0;
+			foreach (var path in plan.IncludedFiles)
+			{
+				if (plan.EffectiveFileSizes?.TryGetValue(path, out var fileBytes) != true ||
+				    fileBytes < 0 || fileBytes > MaximumSearchInspectedBytes - inspectedBytes)
+				{
+					break;
+				}
+				inspectedFiles.Add(path);
+				inspectedBytes += fileBytes;
+			}
+			var inspectionBudgetReached = inspectedFiles.Count < plan.IncludedFiles.Count;
 			await using var searched = await Projects.ConsumeSearchTextAsync(
-				plan,
+				plan with { IncludedFiles = inspectedFiles },
 				(file, token) =>
 				{
 					var scan = McpSearchTextScanner.Scan(
@@ -679,6 +745,9 @@ internal sealed class DevProjexMcpTools(
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
 				additionalMatchesNotice,
+				inspectionBudgetReached
+					? "[Search incomplete] The inspected-text byte budget was reached; additional selected files were not searched and match counts are partial."
+					: null,
 				resultGroupTruncated ? "[Search group truncated at the response character limit.]" : null,
 				SelectionNotices(
 					plan,
@@ -716,7 +785,8 @@ internal sealed class DevProjexMcpTools(
 				cancellationToken,
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
-			var relativeSeeds = Projects.ResolveRequestedFiles(plan, seeds, cancellationToken)
+			var resolvedSeeds = Projects.ResolveRequestedFiles(plan, seeds, cancellationToken);
+			var relativeSeeds = resolvedSeeds
 				.Select(seed => McpProjectService.ToRelative(plan.SourceRoot, seed))
 				.ToArray();
 			var progress = new McpProgressReporter(request, cancellationToken);
@@ -751,10 +821,17 @@ internal sealed class DevProjexMcpTools(
 				SelectionNotices(plan, includeFilters: true, selectionContext),
 				FormatSafeNoFactsNotice(related.Seeds),
 				noRelatedNotice);
+			using var relatedBody = new StringWriter(CultureInfo.InvariantCulture);
+			WriteRelatedFiles(relatedBody, related, direction, configurationData, cancellationToken);
+			var protectedBody = Projects.RedactSyntheticText(
+				plan,
+				resolvedSeeds[0],
+				relatedBody.ToString(),
+				cancellationToken);
 			using var inline = new McpBoundedStringTextWriter(MaximumInlinePackCharacters);
 			try
 			{
-				WriteRelatedMessage(inline, related, direction, configurationData, trustedNotices, cancellationToken);
+				WriteRelatedMessage(inline, protectedBody, trustedNotices);
 			}
 			catch (McpLineLimitReachedException)
 			{
@@ -771,7 +848,7 @@ internal sealed class DevProjexMcpTools(
 						new UTF8Encoding(false),
 						bufferSize: 16 * 1024,
 						leaveOpen: true);
-					WriteRelatedMessage(writer, related, direction, configurationData, trustedNotices, token);
+					WriteRelatedMessage(writer, protectedBody, trustedNotices);
 					await writer.FlushAsync(token).ConfigureAwait(false);
 				},
 				cancellationToken).ConfigureAwait(false);
@@ -782,16 +859,20 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads one page of one selected file after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context instead for multiple files. Returns untrusted file text up to 1,000 lines or 50,000 characters plus continuation notes; line numbers refer to this returned text after replacements. Required: path. Optional profile applies the same selection profile as analyze and pack_context; start_line and end_line are inclusive 1-based integers or numeric strings; start_column continues within start_line using 1-based Unicode characters. Files outside effective filters are unavailable; content beyond the safe inspection limit fails explicitly with DPX-MCP-PAYLOAD-TRUNCATED.")]
+		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page, or requests for up to eight files and sixteen inclusive ranges; the forms are mutually exclusive. Batch responses report ok, partial, not-returned, or unavailable for every range, merge overlaps, and share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements; start_column continues a single-file page.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
 		RunProjectAsync(async () =>
 		{
 			var arguments = McpJsonArguments.Create(request.Params, getFileArgumentNames);
+			var requestSet = McpGetFileRequestSet.Parse(arguments);
+			if (requestSet.IsBatch)
+				return await GetFileBatchAsync(arguments, requestSet, cancellationToken).ConfigureAwait(false);
+
 			// get_file honors the delegated set too: a file revealed by get_tree or
 			// search_project under a per-call exclusions value must stay readable.
-			var requestedPath = arguments.RequiredString("path", allowWhitespace: true);
+			var requestedPath = requestSet.Requests[0].Path;
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var startColumn = arguments.OptionalInteger("start_column", 1, int.MaxValue);
@@ -849,8 +930,258 @@ internal sealed class DevProjexMcpTools(
 				McpSpotlight.Wrap(page.Text),
 				rangeNotice,
 				characterLimitNotice,
-				FormatCompressionUnavailable(inspected.CompressionSnapshot)));
+				FormatCompressionUnavailable(inspected.CompressionSnapshot),
+				SelectionNotices(
+					plan,
+					includeFilters: false,
+					new McpSelectionNoticeContext(HasPaths: true, HasPatterns: false))));
 		}, cancellationToken);
+
+	private async Task<CallToolResult> GetFileBatchAsync(
+		McpJsonArguments arguments,
+		McpGetFileRequestSet requestSet,
+		CancellationToken cancellationToken)
+	{
+		var plan = await Projects.BuildPlanAsync(
+			arguments.OptionalString("project"),
+			arguments.OptionalString("branch"),
+			paths: null,
+			includePatterns: null,
+			excludePatterns: null,
+			profile: arguments.OptionalString("profile"),
+			trackedOnly: false,
+			gitScope: null,
+			maximumFileBytes: null,
+			cancellationToken,
+			includeOutputMetrics: false,
+			exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
+
+		var resolvedRequests = new List<McpResolvedFileReadRequest>(requestSet.Requests.Count);
+		foreach (var item in requestSet.Requests)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			try
+			{
+				resolvedRequests.Add(new McpResolvedFileReadRequest(
+					item,
+					Projects.ResolveFile(plan, item.Path)));
+			}
+			catch (McpToolException exception) when (exception.Code is
+			       McpErrorCodes.PathNotFound or McpErrorCodes.RootViolation)
+			{
+				resolvedRequests.Add(new McpResolvedFileReadRequest(item, PhysicalPath: null));
+			}
+		}
+
+		var uniqueFiles = resolvedRequests
+			.Where(static item => item.PhysicalPath is not null)
+			.Select(static item => item.PhysicalPath!)
+			.Distinct(PathComparer.Default)
+			.Order(ProjectTreePathIdentity.CanonicalComparer)
+			.ToArray();
+		var transformed = new Dictionary<string, TransformedTextFile>(PathComparer.Default);
+		await using var inspected = await Projects.ConsumeSearchTextAsync(
+			plan with { IncludedFiles = uniqueFiles },
+			(file, _) =>
+			{
+				transformed[file.Path] = file;
+				return ValueTask.CompletedTask;
+			},
+			cancellationToken).ConfigureAwait(false);
+
+		var rendered = RenderBatchFileReads(resolvedRequests, transformed, cancellationToken);
+		return McpToolResults.TextSuccess(AppendTrustedNotices(
+			McpSpotlight.Wrap(rendered.Text),
+			rendered.Summary,
+			rendered.UnavailableNotice,
+			rendered.Continuations,
+			FormatCompressionUnavailable(inspected.CompressionSnapshot),
+			SelectionNotices(
+				plan,
+				includeFilters: false,
+				new McpSelectionNoticeContext(HasPaths: true, HasPatterns: false))));
+	}
+
+	private static McpBatchFileReadResult RenderBatchFileReads(
+		IReadOnlyList<McpResolvedFileReadRequest> requests,
+		IReadOnlyDictionary<string, TransformedTextFile> transformed,
+		CancellationToken cancellationToken)
+	{
+		var status = requests
+			.SelectMany(static request => request.Request.Ranges)
+			.ToDictionary(static range => (range.RequestIndex, range.RangeIndex), static _ => "unavailable");
+		var unavailableReasons = new Dictionary<(int RequestIndex, int RangeIndex), string>();
+		foreach (var request in requests)
+		{
+			var reason = request.PhysicalPath is null
+				? "outside effective selection"
+				: transformed.ContainsKey(request.PhysicalPath)
+					? null
+					: McpErrorCodes.PayloadTruncated;
+			if (reason is null)
+				continue;
+			foreach (var range in request.Request.Ranges)
+				unavailableReasons[(range.RequestIndex, range.RangeIndex)] = reason;
+		}
+		var groups = BuildMergedReadGroups(requests);
+		var sectionBudgetLines = MaximumPageLines - status.Count - 1;
+		var statusReserve = "Requests:\n" + string.Join('\n', status.Keys.Select(key =>
+			$"{key.RequestIndex}.{key.RangeIndex} — not-returned" +
+			(unavailableReasons.TryGetValue(key, out var reason) ? $" — {reason}" : string.Empty)));
+		var sectionBudgetCharacters = MaximumPageCharacters - statusReserve.Length;
+		var sections = new StringBuilder();
+		var continuations = new List<string>();
+		var rangeNotices = new List<string>();
+		var usedLines = 0;
+
+		foreach (var group in groups)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (group.PhysicalPath is null)
+				continue;
+			if (!transformed.TryGetValue(group.PhysicalPath, out var file))
+				continue;
+
+			var separator = sections.Length == 0 ? string.Empty : "\n\n";
+			var requestIds = string.Join(", ", group.Ranges.Select(static range =>
+				$"{range.RequestIndex}.{range.RangeIndex}"));
+			var headerPrefix = $"File: {McpTextEscaping.EscapeSingleLine(group.DisplayPath)}\nRequests: {requestIds}\n";
+			const string headerSuffix = "\n";
+			var headerLines = 4;
+			var availableLines = sectionBudgetLines - usedLines - (sections.Length == 0 ? 0 : 1) - headerLines;
+			var availableCharacters = sectionBudgetCharacters - sections.Length - separator.Length -
+			                          headerPrefix.Length - "Status: partial\nLines: 1-1 of 1\n".Length;
+			if (availableLines <= 0 || availableCharacters <= 0)
+			{
+				foreach (var range in group.Ranges)
+					status[(range.RequestIndex, range.RangeIndex)] = "not-returned";
+				continue;
+			}
+
+			McpTextPage page;
+			try
+			{
+				page = McpTextRanges.Slice(
+					file.Content,
+					group.StartLine,
+					group.EndLine,
+					availableLines,
+					availableCharacters,
+					cancellationToken);
+			}
+			catch (McpToolException exception) when (exception.Code == McpErrorCodes.InvalidRange)
+			{
+				foreach (var range in group.Ranges)
+					status[(range.RequestIndex, range.RangeIndex)] = "not-returned";
+				continue;
+			}
+
+			var sectionStatus = page.IsTruncated ? "partial" : "ok";
+			var header = headerPrefix + $"Status: {sectionStatus}\nLines: {page.StartLine}-{page.EndLine} of {page.TotalLines}" + headerSuffix;
+			var section = separator + header + page.Text;
+			if (sections.Length + section.Length > sectionBudgetCharacters)
+			{
+				foreach (var range in group.Ranges)
+					status[(range.RequestIndex, range.RangeIndex)] = "not-returned";
+				continue;
+			}
+
+			sections.Append(section);
+			usedLines += CountResponseLines(section);
+			foreach (var range in group.Ranges)
+				status[(range.RequestIndex, range.RangeIndex)] = sectionStatus;
+			if (page.IsTruncated)
+			{
+				continuations.Add(
+					$"[Batch continuation] requests={requestIds}; start_line={page.NextLine ?? page.EndLine + 1}" +
+					(page.NextColumn is > 1 ? $"; start_column={page.NextColumn}" : string.Empty) + ".");
+			}
+			else if (group.EndLine > page.TotalLines)
+			{
+				rangeNotices.Add(
+					$"[Range clamped] requests={requestIds}; end_line exceeded the file; returned through line {page.TotalLines}.");
+			}
+		}
+
+		var statusText = "Requests:\n" + string.Join('\n', status.Select(pair =>
+			$"{pair.Key.RequestIndex}.{pair.Key.RangeIndex} — {pair.Value}" +
+			(unavailableReasons.TryGetValue(pair.Key, out var reason) ? $" — {reason}" : string.Empty)));
+		var body = sections.Length == 0 ? statusText : statusText + "\n\n" + sections;
+		var counts = status.Values.GroupBy(static value => value, StringComparer.Ordinal)
+			.ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.Ordinal);
+		var summary = $"[Batch read] ok={GetCount("ok")} · partial={GetCount("partial")} · " +
+		              $"not-returned={GetCount("not-returned")} · unavailable={GetCount("unavailable")}.";
+		return new McpBatchFileReadResult(
+			body,
+			summary,
+			GetCount("unavailable") == 0
+				? null
+				: $"[Batch unavailable] files={CountUnavailableFiles()} · ranges={GetCount("unavailable")}; " +
+				  $"{McpErrorCodes.PayloadTruncated} marks mandatory-inspection failures; other entries are outside the effective selection.",
+			continuations.Count == 0 && rangeNotices.Count == 0
+				? null
+				: string.Join('\n', continuations.Concat(rangeNotices)));
+
+		int GetCount(string value) => counts.GetValueOrDefault(value);
+
+		int CountUnavailableFiles() => unavailableReasons.Keys
+			.Select(static key => key.RequestIndex)
+			.Distinct()
+			.Count();
+	}
+
+	private static IReadOnlyList<McpMergedFileReadGroup> BuildMergedReadGroups(
+		IReadOnlyList<McpResolvedFileReadRequest> requests)
+	{
+		var groups = new List<McpMergedFileReadGroup>();
+		foreach (var request in requests)
+		{
+			foreach (var range in request.Request.Ranges)
+			{
+				var matching = groups
+					.Where(group => SameRequestedFile(group, request) &&
+					                group.StartLine <= range.EndLine && range.StartLine <= group.EndLine)
+					.ToArray();
+				if (matching.Length == 0)
+				{
+					groups.Add(new McpMergedFileReadGroup(
+						request.PhysicalPath,
+						request.Request.Path,
+						range.StartLine,
+						range.EndLine,
+						[range]));
+					continue;
+				}
+
+				var target = matching[0];
+				target.StartLine = Math.Min(target.StartLine, range.StartLine);
+				target.EndLine = Math.Max(target.EndLine, range.EndLine);
+				target.Ranges.Add(range);
+				foreach (var duplicate in matching.Skip(1))
+				{
+					target.StartLine = Math.Min(target.StartLine, duplicate.StartLine);
+					target.EndLine = Math.Max(target.EndLine, duplicate.EndLine);
+					target.Ranges.AddRange(duplicate.Ranges);
+					groups.Remove(duplicate);
+				}
+			}
+		}
+		return groups;
+
+		static bool SameRequestedFile(McpMergedFileReadGroup group, McpResolvedFileReadRequest request) =>
+			group.PhysicalPath is not null && request.PhysicalPath is not null
+				? PathComparer.Default.Equals(group.PhysicalPath, request.PhysicalPath)
+				: group.PhysicalPath is null && request.PhysicalPath is null &&
+				  StringComparer.Ordinal.Equals(group.DisplayPath, request.Request.Path);
+	}
+
+	private static int CountResponseLines(string value)
+	{
+		var lines = value.Length == 0 ? 0 : 1;
+		foreach (var character in value)
+			if (character == '\n') lines++;
+		return lines;
+	}
 
 	private static string? FormatLineRangeNotice(McpTextPage page, int? requestedEnd)
 	{
@@ -901,8 +1232,19 @@ internal sealed class DevProjexMcpTools(
 	private string? SelectionNotices(
 		ProjectContextPlan plan,
 		bool includeFilters,
-		McpSelectionNoticeContext request) =>
-		McpEffectiveFilters.SelectionNotices(plan, agentExclusions, includeFilters, request);
+		McpSelectionNoticeContext request,
+		bool includeProtection = true) =>
+		CombineTrustedNotices(
+			McpEffectiveFilters.SelectionNotices(plan, agentExclusions, includeFilters, request),
+			includeProtection
+				? $"[Protection] secrets=always · private-data={(Projects.HidePrivateData ? "enabled" : "disabled")}."
+				: null,
+			FormatRemoteNotice(plan));
+
+	private static string? FormatRemoteNotice(ProjectContextPlan plan) =>
+		plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } identity
+			? $"[Remote] commit={identity.CommitHash ?? "unknown"} branch={identity.Branch ?? "default"}"
+			: null;
 
 	private static bool HasItems<T>(IReadOnlyCollection<T>? items) => items is { Count: > 0 };
 
@@ -1058,16 +1400,10 @@ internal sealed class DevProjexMcpTools(
 
 	private static void WriteRelatedMessage(
 		TextWriter output,
-		DependencyRelatedResult result,
-		DependencyDirection direction,
-		string? configurationData,
-		string? trustedNotices,
-		CancellationToken cancellationToken)
+		string protectedBody,
+		string? trustedNotices)
 	{
-		McpSpotlight.Write(output, writer =>
-		{
-			WriteRelatedFiles(writer, result, direction, configurationData, cancellationToken);
-		});
+		McpSpotlight.Write(output, writer => writer.Write(protectedBody));
 		if (trustedNotices is not null)
 		{
 			output.Write("\n\n");
@@ -1232,22 +1568,28 @@ internal sealed class DevProjexMcpTools(
 		throw new InvalidOperationException("Stored pack response exceeded its character budget.");
 	}
 
-	private static RelatedResolutionCounts CountRelatedResolution(
+	internal static RelatedResolutionCounts CountRelatedResolution(
 		DependencyIndexSnapshot index,
 		IReadOnlyList<string> seeds,
 		DependencyDirection direction)
 	{
-		var seedSet = seeds.ToHashSet(StringComparer.Ordinal);
-		var counts = new int[4];
-		foreach (var edge in index.Edges)
+		var edges = new HashSet<DependencyEdge>();
+		if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
 		{
-			var isDependency = direction is DependencyDirection.Dependencies or DependencyDirection.Both &&
-			                   seedSet.Contains(edge.Source);
-			var isDependent = direction is DependencyDirection.Dependents or DependencyDirection.Both &&
-			                  edge.Target is not null && seedSet.Contains(edge.Target);
-			if (isDependency || isDependent)
-				counts[(int)edge.Status]++;
+			foreach (var seed in seeds)
+				foreach (var edge in index.EdgesBySource.GetValueOrDefault(seed) ?? [])
+					edges.Add(edge);
 		}
+		if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
+		{
+			foreach (var seed in seeds)
+				foreach (var edge in index.EdgesByTarget.GetValueOrDefault(seed) ?? [])
+					if (edge.Target is not null && StringComparer.Ordinal.Equals(edge.Target, seed))
+						edges.Add(edge);
+		}
+		var counts = new int[4];
+		foreach (var edge in edges)
+			counts[(int)edge.Status]++;
 		return new RelatedResolutionCounts(
 			counts[(int)ResolutionStatus.Resolved],
 			counts[(int)ResolutionStatus.Ambiguous],
@@ -1255,11 +1597,35 @@ internal sealed class DevProjexMcpTools(
 			counts[(int)ResolutionStatus.External]);
 	}
 
-	private readonly record struct RelatedResolutionCounts(
+	internal readonly record struct RelatedResolutionCounts(
 		int Resolved,
 		int Ambiguous,
 		int Unresolved,
 		int External);
+
+	private sealed record McpResolvedFileReadRequest(
+		McpGetFileRequest Request,
+		string? PhysicalPath);
+
+	private sealed class McpMergedFileReadGroup(
+		string? physicalPath,
+		string displayPath,
+		int startLine,
+		int endLine,
+		IEnumerable<McpGetFileRange> ranges)
+	{
+		public string? PhysicalPath { get; } = physicalPath;
+		public string DisplayPath { get; } = displayPath;
+		public int StartLine { get; set; } = startLine;
+		public int EndLine { get; set; } = endLine;
+		public List<McpGetFileRange> Ranges { get; } = [.. ranges];
+	}
+
+	private sealed record McpBatchFileReadResult(
+		string Text,
+		string Summary,
+		string? UnavailableNotice,
+		string? Continuations);
 
 	private static string? FormatPackEvictions(McpPackDocument pack) =>
 		pack.EvictedPackCount == 0

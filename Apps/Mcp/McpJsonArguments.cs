@@ -27,6 +27,12 @@ internal sealed class McpJsonArguments(
 	internal static IReadOnlySet<string> FreezeAllowed(params string[] names) =>
 		names.ToFrozenSet(StringComparer.Ordinal);
 
+	public bool Contains(string name) =>
+		_values.TryGetValue(name, out var value) && value.ValueKind != JsonValueKind.Null;
+
+	public bool TryGetElement(string name, out JsonElement value) =>
+		_values.TryGetValue(name, out value) && value.ValueKind != JsonValueKind.Null;
+
 	public string? OptionalString(string name)
 	{
 		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
