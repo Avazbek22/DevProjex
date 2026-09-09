@@ -1,6 +1,8 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -62,13 +64,9 @@ public sealed class DependencyFactsEngine : IDisposable
 		ArgumentNullException.ThrowIfNull(manifestFiles);
 		var started = Stopwatch.StartNew();
 		var root = Path.GetFullPath(sourceRoot);
-		var manifest = manifestFiles
-			.Select(Path.GetFullPath)
-			.Where(path => IsWithin(root, path))
-			.Distinct(PathComparer)
-			.OrderBy(path => PortableRelative(root, path), StringComparer.Ordinal)
-			.ToArray();
-		var manifestRelativePaths = manifest.Select(path => PortableRelative(root, path)).ToArray();
+		var canonicalManifest = CreateCanonicalManifest(root, manifestFiles);
+		var manifest = canonicalManifest.Select(static file => file.FullPath).ToArray();
+		var manifestRelativePaths = canonicalManifest.Select(static file => file.RelativePath).ToArray();
 		var manifestRequestKey = new ManifestRequestKey(
 			root,
 			Hash(manifestRelativePaths));
@@ -82,6 +80,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		    ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 		    _indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
 		{
+			DependencyEngineDiagnostics.RecordResolutionCacheHit();
 			var snapshot = cachedSnapshot.Snapshot;
 			progress?.Report(new DependencyIndexProgress(manifest.Length, manifest.Length));
 			return snapshot with
@@ -117,7 +116,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					.PrepareAsync(root, manifest[index], configuration, _limits, token, contentIdentity)
 					.ConfigureAwait(false);
 				prepared[index] = new PreparedDependencyIdentity(
-					source.RelativePath,
+					canonicalManifest[index].RelativePath,
 					source.ContentFingerprint,
 					source.LanguageId);
 				if (source.PreparedStatus != DependencyFileStatus.Supported)
@@ -131,20 +130,27 @@ public sealed class DependencyFactsEngine : IDisposable
 					return;
 				}
 				var key = CreateFileCacheKey(source);
-				var created = new Lazy<Task<FileFacts>>(
-					() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
-					LazyThreadSafetyMode.ExecutionAndPublication);
-				var lazy = _fileCache.GetOrAdd(key, created);
-				if (ReferenceEquals(lazy, created))
-					_fileCacheOrder.Enqueue(key);
-				else
+				Lazy<Task<FileFacts>>? created = null;
+				if (!_fileCache.TryGetValue(key, out var lazy))
+				{
+					created = new Lazy<Task<FileFacts>>(
+						() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
+						LazyThreadSafetyMode.ExecutionAndPublication);
+					lazy = _fileCache.GetOrAdd(key, created);
+					if (ReferenceEquals(lazy, created))
+						_fileCacheOrder.Enqueue(key);
+				}
+				if (!ReferenceEquals(lazy, created))
+			{
 					Interlocked.Increment(ref reusedFiles);
+					DependencyEngineDiagnostics.RecordFileCacheHit();
+			}
 				try
 				{
 					var extracted = await lazy.Value.ConfigureAwait(false);
 					if (!extracted.CanCache)
 						_fileCache.TryRemove(new KeyValuePair<FileCacheKey, Lazy<Task<FileFacts>>>(key, lazy));
-					else if (ReferenceEquals(lazy, created))
+					else if (created is not null && ReferenceEquals(lazy, created))
 						RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
 					facts[index] = RebindScope(extracted, source.ScopeId);
 					cacheable[index] = source.CanCache && extracted.CanCache;
@@ -162,7 +168,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		var manifestGeneration = Hash(prepared.Select(source =>
 			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"));
 		var parsedFiles = _extractor.ParseCount - parsedBefore;
-		var orderedFacts = facts.OrderBy(static fact => fact.Path, StringComparer.Ordinal).ToArray();
+		// Parallel extraction writes by canonical manifest index, so this array is already ordered.
+		var orderedFacts = facts;
 		var declarations = MergeDeclarations(orderedFacts);
 		var declarationRevision = Hash(declarations.Select(DeclarationKey));
 		var cacheKey = new IndexCacheKey(
@@ -171,28 +178,28 @@ public sealed class DependencyFactsEngine : IDisposable
 			configuration.Fingerprint);
 		var allowed = orderedFacts.Select(static fact => fact.Path).ToHashSet(StringComparer.Ordinal);
 		var canCacheIndex = configuration.CanCache && cacheable.All(static value => value);
-		var createdIndex = new Lazy<Task<ResolvedIndex>>(
+		Lazy<Task<ResolvedIndex>> CreateIndex() => new(
 			() => Task.FromResult(GateResolvedIndex(
-				DependencyResolver.Resolve(
-					root,
-					orderedFacts,
-					declarations,
-					configuration,
-					_limits,
-					cancellationToken),
+				DependencyResolver.Resolve(root, orderedFacts, declarations, configuration, _limits, cancellationToken),
 				allowed)),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		ResolvedIndex resolved;
 		var resolutionCacheHit = false;
 		if (!canCacheIndex)
 		{
+			var createdIndex = CreateIndex();
 			resolved = await createdIndex.Value.ConfigureAwait(false);
 		}
 		else
 		{
-			var cachedIndex = _indexCache.GetOrAdd(cacheKey, createdIndex);
-			if (ReferenceEquals(cachedIndex, createdIndex))
-				_indexCacheOrder.Enqueue(cacheKey);
+			Lazy<Task<ResolvedIndex>>? createdIndex = null;
+			if (!_indexCache.TryGetValue(cacheKey, out var cachedIndex))
+			{
+				createdIndex = CreateIndex();
+				cachedIndex = _indexCache.GetOrAdd(cacheKey, createdIndex);
+				if (ReferenceEquals(cachedIndex, createdIndex))
+					_indexCacheOrder.Enqueue(cacheKey);
+			}
 			try
 			{
 				resolved = await cachedIndex.Value.ConfigureAwait(false);
@@ -202,7 +209,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				_indexCache.TryRemove(new KeyValuePair<IndexCacheKey, Lazy<Task<ResolvedIndex>>>(cacheKey, cachedIndex));
 				throw;
 			}
-			resolutionCacheHit = !ReferenceEquals(cachedIndex, createdIndex);
+			resolutionCacheHit = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
+			if (resolutionCacheHit)
+				DependencyEngineDiagnostics.RecordResolutionCacheHit();
 			if (!resolutionCacheHit)
 				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		}
@@ -656,20 +665,38 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private static ResolvedIndex GateResolvedIndex(ResolvedIndex index, IReadOnlySet<string> allowed)
 	{
-		var files = index.Files.Select(file => file with
+		var files = new FileFacts[index.Files.Count];
+		var filesChanged = false;
+		for (var indexValue = 0; indexValue < files.Length; indexValue++)
 		{
-			Imports = GateImports(file.Imports, allowed),
-			References = GateReferences(file.References, allowed)
-		}).ToArray();
+			var file = index.Files[indexValue];
+			var imports = GateImports(file.Imports, allowed);
+			var references = GateReferences(file.References, allowed);
+			files[indexValue] = ReferenceEquals(imports, file.Imports) && ReferenceEquals(references, file.References)
+				? file
+				: file with { Imports = imports, References = references };
+			if (!ReferenceEquals(files[indexValue], file))
+			{
+				filesChanged = true;
+				DependencyEngineDiagnostics.RecordFileFactsClone();
+			}
+		}
 		var edges = index.Edges.Where(edge => allowed.Contains(edge.Source) &&
 			(edge.Target is null || allowed.Contains(edge.Target) || edge.Target.StartsWith("namespace:", StringComparison.Ordinal)) &&
 			edge.Candidates.All(allowed.Contains) &&
 			edge.DeclarationFiles.All(allowed.Contains)).ToArray();
 		var (bySource, byTarget) = BuildEdgeIndexes(edges);
+		var gatedFiles = filesChanged ? files : index.Files;
+		var fileByPath = index.FileByPath;
+		if (filesChanged)
+		{
+			fileByPath = files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+			DependencyEngineDiagnostics.RecordDictionaryBuild();
+		}
 		return index with
 		{
-			Files = files,
-			FileByPath = files.ToDictionary(static file => file.Path, StringComparer.Ordinal),
+			Files = gatedFiles,
+			FileByPath = fileByPath,
 			Edges = edges,
 			EdgesBySource = bySource,
 			EdgesByTarget = byTarget
@@ -724,15 +751,63 @@ public sealed class DependencyFactsEngine : IDisposable
 	{
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		Span<byte> lengthPrefix = stackalloc byte[sizeof(int)];
-		foreach (var value in values)
+		var buffer = ArrayPool<byte>.Shared.Rent(4096);
+		Encoder? encoder = null;
+		try
 		{
-			var bytes = Encoding.UTF8.GetBytes(value);
-			BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, bytes.Length);
-			hash.AppendData(lengthPrefix);
-			hash.AppendData(bytes);
+			foreach (var value in values)
+			{
+				var byteCount = Encoding.UTF8.GetByteCount(value);
+				BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, byteCount);
+				hash.AppendData(lengthPrefix);
+				if (byteCount <= buffer.Length)
+				{
+					var written = Encoding.UTF8.GetBytes(value.AsSpan(), buffer);
+					hash.AppendData(buffer.AsSpan(0, written));
+					continue;
+				}
+				encoder ??= Encoding.UTF8.GetEncoder();
+				encoder.Reset();
+				var remaining = value.AsSpan();
+				do
+				{
+					encoder.Convert(
+						remaining,
+						buffer,
+						flush: true,
+						out var charactersUsed,
+						out var bytesUsed,
+						out _);
+					if (bytesUsed > 0)
+						hash.AppendData(buffer.AsSpan(0, bytesUsed));
+					remaining = remaining[charactersUsed..];
+				} while (!remaining.IsEmpty);
+			}
+		}
+		finally
+		{
+			CryptographicOperations.ZeroMemory(buffer);
+			ArrayPool<byte>.Shared.Return(buffer);
 		}
 
-		return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+		return Convert.ToHexStringLower(hash.GetHashAndReset());
+	}
+
+	private static CanonicalManifestFile[] CreateCanonicalManifest(
+		string root,
+		IReadOnlyList<string> manifestFiles)
+	{
+		var unique = new Dictionary<string, CanonicalManifestFile>(manifestFiles.Count, PathComparer);
+		foreach (var path in manifestFiles)
+		{
+			var fullPath = Path.GetFullPath(path);
+			if (!IsWithin(root, fullPath) || unique.ContainsKey(fullPath))
+				continue;
+			DependencyEngineDiagnostics.RecordPathNormalization();
+			unique.Add(fullPath, new CanonicalManifestFile(fullPath, PortableRelative(root, fullPath)));
+		}
+		DependencyEngineDiagnostics.RecordManifestSort();
+		return unique.Values.OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
 	}
 
 	private static bool IsWithin(string root, string path)
@@ -772,6 +847,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		string RelativePath,
 		string ContentFingerprint,
 		LanguageId LanguageId);
+
+	private readonly record struct CanonicalManifestFile(string FullPath, string RelativePath);
 
 	private readonly record struct IndexCacheKey(
 		string ManifestGeneration,
@@ -830,11 +907,9 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			var context = new ResolverContext(root, files, declarations, configuration);
 			var resolved = new List<DependencyEdge>();
-			var importsByFile = new Dictionary<string, IReadOnlyList<ImportFact>>(StringComparer.Ordinal);
-			var referencesByFile = new Dictionary<string, IReadOnlyList<ReferenceFact>>(StringComparer.Ordinal);
 			var supportedFiles = files.Where(static file => file.Status == DependencyFileStatus.Supported).ToArray();
 			var parallelism = Math.Clamp(Environment.ProcessorCount, 1, 8);
-			var plans = CreateWorkPlans(supportedFiles, limits, cancellationToken);
+			var plans = CreateWorkPlans(supportedFiles, context, limits, cancellationToken);
 			var completed = new ResolvedFileWork[plans.Length];
 			Parallel.For(0, plans.Length, new ParallelOptions
 			{
@@ -878,26 +953,37 @@ public sealed class DependencyFactsEngine : IDisposable
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				resolved.AddRange(fileWork.Edges);
-				importsByFile[fileWork.File.Path] = fileWork.Imports;
-				referencesByFile[fileWork.File.Path] = fileWork.References;
 			}
-			var resolvedFiles = files.Select(file => file.Status != DependencyFileStatus.Supported
-				? file
-				: file with
+			var resolvedFiles = new FileFacts[files.Count];
+			var supportedIndex = 0;
+			for (var fileIndex = 0; fileIndex < files.Count; fileIndex++)
+			{
+				var file = files[fileIndex];
+				if (file.Status != DependencyFileStatus.Supported)
 				{
-					Imports = importsByFile.GetValueOrDefault(file.Path) ?? file.Imports,
-					References = referencesByFile.GetValueOrDefault(file.Path) ?? file.References
-				}).ToArray();
+					resolvedFiles[fileIndex] = file;
+					continue;
+				}
+				var work = completed[supportedIndex++];
+				resolvedFiles[fileIndex] = file with
+				{
+					Imports = work.Imports,
+					References = work.References
+				};
+			}
+			var fileByPath = resolvedFiles.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+			DependencyEngineDiagnostics.RecordDictionaryBuild();
 			return new ResolvedIndex(
 				Aggregate(resolved),
 				resolvedFiles,
-				resolvedFiles.ToDictionary(static file => file.Path, StringComparer.Ordinal),
+				fileByPath,
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal),
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal));
 		}
 
 		private static ResolutionWorkPlan[] CreateWorkPlans(
 			IReadOnlyList<FileFacts> files,
+			ResolverContext context,
 			DependencyFactsLimits limits,
 			CancellationToken cancellationToken)
 		{
@@ -907,9 +993,10 @@ public sealed class DependencyFactsEngine : IDisposable
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var file = files[index];
-				var requestedWork = (long)file.Imports.Count + file.References.Count;
+				var requestedEdges = (long)file.Imports.Count + file.References.Count;
+				var requestedWork = context.EstimateResolutionWork(file, limits.MaximumWorkPerIndex);
 				string? limitReason = null;
-				if (requestedWork > limits.MaximumEdgesPerFile)
+				if (requestedEdges > limits.MaximumEdgesPerFile)
 					limitReason = "edge limit exceeded";
 				else if (requestedWork > limits.MaximumWorkPerIndex - acceptedWork)
 					limitReason = "index work limit exceeded";
@@ -964,38 +1051,91 @@ public sealed class DependencyFactsEngine : IDisposable
 			file.Path, null, EvidenceLayer.TypeReference, ResolutionStatus.Unresolved,
 			"<limit>", [reason], [new SourceSite(file.Path, 1, reason)], [], false);
 
-		private static IReadOnlyList<DependencyEdge> Aggregate(IEnumerable<DependencyEdge> raw) =>
-			raw.GroupBy(static edge => new
-				{
-					edge.Source,
-					edge.Target,
-					edge.Layer,
-					edge.Status,
-					edge.Reference,
-					edge.CrossScope
-				})
-				.Select(static group => new DependencyEdge(
-					group.Key.Source,
-					group.Key.Target,
-					group.Key.Layer,
-					group.Key.Status,
-					group.Key.Reference,
-					group.SelectMany(static edge => edge.Reasons).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
-					group.SelectMany(static edge => edge.Evidence).Distinct().OrderBy(static site => site.Line).ToArray(),
-					group.SelectMany(static edge => edge.Candidates).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
-					group.Key.CrossScope)
-				{
-					DeclarationFiles = group.SelectMany(static edge => edge.DeclarationFiles)
-						.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
-				})
+		private static IReadOnlyList<DependencyEdge> Aggregate(IEnumerable<DependencyEdge> raw)
+		{
+			var groups = new Dictionary<EdgeAggregationKey, EdgeAccumulator>();
+			foreach (var edge in raw)
+			{
+				var key = new EdgeAggregationKey(
+					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope);
+				if (!groups.TryGetValue(key, out var accumulator))
+					groups.Add(key, accumulator = new EdgeAccumulator());
+				accumulator.Add(edge);
+			}
+			return groups.Select(static group => group.Value.Create(group.Key))
 				.OrderBy(static edge => edge.Source, StringComparer.Ordinal)
 				.ThenBy(static edge => edge.Target, StringComparer.Ordinal)
 				.ThenBy(static edge => edge.Reference, StringComparer.Ordinal)
 				.ToArray();
+		}
+
+		private readonly record struct EdgeAggregationKey(
+			string Source,
+			string? Target,
+			EvidenceLayer Layer,
+			ResolutionStatus Status,
+			string Reference,
+			bool CrossScope);
+
+		private sealed class EdgeAccumulator
+		{
+			private DependencyEdge? _single;
+			private HashSet<string>? _reasons;
+			private HashSet<SourceSite>? _evidenceSeen;
+			private List<SourceSite>? _evidence;
+			private HashSet<string>? _candidates;
+			private HashSet<string>? _declarationFiles;
+
+			public void Add(DependencyEdge edge)
+			{
+				if (_single is null)
+				{
+					_single = edge;
+					return;
+				}
+				if (_reasons is null)
+					InitializeCollections(_single);
+				_reasons!.UnionWith(edge.Reasons);
+				foreach (var site in edge.Evidence)
+					if (_evidenceSeen!.Add(site))
+						_evidence!.Add(site);
+				_candidates!.UnionWith(edge.Candidates);
+				_declarationFiles!.UnionWith(edge.DeclarationFiles);
+			}
+
+			public DependencyEdge Create(EdgeAggregationKey key)
+			{
+				if (_reasons is null)
+					return _single!;
+				return new DependencyEdge(
+					key.Source,
+					key.Target,
+					key.Layer,
+					key.Status,
+					key.Reference,
+					_reasons.Order(StringComparer.Ordinal).ToArray(),
+					_evidence!.OrderBy(static site => site.Line).ToArray(),
+					_candidates!.Order(StringComparer.Ordinal).ToArray(),
+					key.CrossScope)
+				{
+					DeclarationFiles = _declarationFiles!.Order(StringComparer.Ordinal).ToArray()
+				};
+			}
+
+			private void InitializeCollections(DependencyEdge edge)
+			{
+				_reasons = new HashSet<string>(edge.Reasons, StringComparer.Ordinal);
+				_evidenceSeen = new HashSet<SourceSite>(edge.Evidence);
+				_evidence = new List<SourceSite>(edge.Evidence);
+				_candidates = new HashSet<string>(edge.Candidates, StringComparer.Ordinal);
+				_declarationFiles = new HashSet<string>(edge.DeclarationFiles, StringComparer.Ordinal);
+			}
+		}
 	}
 
 	private sealed class ResolverContext
 	{
+		private static readonly ConditionalWeakTable<IReadOnlySet<string>, IReadOnlySet<string>> DotNetSimpleNames = new();
 		private readonly string _root;
 		private readonly IReadOnlyDictionary<string, FileFacts> _files;
 		private readonly IReadOnlyDictionary<SymbolLookupKey, DeclarationFact[]> _symbolsBySimpleName;
@@ -1005,8 +1145,15 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlyDictionary<string, string[]> _visibleScopesById;
 		private readonly IReadOnlyDictionary<string, string[]> _globalNamespaces;
 		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _globalAliases;
-		private readonly IReadOnlyDictionary<string, string[]> _contextNamespacesByFile;
+		private readonly IReadOnlyDictionary<string, CSharpNamespaceRegions> _csharpNamespaceRegionsByFile;
+		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, CSharpUsingDirective[]>> _aliasesByFileAndName;
+		private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, TypeParameterScope[]>> _typeParametersByFileAndName;
 		private readonly IReadOnlySet<string> _dotNetExternalSimpleNames;
+		private readonly IReadOnlyDictionary<string, string[]> _pythonRootPrefixesByScope;
+		private readonly IReadOnlyDictionary<string, string> _pythonModuleByFile;
+		private readonly IReadOnlySet<string> _manifestDirectoryPrefixes;
+		private readonly IReadOnlyDictionary<string, TypeScriptPathMapping[]> _typeScriptMappingsByScope;
+		private readonly bool _diagnosticsEnabled;
 
 		public ResolverContext(
 			string root,
@@ -1015,7 +1162,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			DependencyResolverConfiguration configuration)
 		{
 			_root = root;
+			_diagnosticsEnabled = DependencyEngineDiagnostics.IsEnabled;
 			_files = files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+			DependencyEngineDiagnostics.RecordDictionaryBuild();
 			_symbolsBySimpleName = declarations
 				.GroupBy(static declaration => new SymbolLookupKey(
 					declaration.Identity.ScopeId,
@@ -1042,17 +1191,56 @@ public sealed class DependencyFactsEngine : IDisposable
 						.GroupBy(static pair => pair.Key, StringComparer.Ordinal)
 						.ToDictionary(static aliases => aliases.Key, static aliases => aliases.OrderBy(static pair => pair.Value, StringComparer.Ordinal).First().Value, StringComparer.Ordinal),
 					StringComparer.Ordinal);
-			_contextNamespacesByFile = files.ToDictionary(
+			_csharpNamespaceRegionsByFile = files.ToDictionary(
 				static file => file.Path,
-				file => file.ContextNamespaces
-					.Concat(_globalNamespaces.GetValueOrDefault(file.ScopeId) ?? [])
-					.Distinct(StringComparer.Ordinal)
-					.Order(StringComparer.Ordinal)
-					.ToArray(),
+				file => CSharpNamespaceRegions.Create(
+					file.ContextNamespaces.Concat(_globalNamespaces.GetValueOrDefault(file.ScopeId) ?? []),
+					file.CSharpUsingDirectives),
 				StringComparer.Ordinal);
-			_dotNetExternalSimpleNames = configuration.DotNetExternalSymbols
-				.Select(SimpleName)
-				.ToHashSet(StringComparer.Ordinal);
+			_aliasesByFileAndName = files.ToDictionary(
+				static file => file.Path,
+				static file => (IReadOnlyDictionary<string, CSharpUsingDirective[]>)file.CSharpUsingDirectives
+					.Where(static directive => directive.Alias is not null)
+					.GroupBy(static directive => directive.Alias!, StringComparer.Ordinal)
+					.ToDictionary(
+						static group => group.Key,
+						static group => group
+							.OrderBy(static directive => directive.ScopeEndIndex - directive.ScopeStartIndex)
+							.ThenBy(static directive => directive.Target, StringComparer.Ordinal)
+							.ToArray(),
+						StringComparer.Ordinal),
+				StringComparer.Ordinal);
+			_typeParametersByFileAndName = files.ToDictionary(
+				static file => file.Path,
+				static file => (IReadOnlyDictionary<string, TypeParameterScope[]>)file.TypeParameterScopes
+					.GroupBy(static parameter => parameter.Name, StringComparer.Ordinal)
+					.ToDictionary(static group => group.Key, static group => group.ToArray(), StringComparer.Ordinal),
+				StringComparer.Ordinal);
+			_dotNetExternalSimpleNames = DotNetSimpleNames.GetValue(
+				configuration.DotNetExternalSymbols,
+				static symbols => symbols.Select(SimpleName).ToHashSet(StringComparer.Ordinal));
+			_pythonRootPrefixesByScope = configuration.Scopes
+				.Where(static scope => scope.LanguageId == LanguageId.Python)
+				.ToDictionary(
+					static scope => scope.ScopeId,
+					scope => scope.PythonRoots.Where(candidate => IsWithin(_root, candidate))
+						.Select(candidate => PortableRelative(_root, candidate) is "." ? string.Empty : PortableRelative(_root, candidate).Trim('/'))
+						.Distinct(StringComparer.Ordinal).ToArray(),
+					StringComparer.Ordinal);
+			_pythonModuleByFile = files.Where(static file => file.LanguageId == LanguageId.Python)
+				.ToDictionary(static file => file.Path, ComputePythonModule, StringComparer.Ordinal);
+			_manifestDirectoryPrefixes = BuildDirectoryPrefixes(files);
+			_typeScriptMappingsByScope = configuration.Scopes
+				.Where(static scope => IsTypeScript(scope.LanguageId))
+				.ToDictionary(
+					static scope => scope.ScopeId,
+					static scope => scope.TypeScriptPaths
+						.Select(static pair => new TypeScriptPathMapping(pair.Key, pair.Value, pair.Key.IndexOf('*')))
+						.OrderBy(static mapping => mapping.Star >= 0)
+						.ThenByDescending(static mapping => mapping.Star)
+						.ThenBy(static mapping => mapping.Pattern, StringComparer.Ordinal)
+						.ToArray(),
+					StringComparer.Ordinal);
 		}
 
 		public DependencyEdge ResolveImport(FileFacts source, ImportFact import) => source.LanguageId switch
@@ -1062,6 +1250,32 @@ public sealed class DependencyFactsEngine : IDisposable
 			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
 				"explicit imports are context, not dependency edges, for this language", [])
 		};
+
+		public long EstimateResolutionWork(FileFacts source, int maximumWork)
+		{
+			long work = source.Imports.Count;
+			foreach (var reference in source.References)
+			{
+				var name = SimpleName(reference.Name);
+				long candidates = 0;
+				foreach (var scope in VisibleScopeIds(source.ScopeId))
+				foreach (var language in CompatibleLanguages(source.LanguageId))
+				{
+					if (_symbolsBySimpleName.TryGetValue(new SymbolLookupKey(scope, language, name), out var matches))
+					{
+						candidates += matches.Length;
+						if (_diagnosticsEnabled)
+							DependencyEngineDiagnostics.RecordResolverCandidateProbes(matches.Length);
+					}
+					if (candidates > maximumWork)
+						return candidates;
+				}
+				work += Math.Max(1, candidates);
+				if (work > maximumWork)
+					return work;
+			}
+			return work;
+		}
 
 		private DependencyEdge ResolveTypeScriptImport(FileFacts source, ImportFact import)
 		{
@@ -1159,19 +1373,15 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			if (scope is null)
 				return [];
-			var mappings = scope.TypeScriptPaths
-				.Select(pair => (pair.Key, pair.Value, Star: pair.Key.IndexOf('*')))
-				.Where(item => Matches(item.Key, item.Star, specifier))
-				.OrderBy(static item => item.Star >= 0)
-				.ThenByDescending(static item => item.Star)
-				.ThenBy(static item => item.Key, StringComparer.Ordinal)
+			var mappings = (_typeScriptMappingsByScope.GetValueOrDefault(scope.ScopeId) ?? [])
+				.Where(item => Matches(item.Pattern, item.Star, specifier))
 				.ToArray();
 			if (mappings.Length == 0)
 				return [];
 			var mapping = mappings[0];
 			var wildcard = mapping.Star < 0 ? string.Empty :
-				specifier[mapping.Star..(specifier.Length - (mapping.Key.Length - mapping.Star - 1))];
-			foreach (var target in mapping.Value)
+					specifier[mapping.Star..(specifier.Length - (mapping.Pattern.Length - mapping.Star - 1))];
+			foreach (var target in mapping.Targets)
 			{
 				var resolved = ProbeTypeScript(
 					Path.GetFullPath(Path.Combine(scope.Root, target.Replace("*", wildcard, StringComparison.Ordinal))),
@@ -1369,13 +1579,33 @@ public sealed class DependencyFactsEngine : IDisposable
 					Path.Combine(candidate, "index.js"),
 					Path.Combine(candidate, "index.jsx")]);
 			}
-			foreach (var probe in probes)
+			var suffixes = scope?.TypeScriptModuleSuffixes is { Count: > 0 } configuredSuffixes
+				? configuredSuffixes
+				: [""];
+			foreach (var baseProbe in probes)
+			foreach (var suffix in suffixes)
 			{
+				var probe = ApplyTypeScriptModuleSuffix(baseProbe, suffix);
 				var relative = PortableRelative(_root, probe);
 				if (_files.ContainsKey(relative))
 					return [relative];
 			}
 			return [];
+		}
+
+		private static string ApplyTypeScriptModuleSuffix(string path, string suffix)
+		{
+			if (suffix.Length == 0)
+				return path;
+			var extension = path.EndsWith(".d.mts", StringComparison.OrdinalIgnoreCase) ||
+			                path.EndsWith(".d.cts", StringComparison.OrdinalIgnoreCase)
+				? path[^6..]
+				: path.EndsWith(".d.ts", StringComparison.OrdinalIgnoreCase)
+					? path[^5..]
+					: Path.GetExtension(path);
+			return extension.Length == 0
+				? path + suffix
+				: path[..^extension.Length] + suffix + extension;
 		}
 
 		private bool SupportsDirectoryIndex(
@@ -1522,7 +1752,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			{
 				var prefix = string.Join('/', new[] { root, relative }.Where(static value => value.Length > 0));
 				var init = prefix + "__init__.py";
-				if (!_files.ContainsKey(init) && _files.Keys.Any(path => path.StartsWith(prefix, StringComparison.Ordinal)))
+				if (!_files.ContainsKey(init) && _manifestDirectoryPrefixes.Contains(prefix))
 					portions++;
 			}
 			return portions;
@@ -1551,12 +1781,11 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 		}
 
-		private IEnumerable<string> PythonRootPrefixes(FileFacts source)
+		private IReadOnlyList<string> PythonRootPrefixes(FileFacts source)
 		{
-			var roots = FindScope(source.ScopeId)?.PythonRoots ?? [_root, Path.Combine(_root, "src")];
-			return roots.Where(root => IsWithin(_root, root))
-				.Select(root => PortableRelative(_root, root) is "." ? string.Empty : PortableRelative(_root, root).Trim('/'))
-				.Distinct(StringComparer.Ordinal);
+			if (_pythonRootPrefixesByScope.TryGetValue(source.ScopeId, out var roots))
+				return roots;
+			return [string.Empty, "src"];
 		}
 
 		public DependencyEdge ResolveType(FileFacts source, ReferenceFact reference)
@@ -1577,10 +1806,11 @@ public sealed class DependencyFactsEngine : IDisposable
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			var isSyntacticallyQualified = reference.IsGlobalQualified || reference.Name.Contains('.');
 			var typeParameterShadowsReference = !isSyntacticallyQualified && (source.TypeParameterScopes.Count > 0
-				? source.TypeParameterScopes.Any(parameter =>
+				? _typeParametersByFileAndName.GetValueOrDefault(source.Path)?
+					.GetValueOrDefault(simpleName)?.Any(parameter =>
 					parameter.Name == simpleName &&
 					parameter.StartIndex <= reference.SourceStartIndex &&
-					parameter.EndIndex >= reference.SourceStartIndex)
+					parameter.EndIndex >= reference.SourceStartIndex) == true
 				: source.TypeParameters.Contains(simpleName, StringComparer.Ordinal));
 			if (typeParameterShadowsReference)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
@@ -1811,11 +2041,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			var separator = reference.Name.IndexOf('.');
 			var prefix = separator < 0 ? reference.Name : reference.Name[..separator];
 			var suffix = separator < 0 ? string.Empty : reference.Name[separator..];
-			var local = source.CSharpUsingDirectives
-				.Where(directive => directive.Alias == prefix && IsActive(directive, reference.SourceStartIndex))
-				.OrderBy(directive => directive.ScopeEndIndex - directive.ScopeStartIndex)
-				.ThenBy(static directive => directive.Target, StringComparer.Ordinal)
-				.FirstOrDefault();
+			var local = _aliasesByFileAndName.GetValueOrDefault(source.Path)?
+				.GetValueOrDefault(prefix)?
+				.FirstOrDefault(directive => IsActive(directive, reference.SourceStartIndex));
 			if (local is not null)
 			{
 				expanded = local.Target + suffix;
@@ -1832,16 +2060,48 @@ public sealed class DependencyFactsEngine : IDisposable
 		}
 
 		private IReadOnlyList<string> ActiveCSharpNamespaces(FileFacts source, ReferenceFact reference) =>
-			(_contextNamespacesByFile.GetValueOrDefault(source.Path) ?? [])
-			.Concat(source.CSharpUsingDirectives
-				.Where(directive => directive.Alias is null && IsActive(directive, reference.SourceStartIndex))
-				.Select(static directive => directive.Target))
-			.Distinct(StringComparer.Ordinal)
-			.Order(StringComparer.Ordinal)
-			.ToArray();
+			_csharpNamespaceRegionsByFile.GetValueOrDefault(source.Path)?.At(reference.SourceStartIndex) ?? [];
 
 		private static bool IsActive(CSharpUsingDirective directive, int sourceStartIndex) =>
 			directive.ScopeStartIndex <= sourceStartIndex && directive.ScopeEndIndex >= sourceStartIndex;
+
+		private sealed class CSharpNamespaceRegions(int[] starts, string[][] namespaces)
+		{
+			public IReadOnlyList<string> At(int sourceStartIndex)
+			{
+				var index = Array.BinarySearch(starts, sourceStartIndex);
+				if (index < 0)
+					index = ~index - 1;
+				return namespaces[Math.Max(0, index)];
+			}
+
+			public static CSharpNamespaceRegions Create(
+				IEnumerable<string> baseNamespaces,
+				IReadOnlyList<CSharpUsingDirective> directives)
+			{
+				var local = directives.Where(static directive => directive.Alias is null).ToArray();
+				var boundaries = new SortedSet<int> { int.MinValue };
+				foreach (var directive in local)
+				{
+					boundaries.Add(directive.ScopeStartIndex);
+					if (directive.ScopeEndIndex < int.MaxValue)
+						boundaries.Add(directive.ScopeEndIndex + 1);
+				}
+				var starts = boundaries.ToArray();
+				var values = new string[starts.Length][];
+				for (var index = 0; index < starts.Length; index++)
+				{
+					var position = starts[index];
+					values[index] = baseNamespaces.Concat(local
+							.Where(directive => IsActive(directive, position))
+							.Select(static directive => directive.Target))
+						.Distinct(StringComparer.Ordinal)
+						.Order(StringComparer.Ordinal)
+						.ToArray();
+				}
+				return new CSharpNamespaceRegions(starts, values);
+			}
+		}
 
 		private static string QualifiedLookupName(string qualified)
 		{
@@ -1868,13 +2128,35 @@ public sealed class DependencyFactsEngine : IDisposable
 		}
 		private string PythonModule(FileFacts source)
 		{
+			if (_pythonModuleByFile.TryGetValue(source.Path, out var module))
+				return module;
+			return ComputePythonModule(source);
+		}
+
+		private string ComputePythonModule(FileFacts source)
+		{
 			var root = PythonRootPrefixes(source)
 				.Where(prefix => prefix.Length == 0 || source.Path.StartsWith(prefix + '/', StringComparison.Ordinal))
 				.OrderByDescending(static prefix => prefix.Length)
 				.FirstOrDefault();
 			var relative = root is { Length: > 0 } ? source.Path[(root.Length + 1)..] : source.Path;
-			var module = Path.ChangeExtension(relative, null)!.Replace('/', '.').Replace('\\', '.');
-			return module.EndsWith(".__init__", StringComparison.Ordinal) ? module[..^".__init__".Length] : module;
+			var computed = Path.ChangeExtension(relative, null)!.Replace('/', '.').Replace('\\', '.');
+			return computed.EndsWith(".__init__", StringComparison.Ordinal) ? computed[..^".__init__".Length] : computed;
+		}
+
+		private static IReadOnlySet<string> BuildDirectoryPrefixes(IEnumerable<FileFacts> files)
+		{
+			var result = new HashSet<string>(StringComparer.Ordinal);
+			foreach (var file in files)
+			{
+				var separator = file.Path.IndexOf('/');
+				while (separator >= 0)
+				{
+					result.Add(file.Path[..(separator + 1)]);
+					separator = file.Path.IndexOf('/', separator + 1);
+				}
+			}
+			return result;
 		}
 
 		private DependencyScopeDescriptor? FindScope(string scopeId) =>
@@ -1915,6 +2197,10 @@ public sealed class DependencyFactsEngine : IDisposable
 			LanguageId LanguageId,
 			string QualifiedName,
 			int GenericArity);
+		private readonly record struct TypeScriptPathMapping(
+			string Pattern,
+			IReadOnlyList<string> Targets,
+			int Star);
 		private readonly record struct PackageMapProbe(
 			IReadOnlyList<string> Candidates,
 			string? FailureReason);

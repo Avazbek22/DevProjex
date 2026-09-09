@@ -23,22 +23,19 @@ internal static class FocusRankingEngine
 		var entriesByFullPath = importance.Entries.ToDictionary(
 			static entry => Path.GetFullPath(entry.FullPath),
 			PathComparer.Default);
-		var relativeByFullPath = entriesByFullPath.ToDictionary(
-			static pair => pair.Key,
-			static pair => pair.Value.Path,
-			PathComparer.Default);
 		var seeds = DeduplicateSeeds(request.Seeds, entriesByFullPath, cancellationToken);
 		var seedOrder = seeds
 			.Select((seed, index) => (Path.GetFullPath(seed.FullPath), index))
 			.ToDictionary(static item => item.Item1, static item => item.index, PathComparer.Default);
-		var undirected = graph.BuildUndirected(cancellationToken);
-		var distances = CalculateDistances(
-			graph,
-			undirected,
-			seeds,
-			relativeByFullPath,
-			cancellationToken);
-		var viaByPath = SelectParents(graph, undirected, distances, cancellationToken);
+		var hasGraphSeed = seeds.Any(seed => graph.NodeByPath.ContainsKey(
+			entriesByFullPath[Path.GetFullPath(seed.FullPath)].Path));
+		var undirected = hasGraphSeed ? graph.BuildUndirected(cancellationToken) : null;
+		var distances = hasGraphSeed
+			? CalculateDistances(graph, undirected!, seeds, entriesByFullPath, cancellationToken)
+			: Enumerable.Repeat(-1, graph.Paths.Length).ToArray();
+		var viaByPath = hasGraphSeed
+			? SelectParents(graph, undirected!, distances, cancellationToken)
+			: new Dictionary<string, FocusRankingVia>(StringComparer.Ordinal);
 		var entries = OrderByHop(
 			importance,
 			seedOrder,
@@ -77,7 +74,7 @@ internal static class FocusRankingEngine
 		RankingGraph graph,
 		int[][] undirected,
 		IReadOnlyList<FocusRankingSeedRequest> seeds,
-		IReadOnlyDictionary<string, string> relativeByFullPath,
+		IReadOnlyDictionary<string, ImportanceRankingEntry> entriesByFullPath,
 		CancellationToken cancellationToken)
 	{
 		var distances = new int[graph.Paths.Length];
@@ -85,8 +82,8 @@ internal static class FocusRankingEngine
 		var queue = new Queue<int>();
 		foreach (var seed in seeds)
 		{
-			if (!relativeByFullPath.TryGetValue(Path.GetFullPath(seed.FullPath), out var relative) ||
-			    !graph.NodeByPath.TryGetValue(relative, out var node) || distances[node] == 0)
+			if (!entriesByFullPath.TryGetValue(Path.GetFullPath(seed.FullPath), out var entry) ||
+			    !graph.NodeByPath.TryGetValue(entry.Path, out var node) || distances[node] == 0)
 				continue;
 			distances[node] = 0;
 			queue.Enqueue(node);
@@ -139,21 +136,33 @@ internal static class FocusRankingEngine
 		RankingGraph graph,
 		IReadOnlyList<int> distances,
 		IReadOnlyDictionary<string, FocusRankingVia> viaByPath,
-		CancellationToken cancellationToken) =>
-		importance.Entries
+		CancellationToken cancellationToken)
+	{
+		var plans = importance.Entries
 			.Select(entry => Decorate(entry, seedOrder, graph, distances, viaByPath))
-			.OrderBy(entry => entry.IsFocusSeed ? 0 : entry.Hop is not null ? 1 : 2)
-			.ThenBy(entry => entry.IsFocusSeed ? seedOrder[Path.GetFullPath(entry.FullPath)] : entry.Hop ?? int.MaxValue)
-			.ThenBy(entry => entry.IsFocusSeed ? 0 : entry.BaseImportancePriority)
-			.ThenBy(static entry => entry.Path, StringComparer.Ordinal)
-			.Select((entry, index) =>
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				return entry with { Priority = index + 1 };
-			})
 			.ToArray();
+		var ordered = plans.Where(static plan => plan.IsSeed)
+			.OrderBy(plan => seedOrder[Path.GetFullPath(plan.Entry.FullPath)])
+			.Concat(plans.Where(static plan => !plan.IsSeed && plan.Hop is not null)
+				.GroupBy(static plan => plan.Hop!.Value)
+				.OrderBy(static group => group.Key)
+				.SelectMany(static group => group))
+			.Concat(plans.Where(static plan => !plan.IsSeed && plan.Hop is null));
+		return ordered.Select((plan, index) =>
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return plan.Entry with
+			{
+				Priority = index + 1,
+				BaseImportancePriority = plan.Entry.Priority,
+				Hop = plan.Hop,
+				Via = plan.Via,
+				IsFocusSeed = plan.IsSeed
+			};
+		}).ToArray();
+	}
 
-	private static ImportanceRankingEntry Decorate(
+	private static FocusEntryPlan Decorate(
 		ImportanceRankingEntry entry,
 		IReadOnlyDictionary<string, int> seedOrder,
 		RankingGraph graph,
@@ -166,13 +175,11 @@ internal static class FocusRankingEngine
 			: graph.NodeByPath.TryGetValue(entry.Path, out var node) && distances[node] >= 0
 				? distances[node]
 				: null;
-		return entry with
-		{
-			BaseImportancePriority = entry.Priority,
-			Hop = hop,
-			Via = hop > 0 && viaByPath.TryGetValue(entry.Path, out var via) ? via : null,
-			IsFocusSeed = isSeed
-		};
+		return new FocusEntryPlan(
+			entry,
+			hop,
+			hop > 0 && viaByPath.TryGetValue(entry.Path, out var via) ? via : null,
+			isSeed);
 	}
 
 	private static ImportanceRankingReport BuildReport(
@@ -220,10 +227,12 @@ internal static class FocusRankingEngine
 		IReadOnlyList<FocusRankingSeedRequest> seeds,
 		IReadOnlyDictionary<string, ImportanceRankingEntry> entriesByFullPath,
 		RankingGraph graph,
-		int[][] undirected,
+		int[][]? undirected,
 		DependencyIndexSnapshot snapshot)
 	{
-		var factsByPath = snapshot.Files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
+		var factsByPath = snapshot.FileByPath.Count == snapshot.Files.Count
+			? snapshot.FileByPath
+			: snapshot.Files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
 		return seeds.Select(seed =>
 		{
 			var path = entriesByFullPath[Path.GetFullPath(seed.FullPath)].Path;
@@ -232,7 +241,7 @@ internal static class FocusRankingEngine
 			{
 				DependencyFileStatus.ExtractionFailed => FocusSeedState.ExtractionFailed,
 				DependencyFileStatus.Unsupported or null => FocusSeedState.Unsupported,
-				_ when graph.NodeByPath.TryGetValue(path, out var node) && undirected[node].Length > 0 =>
+				_ when undirected is not null && graph.NodeByPath.TryGetValue(path, out var node) && undirected[node].Length > 0 =>
 					FocusSeedState.Resolved,
 				_ => FocusSeedState.NoResolvedNeighbors
 			};
@@ -245,5 +254,11 @@ internal static class FocusRankingEngine
 			return new FocusRankingSeed(seed.Requested, path, state, reason);
 		}).ToArray();
 	}
+
+	private sealed record FocusEntryPlan(
+		ImportanceRankingEntry Entry,
+		int? Hop,
+		FocusRankingVia? Via,
+		bool IsSeed);
 
 }

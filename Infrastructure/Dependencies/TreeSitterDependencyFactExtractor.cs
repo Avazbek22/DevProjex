@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -18,6 +19,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private const long MaximumPreparedSourceBytes = 64L * 1024 * 1024;
 	private const string DiagnosticErrorQuery = "(ERROR) @diagnostic.error";
 	private readonly IGrammarLibraryLocator _locator;
+	private static readonly ConditionalWeakTable<DependencyResolverConfiguration, ScopeOwnerIndex> ScopeOwners = new();
 	private readonly IFileContentAnalyzer _contentAnalyzer;
 	private readonly BoundedDependencySourceReader? _boundedSourceReader;
 	private readonly IReadOnlyDictionary<LanguageId, LanguageDefinition> _definitions;
@@ -41,6 +43,14 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	public TreeSitterDependencyFactExtractor()
 		: this(CodeCompressionFactory.CreateLocator())
+	{
+	}
+
+	public TreeSitterDependencyFactExtractor(FileContentReadStreamOpener sourceOpener)
+		: this(
+			CodeCompressionFactory.CreateLocator(),
+			new FileContentAnalyzer(sourceOpener ?? throw new ArgumentNullException(nameof(sourceOpener))),
+			new BoundedDependencySourceReader(sourceOpener))
 	{
 	}
 
@@ -97,12 +107,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 		var relative = Normalize(Path.GetRelativePath(sourceRoot, fullPath));
 		var language = ForPath(fullPath);
-		var scope = configuration.Scopes
-			.Where(candidate => LanguageFamily(candidate.LanguageId) == LanguageFamily(language) &&
-			                    IsWithin(candidate.Root, fullPath))
-			.OrderByDescending(static candidate => candidate.Root.Length)
-			.Select(static candidate => candidate.ScopeId)
-			.FirstOrDefault() ?? $"root:{LanguageFamily(language).ToString().ToLowerInvariant()}";
+		var scope = ScopeOwners.GetValue(configuration, static value => new ScopeOwnerIndex(value.Scopes))
+			.Resolve(language, fullPath);
 		try
 		{
 			if (language == LanguageId.Unsupported)
@@ -123,14 +129,13 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				info.CreationTimeUtc.Ticks,
 				language,
 				limits.MaximumCharactersPerFile);
-			var created = new PreparedSourceCacheEntry(
+			var (entry, ownsEntry) = GetOrCreatePreparedSource(
 				key,
-				Interlocked.Increment(ref _preparedSourceGeneration),
 				contentIdentity,
-				new Lazy<Task<PreparedSourceContent>>(
-					() => ReadPreparedSourceAsync(fullPath, language, limits.MaximumCharactersPerFile, cancellationToken),
-					LazyThreadSafetyMode.ExecutionAndPublication));
-			var (entry, ownsEntry) = GetOrReplacePreparedSource(key, created, contentIdentity, cancellationToken);
+				fullPath,
+				language,
+				limits.MaximumCharactersPerFile,
+				cancellationToken);
 			PreparedSourceContent content;
 			try
 			{
@@ -174,26 +179,31 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			RemovePreparedSourceUnderLock(key, entry);
 	}
 
-	private (PreparedSourceCacheEntry Entry, bool OwnsEntry) GetOrReplacePreparedSource(
+	private (PreparedSourceCacheEntry Entry, bool OwnsEntry) GetOrCreatePreparedSource(
 		PreparedSourceCacheKey key,
-		PreparedSourceCacheEntry created,
 		string? requestedIdentity,
+		string fullPath,
+		LanguageId language,
+		int maximumCharacters,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		lock (_preparedSourceTrimSync)
 		{
-			if (!_preparedSources.TryGetValue(key, out var entry))
-			{
-				AddPreparedSourceUnderLock(key, created);
-				return (created, true);
-			}
-			if (requestedIdentity is null ||
+			if (_preparedSources.TryGetValue(key, out var entry) &&
+			    (requestedIdentity is null ||
 			    entry.ContentIdentity is not null &&
-			    string.Equals(entry.ContentIdentity, requestedIdentity, StringComparison.Ordinal))
+			    string.Equals(entry.ContentIdentity, requestedIdentity, StringComparison.Ordinal)))
 				return (entry, false);
-
-			RemovePreparedSourceUnderLock(key, entry);
+			if (entry is not null)
+				RemovePreparedSourceUnderLock(key, entry);
+			var created = new PreparedSourceCacheEntry(
+				key,
+				Interlocked.Increment(ref _preparedSourceGeneration),
+				requestedIdentity,
+				new Lazy<Task<PreparedSourceContent>>(
+					() => ReadPreparedSourceAsync(fullPath, language, maximumCharacters, cancellationToken),
+					LazyThreadSafetyMode.ExecutionAndPublication));
 			AddPreparedSourceUnderLock(key, created);
 			return (created, true);
 		}
@@ -843,7 +853,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		? LanguageId.TypeScript
 		: language;
 	private static string Normalize(string path) => path.Replace('\\', '/');
-	private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+	private static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 	private static string OneLine(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
 	private static bool IsWithin(string root, string path)
 	{
@@ -898,7 +908,29 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		int EvictionEntries,
 		long RetainedBytes);
 
-	internal sealed class BoundedDependencySourceReader
+	private sealed class ScopeOwnerIndex
+	{
+		private readonly IReadOnlyDictionary<LanguageId, DependencyScopeDescriptor[]> _byLanguage;
+
+		public ScopeOwnerIndex(IEnumerable<DependencyScopeDescriptor> scopes) =>
+			_byLanguage = scopes
+				.GroupBy(static scope => LanguageFamily(scope.LanguageId))
+				.ToDictionary(
+					static group => group.Key,
+					static group => group.OrderByDescending(static scope => scope.Root.Length).ToArray());
+
+		public string Resolve(LanguageId language, string fullPath)
+		{
+			var family = LanguageFamily(language);
+			if (_byLanguage.TryGetValue(family, out var candidates))
+				foreach (var candidate in candidates)
+					if (IsWithin(candidate.Root, fullPath))
+						return candidate.ScopeId;
+			return $"root:{family.ToString().ToLowerInvariant()}";
+		}
+	}
+
+	internal sealed class BoundedDependencySourceReader(FileContentReadStreamOpener? sourceOpener = null)
 	{
 		private const int BufferSize = 64 * 1024;
 		private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
@@ -925,13 +957,15 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var charactersWritten = 0;
 			try
 			{
-				await using var stream = new FileStream(
-					path,
-					FileMode.Open,
-					FileAccess.Read,
-					FileShare.Read | FileShare.Delete,
-					BufferSize,
-					FileOptions.Asynchronous | FileOptions.SequentialScan);
+				await using var stream = sourceOpener is null
+					? new FileStream(
+						path,
+						FileMode.Open,
+						FileAccess.Read,
+						FileShare.Read | FileShare.Delete,
+						BufferSize,
+						FileOptions.Asynchronous | FileOptions.SequentialScan)
+					: sourceOpener(path, BufferSize, FileShare.Read | FileShare.Delete, asynchronous: true);
 				var length = stream.Length;
 				var lastWrite = File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks;
 				var byteBufferSize = checked((int)Math.Clamp(length, 1, BufferSize));
@@ -1085,8 +1119,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		}
 
 		private static string MetadataFingerprint(string state, long length, long lastWrite) =>
-			Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{state}:{length}:{lastWrite}")))
-				.ToLowerInvariant();
+			Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes($"{state}:{length}:{lastWrite}")));
 	}
 
 	internal sealed record BoundedDependencySourceRead(

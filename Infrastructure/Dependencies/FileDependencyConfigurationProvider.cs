@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using DevProjex.Application.Dependencies;
+using DevProjex.Application.Services;
 
 namespace DevProjex.Infrastructure.Dependencies;
 
@@ -25,6 +26,14 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 
 	public FileDependencyConfigurationProvider()
 		: this(new BoundedDependencyControlFileReader(), new DependencyPathMetadata())
+	{
+	}
+
+	public FileDependencyConfigurationProvider(FileContentReadStreamOpener sourceOpener)
+		: this(
+			new BoundedDependencyControlFileReader(
+				sourceOpener ?? throw new ArgumentNullException(nameof(sourceOpener))),
+			new DependencyPathMetadata())
 	{
 	}
 
@@ -50,13 +59,29 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var manifest = manifestFiles.Select(Path.GetFullPath).ToHashSet(PathComparer);
 		var scopes = new List<DependencyScopeDescriptor>();
 		var fingerprintParts = new List<string>();
-		var csharpProjects = new Dictionary<string, (string Scope, string[] References)>(PathComparer);
+		var csharpProjects = new Dictionary<string, (
+			string Scope,
+			string[] References,
+			DependencyConfigurationState State,
+			string? Reason)>(PathComparer);
 		var snapshots = new Dictionary<string, Task<DependencyControlFileSnapshot>>(PathComparer);
 		var packageProjections = new Dictionary<string, Task<ConfigurationParseResult<PackageMapDescriptor>>>(PathComparer);
+		var typeScriptLayerProjections = new Dictionary<string, Task<ConfigurationParseResult<TypeScriptConfigurationLayer>>>(PathComparer);
 		var diagnostics = new List<DependencyConfigurationDiagnostic>();
 		var absentControlFiles = new HashSet<string>(PathComparer);
 		var fingerprintedControlFiles = new HashSet<string>(PathComparer);
 		var transientReadFailure = 0;
+		var projectFiles = new List<string>();
+		var typeScriptConfigFiles = new List<string>();
+		var pythonConfigFiles = new List<string>();
+		var packageFiles = new List<string>();
+		foreach (var path in manifest.Order(StringComparer.Ordinal))
+		{
+			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
+			if (IsTypeScriptConfig(path)) typeScriptConfigFiles.Add(path);
+			if (IsPythonConfig(path)) pythonConfigFiles.Add(path);
+			if (Path.GetFileName(path).Equals("package.json", StringComparison.OrdinalIgnoreCase)) packageFiles.Add(path);
+		}
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
 		{
@@ -118,6 +143,23 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 					parsed.Reason);
 		}
 
+		Task<ConfigurationParseResult<TypeScriptConfigurationLayer>> ReadTypeScriptLayerProjectionAsync(string path)
+		{
+			if (typeScriptLayerProjections.TryGetValue(path, out var existing)) return existing;
+			var created = ReadTypeScriptLayerProjectionCoreAsync(path);
+			typeScriptLayerProjections[path] = created;
+			return created;
+		}
+
+		async Task<ConfigurationParseResult<TypeScriptConfigurationLayer>> ReadTypeScriptLayerProjectionCoreAsync(string path)
+		{
+			var snapshot = await ReadSnapshotAsync(path).ConfigureAwait(false);
+			AddFingerprint(path, snapshot);
+			return snapshot.State == DependencyConfigurationState.Valid
+				? ParseTypeScriptConfigLayer(path, snapshot.Content)
+				: TypeScriptLayerFailure(snapshot.State, snapshot.Reason);
+		}
+
 		async Task<ConfigurationParseResult<TypeScriptConfigurationLayer>> ReadTypeScriptLayerAsync(
 			string configPath,
 			int depth,
@@ -128,18 +170,15 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 
 			try
 			{
-				var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
-				AddFingerprint(configPath, snapshot);
-				if (snapshot.State != DependencyConfigurationState.Valid)
+				var layer = await ReadTypeScriptLayerProjectionAsync(configPath).ConfigureAwait(false);
+				if (layer.State != DependencyConfigurationState.Valid)
 				{
 					return TypeScriptLayerFailure(
-						snapshot.State,
-						snapshot.State == DependencyConfigurationState.Missing && depth > 0
+						layer.State,
+						layer.State == DependencyConfigurationState.Missing && depth > 0
 							? TypeScriptExtendsUnavailableReason
-							: snapshot.Reason);
+							: layer.Reason);
 				}
-
-				var layer = ParseTypeScriptConfigLayer(configPath, snapshot.Content);
 				if (layer.State != DependencyConfigurationState.Valid || layer.Value.Extends is null)
 					return layer;
 
@@ -183,7 +222,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				scopeIds.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()));
 		}
 
-		foreach (var project in manifest.Where(static path => path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)).Order(StringComparer.Ordinal))
+		foreach (var project in projectFiles)
 		{
 			var snapshot = await ReadSnapshotAsync(project).ConfigureAwait(false);
 			AddFingerprint(project, snapshot);
@@ -206,7 +245,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				if (!exists)
 					absentControlFiles.Add(reference);
 			}
-			csharpProjects[project] = (scope, references);
+			csharpProjects[project] = (scope, references, parsed.State, parsed.Reason);
 			AddDiagnostic(project, parsed.State, parsed.Reason, scope);
 		}
 		foreach (var pair in csharpProjects.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
@@ -215,7 +254,6 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				.Where(csharpProjects.ContainsKey)
 				.Select(path => csharpProjects[path].Scope)
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-			var diagnostic = diagnostics.FirstOrDefault(item => item.ScopeIds.Contains(pair.Value.Scope, StringComparer.Ordinal));
 			scopes.Add(new DependencyScopeDescriptor(
 				pair.Value.Scope,
 				Path.GetDirectoryName(pair.Key)!,
@@ -229,12 +267,12 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				[],
 				true)
 			{
-				ConfigurationState = diagnostic?.State ?? DependencyConfigurationState.Valid,
-				ConfigurationDiagnostic = diagnostic?.Reason
+				ConfigurationState = pair.Value.State,
+				ConfigurationDiagnostic = pair.Value.Reason
 			});
 		}
 
-		foreach (var configPath in manifest.Where(IsTypeScriptConfig).Order(StringComparer.Ordinal))
+		foreach (var configPath in typeScriptConfigFiles)
 		{
 			var directory = Path.GetDirectoryName(configPath)!;
 			var parsed = await ReadTypeScriptConfigAsync(configPath, directory).ConfigureAwait(false);
@@ -254,14 +292,15 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				new HashSet<string>(),
 				[],
 				true,
-				AllowJavaScript: parsed.Value.AllowJavaScript)
+				AllowJavaScript: parsed.Value.AllowJavaScript,
+				TypeScriptModuleSuffixes: parsed.Value.ModuleSuffixes)
 			{
 				ConfigurationState = parsed.State,
 				ConfigurationDiagnostic = parsed.Reason
 			});
 		}
 
-		foreach (var configPath in manifest.Where(IsPythonConfig).Order(StringComparer.Ordinal))
+		foreach (var configPath in pythonConfigFiles)
 		{
 			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
 			AddFingerprint(configPath, snapshot);
@@ -290,7 +329,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		AddFallbackScope(scopes, root, LanguageId.TypeScript);
 		AddFallbackScope(scopes, root, LanguageId.Python);
 		var packageMaps = new Dictionary<string, PackageMapDescriptor>(StringComparer.Ordinal);
-		foreach (var packagePath in manifest.Where(static path => Path.GetFileName(path).Equals("package.json", StringComparison.OrdinalIgnoreCase)).Order(StringComparer.Ordinal))
+		foreach (var packagePath in packageFiles)
 		{
 			var parsed = await ReadPackageAsync(packagePath).ConfigureAwait(false);
 			packageMaps[PortableRelative(root, parsed.Value.Directory)] = parsed.Value;
@@ -419,6 +458,18 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				: null;
 			var hasAllowJavaScript = options.TryGetProperty("allowJs", out var allowJs);
 			var allowJavaScript = hasAllowJavaScript && allowJs.ValueKind is JsonValueKind.True;
+			var hasModuleSuffixes = options.TryGetProperty("moduleSuffixes", out var moduleSuffixesElement);
+			if (hasModuleSuffixes &&
+			    (moduleSuffixesElement.ValueKind != JsonValueKind.Array ||
+			     moduleSuffixesElement.EnumerateArray().Any(static item => item.ValueKind != JsonValueKind.String)))
+			{
+				return TypeScriptLayerFailure(
+					DependencyConfigurationState.UnsupportedSemantics,
+					"tsconfig compilerOptions.moduleSuffixes must be an array of strings");
+			}
+			var moduleSuffixes = hasModuleSuffixes
+				? moduleSuffixesElement.EnumerateArray().Select(static item => item.GetString()!).ToArray()
+				: null;
 			var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 			var hasPaths = options.TryGetProperty("paths", out var mappings);
 			if (hasPaths && mappings.ValueKind != JsonValueKind.Object)
@@ -448,7 +499,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 					new OptionalConfigurationValue<TypeScriptPathMappings>(
 						hasPaths,
 						hasPaths ? new TypeScriptPathMappings(Path.GetDirectoryName(configPath)!, paths) : null),
-					new OptionalConfigurationValue<bool>(hasAllowJavaScript, allowJavaScript)));
+					new OptionalConfigurationValue<bool>(hasAllowJavaScript, allowJavaScript),
+					new OptionalConfigurationValue<IReadOnlyList<string>>(hasModuleSuffixes, moduleSuffixes)));
 		}
 		catch (JsonException)
 		{
@@ -539,7 +591,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			child.ModuleResolution.IsSpecified ? child.ModuleResolution : inherited.ModuleResolution,
 			child.BaseUrl.IsSpecified ? child.BaseUrl : inherited.BaseUrl,
 			child.Paths.IsSpecified ? child.Paths : inherited.Paths,
-			child.AllowJavaScript.IsSpecified ? child.AllowJavaScript : inherited.AllowJavaScript);
+			child.AllowJavaScript.IsSpecified ? child.AllowJavaScript : inherited.AllowJavaScript,
+			child.ModuleSuffixes.IsSpecified ? child.ModuleSuffixes : inherited.ModuleSuffixes);
 
 	private static TypeScriptConfiguration MaterializeTypeScriptConfiguration(
 		TypeScriptConfigurationLayer layer,
@@ -568,7 +621,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			moduleResolution,
 			legacy,
 			mappings,
-			layer.AllowJavaScript.IsSpecified && layer.AllowJavaScript.Value);
+			layer.AllowJavaScript.IsSpecified && layer.AllowJavaScript.Value,
+			layer.ModuleSuffixes.IsSpecified
+				? layer.ModuleSuffixes.Value ?? []
+				: [""]);
 	}
 
 	private static string ResolveTypeScriptOptionDirectory(string declaringDirectory, string? relative) =>
@@ -838,7 +894,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		});
 	}
 	private static string Fingerprint(string root, string path, string content) => $"{PortableRelative(root, path)}\0{Hash([content])}";
-	private static string Hash(IEnumerable<string> values) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', values)))).ToLowerInvariant();
+	private static string Hash(IEnumerable<string> values) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', values))));
 	private static string PortableRelative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 	private static bool IsWithin(string root, string path)
 	{
@@ -867,13 +923,15 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		string ModuleResolution,
 		bool Legacy,
 		IReadOnlyDictionary<string, IReadOnlyList<string>> Paths,
-		bool AllowJavaScript)
+		bool AllowJavaScript,
+		IReadOnlyList<string> ModuleSuffixes)
 	{
 		public static readonly TypeScriptConfiguration Default = new(
 			"bundler",
 			false,
 			new Dictionary<string, IReadOnlyList<string>>(),
-			false);
+			false,
+			[""]);
 	}
 
 	private readonly record struct OptionalConfigurationValue<T>(bool IsSpecified, T? Value);
@@ -889,10 +947,12 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		OptionalConfigurationValue<string> ModuleResolution,
 		OptionalConfigurationValue<TypeScriptBaseUrl> BaseUrl,
 		OptionalConfigurationValue<TypeScriptPathMappings> Paths,
-		OptionalConfigurationValue<bool> AllowJavaScript)
+		OptionalConfigurationValue<bool> AllowJavaScript,
+		OptionalConfigurationValue<IReadOnlyList<string>> ModuleSuffixes)
 	{
 		public static readonly TypeScriptConfigurationLayer Empty = new(
 			null,
+			default,
 			default,
 			default,
 			default,
@@ -992,7 +1052,7 @@ internal sealed record DependencyControlFileSnapshot(
 	string FingerprintValue,
 	bool CanCache = true);
 
-internal sealed class BoundedDependencyControlFileReader : IDependencyControlFileReader
+internal sealed class BoundedDependencyControlFileReader(FileContentReadStreamOpener? sourceOpener = null) : IDependencyControlFileReader
 {
 	private static ReadOnlySpan<byte> Utf8Preamble => [0xEF, 0xBB, 0xBF];
 	private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -1004,13 +1064,15 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 	{
 		try
 		{
-			await using var stream = new FileStream(
-				path,
-				FileMode.Open,
-				FileAccess.Read,
-				FileShare.Read | FileShare.Delete,
-				64 * 1024,
-				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			await using var stream = sourceOpener is null
+				? new FileStream(
+					path,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.Read | FileShare.Delete,
+					64 * 1024,
+					FileOptions.Asynchronous | FileOptions.SequentialScan)
+				: sourceOpener(path, 64 * 1024, FileShare.Read | FileShare.Delete, asynchronous: true);
 			var length = stream.Length;
 			var lastWrite = File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks;
 			if (length > maximumBytes || length > int.MaxValue)
@@ -1079,7 +1141,7 @@ internal sealed class BoundedDependencyControlFileReader : IDependencyControlFil
 		bool canCache = true) => new(state, string.Empty, reason, $"{state}:{length}:{lastWrite}:{reason}", canCache);
 
 	private static string Hash(ReadOnlySpan<byte> bytes) =>
-		Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+		Convert.ToHexStringLower(SHA256.HashData(bytes));
 
 	private static string OneLine(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
 }
