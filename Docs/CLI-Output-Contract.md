@@ -103,6 +103,27 @@ The base shape is:
       "lines": 0,
       "chars": 0,
       "tokens": 0
+    },
+    "contentOnly": {
+      "measured": {
+        "files": 0,
+        "lines": 0,
+        "chars": 0,
+        "tokens": 0
+      },
+      "estimated": {
+        "files": 0,
+        "chars": 0,
+        "tokens": 0
+      }
+    },
+    "document": {
+      "view": "content",
+      "format": "text",
+      "lines": 0,
+      "chars": 0,
+      "tokens": 0,
+      "estimated": false
     }
   },
   "diagnostics": [],
@@ -115,6 +136,16 @@ analysis. With no explicit CLI root override it contains the effective profile
 roots; an explicit `--root` replaces it with the validated requested subset.
 Available roots discovered before that restriction are not exposed in analysis
 JSON. `inventory` contains only the projected `files` and `folders` counts.
+
+The existing `metrics.content` object retains its clipboard-style v1 meaning for
+compatibility. `metrics.contentOnly.measured` excludes Root and file headings and
+counts only inspected transformed file bodies. `metrics.contentOnly.estimated`
+separately reports files whose content metrics are size-based. `metrics.document`
+models the exact `export context --view content --format text` document shape with
+its Root line and project-relative file headings; `estimated` is true when one or
+more bodies are estimates or lack text metrics. Every emitted `topFiles` entry has an `estimated`
+Boolean, so an estimated largest file cannot be mistaken for part of the measured
+content total.
 
 For a local source, `project.source` is null. For a cached Git source it is an
 object containing `type: "git"`, the safe `repositoryUrl`, and nullable `branch`

@@ -772,6 +772,7 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("Included: 1 file (1 estimated tokens).", text, StringComparison.Ordinal);
 			Assert.Contains("Skipped: 1 file", text, StringComparison.Ordinal);
 			Assert.Contains($"[Remote] commit={commit}", text, StringComparison.Ordinal);
+			Assert.DoesNotContain(" branch=", text, StringComparison.Ordinal);
 			Assert.DoesNotContain(dataRoot, text, PathComparison);
 		}
 		finally

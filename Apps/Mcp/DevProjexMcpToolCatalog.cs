@@ -498,6 +498,49 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "characters": { "type": "integer", "description": "Rendered characters, including estimates for uninspected text files." },
 	    "tokens": { "type": "integer", "description": "Estimated tokens for the same character total." },
 	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective content-detail level used for measurement." },
+	    "contentMetrics": {
+	      "type": "object",
+	      "description": "Content-only metrics split between inspected transformed text and size-based estimates; no root or file headings are counted.",
+	      "properties": {
+	        "measured": {
+	          "type": "object",
+	          "properties": {
+	            "files": { "type": "integer", "description": "Number of files measured from inspected transformed text." },
+	            "lines": { "type": "integer", "description": "Lines in measured transformed file bodies." },
+	            "characters": { "type": "integer", "description": "Normalized characters in measured transformed file bodies." },
+	            "tokens": { "type": "integer", "description": "Estimated tokens for measured transformed file bodies." }
+	          },
+	          "required": ["files", "lines", "characters", "tokens"],
+	          "additionalProperties": false
+	        },
+	        "estimated": {
+	          "type": "object",
+	          "properties": {
+	            "files": { "type": "integer", "description": "Number of text files represented only by size-based estimates." },
+	            "characters": { "type": "integer", "description": "Estimated normalized characters for those files." },
+	            "tokens": { "type": "integer", "description": "Estimated tokens for those files." }
+	          },
+	          "required": ["files", "characters", "tokens"],
+	          "additionalProperties": false
+	        }
+	      },
+	      "required": ["measured", "estimated"],
+	      "additionalProperties": false
+	    },
+	    "documentMetrics": {
+	      "type": "object",
+	      "description": "Metrics for the canonical pack_context content/text document, including its root and relative-path headings.",
+	      "properties": {
+	        "view": { "type": "string", "const": "content", "description": "Pack view used for document measurement." },
+	        "format": { "type": "string", "const": "text", "description": "Pack format used for document measurement." },
+	        "lines": { "type": "integer", "description": "Rendered document lines." },
+	        "characters": { "type": "integer", "description": "Rendered normalized document characters." },
+	        "tokens": { "type": "integer", "description": "Estimated tokens for the rendered document." },
+	        "estimated": { "type": "boolean", "description": "True when one or more file bodies use size-based estimates or lack text metrics." }
+	      },
+	      "required": ["view", "format", "lines", "characters", "tokens", "estimated"],
+	      "additionalProperties": false
+	    },
 	    "exclusions": { "type": "array", "items": { "type": "string" }, "description": "Effective exclusion tokens for this call, in catalog order; the same tokens the mcp --exclude flag and the optional exclusions parameter use." },
 	    "compressionUnavailable": {
 	      "type": "object",
@@ -524,7 +567,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "description": "Pinned remote checkout identity; absent for local projects.",
 	      "properties": {
 	        "commit": { "type": "string", "description": "Commit SHA selected by the repository-cache session." },
-	        "branch": { "type": "string", "description": "Requested or resolved checkout branch." }
+	        "branch": { "type": "string", "description": "Repository-controlled requested or resolved branch, kept inside the untrusted structured payload." }
 	      },
 	      "required": ["commit", "branch"],
 	      "additionalProperties": false
@@ -537,16 +580,17 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "properties": {
 	          "path": { "type": "string", "description": "Project-relative file path." },
 	          "tokens": { "type": "integer", "description": "Estimated tokens for this file." },
+	          "estimated": { "type": "boolean", "description": "True when this entry uses size-based metrics instead of inspected transformed content." },
 	          "uninspected": { "type": "boolean", "description": "True when bounded secret inspection could not read this file and its metrics are estimated." }
 	        },
-	        "required": ["path", "tokens"],
+	        "required": ["path", "tokens", "estimated"],
 	        "additionalProperties": false
 	      }
 	    },
 	    "topFilesTruncated": { "type": "boolean", "description": "True when the aggregate top-files character budget omitted remaining entries." },
 	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Number of requested top-file entries omitted by the aggregate character budget." }
 	  },
-	  "required": ["files", "characters", "tokens", "detail", "exclusions", "protection", "topFiles", "topFilesTruncated", "topFilesRemaining"],
+	  "required": ["files", "characters", "tokens", "detail", "contentMetrics", "documentMetrics", "exclusions", "protection", "topFiles", "topFilesTruncated", "topFilesRemaining"],
 	  "additionalProperties": false
 	}
 	""";

@@ -18,11 +18,18 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 	public async Task WriteAnalysisJsonAsync(
 		ProjectContextPlan plan,
 		TextWriter writer,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		AnalyzeOutputMetrics? outputMetrics = null,
+		IReadOnlySet<string>? estimatedTopFilePaths = null)
 	{
 		await using (var stream = new Utf8TextWriterStream(writer, cancellationToken))
 		{
-			await WriteAnalysisJsonContentAsync(plan, stream, cancellationToken)
+			await WriteAnalysisJsonContentAsync(
+					plan,
+					stream,
+					cancellationToken,
+					outputMetrics,
+					estimatedTopFilePaths)
 				.ConfigureAwait(false);
 			await stream.CompleteAsync(cancellationToken).ConfigureAwait(false);
 		}
@@ -33,10 +40,12 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 	internal Task WriteAnalysisJsonContentAsync(
 		ProjectContextPlan plan,
 		Stream destination,
-		CancellationToken cancellationToken) =>
+		CancellationToken cancellationToken,
+		AnalyzeOutputMetrics? outputMetrics = null,
+		IReadOnlySet<string>? estimatedTopFilePaths = null) =>
 		JsonSerializer.SerializeAsync(
 			destination,
-			CreateAnalysisDocument(plan),
+			CreateAnalysisDocument(plan, outputMetrics, estimatedTopFilePaths),
 			JsonOptions,
 			cancellationToken);
 
@@ -51,7 +60,10 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			? identity.SourceReference
 			: plan.SourceRoot;
 
-	private static AnalysisDocument CreateAnalysisDocument(ProjectContextPlan plan)
+	private static AnalysisDocument CreateAnalysisDocument(
+		ProjectContextPlan plan,
+		AnalyzeOutputMetrics? outputMetrics,
+		IReadOnlySet<string>? estimatedTopFilePaths)
 	{
 		var identity = plan.SourceIdentity;
 		var hasExtendedContent = plan.Redaction is not null ||
@@ -94,11 +106,33 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			Metrics: new AnalysisMetricsDocument(
 				plan.IncludedBytes,
 				plan.Analysis.Metrics.Tree,
-				plan.Analysis.Metrics.Content),
-			TopFiles: plan.TopFiles?.Select(static file =>
+				plan.Analysis.Metrics.Content,
+				outputMetrics is { } calculated
+					? new AnalysisContentMetricsDocument(
+						new AnalysisMeasuredContentDocument(
+							calculated.ContentOnly.Measured.Files,
+							calculated.ContentOnly.Measured.Lines,
+							calculated.ContentOnly.Measured.Characters,
+							calculated.ContentOnly.Measured.Tokens),
+						new AnalysisEstimatedContentDocument(
+							calculated.ContentOnly.Estimated.Files,
+							calculated.ContentOnly.Estimated.Characters,
+							calculated.ContentOnly.Estimated.Tokens))
+					: null,
+				outputMetrics is { } rendered
+					? new AnalysisDocumentMetricsDocument(
+						rendered.Document.View,
+						rendered.Document.Format,
+						rendered.Document.Lines,
+						rendered.Document.Characters,
+						rendered.Document.Tokens,
+						rendered.Document.IsEstimated)
+					: null),
+			TopFiles: plan.TopFiles?.Select(file =>
 				new AnalysisTopFileDocument(
 					PathUtility.NormalizeSeparators(file.Path),
-					file.Tokens)),
+					file.Tokens,
+					estimatedTopFilePaths?.Contains(file.Path) == true)),
 			Diagnostics: plan.Diagnostics.Select(static diagnostic =>
 				new AnalysisDiagnosticDocument(
 					diagnostic.Code,
@@ -206,9 +240,39 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 	private readonly record struct AnalysisMetricsDocument(
 		long Bytes,
 		ProjectOutputMetricsReport Tree,
-		ProjectOutputMetricsReport Content);
+		ProjectOutputMetricsReport Content,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		AnalysisContentMetricsDocument? ContentOnly,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		AnalysisDocumentMetricsDocument? Document);
 
-	private readonly record struct AnalysisTopFileDocument(string Path, long Tokens);
+	private readonly record struct AnalysisTopFileDocument(
+		string Path,
+		long Tokens,
+		bool Estimated);
+
+	private readonly record struct AnalysisContentMetricsDocument(
+		AnalysisMeasuredContentDocument Measured,
+		AnalysisEstimatedContentDocument Estimated);
+
+	private readonly record struct AnalysisMeasuredContentDocument(
+		int Files,
+		long Lines,
+		long Chars,
+		long Tokens);
+
+	private readonly record struct AnalysisEstimatedContentDocument(
+		int Files,
+		long Chars,
+		long Tokens);
+
+	private readonly record struct AnalysisDocumentMetricsDocument(
+		string View,
+		string Format,
+		long Lines,
+		long Chars,
+		long Tokens,
+		bool Estimated);
 
 	private readonly record struct AnalysisDiagnosticDocument(
 		string Code,

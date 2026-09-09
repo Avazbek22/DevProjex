@@ -778,7 +778,7 @@ internal sealed class McpProjectService(
 			SourceType: ProjectSourceType.GitClone,
 			SourceReference.Length: > 0
 		} identity
-			? identity.SourceReference
+			? RepositoryWebPathPresentationService.NormalizeForDisplay(identity.SourceReference)
 			: plan.SourceRoot;
 		var pathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
 			CreateTransformationContext(plan));
