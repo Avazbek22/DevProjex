@@ -1945,6 +1945,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 
 			var namespaceName = reference.ContainingNamespace;
+			if (namespaceName.Length == 0)
+			{
+				var global = candidates.Where(candidate =>
+					candidate.ContainingType is null &&
+					candidate.ContainingNamespace.Length == 0).ToArray();
+				if (global.Length > 0)
+					return global;
+			}
 			while (namespaceName.Length > 0)
 			{
 				var lexical = candidates.Where(candidate =>

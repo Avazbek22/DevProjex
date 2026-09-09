@@ -6,6 +6,29 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New056_GlobalNamespaceTypePrecedesImportedTypeAtTopLevel()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var global = fixture.CreateFile("Global.cs", "public sealed class Widget { }");
+		var imported = fixture.CreateFile("Imported.cs", "namespace Other; public sealed class Widget { }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"using Other; public sealed class Consumer { Widget Value; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, global, imported, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "Consumer.cs" && candidate.Reference == "Widget");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("Global.cs", edge.Target);
+	}
+
+	[Fact]
 	public async Task New055_AttributeShortNameFallbackRunsAfterVisibilityFiltering()
 	{
 		using var fixture = new TemporaryDirectory();
