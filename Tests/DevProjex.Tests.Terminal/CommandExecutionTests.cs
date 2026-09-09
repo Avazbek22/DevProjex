@@ -30,6 +30,8 @@ public sealed class CommandExecutionTests
 	[Theory]
 	[InlineData("DPX-CLI-PROFILE-INVALID", CommandLineExitCodes.UsageError)]
 	[InlineData("DPX-CLI-PROFILE-WRITE-FAILED", CommandLineExitCodes.RuntimeError)]
+	[InlineData("DPX-CLI-PROFILE-PARTIAL", CommandLineExitCodes.PolicyFailure)]
+	[InlineData("DPX-CLI-PROFILE-CONFLICT", CommandLineExitCodes.PolicyFailure)]
 	[InlineData("DPX-PROFILE-DESTINATION-EXISTS", CommandLineExitCodes.DestinationConflict)]
 	public async Task PortableProfileFailuresUseContractExitCode(
 		string code,

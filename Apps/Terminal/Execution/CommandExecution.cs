@@ -35,6 +35,8 @@ internal static class CommandExecution
 		{
 			var isDestinationConflict = exception.Code == "DPX-PROFILE-DESTINATION-EXISTS";
 			var isRuntimeFailure = exception.Code == "DPX-CLI-PROFILE-WRITE-FAILED";
+			var isPolicyFailure = exception.Code is "DPX-CLI-PROFILE-PARTIAL" or
+				"DPX-CLI-PROFILE-CONFLICT";
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
 				SafePortableProfileMessageFor(exception, text),
@@ -45,7 +47,9 @@ internal static class CommandExecution
 					? CommandLineExitCodes.DestinationConflict
 					: isRuntimeFailure
 						? CommandLineExitCodes.RuntimeError
-						: CommandLineExitCodes.UsageError,
+						: isPolicyFailure
+							? CommandLineExitCodes.PolicyFailure
+							: CommandLineExitCodes.UsageError,
 				Exception: exception));
 		}
 		catch (ProjectContextValidationException exception)
@@ -166,6 +170,10 @@ internal static class CommandExecution
 		"DPX-CLI-PROFILE-FUTURE-SCHEMA" => localization["Terminal.Error.ProfileInvalid"],
 		"DPX-CLI-PROFILE-INVALID" => localization["Terminal.Error.ProfileInvalid"],
 		"DPX-CLI-PROFILE-WRITE-FAILED" => localization["Terminal.Error.ProfileWriteFailed"],
+		"DPX-CLI-PROFILE-PARTIAL" =>
+			"The profile cleanup completed only partially. Repeat the command to finish cleanup.",
+		"DPX-CLI-PROFILE-CONFLICT" =>
+			"The profile changed while the command was preparing it. Repeat the command to use the latest version.",
 		"DPX-PROFILE-DESTINATION-EXISTS" => localization["Terminal.Error.ProfileDestinationExists"],
 		"DPX-CLI-FORCE-NOT-SUPPORTED" => localization["Terminal.Error.ForceNotSupported"],
 		"DPX-CLI-ZIP-EXTENSION-REQUIRED" => localization["Terminal.Error.ZipExtensionRequired"],

@@ -32,6 +32,10 @@ public interface IProjectProfileStore
 			: new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null);
 	}
 	bool TryDeleteProfile(string localProjectPath) => false;
+	ProjectProfileDeleteStatus TryDeleteProfileWithResult(string localProjectPath) =>
+		TryDeleteProfile(localProjectPath)
+			? ProjectProfileDeleteStatus.Deleted
+			: ProjectProfileDeleteStatus.Failed;
 	void SaveProfile(string localProjectPath, ProjectSelectionProfile profile);
 	ProjectProfileClearStatus ClearAllProfiles();
 }

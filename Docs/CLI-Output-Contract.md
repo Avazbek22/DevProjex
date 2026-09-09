@@ -644,6 +644,11 @@ prints raw `Exception.Message`, an inner exception, or a platform-localized I/O
 message. Diagnostic verbosity may report an exception type, safe path context,
 stack trace, and request identifier, but never file content or secrets.
 
+`profile reset` returns policy exit code `3` with
+`DPX-CLI-PROFILE-PARTIAL` when persistent marks were removed but the selection
+profile could not be removed. The operation is idempotent; repeating it completes
+the remaining stage once storage is available.
+
 Secret inspection never emits uninspected text. A selected text file above the supported
 16 MiB limit fails no command: `export context` omits its text, and `export project`
 leaves it out of the copy and names it in `DEVPROJEX-NOTICE.txt`.

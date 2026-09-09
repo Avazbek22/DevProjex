@@ -200,7 +200,14 @@ public sealed class ProfileCommandHandler(
 
 	public int Reset(string projectPath)
 	{
-		if (!services.LocalProfileStore.TryDeleteProfile(projectPath))
+		var result = services.LocalProfileStore.TryDeleteProfileWithResult(projectPath);
+		if (result == ProjectProfileDeleteStatus.Partial)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-PARTIAL",
+				"The local profile reset completed only partially. Repeat the command to finish cleanup.");
+		}
+		if (result != ProjectProfileDeleteStatus.Deleted)
 		{
 			throw new PortableProjectProfileException(
 				"DPX-CLI-PROFILE-WRITE-FAILED",

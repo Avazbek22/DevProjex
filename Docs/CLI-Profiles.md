@@ -176,11 +176,11 @@ represent two simultaneous Git modes.
 
 ## Persistence limitations in v5.2
 
-Selection profiles and persistent secret marks use separate durable stores. A
-reset that clears selection successfully but cannot clear the mark store reports
-failure, but it cannot roll back the selection deletion; retry the reset after
-the store becomes available. Concurrent profile saves use last-completion-wins,
-not compare-and-swap against the revision observed while planning.
+Selection profiles and persistent secret marks use separate durable stores. Reset
+removes persistent marks first. If that stage fails, selection remains unchanged.
+If the later selection-store stage fails, the command reports
+`DPX-CLI-PROFILE-PARTIAL` and policy exit code `3`; repeat the command to finish
+the idempotent cleanup.
 
 The durable JSON writer commits the primary before refreshing its backup. A
 backup-copy failure can therefore report a failed save after the primary already
