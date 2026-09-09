@@ -1823,8 +1823,41 @@ public sealed class SecretRedactionSession : IDisposable
 		_scanCache.Store(alias, detectionExecuted: false);
 	}
 
+	internal bool TryGetCachedFindingsByContent(
+		string projectRoot,
+		string filePath,
+		SecretFileMetadata metadata,
+		string contentFingerprint,
+		ISecretDetectionScope detectorScope,
+		bool includeAutomaticDetection,
+		int markedSecretsRevision,
+		string transformIdentity,
+		long generation,
+		CancellationToken generationToken,
+		out SecretScanCacheEntry entry)
+	{
+		lock (_sync)
+		{
+			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
+			return _scanCache.TryGetByContent(
+				filePath,
+				metadata,
+				contentFingerprint,
+				GetRulesIdentity(
+					detectorScope,
+					filePath,
+					NormalizeRelativePath(projectRoot, filePath),
+					includeAutomaticDetection),
+				transformIdentity,
+				markedSecretsRevision,
+				out entry);
+		}
+	}
+
 	internal SecretScanCacheEntry StoreCombinedTransformFindings(
 		SecretScanCacheEntry source,
+		string contentFingerprint,
+		string transformIdentity,
 		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
 		IReadOnlyList<SecretFindingSegmentMetadata> segments,
 		long generation,
@@ -1832,13 +1865,15 @@ public sealed class SecretRedactionSession : IDisposable
 	{
 		var combined = source with
 		{
+			ContentFingerprint = contentFingerprint,
+			TransformIdentity = transformIdentity,
 			Candidates = candidates,
 			Segments = segments,
 			ApproximateRetainedBytes = EstimateRetainedBytes(
 				source.NormalizedPath,
-				source.ContentFingerprint,
+				contentFingerprint,
 				source.RulesIdentity,
-				source.TransformIdentity,
+				transformIdentity,
 				source.OccurrenceProjectRoot,
 				source.OccurrenceRelativePath,
 				candidates,
@@ -2252,6 +2287,7 @@ public sealed class SecretRedactionSnapshotPublishedEventArgs(SecretRedactionSna
 
 public sealed class SecretRedactionScope
 {
+	private const string TransformedDetectionStageSuffix = "\u001ftransformed-detection-v1";
 	private const byte CandidateRepresented = 1;
 	private const byte CandidateRedacted = 2;
 	private readonly SecretRedactionSession _session;
@@ -2680,14 +2716,47 @@ public sealed class SecretRedactionScope
 			cancellationToken,
 			transformMap: null,
 			knownFingerprint: sourceFingerprint);
-		var transformedEntry = DetectTransformed(
+		ContentPipelineDiagnostics.RecordContentFingerprint();
+		var transformedFingerprint = SecretRedactionSession.HashValue(transformedContent.AsSpan());
+		var combinedFingerprint = sourceEntry.ContentFingerprint + transformedFingerprint;
+		var includeAutomaticDetection = inspectionMode == SecretContentInspectionMode.AutomaticAndManual;
+		if (_session.TryGetCachedFindingsByContent(
+			    _projectRoot,
+			    filePath,
+			    metadata,
+			    combinedFingerprint,
+			    _detectorScope,
+			    includeAutomaticDetection,
+			    _markedSecretsRevision,
+			    _transformIdentity,
+			    _generation,
+			    _generationToken,
+			    out var combinedEntry))
+		{
+			return combinedEntry;
+		}
+
+		EnsureScannableLength(filePath, transformedContent.Length);
+		var transformedEntry = _session.GetOrDetectFindings(
+			_projectRoot,
 			filePath,
 			transformedContent,
-			transformMap,
 			metadata,
-			knownFingerprint: null,
+			_detectorScope,
+			_markedSecretsMatcher,
+			includeAutomaticDetection,
+			_markedSecretsRevision,
+			_transformIdentity + TransformedDetectionStageSuffix,
+			_generation,
+			_generationToken,
+			cancellationToken,
+			transformMap);
+		return MergeDetectionEntries(
+			sourceEntry,
+			transformedEntry,
+			combinedFingerprint,
+			transformMap,
 			cancellationToken);
-		return MergeDetectionEntries(sourceEntry, transformedEntry!, transformMap, cancellationToken);
 	}
 
 	internal SecretFileRedactionPlan CreatePlanFromDetectedContent(
@@ -2771,6 +2840,7 @@ public sealed class SecretRedactionScope
 	private SecretScanCacheEntry MergeDetectionEntries(
 		SecretScanCacheEntry sourceEntry,
 		SecretScanCacheEntry transformedEntry,
+		string combinedFingerprint,
 		ContentTransformMap transformMap,
 		CancellationToken cancellationToken)
 	{
@@ -2795,6 +2865,8 @@ public sealed class SecretRedactionScope
 		var segments = BuildSegments(candidates);
 		return _session.StoreCombinedTransformFindings(
 			transformedEntry,
+			combinedFingerprint,
+			_transformIdentity,
 			candidates,
 			segments,
 			_generation,

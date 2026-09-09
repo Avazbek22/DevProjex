@@ -1565,6 +1565,70 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task StripComments_InvalidatesCombinedFindingsWhenOnlyRemovedSourceTextChanges()
+	{
+		const string token = "pat7o9mw4c058sei5.bb075cee667b90855a4471502369a2bd7e93f38ba6aa8039a2527e577ca5793a";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("source-fingerprint-project");
+		var path = temporary.CreateFile(
+			"source-fingerprint-project/State.cs",
+			$"// airtable{Environment.NewLine}" +
+			$"internal static class State {{ public const string Value = \"{token}\"; }}");
+		var originalTimestamp = File.GetLastWriteTimeUtc(path);
+		var originalLength = new FileInfo(path).Length;
+		using var redactionSession = new SecretRedactionSession(new GitleaksSecretDetector());
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var compression = new CodeCompressionContext(
+			sourceRoot,
+			compressionSession,
+			CodeTransformKinds.Comments);
+		var context = ContentTransformationContext.For(
+			compression,
+			new SecretRedactionContext(sourceRoot, redactionSession))!;
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		await using (var first = await preparer.PrepareAsync(
+			             context,
+			             [path],
+			             TestContext.Current.CancellationToken))
+		{
+			var output = await File.ReadAllTextAsync(
+				first.GetFile(path).ContentPath,
+				TestContext.Current.CancellationToken);
+			Assert.Contains(
+				"DEVPROJEX_REDACTED[airtable-personnal-access-token#1]",
+				output,
+				StringComparison.Ordinal);
+		}
+
+		await File.WriteAllTextAsync(
+			path,
+			$"// aaaaaaaa{Environment.NewLine}" +
+			$"internal static class State {{ public const string Value = \"{token}\"; }}",
+			TestContext.Current.CancellationToken);
+		File.SetLastWriteTimeUtc(path, originalTimestamp);
+		Assert.Equal(originalLength, new FileInfo(path).Length);
+		await using var second = await preparer.PrepareAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		var secondOutput = await File.ReadAllTextAsync(
+			second.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+		await using var compressionOnly = await preparer.PrepareAsync(
+			ContentTransformationContext.For(compression, redaction: null)!,
+			[path],
+			TestContext.Current.CancellationToken);
+		var transformedControl = await File.ReadAllTextAsync(
+			compressionOnly.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(transformedControl, secondOutput);
+		Assert.Contains(token, secondOutput, StringComparison.Ordinal);
+		Assert.Equal(3, redactionSession.GetCacheDiagnostics().DetectionRuns);
+	}
+
+	[Fact]
 	public async Task PrepareWithoutFindingCapturePublishesCountsWithoutMaterializingDescriptors()
 	{
 		const string secret = "capture-only-on-request-secret-value-42";
