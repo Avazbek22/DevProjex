@@ -6,6 +6,31 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New095_RequireParameterDoesNotCreateModuleImport()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"jsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"node16\",\"allowJs\":true}}");
+		var package = fixture.CreateFile("package.json", "{\"type\":\"commonjs\"}");
+		var fake = fixture.CreateFile("fake.js", "module.exports = 1;");
+		var real = fixture.CreateFile("real.js", "module.exports = 2;");
+		var source = fixture.CreateFile(
+			"main.js",
+			"function test(require) { return require('./fake.js'); }\nrequire('./real.js');");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, fake, real, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(result.Edges, edge => edge.Source == "main.js" && edge.Target == "fake.js");
+		Assert.Equal("real.js", Assert.Single(result.Edges, edge =>
+			edge.Source == "main.js" && edge.Reference == "./real.js").Target);
+	}
+
+	[Fact]
 	public async Task New091_TupleElementNamesAreNotTypeReferences()
 	{
 		using var fixture = new TemporaryDirectory();
