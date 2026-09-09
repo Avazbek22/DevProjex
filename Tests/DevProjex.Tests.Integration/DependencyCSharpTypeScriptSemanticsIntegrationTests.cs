@@ -6,6 +6,31 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New054_ExactPackageExportDoesNotProbeDirectoryIndex()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var package = fixture.CreateFile(
+			"package.json",
+			"{\"name\":\"fixture\",\"exports\":{\"./sub\":\"./dir\"}}");
+		var index = fixture.CreateFile("dir/index.ts", "export default 1;");
+		var source = fixture.CreateFile("main.ts", "import value from 'fixture/sub';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, index, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "main.ts" && candidate.Reference == "fixture/sub");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+	}
+
+	[Fact]
 	public async Task New053_DynamicImportInCommonJsRequiresRelativeExtension()
 	{
 		using var fixture = new TemporaryDirectory();

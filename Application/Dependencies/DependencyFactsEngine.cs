@@ -1443,7 +1443,8 @@ public sealed class DependencyFactsEngine : IDisposable
 						ProbeTypeScript(
 							Path.GetFullPath(Path.Combine(directory, mappedPath)),
 							FindScope(source.ScopeId),
-							source).ToArray(),
+							source,
+							allowDirectoryIndex: !exports).ToArray(),
 						null);
 				}
 				if (Path.GetFullPath(directory) == Path.GetFullPath(_root))
@@ -1559,7 +1560,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		private IEnumerable<string> ProbeTypeScript(
 			string candidate,
 			DependencyScopeDescriptor? scope,
-			FileFacts source)
+			FileFacts source,
+			bool allowDirectoryIndex = true)
 		{
 			var extension = Path.GetExtension(candidate).ToLowerInvariant();
 			var probes = new List<string>();
@@ -1585,7 +1587,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					candidate + ".jsx"]);
 			}
 			var mode = scope?.ModuleResolution ?? "bundler";
-			if (SupportsDirectoryIndex(mode, source, scope))
+			if (allowDirectoryIndex && SupportsDirectoryIndex(mode, source, scope))
 			{
 				probes.AddRange([
 					Path.Combine(candidate, "index.ts"),
