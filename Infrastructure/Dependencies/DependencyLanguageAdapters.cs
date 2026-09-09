@@ -141,6 +141,7 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 
 internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLanguageAdapter
 {
+	private const string StaticUsingPrefix = "static::";
 	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
 		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
 		{
@@ -502,14 +503,17 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		foreach (var capture in captures.Where(static capture => capture.Name == "context.using"))
 		{
 			var match = UsingRegex().Match(capture.Text);
-			if (!match.Success || match.Groups["static"].Success)
+			if (!match.Success)
 				continue;
+			var isStatic = match.Groups["static"].Success;
 			var target = match.Groups["target"].Value.Replace("global::", string.Empty, StringComparison.Ordinal);
 			var targetArity = GenericArityAt(
 				capture.Text,
 				match.Groups["target"].Index + match.Groups["target"].Length);
 			if (targetArity > 0)
 				target += $"`{targetArity}";
+			if (isStatic)
+				target = StaticUsingPrefix + target;
 			var isGlobal = capture.Text.TrimStart().StartsWith("global using ", StringComparison.Ordinal);
 			var alias = match.Groups["alias"].Success ? match.Groups["alias"].Value : null;
 			if (isGlobal)
@@ -525,7 +529,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			var scopeStart = lexicalNamespace?.Start ?? 0;
 			var scopeEnd = lexicalNamespace?.End ?? sourceLength;
 			directives.Add(new CSharpUsingDirective(target, alias, scopeStart, scopeEnd));
-			if (lexicalNamespace is not null) continue;
+			if (lexicalNamespace is not null || isStatic) continue;
 			if (alias is null) namespaces.Add(target);
 			else aliases[alias] = target;
 		}

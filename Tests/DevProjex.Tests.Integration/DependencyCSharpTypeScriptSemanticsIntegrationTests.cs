@@ -6,6 +6,30 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New015_UsingStaticExposesNestedTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var holder = fixture.CreateFile(
+			"Holder.cs",
+			"namespace Company; public static class Holder { public sealed class Nested { } }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"using static Company.Holder; public sealed class Consumer { Nested Value; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, holder, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "Consumer.cs" && candidate.Reference == "Nested");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("Holder.cs", edge.Target);
+	}
+
+	[Fact]
 	public async Task New059_ExportsFallbackArrayIsHonestlyUnresolved()
 	{
 		using var fixture = new TemporaryDirectory();

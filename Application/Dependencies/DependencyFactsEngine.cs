@@ -1135,6 +1135,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private sealed class ResolverContext
 	{
+		private const string StaticUsingPrefix = "static::";
 		private static readonly ConditionalWeakTable<IReadOnlySet<string>, IReadOnlySet<string>> DotNetSimpleNames = new();
 		private readonly string _root;
 		private readonly IReadOnlyDictionary<string, FileFacts> _files;
@@ -2019,6 +2020,14 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 
 			var importedNamespaces = ActiveCSharpNamespaces(source, reference);
+			var importedStaticTypes = ActiveCSharpStaticTypes(source, reference);
+			var importedNested = candidates.Where(candidate =>
+				candidate.ContainingType is not null &&
+				importedStaticTypes.Contains(
+					QualifiedLookupName(candidate.ContainingType),
+					StringComparer.Ordinal)).ToArray();
+			if (importedNested.Length > 0)
+				return importedNested;
 			var imported = candidates.Where(candidate =>
 				candidate.ContainingType is null &&
 				importedNamespaces.Contains(candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
@@ -2160,6 +2169,20 @@ public sealed class DependencyFactsEngine : IDisposable
 		private IReadOnlyList<string> ActiveCSharpNamespaces(FileFacts source, ReferenceFact reference) =>
 			_csharpNamespaceRegionsByFile.GetValueOrDefault(source.Path)?.At(reference.SourceStartIndex) ?? [];
 
+		private IReadOnlyList<string> ActiveCSharpStaticTypes(
+			FileFacts source,
+			ReferenceFact reference) =>
+			(_globalNamespaces.GetValueOrDefault(source.ScopeId) ?? [])
+			.Concat(source.CSharpUsingDirectives
+				.Where(directive => directive.Alias is null &&
+				                    directive.Target.StartsWith(StaticUsingPrefix, StringComparison.Ordinal) &&
+				                    IsActive(directive, reference.SourceStartIndex))
+				.Select(static directive => directive.Target))
+			.Where(static target => target.StartsWith(StaticUsingPrefix, StringComparison.Ordinal))
+			.Select(static target => QualifiedLookupName(target[StaticUsingPrefix.Length..]))
+			.Distinct(StringComparer.Ordinal)
+			.ToArray();
+
 		private static bool IsActive(CSharpUsingDirective directive, int sourceStartIndex) =>
 			directive.ScopeStartIndex <= sourceStartIndex && directive.ScopeEndIndex >= sourceStartIndex;
 
@@ -2177,7 +2200,11 @@ public sealed class DependencyFactsEngine : IDisposable
 				IEnumerable<string> baseNamespaces,
 				IReadOnlyList<CSharpUsingDirective> directives)
 			{
-				var local = directives.Where(static directive => directive.Alias is null).ToArray();
+				var baseValues = baseNamespaces
+					.Where(static value => !value.StartsWith(StaticUsingPrefix, StringComparison.Ordinal));
+				var local = directives.Where(static directive =>
+					directive.Alias is null &&
+					!directive.Target.StartsWith(StaticUsingPrefix, StringComparison.Ordinal)).ToArray();
 				var boundaries = new SortedSet<int> { int.MinValue };
 				foreach (var directive in local)
 				{
@@ -2190,7 +2217,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				for (var index = 0; index < starts.Length; index++)
 				{
 					var position = starts[index];
-					values[index] = baseNamespaces.Concat(local
+					values[index] = baseValues.Concat(local
 							.Where(directive => IsActive(directive, position))
 							.Select(static directive => directive.Target))
 						.Distinct(StringComparer.Ordinal)
