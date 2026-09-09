@@ -212,7 +212,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Measures a selection before packaging: files, transformed characters, estimated tokens, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree instead for structure, and pack_context for actual content. Returns structured metrics and explicit uninspected estimates; redacted metrics describe safe transformed text after enabled secret/private-data replacement. project comes from list_projects. Key parameters: detail=full|compact|signatures, top_files=1..1000, git_scope=staged|changes|diff:<ref>..<ref>, paths, patterns, profile, and max_file_bytes.")]
+		"Measures a selection before packaging: transformed content, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns structured measured-versus-estimated metrics after required protection. project comes from list_projects. Key parameters: detail=full|compact|signatures, top_files=1..1000, git_scope, paths, patterns, profile, and max_file_bytes.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -246,6 +246,7 @@ internal sealed class DevProjexMcpTools(
 			var largest = new TopFileRanking(topFileCount);
 			var uninspectedPaths = prepared.UnscannablePaths.ToHashSet(
 				ProjectTreePathIdentity.CanonicalComparer);
+			var estimatedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 			long estimatedContentCharacters = 0;
 			var metrics = prepared.GetTransformedMetrics();
 			var analyzedFiles = 0;
@@ -258,6 +259,7 @@ internal sealed class DevProjexMcpTools(
 					CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount));
 				if (fileMetrics.IsEstimated)
 				{
+					estimatedPaths.Add(fileMetrics.Path);
 					estimatedContentCharacters =
 						estimatedContentCharacters > long.MaxValue - fileMetrics.CharCount
 							? long.MaxValue
@@ -278,7 +280,8 @@ internal sealed class DevProjexMcpTools(
 				var topFile = new Dictionary<string, object>(3, StringComparer.Ordinal)
 				{
 					["path"] = McpProjectService.ToRelative(plan.SourceRoot, item.Path),
-					["tokens"] = item.Tokens
+					["tokens"] = item.Tokens,
+					["estimated"] = estimatedPaths.Contains(item.Path)
 				};
 				if (uninspectedPaths.Contains(item.Path))
 					topFile["uninspected"] = true;
@@ -298,18 +301,48 @@ internal sealed class DevProjexMcpTools(
 			var totalCharacters = metrics.Chars > long.MaxValue - estimatedContentCharacters
 				? long.MaxValue
 				: metrics.Chars + estimatedContentCharacters;
+			var analysisMetrics = ExportOutputMetricsCalculator.FromOrderedContentFilesForAnalysis(
+				prepared.TransformedFileMetrics,
+				plan.IncludedFiles,
+				plan.SourceRoot,
+				Projects.ResolveProtectedDocumentRoot(plan));
 			// Echo the effective exclusion state so both the agent and a human reading the
 			// transcript always see which toggles shaped this measurement.
 			var activeExclusions = ProjectSelectionTokens
 				.OrderExclusions(plan.Selection.Exclusions ?? [])
 				.Select(ProjectSelectionTokens.ToToken)
 				.ToArray();
-			var envelope = new Dictionary<string, object>(8, StringComparer.Ordinal)
+			var envelope = new Dictionary<string, object>(10, StringComparer.Ordinal)
 			{
 				["files"] = plan.IncludedFiles.Count,
 				["characters"] = totalCharacters,
 				["tokens"] = CodeCompressionSnapshot.EstimateTokens(totalCharacters),
 				["detail"] = effectiveDetail.Token,
+				["contentMetrics"] = new
+				{
+					measured = new
+					{
+						files = analysisMetrics.ContentOnly.Measured.Files,
+						lines = analysisMetrics.ContentOnly.Measured.Lines,
+						characters = analysisMetrics.ContentOnly.Measured.Characters,
+						tokens = analysisMetrics.ContentOnly.Measured.Tokens
+					},
+					estimated = new
+					{
+						files = analysisMetrics.ContentOnly.Estimated.Files,
+						characters = analysisMetrics.ContentOnly.Estimated.Characters,
+						tokens = analysisMetrics.ContentOnly.Estimated.Tokens
+					}
+				},
+				["documentMetrics"] = new
+				{
+					view = analysisMetrics.Document.View,
+					format = analysisMetrics.Document.Format,
+					lines = analysisMetrics.Document.Lines,
+					characters = analysisMetrics.Document.Characters,
+					tokens = analysisMetrics.Document.Tokens,
+					estimated = analysisMetrics.Document.IsEstimated
+				},
 				["exclusions"] = activeExclusions,
 				["topFiles"] = top,
 				["topFilesTruncated"] = topFilesRemaining > 0,
@@ -1243,8 +1276,22 @@ internal sealed class DevProjexMcpTools(
 
 	private static string? FormatRemoteNotice(ProjectContextPlan plan) =>
 		plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } identity
-			? $"[Remote] commit={identity.CommitHash ?? "unknown"} branch={identity.Branch ?? "default"}"
+			? $"[Remote] commit={FormatTrustedCommit(identity.CommitHash)}"
 			: null;
+
+	internal static string FormatTrustedCommit(string? commitHash)
+	{
+		if (commitHash is not { Length: >= 7 and <= 64 })
+			return "unknown";
+
+		foreach (var character in commitHash)
+		{
+			if (character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f'))
+				return "unknown";
+		}
+
+		return commitHash;
+	}
 
 	private static bool HasItems<T>(IReadOnlyCollection<T>? items) => items is { Count: > 0 };
 

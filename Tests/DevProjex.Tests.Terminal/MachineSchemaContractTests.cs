@@ -153,6 +153,7 @@ public sealed class MachineSchemaContractTests
 			document.RootElement.GetProperty("topFiles").EnumerateArray());
 		Assert.Equal("src/App.cs", topFile.GetProperty("path").GetString());
 		Assert.Equal(7, topFile.GetProperty("tokens").GetInt64());
+		Assert.False(topFile.GetProperty("estimated").GetBoolean());
 		var unscannable = Assert.Single(
 			document.RootElement.GetProperty("contentInspection")
 				.GetProperty("unscannableFiles")
