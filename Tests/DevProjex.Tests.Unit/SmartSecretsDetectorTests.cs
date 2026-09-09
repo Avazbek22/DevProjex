@@ -220,6 +220,100 @@ public sealed class SmartSecretsDetectorTests
 		Assert.Equal(2, resolved.Count(static finding => finding.RuleId == "http-cookie"));
 	}
 
+	[Fact]
+	public void ResolveSegmentedFindings_PreservesTheUnionOfEveryValidFinding()
+	{
+		var cases = new IReadOnlyList<DetectedSecret>[]
+		{
+			[
+				Finding("preferred", 2, 4, -20),
+				Finding("same-range", 2, 4, 10)
+			],
+			[
+				Finding("inner", 4, 2, -20),
+				Finding("outer", 2, 8, 10)
+			],
+			[
+				Finding("left", 1, 5, -20),
+				Finding("right", 4, 5, 10)
+			],
+			[
+				Finding("first", 1, 4, -30),
+				Finding("middle", 4, 4, -20),
+				Finding("last", 7, 4, -10)
+			],
+			[
+				Finding("secret", 1, 4, -20),
+				Finding("private", 4, 4, -10, RedactionFindingCategory.PrivateData)
+			],
+			[
+				Finding("detector", 1, 4, -20),
+				Finding("manual", 4, 4, 10) with { Source = SecretFindingSource.SessionMark }
+			]
+		};
+
+		foreach (var findings in cases)
+		{
+			var resolved = SecretRedactionScope.ResolveNonOverlappingMatches(findings);
+
+			AssertCoverageEqualsUnion(findings, resolved);
+		}
+
+		static DetectedSecret Finding(
+			string ruleId,
+			int start,
+			int length,
+			int order,
+			RedactionFindingCategory category = RedactionFindingCategory.Secrets) =>
+			new(ruleId, start, length, new string('s', length), order, Category: category);
+	}
+
+	[Fact]
+	public void ResolveSegmentedFindings_EnvironmentValueRetainsCoverageAroundCredentialUri()
+	{
+		const string content = "DB_PASSWORD=\"prefixhttps://u:ab12@db.internal/tail\"";
+		var valueStart = content.IndexOf('"') + 1;
+		var valueLength = content.LastIndexOf('"') - valueStart;
+		var rawFindings = StructuredSecretDetector.Detect(
+			".env",
+			content,
+			SmartSecretStack.None,
+			TestContext.Current.CancellationToken);
+		var environment = Assert.Single(
+			rawFindings,
+			static finding => finding.RuleId == "environment-secret");
+		var uriPassword = Assert.Single(
+			rawFindings,
+			static finding => finding.RuleId == "credential-uri-password");
+
+		Assert.Equal((valueStart, valueLength), (environment.Start, environment.Length));
+		Assert.True(uriPassword.Start > environment.Start);
+		Assert.True(uriPassword.Start + uriPassword.Length < environment.Start + environment.Length);
+
+		var resolved = SecretRedactionScope.ResolveNonOverlappingMatches(rawFindings);
+
+		AssertCoverageEqualsUnion(rawFindings, resolved);
+		Assert.All(
+			Enumerable.Range(valueStart, valueLength),
+			offset => Assert.Contains(resolved, finding => Covers(finding, offset)));
+	}
+
+	private static void AssertCoverageEqualsUnion(
+		IReadOnlyList<DetectedSecret> expectedFindings,
+		IReadOnlyList<DetectedSecret> actualSegments)
+	{
+		var length = expectedFindings.Max(static finding => finding.Start + finding.Length) + 1;
+		for (var offset = 0; offset < length; offset++)
+		{
+			Assert.Equal(
+				expectedFindings.Any(finding => Covers(finding, offset)),
+				actualSegments.Any(finding => Covers(finding, offset)));
+		}
+	}
+
+	private static bool Covers(DetectedSecret finding, int offset) =>
+		offset >= finding.Start && offset < finding.Start + finding.Length;
+
 	[Theory]
 	[InlineData("Host=db;Username=admin;Pass" + "word=postgres;Database=app", "postgres")]
 	[InlineData("Server=db;User Id=sa;P" + "wd=Admin123!;Initial Catalog=app", "Admin123!")]
