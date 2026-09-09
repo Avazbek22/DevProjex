@@ -253,6 +253,8 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		var typeText = capture.Text;
 		foreach (Match match in TypeNameRegex().Matches(typeText))
 		{
+			if (IsTupleElementName(typeText, match))
+				continue;
 			var isGlobalQualified = match.Value.StartsWith("global::", StringComparison.Ordinal);
 			var name = match.Value.Replace("global::", string.Empty, StringComparison.Ordinal)
 				.Replace("::", ".", StringComparison.Ordinal);
@@ -272,6 +274,25 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 					isGlobalQualified);
 			}
 		}
+	}
+
+	private static bool IsTupleElementName(string typeText, Match match)
+	{
+		var previous = match.Index - 1;
+		while (previous >= 0 && char.IsWhiteSpace(typeText[previous])) previous--;
+		if (previous < 0 || typeText[previous] is '(' or ',')
+			return false;
+		var next = match.Index + match.Length;
+		while (next < typeText.Length && char.IsWhiteSpace(typeText[next])) next++;
+		if (next >= typeText.Length || typeText[next] is not (',' or ')'))
+			return false;
+		var parenthesisDepth = 0;
+		for (var index = 0; index < match.Index; index++)
+		{
+			if (typeText[index] == '(') parenthesisDepth++;
+			else if (typeText[index] == ')' && parenthesisDepth > 0) parenthesisDepth--;
+		}
+		return parenthesisDepth > 0;
 	}
 
 	private static DeclarationScopeIndex BuildDeclarationScopes(

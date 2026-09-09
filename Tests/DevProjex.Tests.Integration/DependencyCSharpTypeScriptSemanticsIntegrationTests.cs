@@ -6,6 +6,29 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New091_TupleElementNamesAreNotTypeReferences()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var customer = fixture.CreateFile("Customer.cs", "public sealed class Customer { }");
+		var count = fixture.CreateFile("Count.cs", "public sealed class Count { }");
+		var source = fixture.CreateFile(
+			"Consumer.cs",
+			"public sealed class Consumer { (int Customer, int Count) Position; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, customer, count, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Target is "Customer.cs" or "Count.cs");
+		var facts = result.Files.Single(file => file.Path == "Consumer.cs");
+		Assert.DoesNotContain(facts.References, reference => reference.Name is "Customer" or "Count");
+	}
+
+	[Fact]
 	public async Task New090_UnknownQualifiedTypeIsNotExternalByItsLastName()
 	{
 		using var fixture = new TemporaryDirectory();
