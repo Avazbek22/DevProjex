@@ -1638,7 +1638,10 @@ public sealed class DependencyFactsEngine : IDisposable
 					candidate + ".jsx"]);
 			}
 			var mode = scope?.ModuleResolution ?? "bundler";
-			if (allowDirectoryIndex && SupportsDirectoryIndex(mode, source, scope))
+			var candidateDirectory = PortableRelative(_root, candidate);
+			if (allowDirectoryIndex &&
+			    !_configuration.PackageMaps.ContainsKey(candidateDirectory) &&
+			    SupportsDirectoryIndex(mode, source, scope))
 			{
 				probes.AddRange([
 					Path.Combine(candidate, "index.ts"),
