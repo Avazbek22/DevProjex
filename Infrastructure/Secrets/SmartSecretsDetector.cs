@@ -14,7 +14,7 @@ public sealed class SmartSecretsDetector(
 	ISecretDetector providerDetector,
 	SmartIgnoreService smartIgnore) : ISecretDetector
 {
-	internal const string StructuredRulesVersion = "smart-secrets-v4";
+	internal const string StructuredRulesVersion = "smart-secrets-v5";
 
 	public string RulesIdentity =>
 		$"{providerDetector.RulesIdentity}:{StructuredRulesVersion}";
@@ -423,10 +423,44 @@ internal static class StructuredSecretDetector
 		switch (fileKind)
 		{
 			case StructuredSecretFileKind.Environment:
-				DetectEnvironmentAssignments(content, stack, findings, budget, cancellationToken);
+				DetectStructuredValues(
+					content,
+					StructuredSecretValueLexers.FindDotEnvValues(content, stack, budget, cancellationToken),
+					"environment-secret",
+					EnvironmentValueOrder,
+					findings);
+				break;
+			case StructuredSecretFileKind.Npm:
+				DetectStructuredValues(
+					content,
+					StructuredSecretValueLexers.FindNpmValues(content, budget, cancellationToken),
+					"environment-secret",
+					EnvironmentValueOrder,
+					findings);
+				break;
+			case StructuredSecretFileKind.Json:
+				DetectStructuredValues(
+					content,
+					StructuredSecretValueLexers.FindJsonValues(content, stack, budget, cancellationToken),
+					"config-secret",
+					ConfigurationValueOrder,
+					findings);
+				break;
+			case StructuredSecretFileKind.Yaml:
+				DetectStructuredValues(
+					content,
+					StructuredSecretValueLexers.FindYamlValues(content, stack, budget, cancellationToken),
+					"config-secret",
+					ConfigurationValueOrder,
+					findings);
 				break;
 			case StructuredSecretFileKind.Container:
-				DetectContainerAssignments(content, stack, findings, budget, cancellationToken);
+				DetectStructuredValues(
+					content,
+					StructuredSecretValueLexers.FindDockerValues(content, stack, budget, cancellationToken),
+					"container-secret",
+					ContainerValueOrder,
+					findings);
 				break;
 			case StructuredSecretFileKind.HttpRequest:
 				DetectHttpRequestHeaders(content, findings, budget, cancellationToken);
@@ -435,7 +469,28 @@ internal static class StructuredSecretDetector
 				DetectPgPassPasswords(content, findings, budget, cancellationToken);
 				break;
 			case StructuredSecretFileKind.Netrc:
-				DetectNetrcPasswords(content, findings, budget, cancellationToken);
+				DetectStructuredValues(
+					content,
+					StructuredSecretValueLexers.FindNetrcValues(content, budget, cancellationToken),
+					"netrc-password",
+					NetrcPasswordOrder,
+					findings);
+				break;
+			case StructuredSecretFileKind.Xml:
+				DetectStructuredValues(
+					content,
+					StructuredSecretValueLexers.FindXmlValues(content, stack, budget, cancellationToken),
+					"config-secret",
+					ConfigurationValueOrder,
+					findings);
+				break;
+			case StructuredSecretFileKind.Python:
+				DetectStructuredValues(
+					content,
+					StructuredSecretValueLexers.FindPythonValues(content, stack, budget, cancellationToken),
+					"config-secret",
+					ConfigurationValueOrder,
+					findings);
 				break;
 			case not StructuredSecretFileKind.None:
 				DetectConfigurationValues(content, fileKind, stack, findings, budget, cancellationToken);
@@ -505,10 +560,24 @@ internal static class StructuredSecretDetector
 	internal static bool UsesScopedVocabulary(StructuredSecretFileKind fileKind) =>
 		fileKind is
 			StructuredSecretFileKind.Environment or
+			StructuredSecretFileKind.Npm or
+			StructuredSecretFileKind.Json or
+			StructuredSecretFileKind.Yaml or
 			StructuredSecretFileKind.Configuration or
 			StructuredSecretFileKind.Xml or
 			StructuredSecretFileKind.Python or
 			StructuredSecretFileKind.Container;
+
+	private static void DetectStructuredValues(
+		ReadOnlySpan<char> content,
+		IReadOnlyList<StructuredSecretValueSpan> spans,
+		string ruleId,
+		int ruleOrder,
+		ICollection<DetectedSecret> findings)
+	{
+		foreach (var span in spans)
+			AddFinding(content, span.Start, span.Length, ruleId, ruleOrder, findings);
+	}
 
 	private static void DetectCredentialUris(
 		ReadOnlySpan<char> content,
@@ -610,6 +679,7 @@ internal static class StructuredSecretDetector
 			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			if (!LooksLikeConnectionString(line))
 				continue;
+			var queryStyle = Contains(line, "jdbc:");
 
 			var position = 0;
 			while (position < line.Length)
@@ -626,7 +696,7 @@ internal static class StructuredSecretDetector
 				if (key.Equals("password", StringComparison.OrdinalIgnoreCase) ||
 				    key.Equals("pwd", StringComparison.OrdinalIgnoreCase))
 				{
-					var value = FindDelimitedValue(line, equals + 1, ';', '&');
+					var value = FindConnectionValue(line, equals + 1, queryStyle);
 					AddFinding(
 						content,
 						lineStart + value.Start,
@@ -641,6 +711,103 @@ internal static class StructuredSecretDetector
 				position = equals + 1;
 			}
 		}
+	}
+
+	private static TextSpan FindConnectionValue(ReadOnlySpan<char> line, int start, bool queryStyle)
+	{
+		while (start < line.Length && char.IsWhiteSpace(line[start]))
+			start++;
+		if (start >= line.Length)
+			return new TextSpan(start, 0);
+
+		if (TryGetConnectionQuoteToken(line[start..], out var quoteToken))
+		{
+			start += quoteToken.Length;
+			var quotedEnd = start;
+			while (quotedEnd < line.Length)
+			{
+				if (!line[quotedEnd..].StartsWith(quoteToken, StringComparison.Ordinal))
+				{
+					quotedEnd++;
+					continue;
+				}
+				var nextQuote = quotedEnd + quoteToken.Length;
+				if (nextQuote < line.Length &&
+				    line[nextQuote..].StartsWith(quoteToken, StringComparison.Ordinal))
+				{
+					quotedEnd = nextQuote + quoteToken.Length;
+					continue;
+				}
+				break;
+			}
+			return new TextSpan(start, quotedEnd - start);
+		}
+
+		var endDelimiter = queryStyle ? '&' : ';';
+		var end = start;
+		while (end < line.Length)
+		{
+			if (line[end] == endDelimiter &&
+			    (queryStyle || !IsXmlEntityTerminator(line, start, end)))
+			{
+				break;
+			}
+			end++;
+		}
+		return TrimEnd(line, start, end);
+	}
+
+	private static bool TryGetConnectionQuoteToken(ReadOnlySpan<char> value, out string quoteToken)
+	{
+		if (!value.IsEmpty && value[0] is '\'' or '"')
+		{
+			quoteToken = value[0] == '\'' ? "'" : "\"";
+			return true;
+		}
+		if (value.StartsWith("\\\"", StringComparison.Ordinal))
+			quoteToken = "\\\"";
+		else if (value.StartsWith("\\'", StringComparison.Ordinal))
+			quoteToken = "\\'";
+		else if (value.StartsWith("&quot;", StringComparison.Ordinal))
+			quoteToken = "&quot;";
+		else if (value.StartsWith("&apos;", StringComparison.Ordinal))
+			quoteToken = "&apos;";
+		else
+		{
+			quoteToken = string.Empty;
+			return false;
+		}
+		return true;
+	}
+
+	private static bool IsXmlEntityTerminator(ReadOnlySpan<char> value, int valueStart, int semicolon)
+	{
+		var entityStart = semicolon - 1;
+		while (entityStart >= valueStart && semicolon - entityStart <= 10 && value[entityStart] != '&')
+			entityStart--;
+		if (entityStart < valueStart || value[entityStart] != '&')
+			return false;
+		var entity = value[(entityStart + 1)..semicolon];
+		if (entity.Equals("amp", StringComparison.Ordinal) ||
+		    entity.Equals("quot", StringComparison.Ordinal) ||
+		    entity.Equals("apos", StringComparison.Ordinal) ||
+		    entity.Equals("lt", StringComparison.Ordinal) ||
+		    entity.Equals("gt", StringComparison.Ordinal))
+		{
+			return true;
+		}
+		if (entity.Length < 2 || entity[0] != '#')
+			return false;
+		var hexadecimal = entity[1] is 'x' or 'X';
+		var digits = hexadecimal ? entity[2..] : entity[1..];
+		if (digits.IsEmpty)
+			return false;
+		foreach (var digit in digits)
+		{
+			if (hexadecimal ? !Uri.IsHexDigit(digit) : !char.IsAsciiDigit(digit))
+				return false;
+		}
+		return true;
 	}
 
 	private static bool LooksLikeConnectionString(ReadOnlySpan<char> line)
@@ -929,13 +1096,10 @@ internal static class StructuredSecretDetector
 			var credentialStart = schemeEnd;
 			while (credentialStart < line.Length && char.IsWhiteSpace(line[credentialStart]))
 				credentialStart++;
-			if (credentialStart < line.Length &&
-			    TryFindReferenceEnd(line, credentialStart, out var referenceEnd) &&
-			    IsReferenceOrPlaceholder(line[credentialStart..referenceEnd]))
-			{
-				continue;
-			}
-			var credentialEnd = credentialStart;
+			var credentialEnd = credentialStart < line.Length &&
+			                    TryFindReferenceEnd(line, credentialStart, out var referenceEnd)
+				? referenceEnd
+				: credentialStart;
 			while (credentialEnd < line.Length && !char.IsWhiteSpace(line[credentialEnd]))
 				credentialEnd++;
 			if (IsReferenceOrPlaceholder(line[credentialStart..credentialEnd]))
@@ -1515,7 +1679,7 @@ internal static class StructuredSecretDetector
 	internal static bool IsReferenceOrPlaceholder(ReadOnlySpan<char> value)
 		=> SecretDetectionTextPolicy.IsReferenceOrPlaceholder(value);
 
-	private static bool IsSensitiveKey(ReadOnlySpan<char> key, SmartSecretStack stack)
+	internal static bool IsSensitiveKey(ReadOnlySpan<char> key, SmartSecretStack stack)
 	{
 		Span<char> normalizedBuffer = stackalloc char[Math.Min(key.Length, 128)];
 		var length = 0;
@@ -1587,11 +1751,12 @@ internal static class StructuredSecretDetector
 		}
 		if (fileName[0] == '.' || fileName[0] == '_')
 		{
-			if (fileName.StartsWith(".env", StringComparison.OrdinalIgnoreCase) ||
-			    fileName.Equals(".npmrc", StringComparison.OrdinalIgnoreCase))
+			if (fileName.StartsWith(".env", StringComparison.OrdinalIgnoreCase))
 			{
 				return StructuredSecretFileKind.Environment;
 			}
+			if (fileName.Equals(".npmrc", StringComparison.OrdinalIgnoreCase))
+				return StructuredSecretFileKind.Npm;
 			if (fileName.Equals(".pgpass", StringComparison.OrdinalIgnoreCase))
 				return StructuredSecretFileKind.PgPass;
 			if (fileName.Equals(".netrc", StringComparison.OrdinalIgnoreCase) ||
@@ -1622,14 +1787,14 @@ internal static class StructuredSecretDetector
 		    (fileName.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase) ||
 		     fileName.EndsWith(".tfvars.json", StringComparison.OrdinalIgnoreCase)))
 		{
-			return StructuredSecretFileKind.Configuration;
+			return StructuredSecretFileKind.Json;
 		}
 		if ((extension.Equals(".yml", StringComparison.OrdinalIgnoreCase) ||
 		     extension.Equals(".yaml", StringComparison.OrdinalIgnoreCase)) &&
 		    (fileName.StartsWith("application", StringComparison.OrdinalIgnoreCase) ||
 		     fileName.StartsWith("docker-compose", StringComparison.OrdinalIgnoreCase) ||
 		     fileName.StartsWith("compose.", StringComparison.OrdinalIgnoreCase)))
-			return StructuredSecretFileKind.Configuration;
+			return StructuredSecretFileKind.Yaml;
 		if (extension.Equals(".tfvars", StringComparison.OrdinalIgnoreCase))
 			return StructuredSecretFileKind.Configuration;
 		if (extension.Equals(".py", StringComparison.OrdinalIgnoreCase) &&
@@ -1725,6 +1890,9 @@ internal static class StructuredSecretDetector
 	{
 		None,
 		Environment,
+		Npm,
+		Json,
+		Yaml,
 		Configuration,
 		Xml,
 		Python,

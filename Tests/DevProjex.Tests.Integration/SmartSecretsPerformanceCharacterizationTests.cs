@@ -31,7 +31,7 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 			var prefix = isConfiguration
 				? $"{{ \"Password\": \"p{index:D4}!\" }}\n"
 				: $"internal sealed class Type{index:D4} {{ string apiKeyName = \"not-a-credential\"; }}\n";
-			var content = prefix + new string('x', targetSize - prefix.Length);
+			var content = prefix + new string(isConfiguration ? ' ' : 'x', targetSize - prefix.Length);
 			var relativePath = isConfiguration
 				? $"config/appsettings.{index:D4}.json"
 				: $"src/group-{index % 40:D2}/file-{index:D4}.cs";
@@ -117,9 +117,9 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 			detectionsBeforeSelectionOnlyRefresh,
 			session.GetCacheDiagnostics().DetectionRuns);
 
-		var changed = await File.ReadAllTextAsync(paths[0], TestContext.Current.CancellationToken);
-		await File.WriteAllTextAsync(paths[0], changed[..^1] + "y", TestContext.Current.CancellationToken);
-		File.SetLastWriteTimeUtc(paths[0], DateTime.UtcNow.AddSeconds(2));
+		var changed = await File.ReadAllTextAsync(paths[1], TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(paths[1], changed[..^1] + "y", TestContext.Current.CancellationToken);
+		File.SetLastWriteTimeUtc(paths[1], DateTime.UtcNow.AddSeconds(2));
 		_ = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
 		Assert.Equal(fileCount * 3, analyzer.ReadCount);
 		Assert.Equal(

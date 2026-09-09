@@ -11,6 +11,76 @@ public sealed class SecretRedactionCommandContractTests
 	private const string PrivateEmail = "ivan.petrov@corp.internal";
 
 	[Fact]
+	public void RealCli_ExportAndAnalyzeUseTheSameStructuredValueCorpus()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile("project/.env", "DB_PASSWORD=\"dotenv # value\" # keep\n");
+		workspace.Temporary.WriteFile(
+			"project/connections.txt",
+			"Server=db;Password=ado&value;Database=app\n" +
+			"jdbc:postgresql://db/app?user=admin&password=jdbc-value&ssl=true\n");
+		workspace.Temporary.WriteFile(
+			"project/appsettings.json",
+			"{\"Passwords\":[\"json-one\",\"json-two\"],\"Port\":8080}\n");
+		workspace.Temporary.WriteFile(
+			"project/application.yml",
+			"password: |-\n  yaml-one\n  yaml-two\nport: 8080\n");
+		workspace.Temporary.WriteFile(
+			"project/web.config",
+			"<Password><![CDATA[xml-value]]></Password><Port>8080</Port>\n");
+		workspace.Temporary.WriteFile("project/settings.py", "SECRET_KEY = r\"python-value\"\n");
+		workspace.Temporary.WriteFile(
+			"project/Dockerfile",
+			"ENV NORMAL=x \\\n    DB_PASSWORD=docker-value\n");
+		workspace.Temporary.WriteFile(
+			"project/.netrc",
+			"machine host login user password\n\"netrc value\"\n");
+		workspace.Temporary.WriteFile(
+			"project/.npmrc",
+			"//registry.example.com/:_auth=npm-value\n");
+
+		var export = RunPublished(
+			workspace,
+			"export", "context", workspace.ProjectRoot,
+			"--view", "content", "--format", "json",
+			"--git-mode", "none", "--exclude", "none",
+			"--hide-secrets", "--plain", "-o", "-");
+		Assert.True(export.ExitCode == CommandLineExitCodes.Success, export.StandardError);
+		using var exportDocument = JsonDocument.Parse(export.StandardOutput);
+		var exportedContent = string.Join(
+			'\n',
+			exportDocument.RootElement.GetProperty("files").EnumerateArray()
+				.Select(static file => file.GetProperty("content").GetString()));
+
+		foreach (var value in new[]
+		         {
+			         "dotenv # value", "ado&value", "jdbc-value", "json-one", "json-two",
+			         "yaml-one", "yaml-two", "xml-value", "python-value", "docker-value",
+			         "netrc value", "npm-value"
+		         })
+		{
+			Assert.DoesNotContain(value, exportedContent, StringComparison.Ordinal);
+		}
+		Assert.Contains(" # keep", exportedContent, StringComparison.Ordinal);
+		Assert.Contains(";Database=app", exportedContent, StringComparison.Ordinal);
+		Assert.Contains("&ssl=true", exportedContent, StringComparison.Ordinal);
+		Assert.Contains("<Port>8080</Port>", exportedContent, StringComparison.Ordinal);
+		Assert.Contains("port: 8080", exportedContent, StringComparison.Ordinal);
+
+		var analyze = RunPublished(
+			workspace,
+			"analyze", workspace.ProjectRoot,
+			"--format", "json", "--git-mode", "none", "--exclude", "none",
+			"--hide-secrets", "--plain", "-o", "-");
+		Assert.True(analyze.ExitCode == CommandLineExitCodes.Success, analyze.StandardError);
+		using var analyzeDocument = JsonDocument.Parse(analyze.StandardOutput);
+		var placeholderCount = CountOccurrences(exportedContent, SecretRedactionLegend.PlaceholderPrefix);
+		Assert.Equal(
+			placeholderCount,
+			analyzeDocument.RootElement.GetProperty("redaction").GetProperty("redactedCount").GetInt32());
+	}
+
+	[Fact]
 	public async Task ExportContext_LocalProfileAppliesPersistentManualSecretMarks()
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);
@@ -1443,6 +1513,27 @@ public sealed class SecretRedactionCommandContractTests
 				environment,
 				new TerminalServiceFactory(() => workspace.AppDataRoot))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
+
+	private static TerminalTestProcessResult RunPublished(Workspace workspace, params string[] arguments)
+	{
+		var startInfo = new System.Diagnostics.ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		startInfo.ArgumentList.Add("--language");
+		startInfo.ArgumentList.Add("en");
+		startInfo.ArgumentList.Add("--progress");
+		startInfo.ArgumentList.Add("never");
+		startInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
+		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = workspace.AppDataRoot;
+		return TerminalTestProcess.Run(startInfo, TimeSpan.FromMinutes(1));
+	}
 
 	private static async Task AddPersistentManualSecretAsync(
 		Workspace workspace,
