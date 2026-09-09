@@ -114,10 +114,9 @@ public sealed class ProjectSelectionResolver(
 	{
 		var selected = overrides.Exclusions ?? baseline.Exclusions;
 		var legacyHideSecrets = selected?.Contains(ProjectExclusion.HideSecrets) == true;
-		var hideSecrets = overrides.HideSecrets ??
-		                  (overrides.Exclusions is not null
-			                  ? legacyHideSecrets
-			                  : baseline.HideSecrets ?? legacyHideSecrets);
+		var hideSecrets = overrides.HideSecrets ?? baseline.HideSecrets ?? legacyHideSecrets;
+		if (overrides.HideSecrets is null && legacyHideSecrets)
+			hideSecrets = true;
 		var pathExclusions = selected?
 			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
 			.OrderBy(static exclusion => (int)exclusion)
