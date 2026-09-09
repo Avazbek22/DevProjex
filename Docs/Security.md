@@ -25,6 +25,11 @@ detects against both the immutable source snapshot and transformed text, project
 ranges through the transform map, and masks the union. Overlap priority selects a rule label only;
 it does not discard another finding's uncovered range.
 
+The structured tier derives replacement boundaries from the recognized dotenv, connection-string,
+JSON, YAML, XML, Python, Dockerfile, netrc, or npmrc grammar. It masks logical values while leaving
+their surrounding syntax outside the finding, and only a complete simple variable reference is
+exempt from a sensitive-key finding.
+
 Temporary redaction data is stored in private per-user directories. After an
 abnormal termination it can remain until a later DevProjex startup runs the
 scavenger, which removes stale directories once they are more than 24 hours old.

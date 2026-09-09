@@ -118,6 +118,16 @@ URIs on RFC 2606 documentation hosts (`example.com`, `example.net`,
 TLDs) are not redacted. `localhost` is intentionally still inspected because
 development credentials can be real secrets.
 
+Structured value boundaries follow the recognized file format instead of one shared delimiter
+rule. Dotenv comments begin only outside quotes; ADO.NET pairs use semicolons while JDBC query
+parameters use ampersands; JSON property names are decoded and sensitive arrays are visited by
+scalar element; YAML quoted and block scalars follow their own boundaries; XML text and CDATA
+inherit a sensitive element; Python prefixes and triple quotes are recognized; Dockerfile
+continuations and escape directives form logical instructions; `.netrc` is read as a token stream;
+and npm authentication keys are recognized after an optional registry scope. Delimiters, quote
+marks, container punctuation, comments, and adjacent non-sensitive fields stay outside replacement
+spans.
+
 The structured tier reuses Smart Ignore's project-scope resolver and root facts.
 The nearest marked project owns its descendants, so stack-specific vocabulary
 does not leak between sibling or nested projects in a monorepo. Ordinary source
@@ -126,6 +136,9 @@ shaped credentials in source remain covered by Gitleaks rules.
 
 References and placeholders such as `${DB_PASSWORD}`, `$(DbPassword)`,
 `%DB_PASSWORD%`, `{{ secret }}`, `<password>`, and empty values are not redacted.
+For `${...}`, this exception applies only to a complete simple reference. Default expressions such
+as `${DB_PASSWORD:-literal}`, error expressions, nested expressions, escaped references, and text
+with a suffix are composite values and remain subject to redaction under a sensitive key.
 Common template values such as `changeme`, `your-password-here`, `replace_me`,
 `placeholder`, `null`, `none`, `your-api-key-here`-style templates, and repeated
 non-numeric characters are also ignored. These checks match whole values or
