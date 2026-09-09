@@ -347,7 +347,7 @@ public sealed class ProfileCommandContractTests
 			  "selection": {
 			    "roots": null,
 			    "extensions": [".cs"],
-			    "selectedPaths": [],
+			    "selectedPaths": null,
 			    "gitMode": "gitignore",
 			    "exclusions": ["smart-ignore", "hidden-files"]
 			  }
