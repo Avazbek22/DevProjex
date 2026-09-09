@@ -74,7 +74,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void ClearAllProfiles_WhenStorageLockIsBusy_ReturnsBusyAndPreservesProfiles()
+	public void ClearAllProfiles_WhenSelectionLockIsBusy_ReturnsPartialAndRetryCompletes()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -90,8 +90,11 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			var result = store.ClearAllProfiles();
 
-			Assert.Equal(ProjectProfileClearStatus.Busy, result);
+			Assert.Equal(ProjectProfileClearStatus.Partial, result);
 			Assert.True(File.Exists(store.GetPath()));
+			heldLock.Dispose();
+			Assert.Equal(ProjectProfileClearStatus.Cleared, store.ClearAllProfiles());
+			Assert.False(File.Exists(store.GetPath()));
 		}
 		finally
 		{
@@ -100,7 +103,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void ClearAllProfiles_WhenStorageUsesFutureSchema_ReturnsFutureSchemaAndPreservesDocument()
+	public void ClearAllProfiles_WhenSelectionUsesFutureSchema_ReturnsPartialAndPreservesDocument()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -113,7 +116,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			var result = store.ClearAllProfiles();
 
-			Assert.Equal(ProjectProfileClearStatus.FutureSchema, result);
+			Assert.Equal(ProjectProfileClearStatus.Partial, result);
 			Assert.Equal(futureDocument, File.ReadAllText(storagePath));
 		}
 		finally
@@ -812,6 +815,77 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, result.Status);
 			Assert.Null(result.Profile);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public async Task ClearAllProfiles_WhenMarkLockIsBusy_PreservesSelectionAndMarks()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoBusyMarks");
+			store.SaveProfile(projectPath, CreateProfile());
+			Assert.True((await store.AddMarkAsync(
+				projectPath,
+				new MarkedSecretProfileEntry("9f2a4c1e8b3d", "TOKEN", 24),
+				TestContext.Current.CancellationToken)).Succeeded);
+			var markLockPath = Path.Combine(
+				Path.GetDirectoryName(store.GetPath())!,
+				"project-secret-marks.json.lock");
+			using var heldLock = new FileStream(
+				markLockPath,
+				FileMode.OpenOrCreate,
+				FileAccess.ReadWrite,
+				FileShare.None);
+
+			var result = store.ClearAllProfiles();
+
+			Assert.Equal(ProjectProfileClearStatus.Busy, result);
+			Assert.True(File.Exists(store.GetPath()));
+			using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
+			Assert.True(document.RootElement.GetProperty("profiles")
+				.TryGetProperty(PathUtility.Normalize(projectPath), out _));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public async Task DeleteProfile_WhenSelectionLockFailsAfterMarks_ReturnsPartialAndRetryCompletes()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoPartialDelete");
+			store.SaveProfile(projectPath, CreateProfile());
+			Assert.True((await store.AddMarkAsync(
+				projectPath,
+				new MarkedSecretProfileEntry("9f2a4c1e8b3d", "TOKEN", 24),
+				TestContext.Current.CancellationToken)).Succeeded);
+			using (var heldLock = new FileStream(
+				store.GetPath() + ".lock",
+				FileMode.OpenOrCreate,
+				FileAccess.ReadWrite,
+				FileShare.None))
+			{
+				Assert.Equal(ProjectProfileDeleteStatus.Partial, store.TryDeleteProfileWithResult(projectPath));
+			}
+
+			var marks = await store.LoadMarksAsync(projectPath, TestContext.Current.CancellationToken);
+			Assert.True(marks.Succeeded);
+			Assert.Empty(marks.Snapshot!.Marks);
+			Assert.True(store.TryLoadProfile(projectPath, out _));
+			Assert.Equal(ProjectProfileDeleteStatus.Deleted, store.TryDeleteProfileWithResult(projectPath));
+			Assert.False(store.TryLoadProfile(projectPath, out _));
 		}
 		finally
 		{

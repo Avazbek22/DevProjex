@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Pipes;
 using System.Text;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
@@ -49,6 +50,8 @@ internal static class Program
 				.GetResult();
 			return CommandLineExitCodes.Success;
 		}
+		if (args is ["--profile-conflict", var conflictDataRoot, var pipeName, .. var commandArguments])
+			return RunProfileConflict(conflictDataRoot, pipeName, commandArguments);
 
 		if (string.Equals(
 			    Environment.GetEnvironmentVariable(
@@ -80,6 +83,40 @@ internal static class Program
 			.RunAsync(args, cancellation.Token)
 			.GetAwaiter()
 			.GetResult();
+	}
+
+	private static int RunProfileConflict(
+		string dataRoot,
+		string pipeName,
+		string[] commandArguments)
+	{
+		ProfileCommandTestHooks.AfterVersionObserved.Value = (_, _) =>
+		{
+			using var barrier = new NamedPipeServerStream(
+				pipeName,
+				PipeDirection.InOut,
+				1,
+				PipeTransmissionMode.Byte,
+				PipeOptions.None);
+			barrier.WaitForConnection();
+			barrier.WriteByte(1);
+			barrier.Flush();
+			if (barrier.ReadByte() != 1)
+				throw new IOException("The profile conflict barrier was closed before release.");
+		};
+		try
+		{
+			var environment = new InvocationEnvironment(hasAttachedConsole: true);
+			var services = new TerminalServiceFactory(() => dataRoot);
+			return new TerminalApplication(environment, services, developerCommandRunner: null)
+				.RunAsync(commandArguments, CancellationToken.None)
+				.GetAwaiter()
+				.GetResult();
+		}
+		finally
+		{
+			ProfileCommandTestHooks.AfterVersionObserved.Value = null;
+		}
 	}
 
 	private static int HoldProcessTree(string lockPath, string readyPath)

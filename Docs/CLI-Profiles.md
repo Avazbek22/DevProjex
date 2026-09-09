@@ -176,15 +176,18 @@ represent two simultaneous Git modes.
 
 ## Persistence limitations in v5.2
 
-Selection profiles and persistent secret marks use separate durable stores. A
-reset that clears selection successfully but cannot clear the mark store reports
-failure, but it cannot roll back the selection deletion; retry the reset after
-the store becomes available. Concurrent profile saves use last-completion-wins,
-not compare-and-swap against the revision observed while planning.
+Selection profiles and persistent secret marks use separate durable stores. Reset
+removes persistent marks first. If that stage fails, selection remains unchanged.
+If the later selection-store stage fails, the command reports
+`DPX-CLI-PROFILE-PARTIAL` and policy exit code `3`; repeat the command to finish
+the idempotent cleanup. CLI profile saves compare the profile revision observed
+before planning with the revision held under the store lock. A concurrent update
+returns `DPX-CLI-PROFILE-CONFLICT` and policy exit code `3`; repeating the command
+reloads the newer profile before planning again.
 
-The durable JSON writer commits the primary before refreshing its backup. A
-backup-copy failure can therefore report a failed save after the primary already
-contains the new value; callers should reload before retrying. Payload limits
-bound accepted files, but serialization currently materializes the candidate
-JSON in memory before applying the byte cap. These are explicit v5.2 limitations,
-not guarantees of atomicity or bounded transient allocation.
+The durable JSON writer distinguishes a committed primary whose backup refresh
+failed from a rejected or failed primary commit. Persistent secret-mark writes
+treat that state as committed and repair the backup on the next successful write,
+so callers do not repeat an operation that is already durable in the primary.
+Payload limits are enforced while JSON is streamed to private staging: exceeding
+the cap rejects and removes staging before primary or backup is changed.

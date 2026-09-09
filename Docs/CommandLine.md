@@ -797,11 +797,14 @@ created and performs the same transformation-notice collision preflight as the
 real export. A reserved notice file that is outside the effective selection does
 not collide because it is not copied.
 
-v5.2 limitations: code compression in a project copy is best-effort when its
-grammar is unavailable; an unchanged file does not by itself cause a strict
-failure or a generated compression notice. An untransformed folder/ZIP copy also
-does not pin one project-wide source revision, so concurrent source edits can be
-observed at different moments. Stop writers before producing a release archive.
+Code compression in a project copy is best-effort when its grammar is unavailable:
+stderr reports `DPX-COMPRESSION-UNAVAILABLE`, the complete source remains in the
+copy, and the transformation notice is emitted only when at least one file was
+actually transformed. A pass-through file is copied from one open source handle;
+if its captured identity changes before EOF, export fails closed with a source
+unavailable error. The copy is not a project-wide point-in-time snapshot, so edits
+between files can still be observed at different moments. Stop writers before
+producing a release archive.
 
 On success, file and folder destinations write exactly one absolute result path
 to stdout. A ZIP destination of `-` writes only the raw archive bytes instead.

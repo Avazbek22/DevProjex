@@ -88,6 +88,7 @@ public sealed class ExportProjectCommandHandler(
 				.PreflightAsync(exportRequest, cancellationToken)
 				.ConfigureAwait(false);
 			var unscannableFiles = preflight.UnscannableFiles;
+			WriteCompressionDiagnostics(plan, preflight.CompressionSnapshot, request.Output);
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,
@@ -109,10 +110,7 @@ public sealed class ExportProjectCommandHandler(
 					services.Localization);
 			}
 
-			if (CodeTransformIdentity.Resolve(
-				    plan.Selection.CompressCode == true,
-				    plan.Selection.StripComments == true,
-				    plan.Selection.StripBlankLines == true) != CodeTransformKinds.None)
+			if (preflight.CompressionSnapshot is { CompressedFiles: > 0 })
 				environment.Error.WriteLine(services.Localization["Compression.CopyNotice"]);
 			return CommandLineExitCodes.Success;
 		}
@@ -136,6 +134,7 @@ public sealed class ExportProjectCommandHandler(
 				plan.SourceRoot,
 				streamedResult.UnscannableFiles ?? [],
 				services.Localization);
+			WriteCompressionDiagnostics(plan, streamedResult.CompressionSnapshot, request.Output);
 			return CommandLineExitCodes.Success;
 		}
 		var result = await new ProgressRenderer(environment, request.Output, services.Localization)
@@ -158,7 +157,22 @@ public sealed class ExportProjectCommandHandler(
 			plan.SourceRoot,
 			result.UnscannableFiles ?? [],
 			services.Localization);
+		WriteCompressionDiagnostics(plan, result.CompressionSnapshot, request.Output);
 		return CommandLineExitCodes.Success;
+	}
+
+	private void WriteCompressionDiagnostics(
+		ProjectContextPlan plan,
+		CodeCompressionSnapshot? snapshot,
+		TerminalOutputOptions output)
+	{
+		if (snapshot is null)
+			return;
+		var updated = CodeCompressionDiagnostic.Append(plan, snapshot.Availability);
+		if (updated.Diagnostics.Count == plan.Diagnostics.Count)
+			return;
+		new ContextDiagnosticRenderer(environment, output, services.Localization)
+			.Write(updated.Diagnostics.Skip(plan.Diagnostics.Count).ToArray());
 	}
 
 }

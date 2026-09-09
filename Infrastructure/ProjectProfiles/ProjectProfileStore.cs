@@ -85,12 +85,23 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		=> TrySaveProfileWithResult(localProjectPath, profile).Succeeded;
 
 	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
-		=> TrySaveProfileWithResult(localProjectPath, profile, updatedUtc).Succeeded;
+		=> TrySaveProfileWithResultCore(localProjectPath, profile, updatedUtc).Succeeded;
 
 	public ProjectProfileSaveResult TrySaveProfileWithResult(
 		string localProjectPath,
 		ProjectSelectionProfile profile) =>
-		TrySaveProfileWithResult(localProjectPath, profile, DateTimeOffset.UtcNow);
+		TrySaveProfileWithResultCore(localProjectPath, profile, DateTimeOffset.UtcNow);
+
+	public ProjectProfileSaveResult TrySaveProfileWithResult(
+		string localProjectPath,
+		ProjectSelectionProfile profile,
+		DateTimeOffset? expectedUpdatedUtc) =>
+		TrySaveProfileWithResultCore(
+			localProjectPath,
+			profile,
+			DateTimeOffset.UtcNow,
+			expectedUpdatedUtc,
+			enforceExpectedVersion: true);
 
 	public ProjectProfileBatchSaveResult TrySaveProfilesWithResult(
 		IReadOnlyList<ProjectProfileSaveRequest> requests,
@@ -183,10 +194,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
-	private ProjectProfileSaveResult TrySaveProfileWithResult(
+	private ProjectProfileSaveResult TrySaveProfileWithResultCore(
 		string localProjectPath,
 		ProjectSelectionProfile profile,
-		DateTimeOffset updatedUtc)
+		DateTimeOffset updatedUtc,
+		DateTimeOffset? expectedUpdatedUtc = null,
+		bool enforceExpectedVersion = false)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 			return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
@@ -209,12 +222,18 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			if (!TryLoadForMutation(fileSet, out var db))
 				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 			db.SchemaVersion = CurrentSchemaVersion;
+			var hasExisting = db.Profiles.TryGetValue(normalizedPath, out var existing) && existing is not null;
+			if (enforceExpectedVersion &&
+			    (hasExisting != expectedUpdatedUtc.HasValue ||
+			     hasExisting && NormalizeProfileTimestamp(existing!.UpdatedUtc) !=
+			     NormalizeProfileTimestamp(expectedUpdatedUtc!.Value)))
+			{
+				return new ProjectProfileSaveResult(ProjectProfileSaveStatus.Conflict);
+			}
 
 			// A delayed retry from another window/process must not stomp a newer profile revision.
 			// The caller-provided timestamp reflects when the profile became user-approved.
-			if (db.Profiles.TryGetValue(normalizedPath, out var existing) &&
-				existing is not null &&
-				existing.UpdatedUtc > normalizedUpdatedUtc)
+			if (hasExisting && existing!.UpdatedUtc > normalizedUpdatedUtc)
 			{
 				return new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
 			}
@@ -229,7 +248,10 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	public ProjectProfileClearStatus ClearAllProfiles()
 	{
-		ProjectProfileClearStatus selectionStatus;
+		var markStatus = _persistentMarks.ClearAll();
+		if (markStatus != ProjectProfileClearStatus.Cleared)
+			return markStatus;
+
 		lock (_sync)
 		{
 			try
@@ -243,28 +265,24 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				}
 				catch (IOException)
 				{
-					return ProjectProfileClearStatus.Busy;
+					return ProjectProfileClearStatus.Partial;
 				}
 
 				using var _ = heldLock;
 				if (HasOversizedDocument(fileSet))
-					return ProjectProfileClearStatus.Failed;
+					return ProjectProfileClearStatus.Partial;
 				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
-					return ProjectProfileClearStatus.FutureSchema;
+					return ProjectProfileClearStatus.Partial;
 
 				File.Delete(fileSet.PrimaryPath);
 				File.Delete(fileSet.BackupPath);
-				selectionStatus = ProjectProfileClearStatus.Cleared;
+				return ProjectProfileClearStatus.Cleared;
 			}
 			catch
 			{
-				selectionStatus = ProjectProfileClearStatus.Failed;
+				return ProjectProfileClearStatus.Partial;
 			}
 		}
-
-		return selectionStatus == ProjectProfileClearStatus.Cleared
-			? _persistentMarks.ClearAll()
-			: selectionStatus;
 	}
 
 	private static void PrepareStorageDirectoryForClear(JsonStoreFileSet fileSet)
@@ -362,28 +380,34 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
 	}
 
-	public bool TryDeleteProfile(string localProjectPath)
+	public bool TryDeleteProfile(string localProjectPath) =>
+		TryDeleteProfileWithResult(localProjectPath) == ProjectProfileDeleteStatus.Deleted;
+
+	public ProjectProfileDeleteStatus TryDeleteProfileWithResult(string localProjectPath)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
-			return false;
+			return ProjectProfileDeleteStatus.Failed;
+		if (!_persistentMarks.DeleteProject(normalizedPath, TimeSpan.FromSeconds(5)))
+			return ProjectProfileDeleteStatus.Failed;
 
-		var selectionDeleted = false;
 		lock (_sync)
 		{
 			var fileSet = GetFileSet();
 			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
-				return false;
+				return ProjectProfileDeleteStatus.Partial;
 
 			using var _ = heldLock;
 			if (HasOversizedDocument(fileSet) ||
 			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
-				return false;
+				return ProjectProfileDeleteStatus.Partial;
 			if (!TryLoadForMutation(fileSet, out var db))
-				return false;
-			selectionDeleted = !db.Profiles.Remove(normalizedPath) || TrySaveInternal(fileSet, db);
+				return ProjectProfileDeleteStatus.Partial;
+			if (!db.Profiles.Remove(normalizedPath))
+				return ProjectProfileDeleteStatus.Deleted;
+			return TrySaveInternal(fileSet, db)
+				? ProjectProfileDeleteStatus.Deleted
+				: ProjectProfileDeleteStatus.Partial;
 		}
-
-		return selectionDeleted && _persistentMarks.DeleteProject(normalizedPath, TimeSpan.FromSeconds(5));
 	}
 
 	public string GetPath()
@@ -421,7 +445,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 		return new ProjectProfileLookupResult(
 			ProjectProfileLookupStatus.Found,
-			ToProfile(entry, marks.Snapshot.Marks));
+			ToProfile(entry, marks.Snapshot.Marks),
+			NormalizeProfileTimestamp(entry.UpdatedUtc));
 	}
 
 	private static ProjectProfileLookupStatus MapMarkStoreStatus(PersistentSecretMarkStoreStatus status) =>

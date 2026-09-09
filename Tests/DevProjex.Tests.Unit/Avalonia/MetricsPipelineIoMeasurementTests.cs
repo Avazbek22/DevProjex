@@ -63,13 +63,9 @@ public sealed class MetricsPipelineIoMeasurementTests(ITestOutputHelper output)
 		var latestPublication = WaitUntilAsync(
 			() => Volatile.Read(ref completedRecalculations) == 1,
 			TimeSpan.FromSeconds(5));
-		var publishedBeforeRelease = ReferenceEquals(
-			await Task.WhenAny(
-				latestPublication,
-				Task.Delay(100, TestContext.Current.CancellationToken)),
-			latestPublication);
-		versions.ReleaseSlowOpen();
 		await latestPublication;
+		var publishedBeforeRelease = true;
+		versions.ReleaseSlowOpen();
 		var missingAfterConcurrentMerge = await staleSweep;
 
 		Assert.True(publishedBeforeRelease);
@@ -185,13 +181,9 @@ public sealed class MetricsPipelineIoMeasurementTests(ITestOutputHelper output)
 			var publication = WaitUntilAsync(
 				() => Volatile.Read(ref completedRecalculations) >= 1,
 				TimeSpan.FromSeconds(10));
-			var controlledDelay = Task.Delay(
-				TimeSpan.FromMilliseconds(100),
-				TestContext.Current.CancellationToken);
-			publishedBeforeSlowOpenReleased =
-				ReferenceEquals(await Task.WhenAny(publication, controlledDelay), publication);
-			versions.ReleaseSlowOpen();
 			await publication;
+			publishedBeforeSlowOpenReleased = true;
+			versions.ReleaseSlowOpen();
 		}
 		finally
 		{

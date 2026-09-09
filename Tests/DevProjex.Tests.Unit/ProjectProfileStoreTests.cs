@@ -3,6 +3,32 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfileStoreTests
 {
 	[Fact]
+	public void ExpectedRevisionRejectsAConcurrentProfileUpdate()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs"], []));
+		var observed = store.LookupProfile(project, TimeSpan.FromSeconds(1));
+		Assert.Equal(ProjectProfileLookupStatus.Found, observed.Status);
+		Assert.NotNull(observed.UpdatedUtc);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [".json"], []),
+			observed.UpdatedUtc.Value.AddMinutes(1)));
+
+		var stale = store.TrySaveProfileWithResult(
+			project,
+			new ProjectSelectionProfile([], [".md"], []),
+			observed.UpdatedUtc);
+
+		Assert.Equal(ProjectProfileSaveStatus.Conflict, stale.Status);
+		Assert.False(stale.Succeeded);
+		Assert.True(store.TryLoadProfile(project, out var current));
+		Assert.Equal([".json"], current.SelectedExtensions);
+	}
+
+	[Fact]
 	public void TrySaveProfilesWithResult_PersistsEveryProfileInOneBatch()
 	{
 		using var temporary = new TemporaryDirectory();
