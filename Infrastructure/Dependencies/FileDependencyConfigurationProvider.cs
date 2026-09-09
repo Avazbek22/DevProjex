@@ -23,6 +23,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	internal const string TypeScriptExtendsUnavailableReason = "extended tsconfig is unavailable";
 	internal const string TypeScriptModuleResolutionReason = "tsconfig moduleResolution is not supported";
 	internal const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
+	internal const string TypeScriptRootDirectoriesOutsideRootReason = "tsconfig rootDirs must stay inside the project root";
 	internal const string ProjectReferenceConditionReason = "project reference condition could not be evaluated safely";
 	internal const string CompileItemMembershipReason = "C# Compile item membership is not supported";
 	internal const string DisableTransitiveProjectReferencesReason = "DisableTransitiveProjectReferences could not be evaluated safely";
@@ -144,7 +145,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			var parsed = await ReadTypeScriptLayerAsync(Path.GetFullPath(configPath), 0, chain).ConfigureAwait(false);
 			return parsed.State == DependencyConfigurationState.Valid
 				? ConfigurationParseResult<TypeScriptConfiguration>.Valid(
-					MaterializeTypeScriptConfiguration(parsed.Value, scopeDirectory))
+					MaterializeTypeScriptConfiguration(parsed.Value, scopeDirectory, root))
 				: ConfigurationParseResult<TypeScriptConfiguration>.Failure(
 					TypeScriptConfiguration.Default,
 					parsed.State,
@@ -316,12 +317,21 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				[],
 				true,
 				AllowJavaScript: parsed.Value.AllowJavaScript,
-				TypeScriptModuleSuffixes: parsed.Value.ModuleSuffixes)
+				TypeScriptModuleSuffixes: parsed.Value.ModuleSuffixes,
+				TypeScriptRootDirectories: parsed.Value.RootDirectories)
 			{
 				ConfigurationState = parsed.State,
 				ConfigurationDiagnostic = parsed.Reason,
 				HasTypeScriptCustomConditions = parsed.Value.HasCustomConditions
 			});
+			if (parsed.Value.HasIgnoredRootDirectories)
+			{
+				diagnostics.Add(new DependencyConfigurationDiagnostic(
+					PortableRelative(root, configPath),
+					DependencyConfigurationState.UnsupportedSemantics,
+					TypeScriptRootDirectoriesOutsideRootReason,
+					[scopeId]));
+			}
 		}
 
 		foreach (var configPath in pythonConfigFiles)
@@ -541,6 +551,18 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			var moduleSuffixes = hasModuleSuffixes
 				? moduleSuffixesElement.EnumerateArray().Select(static item => item.GetString()!).ToArray()
 				: null;
+			var hasRootDirectories = options.TryGetProperty("rootDirs", out var rootDirectoriesElement);
+			if (hasRootDirectories &&
+			    (rootDirectoriesElement.ValueKind != JsonValueKind.Array ||
+			     rootDirectoriesElement.EnumerateArray().Any(static item => item.ValueKind != JsonValueKind.String)))
+			{
+				return TypeScriptLayerFailure(
+					DependencyConfigurationState.UnsupportedSemantics,
+					"tsconfig compilerOptions.rootDirs must be an array of strings");
+			}
+			var rootDirectories = hasRootDirectories
+				? rootDirectoriesElement.EnumerateArray().Select(static item => item.GetString()!).ToArray()
+				: null;
 			var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 			var hasPaths = options.TryGetProperty("paths", out var mappings);
 			if (hasPaths && mappings.ValueKind != JsonValueKind.Object)
@@ -573,6 +595,11 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 						hasPaths ? new TypeScriptPathMappings(Path.GetDirectoryName(configPath)!, paths) : null),
 					new OptionalConfigurationValue<bool>(hasAllowJavaScript, allowJavaScript),
 					new OptionalConfigurationValue<IReadOnlyList<string>>(hasModuleSuffixes, moduleSuffixes),
+					new OptionalConfigurationValue<TypeScriptRootDirectories>(
+						hasRootDirectories,
+						hasRootDirectories
+							? new TypeScriptRootDirectories(Path.GetDirectoryName(configPath)!, rootDirectories!)
+							: null),
 					new OptionalConfigurationValue<bool>(hasCustomConditions, usesCustomConditions)));
 		}
 		catch (JsonException)
@@ -667,11 +694,13 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			child.Paths.IsSpecified ? child.Paths : inherited.Paths,
 			child.AllowJavaScript.IsSpecified ? child.AllowJavaScript : inherited.AllowJavaScript,
 			child.ModuleSuffixes.IsSpecified ? child.ModuleSuffixes : inherited.ModuleSuffixes,
+			child.RootDirectories.IsSpecified ? child.RootDirectories : inherited.RootDirectories,
 			child.CustomConditions.IsSpecified ? child.CustomConditions : inherited.CustomConditions);
 
-	private static TypeScriptConfiguration MaterializeTypeScriptConfiguration(
+	private TypeScriptConfiguration MaterializeTypeScriptConfiguration(
 		TypeScriptConfigurationLayer layer,
-		string scopeDirectory)
+		string scopeDirectory,
+		string projectRoot)
 	{
 		var moduleResolution = layer.ModuleResolution.IsSpecified
 			? layer.ModuleResolution.Value ?? "bundler"
@@ -694,6 +723,35 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var legacy = moduleResolution.Equals("node10", StringComparison.OrdinalIgnoreCase) ||
 		             moduleResolution.Equals("node", StringComparison.OrdinalIgnoreCase) ||
 		             layer.BaseUrl.IsSpecified;
+		var rootDirectories = new List<string>();
+		var hasIgnoredRootDirectories = false;
+		if (layer.RootDirectories.Value is { } configuredRoots)
+		{
+			foreach (var value in configuredRoots.Values)
+			{
+				string candidate;
+				try
+				{
+					candidate = ResolveTypeScriptOptionDirectory(
+						configuredRoots.DeclaringDirectory,
+						NormalizeTypeScriptOptionPath(value));
+				}
+				catch (Exception exception) when (
+					exception is ArgumentException or NotSupportedException or PathTooLongException)
+				{
+					hasIgnoredRootDirectories = true;
+					continue;
+				}
+				if (IsNetworkPath(candidate) || !IsWithin(projectRoot, candidate) ||
+				    !_pathMetadata.TryResolveContainedPath(projectRoot, candidate, out _))
+				{
+					hasIgnoredRootDirectories = true;
+					continue;
+				}
+				if (!rootDirectories.Contains(candidate, PathComparer))
+					rootDirectories.Add(candidate);
+			}
+		}
 		return new TypeScriptConfiguration(
 			moduleResolution,
 			legacy,
@@ -702,8 +760,14 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			layer.ModuleSuffixes.IsSpecified
 				? layer.ModuleSuffixes.Value ?? []
 				: [""],
-			layer.CustomConditions.IsSpecified && layer.CustomConditions.Value);
+			layer.CustomConditions.IsSpecified && layer.CustomConditions.Value,
+			rootDirectories,
+			hasIgnoredRootDirectories);
 	}
+
+	private static string NormalizeTypeScriptOptionPath(string value) => value
+		.Replace('/', Path.DirectorySeparatorChar)
+		.Replace('\\', Path.DirectorySeparatorChar);
 
 	private static string ResolveTypeScriptOptionDirectory(string declaringDirectory, string? relative) =>
 		string.IsNullOrEmpty(relative)
@@ -1108,7 +1172,9 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		IReadOnlyDictionary<string, IReadOnlyList<string>> Paths,
 		bool AllowJavaScript,
 		IReadOnlyList<string> ModuleSuffixes,
-		bool HasCustomConditions)
+		bool HasCustomConditions,
+		IReadOnlyList<string> RootDirectories,
+		bool HasIgnoredRootDirectories)
 	{
 		public static readonly TypeScriptConfiguration Default = new(
 			"bundler",
@@ -1116,6 +1182,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			new Dictionary<string, IReadOnlyList<string>>(),
 			false,
 			[""],
+			false,
+			[],
 			false);
 	}
 
@@ -1127,6 +1195,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		string DeclaringDirectory,
 		IReadOnlyDictionary<string, IReadOnlyList<string>> Values);
 
+	private sealed record TypeScriptRootDirectories(
+		string DeclaringDirectory,
+		IReadOnlyList<string> Values);
+
 	private sealed record TypeScriptConfigurationLayer(
 		string? Extends,
 		OptionalConfigurationValue<string> ModuleResolution,
@@ -1135,10 +1207,12 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		OptionalConfigurationValue<TypeScriptPathMappings> Paths,
 		OptionalConfigurationValue<bool> AllowJavaScript,
 		OptionalConfigurationValue<IReadOnlyList<string>> ModuleSuffixes,
+		OptionalConfigurationValue<TypeScriptRootDirectories> RootDirectories,
 		OptionalConfigurationValue<bool> CustomConditions)
 	{
 		public static readonly TypeScriptConfigurationLayer Empty = new(
 			null,
+			default,
 			default,
 			default,
 			default,
