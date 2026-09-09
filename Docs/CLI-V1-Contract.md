@@ -695,6 +695,11 @@ On Unix, adjacent staging directories are mode `0700` and staging files are mode
 after removing special setuid/setgid bits. ZIP entries carry the corresponding
 safe Unix modes; a completed ZIP file remains mode `0600`.
 
+v5.2 does not make an untransformed project copy a project-wide point-in-time
+snapshot, and unavailable compression grammars do not turn best-effort project
+copy into a strict failure. These limitations do not weaken Hide Secrets scan
+limits or the omission of text that could not be inspected.
+
 When `--hide-secrets` is selected, text findings are replaced. Such a copy is intentionally not byte-for-byte faithful
 and may not build or run. Binary files remain unchanged. The normal confirmation
 and dry-run plan state this before writing. Dry-run and real export apply the

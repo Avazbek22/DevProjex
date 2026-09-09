@@ -797,6 +797,12 @@ created and performs the same transformation-notice collision preflight as the
 real export. A reserved notice file that is outside the effective selection does
 not collide because it is not copied.
 
+v5.2 limitations: code compression in a project copy is best-effort when its
+grammar is unavailable; an unchanged file does not by itself cause a strict
+failure or a generated compression notice. An untransformed folder/ZIP copy also
+does not pin one project-wide source revision, so concurrent source edits can be
+observed at different moments. Stop writers before producing a release archive.
+
 On success, file and folder destinations write exactly one absolute result path
 to stdout. A ZIP destination of `-` writes only the raw archive bytes instead.
 Measured progress and warnings use stderr.

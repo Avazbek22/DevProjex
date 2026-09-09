@@ -161,3 +161,18 @@ database.
 Legacy local state with both Git options enabled is normalized by the existing
 security-first profile logic before conversion. The v1 portable schema cannot
 represent two simultaneous Git modes.
+
+## Persistence limitations in v5.2
+
+Selection profiles and persistent secret marks use separate durable stores. A
+reset that clears selection successfully but cannot clear the mark store reports
+failure, but it cannot roll back the selection deletion; retry the reset after
+the store becomes available. Concurrent profile saves use last-completion-wins,
+not compare-and-swap against the revision observed while planning.
+
+The durable JSON writer commits the primary before refreshing its backup. A
+backup-copy failure can therefore report a failed save after the primary already
+contains the new value; callers should reload before retrying. Payload limits
+bound accepted files, but serialization currently materializes the candidate
+JSON in memory before applying the byte cap. These are explicit v5.2 limitations,
+not guarantees of atomicity or bounded transient allocation.
