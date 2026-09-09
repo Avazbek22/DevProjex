@@ -864,12 +864,13 @@ public sealed class SecretRedactionOutputPreparer
 			    result.Classification == FileContentClassification.Text)
 			{
 				using var detectionStage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Detection);
-				detectionEntry = redactionScope.DetectTransformedContent(
+				detectionEntry = redactionScope.DetectSourceAndTransformedContent(
 					item.SourcePath,
+					result.Content!.Content,
 					compression.Text,
 					compression.Map,
 					coherentRead.Metadata,
-					compression.Map.IsIdentity ? readFact.Fingerprint : null,
+					readFact.Fingerprint,
 					cancellationToken);
 			}
 

@@ -84,11 +84,13 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			session,
 			ProjectCopyExportFormat.Zip);
 
-		Assert.Equal(10, preview.Redactions.Count);
-		Assert.Equal(10, preview.Redactions.Count(static span =>
+		// The previous count encoded the discarded tail of an overlapping config-secret finding.
+		// Coverage-preserving segmentation represents both valid findings without exposing that tail.
+		Assert.Equal(11, preview.Redactions.Count);
+		Assert.Equal(11, preview.Redactions.Count(static span =>
 			span.State == SecretPreviewSpanState.Redacted));
-		Assert.Equal(10, folder.RedactedValueCount);
-		Assert.Equal(10, zip.RedactedValueCount);
+		Assert.Equal(11, folder.RedactedValueCount);
+		Assert.Equal(11, zip.RedactedValueCount);
 		Assert.Equal(NormalizeForClipboard(selectedContent), contentPreviewPayload);
 		Assert.All(
 			new[] { previewPayload, contentPreviewPayload, selectedContent }.Concat(contextDocuments.Values),
@@ -1465,6 +1467,104 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task StripComments_PreservesSourceFindingWhenItsKeywordIsRemoved()
+	{
+		const string token = "pat7o9mw4c058sei5.bb075cee667b90855a4471502369a2bd7e93f38ba6aa8039a2527e577ca5793a";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("source-finding-project");
+		var path = temporary.CreateFile(
+			"source-finding-project/State.cs",
+			$"// airtable credential{Environment.NewLine}internal static class State {{ public const string Value = \"{token}\"; }}");
+		using var redactionSession = new SecretRedactionSession(new GitleaksSecretDetector());
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var context = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				sourceRoot,
+				compressionSession,
+				CodeTransformKinds.Comments),
+			new SecretRedactionContext(sourceRoot, redactionSession))!;
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		await using var compressionOnly = await preparer.PrepareAsync(
+			ContentTransformationContext.For(
+				new CodeCompressionContext(
+					sourceRoot,
+					compressionSession,
+					CodeTransformKinds.Comments),
+				redaction: null)!,
+			[path],
+			TestContext.Current.CancellationToken);
+		var transformedBeforeRedaction = await File.ReadAllTextAsync(
+			compressionOnly.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+
+		var analysis = await preparer.AnalyzeAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		await using var prepared = await preparer.PrepareAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		var output = await File.ReadAllTextAsync(
+			prepared.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, analysis.DetectedCount);
+		Assert.Equal(1, analysis.RedactedCount);
+		AssertExactReplacement(
+			transformedBeforeRedaction,
+			output,
+			token,
+			"DEVPROJEX_REDACTED[airtable-personnal-access-token#1]");
+		Assert.Equal(2, redactionSession.GetCacheDiagnostics().DetectionRuns);
+	}
+
+	[Fact]
+	public async Task StripComments_DetectsFindingCreatedByTransformation()
+	{
+		const string secret = "joined-secret-value-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("transformed-finding-project");
+		var path = temporary.CreateFile(
+			"transformed-finding-project/State.cs",
+			$"// removed detector context{Environment.NewLine}" +
+			$"internal static class State {{ public const string Value = \"{secret}\"; }}");
+		var detector = new ExactValueWhenMarkerAbsentDetector(secret, "removed detector context");
+		using var redactionSession = new SecretRedactionSession(detector);
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var compression = new CodeCompressionContext(
+			sourceRoot,
+			compressionSession,
+			CodeTransformKinds.Comments);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		await using var compressionOnly = await preparer.PrepareAsync(
+			ContentTransformationContext.For(compression, redaction: null)!,
+			[path],
+			TestContext.Current.CancellationToken);
+		var transformedBeforeRedaction = await File.ReadAllTextAsync(
+			compressionOnly.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+		var context = ContentTransformationContext.For(
+			compression,
+			new SecretRedactionContext(sourceRoot, redactionSession))!;
+
+		await using var prepared = await preparer.PrepareAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		var output = await File.ReadAllTextAsync(
+			prepared.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+
+		AssertExactReplacement(
+			transformedBeforeRedaction,
+			output,
+			secret,
+			"DEVPROJEX_REDACTED[exact-value#1]");
+		Assert.Equal(2, detector.CallCount);
+	}
+
+	[Fact]
 	public async Task PrepareWithoutFindingCapturePublishesCountsWithoutMaterializingDescriptors()
 	{
 		const string secret = "capture-only-on-request-secret-value-42";
@@ -2673,11 +2773,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "settings.json")));
 		var connection = File.ReadAllText(Path.Combine(result.DestinationPath, "config", "appsettings.json"));
 		AssertNoTextSecret(connection);
-		Assert.Contains(
-			"Host=db;Username=admin;Pass" +
-			"word=DEVPROJEX_REDACTED[connection-password#1];Database=app",
-			connection,
-			StringComparison.Ordinal);
+		AssertConnectionStringCoverage(connection);
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "service.txt")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "web.config")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, ".env")));
@@ -2715,11 +2811,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(ReadZipText(archive, "config/settings.json"));
 		var connection = ReadZipText(archive, "config/appsettings.json");
 		AssertNoTextSecret(connection);
-		Assert.Contains(
-			"Host=db;Username=admin;Pass" +
-			"word=DEVPROJEX_REDACTED[connection-password#1];Database=app",
-			connection,
-			StringComparison.Ordinal);
+		AssertConnectionStringCoverage(connection);
 		AssertNoTextSecret(ReadZipText(archive, "config/service.txt"));
 		AssertNoTextSecret(ReadZipText(archive, "config/web.config"));
 		AssertNoTextSecret(ReadZipText(archive, ".env"));
@@ -2752,6 +2844,18 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			item.FullName.EndsWith(suffix, StringComparison.Ordinal));
 		using var reader = new StreamReader(entry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
 		return reader.ReadToEnd();
+	}
+
+	private static void AssertConnectionStringCoverage(string content)
+	{
+		Assert.StartsWith(
+			"{\"ConnectionStrings\":{\"Main\":\"Host=db;Username=admin;Password=",
+			content,
+			StringComparison.Ordinal);
+		Assert.EndsWith("}}\n", content, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(content, "DEVPROJEX_REDACTED[config-secret#1]"));
+		Assert.Equal(1, CountOccurrences(content, "DEVPROJEX_REDACTED[connection-password#1]"));
+		Assert.DoesNotContain(";Database=app", content, StringComparison.Ordinal);
 	}
 
 	private sealed class CategorizedExactValueDetector(
@@ -2861,6 +2965,30 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		for (var offset = 0; (offset = value.IndexOf(search, offset, StringComparison.Ordinal)) >= 0; offset += search.Length)
 			count++;
 		return count;
+	}
+
+	private static void AssertExactReplacement(
+		string transformedBeforeRedaction,
+		string actual,
+		string sensitiveValue,
+		string replacement)
+	{
+		var start = transformedBeforeRedaction.IndexOf(sensitiveValue, StringComparison.Ordinal);
+		Assert.True(
+			start >= 0,
+			$"The transformed control text must retain the asserted sensitive range. Actual: {transformedBeforeRedaction}");
+		Assert.Equal(
+			transformedBeforeRedaction[..start],
+			actual[..start]);
+		Assert.Equal(
+			transformedBeforeRedaction[(start + sensitiveValue.Length)..],
+			actual[(start + replacement.Length)..]);
+		Assert.Equal(
+			string.Concat(
+				transformedBeforeRedaction.AsSpan(0, start),
+				replacement,
+				transformedBeforeRedaction.AsSpan(start + sensitiveValue.Length)),
+			actual);
 	}
 
 	private static string NormalizeForClipboard(string text)
@@ -3080,6 +3208,25 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 
 			Interlocked.Increment(ref _forcedReadFactCount);
 			return ValueTask.FromResult(new ContentReadFact(null, classification, null, null));
+		}
+	}
+
+	private sealed class ExactValueWhenMarkerAbsentDetector(string secret, string marker) : ISecretDetector
+	{
+		public int CallCount { get; private set; }
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default)
+		{
+			CallCount++;
+			if (content.Contains(marker, StringComparison.Ordinal))
+				return [];
+			var index = content.IndexOf(secret, StringComparison.Ordinal);
+			return index < 0
+				? []
+				: [new DetectedSecret("exact-value", index, secret.Length, secret, RuleOrder: 0)];
 		}
 	}
 
