@@ -15,7 +15,7 @@ public sealed class RepositoryWebPathPresentationService
         if (string.IsNullOrWhiteSpace(localRootPath) || string.IsNullOrWhiteSpace(repositoryUrl))
             return null;
 
-        if (!RepositoryUrlUtility.IsSupportedCloneSource(repositoryUrl))
+        if (!IsSafePresentationSource(repositoryUrl))
             return null;
 
         string normalizedRootPath;
@@ -62,6 +62,15 @@ public sealed class RepositoryWebPathPresentationService
         }
 
         return filePath => MapToRepositoryPath(filePath, normalizedRootPath, displayRootPath);
+    }
+
+    private static bool IsSafePresentationSource(string repositoryUrl)
+    {
+        if (RepositoryUrlUtility.IsNetworkCloneSource(repositoryUrl))
+            return true;
+
+        var normalized = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
+        return Uri.TryCreate(normalized, UriKind.Absolute, out var uri) && uri.IsFile;
     }
 
     private static string NormalizeRepositoryUrl(string repositoryUrl)

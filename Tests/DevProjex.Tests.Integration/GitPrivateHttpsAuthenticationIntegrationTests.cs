@@ -399,9 +399,15 @@ public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 			authorityRequest.CertificateExtensions.Add(new X509KeyUsageExtension(
 				X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign,
 				true));
-			var authority = authorityRequest.CreateSelfSigned(
+			var authorityGenerator = X509SignatureGenerator.CreateForRSA(
+				authorityKey,
+				RSASignaturePadding.Pkcs1);
+			var authority = authorityRequest.Create(
+				authorityRequest.SubjectName,
+				authorityGenerator,
 				DateTimeOffset.UtcNow.AddMinutes(-5),
-				DateTimeOffset.UtcNow.AddDays(2));
+				DateTimeOffset.UtcNow.AddDays(2),
+				RandomNumberGenerator.GetBytes(16));
 
 			using var serverKey = RSA.Create(2048);
 			var serverRequest = new CertificateRequest(
@@ -421,7 +427,8 @@ public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 			serverRequest.CertificateExtensions.Add(san.Build());
 			var serial = RandomNumberGenerator.GetBytes(16);
 			var publicServer = serverRequest.Create(
-				authority,
+				authority.SubjectName,
+				authorityGenerator,
 				DateTimeOffset.UtcNow.AddMinutes(-5),
 				DateTimeOffset.UtcNow.AddDays(1),
 				serial);

@@ -139,7 +139,7 @@ public sealed class RepositoryCacheCatalogTests
 		var catalog = new RepositoryCacheCatalog(git, cache);
 
 		var result = await catalog.FindAsync(
-			"git@github.com:Avazbek22/DevProjex.git",
+			"https://github.com/Avazbek22/DevProjex.git",
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(RepositoryCacheState.Ready, result.State);
