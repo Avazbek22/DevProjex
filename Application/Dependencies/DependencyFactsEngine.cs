@@ -1846,12 +1846,6 @@ public sealed class DependencyFactsEngine : IDisposable
 			var attributeName = reference.SyntaxKind == "attribute"
 				? expandedName + "Attribute"
 				: null;
-			if (candidates.Length == 0 && attributeName is not null)
-			{
-				candidates = attributeName.Contains('.')
-					? LookupQualified(source, attributeName, reference.GenericArity)
-					: LookupSimple(source, attributeName, reference.GenericArity);
-			}
 			if (source.LanguageId == LanguageId.CSharp)
 			{
 				if (!reference.IsGlobalQualified && reference.Name.Contains('.') && !aliasExpanded)
@@ -1862,6 +1856,23 @@ public sealed class DependencyFactsEngine : IDisposable
 				}
 				else if (!requiresQualifiedLookup)
 					candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
+			}
+			if (candidates.Length == 0 && attributeName is not null)
+			{
+				candidates = attributeName.Contains('.')
+					? LookupQualified(source, attributeName, reference.GenericArity)
+					: LookupSimple(source, attributeName, reference.GenericArity);
+				if (source.LanguageId == LanguageId.CSharp)
+				{
+					if (!reference.IsGlobalQualified && attributeName.Contains('.'))
+					{
+						var contextual = LookupContextualCSharpQualified(source, reference, attributeName);
+						if (contextual.Length > 0)
+							candidates = contextual;
+					}
+					else if (!attributeName.Contains('.'))
+						candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
+				}
 			}
 			if (candidates.Length == 0)
 			{

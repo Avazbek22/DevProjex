@@ -427,7 +427,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 				match.Length)));
 		return tokens.Select(token =>
 		{
-			var referenceCapture = CaptureToken(capture, token);
+			var referenceCapture = CaptureToken(capture, token) with { Name = "reference.using_alias" };
 			var isGlobalQualified = token.Value.StartsWith("global::", StringComparison.Ordinal);
 			var name = token.Value.Replace("global::", string.Empty, StringComparison.Ordinal)
 				.Replace("::", ".", StringComparison.Ordinal);
@@ -456,7 +456,6 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		}
 		return capture with
 		{
-			Name = "reference.using_alias",
 			Text = token.Value,
 			Line = capture.Line + lineOffset,
 			StartIndex = capture.StartIndex + token.Index,

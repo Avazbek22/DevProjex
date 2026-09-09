@@ -6,6 +6,27 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New055_AttributeShortNameFallbackRunsAfterVisibilityFiltering()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var hidden = fixture.CreateFile("Hidden.cs", "namespace Hidden; public sealed class Audit { }");
+		var attribute = fixture.CreateFile("AuditAttribute.cs", "public sealed class AuditAttribute : System.Attribute { }");
+		var source = fixture.CreateFile("Consumer.cs", "[Audit] public sealed class Consumer { }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, hidden, attribute, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "Consumer.cs" && candidate.Reference == "Audit");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("AuditAttribute.cs", edge.Target);
+	}
+
+	[Fact]
 	public async Task New054_ExactPackageExportDoesNotProbeDirectoryIndex()
 	{
 		using var fixture = new TemporaryDirectory();
