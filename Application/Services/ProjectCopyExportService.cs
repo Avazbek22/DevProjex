@@ -44,7 +44,9 @@ public sealed class ProjectCopyExportService(
 			: null;
 		var transformationNotice = BuildTransformationNotice(prepared, plan, request.NoticeText);
 		ValidateTransformationNoticeCollision(plan, transformationNotice);
-		return new ProjectCopyExportPreflightResult(prepared?.UnscannableFiles ?? []);
+		return new ProjectCopyExportPreflightResult(
+			prepared?.UnscannableFiles ?? [],
+			prepared?.CompressionSnapshot);
 	}
 
 	public async Task<ProjectCopyExportResult> ExportAsync(
@@ -151,7 +153,8 @@ public sealed class ProjectCopyExportService(
 				plan.DirectoryCount,
 				result.BytesWritten,
 				prepared?.Snapshot?.RedactedCount ?? 0,
-				prepared?.UnscannableFiles ?? []);
+				prepared?.UnscannableFiles ?? [],
+				prepared?.CompressionSnapshot);
 		}
 		catch (Exception exception) when (exception is not OperationCanceledException and not ProjectCopyExportException)
 		{
@@ -471,7 +474,8 @@ public sealed class ProjectCopyExportService(
 				plan.DirectoryCount,
 				bytesWritten,
 				prepared?.Snapshot?.RedactedCount ?? 0,
-				prepared?.UnscannableFiles ?? []);
+				prepared?.UnscannableFiles ?? [],
+				prepared?.CompressionSnapshot);
 		}
 		catch (Exception exception)
 		{
@@ -629,7 +633,8 @@ public sealed class ProjectCopyExportService(
 				plan.DirectoryCount,
 				bytesWritten,
 				prepared?.Snapshot?.RedactedCount ?? 0,
-				prepared?.UnscannableFiles ?? []);
+				prepared?.UnscannableFiles ?? [],
+				prepared?.CompressionSnapshot);
 		}
 		catch (Exception exception)
 		{

@@ -122,6 +122,26 @@ public sealed class CompressionAvailabilityProcessTests
 		Assert.Contains("language 'csharp'", context.StandardError, StringComparison.Ordinal);
 		Assert.Contains("DPX-COMPRESSION-UNAVAILABLE", context.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("kept-full", context.StandardOutput, StringComparison.Ordinal);
+
+		var projectOutput = Path.Combine(workspace.CreateDirectory("output"), "copy");
+		var projectCopy = RunCli(
+			host,
+			dataRoot,
+			"--language", "en",
+			"export", "project", project,
+			"--as", "folder",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--compress-code",
+			"--dry-run",
+			"--plain",
+			"-o", projectOutput);
+
+		Assert.Equal(0, projectCopy.ExitCode);
+		Assert.Contains("DPX-COMPRESSION-UNAVAILABLE", projectCopy.StandardError, StringComparison.Ordinal);
+		Assert.Contains("language 'csharp'", projectCopy.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("intentionally not a byte-for-byte copy", projectCopy.StandardError, StringComparison.Ordinal);
+		Assert.False(Path.Exists(projectOutput));
 	}
 
 	[Fact]
