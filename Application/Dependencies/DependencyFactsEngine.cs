@@ -1317,6 +1317,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				var packageTarget = ResolvePackageMap(source, import, import.Specifier, exports: false);
 				if (packageTarget.FailureReason is { } reason)
 					return Edge(source, import, ResolutionStatus.Unresolved, null, reason, []);
+				if (packageTarget.IsExternal)
+					return Edge(source, import, ResolutionStatus.External, null,
+						"declared Node package outside the manifest", []);
 				candidates = packageTarget.Candidates;
 			}
 			else if ((scope.PackageName ?? FindNearestPackageMap(source)?.PackageName) is { } package &&
@@ -1440,6 +1443,12 @@ public sealed class DependencyFactsEngine : IDisposable
 					var mappedPath = wildcard.Length == 0
 						? selected.Path
 						: selected.Path.Replace("*", wildcard, StringComparison.Ordinal);
+					if (!exports && !mappedPath.StartsWith("./", StringComparison.Ordinal))
+					{
+						return map.ExternalPackages.Contains(BarePackageName(mappedPath))
+							? new PackageMapProbe([], null, IsExternal: true)
+							: new PackageMapProbe([], "package imports target has no external-package evidence");
+					}
 					if (exports && !IsValidPackageExportTarget(mappedPath))
 						return new PackageMapProbe([], "package exports target is invalid");
 					return new PackageMapProbe(
@@ -2287,7 +2296,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			int Star);
 		private readonly record struct PackageMapProbe(
 			IReadOnlyList<string> Candidates,
-			string? FailureReason);
+			string? FailureReason,
+			bool IsExternal = false);
 		private readonly record struct PackageTargetSelection(
 			PackageTargetSelectionKind Kind,
 			string? Path,
