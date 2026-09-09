@@ -34,6 +34,8 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 	internal const int MaximumProgressFrameCharacters = 4 * 1024;
 	internal const string CacheQuotaDiagnostic =
 		"DPX-GIT-CACHE-QUOTA: Git cache size exceeds the configured limit.";
+	internal const string CacheReserveDiagnostic =
+		"DPX-GIT-CACHE-RESERVE: Git cache destination does not have the required free-space reserve.";
     private readonly string? _gitExecutable;
     private readonly bool _allowFileTransport;
 	private readonly bool _materializeTestClone;
@@ -142,7 +144,7 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 					targetDirectory,
 					repoName,
 					resultRepositoryUrl,
-					CacheQuotaDiagnostic);
+					CacheReserveDiagnostic);
 
             // Note: progress status is set by caller to show localized message
             // We only report dynamic progress (git output with percentages)
@@ -563,7 +565,7 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 				return false;
 			if (!HasTransferAdmission(RepositoryCacheLayout.GetContainer(repositoryPath)))
 			{
-				progress?.Report(CacheQuotaDiagnostic);
+				progress?.Report(CacheReserveDiagnostic);
 				return false;
 			}
 			await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(

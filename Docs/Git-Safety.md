@@ -160,7 +160,9 @@ HTTPS allows only `https`; SSH/SCP sources allow only `ssh`. The v5.2 product ha
 Clone and fetch also share the repository-cache resource policy. DevProjex checks
 free space on the destination filesystem before clone, monitors the application-owned
 staging or cache directory while Git runs, and terminates the complete process tree
-with `DPX-GIT-CACHE-QUOTA` if the configured cache-size limit is exceeded.
+with `DPX-GIT-CACHE-QUOTA` if the configured cache-size limit is exceeded. A transfer
+rejected before launch because the destination filesystem lacks the required reserve
+reports `DPX-GIT-CACHE-RESERVE`; the diagnostic does not disclose filesystem sizes.
 
 GitHub ZIP fallback applies a separate no-progress deadline while reading the
 response body as well as compressed and extracted byte limits. It reports the ref

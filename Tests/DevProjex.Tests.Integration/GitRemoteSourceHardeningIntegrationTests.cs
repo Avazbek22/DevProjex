@@ -227,7 +227,7 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.False(result.Success);
-		Assert.Equal(GitRepositoryService.CacheQuotaDiagnostic, result.ErrorMessage);
+		Assert.Equal(GitRepositoryService.CacheReserveDiagnostic, result.ErrorMessage);
 		Assert.False(Directory.Exists(target));
 	}
 
