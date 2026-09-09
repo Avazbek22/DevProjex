@@ -71,6 +71,9 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 		while (position < text.Length && char.IsWhiteSpace(text[position])) position++;
 		if (position >= text.Length || text[position] != '<') return 0;
 		var depth = 0;
+		var parenthesisDepth = 0;
+		var bracketDepth = 0;
+		var braceDepth = 0;
 		var arity = 1;
 		for (var index = position; index < text.Length; index++)
 		{
@@ -78,7 +81,15 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 			{
 				case '<': depth++; break;
 				case '>' when --depth == 0: return arity;
-				case ',' when depth == 1: arity++; break;
+				case '(' when depth > 0: parenthesisDepth++; break;
+				case ')' when parenthesisDepth > 0: parenthesisDepth--; break;
+				case '[' when depth > 0: bracketDepth++; break;
+				case ']' when bracketDepth > 0: bracketDepth--; break;
+				case '{' when depth > 0: braceDepth++; break;
+				case '}' when braceDepth > 0: braceDepth--; break;
+				case ',' when depth == 1 && parenthesisDepth == 0 && bracketDepth == 0 && braceDepth == 0:
+					arity++;
+					break;
 			}
 		}
 		return 0;
