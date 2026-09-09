@@ -103,8 +103,7 @@ jobs:
             -ArtifactsRoot artifacts/container-images `
             -Version '${{ inputs.version }}' `
             -SourceSha '${{ inputs.checkout_ref }}' `
-            -VerifyLoadedImages `
-            -LoadedPlatform linux/arm64
+            -VerifyLoadedImages
 
       - name: Smoke amd64 with a read-only root
         shell: pwsh
@@ -158,5 +157,6 @@ jobs:
             -ArtifactsRoot artifacts/container-images `
             -Version '${{ inputs.version }}' `
             -SourceSha '${{ inputs.checkout_ref }}' `
-            -VerifyLoadedImages
+            -VerifyLoadedImages `
+            -LoadedPlatform linux/arm64
           ./Scripts/Test-HeadlessContainerSmoke.ps1 -Image devprojex-ci:arm64 -Version '${{ inputs.version }}'
