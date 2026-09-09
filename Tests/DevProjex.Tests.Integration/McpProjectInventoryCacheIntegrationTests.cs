@@ -283,17 +283,18 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		var appData = Path.Combine(workspace.Path, "app-data");
+		var canonicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
 		new ProjectProfileStore(() => appData).SaveProfile(
-			McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true),
+			canonicalProject,
 			new ProjectSelectionProfile([], [".cs"], []));
 		await using var harness = CreateHarness(project);
 
 		var catalog = await harness.Service.ReadLocalProfileCatalogAsync(
-			Enumerable.Repeat(project, 100).ToArray(),
+			Enumerable.Repeat(canonicalProject, 100).ToArray(),
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal("available", catalog.Status);
-		Assert.Contains(project, catalog.ProjectRoots, PathComparer.Default);
+		Assert.Contains(canonicalProject, catalog.ProjectRoots, PathComparer.Default);
 		Assert.Equal(1, harness.Service.ProfileCatalogReadCount);
 	}
 
