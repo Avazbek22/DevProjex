@@ -6,6 +6,31 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 {
 	[Fact]
+	public async Task New060_RelativeModuleUrlSuffixUsesPhysicalPath()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"nodenext\"}}");
+		var package = fixture.CreateFile("package.json", "{\"type\":\"module\"}");
+		var target = fixture.CreateFile("mod.ts", "export default 1;");
+		var source = fixture.CreateFile(
+			"main.ts",
+			"import first from './mod.js?variant=1';\nimport second from './mod.js#named';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, package, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal("mod.ts", Assert.Single(result.Edges, edge =>
+			edge.Source == "main.ts" && edge.Reference == "./mod.js?variant=1").Target);
+		Assert.Equal("mod.ts", Assert.Single(result.Edges, edge =>
+			edge.Source == "main.ts" && edge.Reference == "./mod.js#named").Target);
+	}
+
+	[Fact]
 	public async Task New052_OrdinaryCSharpTypePositionsProduceReferences()
 	{
 		using var fixture = new TemporaryDirectory();

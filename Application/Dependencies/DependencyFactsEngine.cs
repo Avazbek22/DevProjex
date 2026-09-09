@@ -1302,14 +1302,15 @@ public sealed class DependencyFactsEngine : IDisposable
 			IEnumerable<string> candidates;
 			if (import.Specifier.StartsWith(".", StringComparison.Ordinal))
 			{
-				if (Path.GetExtension(import.Specifier).Length == 0 &&
+				var physicalSpecifier = PhysicalModuleSpecifier(import.Specifier);
+				if (Path.GetExtension(physicalSpecifier).Length == 0 &&
 				    RequiresExplicitRelativeExtension(source, scope, import))
 				{
 					return Edge(source, import, ResolutionStatus.Unresolved, null,
 						"extension required for a relative ESM import under node16/nodenext", []);
 				}
 				var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
-				candidates = ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, import.Specifier)), scope, source);
+				candidates = ProbeTypeScript(Path.GetFullPath(Path.Combine(directory, physicalSpecifier)), scope, source);
 			}
 			else if (import.Specifier.StartsWith("#", StringComparison.Ordinal))
 			{
@@ -1454,6 +1455,14 @@ public sealed class DependencyFactsEngine : IDisposable
 				directory = Path.GetDirectoryName(directory)!;
 			}
 			return new PackageMapProbe([], null);
+		}
+
+		private static string PhysicalModuleSpecifier(string specifier)
+		{
+			var query = specifier.IndexOf('?');
+			var fragment = specifier.IndexOf('#');
+			var suffix = query < 0 ? fragment : fragment < 0 ? query : Math.Min(query, fragment);
+			return suffix < 0 ? specifier : specifier[..suffix];
 		}
 
 		private static bool IsValidPackageExportTarget(string target)
