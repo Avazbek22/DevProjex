@@ -677,6 +677,7 @@ public sealed class ImportanceRankingService(
 	}
 
 	private static bool HasExplicitEntryPointEvidence(FileFacts? facts) =>
+		facts?.HasEntryPointEvidence == true ||
 		facts?.Declarations.Any(static declaration =>
 			declaration.Identity.SymbolKind is SymbolKind.Function or SymbolKind.Module &&
 			IsEntryPointName(declaration.Identity.QualifiedName)) == true;

@@ -17,7 +17,8 @@ internal sealed record DependencySyntaxCapture(
 	string? ContainingDeclaration = null,
 	DependencyImportSyntax? ImportSyntax = null,
 	int CapturedNameStartIndex = -1,
-	string? Evidence = null);
+	string? Evidence = null,
+	bool IsStatic = false);
 
 internal sealed record DependencyImportSyntax(
 	string Specifier,
@@ -168,7 +169,7 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			out var globalAliases);
 		var typeParameterOwners = context.Declarations
 			.Where(capture => Kinds.ContainsKey(capture.Name))
-			.Concat(context.References.Where(static capture => capture.Name == "context.type_parameter_owner"))
+			.Concat(context.References.Where(static capture => capture.Name is "context.method" or "context.type_parameter_owner"))
 			.ToArray();
 		var typeParameterScopes = context.References
 			.Where(static capture => capture.Name == "context.type_parameters")
@@ -247,6 +248,10 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 			globalAliases,
 			typeParameters) with
 		{
+			HasEntryPointEvidence = context.References.Any(static capture =>
+				capture.Name == "context.top_level_statement" ||
+				capture.Name == "context.method" && capture.IsStatic &&
+				string.Equals(capture.CapturedName, "Main", StringComparison.Ordinal)),
 			TypeParameterScopes = typeParameterScopes,
 			CSharpUsingDirectives = usingDirectives
 		};
