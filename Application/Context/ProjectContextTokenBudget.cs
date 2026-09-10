@@ -10,7 +10,15 @@ public sealed record ProjectContextTokenBudgetSkippedFile(
 	long? RemainingEstimatedTokens = null,
 	int? Hop = null,
 	int? BaseImportancePriority = null,
-	FocusRankingVia? Via = null);
+	FocusRankingVia? Via = null)
+{
+	/// <summary>
+	/// The effective detail level this file was costed at, present only when the call asked for a
+	/// mix. A skipped entry has to say which level its estimate belongs to, or the caller cannot
+	/// tell whether lowering detail would have let it in.
+	/// </summary>
+	public string? Detail { get; init; }
+}
 
 public sealed record ProjectContextTokenBudgetReport(
 	long MaximumEstimatedTokens,
@@ -62,7 +70,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		int? hop = null,
 		int? baseImportancePriority = null,
 		FocusRankingVia? via = null,
-		string? sourcePath = null)
+		string? sourcePath = null,
+		string? detail = null)
 	{
 		ArgumentNullException.ThrowIfNull(path);
 		if (_precomputedReport is not null)
@@ -88,7 +97,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_remainingEstimatedTokens,
 			hop,
 			baseImportancePriority,
-			via);
+			via,
+			detail);
 		if (priority is not null)
 			RetainRankedSkippedFile(
 				path,
@@ -97,7 +107,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 				_remainingEstimatedTokens,
 				hop,
 				baseImportancePriority,
-				via);
+				via,
+				detail);
 		return false;
 	}
 
@@ -127,7 +138,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		long remainingEstimatedTokens,
 		int? hop,
 		int? baseImportancePriority,
-		FocusRankingVia? via)
+		FocusRankingVia? via,
+		string? detail)
 	{
 		var ranked = _rankedSkippedFiles ??=
 			new List<ProjectContextTokenBudgetSkippedFile>(MaximumReportedRankedSkippedFiles);
@@ -145,7 +157,7 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			remainingEstimatedTokens,
 			hop,
 			baseImportancePriority,
-			via));
+			via) { Detail = detail });
 		if (ranked.Count > MaximumReportedRankedSkippedFiles)
 			ranked.RemoveAt(MaximumReportedRankedSkippedFiles);
 	}
@@ -157,7 +169,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		long? remainingEstimatedTokens,
 		int? hop,
 		int? baseImportancePriority,
-		FocusRankingVia? via)
+		FocusRankingVia? via,
+		string? detail)
 	{
 		var largestSkippedFiles = _largestSkippedFiles ??=
 			new List<ProjectContextTokenBudgetSkippedFile>(MaximumReportedSkippedFiles);
@@ -174,7 +187,7 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 				remainingEstimatedTokens,
 				hop,
 				baseImportancePriority,
-				via));
+				via) { Detail = detail });
 		if (largestSkippedFiles.Count > MaximumReportedSkippedFiles)
 			largestSkippedFiles.RemoveAt(MaximumReportedSkippedFiles);
 	}

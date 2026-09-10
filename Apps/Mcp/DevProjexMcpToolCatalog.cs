@@ -173,6 +173,33 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string DetailByPatternProperty = """
+	"detail_by_pattern": {
+	  "type": "array",
+	  "maxItems": 16,
+	  "items": {
+	    "type": "object",
+	    "properties": {
+	      "patterns": {
+	        "type": "array",
+	        "minItems": 1,
+	        "maxItems": 32,
+	        "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+	        "description": "Project-relative globs with the same syntax, validation, and matcher as include_patterns."
+	      },
+	      "detail": {
+	        "type": "string",
+	        "enum": ["full", "compact", "signatures"],
+	        "description": "Detail level for files this entry claims."
+	      }
+	    },
+	    "required": ["patterns", "detail"],
+	    "additionalProperties": false
+	  },
+	  "description": "Per-file detail overrides layered on detail. Entries apply in order and the LAST matching entry wins, so list general globs before specific ones; note this is last-match, not first-match. Never widens the selection: a glob matching nothing is reported in the trailer. Invalid entries name their index."
+	}
+	""";
+
 	private const string TrackedOnlyProperty = """
 	"tracked_only": {
 	  "description": "Restrict results to files tracked by Git; accepts a boolean or the string 'true' or 'false'.",
@@ -276,6 +303,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
+	    {{DetailByPatternProperty}},
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
 	    {{TopFilesProperty}},
@@ -296,6 +324,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
+	    {{DetailByPatternProperty}},
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
 	    {{RankProperty}},

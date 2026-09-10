@@ -11,9 +11,11 @@ namespace DevProjex.Application.Compression;
 /// </summary>
 public sealed class ContentDetailPatternSet
 {
-	private readonly IReadOnlyList<Regex> _compiled;
+	// Grouped by the caller's pattern rather than flattened, because a brace group expands to
+	// several automata and the report has to say which of the *supplied* masks claimed nothing.
+	private readonly IReadOnlyList<Regex[]> _compiled;
 
-	private ContentDetailPatternSet(IReadOnlyList<string> patterns, IReadOnlyList<Regex> compiled)
+	private ContentDetailPatternSet(IReadOnlyList<string> patterns, IReadOnlyList<Regex[]> compiled)
 	{
 		Patterns = patterns;
 		_compiled = compiled;
@@ -33,16 +35,15 @@ public sealed class ContentDetailPatternSet
 		if (patterns.Count == 0)
 			throw new ProjectRelativeGlobException("patterns must not be empty");
 
-		var expanded = new List<string>(patterns.Count);
-		foreach (var pattern in patterns)
+		var compiled = new Regex[patterns.Count][];
+		for (var index = 0; index < patterns.Count; index++)
 		{
+			var pattern = patterns[index];
 			ProjectRelativeGlob.Validate(pattern);
-			expanded.AddRange(ProjectRelativeGlob.ExpandBraces(pattern));
+			compiled[index] = ProjectRelativeGlob.ExpandBraces(pattern)
+				.Select(ProjectRelativeGlob.Compile)
+				.ToArray();
 		}
-
-		var compiled = new Regex[expanded.Count];
-		for (var index = 0; index < expanded.Count; index++)
-			compiled[index] = ProjectRelativeGlob.Compile(expanded[index]);
 		return new ContentDetailPatternSet(patterns.ToArray(), compiled);
 	}
 
@@ -54,7 +55,26 @@ public sealed class ContentDetailPatternSet
 		var normalized = PathUtility.NormalizeSeparators(relativePath);
 		for (var index = 0; index < _compiled.Count; index++)
 		{
-			if (_compiled[index].IsMatch(normalized))
+			if (MatchesNormalized(index, normalized))
+				return true;
+		}
+		return false;
+	}
+
+	/// <summary>Whether the caller's pattern at <paramref name="patternIndex"/> claims this file.</summary>
+	public bool MatchesPattern(int patternIndex, string relativePath)
+	{
+		ArgumentNullException.ThrowIfNull(relativePath);
+		ArgumentOutOfRangeException.ThrowIfNegative(patternIndex);
+		ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(patternIndex, _compiled.Count);
+		return MatchesNormalized(patternIndex, PathUtility.NormalizeSeparators(relativePath));
+	}
+
+	private bool MatchesNormalized(int patternIndex, string normalizedPath)
+	{
+		foreach (var regex in _compiled[patternIndex])
+		{
+			if (regex.IsMatch(normalizedPath))
 				return true;
 		}
 		return false;

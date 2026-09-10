@@ -24,6 +24,8 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumExclusionTokenLength = 32;
 	private const int MaximumSearchContentCharacters = 49_000;
 	private const int MaximumAnalyzeTopFilesCharacters = 32_000;
+	private const int MaximumReportedUnmatchedDetailPatterns = 8;
+	private const int MaximumReportedDetailPatternCharacters = 80;
 	private const long MaximumSearchInspectedBytes = 64L * 1024 * 1024;
 	private const string StoredTreePreviewTruncationNotice =
 		"[Tree preview truncated to fit the stored-pack response limit. Use read_pack for the complete pack.]";
@@ -49,10 +51,11 @@ internal sealed class DevProjexMcpTools(
 		"git_scope", "max_file_bytes", "max_depth", "format");
 	private readonly IReadOnlySet<string> selectionArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail",
-		"tracked_only", "git_scope", "top_files", "max_file_bytes");
+		"detail_by_pattern", "tracked_only", "git_scope", "top_files", "max_file_bytes");
 	private readonly IReadOnlySet<string> packArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "view",
-		"format", "detail", "tracked_only", "git_scope", "rank", "focus", "max_tokens", "max_file_bytes");
+		"format", "detail", "detail_by_pattern", "tracked_only", "git_scope", "rank", "focus",
+		"max_tokens", "max_file_bytes");
 	private readonly IReadOnlySet<string> searchArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "context_lines",
 		"ignore_case", "max_results", "tracked_only", "git_scope", "max_file_bytes");
@@ -212,7 +215,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Measures a selection before packaging: transformed content, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns structured measured-versus-estimated metrics after required protection. project comes from list_projects. Key parameters: detail=full|compact|signatures, top_files=1..1000, git_scope, paths, patterns, profile, and max_file_bytes.")]
+		"Measures a selection before packaging: transformed content, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns structured measured-versus-estimated metrics after required protection. project comes from list_projects. Key parameters: detail=full|compact|signatures, top_files=1..1000, git_scope, paths, patterns, profile, and max_file_bytes. detail_by_pattern overrides detail per file; entries apply in order and the last matching entry wins, so list general globs before specific ones.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -223,15 +226,23 @@ internal sealed class DevProjexMcpTools(
 			var arguments = SelectionArguments(request.Params);
 			var topFileCount = arguments.OptionalInteger("top_files", 1, 1_000) ?? 10;
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
+			var detailOverrides = McpDetailOverrides.Parse(arguments);
 			var selection = await BuildSelectionAsync(
 				arguments,
 				cancellationToken,
 				includeOutputMetrics: false).ConfigureAwait(false);
-			var plan = selection.Plan;
+			var plan = Projects.ApplyDetailOverrides(selection.Plan, detailOverrides, cancellationToken);
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
+			var detailMix = ContentDetailSelection.Resolve(plan.Selection, effectiveDetail.Kinds) is { } analyzePolicy
+				? ContentDetailMix.Create(
+					analyzePolicy,
+					plan.SourceRoot,
+					plan.IncludedFiles,
+					cancellationToken)
+				: null;
 			operationProgress.Milestone(11, $"transforming content 0/{plan.IncludedFiles.Count}");
 			await using var prepared = await Projects.MeasureAsync(
 					plan,
@@ -380,13 +391,14 @@ internal sealed class DevProjexMcpTools(
 				envelope,
 				CombineTrustedNotices(
 					FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
+					FormatDetailMix(detailMix),
 					FormatCompressionUnavailable(prepared.CompressionSnapshot),
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					SelectionNotices(plan, includeFilters: false, selection.NoticeContext, includeProtection: false)));
 		}, cancellationToken);
 
 	[Description(
-		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. focus requires rank=importance and seeds graph-hop ordering without widening selection; max_tokens applies greedy content admission and reports heuristic token estimates, not tokenizer counts.")]
+		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. focus requires rank=importance and seeds graph-hop ordering without widening selection; max_tokens applies greedy content admission and reports heuristic token estimates, not tokenizer counts. detail_by_pattern overrides detail per file; entries apply in order and the last matching entry wins, so list general globs before specific ones.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -396,6 +408,7 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(1, "selecting files");
 			var arguments = McpJsonArguments.Create(request.Params, packArgumentNames);
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
+			var detailOverrides = McpDetailOverrides.Parse(arguments);
 			var maximumEstimatedTokens = arguments.OptionalInt64("max_tokens", 1, long.MaxValue);
 			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
 			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
@@ -418,6 +431,13 @@ internal sealed class DevProjexMcpTools(
 				throw new McpToolException(
 					McpErrorCodes.InvalidArguments,
 					$"{McpErrorCodes.InvalidArguments}: rank is valid only when pack_context includes file content.");
+			}
+			if (detailOverrides is not null && view == ProjectContextView.Tree)
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: {McpDetailOverrides.ParameterName} is valid only when " +
+					"pack_context includes file content.");
 			}
 			var selection = await BuildSelectionAsync(
 					arguments,
@@ -442,7 +462,14 @@ internal sealed class DevProjexMcpTools(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
-			plan = Projects.ApplyDetail(plan, effectiveDetail, cancellationToken);
+			plan = Projects.ApplyDetail(plan, effectiveDetail, detailOverrides, cancellationToken);
+			var detailMix = ContentDetailSelection.Resolve(plan.Selection) is { } packPolicy
+				? ContentDetailMix.Create(
+					packPolicy,
+					plan.SourceRoot,
+					plan.IncludedFiles,
+					cancellationToken)
+				: null;
 			var rankingService = rank is null
 				? null
 				: new ImportanceRankingService(
@@ -587,6 +614,7 @@ internal sealed class DevProjexMcpTools(
 						FormatUnscannableNotice(
 							writeResult?.UnscannableFiles,
 							UnscannableResultKind.Pack),
+						FormatDetailMix(detailMix),
 						FormatCompressionUnavailable(prepared?.CompressionSnapshot),
 						trustedPlanWarnings);
 					if (writeResult?.TokenBudget is { } inlineBudget)
@@ -632,6 +660,7 @@ internal sealed class DevProjexMcpTools(
 						UnscannableResultKind.Pack),
 					CombineTrustedNotices(
 						FormatRankingReport(writeResult?.Ranking, writeResult?.TokenBudget),
+						FormatDetailMix(detailMix),
 						FormatCompressionUnavailable(prepared?.CompressionSnapshot),
 						trustedPlanWarnings));
 				await operationProgress.CompleteAsync(
@@ -1788,6 +1817,41 @@ internal sealed class DevProjexMcpTools(
 		};
 	}
 
+	/// <summary>
+	/// States the mix a per-file detail call produced. Counts only; a mask that claimed nothing is
+	/// named because selection is never widened, so a typo would otherwise look like a level that
+	/// simply had no files.
+	/// </summary>
+	private static string? FormatDetailMix(ContentDetailMix? mix)
+	{
+		if (mix is null)
+			return null;
+		var summary =
+			$"[Detail] full {mix.FullFileCount.ToString(CultureInfo.InvariantCulture)} · " +
+			$"compact {mix.CompactFileCount.ToString(CultureInfo.InvariantCulture)} · " +
+			$"signatures {mix.SignaturesFileCount.ToString(CultureInfo.InvariantCulture)} · " +
+			$"overrides {mix.MatchedPatternCount.ToString(CultureInfo.InvariantCulture)} of " +
+			$"{mix.TotalPatternCount.ToString(CultureInfo.InvariantCulture)} patterns matched";
+		if (mix.UnmatchedPatterns.Count == 0)
+			return summary;
+
+		var listed = mix.UnmatchedPatterns.Take(MaximumReportedUnmatchedDetailPatterns).ToArray();
+		var names = string.Join(
+			", ",
+			listed.Select(pattern => McpTextEscaping.EscapeSingleLine(Truncate(pattern))));
+		var remaining = mix.UnmatchedPatterns.Count - listed.Length;
+		return summary +
+		       $"\n[Detail] unmatched: {names}" +
+		       (remaining > 0
+			       ? $" and {remaining.ToString(CultureInfo.InvariantCulture)} more"
+			       : string.Empty);
+	}
+
+	private static string Truncate(string pattern) =>
+		pattern.Length <= MaximumReportedDetailPatternCharacters
+			? pattern
+			: pattern[..MaximumReportedDetailPatternCharacters] + "…";
+
 	private static string FormatTokenBudgetReport(ProjectContextTokenBudgetReport report)
 	{
 		var output = new StringBuilder(512);
@@ -1812,7 +1876,12 @@ internal sealed class DevProjexMcpTools(
 					.Append(McpTextEscaping.EscapeSingleLine(file.Path))
 					.Append(" (")
 					.Append(file.EstimatedTokens.ToString(CultureInfo.InvariantCulture))
-					.Append(" estimated tokens)\n");
+					.Append(" estimated tokens");
+				// Only under a mixed call: an estimate is only actionable next to the level it was
+				// measured at.
+				if (file.Detail is { } skippedDetail)
+					output.Append(" at ").Append(skippedDetail);
+				output.Append(")\n");
 			}
 			if (report.AdditionalSkippedFileCount > 0)
 			{

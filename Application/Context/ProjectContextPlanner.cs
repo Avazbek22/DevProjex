@@ -559,7 +559,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		bool? stripComments,
 		bool? stripBlankLines,
 		bool? hidePrivateData,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyList<ContentDetailOverride>? contentDetailOverrides = null)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
 		cancellationToken.ThrowIfCancellationRequested();
@@ -569,7 +570,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			HidePrivateData = hidePrivateData ?? baseline.Selection.HidePrivateData,
 			CompressCode = compressCode ?? baseline.Selection.CompressCode,
 			StripComments = stripComments ?? baseline.Selection.StripComments,
-			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines
+			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines,
+			ContentDetailOverrides = contentDetailOverrides ?? baseline.Selection.ContentDetailOverrides
 		};
 		var transformed = baseline with
 		{

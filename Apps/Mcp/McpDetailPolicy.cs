@@ -61,6 +61,15 @@ internal static class McpDetailPolicy
 		_ => throw new ArgumentOutOfRangeException(nameof(level), level, null)
 	};
 
+	/// <summary>
+	/// The transformations a level asks for on its own, before the profile's own kinds are unioned
+	/// in. Shared with the per-file overrides so one level token cannot mean two different things.
+	/// </summary>
+	public static CodeTransformKinds RequestedKinds(McpDetailLevel level) => ResolveRequestedKinds(level);
+
+	/// <summary>The level a set of effective kinds corresponds to, for reporting.</summary>
+	public static McpDetailLevel EffectiveLevel(CodeTransformKinds kinds) => ResolveEffectiveLevel(kinds);
+
 	private static CodeTransformKinds ResolveRequestedKinds(McpDetailLevel level) => level switch
 	{
 		McpDetailLevel.Full => CodeTransformIdentity.Resolve(false, false, false),
