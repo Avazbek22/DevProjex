@@ -681,13 +681,13 @@ public sealed class ProjectContextDocumentService(
 
 	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan)
 	{
-		var kinds = CodeTransformIdentity.Resolve(
-			plan.Selection.CompressCode == true,
-			plan.Selection.StripComments == true,
-			plan.Selection.StripBlankLines == true);
+		var kinds = ContentDetailSelection.ResolveContextKinds(plan.Selection);
 		return ContentTransformationContext.For(
 			codeCompressionSession is not null && kinds != CodeTransformKinds.None
 				? new CodeCompressionContext(plan.SourceRoot, codeCompressionSession, kinds)
+				{
+					Policy = ContentDetailSelection.Resolve(plan.Selection)
+				}
 				: null,
 			CreateRedactionContext(plan));
 	}

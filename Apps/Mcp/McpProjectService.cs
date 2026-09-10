@@ -758,11 +758,17 @@ internal sealed class McpProjectService(
 		ProjectContextPlan plan,
 		McpDetailLevel detail = McpDetailLevel.Full)
 	{
-		var transformKinds = ResolveDetail(plan, detail).Kinds;
+		var requestedKinds = ResolveDetail(plan, detail).Kinds;
+		// The gate is every kind any file can request, not the level unmatched files land on: a call
+		// whose default is full and whose overrides ask for signatures has no default kinds at all.
+		var transformKinds = ContentDetailSelection.ResolveContextKinds(plan.Selection, requestedKinds);
 		return ContentTransformationContext.For(
 			transformKinds == CodeTransformKinds.None
 				? null
-				: new CodeCompressionContext(plan.SourceRoot, services.CompressionSession, transformKinds),
+				: new CodeCompressionContext(plan.SourceRoot, services.CompressionSession, transformKinds)
+				{
+					Policy = ContentDetailSelection.Resolve(plan.Selection, requestedKinds)
+				},
 			new SecretRedactionContext(
 				plan.SourceRoot,
 				services.RedactionSession,

@@ -350,10 +350,7 @@ public sealed class ExportContextCommandHandler(
 		if (view is not (ProjectContextView.Content or ProjectContextView.TreeContent))
 			return null;
 
-		var transformKinds = CodeTransformIdentity.Resolve(
-			plan.Selection.CompressCode == true,
-			plan.Selection.StripComments == true,
-			plan.Selection.StripBlankLines == true);
+		var transformKinds = ContentDetailSelection.ResolveContextKinds(plan.Selection);
 		var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
 			plan.Selection.HideSecrets == true,
 			plan.Selection.HidePrivateData == true);
@@ -363,6 +360,9 @@ public sealed class ExportContextCommandHandler(
 					plan.SourceRoot,
 					services.CodeCompressionSession,
 					transformKinds)
+				{
+					Policy = ContentDetailSelection.Resolve(plan.Selection)
+				}
 				: null,
 			redactionFeatures != SecretRedactionFeatures.None
 				? new SecretRedactionContext(

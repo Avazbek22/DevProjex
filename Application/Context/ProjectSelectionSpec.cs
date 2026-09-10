@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace DevProjex.Application.Context;
 
 public enum ProjectExclusion
@@ -52,6 +54,28 @@ public sealed record ProjectSelectionSpec(
 	/// components are applied.
 	/// </summary>
 	public ProjectSelectionApplicationIntent? ApplicationIntent { get; init; }
+
+	/// <summary>
+	/// The content transformations the resolved profile mandates on its own, before any call-level
+	/// toggle. The three booleans above hold profile OR call, and once merged the profile's share
+	/// cannot be recovered from them - which matters because a per-file detail override back to
+	/// <c>full</c> must add nothing while still never removing what the profile requires.
+	///
+	/// Null on a specification that never crossed the selection resolver. Excluded from JSON: this
+	/// is an in-process resolution detail, not part of the desktop request shape.
+	/// </summary>
+	[JsonIgnore]
+	public CodeTransformKinds? ProfileContentKinds { get; init; }
+
+	/// <summary>
+	/// Ordered per-file detail overrides, when the call asked for a mix. Null means one detail level
+	/// applies to the whole selection, which is the historical behaviour and stays byte-for-byte
+	/// identical. Only the overrides live here; each surface unions them with its own call level
+	/// through <see cref="ContentDetailSelection"/>, so the two cannot drift apart.
+	/// Excluded from JSON for the same reason as <see cref="ProfileContentKinds"/>.
+	/// </summary>
+	[JsonIgnore]
+	public IReadOnlyList<ContentDetailOverride>? ContentDetailOverrides { get; init; }
 
 	// Local profiles carry complete checkbox state, not merely the currently checked names.
 	// This internal payload lets every presentation surface apply the same rule: known rows

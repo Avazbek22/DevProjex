@@ -1281,6 +1281,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		Append($"compress-code:{selection.CompressCode == true}");
 		Append($"strip-comments:{selection.StripComments == true}");
 		Append($"strip-blank-lines:{selection.StripBlankLines == true}");
+		// Only appended when the call actually asked for a mix, so a plan without per-file detail
+		// keeps the fingerprint it has always had.
+		foreach (var entry in selection.ContentDetailOverrides ?? [])
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Append($"detail:{(int)entry.RequestedKinds}");
+			foreach (var pattern in entry.Patterns.Patterns)
+				Append("detail-pattern:" + pattern);
+		}
 		foreach (var root in selection.Roots ?? [])
 		{
 			cancellationToken.ThrowIfCancellationRequested();
