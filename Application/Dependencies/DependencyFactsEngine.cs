@@ -2259,8 +2259,13 @@ public sealed class DependencyFactsEngine : IDisposable
 				import.IsWildcard ? import.Specifier + ".*" : import.Specifier,
 				reason, import.Site, candidates);
 
-		private DependencyEdge Edge(FileFacts source, ReferenceFact reference, ResolutionStatus status, string? target, string reason, IReadOnlyList<string> candidates) =>
-			CreateEdge(source, target, reference.Layer, status, reference.Name, reason, reference.Site, candidates);
+		private DependencyEdge Edge(FileFacts source, ReferenceFact reference, ResolutionStatus status, string? target, string reason, IReadOnlyList<string> candidates)
+		{
+			var edge = CreateEdge(source, target, reference.Layer, status, reference.Name, reason, reference.Site, candidates);
+			return reference.SyntaxKind == "call_type_argument"
+				? edge with { Reasons = [.. edge.Reasons, "type argument of a call"] }
+				: edge;
+		}
 
 		private DependencyEdge CreateEdge(FileFacts source, string? target, EvidenceLayer layer, ResolutionStatus status, string reference, string reason, SourceSite site, IReadOnlyList<string> candidates)
 		{

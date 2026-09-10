@@ -228,3 +228,16 @@ growth was below 10% on every corpus. All three pre-registered gates therefore p
 public `focus`/`--focus` input is eligible for v5.2. This is still experimental: the protocol
 shows improved file admission around a known seed, not better model attention or task
 correctness.
+
+### C# generic-call evidence validation
+
+The frozen protocol was rerun on 2026-09-10 after adding C# type arguments written on
+generic method calls as syntactic dependency evidence. The registry, tasks, budgets,
+comparators, sufficient sets, and gates were unchanged. No RecallNew, AllRequired, oracle,
+or irrelevant-token-share cell became worse than the run at
+`963d4f33b2d1196637193ff021bd36e40ecd94e4`. One cell improved: DevProjex
+`mandatory-redaction` at 8,000 tokens under seed-first retained RecallNew `0.0000` and
+AllRequired `false`, while irrelevant-token share moved from `0.943250` to `0.943236`.
+The other cells were unchanged. The complete result is
+`tools/RankingEval/results/2026-09-10-csharp-call-evidence.json`, produced with product and
+evaluator SHA `bb7c7f05ac64694373b71eddcd850695cfa26362`.

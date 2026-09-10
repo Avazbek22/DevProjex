@@ -16,10 +16,12 @@ The current engine records two evidence layers:
 - **TypeReference** covers C# type positions: field, local, `foreach`, property, event, indexer,
   parameter, method, local-function and delegate return, base and `catch` types; generic arguments
   and constraints; attributes; object creation; `typeof`, `sizeof`, `default`, casts, `as`, `is`,
-  and declaration-pattern types. Tuple element names, bare identifiers, method names, variable names,
-  string matches, and dependency-injection registrations are not edges.
+  declaration-pattern types, and type arguments written on a generic method call. A call such as
+  `AddScoped<IService, Service>()` therefore supplies two syntactic type references, but the method
+  name is not a reference and the edge does not claim that a runtime container will bind those types.
+  Tuple element names, bare identifiers, method names, variable names, and string matches are not edges.
 
-Layer C semantic and runtime evidence is deliberately absent. Reflection, DI registrations,
+Layer C semantic and runtime evidence is deliberately absent. Runtime DI behavior,
 templates, generated code, route discovery, Python import hooks, and other dynamic relationships are
 therefore not inferred.
 
