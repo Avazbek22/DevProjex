@@ -8,9 +8,9 @@ public sealed class SmartSecretsDetectorTests
 	internal static readonly SmartSecretsDetector Detector = CreateDetector();
 
 	[Fact]
-	public void RulesIdentity_UsesVersionFiveForStructuredCacheInvalidation()
+	public void RulesIdentity_UsesVersionSixForStructuredCacheInvalidation()
 	{
-		Assert.EndsWith(":smart-secrets-v5", Detector.RulesIdentity, StringComparison.Ordinal);
+		Assert.EndsWith(":smart-secrets-v6", Detector.RulesIdentity, StringComparison.Ordinal);
 	}
 
 	[Theory]

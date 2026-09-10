@@ -141,7 +141,6 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		    "exclusions": {
 		      "type": "array",
 		      "maxItems": {{ProjectSelectionTokens.Exclusions.Count}},
-		      "uniqueItems": true,
 		      "items": { "type": "string", "enum": [{{tokens}}] },
 		      "description": "Full desired set of built-in exclusion toggles. An empty array turns every toggle off (widest scan); omit the parameter to keep the server baseline — analyze echoes the effective set. Overrides the server baseline and any profile exclusions for this call. Tokens match case-insensitively; duplicates are rejected. hidden-* follow the platform hidden attribute; on Unix-like systems dot-named entries belong to the dot-* toggles."
 		    }
@@ -353,12 +352,12 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProjectProperty}},
 	    {{BranchProperty}},
 	    {{ProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
+	    "path": { "type": "string", "minLength": 1, "description": "Single-file form. Exactly one of path or requests is required; supplying both is rejected before file access. The path must name an existing file inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
 	    "requests": {
 	      "type": "array",
 	      "minItems": 1,
 	      "maxItems": 8,
-	      "description": "Batch form: up to eight file requests and sixteen ranges total. Mutually exclusive with path and its range arguments.",
+	      "description": "Batch form: up to eight file requests and sixteen ranges total. Exactly one of requests or path is required; supplying both is rejected before file access. Single-file range arguments cannot be combined with requests.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
@@ -387,10 +386,6 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
-	  "oneOf": [
-	    { "required": ["path"], "not": { "required": ["requests"] } },
-	    { "required": ["requests"], "not": { "required": ["path"] } }
-	  ],
 	  "additionalProperties": false
 	}
 	""";
@@ -405,7 +400,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "description": "One seed path, or up to 16 seed paths, inside the effective project selection.",
 	      "oneOf": [
 	        { "type": "string", "minLength": 1, "maxLength": 4096 },
-	        { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
 	      ]
 	    },
 	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Static relationship direction: dependencies are files the seed references, dependents are files that reference the seed, both returns both sections." },

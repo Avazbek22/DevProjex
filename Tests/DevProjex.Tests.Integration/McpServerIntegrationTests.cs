@@ -1523,7 +1523,7 @@ public sealed class McpServerIntegrationTests
 			Assert.Equal(
 				ProjectSelectionTokens.Exclusions.Count,
 				published.GetProperty("maxItems").GetInt32());
-			Assert.True(published.GetProperty("uniqueItems").GetBoolean());
+			Assert.False(published.TryGetProperty("uniqueItems", out _));
 			var propertyNames = schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name).ToArray();
 			var globAnchor = Array.IndexOf(propertyNames, "exclude_patterns");
 			var profileAnchor = Array.IndexOf(propertyNames, "profile");
@@ -1643,7 +1643,8 @@ public sealed class McpServerIntegrationTests
 			Assert.Contains("exclusions", Text(leaked), StringComparison.Ordinal);
 		}
 
-		// The published schema declares uniqueItems, and case-variant repeats count too.
+		// Runtime validation rejects case-variant repeats even though the portable schema subset
+		// does not advertise a uniqueness keyword.
 		var duplicated = await delegatedServer.CallAsync(
 			"get_tree",
 			new Dictionary<string, object?> { ["exclusions"] = new[] { "dot-files", "DOT-FILES" } });
@@ -1976,7 +1977,16 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(
 			McpGetFileRequestSet.MaximumRanges,
 			batchRequests.GetProperty("items").GetProperty("properties").GetProperty("ranges").GetProperty("maxItems").GetInt32());
-		Assert.Equal(2, getFileSchema.GetProperty("oneOf").GetArrayLength());
+		Assert.False(getFileSchema.TryGetProperty("oneOf", out _));
+		Assert.False(getFileSchema.TryGetProperty("not", out _));
+		Assert.Contains(
+			"Exactly one of path or requests is required",
+			getFileSchema.GetProperty("properties").GetProperty("path").GetProperty("description").GetString(),
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Exactly one of requests or path is required",
+			batchRequests.GetProperty("description").GetString(),
+			StringComparison.Ordinal);
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("ignore_case");
 		Assert.Equal(2, searchBoolean.GetProperty("oneOf").GetArrayLength());
@@ -2124,6 +2134,56 @@ public sealed class McpServerIntegrationTests
 				var items = patterns.GetProperty("items");
 				Assert.Equal(1, items.GetProperty("minLength").GetInt32());
 				Assert.Equal(512, items.GetProperty("maxLength").GetInt32());
+			}
+		}
+	}
+
+	[Fact]
+	public async Task PublishedInputSchemasUseThePortableKeywordSubset()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			agentExclusions: true);
+
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
+		foreach (var tool in tools)
+			AssertPortableKeywords(tool.Name, tool.ProtocolTool.InputSchema);
+	}
+
+	private static void AssertPortableKeywords(string toolName, JsonElement schema)
+	{
+		string[] allowed =
+		[
+			"type", "properties", "required", "description", "enum", "items",
+			"minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength",
+			"pattern", "additionalProperties", "oneOf", "default"
+		];
+
+		foreach (var property in schema.EnumerateObject())
+		{
+			Assert.True(
+				allowed.Contains(property.Name, StringComparer.Ordinal),
+				$"{toolName}: unsupported schema keyword '{property.Name}'.");
+			if (property.NameEquals("properties"))
+			{
+				foreach (var parameter in property.Value.EnumerateObject())
+					AssertPortableKeywords(toolName, parameter.Value);
+			}
+			else if (property.NameEquals("items") && property.Value.ValueKind == JsonValueKind.Object)
+			{
+				AssertPortableKeywords(toolName, property.Value);
+			}
+			else if (property.NameEquals("oneOf"))
+			{
+				foreach (var alternative in property.Value.EnumerateArray())
+					AssertPortableKeywords(toolName, alternative);
 			}
 		}
 	}
