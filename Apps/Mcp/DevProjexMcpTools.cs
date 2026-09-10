@@ -682,7 +682,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regular expression. Use it to locate symbols or phrases; use related_files instead for static dependency links, or get_file for a known file page. Returns path:line:text matches, merged context groups separated by --, and the count of additional matches beyond max_results; line numbers refer to returned text after replacements, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further.")]
+		"Searches safe transformed project text with a timed .NET regular expression. Use it to locate symbols or phrases; use related_files instead for static dependency links, or get_file for a known file page. Returns path:line:text matches, merged context groups separated by --, and the count of additional matches beyond max_results; line numbers refer to returned text after replacements, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -892,7 +892,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page, or requests for up to eight files and sixteen inclusive ranges; the forms are mutually exclusive. Batch responses report ok, partial, not-returned, or unavailable for every range, merge overlaps, and share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements; start_column continues a single-file page.")]
+		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page, or requests for up to eight files and sixteen inclusive ranges; the forms are mutually exclusive. Send one batched call whenever you want more than one file or more than one range, as requests=[{\"path\":\"src/a.ts\",\"ranges\":[{\"start_line\":10,\"end_line\":30}]}]. Batch responses report ok, partial, not-returned, or unavailable for every range, merge overlaps, and share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements; start_column continues a single-file page.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>

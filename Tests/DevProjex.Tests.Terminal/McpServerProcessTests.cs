@@ -335,7 +335,7 @@ public sealed partial class McpServerProcessTests
 			clientPhase.Token))
 		{
 			var instructions = Assert.IsType<string>(client.ServerInstructions);
-			Assert.InRange(instructions.Length, 600, 900);
+			Assert.InRange(instructions.Length, 600, 960);
 			Assert.Contains("list_projects", instructions, StringComparison.Ordinal);
 			Assert.Contains("pack_context", instructions, StringComparison.Ordinal);
 			Assert.Contains("DEVPROJEX_REDACTED[<category>#<n>]", instructions, StringComparison.Ordinal);

@@ -150,6 +150,20 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void McpDocumentationShowsSearchFollowedByOneBatchedRead()
+	{
+		var server = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Docs", "McpServer.md"));
+		var normalized = Regex.Replace(server, @"\s+", " ");
+
+		Assert.Contains("### Search, then one batched read", server, StringComparison.Ordinal);
+		Assert.Contains("\"requests\": [", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"Four single reads of four locations are one call",
+			normalized,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void McpReadmeNetworkBoundaryMatchesRemoteOptIn()
 	{
 		var rootPath = FindRepositoryRoot();

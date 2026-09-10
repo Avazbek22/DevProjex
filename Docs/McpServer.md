@@ -151,7 +151,9 @@ for transformed size and token estimates before packing, `search_project` for
 textual locations, `related_files` for statically evidenced relationships,
 `get_file` for one file page, and `pack_context` for multi-file context. A large
 pack returns an id that `read_pack` pages; `read_pack` does not recreate expired
-packs.
+packs. When a step wants more than one file or more than one range, send one
+batched `get_file` call instead of several single reads; see
+[Search, then one batched read](#search-then-one-batched-read).
 
 ## Security Model
 
@@ -633,6 +635,35 @@ inspection withheld the file. The latter status contains only a count-safe reaso
 The complete batch, including section headers, is limited to 1,000 lines and 50,000
 characters. A partial section reports the next 1-based `start_line` and
 `start_column`; call `get_file` again for that continuation.
+
+### Search, then one batched read
+
+This is the normal reading pattern, not an advanced one. A search returns several
+interesting locations; the follow-up is a single call, not one call per location.
+
+```json
+{"name": "search_project", "arguments": {"pattern": "createRouter", "context_lines": 2}}
+```
+
+```json
+{
+  "name": "get_file",
+  "arguments": {
+    "requests": [
+      {"path": "src/hono-base.ts", "ranges": [{"start_line": 415, "end_line": 430}]},
+      {"path": "src/hono.test.ts", "ranges": [{"start_line": 811, "end_line": 855}]},
+      {"path": "src/utils/url.ts", "ranges": [{"start_line": 1, "end_line": 95}]},
+      {"path": "src/utils/url.test.ts", "ranges": [{"start_line": 147, "end_line": 175}]}
+    ]
+  }
+}
+```
+
+Four single reads of four locations are one call with four records. The batch
+reads and redacts each physical file once, reports a status per range, and pays
+one set of response notices instead of four. Use the single `path` form only when
+exactly one range of one file is wanted.
+
 Numeric parameters accept JSON numbers and decimal numeric strings.
 Boolean parameters accept JSON booleans and the exact strings `"true"` and
 `"false"`.

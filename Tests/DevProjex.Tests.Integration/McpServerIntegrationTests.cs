@@ -2139,6 +2139,35 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task ToolTextAsksForOneBatchedReadInsteadOfSeveralSingleReads()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+		var getFile = tools.Single(static tool => tool.Name == "get_file").ProtocolTool.Description!;
+		var search = tools.Single(static tool => tool.Name == "search_project").ProtocolTool.Description!;
+		var instructions = server.Client.ServerInstructions!;
+
+		// The batch form already worked; agents never chose it because nothing said when to.
+		Assert.Contains(
+			"whenever you want more than one file or more than one range",
+			getFile,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"requests=[{\"path\":\"src/a.ts\",\"ranges\":[{\"start_line\":10,\"end_line\":30}]}]",
+			getFile,
+			StringComparison.Ordinal);
+		Assert.Contains("one batched get_file requests call", search, StringComparison.Ordinal);
+		Assert.Contains("one batched get_file call", instructions, StringComparison.Ordinal);
+		Assert.Single(
+			Regex.Matches(instructions, "batched get_file", RegexOptions.None, TimeSpan.FromSeconds(2)));
+	}
+
+	[Fact]
 	public async Task PublishedInputSchemasUseThePortableKeywordSubset()
 	{
 		using var workspace = new TemporaryDirectory();
