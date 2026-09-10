@@ -679,82 +679,397 @@ internal static class StructuredSecretDetector
 			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			if (!LooksLikeConnectionString(line))
 				continue;
-			var queryStyle = Contains(line, "jdbc:");
 
-			var position = 0;
-			while (position < line.Length)
+			var regionSearchStart = 0;
+			while (TryFindConnectionRegion(line, ref regionSearchStart, out var region))
 			{
-				var equals = line[position..].IndexOf('=');
-				if (equals < 0)
-					break;
-				equals += position;
-				var keyStart = equals - 1;
-				while (keyStart >= 0 && IsConnectionKeyCharacter(line[keyStart]))
-					keyStart--;
-				keyStart++;
-				var key = line[keyStart..equals].Trim();
-				if (key.Equals("password", StringComparison.OrdinalIgnoreCase) ||
-				    key.Equals("pwd", StringComparison.OrdinalIgnoreCase))
-				{
-					var value = FindConnectionValue(line, equals + 1, queryStyle);
-					AddFinding(
-						content,
-						lineStart + value.Start,
-						value.Length,
-						"connection-password",
-						ConnectionPasswordOrder,
-						findings);
-					position = Math.Max(equals + 1, value.End + 1);
-					continue;
-				}
-
-				position = equals + 1;
+				AddConnectionPasswords(content, line, lineStart, region, findings);
+				CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			}
 		}
 	}
 
-	private static TextSpan FindConnectionValue(ReadOnlySpan<char> line, int start, bool queryStyle)
+	private static bool TryFindConnectionRegion(
+		ReadOnlySpan<char> line,
+		ref int searchStart,
+		out ConnectionRegion region)
 	{
-		while (start < line.Length && char.IsWhiteSpace(line[start]))
-			start++;
-		if (start >= line.Length)
-			return new TextSpan(start, 0);
-
-		if (TryGetConnectionQuoteToken(line[start..], out var quoteToken))
+		if (searchStart == 0)
 		{
-			start += quoteToken.Length;
-			var quotedEnd = start;
-			while (quotedEnd < line.Length)
+			var first = IndexOfFirstNonWhitespace(line);
+			if (first >= 0 &&
+			    (TryCreateConnectionRegion(line, first, line.Length, out region) ||
+			     TryGetHttpHeaderConnectionStart(line, first, out var headerStart) &&
+			     TryCreateConnectionRegion(line, headerStart, line.Length, out region)))
 			{
-				if (!line[quotedEnd..].StartsWith(quoteToken, StringComparison.Ordinal))
-				{
-					quotedEnd++;
-					continue;
-				}
-				var nextQuote = quotedEnd + quoteToken.Length;
-				if (nextQuote < line.Length &&
-				    line[nextQuote..].StartsWith(quoteToken, StringComparison.Ordinal))
-				{
-					quotedEnd = nextQuote + quoteToken.Length;
-					continue;
-				}
-				break;
+				searchStart = region.End + 1;
+				return true;
 			}
-			return new TextSpan(start, quotedEnd - start);
 		}
 
-		var endDelimiter = queryStyle ? '&' : ';';
-		var end = start;
-		while (end < line.Length)
+		var position = Math.Max(0, searchStart);
+		while (position < line.Length)
 		{
-			if (line[end] == endDelimiter &&
-			    (queryStyle || !IsXmlEntityTerminator(line, start, end)))
+			var relativeQuote = line[position..].IndexOfAny('\'', '"');
+			if (relativeQuote < 0)
+				break;
+			var quote = position + relativeQuote;
+			if (IsBackslashEscaped(line, quote) ||
+			    !TryFindHostLiteralEnd(line, quote, out var literalEnd))
+			{
+				position = quote + 1;
+				continue;
+			}
+
+			if (TryCreateConnectionRegion(line, quote + 1, literalEnd, out region))
+			{
+				searchStart = literalEnd + 1;
+				return true;
+			}
+			position = literalEnd + 1;
+		}
+
+		region = default;
+		searchStart = line.Length;
+		return false;
+	}
+
+	private static bool TryGetHttpHeaderConnectionStart(
+		ReadOnlySpan<char> line,
+		int first,
+		out int regionStart)
+	{
+		regionStart = 0;
+		var relativeColon = line[first..].IndexOf(':');
+		if (relativeColon <= 0)
+			return false;
+		var colon = first + relativeColon;
+		var name = line[first..colon];
+		if (!IsSecretHttpHeader(name) || colon + 1 >= line.Length || line[colon + 1] != ' ')
+			return false;
+
+		regionStart = colon + 2;
+		while (regionStart < line.Length && line[regionStart] == ' ')
+			regionStart++;
+		return regionStart < line.Length;
+	}
+
+	private static bool IsSecretHttpHeader(ReadOnlySpan<char> name) =>
+		name.Equals("Cookie", StringComparison.OrdinalIgnoreCase) ||
+		name.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase) ||
+		name.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||
+		name.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase);
+
+	private static bool TryFindHostLiteralEnd(
+		ReadOnlySpan<char> line,
+		int openingQuote,
+		out int literalEnd)
+	{
+		var quote = line[openingQuote];
+		for (var position = openingQuote + 1; position < line.Length; position++)
+		{
+			if (line[position] == quote && !IsBackslashEscaped(line, position))
+			{
+				literalEnd = position;
+				return true;
+			}
+		}
+		literalEnd = 0;
+		return false;
+	}
+
+	private static bool IsBackslashEscaped(ReadOnlySpan<char> value, int position)
+	{
+		var slashCount = 0;
+		for (var index = position - 1; index >= 0 && value[index] == '\\'; index--)
+			slashCount++;
+		return (slashCount & 1) != 0;
+	}
+
+	private static bool TryCreateConnectionRegion(
+		ReadOnlySpan<char> line,
+		int candidateStart,
+		int candidateEnd,
+		out ConnectionRegion region)
+	{
+		region = default;
+		if (candidateStart >= candidateEnd)
+			return false;
+
+		var candidate = line[candidateStart..candidateEnd];
+		var anchorSignal = false;
+		var pairStart = candidateStart;
+		var style = ConnectionPairStyle.AdoNet;
+		if (candidate.StartsWith("jdbc:", StringComparison.OrdinalIgnoreCase))
+		{
+			var query = candidate.IndexOf('?');
+			if (query < 0 || !IsConnectionUriPrefix(candidate[..query]))
+				return false;
+			pairStart += query + 1;
+			style = ConnectionPairStyle.Query;
+			anchorSignal = true;
+		}
+		else if (TryGetConnectionUriQueryStart(candidate, out var relativePairStart))
+		{
+			pairStart += relativePairStart;
+			style = ConnectionPairStyle.Query;
+		}
+		else if (TryValidateConnectionPairs(
+			         line,
+			         pairStart,
+			         candidateEnd,
+			         ConnectionPairStyle.AdoNet,
+			         anchorSignal: false))
+		{
+			region = new ConnectionRegion(pairStart, candidateEnd, ConnectionPairStyle.AdoNet);
+			return true;
+		}
+		else
+		{
+			style = ConnectionPairStyle.LibPq;
+		}
+
+		if (!TryValidateConnectionPairs(line, pairStart, candidateEnd, style, anchorSignal))
+			return false;
+
+		region = new ConnectionRegion(pairStart, candidateEnd, style);
+		return true;
+	}
+
+	private static bool TryGetConnectionUriQueryStart(
+		ReadOnlySpan<char> candidate,
+		out int pairStart)
+	{
+		pairStart = 0;
+		var scheme = candidate.IndexOf("://", StringComparison.Ordinal);
+		if (scheme <= 0)
+			return false;
+		for (var index = 0; index < scheme; index++)
+		{
+			if (!(char.IsAsciiLetterOrDigit(candidate[index]) || candidate[index] is '+' or '-' or '.'))
+				return false;
+		}
+		var query = candidate.IndexOf('?');
+		if (query < scheme + 3 || !IsConnectionUriPrefix(candidate[..query]))
+			return false;
+		pairStart = query + 1;
+		return true;
+	}
+
+	private static bool IsConnectionUriPrefix(ReadOnlySpan<char> prefix)
+	{
+		foreach (var character in prefix)
+		{
+			if (char.IsWhiteSpace(character) || character is '"' or '\'' or '(' or ')' or '[' or ']' or '{' or '}' or ',' or ';' or '&' or '=')
+				return false;
+		}
+		return true;
+	}
+
+	private static bool TryValidateConnectionPairs(
+		ReadOnlySpan<char> line,
+		int start,
+		int end,
+		ConnectionPairStyle style,
+		bool anchorSignal)
+	{
+		var pairCount = 0;
+		var hasSignal = anchorSignal;
+		var position = start;
+		while (position < end)
+		{
+			if (style is not ConnectionPairStyle.LibPq)
+			{
+				while (position < end && char.IsWhiteSpace(line[position]))
+					position++;
+				if (position == end)
+					break;
+			}
+
+			if (!TryReadConnectionPair(line, position, end, style, out var pair))
+				return false;
+			pairCount++;
+			hasSignal |= IsConnectionSignalKey(line[pair.KeyStart..pair.KeyEnd]);
+			position = pair.Next;
+			if (position == end)
+				break;
+			if (line[position] != GetConnectionSeparator(style))
+				return false;
+			position++;
+			if (position == end)
+				break;
+			if (style == ConnectionPairStyle.LibPq && line[position] == ' ')
+				return false;
+		}
+		return pairCount >= 2 && hasSignal;
+	}
+
+	private static bool TryReadConnectionPair(
+		ReadOnlySpan<char> line,
+		int start,
+		int end,
+		ConnectionPairStyle style,
+		out ConnectionPair pair)
+	{
+		pair = default;
+		var equals = start;
+		while (equals < end && line[equals] != '=')
+		{
+			if (line[equals] == GetConnectionSeparator(style))
+				return false;
+			equals++;
+		}
+		if (equals == end)
+			return false;
+
+		var keyStart = start;
+		var keyEnd = equals;
+		while (keyStart < keyEnd && char.IsWhiteSpace(line[keyStart]))
+			keyStart++;
+		while (keyEnd > keyStart && char.IsWhiteSpace(line[keyEnd - 1]))
+			keyEnd--;
+		if (keyStart == keyEnd)
+			return false;
+		for (var index = keyStart; index < keyEnd; index++)
+		{
+			if (!IsConnectionKeyCharacter(line[index]) ||
+			    style == ConnectionPairStyle.LibPq && char.IsWhiteSpace(line[index]))
+			{
+				return false;
+			}
+		}
+
+		var valueStart = equals + 1;
+		if (style is not ConnectionPairStyle.LibPq)
+		{
+			while (valueStart < end && char.IsWhiteSpace(line[valueStart]))
+				valueStart++;
+		}
+		if (!TryReadConnectionValue(line, valueStart, end, style, out var value, out var next))
+			return false;
+
+		pair = new ConnectionPair(keyStart, keyEnd, value.Start, value.End, next);
+		return true;
+	}
+
+	private static bool TryReadConnectionValue(
+		ReadOnlySpan<char> line,
+		int start,
+		int end,
+		ConnectionPairStyle style,
+		out TextSpan value,
+		out int next)
+	{
+		value = default;
+		next = start;
+		if (start > end)
+			return false;
+
+		if (start < end && TryGetConnectionQuoteToken(line[start..end], out var quoteToken))
+		{
+			var contentStart = start + quoteToken.Length;
+			var position = contentStart;
+			while (position <= end - quoteToken.Length)
+			{
+				if (!line[position..end].StartsWith(quoteToken, StringComparison.Ordinal))
+				{
+					position++;
+					continue;
+				}
+				var afterQuote = position + quoteToken.Length;
+				if (afterQuote <= end - quoteToken.Length &&
+				    line[afterQuote..end].StartsWith(quoteToken, StringComparison.Ordinal))
+				{
+					position = afterQuote + quoteToken.Length;
+					continue;
+				}
+
+				next = afterQuote;
+				while (next < end && char.IsWhiteSpace(line[next]) && style is not ConnectionPairStyle.LibPq)
+					next++;
+				if (next < end && line[next] != GetConnectionSeparator(style))
+					return false;
+				value = new TextSpan(contentStart, position - contentStart);
+				return true;
+			}
+			return false;
+		}
+
+		var separator = GetConnectionSeparator(style);
+		var valueEnd = start;
+		while (valueEnd < end)
+		{
+			var character = line[valueEnd];
+			if (character == separator &&
+			    (style != ConnectionPairStyle.AdoNet || !IsXmlEntityTerminator(line, start, valueEnd)))
 			{
 				break;
 			}
-			end++;
+			if (style == ConnectionPairStyle.LibPq && character == '\\' && valueEnd + 1 < end)
+			{
+				valueEnd += 2;
+				continue;
+			}
+			if (IsDisallowedConnectionValueCharacter(character, style))
+				return false;
+			valueEnd++;
 		}
-		return TrimEnd(line, start, end);
+		next = valueEnd;
+		value = TrimEnd(line, start, valueEnd);
+		return true;
+	}
+
+	private static bool IsDisallowedConnectionValueCharacter(
+		char character,
+		ConnectionPairStyle style) =>
+		character is '(' or ')' or '[' or ']' or '{' or '}' or ',' or '\'' or '"' ||
+		style == ConnectionPairStyle.Query && (char.IsWhiteSpace(character) || character == '#');
+
+	private static char GetConnectionSeparator(ConnectionPairStyle style) => style switch
+	{
+		ConnectionPairStyle.AdoNet => ';',
+		ConnectionPairStyle.Query => '&',
+		ConnectionPairStyle.LibPq => ' ',
+		_ => throw new ArgumentOutOfRangeException(nameof(style))
+	};
+
+	private static void AddConnectionPasswords(
+		ReadOnlySpan<char> content,
+		ReadOnlySpan<char> line,
+		int lineStart,
+		ConnectionRegion region,
+		ICollection<DetectedSecret> matches)
+	{
+		var position = region.Start;
+		while (position < region.End)
+		{
+			if (region.Style is not ConnectionPairStyle.LibPq)
+			{
+				while (position < region.End && char.IsWhiteSpace(line[position]))
+					position++;
+				if (position == region.End)
+					break;
+			}
+
+			if (!TryReadConnectionPair(line, position, region.End, region.Style, out var pair))
+				return;
+			var key = line[pair.KeyStart..pair.KeyEnd];
+			if (key.Equals("password", StringComparison.OrdinalIgnoreCase) ||
+			    key.Equals("pwd", StringComparison.OrdinalIgnoreCase))
+			{
+				AddFinding(
+					content,
+					lineStart + pair.ValueStart,
+					pair.ValueEnd - pair.ValueStart,
+					"connection-password",
+					ConnectionPasswordOrder,
+					matches);
+			}
+			position = pair.Next;
+			if (position >= region.End)
+				break;
+			position++;
+		}
 	}
 
 	private static bool TryGetConnectionQuoteToken(ReadOnlySpan<char> value, out string quoteToken)
@@ -838,6 +1153,15 @@ internal static class StructuredSecretDetector
 		}
 		return assignmentCount >= 2 && hasConnectionSignal;
 	}
+
+	private static bool IsConnectionSignalKey(ReadOnlySpan<char> key) =>
+		key.Equals("host", StringComparison.OrdinalIgnoreCase) ||
+		key.Equals("server", StringComparison.OrdinalIgnoreCase) ||
+		key.Equals("data source", StringComparison.OrdinalIgnoreCase) ||
+		key.Equals("database", StringComparison.OrdinalIgnoreCase) ||
+		key.Equals("initial catalog", StringComparison.OrdinalIgnoreCase) ||
+		key.Equals("user id", StringComparison.OrdinalIgnoreCase) ||
+		key.Equals("username", StringComparison.OrdinalIgnoreCase);
 
 	private static void DetectEnvironmentAssignments(
 		ReadOnlySpan<char> content,
@@ -1879,6 +2203,25 @@ internal static class StructuredSecretDetector
 	private readonly record struct TextSpan(int Start, int Length)
 	{
 		public int End => Start + Length;
+	}
+
+	private readonly record struct ConnectionPair(
+		int KeyStart,
+		int KeyEnd,
+		int ValueStart,
+		int ValueEnd,
+		int Next);
+
+	private readonly record struct ConnectionRegion(
+		int Start,
+		int End,
+		ConnectionPairStyle Style);
+
+	private enum ConnectionPairStyle : byte
+	{
+		AdoNet,
+		Query,
+		LibPq
 	}
 
 	private readonly record struct XmlAttributeSpan(

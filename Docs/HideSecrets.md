@@ -118,6 +118,16 @@ URIs on RFC 2606 documentation hosts (`example.com`, `example.net`,
 TLDs) are not redacted. `localhost` is intentionally still inspected because
 development credentials can be real secrets.
 
+A connection-string match requires one complete region of at least two
+`key=value` pairs and an existing connection signal such as `Server`, `Host`, or
+`Database`. ADO.NET regions use semicolons, JDBC and URI query regions use
+ampersands, and libpq keyword/value regions use single spaces. A region may start
+at the beginning of a line, inside a quoted host-language literal, at a JDBC or
+URI anchor, or after one of the already protected HTTP header names: `Cookie`,
+`Set-Cookie`, `Authorization`, and `Proxy-Authorization`. Other header-like or
+call-expression text does not open a region. Unquoted call punctuation invalidates
+the whole region, and a password replacement cannot extend beyond its region.
+
 Structured value boundaries follow the recognized file format instead of one shared delimiter
 rule. Dotenv comments begin only outside quotes; ADO.NET pairs use semicolons while JDBC query
 parameters use ampersands; JSON property names are decoded and sensitive arrays are visited by
