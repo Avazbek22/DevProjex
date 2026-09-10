@@ -31,6 +31,9 @@ public sealed partial class McpServerProcessTests
 		Assert.NotEqual(true, pack.IsError);
 		Assert.True(text.IndexOf("B.cs:", StringComparison.Ordinal) < text.IndexOf("A.cs:", StringComparison.Ordinal), text);
 		Assert.Contains("[Ranking] importance-v1", text, StringComparison.Ordinal);
+		Assert.Contains("[Ranking coverage] facts", text, StringComparison.Ordinal);
+		Assert.Contains("internal reference resolution 2/2 (100%)", text, StringComparison.Ordinal);
+		Assert.Contains("unique resolved file pairs 1", text, StringComparison.Ordinal);
 		Assert.Contains("[Ranking top] B.cs", text, StringComparison.Ordinal);
 		var rankingIndex = text.IndexOf("[Ranking] importance-v1", StringComparison.Ordinal);
 		var rankingTopIndex = text.IndexOf("[Ranking top] B.cs", StringComparison.Ordinal);
@@ -72,6 +75,8 @@ public sealed partial class McpServerProcessTests
 		Assert.Equal(0, text.ExitCode);
 		Assert.True(text.StandardOutput.IndexOf("B.cs:", StringComparison.Ordinal) < text.StandardOutput.IndexOf("A.cs:", StringComparison.Ordinal), text.StandardOutput);
 		Assert.Contains("[Ranking] importance-v1", text.StandardError, StringComparison.Ordinal);
+		Assert.Contains("internal reference resolution 2/2 (100%)", text.StandardError, StringComparison.Ordinal);
+		Assert.Contains("unique resolved file pairs 1", text.StandardError, StringComparison.Ordinal);
 
 		var json = RunRankingCli(dataRoot, project, "json");
 		Assert.Equal(0, json.ExitCode);
@@ -116,9 +121,9 @@ public sealed partial class McpServerProcessTests
 	{
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
-		workspace.WriteFile("project/A.cs", "namespace Fixture; public sealed class A { private readonly B value = new(); }");
-		workspace.WriteFile("project/B.cs", "namespace Fixture; public sealed class B { }");
-		workspace.WriteFile("project/C.cs", "namespace Fixture; public sealed class C { private readonly B value = new(); }");
+		workspace.WriteFile("project/A.cs", "namespace Fixture; public sealed class A { private readonly B first = new(); private readonly D second = new(); }");
+		workspace.WriteFile("project/B.cs", "namespace Fixture; public sealed class B { } public sealed class D { }");
+		workspace.WriteFile("project/C.cs", "namespace Fixture; public sealed class C { }");
 		RunGitAsync(project, "init", "--quiet").GetAwaiter().GetResult();
 		RunGitAsync(project, "config", "user.name", "DevProjex Ranking Tests").GetAwaiter().GetResult();
 		RunGitAsync(project, "config", "user.email", "ranking@devprojex.local").GetAwaiter().GetResult();

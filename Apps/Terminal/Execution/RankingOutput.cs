@@ -31,11 +31,15 @@ internal static class RankingOutput
 				historySuffix,
 				$"{report.GraphVariant} · facts"));
 		}
+		var referenceResolution = report.InternalReferenceCandidates == 0
+			? "unavailable"
+			: $"{report.ResolvedInternalReferences.ToString(CultureInfo.InvariantCulture)}/" +
+			  $"{report.InternalReferenceCandidates.ToString(CultureInfo.InvariantCulture)} " +
+			  $"({Math.Round(report.ResolvedInternalReferenceCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture)}%)";
 		writer.WriteLine(
 			$"[Ranking coverage] facts {percentage.ToString(CultureInfo.InvariantCulture)}% · " +
-			$"resolved internal references {report.ResolvedInternalReferences.ToString(CultureInfo.InvariantCulture)}/" +
-			$"{report.InternalReferenceCandidates.ToString(CultureInfo.InvariantCulture)} " +
-			$"({Math.Round(report.ResolvedInternalReferenceCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture)}%) · " +
+			$"internal reference resolution {referenceResolution} · " +
+			$"unique resolved file pairs {report.UniqueResolvedFilePairs.ToString(CultureInfo.InvariantCulture)} · " +
 			$"files with resolved edges {report.FilesWithResolvedEdges.ToString(CultureInfo.InvariantCulture)}");
 		if (report.GitHistoryIsShallow && !report.GitHistoryIsComplete)
 		{

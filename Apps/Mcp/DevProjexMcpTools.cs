@@ -1959,13 +1959,23 @@ internal sealed class DevProjexMcpTools(
 		}
 		status.Append("\n[Ranking coverage] facts ")
 			.Append(Math.Round(report.GraphCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
-			.Append("% · resolved internal references ")
-			.Append(report.ResolvedInternalReferences.ToString(CultureInfo.InvariantCulture))
-			.Append('/')
-			.Append(report.InternalReferenceCandidates.ToString(CultureInfo.InvariantCulture))
-			.Append(" (")
-			.Append(Math.Round(report.ResolvedInternalReferenceCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
-			.Append("%) · files with resolved edges ")
+			.Append("% · internal reference resolution ");
+		if (report.InternalReferenceCandidates == 0)
+		{
+			status.Append("unavailable");
+		}
+		else
+		{
+			status.Append(report.ResolvedInternalReferences.ToString(CultureInfo.InvariantCulture))
+				.Append('/')
+				.Append(report.InternalReferenceCandidates.ToString(CultureInfo.InvariantCulture))
+				.Append(" (")
+				.Append(Math.Round(report.ResolvedInternalReferenceCoverage * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture))
+				.Append("%)");
+		}
+		status.Append(" · unique resolved file pairs ")
+			.Append(report.UniqueResolvedFilePairs.ToString(CultureInfo.InvariantCulture))
+			.Append(" · files with resolved edges ")
 			.Append(report.FilesWithResolvedEdges.ToString(CultureInfo.InvariantCulture));
 		if (report.HasMissingSignals)
 		{

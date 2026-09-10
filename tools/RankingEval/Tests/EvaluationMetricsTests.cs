@@ -7,6 +7,36 @@ namespace DevProjex.RankingEval.Tests;
 public sealed class EvaluationMetricsTests
 {
 	[Fact]
+	public async Task IndexMeasurementRejectsUnknownModeBeforeOpeningTheRepository()
+	{
+		var registry = new EvaluationRegistry
+		{
+			Protocol = "fixture",
+			Selection = new RegistrySelection { Budgets = [4_000] },
+			Orders = [],
+			Performance = new RegistryPerformance { Repetitions = 5 },
+			Repositories =
+			[
+				new RegistryRepository
+				{
+					Id = "fixture",
+					Url = "https://example.invalid/fixture.git",
+					Commit = new string('0', 40),
+					Tasks = []
+				}
+			]
+		};
+
+		await Assert.ThrowsAsync<ArgumentException>(() => EvaluationRunner.MeasureIndexOneAsync(
+			registry,
+			"fixture",
+			Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")),
+			Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")),
+			"unknown",
+			TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public async Task BoundedProcessRunnerKillsAHungChildWhenCancelled()
 	{
 		var start = new ProcessStartInfo("dotnet")

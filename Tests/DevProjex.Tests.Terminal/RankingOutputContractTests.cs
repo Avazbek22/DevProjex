@@ -105,6 +105,7 @@ public sealed class RankingOutputContractTests
 			ResolvedInternalReferences = 2,
 			InternalReferenceCandidates = 20,
 			ResolvedInternalReferenceCoverage = 0.1,
+			UniqueResolvedFilePairs = 2,
 			FilesWithResolvedEdges = 3,
 			GitHistoryIsShallow = true,
 			GitHistoryIsComplete = false,
@@ -117,10 +118,41 @@ public sealed class RankingOutputContractTests
 
 		var text = output.ToString();
 		Assert.Contains("facts 60%", text, StringComparison.Ordinal);
-		Assert.Contains("resolved internal references 2/20 (10%)", text, StringComparison.Ordinal);
+		Assert.Contains("internal reference resolution 2/20 (10%)", text, StringComparison.Ordinal);
+		Assert.Contains("unique resolved file pairs 2", text, StringComparison.Ordinal);
 		Assert.Contains("files with resolved edges 3", text, StringComparison.Ordinal);
 		Assert.Contains("read 1/200 commits; shallow history", text, StringComparison.Ordinal);
 		Assert.Contains("coordinator", text, StringComparison.Ordinal);
 		Assert.Contains("priority 3; graph unavailable; git available; main contribution: role; confidence limited", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void WriteMarksReferenceResolutionUnavailableWhenThereAreNoReferenceGroups()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("empty-coverage-data"))
+			.Create(AppLanguage.En);
+		var report = new ImportanceRankingReport(
+			ImportanceRankingService.AlgorithmId,
+			[],
+			[],
+			1,
+			0,
+			0,
+			0,
+			200,
+			0,
+			ProjectGitHistoryUnavailableReason.NotRepository,
+			false,
+			ImportanceRankingService.GraphVariant);
+		using var output = new StringWriter();
+
+		RankingOutput.Write(output, report, tokenBudget: null, services.Localization);
+
+		Assert.Contains(
+			"internal reference resolution unavailable · unique resolved file pairs 0",
+			output.ToString(),
+			StringComparison.Ordinal);
 	}
 }

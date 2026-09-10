@@ -17,6 +17,7 @@ internal static class Program
 			{
 				"run" => await RunAsync(args[1..]).ConfigureAwait(false),
 				"measure-one" => await MeasureOneAsync(args[1..]).ConfigureAwait(false),
+				"measure-index-one" => await MeasureIndexOneAsync(args[1..]).ConfigureAwait(false),
 				"hang" => await HangAsync().ConfigureAwait(false),
 				_ => throw new ArgumentException($"Unknown command '{args[0]}'.")
 			};
@@ -60,6 +61,20 @@ internal static class Program
 		return 0;
 	}
 
+	private static async Task<int> MeasureIndexOneAsync(string[] args)
+	{
+		var registry = EvaluationRegistry.Load(Path.GetFullPath(Required(args, "--registry")));
+		var result = await EvaluationRunner.MeasureIndexOneAsync(
+			registry,
+			Required(args, "--repository"),
+			Path.GetFullPath(Required(args, "--root")),
+			Path.GetFullPath(Required(args, "--data")),
+			Required(args, "--mode"),
+			CancellationToken.None).ConfigureAwait(false);
+		Console.Write(JsonSerializer.Serialize(result, EvaluationRegistry.JsonOptions));
+		return 0;
+	}
+
 	private static string Required(string[] args, string name)
 	{
 		var index = Array.IndexOf(args, name);
@@ -77,5 +92,6 @@ internal static class Program
 	private static void PrintHelp() => Console.WriteLine("""
 		RankingEval
 		  run --registry FILE --product-root PATH --workspace PATH --output FILE
+		  measure-index-one --registry FILE --repository ID --root PATH --data PATH --mode cold|warm
 		""");
 }

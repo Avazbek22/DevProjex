@@ -15,6 +15,13 @@
 (attribute name: (_) @reference.attribute)
 (object_creation_expression type: (_) @reference.object_creation)
 (object_creation_expression !type) @reference.target_typed_object_creation
+(invocation_expression
+  function: (generic_name
+    (type_argument_list) @reference.call_type_argument))
+(invocation_expression
+  function: (member_access_expression
+    name: (generic_name
+      (type_argument_list) @reference.call_type_argument)))
 (typeof_expression type: (_) @reference.typeof)
 (sizeof_expression type: (_) @reference.sizeof)
 (default_expression type: (_) @reference.default)

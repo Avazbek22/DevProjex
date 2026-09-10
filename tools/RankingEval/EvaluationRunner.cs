@@ -335,6 +335,42 @@ internal sealed class EvaluationRunner(
 		return new MeasureOneResult(stopwatch.Elapsed.TotalMilliseconds, process.PeakWorkingSet64);
 	}
 
+	internal static async Task<IndexMeasureOneResult> MeasureIndexOneAsync(
+		EvaluationRegistry registry,
+		string repositoryId,
+		string root,
+		string data,
+		string mode,
+		CancellationToken cancellationToken)
+	{
+		_ = registry.Repositories.Single(item => item.Id.Equals(repositoryId, StringComparison.Ordinal));
+		if (mode is not ("cold" or "warm"))
+			throw new ArgumentException($"Unknown indexing mode '{mode}'.", nameof(mode));
+		using var services = new TerminalServiceFactory(() => data).Create(AppLanguage.En);
+		var plan = await services.ContextFactory
+			.BuildAsync(root, ProjectSelectionSpec.Standard, cancellationToken: cancellationToken)
+			.ConfigureAwait(false);
+		if (plan.HasErrors)
+			throw new InvalidOperationException($"The standard selection failed for {repositoryId}.");
+		if (mode == "warm")
+			_ = await services.DependencyFactsEngine.IndexAsync(
+				plan.SourceRoot,
+				plan.IncludedFiles,
+				cancellationToken: cancellationToken).ConfigureAwait(false);
+
+		var stopwatch = Stopwatch.StartNew();
+		var snapshot = await services.DependencyFactsEngine.IndexAsync(
+			plan.SourceRoot,
+			plan.IncludedFiles,
+			cancellationToken: cancellationToken).ConfigureAwait(false);
+		stopwatch.Stop();
+		return new IndexMeasureOneResult(
+			stopwatch.Elapsed.TotalMilliseconds,
+			snapshot.Metrics.ParsedFiles,
+			snapshot.Metrics.ReusedFiles,
+			snapshot.Metrics.ResolutionCacheHit);
+	}
+
 	private static async Task<ContentCatalog> BuildContentCatalogAsync(
 		TerminalServices services,
 		ProjectContextPlan plan,

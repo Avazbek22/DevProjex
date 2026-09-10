@@ -96,6 +96,8 @@ public sealed record ImportanceRankingReport(
 
 	public double ResolvedInternalReferenceCoverage { get; init; }
 
+	public int UniqueResolvedFilePairs { get; init; }
+
 	public int FilesWithResolvedEdges { get; init; }
 
 	public bool GitHistoryIsShallow { get; init; }
