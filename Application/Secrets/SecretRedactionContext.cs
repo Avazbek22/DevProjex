@@ -55,4 +55,15 @@ public sealed record SecretRedactionContext(
 		ContentSelectionSnapshot selection,
 		string transformIdentity = "") =>
 		Session.BeginOutput(ProjectRoot, selection, transformIdentity, Features);
+
+	/// <summary>
+	/// Opens a scope whose per-file cache lookups follow <paramref name="perFileTransformIdentity"/>.
+	/// A null resolver keeps the operation-wide identity for every file, which is what a uniform
+	/// transformation means.
+	/// </summary>
+	public SecretRedactionScope BeginOutput(
+		ContentSelectionSnapshot selection,
+		string transformIdentity,
+		Func<string, string>? perFileTransformIdentity) =>
+		Session.BeginOutput(ProjectRoot, selection, transformIdentity, Features, perFileTransformIdentity);
 }

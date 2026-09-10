@@ -49,9 +49,12 @@ public sealed class ContentDetailPatternSet
 	public bool Matches(string relativePath)
 	{
 		ArgumentNullException.ThrowIfNull(relativePath);
+		// Separators are normalised here, exactly as the include filter does, so a caller may hand
+		// over either platform form and still get the same decision.
+		var normalized = PathUtility.NormalizeSeparators(relativePath);
 		for (var index = 0; index < _compiled.Count; index++)
 		{
-			if (_compiled[index].IsMatch(relativePath))
+			if (_compiled[index].IsMatch(normalized))
 				return true;
 		}
 		return false;
@@ -120,6 +123,26 @@ public sealed class ContentDetailPolicy
 				kinds = ProfileKinds | Overrides[index].RequestedKinds;
 		}
 		return kinds;
+	}
+
+	/// <summary>
+	/// The one path form patterns are matched against. Compression and redaction both go through
+	/// this, so the two halves of the pipeline can never disagree about which override claims a
+	/// file.
+	/// </summary>
+	public static string ToProjectRelativePath(string projectRoot, string fullPath)
+	{
+		ArgumentNullException.ThrowIfNull(fullPath);
+		if (string.IsNullOrEmpty(projectRoot))
+			return PathUtility.NormalizeSeparators(fullPath);
+		try
+		{
+			return PathUtility.NormalizeSeparators(Path.GetRelativePath(projectRoot, fullPath));
+		}
+		catch (ArgumentException)
+		{
+			return PathUtility.NormalizeSeparators(fullPath);
+		}
 	}
 
 	/// <summary>

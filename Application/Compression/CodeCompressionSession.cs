@@ -1464,6 +1464,24 @@ public sealed record CodeCompressionContext(
 	public CodeTransformKinds KindsFor(string relativePath) =>
 		Policy is null ? Kinds : Policy.KindsFor(relativePath);
 
+	/// <summary>
+	/// The transform identity that applies to one file. The redaction stage keys its scan cache on
+	/// this, and that cache's metadata lookup does not compare transformed text, so a file must
+	/// never be handed an identity that belongs to a different transformation of itself.
+	///
+	/// An untransformed file resolves to the empty string - exactly the value a pipeline without
+	/// compression uses - so it stays interchangeable with the same file in an untransformed pack.
+	/// </summary>
+	public string TransformIdentityForFullPath(string fullPath)
+	{
+		if (Policy is null)
+			return Session.GetTransformIdentity(Kinds);
+		var kinds = Policy.KindsFor(ContentDetailPolicy.ToProjectRelativePath(ProjectRoot, fullPath));
+		return kinds == CodeTransformKinds.None
+			? string.Empty
+			: Session.GetTransformIdentity(kinds);
+	}
+
 	public CodeCompressionScope BeginOutput(IReadOnlyList<string> orderedFilePaths) =>
 		Session.BeginOutput(
 			ProjectRoot,
