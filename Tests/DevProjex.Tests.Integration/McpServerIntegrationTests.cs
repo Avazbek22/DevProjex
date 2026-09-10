@@ -2168,6 +2168,32 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task ToolTextSendsFileLookupToTheTreeAndNotToContentSearch()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+		var tree = tools.Single(static tool => tool.Name == "get_tree").ProtocolTool.Description!;
+		var search = tools.Single(static tool => tool.Name == "search_project").ProtocolTool.Description!;
+		var depth = tools.Single(static tool => tool.Name == "get_tree")
+			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("max_depth")
+			.GetProperty("description").GetString()!;
+
+		// Agents reached for content search to find files, and got a silent empty answer.
+		Assert.Contains("find files by name", tree, StringComparison.Ordinal);
+		Assert.Contains("include_patterns=[\"**/*router*.ts\"]", tree, StringComparison.Ordinal);
+		Assert.Contains("matches file content, never paths", search, StringComparison.Ordinal);
+		Assert.Contains("get_tree include_patterns", search, StringComparison.Ordinal);
+		Assert.Contains("counts levels below the project root", tree, StringComparison.Ordinal);
+		Assert.Contains("below the project root", depth, StringComparison.Ordinal);
+		Assert.Contains("paths", depth, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task PublishedInputSchemasUseThePortableKeywordSubset()
 	{
 		using var workspace = new TemporaryDirectory();

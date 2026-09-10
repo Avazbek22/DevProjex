@@ -164,6 +164,29 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void McpDocumentationStatesDepthSemanticsAndTheContentOnlySearchBoundary()
+	{
+		var server = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Docs", "McpServer.md"));
+		var normalized = Regex.Replace(server, @"\s+", " ");
+
+		Assert.Contains(
+			"`max_depth` counts levels below the project root",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`paths` narrows the selection but never re-roots the tree",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`search_project` matches file content only and never matches paths",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("[Search totals] matches=N · files=M", server, StringComparison.Ordinal);
+		Assert.Contains("[Search truncated]", server, StringComparison.Ordinal);
+		Assert.Contains("16,000 characters", normalized, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void McpReadmeNetworkBoundaryMatchesRemoteOptIn()
 	{
 		var rootPath = FindRepositoryRoot();

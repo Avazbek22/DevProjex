@@ -268,7 +268,7 @@ open-world.
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
-| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
+| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
 | `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen ranges. Batch ranges use inclusive `start_line`/`end_line`, read and redact each physical file once, merge overlaps, and report `ok`, `partial`, `not-returned`, or `unavailable` for every range. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
 
@@ -414,6 +414,19 @@ If the response character limit cuts a group, only matching lines whose complete
 prefix, text, and line ending were written count as shown; the remaining count is
 exact and `[Search group truncated at the response character limit.]` marks the partial group.
 
+The match text a `search_project` call returns is capped at 16,000 characters, well
+below the general 50,000-character response limit, because a wide alternation with
+context lines could otherwise spend a large share of an agent's context in one
+unpredictable call. When the cap stops the output, the response adds the constant
+`[Search truncated] The returned text reached the 16000-character search cap. Narrow
+the pattern, add paths or include_patterns, or lower context_lines.` Whenever a call
+does not return every match it found — because `max_results`, the cap, or both
+withheld some — it also reports `[Search totals] matches=N · files=M`, the exact
+number of matches and the exact number of files containing at least one match inside
+the inspected selection. Both lines are trusted counts and constants; no path enters
+them. A call that returns everything it found keeps its previous response unchanged.
+The `[N additional matches not shown]` count keeps its existing meaning and precision.
+
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append
 `[Compression unavailable] failures=N · languages=M` when their effective selection requests
@@ -440,6 +453,16 @@ before EOF, the existing
 When the character cap falls inside one long line, the trailer keeps that line and
 adds the next 1-based Unicode column:
 `[Showing lines A-A of N; continue with start_line=A start_column=C.]`.
+
+`max_depth` counts levels below the project root. Depth 0 returns the root alone,
+depth 1 adds its direct children, and a file inside `src/router` first appears at
+depth 3. `paths` narrows the selection but never re-roots the tree, so the depth a
+subtree needs is still counted from the project root, not from the `paths` entry.
+The three narrowing parameters compose in a fixed order and never widen each other:
+`paths` and the pattern arrays intersect to form the selection, and `max_depth`
+then prunes the rendering of that selection. Listing one directory therefore needs
+no depth at all — `paths: ["src/router"]` alone returns everything selected under
+it, and `include_patterns: ["**/*router*.ts"]` is how a file is found by name.
 
 For `get_tree`, omitted `max_depth` on an oversized `text` or `markdown` result
 selects the deepest depth whose complete tree fits the 2,000-line limit and
@@ -611,7 +634,10 @@ classes (`[...]`) are rejected with `DPX-MCP-INVALID-PATTERN` rather than
 matched literally, because a silently empty result reads as "no such files".
 `paths` contains existing project-relative files or directories for `get_tree`,
 `analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
-glob metacharacters have meaning only in the pattern parameters.
+glob metacharacters have meaning only in the pattern parameters. Every array
+parameter requires a JSON array: a bare string where an array is expected returns
+`DPX-MCP-INVALID-ARGUMENTS` naming the argument, for example
+`'paths' must be an array of strings.`, instead of a partial or empty result.
 
 ### Batch `get_file`
 

@@ -22,7 +22,13 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumPageLines = 1_000;
 	private const int MaximumPageCharacters = 50_000;
 	private const int MaximumExclusionTokenLength = 32;
-	private const int MaximumSearchContentCharacters = 49_000;
+	// A wide alternation with context lines used to spend a quarter of an agent's whole
+	// context budget in one unpredictable call. The cap bounds that, and the totals line
+	// tells the caller how much it did not get.
+	private const int MaximumSearchContentCharacters = 16_000;
+	private const string SearchContentCapNotice =
+		"[Search truncated] The returned text reached the 16000-character search cap. " +
+		"Narrow the pattern, add paths or include_patterns, or lower context_lines.";
 	private const int MaximumAnalyzeTopFilesCharacters = 32_000;
 	private const long MaximumSearchInspectedBytes = 64L * 1024 * 1024;
 	private const string StoredTreePreviewTruncationNotice =
@@ -121,7 +127,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Returns the filtered project structure without file contents. Use it to orient before reading; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML and limits large text trees within 2,000 lines and 50,000 characters. project accepts a unique name or path from list_projects, or an allowed remote Git URL. Key parameters: paths narrows to literal files or directories; format=markdown|text|json|xml; max_depth=0..1000; git_scope=staged|changes|diff:<ref>..<ref>; include/exclude patterns and max_file_bytes narrow further.")]
+		"Returns the filtered project structure without file contents. Use it to orient, to list what a directory holds, or to find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML within 2,000 lines and 50,000 characters. project accepts a unique name or path from list_projects, or an allowed remote Git URL. Key parameters: paths narrows to literal files or directories; include_patterns finds files by name, as include_patterns=[\"**/*router*.ts\"]; format=markdown|text|json|xml; max_depth=0..1000 counts levels below the project root, not below paths; git_scope=staged|changes|diff:<ref>..<ref>; exclude_patterns and max_file_bytes narrow further.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -682,7 +688,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regular expression. Use it to locate symbols or phrases; use related_files instead for static dependency links, or get_file for a known file page. Returns path:line:text matches, merged context groups separated by --, and the count of additional matches beyond max_results; line numbers refer to returned text after replacements, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
+		"Searches safe transformed project text with a timed .NET regular expression. It matches file content, never paths; find files by name with get_tree include_patterns. Use it to locate symbols or phrases; use related_files instead for dependency links. Returns path:line:text matches, merged context groups separated by --, exact match and file counts, and the count of additional matches beyond max_results; line numbers refer to that text, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -715,6 +721,7 @@ internal sealed class DevProjexMcpTools(
 			var output = new StringBuilder();
 			var totalMatches = 0;
 			var shownMatches = 0;
+			var matchingFiles = 0;
 			var responseLimitReached = false;
 			var resultGroupTruncated = false;
 			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
@@ -742,6 +749,8 @@ internal sealed class DevProjexMcpTools(
 						file.ReplacementRanges,
 						token);
 					totalMatches += scan.TotalMatches;
+					if (scan.TotalMatches > 0)
+						matchingFiles++;
 					if (responseLimitReached)
 						return ValueTask.CompletedTask;
 
@@ -767,6 +776,12 @@ internal sealed class DevProjexMcpTools(
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
 				: null;
+			// Sizing information is only worth its characters when the caller did not
+			// receive everything the pattern found.
+			var searchTotalsNotice = totalMatches > shownMatches || resultGroupTruncated
+				? $"[Search totals] matches={totalMatches.ToString(CultureInfo.InvariantCulture)} · " +
+				  $"files={matchingFiles.ToString(CultureInfo.InvariantCulture)}"
+				: null;
 			// An empty search result must say whether nothing matched or nothing was searched;
 			// the count is trusted data, the file names never are.
 			var noMatches = totalMatches == 0 && plan.IncludedFiles.Count > 0
@@ -778,10 +793,12 @@ internal sealed class DevProjexMcpTools(
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
 				additionalMatchesNotice,
+				searchTotalsNotice,
 				inspectionBudgetReached
 					? "[Search incomplete] The inspected-text byte budget was reached; additional selected files were not searched and match counts are partial."
 					: null,
 				resultGroupTruncated ? "[Search group truncated at the response character limit.]" : null,
+				resultGroupTruncated ? SearchContentCapNotice : null,
 				SelectionNotices(
 					plan,
 					includeFilters: false,
