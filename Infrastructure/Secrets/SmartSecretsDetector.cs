@@ -14,7 +14,7 @@ public sealed class SmartSecretsDetector(
 	ISecretDetector providerDetector,
 	SmartIgnoreService smartIgnore) : ISecretDetector
 {
-	internal const string StructuredRulesVersion = "smart-secrets-v5";
+	internal const string StructuredRulesVersion = "smart-secrets-v6";
 
 	public string RulesIdentity =>
 		$"{providerDetector.RulesIdentity}:{StructuredRulesVersion}";
