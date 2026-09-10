@@ -24,6 +24,7 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumExclusionTokenLength = 32;
 	private const int MaximumSearchContentCharacters = 49_000;
 	private const int MaximumAnalyzeTopFilesCharacters = 32_000;
+	private const int MaximumAdmissionIncludedFilesCharacters = 32_000;
 	private const int MaximumReportedUnmatchedDetailPatterns = 8;
 	private const int MaximumReportedDetailPatternCharacters = 80;
 	private const long MaximumSearchInspectedBytes = 64L * 1024 * 1024;
@@ -51,7 +52,8 @@ internal sealed class DevProjexMcpTools(
 		"git_scope", "max_file_bytes", "max_depth", "format");
 	private readonly IReadOnlySet<string> selectionArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail",
-		"detail_by_pattern", "tracked_only", "git_scope", "top_files", "max_file_bytes");
+		"detail_by_pattern", "tracked_only", "git_scope", "top_files", "max_file_bytes",
+		"max_tokens", "rank", "focus");
 	private readonly IReadOnlySet<string> packArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "view",
 		"format", "detail", "detail_by_pattern", "tracked_only", "git_scope", "rank", "focus",
@@ -215,7 +217,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Measures a selection before packaging: transformed content, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns structured measured-versus-estimated metrics after required protection. project comes from list_projects. Key parameters: detail=full|compact|signatures, top_files=1..1000, git_scope, paths, patterns, profile, and max_file_bytes. detail_by_pattern overrides detail per file; entries apply in order and the last matching entry wins, so list general globs before specific ones.")]
+		"Measures a selection before packaging: transformed content, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns structured measured-versus-estimated metrics after required protection. project comes from list_projects. Key parameters: detail=full|compact|signatures, top_files=1..1000, git_scope, paths, patterns, profile, and max_file_bytes. detail_by_pattern overrides detail per file; entries apply in order and the last matching entry wins, so list general globs before specific ones. With max_tokens it also returns admission: which files that budget would admit, from the same greedy pass pack_context uses, without producing content. Use it to choose a budget or to check an admission decision; it is not a required step before every pack_context, because it reads and transforms the selection just as a pack does. rank and focus order that admission and require max_tokens. Cost units differ from related_files: this reports the transformed cost at each file's effective detail, while related_files reports a source character estimate.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -227,6 +229,30 @@ internal sealed class DevProjexMcpTools(
 			var topFileCount = arguments.OptionalInteger("top_files", 1, 1_000) ?? 10;
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
 			var detailOverrides = McpDetailOverrides.Parse(arguments);
+			var maximumEstimatedTokens = arguments.OptionalInt64("max_tokens", 1, long.MaxValue);
+			var rank = ParseRank(arguments.OptionalString("rank"));
+			var focusSpecified = request.Params.Arguments?.ContainsKey("focus") == true;
+			var focus = focusSpecified
+				? arguments.RequiredStringOrArray(
+					"focus",
+					maximumItems: 16,
+					maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength)
+				: null;
+			// An ordering that is neither returned nor used must not be computed, so both ordering
+			// inputs are refused unless there is a budget for them to order.
+			if (maximumEstimatedTokens is null && (rank is not null || focusSpecified))
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: rank and focus are valid on analyze only together " +
+					"with max_tokens.");
+			}
+			if (focusSpecified && rank is null)
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: focus is valid only together with rank: \"importance\".");
+			}
 			var selection = await BuildSelectionAsync(
 				arguments,
 				cancellationToken,
@@ -286,6 +312,26 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(
 				99,
 				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
+			ProjectContextTokenBudgetReport? admissionBudget = null;
+			if (maximumEstimatedTokens is not null)
+			{
+				var ranking = rank is null
+					? null
+					: await RankForAdmissionAsync(plan, focus, cancellationToken).ConfigureAwait(false);
+				// The same cost-and-admission service a pack uses. There is no second greedy pass,
+				// which is what lets the two agree by construction rather than by coincidence.
+				var admission = await new ProjectContextTokenAdmissionService(Projects.DocumentService)
+					.AdmitMeasuredAsync(
+						plan,
+						ProjectContextView.Content,
+						ProjectContextDocumentFormat.Text,
+						maximumEstimatedTokens.Value,
+						prepared,
+						ranking,
+						cancellationToken)
+					.ConfigureAwait(false);
+				admissionBudget = admission.WriteResult.TokenBudget;
+			}
 			var allTop = largest.Project(item =>
 			{
 				var topFile = new Dictionary<string, object>(3, StringComparer.Ordinal)
@@ -359,6 +405,8 @@ internal sealed class DevProjexMcpTools(
 				["topFilesTruncated"] = topFilesRemaining > 0,
 				["topFilesRemaining"] = topFilesRemaining
 			};
+			if (admissionBudget is not null)
+				envelope["admission"] = BuildAdmission(admissionBudget, effectiveDetail.Token);
 			envelope["protection"] = new
 			{
 				secrets = "always",
@@ -387,14 +435,26 @@ internal sealed class DevProjexMcpTools(
 				};
 			}
 			await operationProgress.CompleteAsync(100, "building analysis").ConfigureAwait(false);
-			return McpToolResults.StructuredSuccess(
-				envelope,
-				CombineTrustedNotices(
-					FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
-					FormatDetailMix(detailMix),
-					FormatCompressionUnavailable(prepared.CompressionSnapshot),
-					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
-					SelectionNotices(plan, includeFilters: false, selection.NoticeContext, includeProtection: false)));
+			// The budget report goes into the trusted notices rather than the structured block: the
+			// first text block has to stay a byte-identical serialization of structuredContent.
+			var formattedAdmissionReport = admissionBudget is null
+				? null
+				: FormatTokenBudgetReport(admissionBudget);
+			var notices = CombineTrustedNotices(
+				FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
+				FormatDetailMix(detailMix),
+				formattedAdmissionReport,
+				FormatCompressionUnavailable(prepared.CompressionSnapshot),
+				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
+				SelectionNotices(plan, includeFilters: false, selection.NoticeContext, includeProtection: false));
+			if (admissionBudget is not null)
+			{
+				notices = AppendBudgetAccounting(
+					notices ?? string.Empty,
+					admissionBudget,
+					formattedAdmissionReport!.Length);
+			}
+			return McpToolResults.StructuredSuccess(envelope, notices);
 		}, cancellationToken);
 
 	[Description(
@@ -1815,6 +1875,121 @@ internal sealed class DevProjexMcpTools(
 				.Where(static diagnostic => diagnostic.Severity != ContextDiagnosticSeverity.Warning)
 				.ToArray()
 		};
+	}
+
+	/// <summary>
+	/// Orders the effective selection for an admission preview. Ranking runs only because a budget
+	/// asked for it; without one, neither dependency indexing nor Git history is touched.
+	/// </summary>
+	private async Task<ImportanceRankingReport> RankForAdmissionAsync(
+		ProjectContextPlan plan,
+		IReadOnlyList<string>? focus,
+		CancellationToken cancellationToken)
+	{
+		var service = new ImportanceRankingService(
+			Projects.DependencyFactsEngine,
+			new ProjectGitHistoryReader());
+		if (focus is null)
+		{
+			return await service
+				.RankAsync(plan.SourceRoot, plan.IncludedFiles, progress: null, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		var seeds = Projects.ResolveRequestedFiles(plan, focus, cancellationToken)
+			.Select((path, index) => new FocusRankingSeedRequest(focus[index], path))
+			.ToArray();
+		return await service
+			.RankAsync(
+				plan.SourceRoot,
+				plan.IncludedFiles,
+				new FocusRankingRequest(seeds),
+				progress: null,
+				cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// The admission plan a budget produced, bounded the same way the largest-files list is: an
+	/// entry cap plus an aggregate character budget, with the flag and the count saying what was cut.
+	/// The digest always covers the complete order, so equality with a pack stays checkable even when
+	/// the list does not fit.
+	/// </summary>
+	private static Dictionary<string, object> BuildAdmission(
+		ProjectContextTokenBudgetReport report,
+		string detailToken)
+	{
+		var included = new List<Dictionary<string, object>>();
+		var characters = 2;
+		foreach (var file in report.IncludedFiles)
+		{
+			var entry = new Dictionary<string, object>(4, StringComparer.Ordinal)
+			{
+				["path"] = file.Path,
+				["tokens"] = file.EstimatedTokens
+			};
+			if (file.Priority is { } priority)
+				entry["priority"] = priority;
+			if (file.Hop is { } hop)
+				entry["hop"] = hop;
+			var entryCharacters = JsonSerializer.Serialize(entry).Length + (included.Count == 0 ? 0 : 1);
+			if (characters + entryCharacters > MaximumAdmissionIncludedFilesCharacters)
+				break;
+			included.Add(entry);
+			characters += entryCharacters;
+		}
+
+		var skipped = new List<Dictionary<string, object>>(report.LargestSkippedFiles.Count);
+		foreach (var file in ConcatenateSkipped(report))
+		{
+			var entry = new Dictionary<string, object>(4, StringComparer.Ordinal)
+			{
+				["path"] = file.Path,
+				["tokens"] = file.EstimatedTokens,
+				["remainingTokens"] = file.RemainingEstimatedTokens ?? 0
+			};
+			if (file.Priority is { } priority)
+				entry["priority"] = priority;
+			if (file.Detail is { } fileDetail)
+				entry["detail"] = fileDetail;
+			skipped.Add(entry);
+		}
+
+		return new Dictionary<string, object>(12, StringComparer.Ordinal)
+		{
+			["budget"] = report.MaximumEstimatedTokens,
+			["includedFileCount"] = report.IncludedFileCount,
+			["skippedFileCount"] = report.SkippedFileCount,
+			["includedEstimatedTokens"] = report.IncludedEstimatedTokens,
+			["skippedEstimatedTokens"] = report.SkippedEstimatedTokens,
+			["includedFiles"] = included,
+			["includedFilesTruncated"] = included.Count < report.IncludedFileCount,
+			["additionalIncludedFileCount"] = report.IncludedFileCount - included.Count,
+			["includedOrderDigest"] = report.IncludedOrderDigest,
+			["skippedFiles"] = skipped,
+			["additionalSkippedFileCount"] = Math.Max(0, report.SkippedFileCount - skipped.Count),
+			["detail"] = detailToken
+		};
+	}
+
+	/// <summary>
+	/// The largest skipped files, plus the highest-priority skipped files when the call ranked, in
+	/// the same shape a pack reports them and without listing any file twice.
+	/// </summary>
+	private static IEnumerable<ProjectContextTokenBudgetSkippedFile> ConcatenateSkipped(
+		ProjectContextTokenBudgetReport report)
+	{
+		var seen = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var file in report.LargestSkippedFiles)
+		{
+			if (seen.Add(file.Path))
+				yield return file;
+		}
+		foreach (var file in report.RankedSkippedFiles ?? [])
+		{
+			if (seen.Add(file.Path))
+				yield return file;
+		}
 	}
 
 	/// <summary>

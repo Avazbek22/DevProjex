@@ -193,7 +193,7 @@ public sealed class ProjectContextDocumentService(
 					ranking)
 				.ConfigureAwait(false);
 		}
-		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, precomputedTokenBudget);
+		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, plan.SourceRoot, precomputedTokenBudget);
 		using var cancellationDestination = new CancellationBoundWriteStream(
 			destination,
 			cancellationToken);
@@ -334,7 +334,7 @@ public sealed class ProjectContextDocumentService(
 		ArgumentNullException.ThrowIfNull(plan);
 		ValidateView(view);
 		ValidateDocumentFormat(format);
-		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens)!;
+		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, plan.SourceRoot)!;
 		var orderedPaths = ResolveOrderedPaths(plan.IncludedFiles, ranking);
 		if (!IncludesContent(view))
 			return new ProjectContextWriteResult([], tokenBudget.CreateReport(), ranking);
@@ -393,7 +393,7 @@ public sealed class ProjectContextDocumentService(
 		ValidateDocumentFormat(format);
 		await EnsureRankingSourceVersionsAsync(plan.IncludedFiles, ranking, cancellationToken)
 			.ConfigureAwait(false);
-		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens)!;
+		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, plan.SourceRoot)!;
 		if (!IncludesContent(view))
 			return new ProjectContextWriteResult(measured.UnscannableFiles, tokenBudget.CreateReport(), ranking);
 
@@ -516,12 +516,13 @@ public sealed class ProjectContextDocumentService(
 
 	private static ProjectContextTokenBudgetAccumulator? CreateTokenBudget(
 		long? maximumEstimatedTokens,
+		string sourceRoot,
 		ProjectContextTokenBudgetReport? precomputedTokenBudget = null) =>
 		precomputedTokenBudget is not null
 			? new ProjectContextTokenBudgetAccumulator(precomputedTokenBudget)
 			: maximumEstimatedTokens is null
 				? null
-				: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value);
+				: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value, sourceRoot);
 
 	private static bool TryIncludeInBudget(
 		ProjectContextTokenBudgetAccumulator tokenBudget,

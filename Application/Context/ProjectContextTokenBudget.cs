@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Ranking;
 
@@ -20,6 +22,15 @@ public sealed record ProjectContextTokenBudgetSkippedFile(
 	public string? Detail { get; init; }
 }
 
+/// <summary>
+/// One admitted file, in admission order. Ranking fields are present only when the call ranked.
+/// </summary>
+public sealed record ProjectContextTokenBudgetIncludedFile(
+	string Path,
+	long EstimatedTokens,
+	int? Priority = null,
+	int? Hop = null);
+
 public sealed record ProjectContextTokenBudgetReport(
 	long MaximumEstimatedTokens,
 	int IncludedFileCount,
@@ -31,13 +42,35 @@ public sealed record ProjectContextTokenBudgetReport(
 	IReadOnlyList<ProjectContextTokenBudgetSkippedFile>? RankedSkippedFiles = null)
 {
 	internal IReadOnlyList<string> AdmittedSourceFiles { get; init; } = [];
+
+	/// <summary>
+	/// A bounded prefix of the admission order. The full order is covered by
+	/// <see cref="IncludedOrderDigest"/>, so a caller can check equality with a pack without being
+	/// handed the whole list.
+	/// </summary>
+	public IReadOnlyList<ProjectContextTokenBudgetIncludedFile> IncludedFiles { get; init; } = [];
+
+	/// <summary>How many admitted files the prefix left out.</summary>
+	public int AdditionalIncludedFileCount { get; init; }
+
+	/// <summary>
+	/// A stable hash of the complete ordered list of admitted project-relative paths, computed here
+	/// and nowhere else so a measurement and a pack cannot drift apart. Taken from the source path
+	/// rather than the printed one, because the printed form varies by format, view and root
+	/// presentation while the admitted set does not.
+	/// </summary>
+	public string IncludedOrderDigest { get; init; } = string.Empty;
 }
 
 internal sealed class ProjectContextTokenBudgetAccumulator
 {
 	internal const int MaximumReportedSkippedFiles = 25;
 	internal const int MaximumReportedRankedSkippedFiles = 10;
+	internal const int MaximumReportedIncludedFiles = 1_000;
 	private readonly long _maximumEstimatedTokens;
+	private readonly string? _sourceRoot;
+	private readonly IncrementalHash _includedOrder = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+	private readonly List<ProjectContextTokenBudgetIncludedFile> _includedFiles = [];
 	private List<ProjectContextTokenBudgetSkippedFile>? _largestSkippedFiles;
 	private List<ProjectContextTokenBudgetSkippedFile>? _rankedSkippedFiles;
 	private long _remainingEstimatedTokens;
@@ -48,11 +81,12 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 	private readonly List<string> _admittedSourceFiles = [];
 	private readonly ProjectContextTokenBudgetReport? _precomputedReport;
 
-	public ProjectContextTokenBudgetAccumulator(long maximumEstimatedTokens)
+	public ProjectContextTokenBudgetAccumulator(long maximumEstimatedTokens, string? sourceRoot = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfLessThan(maximumEstimatedTokens, 1);
 		_maximumEstimatedTokens = maximumEstimatedTokens;
 		_remainingEstimatedTokens = maximumEstimatedTokens;
+		_sourceRoot = sourceRoot;
 	}
 
 	public ProjectContextTokenBudgetAccumulator(ProjectContextTokenBudgetReport precomputedReport)
@@ -85,6 +119,15 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_includedEstimatedTokens += estimatedTokens;
 			if (sourcePath is not null)
 				_admittedSourceFiles.Add(sourcePath);
+			AppendToIncludedOrder(sourcePath ?? path);
+			if (_includedFiles.Count < MaximumReportedIncludedFiles)
+			{
+				_includedFiles.Add(new ProjectContextTokenBudgetIncludedFile(
+					path,
+					estimatedTokens,
+					priority,
+					hop));
+			}
 			return true;
 		}
 
@@ -127,8 +170,21 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_skippedFileCount - largestSkippedFiles.Length,
 			_rankedSkippedFiles?.ToArray() ?? [])
 		{
-			AdmittedSourceFiles = _admittedSourceFiles.ToArray()
+			AdmittedSourceFiles = _admittedSourceFiles.ToArray(),
+			IncludedFiles = _includedFiles.ToArray(),
+			AdditionalIncludedFileCount = _includedFileCount - _includedFiles.Count,
+			IncludedOrderDigest = Convert.ToHexString(_includedOrder.GetCurrentHash())
 		};
+	}
+
+	private void AppendToIncludedOrder(string sourcePath)
+	{
+		var relativePath = ContentDetailPolicy.ToProjectRelativePath(_sourceRoot ?? string.Empty, sourcePath);
+		var bytes = Encoding.UTF8.GetBytes(relativePath);
+		Span<byte> length = stackalloc byte[4];
+		BinaryPrimitives.WriteInt32LittleEndian(length, bytes.Length);
+		_includedOrder.AppendData(length);
+		_includedOrder.AppendData(bytes);
 	}
 
 	private void RetainRankedSkippedFile(

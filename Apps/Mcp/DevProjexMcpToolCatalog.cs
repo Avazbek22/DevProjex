@@ -307,7 +307,10 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
 	    {{TopFilesProperty}},
-	    {{MaxFileBytesProperty}}
+	    {{MaxFileBytesProperty}},
+	    {{MaximumTokensProperty}},
+	    {{RankProperty}},
+	    {{FocusProperty}}
 	  },
 	  "additionalProperties": false
 	}
@@ -612,7 +615,56 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      }
 	    },
 	    "topFilesTruncated": { "type": "boolean", "description": "True when the aggregate top-files character budget omitted remaining entries." },
-	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Number of requested top-file entries omitted by the aggregate character budget." }
+	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Number of requested top-file entries omitted by the aggregate character budget." },
+	    "admission": {
+	      "type": "object",
+	      "description": "Which files a max_tokens budget would admit, present only when max_tokens was supplied. The same greedy first-fit pass pack_context uses, so the admitted set matches for the same snapshot, configuration, filters, and effective transforms. No content is produced.",
+	      "properties": {
+	        "budget": { "type": "integer", "minimum": 1, "description": "Requested maximum estimated content tokens." },
+	        "includedFileCount": { "type": "integer", "minimum": 0, "description": "Number of admitted files." },
+	        "skippedFileCount": { "type": "integer", "minimum": 0, "description": "Number of files that did not fit; a skipped file never stops later, smaller files from being admitted." },
+	        "includedEstimatedTokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the admitted files." },
+	        "skippedEstimatedTokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the skipped files." },
+	        "includedFiles": {
+	          "type": "array",
+	          "description": "Prefix of the admission order, at most 1000 entries and bounded by an aggregate character budget.",
+	          "items": {
+	            "type": "object",
+	            "properties": {
+	              "path": { "type": "string", "description": "Project-relative path of the admitted file." },
+	              "tokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the transformed file at its effective detail." },
+	              "priority": { "type": "integer", "minimum": 1, "description": "Position in the admission order; present only with rank." },
+	              "hop": { "type": "integer", "minimum": 0, "description": "Minimum undirected graph hop from a focus seed; present only with focus." }
+	            },
+	            "required": ["path", "tokens"],
+	            "additionalProperties": false
+	          }
+	        },
+	        "includedFilesTruncated": { "type": "boolean", "description": "True when the bounds omitted admitted entries from includedFiles." },
+	        "additionalIncludedFileCount": { "type": "integer", "minimum": 0, "description": "Number of admitted files omitted from includedFiles." },
+	        "includedOrderDigest": { "type": "string", "description": "Hash of the complete ordered admitted path list, so equality with a pack can be checked without listing it. It is an order digest: compare it only between calls with the same rank and focus." },
+	        "skippedFiles": {
+	          "type": "array",
+	          "description": "The 25 largest skipped files plus, with rank, the 10 highest-priority skipped files.",
+	          "items": {
+	            "type": "object",
+	            "properties": {
+	              "path": { "type": "string", "description": "Project-relative path of the skipped file." },
+	              "tokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the transformed file at its effective detail." },
+	              "priority": { "type": "integer", "minimum": 1, "description": "Position in the admission order; present only with rank." },
+	              "remainingTokens": { "type": "integer", "minimum": 0, "description": "Budget still free when this file was considered." },
+	              "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective detail this file was costed at; present only when detail_by_pattern was supplied." }
+	            },
+	            "required": ["path", "tokens", "remainingTokens"],
+	            "additionalProperties": false
+	          }
+	        },
+	        "additionalSkippedFileCount": { "type": "integer", "minimum": 0, "description": "Number of skipped files omitted from skippedFiles." },
+	        "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective default detail level the admission was measured at." }
+	      },
+	      "required": ["budget", "includedFileCount", "skippedFileCount", "includedEstimatedTokens", "skippedEstimatedTokens", "includedFiles", "includedFilesTruncated", "additionalIncludedFileCount", "includedOrderDigest", "skippedFiles", "additionalSkippedFileCount", "detail"],
+	      "additionalProperties": false
+	    }
 	  },
 	  "required": ["files", "characters", "tokens", "detail", "contentMetrics", "documentMetrics", "exclusions", "protection", "topFiles", "topFilesTruncated", "topFilesRemaining"],
 	  "additionalProperties": false
