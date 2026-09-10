@@ -256,7 +256,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{GitScopeProperty}},
 	    {{MaxFileBytesProperty}},
 	    "max_depth": {
-	      "description": "Maximum tree depth from 0 to 1000; accepts an integer or numeric string.",
+	      "description": "Maximum tree depth from 0 to 1000, counted in levels below the project root and never below a paths entry: 0 returns the root alone, 1 adds its direct children, and a file inside src/router needs 3. Omit it to let a large tree pick the deepest complete depth that fits. Accepts an integer or numeric string.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
 	    },
 	    {{TreeFormatProperty}}
@@ -329,7 +329,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    {{ProjectProperty}},
 	    {{BranchProperty}},
-	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression, limited to 4,096 characters and a 2-second evaluation timeout, applied after redaction. Text inserted by redaction never matches." },
+	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression, limited to 4,096 characters and a 2-second evaluation timeout, applied after redaction. It is matched against file content only and never against file names or paths; use get_tree with include_patterns to find files by name. Text inserted by redaction never matches." },
 	    {{PathsProperty}},
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},

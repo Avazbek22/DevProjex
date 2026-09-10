@@ -150,6 +150,76 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void McpDocumentationShowsSearchFollowedByOneBatchedRead()
+	{
+		var server = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Docs", "McpServer.md"));
+		var normalized = Regex.Replace(server, @"\s+", " ");
+
+		Assert.Contains("### Search, then one batched read", server, StringComparison.Ordinal);
+		Assert.Contains("\"requests\": [", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"Four single reads of four locations are one call",
+			normalized,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void McpDocumentationStatesDepthSemanticsAndTheContentOnlySearchBoundary()
+	{
+		var server = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Docs", "McpServer.md"));
+		var normalized = Regex.Replace(server, @"\s+", " ");
+
+		Assert.Contains(
+			"`max_depth` counts levels below the project root",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`paths` narrows the selection but never re-roots the tree",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`search_project` matches file content only and never matches paths",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("[Search totals] matches=N · files=M", server, StringComparison.Ordinal);
+		Assert.Contains("[Search truncated]", server, StringComparison.Ordinal);
+		Assert.Contains("16,000 characters", normalized, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void McpDocumentationStatesWhenServiceNoticesRepeat()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var security = File.ReadAllText(Path.Combine(rootPath, "Docs", "Security.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedSecurity = Regex.Replace(security, @"\s+", " ");
+
+		Assert.Contains("### Service notices repeat only when they change", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"`[Unchanged] filters, protection; see list_projects.`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains("Omission has to be provable", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains(
+			"any call that passed `max_file_bytes`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"A new server process is a new session and always starts in full",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Filters are never silent, though an unchanged filter line is reported once per session",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"the untrusted-data boundary around project text is unchanged",
+			normalizedSecurity,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void McpReadmeNetworkBoundaryMatchesRemoteOptIn()
 	{
 		var rootPath = FindRepositoryRoot();

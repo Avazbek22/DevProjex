@@ -7,6 +7,13 @@ internal readonly record struct McpSelectionNoticeContext(
 	bool HasPatterns);
 
 /// <summary>
+/// The effective-filter footer and, when nothing survived, the explanation of the empty result.
+/// </summary>
+internal readonly record struct McpSelectionNotices(
+	string? Filters,
+	string? EmptySelection);
+
+/// <summary>
 /// Trusted, path-free descriptions of the filters that shaped a selection. They let an agent
 /// tell "this file does not exist" from "this server hides it" without naming a hidden path.
 /// </summary>
@@ -55,10 +62,11 @@ internal static class McpEffectiveFilters
 			: $"Paths they hide are absent from every tool; only the server startup line widens them ({StartupFlags}).";
 
 	/// <summary>
-	/// The footer plus the empty-selection explanation when nothing survived the filters;
-	/// <see langword="null"/> when no requested diagnostic applies and the selection is not empty.
+	/// The footer and the empty-selection explanation as separate lines, so a caller can decide
+	/// which of them a given response repeats. Both are <see langword="null"/> when no requested
+	/// diagnostic applies and the selection is not empty.
 	/// </summary>
-	public static string? SelectionNotices(
+	public static McpSelectionNotices SelectionNoticeParts(
 		ProjectContextPlan plan,
 		bool agentExclusions,
 		bool includeFilters,
@@ -67,10 +75,11 @@ internal static class McpEffectiveFilters
 		ArgumentNullException.ThrowIfNull(plan);
 		var isEmpty = plan.IncludedFiles.Count == 0;
 		if (!includeFilters && !isEmpty && plan.FileSizeFilter is null)
-			return null;
+			return new McpSelectionNotices(null, null);
 
-		var notice = Notice(plan, agentExclusions);
-		return isEmpty ? notice + "\n" + EmptySelectionNotice(plan, request) : notice;
+		return new McpSelectionNotices(
+			Notice(plan, agentExclusions),
+			isEmpty ? EmptySelectionNotice(plan, request) : null);
 	}
 
 	private static string EmptySelectionNotice(

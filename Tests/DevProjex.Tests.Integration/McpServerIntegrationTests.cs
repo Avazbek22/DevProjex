@@ -123,7 +123,9 @@ public sealed class McpServerIntegrationTests
 
 		var pack = Text(await server.CallAsync("pack_context"));
 		Assert.Contains("DATABASE_URL", pack, StringComparison.Ordinal);
-		Assert.Contains("[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.", pack, StringComparison.Ordinal);
+		// The tree already reported this baseline in this session and it has not changed since.
+		Assert.Contains(McpServiceNoticeMemo.ContinuationNotice, pack, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Effective filters]", pack, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -2136,6 +2138,61 @@ public sealed class McpServerIntegrationTests
 				Assert.Equal(512, items.GetProperty("maxLength").GetInt32());
 			}
 		}
+	}
+
+	[Fact]
+	public async Task ToolTextAsksForOneBatchedReadInsteadOfSeveralSingleReads()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+		var getFile = tools.Single(static tool => tool.Name == "get_file").ProtocolTool.Description!;
+		var search = tools.Single(static tool => tool.Name == "search_project").ProtocolTool.Description!;
+		var instructions = server.Client.ServerInstructions!;
+
+		// The batch form already worked; agents never chose it because nothing said when to.
+		Assert.Contains(
+			"whenever you want more than one file or more than one range",
+			getFile,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"requests=[{\"path\":\"src/a.ts\",\"ranges\":[{\"start_line\":10,\"end_line\":30}]}]",
+			getFile,
+			StringComparison.Ordinal);
+		Assert.Contains("one batched get_file requests call", search, StringComparison.Ordinal);
+		Assert.Contains("one batched get_file call", instructions, StringComparison.Ordinal);
+		Assert.Single(
+			Regex.Matches(instructions, "batched get_file", RegexOptions.None, TimeSpan.FromSeconds(2)));
+	}
+
+	[Fact]
+	public async Task ToolTextSendsFileLookupToTheTreeAndNotToContentSearch()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+		var tree = tools.Single(static tool => tool.Name == "get_tree").ProtocolTool.Description!;
+		var search = tools.Single(static tool => tool.Name == "search_project").ProtocolTool.Description!;
+		var depth = tools.Single(static tool => tool.Name == "get_tree")
+			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("max_depth")
+			.GetProperty("description").GetString()!;
+
+		// Agents reached for content search to find files, and got a silent empty answer.
+		Assert.Contains("find files by name", tree, StringComparison.Ordinal);
+		Assert.Contains("include_patterns=[\"**/*router*.ts\"]", tree, StringComparison.Ordinal);
+		Assert.Contains("matches file content, never paths", search, StringComparison.Ordinal);
+		Assert.Contains("get_tree include_patterns", search, StringComparison.Ordinal);
+		Assert.Contains("counts levels below the project root", tree, StringComparison.Ordinal);
+		Assert.Contains("below the project root", depth, StringComparison.Ordinal);
+		Assert.Contains("paths", depth, StringComparison.Ordinal);
 	}
 
 	[Fact]
