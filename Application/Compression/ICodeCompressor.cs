@@ -54,6 +54,15 @@ public interface ICodeCompressor
 			? CreateScope(projectRoot)
 			: throw new NotSupportedException(
 				$"The compressor does not support transformation mode '{kinds}'.");
+
+	/// <summary>
+	/// Creates one parse operation that belongs to an existing operation identity. A mixed-detail
+	/// operation needs several parse scopes - one per distinct edit family - but they are still one
+	/// operation, and per-operation state such as a memoised transient grammar-load failure must be
+	/// shared by all of them. Implementations without per-operation state ignore the identifier.
+	/// </summary>
+	ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds, long operationId) =>
+		CreateScope(projectRoot, kinds);
 }
 
 /// <summary>Optional native-runtime facts used by bounded orchestration and developer diagnostics.</summary>

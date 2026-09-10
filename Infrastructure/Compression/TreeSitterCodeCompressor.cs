@@ -238,7 +238,10 @@ public sealed class TreeSitterCodeCompressor :
 	public ICodeCompressionScope CreateScope(string projectRoot) =>
 		CreateScope(projectRoot, CodeTransformKinds.Bodies);
 
-	public ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds)
+	public ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds) =>
+		CreateScope(projectRoot, kinds, Interlocked.Increment(ref _nextScopeId));
+
+	public ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds, long operationId)
 	{
 		ValidateTransformKinds(kinds);
 
@@ -251,7 +254,7 @@ public sealed class TreeSitterCodeCompressor :
 				_byExtension,
 				CodeTransformIdentity.Create(TransformIdentity, kinds),
 				kinds,
-				Interlocked.Increment(ref _nextScopeId),
+				operationId,
 				_locator,
 				GetLanguagePool,
 				ReleaseScope,

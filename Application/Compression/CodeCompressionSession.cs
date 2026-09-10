@@ -123,6 +123,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	private long _prewarmReuses;
 	private long _unsupportedFastPaths;
 	private long _retainedCacheBytes;
+	private long _nextOperationId;
 	private bool _disposed;
 
 	internal CodeCompressionSession(
@@ -157,10 +158,23 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			_ => throw new ArgumentOutOfRangeException(nameof(kinds), kinds, null)
 		};
 
+	/// <summary>
+	/// Identifies a whole mixed-detail operation. A single kinds value cannot stand in for it: two
+	/// calls with the same default level and different overrides transform the same file
+	/// differently, and the scan caches keyed on this string must not confuse them.
+	/// </summary>
+	public string GetTransformIdentity(ContentDetailPolicy policy)
+	{
+		ArgumentNullException.ThrowIfNull(policy);
+		return policy.IsUniform
+			? GetTransformIdentity(policy.BaseKinds)
+			: policy.ComputeIdentity(compressor.TransformIdentity);
+	}
+
 	public bool IsSupported(string relativePath) => compressor.IsSupported(relativePath);
 
 	public bool IsSupported(string relativePath, CodeTransformKinds kinds) =>
-		compressor.IsSupported(relativePath, kinds);
+		kinds != CodeTransformKinds.None && compressor.IsSupported(relativePath, kinds);
 
 	public int AnalysisWorkerCapacity =>
 		(compressor as ICodeCompressionRuntimeDiagnosticsProvider)?.AnalysisWorkerCapacity ?? 1;
@@ -235,6 +249,13 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		CodeTransformKinds kinds) =>
 		BeginScope(projectRoot, selection, CodeCompressionScopeMode.Output, kinds);
 
+	internal CodeCompressionScope BeginOutput(
+		string projectRoot,
+		ContentSelectionSnapshot selection,
+		CodeTransformKinds kinds,
+		ContentDetailPolicy? policy) =>
+		BeginScope(projectRoot, selection, CodeCompressionScopeMode.Output, kinds, policy);
+
 	internal CodeCompressionScope BeginPrewarm(
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths) =>
@@ -266,18 +287,45 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			CodeCompressionScopeMode.Measurement,
 			kinds);
 
+	internal CodeCompressionScope BeginMeasurement(
+		string projectRoot,
+		CodeTransformKinds kinds,
+		ContentDetailPolicy? policy) =>
+		BeginScope(
+			projectRoot,
+			new ContentSelectionSnapshot(0, [], string.Empty),
+			CodeCompressionScopeMode.Measurement,
+			kinds,
+			policy);
+
+	internal CodeCompressionScope BeginPrewarm(
+		string projectRoot,
+		ContentSelectionSnapshot selection,
+		CodeTransformKinds kinds,
+		ContentDetailPolicy? policy) =>
+		BeginScope(projectRoot, selection, CodeCompressionScopeMode.Prewarm, kinds, policy);
+
 	private CodeCompressionScope BeginScope(
 		string projectRoot,
 		ContentSelectionSnapshot selection,
 		CodeCompressionScopeMode mode,
-		CodeTransformKinds kinds)
+		CodeTransformKinds kinds,
+		ContentDetailPolicy? policy = null)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
-		var transformIdentity = GetTransformIdentity(kinds);
+		var effectivePolicy = policy is { IsUniform: false } ? policy : null;
+		var transformIdentity = effectivePolicy is null
+			? GetTransformIdentity(kinds)
+			: GetTransformIdentity(effectivePolicy);
 		var generation = CaptureGeneration();
+		// Every parse scope a mixed operation materialises belongs to one operation, so the
+		// identifier is captured once here rather than once per inner scope.
+		var operationId = Interlocked.Increment(ref _nextOperationId);
 		return new CodeCompressionScope(
 			this,
-			compressor.CreateScope(projectRoot, kinds),
+			effectivePolicy is null
+				? compressor.CreateScope(projectRoot, kinds, operationId)
+				: null,
 			mode == CodeCompressionScopeMode.Measurement
 				? string.Empty
 				: selection.SelectionFingerprint,
@@ -286,7 +334,11 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			mode,
 			kinds,
 			transformIdentity,
-			Availability);
+			Availability,
+			effectivePolicy,
+			effectivePolicy is null
+				? null
+				: requestedKinds => compressor.CreateScope(projectRoot, requestedKinds, operationId));
 	}
 
 	internal CodeCompressionExecution Transform(
@@ -891,12 +943,19 @@ public sealed class CodeCompressionScope : IDisposable
 {
 	internal const int MaximumUnchangedDiagnosticExamples = 256;
 	private readonly CodeCompressionSession session;
-	private readonly ICodeCompressionScope inner;
+	private readonly ICodeCompressionScope? inner;
 	private readonly string selectionKey;
 	private readonly long generation;
 	private readonly CodeCompressionScopeMode mode;
 	private readonly CodeTransformKinds kinds;
 	private readonly string transformIdentity;
+	private readonly ContentDetailPolicy? detailPolicy;
+	private readonly Func<CodeTransformKinds, ICodeCompressionScope>? innerFactory;
+	// One parse scope per distinct edit family, materialised on first use. Preparation runs the
+	// per-file work on several workers, so the factory must run at most once per kinds value: a
+	// duplicate scope would never be disposed and would keep the compressor from releasing its
+	// grammar pools for the rest of the process.
+	private readonly ConcurrentDictionary<CodeTransformKinds, Lazy<ICodeCompressionScope>>? innerByKinds;
 	private readonly SortedList<DiagnosticOrderKey, CodeCompressionFileOutcome>? _unchangedExamples;
 	private readonly int[]? _unchangedOutcomeCounts;
 	private readonly IReadOnlyDictionary<string, int>? _fileOrder;
@@ -916,14 +975,16 @@ public sealed class CodeCompressionScope : IDisposable
 
 	internal CodeCompressionScope(
 		CodeCompressionSession session,
-		ICodeCompressionScope inner,
+		ICodeCompressionScope? inner,
 		string selectionKey,
 		IReadOnlyList<string> orderedFilePaths,
 		long generation,
 		CodeCompressionScopeMode mode,
 		CodeTransformKinds kinds,
 		string transformIdentity,
-		CodeCompressionAvailabilitySnapshot initialAvailability)
+		CodeCompressionAvailabilitySnapshot initialAvailability,
+		ContentDetailPolicy? detailPolicy = null,
+		Func<CodeTransformKinds, ICodeCompressionScope>? innerFactory = null)
 	{
 		this.session = session;
 		this.inner = inner;
@@ -933,6 +994,10 @@ public sealed class CodeCompressionScope : IDisposable
 		this.kinds = kinds;
 		this.transformIdentity = transformIdentity;
 		this.initialAvailability = initialAvailability;
+		this.detailPolicy = detailPolicy;
+		this.innerFactory = innerFactory;
+		if (detailPolicy is not null)
+			innerByKinds = new ConcurrentDictionary<CodeTransformKinds, Lazy<ICodeCompressionScope>>();
 		if (mode == CodeCompressionScopeMode.Measurement)
 			return;
 
@@ -945,6 +1010,38 @@ public sealed class CodeCompressionScope : IDisposable
 			.ToDictionary(static item => item.path, static item => item.index, ProjectTreePathIdentity.CanonicalComparer);
 	}
 
+	/// <summary>
+	/// The parse scope, kinds and identity that apply to one file. Under a mixed detail policy each
+	/// file answers for itself; a file that requests no transformation at all resolves to a null
+	/// scope and is never submitted to the compressor, exactly as if compression were off for it.
+	/// </summary>
+	private readonly record struct FileTransformTarget(
+		ICodeCompressionScope? Scope,
+		CodeTransformKinds Kinds,
+		string Identity);
+
+	private FileTransformTarget ResolveTarget(string relativePath)
+	{
+		if (detailPolicy is null)
+			return new FileTransformTarget(inner, kinds, transformIdentity);
+
+		var fileKinds = detailPolicy.KindsFor(relativePath);
+		if (fileKinds == CodeTransformKinds.None)
+			return new FileTransformTarget(null, CodeTransformKinds.None, string.Empty);
+
+		var scope = innerByKinds!
+			.GetOrAdd(
+				fileKinds,
+				requested => new Lazy<ICodeCompressionScope>(
+					() => innerFactory!(requested),
+					LazyThreadSafetyMode.ExecutionAndPublication))
+			.Value;
+		return new FileTransformTarget(scope, fileKinds, session.GetTransformIdentity(fileKinds));
+	}
+
+	internal CodeTransformKinds KindsFor(string relativePath) =>
+		detailPolicy is null ? kinds : detailPolicy.KindsFor(relativePath);
+
 	public CodeCompressionResult Transform(
 		string fullPath,
 		string relativePath,
@@ -952,16 +1049,19 @@ public sealed class CodeCompressionScope : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var target = ResolveTarget(relativePath);
+		if (target.Scope is null)
+			return new CodeCompressionResult(content, ContentTransformMap.Identity);
 		var execution = session.Transform(
-			inner,
+			target.Scope,
 			fullPath,
 			relativePath,
 			content,
 			fingerprint: null,
 			generation,
 			materializeOutput: true,
-			kinds,
-			transformIdentity,
+			target.Kinds,
+			target.Identity,
 			cancellationToken);
 		var plan = execution.Plan;
 		RecordPlan(fullPath, plan);
@@ -979,16 +1079,19 @@ public sealed class CodeCompressionScope : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var target = ResolveTarget(relativePath);
+		if (target.Scope is null)
+			return new CodeCompressionResult(content, ContentTransformMap.Identity);
 		var execution = session.Transform(
-			inner,
+			target.Scope,
 			fullPath,
 			relativePath,
 			content,
 			fingerprint,
 			generation,
 			materializeOutput: true,
-			kinds,
-			transformIdentity,
+			target.Kinds,
+			target.Identity,
 			cancellationToken);
 		var plan = execution.Plan;
 		RecordPlan(fullPath, plan);
@@ -1004,16 +1107,19 @@ public sealed class CodeCompressionScope : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var target = ResolveTarget(relativePath);
+		if (target.Scope is null)
+			return UnrequestedPlan(relativePath, content);
 		var execution = session.Transform(
-			inner,
+			target.Scope,
 			fullPath,
 			relativePath,
 			content,
 			fingerprint: null,
 			generation,
 			materializeOutput: false,
-			kinds,
-			transformIdentity,
+			target.Kinds,
+			target.Identity,
 			cancellationToken);
 		RecordPlan(fullPath, execution.Plan);
 		return execution.Plan;
@@ -1027,20 +1133,36 @@ public sealed class CodeCompressionScope : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var target = ResolveTarget(relativePath);
+		if (target.Scope is null)
+			return UnrequestedPlan(relativePath, content);
 		var execution = session.Transform(
-			inner,
+			target.Scope,
 			fullPath,
 			relativePath,
 			content,
 			fingerprint,
 			generation,
 			materializeOutput: false,
-			kinds,
-			transformIdentity,
+			target.Kinds,
+			target.Identity,
 			cancellationToken);
 		RecordPlan(fullPath, execution.Plan);
 		return execution.Plan;
 	}
+
+	/// <summary>
+	/// A file whose effective detail requests no transformation. Its transformed length equals its
+	/// source length and it is deliberately not recorded: the scope's counters describe the files a
+	/// transformation was actually asked for, exactly as they do when compression is off entirely.
+	/// </summary>
+	private static CodeCompressionPlan UnrequestedPlan(string relativePath, string content) =>
+		CodeCompressionPlan.Unchanged(
+			relativePath,
+			"unknown",
+			CodeCompressionOutcome.UnchangedNoBenefit,
+			content.Length,
+			string.Empty);
 
 	internal bool Warm(
 		string fullPath,
@@ -1056,15 +1178,18 @@ public sealed class CodeCompressionScope : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var target = ResolveTarget(relativePath);
+		if (target.Scope is null)
+			return null;
 		var plan = session.Warm(
-			inner,
+			target.Scope,
 			fullPath,
 			relativePath,
 			content,
 			fingerprint: null,
 			generation,
-			kinds,
-			transformIdentity,
+			target.Kinds,
+			target.Identity,
 			cancellationToken);
 		if (plan is null)
 			return null;
@@ -1088,14 +1213,20 @@ public sealed class CodeCompressionScope : IDisposable
 		out CodeCompressionPlan? plan)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var target = ResolveTarget(relativePath);
+		if (target.Scope is null)
+		{
+			plan = null;
+			return false;
+		}
 		if (!session.TryGetWarmCachedPlan(
 				fullPath,
 				relativePath,
 				content.Length,
 				fingerprint,
 				generation,
-				kinds,
-				transformIdentity,
+				target.Kinds,
+				target.Identity,
 				out plan))
 		{
 			return false;
@@ -1120,15 +1251,18 @@ public sealed class CodeCompressionScope : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var target = ResolveTarget(relativePath);
+		if (target.Scope is null)
+			return null;
 		var plan = session.Warm(
-			inner,
+			target.Scope,
 			fullPath,
 			relativePath,
 			content,
 			fingerprint,
 			generation,
-			kinds,
-			transformIdentity,
+			target.Kinds,
+			target.Identity,
 			cancellationToken);
 		if (plan is null)
 			return null;
@@ -1142,9 +1276,12 @@ public sealed class CodeCompressionScope : IDisposable
 		int sourceLength)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var target = ResolveTarget(relativePath);
+		if (target.Scope is null)
+			return;
 		RecordPlan(
 			fullPath,
-			session.CreateUnsupportedPlan(relativePath, sourceLength, transformIdentity));
+			session.CreateUnsupportedPlan(relativePath, sourceLength, target.Identity));
 	}
 
 	private void RecordPlan(string fullPath, CodeCompressionPlan plan)
@@ -1262,7 +1399,17 @@ public sealed class CodeCompressionScope : IDisposable
 
 		try
 		{
-			inner.Dispose();
+			inner?.Dispose();
+			if (innerByKinds is not null)
+			{
+				// Only materialised entries hold a compressor lease; an unobserved Lazy never ran
+				// its factory and has nothing to release.
+				foreach (var entry in innerByKinds.Values)
+				{
+					if (entry.IsValueCreated)
+						entry.Value.Dispose();
+				}
+			}
 		}
 		finally
 		{
@@ -1297,28 +1444,46 @@ public sealed record CodeCompressionContext(
 	CodeCompressionSession Session,
 	CodeTransformKinds Kinds = CodeTransformKinds.Bodies)
 {
-	public string TransformIdentity => Session.GetTransformIdentity(Kinds);
+	/// <summary>
+	/// Resolves transform kinds per file. Null keeps the historical behaviour where
+	/// <see cref="Kinds"/> applies to the whole selection, and a policy without overrides is
+	/// deliberately indistinguishable from null. Never set on a context owned by the desktop app:
+	/// its prewarm path consumes <see cref="TransformIdentity"/> per file, and under a policy that
+	/// string identifies the operation rather than any one file.
+	/// </summary>
+	public ContentDetailPolicy? Policy { get; init; }
 
-	public bool IsSupported(string relativePath) => Session.IsSupported(relativePath, Kinds);
+	public string TransformIdentity => Policy is null
+		? Session.GetTransformIdentity(Kinds)
+		: Session.GetTransformIdentity(Policy);
+
+	public bool IsSupported(string relativePath) =>
+		Session.IsSupported(relativePath, KindsFor(relativePath));
+
+	/// <summary>The transform kinds this file actually requests.</summary>
+	public CodeTransformKinds KindsFor(string relativePath) =>
+		Policy is null ? Kinds : Policy.KindsFor(relativePath);
 
 	public CodeCompressionScope BeginOutput(IReadOnlyList<string> orderedFilePaths) =>
 		Session.BeginOutput(
 			ProjectRoot,
 			ContentSelectionSnapshot.Create(ProjectRoot, orderedFilePaths),
-			Kinds);
+			Kinds,
+			Policy);
 
 	public CodeCompressionScope BeginOutput(ContentSelectionSnapshot selection) =>
-		Session.BeginOutput(ProjectRoot, selection, Kinds);
+		Session.BeginOutput(ProjectRoot, selection, Kinds, Policy);
 
 	internal CodeCompressionScope BeginPrewarm(IReadOnlyList<string> orderedFilePaths) =>
 		Session.BeginPrewarm(
 			ProjectRoot,
 			ContentSelectionSnapshot.Create(ProjectRoot, orderedFilePaths),
-			Kinds);
+			Kinds,
+			Policy);
 
 	internal CodeCompressionScope BeginPrewarm(ContentSelectionSnapshot selection) =>
-		Session.BeginPrewarm(ProjectRoot, selection, Kinds);
+		Session.BeginPrewarm(ProjectRoot, selection, Kinds, Policy);
 
 	public CodeCompressionScope BeginMeasurement() =>
-		Session.BeginMeasurement(ProjectRoot, Kinds);
+		Session.BeginMeasurement(ProjectRoot, Kinds, Policy);
 }
