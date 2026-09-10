@@ -614,7 +614,8 @@ glob metacharacters have meaning only in the pattern parameters.
 ### Batch `get_file`
 
 Use `requests` when several source excerpts are already known; use `search_project`
-when their locations are not known. `path` and `requests` are mutually exclusive.
+when their locations are not known. Exactly one of `path` or `requests` is required;
+supplying both or neither returns `DPX-MCP-INVALID-ARGUMENTS` before any file is read.
 The batch contains one to eight records, each shaped as
 `{"path":"src/App.cs","ranges":[{"start_line":10,"end_line":30}]}`. A call
 contains at most sixteen ranges in total. Each range is inclusive, starts at line

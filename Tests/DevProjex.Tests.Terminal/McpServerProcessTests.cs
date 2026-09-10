@@ -26,6 +26,83 @@ public sealed partial class McpServerProcessTests
 	private const string PrivateEmail = "alice.smith" + "@company.io";
 	private const string PrivatePath = "/home/alice-smith/DevProjexMcpProcessProbe/project";
 
+	[Fact]
+	public async Task RealProcessListsEveryCatalogToolAndRejectsMissingOrConflictingFileSelectors()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Anchor.cs", "anchor\n");
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var clientPhase = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		clientPhase.CancelAfter(TimeSpan.FromMinutes(2));
+		await using (var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			clientOptions: null,
+			loggerFactory: null,
+			clientPhase.Token))
+		{
+			var tools = await client.ListToolsAsync(options: null, clientPhase.Token);
+			Assert.Equal(8, tools.Count);
+			Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
+
+			var missing = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?>(),
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.True(missing.IsError);
+			Assert.StartsWith(
+				McpErrorCodes.InvalidArguments,
+				Assert.IsType<TextContentBlock>(Assert.Single(missing.Content)).Text,
+				StringComparison.Ordinal);
+
+			var conflicting = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?>
+				{
+					["path"] = "Anchor.cs",
+					["requests"] = new object[]
+					{
+						new { path = "Anchor.cs", ranges = new[] { new { start_line = 1, end_line = 1 } } }
+					}
+				},
+				progress: null,
+				options: null,
+				clientPhase.Token);
+			Assert.True(conflicting.IsError);
+			Assert.StartsWith(
+				McpErrorCodes.InvalidArguments,
+				Assert.IsType<TextContentBlock>(Assert.Single(conflicting.Content)).Text,
+				StringComparison.Ordinal);
+		}
+
+		process.StandardInput.Close();
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardError = await standardErrorTask;
+		Assert.Equal(0, process.ExitCode);
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+	}
+
 	[Theory]
 	[InlineData("none")]
 	[InlineData("off")]
