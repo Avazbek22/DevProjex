@@ -163,6 +163,67 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain(UnchangedServiceNotice, empty, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task RealProcessRepeatsServiceNoticesAfterAResponseThatCouldNotCarryThem()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("stored-project");
+		workspace.WriteFile("stored-project/target.ts", "export const target = 1;\n");
+		workspace.WriteFile(
+			"stored-project/tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		for (var index = 0; index < 700; index++)
+		{
+			workspace.WriteFile(
+				$"stored-project/related/very-long-related-target-{index:D4}.ts",
+				$"import target from '../target.js'; export const value{index} = target;\n");
+		}
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		// The dependency answer overflows into a stored pack, so the response body is the
+		// pack pointer and carries none of the service notices.
+		var stored = AllProcessText(await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = "target.ts", ["direction"] = "dependents" }));
+		var next = AllProcessText(await CallAsync(
+			server,
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text", ["max_depth"] = 1 }));
+
+		Assert.Contains("Related-files result stored as", stored, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Protection]", stored, StringComparison.Ordinal);
+		Assert.DoesNotContain(UnchangedServiceNotice, next, StringComparison.Ordinal);
+		Assert.Contains("[Effective filters]", next, StringComparison.Ordinal);
+		Assert.Contains("[Protection]", next, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessRepeatsServiceNoticesAfterAFailedCall()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("failing-project");
+		workspace.WriteFile("failing-project/src/Alpha.ts", "export const alpha = 1\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var failed = await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "src/Missing.ts" });
+		var next = AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "src/Alpha.ts" }));
+
+		Assert.True(failed.IsError);
+		Assert.DoesNotContain(UnchangedServiceNotice, next, StringComparison.Ordinal);
+		Assert.Contains("[Protection]", next, StringComparison.Ordinal);
+	}
+
 	private static ValueTask<CallToolResult> CallAsync(
 		ActualMcpProcess server,
 		string tool,

@@ -404,8 +404,9 @@ call, so a session receives them once and then only when what they say changes.
 The change signal is the state the lines are made of: the project, the profile,
 the effective exclusion set, the Git mode, and the protection policy. A response
 that withholds them carries the constant
-`[Unchanged] filters, protection; see list_projects.` instead, which is shorter
-than the shortest set it can replace, so no response grows by omitting a notice.
+`[Unchanged] filters, protection; see list_projects.` instead, which is never
+longer than the shortest set it can replace, so no response grows by omitting a
+notice.
 
 Omission has to be provable. When the project cannot be identified, when either
 line would say something this session has not been told for that project, or when
@@ -415,6 +416,12 @@ response after any of those inputs changed, an `[Empty selection]` response, and
 any call that passed `max_file_bytes`, whose echo reports a per-call argument
 rather than session state. A new server process is a new session and always starts
 in full.
+
+A line counts as reported only once it is in the text the caller receives. A
+result whose body moved into a stored pack, a response whose trailing diagnostics
+were truncated to fit a stored-pack limit, and a failed call all leave the session
+where it was, so the next response reports the full set again rather than pointing
+back at something the caller never saw.
 
 `list_projects` is unaffected and always answers with the complete `baseline`
 object, including the Git mode, exclusion tokens, `agentExclusions`, and
@@ -459,9 +466,11 @@ the pattern, add paths or include_patterns, or lower context_lines.` Whenever a 
 does not return every match it found — because `max_results`, the cap, or both
 withheld some — it also reports `[Search totals] matches=N · files=M`, the exact
 number of matches and the exact number of files containing at least one match inside
-the inspected selection. Both lines are trusted counts and constants; no path enters
-them. A call that returns everything it found keeps its previous response unchanged.
-The `[N additional matches not shown]` count keeps its existing meaning and precision.
+the inspected selection. A group cut only in its trailing context lines withheld no
+match, so it receives the cap notice without the totals line. Both lines are trusted
+counts and constants; no path enters them. A call whose output was not cut and that
+returned every match it found keeps its previous response unchanged. The
+`[N additional matches not shown]` count keeps its existing meaning and precision.
 
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append

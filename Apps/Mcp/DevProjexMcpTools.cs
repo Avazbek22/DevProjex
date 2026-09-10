@@ -778,8 +778,9 @@ internal sealed class DevProjexMcpTools(
 				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
 				: null;
 			// Sizing information is only worth its characters when the caller did not
-			// receive everything the pattern found.
-			var searchTotalsNotice = totalMatches > shownMatches || resultGroupTruncated
+			// receive every match the pattern found. A group cut in its trailing context
+			// lines withheld no match and gets the cap notice alone.
+			var searchTotalsNotice = totalMatches > shownMatches
 				? $"[Search totals] matches={totalMatches.ToString(CultureInfo.InvariantCulture)} · " +
 				  $"files={matchingFiles.ToString(CultureInfo.InvariantCulture)}"
 				: null;
@@ -1293,7 +1294,7 @@ internal sealed class DevProjexMcpTools(
 		// Two cases always answer in full: a response that has to explain an empty selection
 		// names the filters that emptied it, and a max_file_bytes echo reports a value the
 		// caller passed on this call rather than session state.
-		var notices = serviceNotices.Next(
+		var notices = serviceNotices.Prepare(
 			NoticeIdentity(plan),
 			selection.Filters,
 			protection,
@@ -1398,7 +1399,30 @@ internal sealed class DevProjexMcpTools(
 	private Task<CallToolResult> RunProjectAsync(
 		Func<Task<CallToolResult>> operation,
 		CancellationToken cancellationToken) =>
-		_projectOperation.RunAsync(() => ExecuteAsync(operation), cancellationToken);
+		_projectOperation.RunAsync(() => RunAndConfirmServiceNoticesAsync(operation), cancellationToken);
+
+	/// <summary>
+	/// Service notices count as reported only once they are in the text the caller receives.
+	/// A stored pack, a truncated diagnostic tail, or a failed call therefore leaves the memo
+	/// where it was, and the next response repeats the full set.
+	/// </summary>
+	private async Task<CallToolResult> RunAndConfirmServiceNoticesAsync(Func<Task<CallToolResult>> operation)
+	{
+		try
+		{
+			var result = await ExecuteAsync(operation).ConfigureAwait(false);
+			serviceNotices.CommitDelivered(ResponseText(result));
+			return result;
+		}
+		catch
+		{
+			serviceNotices.DiscardPending();
+			throw;
+		}
+	}
+
+	private static string ResponseText(CallToolResult result) =>
+		string.Join('\n', result.Content.OfType<TextContentBlock>().Select(static block => block.Text));
 
 	private static async Task<CallToolResult> ExecuteAsync(Func<Task<CallToolResult>> operation)
 	{
