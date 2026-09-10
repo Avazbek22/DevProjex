@@ -136,7 +136,6 @@ public sealed record FileFacts(
 	IReadOnlyList<string> TypeParameters)
 {
 	public bool CanCache { get; init; } = true;
-	public bool HasEntryPointEvidence { get; init; }
 	public IReadOnlyList<TypeParameterScope> TypeParameterScopes { get; init; } = [];
 	public IReadOnlyList<CSharpUsingDirective> CSharpUsingDirectives { get; init; } = [];
 }

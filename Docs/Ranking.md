@@ -62,13 +62,7 @@ Extracted-facts coverage is `Supported / candidates`. `Supported`, `Unsupported`
 
 Git activity is commit count plus recency by position in a safe 200-commit LocalRead window. History is cached only after success, by repository identity, pinned HEAD, window, shallow state, and completeness. An incomplete shallow window has confidence `commits read / 200`; it is reported as, for example, `read 1/200 commits; shallow history`, and is not treated as evidence of low activity. Candidate repository boundaries are indexed once per operation. History paths are parsed as NUL-delimited fields; one Git-generated framing LF is removed from the first path field, while newline and `0x1e` bytes belonging to a filename are preserved.
 
-Manifests and explicit entry-point evidence receive the entry-point role. For C#, the facts carry a
-compact file flag when the syntax contains a static type-level method named `Main` or a top-level
-statement; neither `Main` nor the statement becomes a declaration or a graph edge. A non-static
-`Main`, a type named `Main`, and the filename do not supply this role. Existing executable-module
-evidence for other languages is unchanged. A source with no dependents and at least three dependencies
-is only a `coordinator`, not an inferred entry point. Tests are deprioritized but never excluded. The
-final tie-break is the canonical relative path.
+Manifests and explicit `Main` or executable-module evidence are entry points. A source with no dependents and at least three dependencies is only a `coordinator`, not an inferred entry point. Tests are deprioritized but never excluded. The final tie-break is the canonical relative path.
 
 Facts, preparation, cost, and emitted bytes are bound to one source identity. SHA-256 content plus length and last-write metadata are captured around fact indexing. For source-backed output, raw SHA-256 is then calculated from the same opened handle that supplies the decoded or direct UTF-8 payload; path metadata remains a second guard against replacement. Application-owned immutable prepared content needs no source check after ownership transfer. A mismatch fails closed with guidance to repeat the export. Ranking still never widens the effective selection. Without `rank`, it performs no fact indexing, Git work, or content hashing and preserves the existing bytes and metadata-coherence behavior.
 

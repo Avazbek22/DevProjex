@@ -565,7 +565,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		}
 
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
-			captureName is "context.namespace" or "context.method" or "context.top_level_statement";
+			captureName == "context.namespace";
 		if (!isCompact)
 		{
 			var text = materialization.Read(node);
@@ -587,11 +587,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			: capturedName + (genericArity == 0 ? string.Empty : $"`{genericArity}");
 		var isFileLocal = captureName.StartsWith("declaration.", StringComparison.Ordinal) &&
 			node.Children.Any(child => child.Type == "modifier" && materialization.Read(child) == "file");
-		var isStatic = captureName == "context.method" &&
-			node.Children.Any(child => child.Type == "modifier" && materialization.Read(child) == "static");
 		return CreateCapture(captureName, node, evidence, capturedName, genericArity, isFileLocal,
-			FindContainingDeclaration(node, materialization), capturedNameStartIndex: capturedNameStartIndex,
-			evidence: evidence, isStatic: isStatic);
+			FindContainingDeclaration(node, materialization), capturedNameStartIndex: capturedNameStartIndex, evidence: evidence);
 	}
 
 	private static bool TryReadSupportedModuleCall(
@@ -681,8 +678,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string? containingDeclaration = null,
 		DependencyImportSyntax? importSyntax = null,
 		int capturedNameStartIndex = -1,
-		string? evidence = null,
-		bool isStatic = false) =>
+		string? evidence = null) =>
 		new(
 			captureName,
 			node.Type,
@@ -696,8 +692,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			containingDeclaration,
 			importSyntax,
 			capturedNameStartIndex,
-			evidence,
-			isStatic);
+			evidence);
 
 	private static string? FindContainingDeclaration(
 		Node node,
