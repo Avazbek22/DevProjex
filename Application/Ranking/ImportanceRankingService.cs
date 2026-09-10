@@ -127,9 +127,14 @@ public sealed class ImportanceRankingService(
 		NormalizeStateValues(states, RankingValueKind.Git, cancellationToken);
 		NormalizeRoleValues(states, cancellationToken);
 		var coverage = CalculateExtractedFactsCoverage(dependency.Coverage, candidates.Length);
+		var candidateRelativePaths = candidates
+			.Select(static candidate => candidate.RelativePath)
+			.ToHashSet(StringComparer.Ordinal);
 		var internalReferenceCandidates = dependency.Edges.Count(static edge =>
 			edge.Status != ResolutionStatus.External);
-		var resolvedInternalReferences = graph.EdgeCount;
+		var resolvedInternalReferences = dependency.Edges.Count(edge =>
+			edge.Status == ResolutionStatus.Resolved &&
+			ResolvedTargets(edge).Any(candidateRelativePaths.Contains));
 		var resolvedInternalReferenceCoverage = internalReferenceCandidates == 0
 			? 0
 			: Math.Clamp((double)resolvedInternalReferences / internalReferenceCandidates, 0, 1);
@@ -217,6 +222,7 @@ public sealed class ImportanceRankingService(
 			ResolvedInternalReferences = resolvedInternalReferences,
 			InternalReferenceCandidates = internalReferenceCandidates,
 			ResolvedInternalReferenceCoverage = resolvedInternalReferenceCoverage,
+			UniqueResolvedFilePairs = graph.EdgeCount,
 			FilesWithResolvedEdges = graph.FilesWithEdges,
 			GitHistoryIsShallow = history.IsShallow,
 			GitHistoryIsComplete = history.IsComplete,
@@ -229,6 +235,11 @@ public sealed class ImportanceRankingService(
 			? report
 			: FocusRankingEngine.Apply(report, focus, graph, dependency, cancellationToken);
 	}
+
+	private static IEnumerable<string> ResolvedTargets(DependencyEdge edge) =>
+		edge.DeclarationFiles.Count > 0
+			? edge.DeclarationFiles
+			: edge.Target is null ? [] : [edge.Target];
 
 	internal static double CalculateExtractedFactsCoverage(
 		DependencyFactsCoverage coverage,

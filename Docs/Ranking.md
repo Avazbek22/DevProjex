@@ -58,7 +58,7 @@ Gold paths never enter a score or search query. Historical fixes are not labels,
 
 The `importance-v1` constants remain graph `0.85`, Git `0.10`, and role `0.05`; v5.2 is not released, so the corrected implementation retains the algorithm id. The graph is built once as canonical numeric node ids and sorted adjacency arrays. Only unique resolved non-self file pairs participate. The same graph supplies PageRank, dependents, dependencies, and coverage counts. PageRank uses 30 deterministic sequential iterations on two `double[]` buffers. Before dense-rank normalization, values are quantized to an absolute `1e-12` grid with midpoint-to-even rounding. This is a transitive equivalence relation; pairwise epsilon comparison is deliberately not used. At the graph sizes in this protocol, `1e-12` is well below a meaningful rank separation while absorbing observed symmetric-node noise near `1e-17`.
 
-Extracted-facts coverage is `Supported / candidates`. `Supported`, `Unsupported`, and `ExtractionFailed` are mutually exclusive, so failures are not subtracted from `Supported`. Reports separately state facts coverage, unique resolved internal references over all non-external reference records, and the number of files touching a resolved edge. A high facts percentage can no longer be presented as high link coverage when the graph is sparse.
+Extracted-facts coverage is `Supported / candidates`. `Supported`, `Unsupported`, and `ExtractionFailed` are mutually exclusive, so failures are not subtracted from `Supported`. Reference resolution is a separate fraction: the denominator is the set of non-external logical reference groups, and the numerator is the groups that resolve to at least one selected file. A partial type with several declaration files is still one resolved logical reference. A self-reference counts as resolved evidence in this fraction but is excluded from the ranking graph, whose unique non-self file-pair count and files-with-edges count are reported separately. When there are no reference groups, the resolution fraction is reported as unavailable rather than as zero percent. This fraction is diagnostic only; graph weight continues to use facts-supported candidate coverage.
 
 Git activity is commit count plus recency by position in a safe 200-commit LocalRead window. History is cached only after success, by repository identity, pinned HEAD, window, shallow state, and completeness. An incomplete shallow window has confidence `commits read / 200`; it is reported as, for example, `read 1/200 commits; shallow history`, and is not treated as evidence of low activity. Candidate repository boundaries are indexed once per operation. History paths are parsed as NUL-delimited fields; one Git-generated framing LF is removed from the first path field, while newline and `0x1e` bytes belonging to a filename are preserved.
 
@@ -92,11 +92,11 @@ The manual review calls the Flask combined list credible: it contains `app.py`, 
 
 Measured coverage was:
 
-| Repository | Facts-supported candidates | Resolved internal references | Files with resolved edges |
-|---|---:|---:|---:|
-| DevProjex | `1,471 / 2,299 (63.98%)` | `5,138 / 11,567 (44.42%)` | `1,221` |
-| Repomix | `389 / 951 (40.90%)` | `1,025 / 2,612 (39.24%)` | `359` |
-| Flask | `80 / 212 (37.74%)` | `175 / 512 (34.18%)` | `75` |
+| Repository | Facts-supported candidates | Internal reference resolution | Unique resolved file pairs | Files with resolved edges |
+|---|---:|---:|---:|---:|
+| DevProjex | `1,471 / 2,299 (63.98%)` | `3,887 / 16,270 (23.89%)` | `2,372` | `624` |
+| Repomix | `389 / 951 (40.90%)` | `1,572 / 2,637 (59.61%)` | `1,040` | `358` |
+| Flask | `80 / 212 (37.74%)` | `216 / 523 (41.30%)` | `157` | `74` |
 
 ## Localization-task budget series
 
@@ -120,7 +120,7 @@ On the pinned DevProjex corpus, the beginning of the reviewed report is represen
 
 ```text
 [Ranking] importance-v1 · graph pagerank · facts 64% of 2,299 sources · git window 200 commits · tests deprioritized · missing signals: confidence limited
-[Ranking coverage] facts 64% · resolved internal references 5,138/11,567 (44%) · files with resolved edges 1,221
+[Ranking coverage] facts 64% · internal reference resolution 3,887/16,270 (24%) · unique resolved file pairs 2,372 · files with resolved edges 624
 [Ranking top] Kernel/Models/IgnoreRules.cs — dependents 138 · dependencies 5 · commits 2/200 · priority 1; graph available; git available; main contribution: graph; confidence limited
 ```
 
