@@ -47,6 +47,7 @@ internal sealed class DevProjexMcpTools(
 		"fact limit exceeded"
 	];
 	private readonly McpProjectOperationGate _projectOperation = new();
+	private readonly McpServiceNoticeMemo serviceNotices = new();
 	private static readonly IReadOnlySet<string> EmptyArgumentNames = McpJsonArguments.FreezeAllowed();
 	private static readonly IReadOnlySet<string> ReadPackArgumentNames =
 		McpJsonArguments.FreezeAllowed("pack_id", "start_line", "end_line", "start_column");
@@ -1283,13 +1284,41 @@ internal sealed class DevProjexMcpTools(
 		ProjectContextPlan plan,
 		bool includeFilters,
 		McpSelectionNoticeContext request,
-		bool includeProtection = true) =>
-		CombineTrustedNotices(
-			McpEffectiveFilters.SelectionNotices(plan, agentExclusions, includeFilters, request),
-			includeProtection
-				? $"[Protection] secrets=always · private-data={(Projects.HidePrivateData ? "enabled" : "disabled")}."
-				: null,
+		bool includeProtection = true)
+	{
+		var selection = McpEffectiveFilters.SelectionNoticeParts(plan, agentExclusions, includeFilters, request);
+		var protection = includeProtection
+			? $"[Protection] secrets=always · private-data={(Projects.HidePrivateData ? "enabled" : "disabled")}."
+			: null;
+		// Two cases always answer in full: a response that has to explain an empty selection
+		// names the filters that emptied it, and a max_file_bytes echo reports a value the
+		// caller passed on this call rather than session state.
+		var notices = serviceNotices.Next(
+			NoticeIdentity(plan),
+			selection.Filters,
+			protection,
+			alwaysSend: selection.EmptySelection is not null || plan.FileSizeFilter is not null);
+		return CombineTrustedNotices(
+			notices.Continuation,
+			notices.Filters,
+			selection.EmptySelection,
+			notices.Protection,
 			FormatRemoteNotice(plan));
+	}
+
+	/// <summary>
+	/// The project a set of service notices describes. Remote checkouts are keyed by their safe
+	/// address as well as their pinned root, and an unresolvable project yields no identity, which
+	/// makes the memo send the full set.
+	/// </summary>
+	private static string? NoticeIdentity(ProjectContextPlan plan)
+	{
+		if (string.IsNullOrEmpty(plan.SourceRoot))
+			return null;
+		return plan.SourceIdentity is { } identity
+			? string.Join(" ", plan.SourceRoot, identity.SourceType.ToString(), identity.RepositoryUrl ?? "")
+			: plan.SourceRoot;
+	}
 
 	private static string? FormatRemoteNotice(ProjectContextPlan plan) =>
 		plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } identity

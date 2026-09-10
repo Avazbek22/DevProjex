@@ -187,6 +187,39 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void McpDocumentationStatesWhenServiceNoticesRepeat()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var security = File.ReadAllText(Path.Combine(rootPath, "Docs", "Security.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedSecurity = Regex.Replace(security, @"\s+", " ");
+
+		Assert.Contains("### Service notices repeat only when they change", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"`[Unchanged] filters, protection; see list_projects.`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains("Omission has to be provable", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains(
+			"any call that passed `max_file_bytes`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"A new server process is a new session and always starts in full",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Filters are never silent, though an unchanged filter line is reported once per session",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"the untrusted-data boundary around project text is unchanged",
+			normalizedSecurity,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void McpReadmeNetworkBoundaryMatchesRemoteOptIn()
 	{
 		var rootPath = FindRepositoryRoot();

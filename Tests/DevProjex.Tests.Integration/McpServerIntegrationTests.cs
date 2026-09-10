@@ -123,7 +123,9 @@ public sealed class McpServerIntegrationTests
 
 		var pack = Text(await server.CallAsync("pack_context"));
 		Assert.Contains("DATABASE_URL", pack, StringComparison.Ordinal);
-		Assert.Contains("[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.", pack, StringComparison.Ordinal);
+		// The tree already reported this baseline in this session and it has not changed since.
+		Assert.Contains(McpServiceNoticeMemo.ContinuationNotice, pack, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Effective filters]", pack, StringComparison.Ordinal);
 	}
 
 	[Fact]

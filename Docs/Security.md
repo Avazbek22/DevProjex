@@ -16,6 +16,14 @@ limits documented in [McpServer.md](McpServer.md),
 | File system | MCP tools are annotated read-only and non-destructive for the source project. Remote checkouts and stored packs live in application-owned managed cache or temporary session storage; the source project is not written. Cache checkout writes require an active lease and a path inside the application-owned repository container. |
 | Supply chain | Grammar sources and secret-detection rules are pinned and hash-verified. Release channels require content receipts, static completeness checks, mutation gates, and real-entry-point smoke tests before publication. Published container artifacts include build provenance; the other channel-specific evidence is described in the release process. |
 
+The trusted filter and protection lines are reported once per session and then
+only when their content changes, with a constant continuation line in their
+place. This changes how often an unchanged trusted line is repeated and nothing
+else: the lines still carry only fixed text, enum states, and counts, the change
+signal is derived from server state rather than assumed, an unprovable state
+sends the full set, and the untrusted-data boundary around project text is
+unchanged. `list_projects` always reports the complete baseline.
+
 Secret-redaction exceptions are operator-controlled. Project content is
 untrusted input, so inline markers such as `gitleaks:allow` cannot grant an
 exception in GUI, CLI, or MCP output.

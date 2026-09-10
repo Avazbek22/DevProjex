@@ -377,7 +377,10 @@ and a deterministic `languages` array. The array is empty when the whole deliver
 source is unavailable. This is an additive schema field; clients that cache the
 schema must refresh it.
 
-Filters are never silent. `get_tree` and `pack_context` end with a trusted
+Filters are never silent, though an unchanged filter line is reported once per
+session rather than on every response — see
+[Service notices repeat only when they change](#service-notices-repeat-only-when-they-change).
+`get_tree` and `pack_context` end with a trusted
 `[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
 exclusion toggles that shaped the tree and who can widen them: the server
 startup line, or a per-call `exclusions` value on a delegation server. When
@@ -393,6 +396,39 @@ When selection produces warnings, `analyze` appends separate human-readable
 trusted warning text blocks without changing its structured schema. Warning
 messages contain stable codes and safe counts or retry guidance, never diagnostic
 paths or project-controlled message text.
+
+### Service notices repeat only when they change
+
+The `[Effective filters]` and `[Protection]` lines describe server state, not the
+call, so a session receives them once and then only when what they say changes.
+The change signal is the state the lines are made of: the project, the profile,
+the effective exclusion set, the Git mode, and the protection policy. A response
+that withholds them carries the constant
+`[Unchanged] filters, protection; see list_projects.` instead, which is shorter
+than the shortest set it can replace, so no response grows by omitting a notice.
+
+Omission has to be provable. When the project cannot be identified, when either
+line would say something this session has not been told for that project, or when
+the response has to explain itself anyway, the full set goes out again. Concretely
+the full set always returns for: the first response of a session, the first
+response after any of those inputs changed, an `[Empty selection]` response, and
+any call that passed `max_file_bytes`, whose echo reports a per-call argument
+rather than session state. A new server process is a new session and always starts
+in full.
+
+`list_projects` is unaffected and always answers with the complete `baseline`
+object, including the Git mode, exclusion tokens, `agentExclusions`, and
+`protection`. It is the orientation call and the way an agent that lost its
+history recovers the whole picture; it never counts as having reported a
+per-call effective selection, so it does not suppress a later `[Effective
+filters]` line.
+
+Only the repetition of unchanged trusted lines changes. Lines that state a fact
+about one call — `[Remote] commit=`, `[Resolution]`, `[Facts coverage]`,
+`[Search scope]`, `[Budget accounting]`, `[Search totals]`, search and tree
+truncation notices, and every `[Warning ...]` — are computed and sent for every
+call as before, and the untrusted-data wrapper around project text is never
+affected.
 
 If mandatory secret redaction cannot inspect a selected file, including text
 larger than the 16 MiB inspection boundary, selection-wide content tools return
