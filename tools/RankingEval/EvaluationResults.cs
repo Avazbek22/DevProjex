@@ -57,3 +57,9 @@ internal sealed record ContentCatalog(
 	IReadOnlyDictionary<string, long> TokenCosts);
 
 internal sealed record MeasureOneResult(double ElapsedMilliseconds, long PeakWorkingSetBytes);
+
+internal sealed record IndexMeasureOneResult(
+	double ElapsedMilliseconds,
+	int ParsedFiles,
+	int ReusedFiles,
+	bool ResolutionCacheHit);

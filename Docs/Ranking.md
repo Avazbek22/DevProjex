@@ -241,3 +241,19 @@ AllRequired `false`, while irrelevant-token share moved from `0.943250` to `0.94
 The other cells were unchanged. The complete result is
 `tools/RankingEval/results/2026-09-10-csharp-call-evidence.json`, produced with product and
 evaluator SHA `bb7c7f05ac64694373b71eddcd850695cfa26362`.
+
+The query-work check measures `DependencyFactsEngine.IndexAsync` directly in seven isolated
+processes per cell; warm cells prime the same engine once. Values are median milliseconds with
+the observed minimum–maximum range. The baseline is
+`963d4f33b2d1196637193ff021bd36e40ecd94e4`.
+
+| Repository | Cold baseline | Cold with call evidence | Warm baseline | Warm with call evidence |
+|---|---:|---:|---:|---:|
+| DevProjex | `1659.929 (1634.848–1687.154)` | `1686.254 (1624.407–1722.022)` | `40.027 (37.397–41.302)` | `38.700 (37.733–41.036)` |
+| Repomix | `283.823 (273.984–296.384)` | `259.804 (253.490–263.944)` | `78.575 (70.922–82.200)` | `70.243 (67.686–74.320)` |
+| Flask | `174.348 (169.827–175.835)` | `173.358 (171.164–181.906)` | `3.825 (3.558–4.036)` | `3.915 (3.498–4.045)` |
+
+The C# corpus ranges overlap, so the added capture does not show a slowdown outside run-to-run
+spread. The non-C# changes are measurement variation: their syntax queries and projected facts are
+byte-identical in the pinned tests. The query content is part of the extractor identity, so changing
+`references.scm` invalidates cached C# facts without a manual cache-version change.
