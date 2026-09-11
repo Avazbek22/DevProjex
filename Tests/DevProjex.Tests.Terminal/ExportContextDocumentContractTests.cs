@@ -566,9 +566,11 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
 		Assert.Equal(0, diagnostics.PreparedWriteBytes);
 		Assert.Equal(0, diagnostics.DocumentWriteBytes);
-		Assert.Equal(6, diagnostics.SourceVersionHashPasses);
+		// One content pass inside ranking and one at write time; ranking no longer reads the
+		// selection a second time to compare it with itself.
+		Assert.Equal(4, diagnostics.SourceVersionHashPasses);
 		Assert.Equal(
-			3 * (new FileInfo(firstPath).Length + new FileInfo(secondPath).Length),
+			2 * (new FileInfo(firstPath).Length + new FileInfo(secondPath).Length),
 			diagnostics.SourceVersionHashBytes);
 	}
 
@@ -729,7 +731,7 @@ public sealed class ExportContextDocumentContractTests
 	}
 
 	[Fact]
-	public async Task RankedSourceBackedExportHashesEachSourceThreeTimes()
+	public async Task RankedSourceBackedExportHashesEachSourceTwice()
 	{
 		using var workspace = new TemporaryDirectory();
 		var firstPath = workspace.WriteFile("A.cs", "public sealed class A { }\n");
@@ -747,9 +749,11 @@ public sealed class ExportContextDocumentContractTests
 				rank: true));
 		var diagnostics = measurement.Capture();
 
-		Assert.Equal(6, diagnostics.SourceVersionHashPasses);
+		// One content pass inside ranking and one at write time; ranking no longer reads the
+		// selection a second time to compare it with itself.
+		Assert.Equal(4, diagnostics.SourceVersionHashPasses);
 		Assert.Equal(
-			3 * (new FileInfo(firstPath).Length + new FileInfo(secondPath).Length),
+			2 * (new FileInfo(firstPath).Length + new FileInfo(secondPath).Length),
 			diagnostics.SourceVersionHashBytes);
 	}
 

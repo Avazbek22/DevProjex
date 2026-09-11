@@ -1,4 +1,5 @@
 using DevProjex.Application.Dependencies;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Ranking;
 using DevProjex.Infrastructure.Dependencies;
 
@@ -216,6 +217,32 @@ public sealed class ImportanceRankingCoverageIntegrationTests
 			ImportanceFileRole.TestSource,
 			report.Entries.Single(entry => entry.Path == "tests/HarnessTests.cs").Role);
 	}
+	[Fact]
+	public async Task ARankedCallReadsEachCandidateExactlyOnce()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var types = fixture.CreateFile("Types.cs", "namespace Fixture; public sealed class Alpha { }");
+		var consumer = fixture.CreateFile(
+			"Consumer.cs",
+			"namespace Fixture; public sealed class Consumer { Alpha Value; }");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		await ranking.RankAsync(
+			fixture.Path,
+			[project, types, consumer],
+			TestContext.Current.CancellationToken);
+		var diagnostics = measurement.Capture();
+
+		// Three candidates, three content passes: one digest of the selection for the whole call.
+		Assert.Equal(3, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(
+			new FileInfo(project).Length + new FileInfo(types).Length + new FileInfo(consumer).Length,
+			diagnostics.SourceVersionHashBytes);
+	}
+
 	[Fact]
 	public async Task PartialDeclarationFilesRemainOneResolvedLogicalReference()
 	{
