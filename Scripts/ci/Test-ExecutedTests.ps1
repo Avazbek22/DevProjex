@@ -33,12 +33,30 @@ $executed = 0
 $total = 0
 $aborted = [Collections.Generic.List[string]]::new()
 
-foreach ($path in $ResultsPath) {
-	if (-not (Test-Path -LiteralPath $path)) {
-		throw "$JobName produced no results directory at '$path'. A run that executes nothing cannot report success; see Docs/CI-Known-Failures.md."
+function Resolve-ResultsDirectory {
+	param([string] $Path)
+
+	if (Test-Path -LiteralPath $Path) {
+		return @((Resolve-Path -LiteralPath $Path).Path)
 	}
 
-	$results = @(Get-ChildItem -LiteralPath $path -Recurse -File -Filter '*.trx')
+	# A results directory is not always where the command line appears to put it. The test platform
+	# the UI suite runs on resolves its own --results-directory against the test project rather than
+	# the repository, so the same argument lands under Tests/<project>/. The upload step globs both
+	# shapes for that reason; this looks in both rather than calling a completed run empty.
+	$leaf = Split-Path -Leaf $Path
+	return @(Get-ChildItem -Path . -Recurse -Directory -Filter $leaf -ErrorAction SilentlyContinue |
+		Where-Object { $_.Parent.Name -eq 'TestResults' } |
+		Select-Object -ExpandProperty FullName)
+}
+
+foreach ($path in $ResultsPath) {
+	$directories = @(Resolve-ResultsDirectory -Path $path)
+	if ($directories.Count -eq 0) {
+		throw "$JobName produced no results directory for '$path'. A run that executes nothing cannot report success; see Docs/CI-Known-Failures.md."
+	}
+
+	$results = @($directories | ForEach-Object { Get-ChildItem -LiteralPath $_ -Recurse -File -Filter '*.trx' })
 	if ($results.Count -eq 0) {
 		throw "$JobName produced no .trx file under '$path'. A run that executes nothing cannot report success; see Docs/CI-Known-Failures.md."
 	}
