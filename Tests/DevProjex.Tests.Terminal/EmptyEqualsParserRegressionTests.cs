@@ -151,6 +151,9 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--as",
 		"--branch",
 		"--color",
+		// export context intentionally adds this repeatable required-value option: per-file detail
+		// overrides of the form "<glob>=<full|compact|signatures>".
+		"--detail-for",
 		// related intentionally adds this required-value option to the public CLI grammar.
 		"--direction",
 		"--exclude",

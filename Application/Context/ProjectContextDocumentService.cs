@@ -193,7 +193,7 @@ public sealed class ProjectContextDocumentService(
 					ranking)
 				.ConfigureAwait(false);
 		}
-		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, precomputedTokenBudget);
+		using var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, plan.SourceRoot, precomputedTokenBudget);
 		using var cancellationDestination = new CancellationBoundWriteStream(
 			destination,
 			cancellationToken);
@@ -334,7 +334,7 @@ public sealed class ProjectContextDocumentService(
 		ArgumentNullException.ThrowIfNull(plan);
 		ValidateView(view);
 		ValidateDocumentFormat(format);
-		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens)!;
+		using var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, plan.SourceRoot)!;
 		var orderedPaths = ResolveOrderedPaths(plan.IncludedFiles, ranking);
 		if (!IncludesContent(view))
 			return new ProjectContextWriteResult([], tokenBudget.CreateReport(), ranking);
@@ -393,7 +393,7 @@ public sealed class ProjectContextDocumentService(
 		ValidateDocumentFormat(format);
 		await EnsureRankingSourceVersionsAsync(plan.IncludedFiles, ranking, cancellationToken)
 			.ConfigureAwait(false);
-		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens)!;
+		using var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, plan.SourceRoot)!;
 		if (!IncludesContent(view))
 			return new ProjectContextWriteResult(measured.UnscannableFiles, tokenBudget.CreateReport(), ranking);
 
@@ -405,6 +405,7 @@ public sealed class ProjectContextDocumentService(
 			format,
 			useSourceMappedStructuredPaths: true);
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
+		var detailTokenResolver = CreateDetailTokenResolver(plan);
 		var metricsByPath = measured.TransformedFileMetrics.ToDictionary(
 			static metrics => Path.GetFullPath(metrics.Path),
 			PathComparer.Default);
@@ -432,7 +433,8 @@ public sealed class ProjectContextDocumentService(
 				path,
 				file.Metrics?.CharCount ?? 0,
 				rankingEntriesByFullPath,
-				index);
+				index,
+				detailTokenResolver);
 		}
 
 		return new ProjectContextWriteResult(measured.UnscannableFiles, tokenBudget.CreateReport(), ranking);
@@ -487,6 +489,7 @@ public sealed class ProjectContextDocumentService(
 			format,
 			useSourceMappedStructuredPaths: true);
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
+		var detailTokenResolver = CreateDetailTokenResolver(plan);
 		await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 			               plan.SourceRoot,
 			               orderedPaths,
@@ -506,18 +509,20 @@ public sealed class ProjectContextDocumentService(
 				source.Path,
 				file.Metrics?.CharCount ?? 0,
 				rankingEntriesByFullPath,
-				source.Index);
+				source.Index,
+				detailTokenResolver);
 		}
 	}
 
 	private static ProjectContextTokenBudgetAccumulator? CreateTokenBudget(
 		long? maximumEstimatedTokens,
+		string sourceRoot,
 		ProjectContextTokenBudgetReport? precomputedTokenBudget = null) =>
 		precomputedTokenBudget is not null
 			? new ProjectContextTokenBudgetAccumulator(precomputedTokenBudget)
 			: maximumEstimatedTokens is null
 				? null
-				: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value);
+				: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value, sourceRoot);
 
 	private static bool TryIncludeInBudget(
 		ProjectContextTokenBudgetAccumulator tokenBudget,
@@ -525,7 +530,8 @@ public sealed class ProjectContextDocumentService(
 		string fullPath,
 		int transformedCharacterCount,
 		IReadOnlyDictionary<string, ImportanceRankingEntry>? rankingEntriesByFullPath,
-		int admissionIndex)
+		int admissionIndex,
+		Func<string, string>? detailTokenResolver = null)
 	{
 		ImportanceRankingEntry? entry = null;
 		if (rankingEntriesByFullPath is not null)
@@ -537,7 +543,24 @@ public sealed class ProjectContextDocumentService(
 			entry?.Hop,
 			entry?.BaseImportancePriority,
 			entry?.Via,
-			fullPath);
+			fullPath,
+			detailTokenResolver?.Invoke(fullPath));
+	}
+
+	/// <summary>
+	/// Reports each file's effective detail tier, or null when one level applies to the whole
+	/// selection. Returning null there is what keeps a call without per-file detail byte-for-byte
+	/// identical: the field appears only when a mix was actually requested.
+	/// </summary>
+	private static Func<string, string>? CreateDetailTokenResolver(ProjectContextPlan plan)
+	{
+		var policy = ContentDetailSelection.Resolve(plan.Selection);
+		if (policy is null)
+			return null;
+		var sourceRoot = plan.SourceRoot;
+		return path => ContentDetailLevelTokens.ToToken(
+			ContentDetailLevelTokens.FromKinds(
+				policy.KindsFor(ContentDetailPolicy.ToProjectRelativePath(sourceRoot, path))));
 	}
 
 	private static IReadOnlyDictionary<string, ImportanceRankingEntry>? CreateRankingEntryLookup(
@@ -681,13 +704,13 @@ public sealed class ProjectContextDocumentService(
 
 	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan)
 	{
-		var kinds = CodeTransformIdentity.Resolve(
-			plan.Selection.CompressCode == true,
-			plan.Selection.StripComments == true,
-			plan.Selection.StripBlankLines == true);
+		var kinds = ContentDetailSelection.ResolveContextKinds(plan.Selection);
 		return ContentTransformationContext.For(
 			codeCompressionSession is not null && kinds != CodeTransformKinds.None
 				? new CodeCompressionContext(plan.SourceRoot, codeCompressionSession, kinds)
+				{
+					Policy = ContentDetailSelection.Resolve(plan.Selection)
+				}
 				: null,
 			CreateRedactionContext(plan));
 	}
@@ -810,6 +833,7 @@ public sealed class ProjectContextDocumentService(
 		await using var streamWriter = CreateStreamWriter(destination);
 		var writer = new TrailingLineEndingTextWriter(streamWriter);
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
+		var detailTokenResolver = CreateDetailTokenResolver(plan);
 		var hasOutput = false;
 		var includesContent = IncludesContent(view) && orderedPaths.Count > 0;
 		if (view == ProjectContextView.Content)
@@ -859,7 +883,8 @@ public sealed class ProjectContextDocumentService(
 					    source.Path,
 					    file.Metrics?.CharCount ?? 0,
 					    rankingEntriesByFullPath,
-					    index))
+					    index,
+					    detailTokenResolver))
 				{
 					ReportProgress(writeProgress, index + 1, orderedPaths.Count);
 					continue;
@@ -922,6 +947,7 @@ public sealed class ProjectContextDocumentService(
 	{
 		await using var writer = CreateStreamWriter(destination);
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
+		var detailTokenResolver = CreateDetailTokenResolver(plan);
 		await writer.WriteAsync("# ".AsMemory(), cancellationToken).ConfigureAwait(false);
 		await writer.WriteAsync(EscapeMarkdownHeading(GetProjectName(plan)).AsMemory(), cancellationToken)
 			.ConfigureAwait(false);
@@ -992,7 +1018,8 @@ public sealed class ProjectContextDocumentService(
 					    source.Path,
 					    file.Metrics?.CharCount ?? 0,
 					    rankingEntriesByFullPath,
-					    source.Index))
+					    source.Index,
+					    detailTokenResolver))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
@@ -1070,6 +1097,7 @@ public sealed class ProjectContextDocumentService(
 			MaxDepth = int.MaxValue
 		});
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
+		var detailTokenResolver = CreateDetailTokenResolver(plan);
 
 		writer.WriteStartObject();
 		writer.WriteNumber("schemaVersion", SchemaVersion);
@@ -1119,7 +1147,8 @@ public sealed class ProjectContextDocumentService(
 					    source.Path,
 					    file.Metrics?.CharCount ?? 0,
 					    rankingEntriesByFullPath,
-					    source.Index))
+					    source.Index,
+					    detailTokenResolver))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
@@ -1128,6 +1157,8 @@ public sealed class ProjectContextDocumentService(
 				writer.WriteString("path", NormalizePath(file.Path));
 				writer.WriteBoolean("isBinary", file.IsBinary);
 				writer.WriteString("classification", ToToken(file.Classification));
+				if (detailTokenResolver is not null)
+					writer.WriteString("detail", detailTokenResolver(path));
 				if (file.Classification != FileContentClassification.Text)
 				{
 					writer.WriteNull("content");
@@ -1192,6 +1223,7 @@ public sealed class ProjectContextDocumentService(
 			Async = true
 		});
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
+		var detailTokenResolver = CreateDetailTokenResolver(plan);
 
 		writer.WriteStartDocument();
 		writer.WriteStartElement("devprojexContext");
@@ -1244,7 +1276,8 @@ public sealed class ProjectContextDocumentService(
 					    source.Path,
 					    file.Metrics?.CharCount ?? 0,
 					    rankingEntriesByFullPath,
-					    source.Index))
+					    source.Index,
+					    detailTokenResolver))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
@@ -1253,6 +1286,8 @@ public sealed class ProjectContextDocumentService(
 				WriteSanitizedXmlAttributeString(writer, "path", NormalizePath(file.Path));
 				writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
 				writer.WriteAttributeString("classification", ToToken(file.Classification));
+				if (detailTokenResolver is not null)
+					writer.WriteAttributeString("detail", detailTokenResolver(path));
 				if (file.Classification == FileContentClassification.Text)
 				{
 					writer.WriteStartElement("content");
@@ -1679,6 +1714,7 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken,
 		PreparedSecretRedactionOutput? prepared = null)
 	{
+		var detailTokenResolver = CreateDetailTokenResolver(plan);
 		var maximumFiles = Math.Max(0, limits.MaximumFiles);
 		var maximumCharacters = Math.Max(0, limits.MaximumCharacters);
 		var maximumFileBytes = Math.Max(0, limits.MaximumFileBytes);
@@ -1719,6 +1755,7 @@ public sealed class ProjectContextDocumentService(
 				var pending = pendingReads.Dequeue();
 				var result = await pending.ReadTask.ConfigureAwait(false);
 				var relativePath = NormalizeRelativePath(plan.SourceRoot, pending.Path);
+				var detail = detailTokenResolver?.Invoke(pending.Path);
 				var content = result.Content;
 				var reachedOutputBoundary = false;
 				if (!result.IsText || content is null)
@@ -1726,7 +1763,8 @@ public sealed class ProjectContextDocumentService(
 					files.Add(new ContextFileDocument(
 						relativePath,
 						result.Classification,
-						Content: null));
+						Content: null,
+						Detail: detail));
 				}
 				else if (content.IsEstimated)
 				{
@@ -1734,7 +1772,8 @@ public sealed class ProjectContextDocumentService(
 						relativePath,
 						FileContentClassification.TooLarge,
 						Content: null,
-						IsOmitted: true));
+						IsOmitted: true,
+						Detail: detail));
 					isTruncated = true;
 				}
 				else
@@ -1762,7 +1801,8 @@ public sealed class ProjectContextDocumentService(
 						relativePath,
 						FileContentClassification.Text,
 						fileContent,
-						IsTruncated: fileContent.Length != content.Content.Length));
+						IsTruncated: fileContent.Length != content.Content.Length,
+						Detail: detail));
 					remainingCharacters -= fileContent.Length;
 					// Once a file is truncated, later files are not part of the bounded prefix.
 					// Continuing merely because a placeholder was removed at the boundary would
@@ -1976,6 +2016,8 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteString("path", file.Path);
 			writer.WriteBoolean("isBinary", file.IsBinary);
 			writer.WriteString("classification", ToToken(file.Classification));
+			if (file.Detail is { } preparedDetail)
+				writer.WriteString("detail", preparedDetail);
 			if (file.Classification != FileContentClassification.Text || file.IsOmitted)
 				writer.WriteNull("content");
 			else
@@ -2038,6 +2080,8 @@ public sealed class ProjectContextDocumentService(
 			WriteSanitizedXmlAttributeString(writer, "path", file.Path);
 			writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
 			writer.WriteAttributeString("classification", ToToken(file.Classification));
+			if (file.Detail is { } preparedDetail)
+				writer.WriteAttributeString("detail", preparedDetail);
 			if (file.IsOmitted)
 				writer.WriteAttributeString("omitted", XmlConvert.ToString(true));
 			if (file.IsTruncated)
@@ -2249,6 +2293,8 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteStartObject();
 			writer.WriteString("path", NormalizePath(file.Path));
 			writer.WriteNumber("estimatedTokens", file.EstimatedTokens);
+			if (file.Detail is { } detail)
+				writer.WriteString("detail", detail);
 			if (file.Priority is { } priority)
 				writer.WriteNumber("priority", priority);
 			if (file.RemainingEstimatedTokens is { } remaining)
@@ -2621,6 +2667,8 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteAttributeString(
 				"estimatedTokens",
 				XmlConvert.ToString(file.EstimatedTokens));
+			if (file.Detail is { } detail)
+				writer.WriteAttributeString("detail", detail);
 			writer.WriteEndElement();
 		}
 		writer.WriteEndElement();
@@ -3132,7 +3180,9 @@ public sealed class ProjectContextDocumentService(
 		string? Content,
 		bool IsOmitted = false,
 		bool IsTruncated = false,
-		TextFileMetrics? Metrics = null)
+		TextFileMetrics? Metrics = null,
+		// Present only when the call asked for a mix, so a uniform document keeps its exact bytes.
+		string? Detail = null)
 	{
 		public bool IsBinary => Classification == FileContentClassification.Binary;
 	}

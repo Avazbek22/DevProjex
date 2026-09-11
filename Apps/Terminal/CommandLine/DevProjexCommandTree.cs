@@ -654,6 +654,13 @@ public sealed class DevProjexCommandTree
 			context,
 			FileSystemCompletionKind.FilesAndDirectories,
 			FileSystemCompletionSource.ResolveProjectDirectory(context)));
+		var detailFor = new Option<string[]>("--detail-for")
+		{
+			Description = L("Terminal.Option.DetailFor"),
+			HelpName = "GLOB=LEVEL",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
 		var branch = BranchOption();
 		var selection = new SelectionOptions(
 			_localization,
@@ -668,6 +675,7 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(maximumEstimatedTokens);
 		command.Options.Add(rank);
 		command.Options.Add(focus);
+		command.Options.Add(detailFor);
 		command.Options.Add(branch);
 		selection.AddTo(command);
 		_output.AddProgressTo(command);
@@ -721,6 +729,24 @@ public sealed class DevProjexCommandTree
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.FocusEmpty")));
 			}
+			if (result.GetResult(detailFor) is not null)
+			{
+				if (CliParseValue.TryGet(result, view, out var detailView) &&
+				    detailView == ProjectContextView.Tree)
+				{
+					result.AddError(LocalizedParseError.Create(
+						L("Terminal.Validation.DetailForRequiresContent")));
+				}
+				try
+				{
+					DetailForOption.Parse(result.GetValue(detailFor) ?? []);
+				}
+				catch (DetailForOptionException failure)
+				{
+					result.AddError(LocalizedParseError.Create(
+						_localization.Format("Terminal.Validation.DetailFor", failure.Message)));
+				}
+			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
@@ -749,11 +775,15 @@ public sealed class DevProjexCommandTree
 						services,
 						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
+					var detailOverrides = DetailForOption.Parse(
+						parseResult.GetResult(detailFor) is null ? null : parseResult.GetValue(detailFor));
 					return await new ExportContextCommandHandler(services, environment)
 						.ExecuteAsync(
 							new ExportContextCommandRequest(
 								projectPath,
-								spec,
+								detailOverrides is null
+									? spec
+									: spec with { ContentDetailOverrides = detailOverrides },
 								parseResult.GetValue(view),
 								parseResult.GetValue(format),
 								parseResult.GetValue(outputPath),

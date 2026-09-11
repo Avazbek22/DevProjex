@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Ranking;
 
@@ -10,7 +12,24 @@ public sealed record ProjectContextTokenBudgetSkippedFile(
 	long? RemainingEstimatedTokens = null,
 	int? Hop = null,
 	int? BaseImportancePriority = null,
-	FocusRankingVia? Via = null);
+	FocusRankingVia? Via = null)
+{
+	/// <summary>
+	/// The effective detail level this file was costed at, present only when the call asked for a
+	/// mix. A skipped entry has to say which level its estimate belongs to, or the caller cannot
+	/// tell whether lowering detail would have let it in.
+	/// </summary>
+	public string? Detail { get; init; }
+}
+
+/// <summary>
+/// One admitted file, in admission order. Ranking fields are present only when the call ranked.
+/// </summary>
+public sealed record ProjectContextTokenBudgetIncludedFile(
+	string Path,
+	long EstimatedTokens,
+	int? Priority = null,
+	int? Hop = null);
 
 public sealed record ProjectContextTokenBudgetReport(
 	long MaximumEstimatedTokens,
@@ -23,13 +42,40 @@ public sealed record ProjectContextTokenBudgetReport(
 	IReadOnlyList<ProjectContextTokenBudgetSkippedFile>? RankedSkippedFiles = null)
 {
 	internal IReadOnlyList<string> AdmittedSourceFiles { get; init; } = [];
+
+	/// <summary>
+	/// A bounded prefix of the admission order. The full order is covered by
+	/// <see cref="IncludedOrderDigest"/>, so a caller can check equality with a pack without being
+	/// handed the whole list.
+	/// </summary>
+	public IReadOnlyList<ProjectContextTokenBudgetIncludedFile> IncludedFiles { get; init; } = [];
+
+	/// <summary>How many admitted files the prefix left out.</summary>
+	public int AdditionalIncludedFileCount { get; init; }
+
+	/// <summary>
+	/// A stable hash of the complete ordered list of admitted project-relative paths, computed here
+	/// and nowhere else so a measurement and a pack cannot drift apart. Taken from the source path
+	/// rather than the printed one, because the printed form varies by format, view and root
+	/// presentation while the admitted set does not.
+	/// </summary>
+	public string IncludedOrderDigest { get; init; } = string.Empty;
 }
 
-internal sealed class ProjectContextTokenBudgetAccumulator
+internal sealed class ProjectContextTokenBudgetAccumulator : IDisposable
 {
 	internal const int MaximumReportedSkippedFiles = 25;
 	internal const int MaximumReportedRankedSkippedFiles = 10;
+	internal const int MaximumReportedIncludedFiles = 1_000;
+	// The digest of an empty admission: SHA-256 of no input, so it is stable and comparable.
+	private static readonly string EmptyIncludedOrderDigest =
+		Convert.ToHexString(SHA256.HashData([]));
 	private readonly long _maximumEstimatedTokens;
+	private readonly string? _sourceRoot;
+	// Created on first admitted file. A replay over a completed admission never appends and never
+	// reads it, so it must not hold a hash handle either.
+	private IncrementalHash? _includedOrder;
+	private readonly List<ProjectContextTokenBudgetIncludedFile> _includedFiles = [];
 	private List<ProjectContextTokenBudgetSkippedFile>? _largestSkippedFiles;
 	private List<ProjectContextTokenBudgetSkippedFile>? _rankedSkippedFiles;
 	private long _remainingEstimatedTokens;
@@ -40,11 +86,12 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 	private readonly List<string> _admittedSourceFiles = [];
 	private readonly ProjectContextTokenBudgetReport? _precomputedReport;
 
-	public ProjectContextTokenBudgetAccumulator(long maximumEstimatedTokens)
+	public ProjectContextTokenBudgetAccumulator(long maximumEstimatedTokens, string? sourceRoot = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfLessThan(maximumEstimatedTokens, 1);
 		_maximumEstimatedTokens = maximumEstimatedTokens;
 		_remainingEstimatedTokens = maximumEstimatedTokens;
+		_sourceRoot = sourceRoot;
 	}
 
 	public ProjectContextTokenBudgetAccumulator(ProjectContextTokenBudgetReport precomputedReport)
@@ -62,7 +109,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		int? hop = null,
 		int? baseImportancePriority = null,
 		FocusRankingVia? via = null,
-		string? sourcePath = null)
+		string? sourcePath = null,
+		string? detail = null)
 	{
 		ArgumentNullException.ThrowIfNull(path);
 		if (_precomputedReport is not null)
@@ -76,6 +124,15 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_includedEstimatedTokens += estimatedTokens;
 			if (sourcePath is not null)
 				_admittedSourceFiles.Add(sourcePath);
+			AppendToIncludedOrder(sourcePath ?? path);
+			if (_includedFiles.Count < MaximumReportedIncludedFiles)
+			{
+				_includedFiles.Add(new ProjectContextTokenBudgetIncludedFile(
+					path,
+					estimatedTokens,
+					priority,
+					hop));
+			}
 			return true;
 		}
 
@@ -88,7 +145,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_remainingEstimatedTokens,
 			hop,
 			baseImportancePriority,
-			via);
+			via,
+			detail);
 		if (priority is not null)
 			RetainRankedSkippedFile(
 				path,
@@ -97,7 +155,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 				_remainingEstimatedTokens,
 				hop,
 				baseImportancePriority,
-				via);
+				via,
+				detail);
 		return false;
 	}
 
@@ -116,8 +175,30 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_skippedFileCount - largestSkippedFiles.Length,
 			_rankedSkippedFiles?.ToArray() ?? [])
 		{
-			AdmittedSourceFiles = _admittedSourceFiles.ToArray()
+			AdmittedSourceFiles = _admittedSourceFiles.ToArray(),
+			IncludedFiles = _includedFiles.ToArray(),
+			AdditionalIncludedFileCount = _includedFileCount - _includedFiles.Count,
+			IncludedOrderDigest = _includedOrder is null
+				? EmptyIncludedOrderDigest
+				: Convert.ToHexString(_includedOrder.GetCurrentHash())
 		};
+	}
+
+	public void Dispose()
+	{
+		_includedOrder?.Dispose();
+		_includedOrder = null;
+	}
+
+	private void AppendToIncludedOrder(string sourcePath)
+	{
+		_includedOrder ??= IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		var relativePath = ContentDetailPolicy.ToProjectRelativePath(_sourceRoot ?? string.Empty, sourcePath);
+		var bytes = Encoding.UTF8.GetBytes(relativePath);
+		Span<byte> length = stackalloc byte[4];
+		BinaryPrimitives.WriteInt32LittleEndian(length, bytes.Length);
+		_includedOrder.AppendData(length);
+		_includedOrder.AppendData(bytes);
 	}
 
 	private void RetainRankedSkippedFile(
@@ -127,7 +208,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		long remainingEstimatedTokens,
 		int? hop,
 		int? baseImportancePriority,
-		FocusRankingVia? via)
+		FocusRankingVia? via,
+		string? detail)
 	{
 		var ranked = _rankedSkippedFiles ??=
 			new List<ProjectContextTokenBudgetSkippedFile>(MaximumReportedRankedSkippedFiles);
@@ -145,7 +227,7 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			remainingEstimatedTokens,
 			hop,
 			baseImportancePriority,
-			via));
+			via) { Detail = detail });
 		if (ranked.Count > MaximumReportedRankedSkippedFiles)
 			ranked.RemoveAt(MaximumReportedRankedSkippedFiles);
 	}
@@ -157,7 +239,8 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		long? remainingEstimatedTokens,
 		int? hop,
 		int? baseImportancePriority,
-		FocusRankingVia? via)
+		FocusRankingVia? via,
+		string? detail)
 	{
 		var largestSkippedFiles = _largestSkippedFiles ??=
 			new List<ProjectContextTokenBudgetSkippedFile>(MaximumReportedSkippedFiles);
@@ -174,7 +257,7 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 				remainingEstimatedTokens,
 				hop,
 				baseImportancePriority,
-				via));
+				via) { Detail = detail });
 		if (largestSkippedFiles.Count > MaximumReportedSkippedFiles)
 			largestSkippedFiles.RemoveAt(MaximumReportedSkippedFiles);
 	}

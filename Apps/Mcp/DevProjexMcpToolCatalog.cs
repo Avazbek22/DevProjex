@@ -173,6 +173,29 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string DetailByPatternProperty = """
+	"detail_by_pattern": {
+	  "type": "array",
+	  "maxItems": 16,
+	  "items": {
+	    "type": "object",
+	    "properties": {
+	      "patterns": {
+	        "type": "array",
+	        "minItems": 1,
+	        "maxItems": 32,
+	        "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+	        "description": "Same syntax and matcher as include_patterns."
+	      },
+	      "detail": { "type": "string", "enum": ["full", "compact", "signatures"] }
+	    },
+	    "required": ["patterns", "detail"],
+	    "additionalProperties": false
+	  },
+	  "description": "Per-file overrides on detail. Entries apply in order and the LAST match wins - last-match, not first-match - so list general globs first. Never widens the selection; a glob matching nothing is reported in the trailer. An invalid entry names its index."
+	}
+	""";
+
 	private const string TrackedOnlyProperty = """
 	"tracked_only": {
 	  "description": "Restrict results to files tracked by Git; accepts a boolean or the string 'true' or 'false'.",
@@ -276,10 +299,14 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
+	    {{DetailByPatternProperty}},
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
 	    {{TopFilesProperty}},
-	    {{MaxFileBytesProperty}}
+	    {{MaxFileBytesProperty}},
+	    {{MaximumTokensProperty}},
+	    {{RankProperty}},
+	    {{FocusProperty}}
 	  },
 	  "additionalProperties": false
 	}
@@ -296,6 +323,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
+	    {{DetailByPatternProperty}},
 	    {{TrackedOnlyProperty}},
 	    {{GitScopeProperty}},
 	    {{RankProperty}},
@@ -583,7 +611,56 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      }
 	    },
 	    "topFilesTruncated": { "type": "boolean", "description": "True when the aggregate top-files character budget omitted remaining entries." },
-	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Requested top-file entries omitted by the aggregate character budget." }
+	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Requested top-file entries omitted by the aggregate character budget." },
+	    "admission": {
+	      "type": "object",
+	      "description": "Files a max_tokens budget would admit, from the same greedy first-fit pass pack_context uses, so the admitted set matches for one snapshot, configuration, filters and effective transforms. Produces no content. Paths are project-relative; token counts are the transformed file at its effective detail; priority is the position in the admission order, only with rank.",
+	      "properties": {
+	        "budget": { "type": "integer", "minimum": 1, "description": "Estimated content tokens requested." },
+	        "includedFileCount": { "type": "integer", "minimum": 0 },
+	        "skippedFileCount": { "type": "integer", "minimum": 0, "description": "A skipped file never stops later, smaller ones from being admitted." },
+	        "includedEstimatedTokens": { "type": "integer", "minimum": 0 },
+	        "skippedEstimatedTokens": { "type": "integer", "minimum": 0 },
+	        "includedFiles": {
+	          "type": "array",
+	          "description": "Prefix of the admission order; at most 1000 entries and a character budget.",
+	          "items": {
+	            "type": "object",
+	            "properties": {
+	              "path": { "type": "string" },
+	              "tokens": { "type": "integer", "minimum": 0 },
+	              "priority": { "type": "integer", "minimum": 1 },
+	              "hop": { "type": "integer", "minimum": 0, "description": "Minimum undirected graph hop from a focus seed; only with focus." }
+	            },
+	            "required": ["path", "tokens"],
+	            "additionalProperties": false
+	          }
+	        },
+	        "includedFilesTruncated": { "type": "boolean" },
+	        "additionalIncludedFileCount": { "type": "integer", "minimum": 0 },
+	        "includedOrderDigest": { "type": "string", "description": "Hash of the complete ordered admitted path list, so equality with a pack is checkable without listing it. Compare only across calls with the same rank and focus." },
+	        "skippedFiles": {
+	          "type": "array",
+	          "description": "The 25 largest skipped files plus, with rank, the 10 highest-priority ones.",
+	          "items": {
+	            "type": "object",
+	            "properties": {
+	              "path": { "type": "string" },
+	              "tokens": { "type": "integer", "minimum": 0 },
+	              "priority": { "type": "integer", "minimum": 1 },
+	              "remainingTokens": { "type": "integer", "minimum": 0, "description": "Budget still free when this file was considered." },
+	              "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Level resolved for this file, only with detail_by_pattern; resolved, not a guarantee a transformation applied." }
+	            },
+	            "required": ["path", "tokens", "remainingTokens"],
+	            "additionalProperties": false
+	          }
+	        },
+	        "additionalSkippedFileCount": { "type": "integer", "minimum": 0 },
+	        "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective default detail level the admission was measured at." }
+	      },
+	      "required": ["budget", "includedFileCount", "skippedFileCount", "includedEstimatedTokens", "skippedEstimatedTokens", "includedFiles", "includedFilesTruncated", "additionalIncludedFileCount", "includedOrderDigest", "skippedFiles", "additionalSkippedFileCount", "detail"],
+	      "additionalProperties": false
+	    }
 	  },
 	  "required": ["files", "characters", "tokens", "detail", "contentMetrics", "documentMetrics", "exclusions", "protection", "topFiles", "topFilesTruncated", "topFilesRemaining"],
 	  "additionalProperties": false

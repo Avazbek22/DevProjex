@@ -42,7 +42,14 @@ public sealed class ProjectSelectionResolver(
 			CompressCode = overrides.CompressCode ?? baseline.CompressCode,
 			StripComments = overrides.StripComments ?? baseline.StripComments,
 			StripBlankLines = overrides.StripBlankLines ?? baseline.StripBlankLines,
-			ProfileSource = profile
+			ProfileSource = profile,
+			// Recorded before the call-level toggles are merged in. Both the MCP tools and the
+			// command line reach this one resolver, so per-file detail overrides get the same
+			// definition of "what the profile mandates" on either surface.
+			ProfileContentKinds = CodeTransformIdentity.Resolve(
+				baseline.CompressCode == true,
+				baseline.StripComments == true,
+				baseline.StripBlankLines == true)
 		};
 		var applyProfileValues = profile.Kind != ProjectProfileSourceKind.Local;
 		resolved = resolved with
