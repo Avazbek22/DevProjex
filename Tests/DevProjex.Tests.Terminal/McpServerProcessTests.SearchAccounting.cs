@@ -54,8 +54,9 @@ public sealed partial class McpServerProcessTests
 			TestContext.Current.CancellationToken);
 		// The path heads the block and the match line carries the number, so the workflow reads
 		// both out of the grouped shape before feeding them back to get_file.
-		var match = Regex.Match(AllProcessText(search), @"(?<path>src/Needle\.ts)?
-(?<line>\d+):");
+		var match = Regex.Match(
+			AllProcessText(search).Replace("\r\n", "\n", StringComparison.Ordinal),
+			@"(?<path>src/Needle\.ts)\n(?<line>\d+):");
 		Assert.True(match.Success, AllProcessText(search));
 		var file = await server.Client.CallToolAsync(
 			"get_file",

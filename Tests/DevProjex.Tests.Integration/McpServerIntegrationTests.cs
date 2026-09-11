@@ -6975,7 +6975,7 @@ public sealed partial class McpServerIntegrationTests
 		if (!OperatingSystem.IsWindows())
 		{
 			Assert.Contains("literal*question?{brace[file.txt", Text(tree), StringComparison.Ordinal);
-			Assert.Contains("literal*question?{brace[file.txt:1:all-literal-marker", Text(search), StringComparison.Ordinal);
+			McpSearchOutputAssertions.ContainsMatch(Text(search), "literal*question?{brace[file.txt", 1, "all-literal-marker");
 		}
 		Assert.DoesNotContain("drop.txt", Text(tree), StringComparison.Ordinal);
 		Assert.DoesNotContain("other.txt", Text(tree), StringComparison.Ordinal);
