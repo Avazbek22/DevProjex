@@ -48,6 +48,12 @@ public sealed partial class McpServerProcessTests
 			"struct A;\nstruct B;\nimpl A { fn run(&self) -> &'static str { \"member-marker-a\" } }\nimpl B { fn run(&self) -> &'static str { \"member-marker-b\" } }\n// fallback-marker\n",
 			"members::impl<A>::run",
 			"members::impl<B>::run"
+		},
+		{
+			"Members.kt",
+			"package sample\nclass A {\n fun run(): String { return \"member-marker-a\" }\n}\nclass B {\n fun run(): String { return \"member-marker-b\" }\n}\n// fallback-marker\n",
+			"sample.A.run",
+			"sample.B.run"
 		}
 	};
 

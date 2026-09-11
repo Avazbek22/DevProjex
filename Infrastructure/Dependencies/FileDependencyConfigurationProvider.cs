@@ -408,6 +408,37 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				ConfigurationDiagnostic = project.Reason
 			});
 		}
+		var kotlinScopeByKey = javaProjects
+			.Where(static project => project.ProjectKey.Length > 0)
+			.GroupBy(static project => project.ProjectKey, StringComparer.Ordinal)
+			.Where(static group => group.Count() == 1)
+			.ToDictionary(
+				static group => group.Key,
+				group => "kotlin:" + PortableRelative(root, group.Single().Path),
+				StringComparer.Ordinal);
+		foreach (var project in javaProjects.OrderBy(static project => project.Path, StringComparer.Ordinal))
+		{
+			var references = project.ReferenceKeys
+				.Where(kotlinScopeByKey.ContainsKey)
+				.Select(key => kotlinScopeByKey[key])
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				"kotlin:" + PortableRelative(root, project.Path),
+				Path.GetDirectoryName(project.Path)!,
+				LanguageId.Kotlin,
+				references,
+				null,
+				false,
+				new Dictionary<string, IReadOnlyList<string>>(),
+				null,
+				new HashSet<string>(),
+				[],
+				true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason
+			});
+		}
 
 		var rustProjects = new List<(string Path, string ScopeId, RustProjectConfiguration Configuration,
 			DependencyConfigurationState State, string? Reason)>();

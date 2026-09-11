@@ -62,6 +62,33 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessRelatedFilesReportsKotlinManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("kotlin-project");
+		workspace.WriteFile("kotlin-project/library/Remote.kt", "package library\nclass Remote");
+		workspace.WriteFile(
+			"kotlin-project/app/Consumer.kt",
+			"package app\nimport library.Remote\nclass Consumer(val value: Remote)");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "app/Consumer.kt",
+				["direction"] = "dependencies"
+			});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("library/Remote.kt", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" — unresolved — ", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesPreservesParsedImportSemantics()
 	{
 		using var workspace = new TemporaryDirectory();

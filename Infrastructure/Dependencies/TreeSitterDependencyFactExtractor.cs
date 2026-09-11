@@ -586,7 +586,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		using var cursor = query.Execute(root);
 		var declarations = new List<NavigationDeclaration>();
 		var seen = new HashSet<(int Start, int End, NavigationSymbolKind Kind, string Name)>();
-		var javaNames = language == LanguageId.Java
+		var javaNames = language is LanguageId.Java or LanguageId.Kotlin
 			? new Dictionary<string, int>(StringComparer.Ordinal)
 			: null;
 		var visited = 0;
@@ -602,16 +602,18 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				fileScopedNamespace = name;
 			else if (language == LanguageId.Java && capture.Node.Type == "package_declaration")
 				fileScopedNamespace = name;
+			else if (language == LanguageId.Kotlin && capture.Node.Type == "package_header")
+				fileScopedNamespace = name;
 			var owners = ReadNavigationOwners(capture.Node, language).ToList();
 			if (fileScopedNamespace is not null &&
-			    capture.Node.Type is not ("file_scoped_namespace_declaration" or "package_declaration"))
+			    capture.Node.Type is not ("file_scoped_namespace_declaration" or "package_declaration" or "package_header"))
 			{
 				owners.Insert(0, fileScopedNamespace);
 			}
 			var separator = language == LanguageId.Rust ? "::" : ".";
 			var owner = owners.Count == 0 ? null : string.Join(separator, owners);
 			var qualifiedName = owner is null ? name : $"{owner}{separator}{name}";
-			if (javaNames is not null && capture.Node.Type != "package_declaration")
+			if (javaNames is not null && capture.Node.Type is not ("package_declaration" or "package_header"))
 			{
 				var ordinal = javaNames.GetValueOrDefault(qualifiedName) + 1;
 				javaNames[qualifiedName] = ordinal;
@@ -652,11 +654,24 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	private static string? ReadNavigationName(Node node, LanguageId language)
 	{
+		if (language == LanguageId.Kotlin && node.Type == "function_declaration")
+			return KotlinFunctionName(node);
 		var named = node.GetChildForField("name") ?? node.GetChildForField("key");
+		if (named is null && node.Type == "type_alias") named = node.GetChildForField("type");
 		if (named is not null)
 			return NormalizeNavigationName(named.Text);
 		if (language == LanguageId.Java && node.Type == "package_declaration")
 			return NormalizeNavigationName(node.NamedChildren.LastOrDefault()?.Text ?? string.Empty);
+		if (language == LanguageId.Kotlin && node.Type == "package_header")
+			return KotlinPackageName(node.Text);
+		if (language == LanguageId.Kotlin && node.Type == "property_declaration")
+			return FirstDescendantText(node, "identifier");
+		if (language == LanguageId.Kotlin && node.Type == "class_parameter")
+			return FirstDescendantText(node, "identifier");
+		if (language == LanguageId.Kotlin && node.Type == "enum_entry")
+			return NormalizeNavigationName(node.NamedChildren.FirstOrDefault()?.Text ?? string.Empty);
+		if (language == LanguageId.Kotlin && node.Type is "primary_constructor" or "secondary_constructor") return "constructor";
+		if (language == LanguageId.Kotlin && node.Type == "anonymous_initializer") return "init";
 		if (language == LanguageId.Rust && node.Type == "impl_item")
 		{
 			var implementedType = node.GetChildForField("type")?.Text;
@@ -716,6 +731,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			"method_declaration" or "constructor_declaration" or "compact_constructor_declaration",
 		LanguageId.Rust => nodeType is "mod_item" or "struct_item" or "enum_item" or "trait_item" or
 			"union_item" or "impl_item" or "function_item",
+		LanguageId.Kotlin => nodeType is "class_declaration" or "object_declaration" or
+			"function_declaration" or "property_declaration" or "secondary_constructor" or
+			"anonymous_initializer",
 		_ => false
 	};
 
@@ -776,6 +794,48 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		return string.Join("::", portable.Split('/', StringSplitOptions.RemoveEmptyEntries));
 	}
 
+	private static string? KotlinPackageName(string text)
+	{
+		var value = text.Trim();
+		return value.StartsWith("package ", StringComparison.Ordinal)
+			? NormalizeNavigationName(value["package ".Length..].Trim().TrimEnd(';'))
+			: null;
+	}
+
+	private static string? KotlinFunctionName(Node node)
+	{
+		var nameNode = node.GetChildForField("name");
+		if (nameNode is null) return null;
+		var name = NormalizeNavigationName(nameNode.Text);
+		if (name is null) return null;
+		var header = node.Text.AsSpan(0, checked((int)(nameNode.EndIndex - node.StartIndex)));
+		var dot = header.LastIndexOf('.');
+		if (dot < 0) return name;
+		var receiverStart = dot - 1;
+		var genericDepth = 0;
+		while (receiverStart >= 0)
+		{
+			var character = header[receiverStart];
+			if (character == '>') genericDepth++;
+			else if (character == '<' && genericDepth > 0) genericDepth--;
+			else if (genericDepth == 0 && char.IsWhiteSpace(character)) break;
+			receiverStart--;
+		}
+		var receiver = header[(receiverStart + 1)..dot].Trim().ToString();
+		return receiver.Length == 0 ? name : $"{name}[{receiver}]";
+	}
+
+	private static string? FirstDescendantText(Node node, string nodeType)
+	{
+		foreach (var child in node.NamedChildren)
+		{
+			if (child.Type == nodeType) return NormalizeNavigationName(child.Text);
+			var nested = FirstDescendantText(child, nodeType);
+			if (nested is not null) return nested;
+		}
+		return null;
+	}
+
 	private static bool IsDeclarationCapture(string captureName) =>
 		captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 		captureName is "context.namespace" or "context.using";
@@ -827,6 +887,19 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				capturedNameStartIndex: packageNameNode is null ? -1 : checked((int)packageNameNode.StartIndex),
 				evidence: packageName ?? string.Empty);
 		}
+		if (captureName == "context.namespace" && node.Type == "package_header")
+		{
+			var packageName = KotlinPackageName(materialization.Read(node));
+			return CreateCapture(
+				captureName,
+				node,
+				packageName ?? string.Empty,
+				packageName,
+				0,
+				false,
+				false,
+				evidence: packageName ?? string.Empty);
+		}
 
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 			captureName is "context.namespace" or "context.type_parameter_owner";
@@ -840,7 +913,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				evidence: OneLineEvidence(text));
 		}
 
-		var nameNode = node.GetChildForField("name");
+		var nameNode = node.GetChildForField("name") ??
+			(node.Type == "type_alias" ? node.GetChildForField("type") : null);
 		var capturedName = nameNode is null ? null : materialization.Read(nameNode);
 		var capturedNameStartIndex = nameNode is null ? -1 : checked((int)nameNode.StartIndex);
 		var typeParameters = node.Children.FirstOrDefault(static child =>
@@ -1057,6 +1131,21 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var name = node.GetChildForField("name");
 			return name is null ? null : new DependencyImportSyntax(materialization.Read(name), 0, []);
 		}
+		if (captureName == "import.kotlin")
+		{
+			var text = materialization.Read(node).Trim().TrimEnd(';');
+			if (!text.StartsWith("import ", StringComparison.Ordinal)) return null;
+			var specifier = text["import ".Length..].Trim();
+			var aliasMarker = specifier.LastIndexOf(" as ", StringComparison.Ordinal);
+			var alias = aliasMarker < 0 ? null : specifier[(aliasMarker + " as ".Length)..].Trim();
+			if (aliasMarker >= 0) specifier = specifier[..aliasMarker].Trim();
+			var wildcard = specifier.EndsWith(".*", StringComparison.Ordinal);
+			if (wildcard) specifier = specifier[..^2];
+			return specifier.Length == 0 ? null : new DependencyImportSyntax(
+				specifier,
+				0,
+				[new DependencyImportBinding(specifier.Split('.').Last(), alias, wildcard)]);
+		}
 		return null;
 	}
 
@@ -1193,6 +1282,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".go" => LanguageId.Go,
 		".java" => LanguageId.Java,
 		".rs" => LanguageId.Rust,
+		".kt" or ".kts" => LanguageId.Kotlin,
 		_ => LanguageId.Unsupported
 	};
 
@@ -1530,7 +1620,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.Python] = new("tree-sitter-python", "tree_sitter_python", "python", new PythonDependencyLanguageAdapter()),
 				[LanguageId.Go] = new("tree-sitter-go", "tree_sitter_go", "go", new GoDependencyLanguageAdapter()),
 				[LanguageId.Java] = new("tree-sitter-java", "tree_sitter_java", "java", new JavaDependencyLanguageAdapter()),
-				[LanguageId.Rust] = new("tree-sitter-rust", "tree_sitter_rust", "rust", new RustDependencyLanguageAdapter())
+				[LanguageId.Rust] = new("tree-sitter-rust", "tree_sitter_rust", "rust", new RustDependencyLanguageAdapter()),
+				[LanguageId.Kotlin] = new("tree-sitter-kotlin", "tree_sitter_kotlin", "kotlin", new KotlinDependencyLanguageAdapter())
 			};
 	}
 

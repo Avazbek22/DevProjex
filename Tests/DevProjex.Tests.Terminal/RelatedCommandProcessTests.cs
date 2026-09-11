@@ -52,6 +52,30 @@ public sealed class RelatedCommandProcessTests
 	}
 
 	[Fact]
+	public void RealPublishedCommandReportsKotlinManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/library/Remote.kt", "package library\nclass Remote");
+		workspace.WriteFile(
+			"project/app/Consumer.kt",
+			"package app\nimport library.Remote\nclass Consumer(val value: Remote)");
+
+		var result = Run(
+			workspace,
+			"related", "app/Consumer.kt",
+			"--project", project,
+			"--direction", "dependencies",
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("library/Remote.kt", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"status\": \"unresolved\"", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RealPublishedCommandUsesPythonDottedImportBindingAndPackageBoundaries()
 	{
 		using var workspace = new TemporaryDirectory();

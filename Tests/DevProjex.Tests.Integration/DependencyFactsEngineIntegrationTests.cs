@@ -11,6 +11,125 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyFactsEngineIntegrationTests
 {
 	[Fact]
+	public async Task KotlinFactsResolveImportsAliasesAndRepositoryTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var model = fixture.CreateFile("models/User.kt", "package models\nopen class User");
+		var consumer = fixture.CreateFile("app/Consumer.kt", """
+			package app
+			import models.User as Person
+			class Consumer(val value: Person) : Person() {
+			    fun String.render(): Person = value
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[model, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "app/Consumer.kt");
+
+		Assert.True(facts.Status == DependencyFileStatus.Supported,
+			$"{facts.StatusReason}; {string.Join(", ", facts.ErrorNodeKinds.Keys)}");
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "app.Consumer");
+		Assert.Contains(index.Edges, static edge => edge.Source == "app/Consumer.kt" &&
+			edge.Target == "models/User.kt" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "app.Consumer.render[String]" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "app.Consumer.value" && declaration.Kind == NavigationSymbolKind.Property);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "app.Consumer.constructor" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.Contains("render", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task KotlinNavigationDistinguishesOwnersAndRepeatedMembers()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Members.kt", """
+			package sample
+			class First {
+			    fun run() = 1
+			    fun run(value: Int) = value
+			}
+			class Second {
+			    fun run() = 2
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations
+			.Where(static declaration => declaration.Kind == NavigationSymbolKind.Method)
+			.Select(static declaration => declaration.Name)
+			.ToArray();
+
+		Assert.Equal(["sample.First.run", "sample.First.run#2", "sample.Second.run"], names);
+		Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+	}
+
+	[Fact]
+	public async Task KotlinMavenAndGradleProjectReferencesBoundCrossScopeImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var mavenLibrary = fixture.CreateFile("maven-lib/pom.xml", """
+			<project><modelVersion>4.0.0</modelVersion><groupId>sample</groupId><artifactId>library</artifactId></project>
+			""");
+		var mavenLibrarySource = fixture.CreateFile(
+			"maven-lib/src/main/kotlin/library/Remote.kt", "package library\nclass Remote");
+		var mavenApp = fixture.CreateFile("maven-app/pom.xml", """
+			<project><modelVersion>4.0.0</modelVersion><groupId>sample</groupId><artifactId>app</artifactId>
+			<dependencies><dependency><groupId>sample</groupId><artifactId>library</artifactId></dependency></dependencies></project>
+			""");
+		var mavenAppSource = fixture.CreateFile(
+			"maven-app/src/main/kotlin/app/App.kt", "package app\nimport library.Remote\nclass App(val value: Remote)");
+		var gradleLibrary = fixture.CreateFile("gradle/lib/build.gradle.kts", "plugins { kotlin(\"jvm\") }");
+		var gradleLibrarySource = fixture.CreateFile(
+			"gradle/lib/src/main/kotlin/shared/Service.kt", "package shared\nclass Service");
+		var gradleApp = fixture.CreateFile(
+			"gradle/app/build.gradle.kts", "dependencies { implementation(project(\":gradle:lib\")) }");
+		var gradleAppSource = fixture.CreateFile(
+			"gradle/app/src/main/kotlin/client/Client.kt", "package client\nimport shared.Service\nclass Client(val value: Service)");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[mavenLibrary, mavenLibrarySource, mavenApp, mavenAppSource,
+				gradleLibrary, gradleLibrarySource, gradleApp, gradleAppSource],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("maven-app/src/main/kotlin/app/App.kt", StringComparison.Ordinal) &&
+			edge.Target == "maven-lib/src/main/kotlin/library/Remote.kt" && edge.CrossScope);
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("gradle/app/src/main/kotlin/client/Client.kt", StringComparison.Ordinal) &&
+			edge.Target == "gradle/lib/src/main/kotlin/shared/Service.kt" && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task KotlinSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Broken.kt", "package sample\nclass Broken(val value: Missing");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Equal("syntax tree contains errors", facts.StatusReason);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
 	public async Task RustFactsResolveModulesUsesAndTypesFromTheManifest()
 	{
 		using var fixture = new TemporaryDirectory();

@@ -10,6 +10,7 @@ public enum LanguageId
 	Go,
 	Java,
 	Rust,
+	Kotlin,
 	Unsupported
 }
 

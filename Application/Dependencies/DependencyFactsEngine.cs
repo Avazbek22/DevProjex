@@ -1291,7 +1291,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			LanguageId.TypeScript or LanguageId.JavaScript or LanguageId.Tsx => ResolveTypeScriptImport(source, import),
 			LanguageId.Python => ResolvePythonImport(source, import),
-			LanguageId.Java => ResolveJavaImport(source, import),
+			LanguageId.Java or LanguageId.Kotlin => ResolveJavaImport(source, import),
 			LanguageId.Rust => ResolveRustImport(source, import),
 			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
 				"explicit imports are context, not dependency edges, for this language", [])
@@ -2222,7 +2222,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			var aliasExpanded = source.LanguageId == LanguageId.CSharp &&
 			                    !reference.IsGlobalQualified &&
 			                    TryExpandCSharpAlias(source, reference, out expandedAlias);
-			if (!aliasExpanded && source.LanguageId == LanguageId.Java && !isSyntacticallyQualified &&
+			if (!aliasExpanded && source.LanguageId is LanguageId.Java or LanguageId.Kotlin && !isSyntacticallyQualified &&
 			    source.Aliases.TryGetValue(simpleName, out var javaImport))
 			{
 				expandedAlias = javaImport;
@@ -2263,7 +2263,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			else if (source.LanguageId == LanguageId.Go)
 				candidates = SelectSamePackageGoCandidates(source, candidates);
-			else if (source.LanguageId == LanguageId.Java)
+			else if (source.LanguageId is LanguageId.Java or LanguageId.Kotlin)
 			{
 				if (reference.Name.Contains('.') && candidates.Length == 0)
 					candidates = LookupQualified(source,
@@ -2497,7 +2497,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				return false;
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
-			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Rust &&
+			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust &&
 			       VisibleScopeIds(source.ScopeId).Contains(
 			       declaration.Identity.ScopeId, StringComparer.Ordinal);
 		}
@@ -2756,7 +2756,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (pending.TryDequeue(out var scopeId))
 				{
 					if (!visited.Add(scopeId)) continue;
-					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Rust) ||
+					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust) ||
 					    !scopes.TryGetValue(scopeId, out var current)) continue;
 					foreach (var projectReference in current.ProjectReferences) pending.Enqueue(projectReference);
 				}

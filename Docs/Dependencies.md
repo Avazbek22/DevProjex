@@ -204,6 +204,23 @@ remain distinct. Anonymous closures and macro-produced members fall back to thei
 named owner. A syntax tree containing an error publishes neither recovered declarations nor recovered
 edges.
 
+Kotlin source files contribute classes, objects, type aliases, and top-level functions under their
+declared package and complete nesting chain. Exact imports and aliases resolve only to matching
+declarations in the allowed manifest; wildcard imports provide package visibility without guessing a
+target. Same-package declarations are visible to type references. Bounded `pom.xml`, `build.gradle`,
+and `build.gradle.kts` files define source scopes using the same literal repository-only Maven and
+Gradle project relationships described for Java. External artifacts, generated sources, compiler
+plugins, build-script-computed source sets, and runtime class paths are not inferred and remain
+unresolved.
+
+Kotlin navigation includes packages, nested classes and objects, type aliases, top-level and member
+functions, extension functions, properties, secondary constructors, initializers, and enum entries.
+Names start with the package and carry every owning declaration; an extension function appends its
+receiver in brackets. Repeated names receive a stable source-order suffix, so every navigation name
+in a file is unique. Anonymous functions and local values that do not provide a stable declaration
+name fall back to the nearest supported owner. A syntax tree containing an error publishes neither
+recovered declarations nor recovered edges.
+
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
 makes resolvable. Top-level `func`, method and `type` declarations are importable names within
@@ -281,16 +298,16 @@ produces `External`.
 
 ## Extraction, limits, and diagnostics
 
-C#, TypeScript/TSX/JavaScript, Python, Go, and Java adapters use shipped Tree-sitter grammars and embedded
+C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, and Kotlin adapters use shipped Tree-sitter grammars and embedded
 `declarations.scm` and `references.scm` query data. A separate `navigation.scm` projection records
 named types and members with their owner chain, exact line and character ranges, and content
 fingerprint. The owner chain starts with the language namespace, package, or module when one is
 declared, so the exact name printed by search is also the exact `symbol` accepted by `get_file`.
 Search annotations and named `get_file` reads use this compact projection; navigation
 members never enter dependency resolution, its fact limits, or the related-file graph. The projection
-currently covers named methods and fields in all five languages, plus C# properties and events,
-TypeScript signatures, Go interface methods, and Java members. Anonymous functions, C# accessors and operators,
-Python lambdas, and Go function literals fall back to the nearest supported named owner rather than
+currently covers named methods and fields in all supported languages, plus C# properties and events,
+TypeScript signatures, Go interface methods, and Java and Kotlin members. Anonymous functions, C# accessors and operators,
+Python lambdas, Go function literals, and unnamed Kotlin lambdas fall back to the nearest supported named owner rather than
 claiming a false member.
 
 Each supported source file is parsed once per content fingerprint. Both fact and navigation queries
