@@ -280,8 +280,8 @@ against the same measurement on the unmodified base, with a ten per cent allowan
 measurement is not grounds to accept or reject the signal. The registered evaluation criterion in
 `tools/RankingEval/registry.json` keeps its own seven-repetition median independently of this.
 
-The measurement was taken after the criterion was registered. Warm medians of five independent
-`measure-one` processes per repository, base and signal measured back to back on one machine:
+The measurement was taken after the criterion was registered. Warm ranking medians of five
+independent `measure-one` processes per repository, base and signal measured back to back:
 
 | Repository | Warm base | Warm with the signal | Change |
 |---|---:|---:|---:|
@@ -289,15 +289,34 @@ The measurement was taken after the criterion was registered. Warm medians of fi
 | Repomix | `541.85` | `522.04` | `-3.7%` |
 | Flask | `210.49` | `194.26` | `-7.7%` |
 
-All three are inside the ten per cent allowance. An earlier pair of five-run sets taken while the
+All three are inside the ten per cent allowance. Two caveats belong with those numbers. Warm
+ranking reuses the cached index - `measure-index-one` reports `parsed=0, reused=2299` for the warm
+DevProjex cell - so this figure observes only the one dictionary probe per candidate that role
+classification adds, not the extraction side. And an earlier pair of five-run sets taken while the
 machine was busier produced base medians of `1095.38`, `658.57` and `375.69` milliseconds for the
 same unmodified code, a spread wider than the allowance itself, which is why the criterion was
-registered as a repeated measurement rather than a single run. Pooling both five-run sets per side
-gives `-1.5%`, `-13.2%` and `-10.1%`.
+registered as a repeated measurement rather than a single run.
+
+The extraction side is measured with `measure-index-one`, which times
+`DependencyFactsEngine.IndexAsync` directly. Medians of five isolated processes per cell:
+
+| Repository | Cold base | Cold with the signal | Change | Warm base | Warm with the signal | Change |
+|---|---:|---:|---:|---:|---:|---:|
+| DevProjex | `2415.39` | `2160.28` | `-10.6%` | `60.51` | `54.43` | `-10.0%` |
+| Repomix | `359.39` | `325.66` | `-9.4%` | `92.35` | `85.09` | `-7.9%` |
+| Flask | `241.10` | `210.75` | `-12.6%` | `6.01` | `5.55` | `-7.7%` |
+
+No cell is slower. The C# corpus is the only one whose extraction changed, yet Repomix and Flask
+moved by the same order, so the improvement cannot be attributed above run-to-run drift; what the
+table does establish is that the signal costs nothing measurable. Making a method declaration a
+compact capture is the reason a saving is plausible at all: its body is no longer materialized and
+discarded on every C# file.
 
 The frozen evaluation was re-run on the registered three-repository corpus: every cell is identical
 to the base run, and the registered release criterion passes. The signal is not inert on that
-corpus - `Apps/TerminalHost/Program.cs`, `Apps/Avalonia/Program.cs` and
-`tools/DependencyFactsSpike/Program.cs` each declare `public static int Main(string[] args)` and
-change role - but the role weight of `0.05` does not move any registered task's admitted set at any
+corpus. `Apps/TerminalHost/Program.cs`, `Apps/Avalonia/Program.cs` and
+`tools/DependencyFactsSpike/Program.cs` declare `public static int Main(string[] args)`, and
+`Packaging/GrammarDeliveryProbe/Program.cs`, `tools/SegmentedRedactionBenchmark/Program.cs` and
+`tools/StoreMediaCapture/Program.cs` are top-level-statement files, so both branches of the
+evidence fire. The role weight of `0.05` does not move any registered task's admitted set at any
 registered budget.
