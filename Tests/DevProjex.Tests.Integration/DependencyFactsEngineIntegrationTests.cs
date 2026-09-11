@@ -1064,6 +1064,82 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task GoFacts_ResolveNamesDeclaredInTheSamePackageDirectory()
+	{
+		using var fixture = new TemporaryDirectory();
+		var model = fixture.CreateFile("store/model.go", """
+			package store
+
+			type Record struct {
+				Name string
+			}
+			""");
+		var service = fixture.CreateFile("store/service.go", """
+			package store
+
+			func Load() Record {
+				return Record{}
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[model, service],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// A Go package is a directory, so a sibling file needs no import to use the name.
+		Assert.Contains(result.Edges, edge => edge.Source == "store/service.go" &&
+			edge.Reference == "Record" && edge.Status == ResolutionStatus.Resolved &&
+			edge.Target == "store/model.go");
+		Assert.All(
+			result.Files,
+			file => Assert.Equal(DependencyFileStatus.Supported, file.Status));
+	}
+
+	[Fact]
+	public async Task GoFacts_DoNotReachAcrossPackagesOrResolveImportPaths()
+	{
+		using var fixture = new TemporaryDirectory();
+		var first = fixture.CreateFile("alpha/kind.go", """
+			package alpha
+
+			type Shared struct {
+			}
+			""");
+		var second = fixture.CreateFile("beta/kind.go", """
+			package beta
+
+			type Shared struct {
+			}
+			""");
+		var consumer = fixture.CreateFile("beta/use.go", """
+			package beta
+
+			import "example.com/module/alpha"
+
+			func Use() Shared {
+				return Shared{}
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[first, second, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// The same name exists in two packages; only the one in this directory is a candidate.
+		Assert.Contains(result.Edges, edge => edge.Source == "beta/use.go" &&
+			edge.Reference == "Shared" && edge.Status == ResolutionStatus.Resolved &&
+			edge.Target == "beta/kind.go");
+		Assert.DoesNotContain(result.Edges, edge => edge.Source == "beta/use.go" &&
+			edge.Target == "alpha/kind.go");
+		// Import paths are outside this capability and produce no edge at all.
+		Assert.DoesNotContain(result.Edges, edge => edge.Source == "beta/use.go" &&
+			edge.Reference.Contains("example.com", StringComparison.Ordinal));
+	}
+	[Fact]
 	public async Task PythonFacts_ResolveRelativeImportsAndClassifyKnownStdlibOnly()
 	{
 		using var fixture = new TemporaryDirectory();

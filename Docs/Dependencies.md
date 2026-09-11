@@ -167,6 +167,20 @@ an absent control file, so its later appearance invalidates a cached dependency 
 existing base is outside the effective manifest, the manifest-snapshot shortcut is bypassed; this
 keeps later edits observable without widening the selected dependency manifest.
 
+Go has one narrow capability: a package is a directory, so a name declared at the top level of
+one file is visible to its siblings without an import, and that is the relationship the adapter
+makes resolvable. Top-level `func`, method and `type` declarations are importable names within
+their directory, and a type reference resolves to the file in the same directory that declares
+it. A name declared in two directories stays two declarations, so a reference never reaches
+across packages; it resolves to the one in its own directory or to nothing.
+
+Everything else in Go is outside this capability and produces no edge rather than a guessed one.
+Import paths are not resolved: `go.mod` is not read, a module path is not mapped to a directory,
+and vendor directories, build tags, import aliases, dot imports and `internal` visibility are not
+interpreted. Package-level `const` and `var` declarations are not yet importable names, and a
+named type is recorded as one declaration without distinguishing struct, interface and alias.
+Go needs no configuration file, so a Go file has no owning-configuration failure mode.
+
 Configuration reads have four explicit outcomes: valid, missing, corrupt, and unsupported semantics.
 A malformed JSON document, a `null` or non-object `compilerOptions`, or an unsupported value shape is
 never replaced by an implicit default. References whose resolution depends on that control file remain
@@ -219,7 +233,7 @@ produces `External`.
 
 ## Extraction, limits, and diagnostics
 
-C#, TypeScript/TSX/JavaScript, and Python adapters use shipped Tree-sitter grammars and embedded
+C#, TypeScript/TSX/JavaScript, Python, and Go adapters use shipped Tree-sitter grammars and embedded
 `declarations.scm` and `references.scm` query data. Each supported source file is parsed once per
 content fingerprint; its syntax tree is disposed immediately and only compact facts remain. Files
 without an adapter are counted as unsupported instead of disappearing. Read, grammar, and query
