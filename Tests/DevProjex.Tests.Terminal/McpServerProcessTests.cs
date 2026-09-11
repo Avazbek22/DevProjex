@@ -1156,16 +1156,58 @@ public sealed partial class McpServerProcessTests
 
 		public void Report(T value)
 		{
+			TaskCompletionSource? satisfied = null;
 			lock (_sync)
+			{
 				_values.Add(value);
+				if (_awaited is not null && _awaited(value))
+				{
+					satisfied = _awaitedSignal;
+					_awaited = null;
+					_awaitedSignal = null;
+				}
+			}
+
 			_reported.TrySetResult();
+			satisfied?.TrySetResult();
 		}
 
 		private readonly TaskCompletionSource _reported = new(
 			TaskCreationOptions.RunContinuationsAsynchronously);
+		private Func<T, bool>? _awaited;
+		private TaskCompletionSource? _awaitedSignal;
 
 		public Task WaitForValueAsync(CancellationToken cancellationToken) =>
 			_reported.Task.WaitAsync(cancellationToken);
+
+		/// <summary>
+		/// Waits until a reported value satisfies <paramref name="predicate"/>, counting values that
+		/// have already arrived.
+		/// </summary>
+		/// <remarks>
+		/// A notification is delivered on its own path and its arrival is not tied to the return of
+		/// the call it belongs to. Reading the collected values the moment a call returns therefore
+		/// asks whether delivery has happened yet, which is a different question from whether it
+		/// will.
+		/// </remarks>
+		public Task WaitForAsync(Func<T, bool> predicate, CancellationToken cancellationToken)
+		{
+			TaskCompletionSource signal;
+			lock (_sync)
+			{
+				foreach (var value in _values)
+				{
+					if (predicate(value))
+						return Task.CompletedTask;
+				}
+
+				signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+				_awaited = predicate;
+				_awaitedSignal = signal;
+			}
+
+			return signal.Task.WaitAsync(cancellationToken);
+		}
 	}
 
 	[Fact]

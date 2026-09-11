@@ -66,8 +66,12 @@ all mid-scan values. When almost nothing has been dispatched yet, the count asse
 There is no poll and no wait: `[Fact(Timeout = 120_000)]` bounds the whole test, not the arrival of
 a notification. The test carries no `Category` trait, so no CI filter excludes it.
 
-**Not fixed here.** This list is a record; changing the test is a separate change. Whoever takes it
-will want the test to wait for the terminal notification rather than assume it has arrived.
+**Fixed under #382, pending a clean week.** The loss was measured to the side of the boundary it
+happens on: the server writes the terminal notification before the result of the call, so a value
+missing on the client was already on the wire and was lost on delivery. The test now waits for the
+terminal notification instead of assuming the return of the call means it has arrived, and the
+write order is pinned separately against the recorded transport. This entry closes once that has
+run clean for a week; until then the occurrences above stand as the record.
 
 ## 2. The runner enumerating zero tests
 
