@@ -408,7 +408,12 @@ follow it, `[Protection]` comes after that, a pinned remote checkout adds
 `max_file_bytes` is supplied, every tool that accepts it also reports
 `; max_file_bytes: <bytes>` in its effective-filter diagnostics. Every selection
 tool adds an `[Empty selection]` line when no file survived the
-filters and the request arguments, `search_project` adds a `[No matches]` line
+filters and the request arguments. That line opens with the stage that emptied the
+selection as a constant token — `stage=patterns`, `stage=paths`, `stage=git-scope`,
+or `stage=filters` — so a caller can tell a pattern that matched nothing from a
+server that hides the file, without a second call. A pattern with no `/` and no
+`**` matches only an entry directly in the project root, and its empty result
+names the `**/` and `/**` rewrites instead of restating the general rule. `search_project` adds a `[No matches]` line
 with the searched-file count when the pattern matched nothing, and a
 `DPX-MCP-PATH-NOT-FOUND` error for a filtered file names the effective filters
 and the party able to widen them — the startup line, or a per-call `exclusions`
@@ -474,9 +479,9 @@ the final text; only those ranges are excluded from pattern matches. Placeholder
 source text, including an unfinished `DEVPROJEX_REDACTED[` prefix, remains searchable.
 The search is streamed: no intermediate export is written or read. Context windows that overlap or touch
 are emitted once as a merged grep-style group, with `--` between separate groups.
-If the response character limit cuts a group, only matching lines whose complete
+If the search cap below cuts a group, only matching lines whose complete
 prefix, text, and line ending were written count as shown; the remaining count is
-exact and `[Search group truncated at the response character limit.]` marks the partial group.
+exact, and the `[Search truncated]` line names the cap that stopped it.
 
 The match text a `search_project` call returns is capped at 16,000 characters, well
 below the general 50,000-character response limit, because a wide alternation with

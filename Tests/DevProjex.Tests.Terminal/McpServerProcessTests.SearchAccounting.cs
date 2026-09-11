@@ -155,7 +155,10 @@ public sealed partial class McpServerProcessTests
 		Assert.True(
 			shown + additional == 200,
 			$"shown={shown}, additional={additional}\n{text[^Math.Min(text.Length, 2_000)..]}");
-		Assert.Contains("[Search group truncated at the response character limit.]", text, StringComparison.Ordinal);
+		// One condition, one notice, naming the cap that actually stopped the output.
+		Assert.Contains("[Search truncated]", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("response character limit", text, StringComparison.Ordinal);
+		Assert.Single(Regex.Matches(text, @"\[Search truncated\]"));
 		Assert.Contains("😀", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("\uD83D</untrusted-data-", text, StringComparison.Ordinal);
 	}
