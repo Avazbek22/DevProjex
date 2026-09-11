@@ -17,7 +17,8 @@ internal sealed record DependencySyntaxCapture(
 	string? ContainingDeclaration = null,
 	DependencyImportSyntax? ImportSyntax = null,
 	int CapturedNameStartIndex = -1,
-	string? Evidence = null);
+	string? Evidence = null,
+	int EndLine = -1);
 
 internal sealed record DependencyImportSyntax(
 	string Specifier,
@@ -59,7 +60,10 @@ internal interface IDependencyLanguageAdapter
 internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageAdapter
 {
 	protected static SourceSite Site(DependencyExtractionContext context, DependencySyntaxCapture capture) =>
-		new(context.RelativePath, capture.Line, capture.Evidence ?? OneLine(capture.Text));
+		new(context.RelativePath, capture.Line, capture.Evidence ?? OneLine(capture.Text))
+		{
+			EndLine = capture.EndLine
+		};
 
 	protected static string OneLine(string value)
 	{

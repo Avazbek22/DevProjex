@@ -5,6 +5,8 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	private const string UnchangedServiceNotice = "[Unchanged] filters, protection; see list_projects.";
+	private const string UnchangedFiltersServiceNotice = "[Unchanged] filters; see list_projects.";
+	private const string UnchangedProtectionServiceNotice = "[Unchanged] protection; see list_projects.";
 
 	[Fact]
 	public async Task RealProcessSendsServiceNoticesOnceWhileTheyKeepSayingTheSameThing()
@@ -39,17 +41,24 @@ public sealed partial class McpServerProcessTests
 		Assert.Equal(10, texts.Count);
 		Assert.Single(texts, static text => text.Contains("[Effective filters]", StringComparison.Ordinal));
 		Assert.Single(texts, static text => text.Contains("[Protection]", StringComparison.Ordinal));
+		Assert.Equal(8, texts.Count(HasContinuation));
+		// Two of the eight are tree calls, which carry both lines. The six content reads carry no
+		// filters line at all, so their continuation names only the line they actually withheld.
 		Assert.Equal(
-			8,
+			2,
 			texts.Count(static text => text.Contains(UnchangedServiceNotice, StringComparison.Ordinal)));
+		Assert.Equal(
+			6,
+			texts.Count(static text =>
+				text.Contains(UnchangedProtectionServiceNotice, StringComparison.Ordinal)));
 		// list_projects is the orientation call and always answers with the whole baseline.
-		Assert.DoesNotContain(UnchangedServiceNotice, texts[0], StringComparison.Ordinal);
+		Assert.False(HasContinuation(texts[0]));
 		Assert.Contains("\"exclusions\"", texts[0], StringComparison.Ordinal);
 		Assert.Contains("\"protection\"", texts[0], StringComparison.Ordinal);
 		// The first response that carries them carries both in full.
 		Assert.Contains("[Effective filters]", texts[1], StringComparison.Ordinal);
 		Assert.Contains("[Protection]", texts[1], StringComparison.Ordinal);
-		Assert.DoesNotContain(UnchangedServiceNotice, texts[1], StringComparison.Ordinal);
+		Assert.False(HasContinuation(texts[1]));
 	}
 
 	[Fact]
@@ -100,7 +109,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Single(texts, static text => text.Contains("[Effective filters]", StringComparison.Ordinal));
 		Assert.Single(texts, static text => text.Contains("[Protection]", StringComparison.Ordinal));
 		Assert.Contains("[Effective filters]", texts[0], StringComparison.Ordinal);
-		Assert.DoesNotContain(UnchangedServiceNotice, texts[0], StringComparison.Ordinal);
+		Assert.False(HasContinuation(texts[0]));
 		Assert.Equal(
 			3,
 			texts.Count(static text => text.Contains(UnchangedServiceNotice, StringComparison.Ordinal)));
@@ -186,9 +195,9 @@ public sealed partial class McpServerProcessTests
 			"get_file",
 			new Dictionary<string, object?> { ["path"] = "src/Alpha.ts" }));
 
-		Assert.Contains(UnchangedServiceNotice, firstResponse, StringComparison.Ordinal);
+		Assert.Contains(UnchangedProtectionServiceNotice, firstResponse, StringComparison.Ordinal);
 		Assert.Contains("[Protection]", freshResponse, StringComparison.Ordinal);
-		Assert.DoesNotContain(UnchangedServiceNotice, freshResponse, StringComparison.Ordinal);
+		Assert.False(HasContinuation(freshResponse));
 	}
 
 	[Fact]
@@ -214,7 +223,7 @@ public sealed partial class McpServerProcessTests
 		// A response that has to explain why it is empty always names the filters that emptied it.
 		Assert.Contains("[Empty selection]", empty, StringComparison.Ordinal);
 		Assert.Contains("[Effective filters]", empty, StringComparison.Ordinal);
-		Assert.DoesNotContain(UnchangedServiceNotice, empty, StringComparison.Ordinal);
+		Assert.False(HasContinuation(empty));
 	}
 
 	[Fact]
@@ -249,7 +258,7 @@ public sealed partial class McpServerProcessTests
 
 		Assert.Contains("Related-files result stored as", stored, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Protection]", stored, StringComparison.Ordinal);
-		Assert.DoesNotContain(UnchangedServiceNotice, next, StringComparison.Ordinal);
+		Assert.False(HasContinuation(next));
 		Assert.Contains("[Effective filters]", next, StringComparison.Ordinal);
 		Assert.Contains("[Protection]", next, StringComparison.Ordinal);
 	}
@@ -274,9 +283,119 @@ public sealed partial class McpServerProcessTests
 			new Dictionary<string, object?> { ["path"] = "src/Alpha.ts" }));
 
 		Assert.True(failed.IsError);
-		Assert.DoesNotContain(UnchangedServiceNotice, next, StringComparison.Ordinal);
+		Assert.False(HasContinuation(next));
 		Assert.Contains("[Protection]", next, StringComparison.Ordinal);
 	}
+
+	[Fact]
+	public async Task RealProcessNeverReportsAnUnchangedProtectionLineInAnAnalyzeOnlySession()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("analyze-only-project");
+		workspace.WriteFile("analyze-only-project/src/Alpha.ts", "export const alpha = 1\n");
+		workspace.WriteFile("analyze-only-project/src/Beta.ts", "export const beta = 2\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var texts = new List<string>();
+		for (var call = 0; call < 4; call++)
+		{
+			texts.Add(AllProcessText(await CallAsync(
+				server,
+				"analyze",
+				new Dictionary<string, object?>())));
+		}
+
+		// analyze reports no protection line on any call, so no response of this session may say a
+		// protection line is unchanged: the session has never carried one.
+		Assert.Equal(4, texts.Count);
+		Assert.All(
+			texts,
+			static text => Assert.DoesNotContain("[Protection]", text, StringComparison.Ordinal));
+		Assert.All(texts, static text => Assert.False(HasContinuation(text)));
+	}
+
+	[Fact]
+	public async Task RealProcessNamesOnlyTheProtectionLineWhenTheSessionNeverCarriedFilters()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("reads-only-project");
+		workspace.WriteFile("reads-only-project/src/Alpha.ts", "export const alpha = 1\n");
+		workspace.WriteFile("reads-only-project/src/Beta.ts", "export const beta = 2\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		// Neither tool reports an effective-filters line on a selection that is not empty, so this
+		// session never carries one.
+		var first = AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "src/Alpha.ts" }));
+		var second = AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "src/Beta.ts" }));
+		var third = AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "alpha", ["context_lines"] = 0 }));
+
+		Assert.Contains("[Protection]", first, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Effective filters]", first, StringComparison.Ordinal);
+		Assert.False(HasContinuation(first));
+
+		foreach (var text in new[] { second, third })
+		{
+			Assert.Contains(UnchangedProtectionServiceNotice, text, StringComparison.Ordinal);
+			Assert.DoesNotContain(UnchangedServiceNotice, text, StringComparison.Ordinal);
+			Assert.DoesNotContain(UnchangedFiltersServiceNotice, text, StringComparison.Ordinal);
+			Assert.DoesNotContain("[Effective filters]", text, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task RealProcessNamesTheLinesEachResponseActuallyWithholds()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("mixed-project");
+		workspace.WriteFile("mixed-project/src/Alpha.ts", "export const alpha = 1\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var tree = AllProcessText(await CallAsync(
+			server,
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" }));
+		var read = AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "src/Alpha.ts" }));
+		var repeatedTree = AllProcessText(await CallAsync(
+			server,
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" }));
+
+		// The tree carries both lines, so it is the one response that can withhold both later.
+		Assert.Contains("[Effective filters]", tree, StringComparison.Ordinal);
+		Assert.Contains("[Protection]", tree, StringComparison.Ordinal);
+		Assert.False(HasContinuation(tree));
+
+		// The read would have carried only a protection line, so that is all it can stand in for,
+		// even though the session has by now reported an effective-filters line as well.
+		Assert.Contains(UnchangedProtectionServiceNotice, read, StringComparison.Ordinal);
+		Assert.DoesNotContain(UnchangedServiceNotice, read, StringComparison.Ordinal);
+
+		Assert.Contains(UnchangedServiceNotice, repeatedTree, StringComparison.Ordinal);
+		Assert.DoesNotContain(UnchangedProtectionServiceNotice, repeatedTree, StringComparison.Ordinal);
+	}
+
+	private static bool HasContinuation(string text) =>
+		text.Contains(UnchangedServiceNotice, StringComparison.Ordinal) ||
+		text.Contains(UnchangedFiltersServiceNotice, StringComparison.Ordinal) ||
+		text.Contains(UnchangedProtectionServiceNotice, StringComparison.Ordinal);
 
 	private static ValueTask<CallToolResult> CallAsync(
 		ActualMcpProcess server,
