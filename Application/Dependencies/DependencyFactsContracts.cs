@@ -137,6 +137,15 @@ public interface IDependencyFactExtractor : IDisposable
 	int CompiledQuerySetCount { get; }
 }
 
+public interface IDependencyNavigationExtractor
+{
+	IReadOnlyList<NavigationDeclaration> ExtractNavigation(
+		string relativePath,
+		string source,
+		string contentFingerprint,
+		CancellationToken cancellationToken);
+}
+
 public interface IDependencyConfigurationProvider
 {
 	Task<DependencyResolverConfiguration> ReadAsync(

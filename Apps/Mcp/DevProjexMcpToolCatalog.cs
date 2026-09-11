@@ -6,6 +6,7 @@ namespace DevProjex.Mcp;
 internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 {
 	private const string MaximumResultSizeKey = "anthropic/maxResultSizeChars";
+	private const string SearchHintKey = "anthropic/searchHint";
 	private readonly IReadOnlyList<McpServerTool> _tools;
 
 	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote, bool agentExclusions = false)
@@ -72,15 +73,27 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		}
 		var tool = McpServerTool.Create(method, target, options);
 		tool.ProtocolTool.InputSchema = ParseSchema(inputSchema);
-		if (largeResult)
+		tool.ProtocolTool.Meta = new System.Text.Json.Nodes.JsonObject
 		{
-			tool.ProtocolTool.Meta = new System.Text.Json.Nodes.JsonObject
-			{
-				[MaximumResultSizeKey] = 200_000
-			};
-		}
+			[SearchHintKey] = SearchHint(name)
+		};
+		if (largeResult)
+			tool.ProtocolTool.Meta[MaximumResultSizeKey] = 200_000;
 		return tool;
 	}
+
+	private static string SearchHint(string name) => name switch
+	{
+		"list_projects" => "discover configured projects and policies",
+		"get_tree" => "inspect project structure by path and pattern",
+		"analyze" => "measure selected project content before packaging",
+		"pack_context" => "package selected project files into context",
+		"read_pack" => "continue reading a stored project result",
+		"search_project" => "search file contents with a regular expression",
+		"related_files" => "trace static dependencies around known files",
+		"get_file" => "read project files by path, range, or symbol",
+		_ => throw new ArgumentOutOfRangeException(nameof(name), name, null)
+	};
 
 	private static JsonElement ParseSchema(string json)
 	{
@@ -404,7 +417,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "type": "array",
 	      "minItems": 1,
 	      "maxItems": 8,
-	      "description": "Batch form: up to eight file requests and sixteen ranges total. Exactly one of requests or path is required; supplying both is rejected before file access. Single-file range arguments cannot be combined with requests.",
+	      "description": "Batch form: up to eight file requests and sixteen ranges or symbols total. Exactly one of requests or path is required; supplying both is rejected before file access. Single-file range arguments cannot be combined with requests.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
@@ -423,9 +436,10 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	              "required": ["start_line", "end_line"],
 	              "additionalProperties": false
 	            }
-	          }
+	          },
+	          "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Named declaration to read from this file instead of ranges. Exactly one of ranges or symbol is required for each request." }
 	        },
-	        "required": ["path", "ranges"],
+	        "required": ["path"],
 	        "additionalProperties": false
 	      }
 	    },

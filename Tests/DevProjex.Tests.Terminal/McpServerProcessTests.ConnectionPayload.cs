@@ -9,25 +9,12 @@ public sealed partial class McpServerProcessTests
 	// recorded measurement, not the measurement itself: a ceiling with a few characters to spare is
 	// a tripwire for the next honest addition rather than a budget.
 	//
-	// Recorded on 2026-09-11 from the characters the client received: tools/list result 43,323 on a
-	// default server, 47,241 on a delegation server, and 1,044 of instructions. The figure recorded
-	// here before this line said 40,566, which was two branches out of date; a stale record is worse
-	// than none, because the next addition sizes itself against it.
-	//
-	// The previous ceiling of 37,500 stood over a 35,176 measurement and was sized for one packing
-	// parameter. Per-file detail is that parameter, and it costs 1,422 characters because
-	// pack_context and analyze both publish it. The admission preview is the schema-sized addition
-	// the old headroom deliberately excluded: 2,600 characters of output schema plus 1,072 for the
-	// ordering inputs analyze gained, all of it paid on every connection so a caller can see which
-	// files a budget admits without buying a pack. Descriptions that only restated their field
-	// names were removed before this ceiling moved.
-	//
-	// The headroom against the ceiling is 177 characters. It is no longer enough for a parameter of
-	// any size, and the next addition to this surface has to move the ceiling and say what it
-	// bought, or take its characters back out of a description. A delegation server is the larger payer, but its excess
-	// over a default server is the exclusion parameter and nothing else, so it is pinned as an
-	// exact difference rather than as a second ceiling that could never fire before the first one.
-	private const int ToolsListResultCeiling = 43_500;
+	// Recorded on 2026-09-12 from the wire JSON the client received: tools/list result 34,439 on a
+	// default server, 38,357 when per-call exclusions are enabled, and 1,128 of instructions.
+	// The base revision delivered 42,370 characters before the protected JSON tools stopped
+	// publishing duplicate output schemas. The exact mode difference below isolates the optional
+	// exclusion parameter; the total ceiling keeps deliberate room for protocol metadata.
+	private const int ToolsListResultCeiling = 35_000;
 	private const int ToolsListResultFloor = 33_000;
 	private const int ExclusionsParameterCost = 3_918;
 	private const int InstructionsCeiling = 1_200;

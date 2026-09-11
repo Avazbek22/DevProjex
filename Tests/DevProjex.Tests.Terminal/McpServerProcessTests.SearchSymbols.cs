@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -134,6 +135,52 @@ public sealed partial class McpServerProcessTests
 
 		Assert.Contains("in Logger.Write\n", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("\nin Logger\n", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessUsesOneTransformedSnapshotForSearchAndNamedReads()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("transformed-navigation-project");
+		const string privateKey =
+			"-----BEGIN " + "PRIVATE KEY-----\n" +
+			"MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDAC4AWkdwKYSd8\n" +
+			"Ks14IReLcYgADhoXk56ZzXI=\n" +
+			"-----END " + "PRIVATE KEY-----";
+		var source =
+			"sealed class Multi\n{\n    private const string Key = \"\"\"\n" + privateKey +
+			"\n\"\"\";\n\n    string Locate()\n    {\n        return \"coordinate-marker\";\n    }\n}\n";
+		workspace.WriteFile("transformed-navigation-project/Multi.cs", source);
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var searched = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "coordinate-marker", ["context_lines"] = 0 })));
+		Assert.Contains("in Multi.Locate\n", searched, StringComparison.Ordinal);
+		Assert.Contains("9:        return \"coordinate-marker\";", searched, StringComparison.Ordinal);
+		Assert.Contains("Multi.cs Multi.Locate 7", searched, StringComparison.Ordinal);
+
+		var named = Normalize(AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Multi.cs", ["symbol"] = "Multi.Locate" })));
+		Assert.Contains("File: Multi.cs\nLines: 7-10 of 12\n", named, StringComparison.Ordinal);
+		Assert.Contains("coordinate-marker", named, StringComparison.Ordinal);
+		Assert.DoesNotContain("PRIVATE KEY", named, StringComparison.Ordinal);
+
+		workspace.WriteFile(
+			"transformed-navigation-project/Multi.cs",
+			"sealed class Multi\n{\n\n\n    string Locate()\n    {\n        return \"updated-coordinate-marker\";\n    }\n}\n");
+		var updated = Normalize(AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Multi.cs", ["symbol"] = "Multi.Locate" })));
+		Assert.Contains("File: Multi.cs\nLines: 5-8 of 10\n", updated, StringComparison.Ordinal);
+		Assert.Contains("updated-coordinate-marker", updated, StringComparison.Ordinal);
+		Assert.DoesNotContain("PRIVATE KEY", updated, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -398,6 +445,128 @@ public sealed partial class McpServerProcessTests
 			"its path and symbol; for several of them, one get_file requests call.",
 			text,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessPrintedFollowUpRoutesExecuteWithoutAdditionalArguments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("route-project");
+		workspace.WriteFile(
+			"route-project/src/Alpha.cs",
+			"sealed class Alpha\n{\n    string Read() => \"route-marker-alpha\";\n}\n");
+		workspace.WriteFile(
+			"route-project/src/Beta.cs",
+			"sealed class Beta\n{\n    string Read() => \"route-marker-beta\";\n}\n");
+		workspace.WriteFile(
+			"route-project/Large.txt",
+			string.Join('\n', Enumerable.Range(1, 3_200).Select(static line => $"stored-route-{line:D4}")));
+		workspace.WriteFile("route-project/LongLine.txt", new string('x', 60_000) + "tail-route-marker\n");
+		for (var index = 0; index < 3; index++)
+			workspace.WriteFile($"route-project/Stored{index}.txt", $"stored-search-route-{index}\n");
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var searched = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "route-marker-(alpha|beta)",
+				["context_lines"] = 0
+			})));
+		Assert.Contains("[Read declarations]", searched, StringComparison.Ordinal);
+		var selectors = Regex.Matches(
+			SpotlightBody(searched),
+			@"^(?<path>src/[^ ]+\.cs) (?<symbol>[^ ]+) (?<line>[0-9]+)$",
+			RegexOptions.Multiline,
+			TimeSpan.FromSeconds(2));
+		Assert.Equal(2, selectors.Count);
+
+		var scalarArguments = new Dictionary<string, object?>
+		{
+			["path"] = selectors[0].Groups["path"].Value,
+			["symbol"] = selectors[0].Groups["symbol"].Value
+		};
+		var scalar = Normalize(AllProcessText(await CallAsync(server, "get_file", scalarArguments)));
+		Assert.Contains("route-marker-alpha", scalar, StringComparison.Ordinal);
+		Assert.DoesNotContain("route-marker-beta", scalar, StringComparison.Ordinal);
+
+		var requests = selectors.Select(selector => (object)new
+		{
+			path = selector.Groups["path"].Value,
+			symbol = selector.Groups["symbol"].Value
+		}).ToArray();
+		var batch = Normalize(AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["requests"] = requests })));
+		Assert.Contains("route-marker-alpha", batch, StringComparison.Ordinal);
+		Assert.Contains("route-marker-beta", batch, StringComparison.Ordinal);
+
+		var packed = Normalize(AllProcessText(await CallAsync(
+			server,
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Large.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			})));
+		var packId = Regex.Match(packed, @"Pack stored as '(?<id>[^']+)'", RegexOptions.None,
+			TimeSpan.FromSeconds(2)).Groups["id"].Value;
+		Assert.False(string.IsNullOrWhiteSpace(packId), packed);
+		var firstPage = Normalize(AllProcessText(await CallAsync(
+			server,
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId })));
+		var nextLine = Regex.Match(firstPage, @"continue with start_line=(?<line>[0-9]+)", RegexOptions.None,
+			TimeSpan.FromSeconds(2)).Groups["line"].Value;
+		Assert.False(string.IsNullOrWhiteSpace(nextLine), firstPage);
+		var nextPage = Normalize(AllProcessText(await CallAsync(
+			server,
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId, ["start_line"] = nextLine })));
+		Assert.Contains($"stored-route-{int.Parse(nextLine, CultureInfo.InvariantCulture) - 2:D4}", nextPage,
+			StringComparison.Ordinal);
+
+		var storedSearch = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "stored-search-route",
+				["context_lines"] = 0,
+				["max_results"] = 1
+			})));
+		var searchPackId = Regex.Match(storedSearch, @"\[Search stored\] pack_id=(?<id>[0-9a-f]+)",
+			RegexOptions.None, TimeSpan.FromSeconds(2)).Groups["id"].Value;
+		Assert.False(string.IsNullOrWhiteSpace(searchPackId), storedSearch);
+		var storedSearchPage = Normalize(AllProcessText(await CallAsync(
+			server,
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = searchPackId })));
+		Assert.Contains("stored-search-route", storedSearchPage, StringComparison.Ordinal);
+
+		var longPage = Normalize(AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "LongLine.txt" })));
+		var nextColumn = Regex.Match(longPage, @"continue with start_line=1 start_column=(?<column>[0-9]+)",
+			RegexOptions.None, TimeSpan.FromSeconds(2)).Groups["column"].Value;
+		Assert.False(string.IsNullOrWhiteSpace(nextColumn), longPage);
+		var longContinuation = Normalize(AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["path"] = "LongLine.txt",
+				["start_line"] = 1,
+				["start_column"] = nextColumn
+			})));
+		Assert.Contains("tail-route-marker", longContinuation, StringComparison.Ordinal);
 	}
 
 	private static string Normalize(string text) =>

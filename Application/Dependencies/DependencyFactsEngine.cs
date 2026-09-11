@@ -39,6 +39,27 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	public int ParseCount => _extractor.ParseCount;
 	public int CompiledQuerySetCount => _extractor.CompiledQuerySetCount;
+
+	public IReadOnlyList<NavigationDeclaration> ExtractNavigation(
+		string relativePath,
+		string source,
+		string contentFingerprint,
+		CancellationToken cancellationToken = default)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (source.Length > _limits.MaximumCharactersPerFile ||
+		    _extractor is not IDependencyNavigationExtractor navigationExtractor)
+			return [];
+		return navigationExtractor.ExtractNavigation(
+			relativePath,
+			source,
+			contentFingerprint,
+			cancellationToken);
+	}
 	internal DependencyFactsCacheState CacheState
 	{
 		get

@@ -11,7 +11,7 @@ using TreeSitter;
 
 namespace DevProjex.Infrastructure.Dependencies;
 
-public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
+public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor, IDependencyNavigationExtractor
 {
 	private const int MaximumWorkers = 8;
 	private const int MaximumRetainedWorkersPerLanguage = 2;
@@ -382,6 +382,34 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) =>
 		Extract(source, limits, CancellationToken.None);
+
+	public IReadOnlyList<NavigationDeclaration> ExtractNavigation(
+		string relativePath,
+		string source,
+		string contentFingerprint,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
+		var language = ForPath(relativePath);
+		if (language == LanguageId.Unsupported)
+			return [];
+
+		cancellationToken.ThrowIfCancellationRequested();
+		var runtime = GetRuntime(language);
+		using var lease = runtime.Rent(_workerBudget);
+		using var tree = lease.Parser.Parse(source) ??
+			throw new InvalidOperationException("Tree-sitter returned no syntax tree.");
+		Interlocked.Increment(ref _parseCount);
+		return CaptureNavigation(
+			runtime.Navigation,
+			tree.RootNode,
+			language,
+			contentFingerprint,
+			cancellationToken);
+	}
 
 	public FileFacts Extract(
 		PreparedDependencySource source,

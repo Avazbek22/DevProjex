@@ -900,6 +900,7 @@ internal sealed class DevProjexMcpTools(
 			var inspectionBudgetReached = inspectedFiles.Count < plan.IncludedFiles.Count;
 			var materialisedMatches = 0;
 			var groups = new List<McpSearchRenderedGroup>();
+			var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
 			await using var searched = await Projects.ConsumeSearchTextAsync(
 				plan with { IncludedFiles = inspectedFiles },
 				(file, token) =>
@@ -925,6 +926,15 @@ internal sealed class DevProjexMcpTools(
 						storeHitMatchBound = true;
 
 					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
+					if (found > 0 && navigationByFile.Count < McpSearchSymbols.MaximumAnnotatedFiles &&
+					    !navigationByFile.ContainsKey(relative))
+					{
+						navigationByFile[relative] = McpSearchSymbols.CaptureNavigation(
+							Projects.DependencyFactsEngine,
+							relative,
+							file.Content,
+							token);
+					}
 					foreach (var match in scan.Matches)
 					{
 						var rendered = RenderGroupLines(relative, file.Content, match);
@@ -942,12 +952,10 @@ internal sealed class DevProjexMcpTools(
 			// it found has nothing to choose between and is left exactly as it was.
 			var withholdsByCount = totalMatches > maximumResults;
 			var ordering = withholdsByCount && groups.Count > 0
-				? await OrderDeclarationsFirstAsync(
-						Projects.DependencyFactsEngine,
-						plan,
+				? OrderDeclarationsFirst(
 						groups,
+						navigationByFile,
 						cancellationToken)
-					.ConfigureAwait(false)
 				: null;
 			var ordered = ordering ?? groups;
 
@@ -1035,9 +1043,7 @@ internal sealed class DevProjexMcpTools(
 			// Resolved on every search that showed a hit, including one the cap cut: the selector
 			// list below is what stops a caller opening a whole file to find a declaration it was
 			// already holding, and a cut response is exactly when that happens.
-			var symbols = await McpSearchSymbols
-				.ResolveAsync(Projects.DependencyFactsEngine, plan, writtenHits, cancellationToken)
-				.ConfigureAwait(false);
+			var symbols = McpSearchSymbols.Resolve(writtenHits, navigationByFile, cancellationToken);
 			// A response the character cap already cut has no room to spend on labelling each run,
 			// so the headers are dropped and the remaining characters go to matches. The list stays.
 			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols);
@@ -1213,7 +1219,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page, or requests for up to eight files and sixteen inclusive ranges; the forms are mutually exclusive. Send one batched call whenever you want more than one file or more than one range, as requests=[{\"path\":\"src/a.ts\",\"ranges\":[{\"start_line\":10,\"end_line\":30}]}]. Batch responses report ok, partial, not-returned, or unavailable for every range, merge overlaps, and share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements; start_column continues a single-file page.")]
+		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page, or requests for up to eight files and sixteen inclusive ranges or named declarations; the forms are mutually exclusive. Send one batched call whenever you want more than one file, range, or known symbol, as requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]. Batch responses report ok, partial, not-returned, or unavailable for every item, merge overlapping ranges, and share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements; start_column continues a single-file page.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1254,19 +1260,6 @@ internal sealed class DevProjexMcpTools(
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			var file = Projects.ResolveFile(plan, requestedPath);
-			if (symbol is not null)
-			{
-				var located = await McpSearchSymbols
-					.ResolveSymbolAsync(
-						Projects.DependencyFactsEngine,
-						plan,
-						McpProjectService.ToRelative(plan.SourceRoot, file),
-						file,
-						symbol,
-						cancellationToken)
-					.ConfigureAwait(false);
-				(start, end) = ResolveSymbolRange(located);
-			}
 
 			TransformedTextFile? transformed = null;
 			await using var inspected = await Projects.ConsumeSearchTextAsync(
@@ -1291,6 +1284,17 @@ internal sealed class DevProjexMcpTools(
 					$"{McpErrorCodes.PayloadTruncated}: {detail}; content was not returned because it could not be inspected safely. " +
 					$"Select a file no larger than {SecretRedactionOutputPreparer.MaximumScannableFileBytes} bytes or narrow the project before retrying.");
 			}
+			var relativePath = McpProjectService.ToRelative(plan.SourceRoot, file);
+			if (symbol is not null)
+			{
+				var located = McpSearchSymbols.ResolveSymbol(
+					Projects.DependencyFactsEngine,
+					relativePath,
+					transformed.Content,
+					symbol,
+					cancellationToken);
+				(start, end) = ResolveSymbolRange(located);
+			}
 			var page = McpTextRanges.Slice(
 				transformed.Content,
 				start,
@@ -1303,8 +1307,9 @@ internal sealed class DevProjexMcpTools(
 			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
+			var addressedPage = FormatFileReadHeader(relativePath, page) + page.Text;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
-				McpSpotlight.Wrap(page.Text),
+				McpSpotlight.Wrap(addressedPage),
 				rangeNotice,
 				characterLimitNotice,
 				FormatCompressionUnavailable(inspected.CompressionSnapshot),
@@ -1339,9 +1344,8 @@ internal sealed class DevProjexMcpTools(
 			cancellationToken.ThrowIfCancellationRequested();
 			try
 			{
-				resolvedRequests.Add(new McpResolvedFileReadRequest(
-					item,
-					Projects.ResolveFile(plan, item.Path)));
+				var physicalPath = Projects.ResolveFile(plan, item.Path);
+				resolvedRequests.Add(new McpResolvedFileReadRequest(item, physicalPath));
 			}
 			catch (McpToolException exception) when (exception.Code is
 			       McpErrorCodes.PathNotFound or McpErrorCodes.RootViolation)
@@ -1364,7 +1368,28 @@ internal sealed class DevProjexMcpTools(
 				transformed[file.Path] = file;
 				return ValueTask.CompletedTask;
 			},
-			cancellationToken).ConfigureAwait(false);
+				cancellationToken).ConfigureAwait(false);
+		for (var index = 0; index < resolvedRequests.Count; index++)
+		{
+			var resolved = resolvedRequests[index];
+			if (resolved.Request.Symbol is null || resolved.PhysicalPath is null ||
+			    !transformed.TryGetValue(resolved.PhysicalPath, out var file))
+				continue;
+			var located = McpSearchSymbols.ResolveSymbol(
+				Projects.DependencyFactsEngine,
+				McpProjectService.ToRelative(plan.SourceRoot, resolved.PhysicalPath),
+				file.Content,
+				resolved.Request.Symbol,
+				cancellationToken);
+			var (start, end) = ResolveSymbolRange(located);
+			resolvedRequests[index] = resolved with
+			{
+				Request = resolved.Request with
+				{
+					Ranges = [new McpGetFileRange(resolved.Request.Index, 1, start!.Value, end!.Value)]
+				}
+			};
+		}
 
 		var rendered = RenderBatchFileReads(resolvedRequests, transformed, cancellationToken);
 		return McpToolResults.TextSuccess(AppendTrustedNotices(
@@ -1422,8 +1447,8 @@ internal sealed class DevProjexMcpTools(
 			var separator = sections.Length == 0 ? string.Empty : "\n\n";
 			var requestIds = string.Join(", ", group.Ranges.Select(static range =>
 				$"{range.RequestIndex}.{range.RangeIndex}"));
-			var headerPrefix = $"File: {McpTextEscaping.EscapeSingleLine(group.DisplayPath)}\nRequests: {requestIds}\n";
-			const string headerSuffix = "\n";
+			var escapedPath = McpTextEscaping.EscapeSingleLine(group.DisplayPath);
+			var headerPrefix = $"File: {escapedPath}\nRequests: {requestIds}\n";
 			var headerLines = 4;
 			var availableLines = sectionBudgetLines - usedLines - (sections.Length == 0 ? 0 : 1) - headerLines;
 			var availableCharacters = sectionBudgetCharacters - sections.Length - separator.Length -
@@ -1454,7 +1479,7 @@ internal sealed class DevProjexMcpTools(
 			}
 
 			var sectionStatus = page.IsTruncated ? "partial" : "ok";
-			var header = headerPrefix + $"Status: {sectionStatus}\nLines: {page.StartLine}-{page.EndLine} of {page.TotalLines}" + headerSuffix;
+			var header = FormatFileReadHeader(escapedPath, page, requestIds, sectionStatus, pathIsEscaped: true);
 			var section = separator + header + page.Text;
 			if (sections.Length + section.Length > sectionBudgetCharacters)
 			{
@@ -1558,6 +1583,25 @@ internal sealed class DevProjexMcpTools(
 		foreach (var character in value)
 			if (character == '\n') lines++;
 		return lines;
+	}
+
+	private static string FormatFileReadHeader(
+		string path,
+		McpTextPage page,
+		string? requestIds = null,
+		string? status = null,
+		bool pathIsEscaped = false)
+	{
+		var header = new StringBuilder();
+		header.Append("File: ");
+		header.Append(pathIsEscaped ? path : McpTextEscaping.EscapeSingleLine(path)).Append('\n');
+		if (requestIds is not null)
+			header.Append("Requests: ").Append(requestIds).Append('\n');
+		if (status is not null)
+			header.Append("Status: ").Append(status).Append('\n');
+		header.Append("Lines: ").Append(page.StartLine).Append('-').Append(page.EndLine)
+			.Append(" of ").Append(page.TotalLines).Append('\n');
+		return header.ToString();
 	}
 
 	private static string? FormatLineRangeNotice(McpTextPage page, int? requestedEnd)
@@ -2716,19 +2760,16 @@ internal sealed class DevProjexMcpTools(
 	/// Both sides keep their existing relative order, so the same query on the same tree always
 	/// produces the same answer.
 	/// </remarks>
-	private static async Task<IReadOnlyList<McpSearchRenderedGroup>?> OrderDeclarationsFirstAsync(
-		DependencyFactsEngine engine,
-		ProjectContextPlan plan,
+	private static IReadOnlyList<McpSearchRenderedGroup>? OrderDeclarationsFirst(
 		IReadOnlyList<McpSearchRenderedGroup> groups,
+		IReadOnlyDictionary<string, IReadOnlyList<NavigationDeclaration>> navigationByFile,
 		CancellationToken cancellationToken)
 	{
 		var hits = groups
 			.SelectMany(group => group.MatchLines.Select(line =>
 				new McpSearchHit(group.RelativePath, group.FullPath, line)))
 			.ToArray();
-		var declarations = await McpSearchSymbols
-			.ResolveAsync(engine, plan, hits, cancellationToken)
-			.ConfigureAwait(false);
+		var declarations = McpSearchSymbols.Resolve(hits, navigationByFile, cancellationToken);
 		// A search that touched more files than the naming can reach knows nothing about the ones
 		// past that bound, and ordering on a signal it does not have would claim an order it did
 		// not apply. It keeps selection order instead, and says nothing.

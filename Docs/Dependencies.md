@@ -258,6 +258,11 @@ Each supported source file is parsed once per content fingerprint. Both fact and
 run against that same live tree before it is disposed; only compact facts remain. Files
 without an adapter are counted as unsupported instead of disappearing. Read, grammar, and query
 failures are counted separately as extraction failures.
+MCP search annotations and named reads operate on transformed text, whose line count can differ after
+multi-line replacement or compression. They therefore run the navigation query directly on the same
+bounded transformed snapshot that supplies the response, rather than combining its coordinates with
+a later read from disk. This path performs one parse for each annotated or named-read file and retains
+only the compact projection.
 The same per-file handling applies before language dispatch: if an unsupported file disappears or its
 metadata cannot be read after selection, it is reported as a transient extraction failure and is not
 retained in the facts cache; it does not abort the rest of the index.

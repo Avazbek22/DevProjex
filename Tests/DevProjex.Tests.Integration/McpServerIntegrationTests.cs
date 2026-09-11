@@ -1896,6 +1896,17 @@ public sealed partial class McpServerIntegrationTests
 			"related_files",
 			"get_file"
 		};
+		var searchHints = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["list_projects"] = "discover configured projects and policies",
+			["get_tree"] = "inspect project structure by path and pattern",
+			["analyze"] = "measure selected project content before packaging",
+			["pack_context"] = "package selected project files into context",
+			["read_pack"] = "continue reading a stored project result",
+			["search_project"] = "search file contents with a regular expression",
+			["related_files"] = "trace static dependencies around known files",
+			["get_file"] = "read project files by path, range, or symbol"
+		};
 		Assert.All(tools, tool =>
 		{
 			var protocol = tool.ProtocolTool;
@@ -1913,6 +1924,8 @@ public sealed partial class McpServerIntegrationTests
 			Assert.DoesNotContain("hide_private", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
 			Assert.DoesNotContain("hide-secrets", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
 			Assert.DoesNotContain("hide-private", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
+			Assert.Equal(searchHints[tool.Name], protocol.Meta!["anthropic/searchHint"]!.GetValue<string>());
+			Assert.False(protocol.Meta.ContainsKey("anthropic/alwaysLoad"));
 		});
 		Assert.All(tools, static tool => Assert.Null(tool.ProtocolTool.OutputSchema));
 		Assert.Equal(
@@ -2149,17 +2162,20 @@ public sealed partial class McpServerIntegrationTests
 		var search = tools.Single(static tool => tool.Name == "search_project").ProtocolTool.Description!;
 		var instructions = server.Client.ServerInstructions!;
 
-		// The batch form already worked; agents never chose it because nothing said when to.
+		// The route states when one request should replace several independent reads.
 		Assert.Contains(
-			"whenever you want more than one file or more than one range",
+			"whenever you want more than one file, range, or known symbol",
 			getFile,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"requests=[{\"path\":\"src/a.ts\",\"ranges\":[{\"start_line\":10,\"end_line\":30}]}]",
+			"requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]",
 			getFile,
 			StringComparison.Ordinal);
 		Assert.Contains("one batched get_file requests call", search, StringComparison.Ordinal);
 		Assert.Contains("one batched get_file call", instructions, StringComparison.Ordinal);
+		Assert.Contains("When the project is unknown", instructions, StringComparison.Ordinal);
+		Assert.Contains("When one location is known", instructions, StringComparison.Ordinal);
+		Assert.Contains("only when a multi-file document is needed", instructions, StringComparison.Ordinal);
 		Assert.Single(
 			Regex.Matches(instructions, "batched get_file", RegexOptions.None, TimeSpan.FromSeconds(2)));
 	}
@@ -6297,6 +6313,43 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetFileScalarAndBatchSymbolReadsShareAddressHeaders()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Reader.cs"), """
+			sealed class Reader
+			{
+				string Load()
+				{
+					return "addressed-marker";
+				}
+			}
+			""");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var scalar = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["path"] = "Reader.cs",
+			["symbol"] = "Reader.Load"
+		});
+		var batch = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[] { new { path = "Reader.cs", symbol = "Reader.Load" } }
+		});
+		var scalarBody = ExtractSpotlightBody(Text(scalar)).Replace("\r\n", "\n", StringComparison.Ordinal);
+		var batchBody = ExtractSpotlightBody(Text(batch)).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+		Assert.NotEqual(true, scalar.IsError);
+		Assert.NotEqual(true, batch.IsError);
+		Assert.StartsWith("File: Reader.cs\nLines: 3-6 of 7\n", scalarBody, StringComparison.Ordinal);
+		Assert.Contains("File: Reader.cs\nRequests: 1.1\nStatus: ok\nLines: 3-6 of 7\n", batchBody,
+			StringComparison.Ordinal);
+		Assert.Contains("addressed-marker", scalarBody, StringComparison.Ordinal);
+		Assert.Contains("addressed-marker", batchBody, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetFileBatchMatchesSinglePagesForEightUnicodeFilesAndReportsUnavailableSafely()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -6333,7 +6386,13 @@ public sealed partial class McpServerIntegrationTests
 		var batchBody = ExtractSpotlightBody(batchText);
 
 		Assert.NotEqual(true, batch.IsError);
-		Assert.All(singleBodies, body => Assert.Contains(body, batchBody, StringComparison.Ordinal));
+		Assert.All(singleBodies, body =>
+		{
+			var firstLineEnd = body.IndexOf('\n');
+			var secondLineEnd = body.IndexOf('\n', firstLineEnd + 1);
+			Assert.True(firstLineEnd >= 0 && secondLineEnd >= 0, body);
+			Assert.Contains(body[(secondLineEnd + 1)..], batchBody, StringComparison.Ordinal);
+		});
 		Assert.Contains("α0", batchBody, StringComparison.Ordinal);
 		Assert.Contains("[Range clamped]", batchText, StringComparison.Ordinal);
 		var singlePlaceholders = singleBodies
@@ -6397,6 +6456,8 @@ public sealed partial class McpServerIntegrationTests
 	[InlineData("missing-path")]
 	[InlineData("too-many-requests")]
 	[InlineData("too-many-ranges")]
+	[InlineData("missing-selector")]
+	[InlineData("both-selectors")]
 	public async Task GetFileBatchRejectsInvalidShapesBeforeReading(string shape)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -6420,6 +6481,16 @@ public sealed partial class McpServerIntegrationTests
 							.Select(static _ => new { start_line = 1, end_line = 1 }).ToArray()
 					}
 				},
+				"missing-selector" => new object[] { new { path = "A.txt" } },
+				"both-selectors" => new object[]
+				{
+					new
+					{
+						path = "A.txt",
+						symbol = "A",
+						ranges = new[] { new { start_line = 1, end_line = 1 } }
+					}
+				},
 				_ => new object[] { new { path = "A.txt", ranges = new[] { new { start_line = 1, end_line = 1 } } } }
 			}
 		};
@@ -6430,7 +6501,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.True(result.IsError);
 		Assert.StartsWith(McpErrorCodes.InvalidArguments, Text(result), StringComparison.Ordinal);
-		if (shape == "missing-path")
+		if (shape is "missing-path" or "missing-selector" or "both-selectors")
 			Assert.Contains("requests[0]", Text(result), StringComparison.Ordinal);
 	}
 
