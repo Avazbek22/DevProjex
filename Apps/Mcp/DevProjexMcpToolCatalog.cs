@@ -248,6 +248,21 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private static string ExpandRelatedProperty =>
+		$$"""
+	"expand_related": {
+	  "description": "Also pack the statically resolved neighbours of the given seed files, in one call instead of a related_files round trip. Expansion only narrows: a neighbour outside the effective filters, the Git scope, or paths never enters. Only resolved edges travel. Stops at {{McpRelatedExpansion.MaximumExpandedFiles}} files and says so.",
+	  "type": "object",
+	  "properties": {
+	    "seeds": { "type": "array", "minItems": 1, "maxItems": {{McpRelatedExpansion.MaximumSeeds}}, "items": { "type": "string" }, "description": "Project-relative files already inside the effective selection; directories and globs are rejected." },
+	    "hops": { "type": "integer", "minimum": {{McpRelatedExpansion.MinimumHops}}, "maximum": {{McpRelatedExpansion.MaximumHops}}, "default": {{McpRelatedExpansion.MinimumHops}}, "description": "How many edges out from each seed to follow." },
+	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Which way to follow edges; same meaning as related_files.direction." }
+	  },
+	  "required": ["seeds"],
+	  "additionalProperties": false
+	}
+	""";
+
 	private const string MaxFileBytesProperty = """
 	"max_file_bytes": {
 	  "description": "Exclude otherwise selected files strictly larger than this byte count; integer or numeric string.",
@@ -330,6 +345,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{FocusProperty}},
 	    {{MaximumTokensProperty}},
 	    {{MaxFileBytesProperty}},
+	    {{ExpandRelatedProperty}},
 	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Pack view: tree includes structure only, content includes files only, tree-content includes both." },
 	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown", "description": "Pack format: markdown or text for readable output; json or xml for structured output." }
 	  },

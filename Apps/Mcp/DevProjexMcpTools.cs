@@ -74,7 +74,7 @@ internal sealed class DevProjexMcpTools(
 	private readonly IReadOnlySet<string> packArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "view",
 		"format", "detail", "detail_by_pattern", "tracked_only", "git_scope", "rank", "focus",
-		"max_tokens", "max_file_bytes");
+		"max_tokens", "max_file_bytes", McpRelatedExpansion.ParameterName);
 	private readonly IReadOnlySet<string> searchArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "context_lines",
 		"ignore_case", "max_results", "tracked_only", "git_scope", "max_file_bytes");
@@ -481,7 +481,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. focus requires rank=importance and seeds graph-hop ordering without widening selection; max_tokens applies greedy content admission and reports heuristic token estimates, not tokenizer counts. detail_by_pattern overrides detail per file; entries apply in order and the last matching entry wins, so list general globs before specific ones.")]
+		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. expand_related also packs the resolved dependency neighbours of its seeds and only narrows. focus requires rank=importance; max_tokens applies greedy content admission and reports heuristic token estimates, not tokenizer counts. detail_by_pattern overrides detail per file; the last matching entry wins, so list general globs first.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -522,6 +522,7 @@ internal sealed class DevProjexMcpTools(
 					$"{McpErrorCodes.InvalidArguments}: {McpDetailOverrides.ParameterName} is valid only when " +
 					"pack_context includes file content.");
 			}
+			var expansionRequest = McpRelatedExpansion.Parse(arguments);
 			var selection = await BuildSelectionAsync(
 					arguments,
 					cancellationToken,
@@ -530,6 +531,29 @@ internal sealed class DevProjexMcpTools(
 						format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 				.ConfigureAwait(false);
 			var plan = selection.Plan;
+			// Expansion runs against the plan the filters produced and can only remove from it, so
+			// a neighbour outside the effective selection has no way in. It also runs before focus
+			// is resolved, which is what makes a focus seed the expansion did not admit fail with
+			// the same error any unselected path gets.
+			var expansionResult = expansionRequest is null
+				? null
+				: await McpRelatedExpansion.ExpandAsync(
+						Projects.DependencyFactsEngine,
+						plan,
+						Projects.ResolveRequestedFiles(plan, expansionRequest.Seeds, cancellationToken)
+							.Select(seed => McpProjectService.ToRelative(plan.SourceRoot, seed))
+							.ToArray(),
+						expansionRequest,
+						operationProgress.MeasureFacts("Indexing dependency facts", 2, 8),
+						cancellationToken)
+					.ConfigureAwait(false);
+			if (expansionResult is not null)
+			{
+				plan = await Projects
+					.NarrowSelectionAsync(plan, expansionResult.RelativePaths, cancellationToken)
+					.ConfigureAwait(false);
+			}
+
 			var selectedFileCount = plan.IncludedFiles.Count;
 			var focusSeeds = focus is null
 				? null
@@ -539,6 +563,7 @@ internal sealed class DevProjexMcpTools(
 			// A pack is the answer many agents read instead of get_tree, so it carries the same
 			// effective-filters footer next to its tree.
 			var trustedPlanWarnings = CombineTrustedNotices(
+				FormatExpansionNotice(expansionResult),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				SelectionNotices(plan, includeFilters: true, selection.NoticeContext));
 			operationProgress.Milestone(
@@ -2320,6 +2345,26 @@ internal sealed class DevProjexMcpTools(
 		return end - start is > 0 and <= MaximumNameSearchExtensionLength &&
 			start > 0 &&
 			pattern[start - 1] == '.';
+	}
+
+	/// <summary>
+	/// Reports what the expansion added, in counts and one constant. The paths themselves are in
+	/// the untrusted block with the rest of the pack, as every project path is.
+	/// </summary>
+	private static string? FormatExpansionNotice(McpRelatedExpansionResult? expansion)
+	{
+		if (expansion is null)
+			return null;
+		var reported =
+			$"[Expanded] seeds={expansion.SeedCount.ToString(CultureInfo.InvariantCulture)} · " +
+			$"hop1=+{expansion.FirstHopCount.ToString(CultureInfo.InvariantCulture)} · " +
+			$"hop2=+{expansion.SecondHopCount.ToString(CultureInfo.InvariantCulture)} · " +
+			$"seeds-without-facts={expansion.SeedsWithoutFacts.ToString(CultureInfo.InvariantCulture)}";
+		return expansion.LimitReached
+			? $"{reported}; stopped at the " +
+			  $"{McpRelatedExpansion.MaximumExpandedFiles.ToString(CultureInfo.InvariantCulture)}-file " +
+			  "expansion limit, so the neighbourhood is incomplete."
+			: $"{reported}.";
 	}
 
 	private static IReadOnlyList<string>? ParsePaths(McpJsonArguments arguments) =>

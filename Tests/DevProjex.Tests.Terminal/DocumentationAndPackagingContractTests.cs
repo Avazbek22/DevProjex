@@ -214,6 +214,13 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("[Search truncated]", server, StringComparison.Ordinal);
 		Assert.Contains("16,000 characters", normalized, StringComparison.Ordinal);
 		Assert.Contains("### Finding a file by name", server, StringComparison.Ordinal);
+		Assert.Contains("### `pack_context.expand_related`", server, StringComparison.Ordinal);
+		Assert.Contains("**Expansion only ever narrows.**", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Expanded] seeds=1 · hop1=+11 · hop2=+0 · seeds-without-facts=0.",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains("stops at 400 files", normalized, StringComparison.Ordinal);
 		Assert.Contains(
 			"`include_patterns` is the only parameter that matches a file by its name",
 			normalized,

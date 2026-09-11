@@ -359,6 +359,54 @@ affected snapshot. Changing only `related_files` seeds or `direction` does not;
 those are projections over the same immutable index. This is an optimization,
 not a strict filesystem snapshot mode, and no strict cache switch is offered.
 
+### `pack_context.expand_related`
+
+`expand_related` packs the seeds together with their statically resolved
+neighbours, so the documented `search_project` to `related_files` to
+`pack_context` sequence becomes one call. It takes `seeds` (1 to 16
+project-relative files), `hops` (1 or 2, default 1), and `direction`
+(`dependencies`, `dependents`, or `both`, default `both`, the same enum
+`related_files.direction` uses). `related_files` keeps its own purpose: it shows
+evidence, resolution status, and candidate lists, and lets a reader choose
+neighbours by hand.
+
+**Expansion only ever narrows.** The neighbourhood is computed over the dependency
+index built from the plan's own included files, which is the set the baseline,
+profile, exclusions, Git scope, `tracked_only`, `paths`, the glob parameters, and
+`max_file_bytes` already produced. A file those filters keep out is not in the
+index, so no value of `expand_related` can reach it, and an excluded file cannot
+act as a bridge: if the only route from a seed to a second-hop file runs through a
+file the filters hid, that second-hop file is not packed. Only `Resolved` edges
+travel; an `Ambiguous` or `Unresolved` reference names a file the engine would not
+commit to, and following it would put a guess in the pack.
+
+A seed must be a file inside the effective selection. A directory, a glob, or a
+path the filters hide returns the existing `DPX-MCP-PATH-NOT-FOUND` error naming
+the effective filters, which is the same answer any other unselected path gets.
+
+Two hops do not bound the result: one widely imported file can reach most of a
+repository. The expansion therefore stops at 400 files, counting the seeds, and
+takes each hop in ordinal path order so the admitted prefix is deterministic rather
+than an arbitrary choice between neighbours.
+
+Every call that expanded reports one trusted line of counts and constants:
+
+```text
+[Expanded] seeds=1 · hop1=+11 · hop2=+0 · seeds-without-facts=0.
+```
+
+and, when the limit decided the answer, `; stopped at the 400-file expansion
+limit, so the neighbourhood is incomplete.` The paths themselves stay in the
+untrusted block with the rest of the pack, as every project path does.
+
+Expansion selects the candidate set; it does not order it. Without `rank` the pack
+keeps canonical path order, and with `rank` the existing ranking orders what
+expansion admitted. To put particular files first under a binding `max_tokens`,
+combine `expand_related` with `rank` and `focus`: a `focus` seed the expansion
+admitted is ranked first as usual, and one it did not admit is a path outside the
+selection and returns `DPX-MCP-PATH-NOT-FOUND`. Without `expand_related` every
+response is byte-identical to a server without it.
+
 ## Result Contract
 
 Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their

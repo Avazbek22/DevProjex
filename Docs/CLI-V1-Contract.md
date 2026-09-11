@@ -1326,6 +1326,17 @@ present in the effective tree. It states a fact about one call and is never
 memoised; searches that matched, ordinary content patterns, and already-empty
 selections are byte-identical to v5.2 without it.
 
+MCP `pack_context` gains the optional object input `expand_related`
+(`seeds`, `hops`, `direction`), which packs the seeds together with their
+statically resolved dependency neighbours in one call. It only narrows: the
+neighbourhood is computed over the dependency index built from the plan's own
+included files, so no value can admit a file the effective filters, the Git scope,
+or the project root kept out, and an excluded file never bridges two hops. A seed
+that is not a selected file returns the existing `DPX-MCP-PATH-NOT-FOUND`. The
+expansion stops at 400 files and reports the constant that stopped it. Every call
+that expanded carries a trusted `[Expanded]` line of counts. Without the parameter,
+`pack_context` responses are byte-identical.
+
 MCP `get_tree.format` is an additive input with `markdown` as its compact default.
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;
 structured output that cannot fit the 2,000-line response limit fails with an

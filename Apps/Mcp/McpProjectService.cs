@@ -972,6 +972,35 @@ internal sealed class McpProjectService(
 		}
 	}
 
+	/// <summary>
+	/// Narrows a plan to a subset of the files it already holds. Every path must come from the
+	/// plan itself, so this can only remove: it is how a request that computes its own subset
+	/// stays inside the effective selection instead of being trusted to.
+	/// </summary>
+	public async Task<ProjectContextPlan> NarrowSelectionAsync(
+		ProjectContextPlan plan,
+		IReadOnlyCollection<string> relativePaths,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentNullException.ThrowIfNull(relativePaths);
+		if (relativePaths.Count == 0)
+		{
+			return await services.Planner
+				.ReprojectEmptySelectionAsync(plan, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		var gitMode = plan.Selection.GitMode ?? GitFilteringMode.None;
+		return GitScopeSelection.IsMomentary(gitMode)
+			? await services.Planner
+				.ReprojectSelectionAsync(plan, relativePaths, StringComparer.Ordinal, cancellationToken)
+				.ConfigureAwait(false)
+			: await services.Planner
+				.ReprojectSelectionAsync(plan, relativePaths, cancellationToken)
+				.ConfigureAwait(false);
+	}
+
 	public IReadOnlyList<string> ResolveRequestedFiles(
 		ProjectContextPlan plan,
 		IReadOnlyList<string> paths,
