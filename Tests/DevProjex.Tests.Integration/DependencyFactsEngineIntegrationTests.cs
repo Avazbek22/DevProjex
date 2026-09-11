@@ -35,11 +35,11 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Single(facts.Declarations, static declaration =>
 			declaration.Identity.QualifiedName == "Sample.Holder");
 		Assert.Contains(facts.NavigationDeclarations, static declaration =>
-			declaration.Name == "Holder.field" && declaration.Kind == NavigationSymbolKind.Field);
+			declaration.Name == "Sample.Holder.field" && declaration.Kind == NavigationSymbolKind.Field);
 		Assert.Contains(facts.NavigationDeclarations, static declaration =>
-			declaration.Name == "Holder.Property" && declaration.Kind == NavigationSymbolKind.Property);
+			declaration.Name == "Sample.Holder.Property" && declaration.Kind == NavigationSymbolKind.Property);
 		Assert.Contains(facts.NavigationDeclarations, static declaration =>
-			declaration.Name == "Holder.Method" && declaration.Kind == NavigationSymbolKind.Method);
+			declaration.Name == "Sample.Holder.Method" && declaration.Kind == NavigationSymbolKind.Method);
 		Assert.DoesNotContain(index.Declarations, static declaration =>
 			declaration.Identity.QualifiedName.EndsWith(".Method", StringComparison.Ordinal));
 	}
