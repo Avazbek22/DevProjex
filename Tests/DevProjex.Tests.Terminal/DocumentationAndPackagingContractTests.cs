@@ -58,6 +58,29 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void PublishedDocumentationNamesEveryMcpToolAndTheirCount()
+	{
+		var rootPath = FindRepositoryRoot();
+		var toolNames = ReadCatalogToolNames(rootPath);
+		var readMe = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+		var contract = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var enumeration = FirstSentence(
+			ParagraphContaining(readMe, "read-only tools cover the whole workflow"));
+
+		foreach (var name in toolNames)
+			Assert.Contains($"`{name}`", enumeration, StringComparison.Ordinal);
+
+		Assert.Contains(
+			$"{CountWord(toolNames.Length)} read-only tools",
+			enumeration,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"all {CountWord(toolNames.Length).ToLowerInvariant()} tool descriptions",
+			contract,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void GitSafetyProfilesAndFilterRefusalRemainDocumented()
 	{
 		var rootPath = FindRepositoryRoot();
@@ -1622,4 +1645,64 @@ public sealed class DocumentationAndPackagingContractTests
 
 	private static string FindRepositoryRoot()
 		=> PublishedApplicationLocator.FindRepositoryRoot();
+
+	/// <summary>
+	/// The tool names the MCP catalog registers, read from its source so that adding a tool is
+	/// what makes the documentation assertions fail.
+	/// </summary>
+	private static string[] ReadCatalogToolNames(string rootPath)
+	{
+		var catalog = File.ReadAllText(
+			Path.Combine(rootPath, "Apps", "Mcp", "DevProjexMcpToolCatalog.cs"));
+		var names = Regex
+			.Matches(
+				catalog,
+				@"Create\(\s*target,\s*nameof\(DevProjexMcpTools\.\w+\),\s*""(?<name>[a-z_]+)""")
+			.Select(match => match.Groups["name"].Value)
+			.ToArray();
+		Assert.NotEmpty(names);
+		Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+
+		// A registration this reader cannot parse must fail loudly rather than lower the count on
+		// both sides of the comparison and let a stale document pass.
+		Assert.Equal(Regex.Matches(catalog, @"Create\(\s*target,").Count, names.Length);
+		return names;
+	}
+
+	private static string ParagraphContaining(string document, string marker)
+	{
+		var paragraph = document
+			.ReplaceLineEndings("\n")
+			.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+			.FirstOrDefault(block => block.Contains(marker, StringComparison.Ordinal));
+		Assert.True(paragraph is not null, $"No paragraph contains '{marker}'.");
+		return paragraph!;
+	}
+
+	/// <summary>
+	/// The opening sentence of a paragraph, so that a name mentioned in later prose cannot stand in
+	/// for a name missing from the enumeration itself.
+	/// </summary>
+	private static string FirstSentence(string paragraph)
+	{
+		var end = paragraph.IndexOf(". ", StringComparison.Ordinal);
+		return end < 0 ? paragraph : paragraph[..(end + 1)];
+	}
+
+	private static string CountWord(int value) => value switch
+	{
+		1 => "One",
+		2 => "Two",
+		3 => "Three",
+		4 => "Four",
+		5 => "Five",
+		6 => "Six",
+		7 => "Seven",
+		8 => "Eight",
+		9 => "Nine",
+		10 => "Ten",
+		11 => "Eleven",
+		12 => "Twelve",
+		_ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
+	};
 }

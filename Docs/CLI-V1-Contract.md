@@ -1233,8 +1233,9 @@ and profile text uses localized yes/no values.
 
 `devprojex mcp --allow-remote` is an additive, opt-in startup capability. Without
 the flag, MCP project tools retain the local-only, zero-network contract. With
-the flag, `get_tree`, `analyze`, `pack_context`, `search_project`, and `get_file`
-accept a Git URL in `project` plus an optional URL-only `branch`. RepoCache owns
+the flag, `get_tree`, `analyze`, `pack_context`, `search_project`,
+`related_files`, and `get_file` accept a Git URL in `project` plus an optional
+URL-only `branch`. RepoCache owns
 clone publication and the server pins each resolved checkout until shutdown.
 `list_projects` remains the stable list of configured local roots.
 Remote network URLs use HTTP(S), SSH, Git protocol, or SCP syntax and cannot
@@ -1246,8 +1247,10 @@ The MCP `analyze` tool exposes the matching optional `top_files` parameter with
 default `10`; both surfaces share the same bounded, deterministic ranking.
 
 `--max-file-bytes SIZE` is an additive, invocation-only option on `analyze`,
-`tree`, and `export context`. The four MCP selection tools expose the equivalent
-positive integer `max_file_bytes` parameter. Both surfaces use one Application
+`tree`, and `export context`. The five MCP selection tools that narrow a file set
+— `get_tree`, `analyze`, `pack_context`, `search_project`, and `related_files` —
+expose the equivalent `max_file_bytes` parameter, as a positive integer or the
+same value written as a numeric string. Both surfaces use one Application
 filter and exclude files strictly larger than the limit without changing profile
 schemas. Existing machine documents add no property; their inventory, byte
 metrics, trees, and content reflect the effective narrowed selection.
@@ -1255,7 +1258,7 @@ metrics, trees, and content reflect the effective narrowed selection.
 Git-axis v2 is an additive CLI-v1 extension. Direct selection commands accept
 the momentary `staged`, `changes`, and `diff:<REF>..<REF>` tokens. MCP adds the
 persistent server baseline `--git-mode` and the narrowing `git_scope` parameter
-on its four selection tools. Profile schemas remain unchanged and reject
+on the same five selection tools. Profile schemas remain unchanged and reject
 momentary values.
 
 MCP exclusions are a v5.2 extension with one deliberate default change: a
@@ -1270,8 +1273,9 @@ only when a tool does not name an explicit profile.
 `devprojex mcp --unrestricted` is the widest-baseline preset, equivalent to
 `--exclude none --git-mode none` and in conflict with both spelled-out flags.
 `devprojex mcp --allow-agent-exclusions` additionally publishes an `exclusions` array
-parameter on `get_tree`, `analyze`, `pack_context`, `search_project`, and
-`get_file`; the value is the full desired toggle set, an empty array disables
+parameter on the six selection tools (`get_tree`, `analyze`, `pack_context`,
+`search_project`, `related_files`, and `get_file`); the value is the full
+desired toggle set, an empty array disables
 every toggle, and it outranks the server baseline and profile exclusions.
 Without the flag the parameter does not exist in any schema. Redaction toggles
 are not part of the vocabulary on either surface. `analyze` results echo the
@@ -1279,10 +1283,18 @@ effective set in an `exclusions` array and `list_projects` results carry a
 `baseline` object (`git`, `exclusions`, `agentExclusions`); both are required
 on every server — including servers started without the exclusion flags — so
 consumers that pinned the pre-v5.2 output schemas must refresh their copies.
-`get_tree` and `pack_context` responses end with a trusted
-`[Effective filters]` line, every selection tool adds an `[Empty selection]`
-line when nothing survived the filters, and `DPX-MCP-PATH-NOT-FOUND` names the
-effective filters. Glob patterns gain `{a,b}` alternatives; `!` negation and
+`get_tree`, `pack_context`, and `related_files` responses always carry a trusted
+`[Effective filters]` line; the other selection tools carry it only when they
+have to explain themselves. It is never the last line: an `[Empty selection]`
+line can follow it, `[Protection]` comes after that, a pinned remote checkout
+adds `[Remote]`, and a budgeted `pack_context` ends with `[Budget accounting]`.
+A session is told each trusted service line once and then receives the constant
+`[Unchanged] filters, protection; see list_projects.` line until that content
+changes; an `[Empty selection]` response and any call that passed
+`max_file_bytes` report the full set instead. `analyze` reports no protection
+line on any call. Every selection tool adds an `[Empty selection]` line when
+nothing survived the filters, and a `DPX-MCP-PATH-NOT-FOUND` error for a file
+the filters hide names the effective filters. Glob patterns gain `{a,b}` alternatives; `!` negation and
 `[...]` classes, previously matched as literal characters, are rejected with
 `DPX-MCP-INVALID-PATTERN`.
 
@@ -1315,7 +1327,7 @@ a fitting depth. Third, uninspected entries in MCP `analyze.topFiles` gain the
 optional `uninspected: true` field, and their estimates use the same character
 base as aggregate `characters` and `tokens`. Fourth, `initialize.instructions`
 now carries workflow, trust-boundary, redaction, limit, and glob guidance, while
-all seven tool descriptions are self-contained for tool search. Cached MCP
+all eight tool descriptions are self-contained for tool search. Cached MCP
 schemas must be refreshed for the additive `topFiles` field and new field
 descriptions.
 
