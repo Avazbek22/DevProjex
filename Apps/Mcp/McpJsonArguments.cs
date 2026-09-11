@@ -84,14 +84,15 @@ internal sealed class McpJsonArguments(
 		int? maximumItems = null,
 		int? maximumItemScalarValues = null,
 		string? tooManyItemsHint = null,
-		string? overLengthHint = null)
+		string? overLengthHint = null,
+		bool allowScalar = true)
 	{
 		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
 			return null;
 		// A caller that means one value writes one value. Reading the scalar as a one-item
 		// list costs nothing, keeps every array call byte-identical, and removes a round
 		// trip that returns no information; focus already accepts both shapes.
-		if (value.ValueKind == JsonValueKind.String)
+		if (allowScalar && value.ValueKind == JsonValueKind.String)
 		{
 			var scalar = value.GetString();
 			if (string.IsNullOrEmpty(scalar) || (!allowWhitespace && string.IsNullOrWhiteSpace(scalar)))
@@ -107,7 +108,7 @@ internal sealed class McpJsonArguments(
 			return [scalar];
 		}
 		if (value.ValueKind != JsonValueKind.Array)
-			throw Invalid(name, "a string or an array of strings");
+			throw Invalid(name, allowScalar ? "a string or an array of strings" : "an array of strings");
 		if (maximumItems is not null && value.GetArrayLength() > maximumItems.Value)
 		{
 			throw Invalid(

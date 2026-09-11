@@ -1984,10 +1984,18 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var paths = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("paths");
-			Assert.Equal(McpProjectService.MaximumRequestedPaths, paths.GetProperty("maxItems").GetInt32());
+			// One path may be written as one string, so the bounds live on the array branch and
+			// the single-value branch carries the same per-item length.
+			var branches = paths.GetProperty("oneOf").EnumerateArray().ToArray();
+			var scalarBranch = branches.Single(branch => branch.GetProperty("type").GetString() == "string");
+			var arrayBranch = branches.Single(branch => branch.GetProperty("type").GetString() == "array");
+			Assert.Equal(McpProjectService.MaximumRequestedPaths, arrayBranch.GetProperty("maxItems").GetInt32());
 			Assert.Equal(
 				McpProjectService.MaximumRequestedPathLength,
-				paths.GetProperty("items").GetProperty("maxLength").GetInt32());
+				arrayBranch.GetProperty("items").GetProperty("maxLength").GetInt32());
+			Assert.Equal(
+				McpProjectService.MaximumRequestedPathLength,
+				scalarBranch.GetProperty("maxLength").GetInt32());
 			Assert.Contains("literal paths", paths.GetProperty("description").GetString(), StringComparison.Ordinal);
 		}
 		var getFileSchema = tools.Single(static tool => tool.Name == "get_file").ProtocolTool.InputSchema;
@@ -2148,11 +2156,18 @@ public sealed partial class McpServerIntegrationTests
 				maximumFileBytes.GetProperty("oneOf")[0].GetProperty("minimum").GetInt64());
 			foreach (var propertyName in new[] { "include_patterns", "exclude_patterns" })
 			{
+				// One pattern may be written as one string, so the count bound lives on the
+				// array branch while both branches carry the same per-pattern length.
 				var patterns = properties.GetProperty(propertyName);
-				Assert.Equal(256, patterns.GetProperty("maxItems").GetInt32());
-				var items = patterns.GetProperty("items");
+				var branches = patterns.GetProperty("oneOf").EnumerateArray().ToArray();
+				var scalar = branches.Single(branch => branch.GetProperty("type").GetString() == "string");
+				var array = branches.Single(branch => branch.GetProperty("type").GetString() == "array");
+				Assert.Equal(256, array.GetProperty("maxItems").GetInt32());
+				var items = array.GetProperty("items");
 				Assert.Equal(1, items.GetProperty("minLength").GetInt32());
 				Assert.Equal(512, items.GetProperty("maxLength").GetInt32());
+				Assert.Equal(1, scalar.GetProperty("minLength").GetInt32());
+				Assert.Equal(512, scalar.GetProperty("maxLength").GetInt32());
 			}
 		}
 	}
@@ -6140,7 +6155,7 @@ public sealed partial class McpServerIntegrationTests
 					["ignore_case"] = false
 				});
 			Assert.NotEqual(true, result.IsError);
-			Assert.Contains("Markers.cs:", Text(result), StringComparison.Ordinal);
+			Assert.Contains("Markers.cs", Text(result), StringComparison.Ordinal);
 		}
 
 		var placeholder = await server.CallAsync(
@@ -6152,7 +6167,7 @@ public sealed partial class McpServerIntegrationTests
 				["ignore_case"] = false
 			});
 		Assert.NotEqual(true, placeholder.IsError);
-		Assert.DoesNotContain("Markers.cs:", Text(placeholder), StringComparison.Ordinal);
+		Assert.DoesNotContain("Markers.cs", Text(placeholder), StringComparison.Ordinal);
 		Assert.Contains("[No matches]", Text(placeholder), StringComparison.Ordinal);
 	}
 
@@ -6965,8 +6980,8 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("drop.txt", Text(tree), StringComparison.Ordinal);
 		Assert.DoesNotContain("other.txt", Text(tree), StringComparison.Ordinal);
 		Assert.NotEqual(true, search.IsError);
-		Assert.Contains("selected/keep file.txt:1:selected-marker", Text(search), StringComparison.Ordinal);
-		Assert.Contains("literal[brace{.txt:1:literal-marker", Text(search), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "selected/keep file.txt", 1, "selected-marker");
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "literal[brace{.txt", 1, "literal-marker");
 		Assert.DoesNotContain("drop-marker", Text(search), StringComparison.Ordinal);
 		Assert.DoesNotContain("other-marker", Text(search), StringComparison.Ordinal);
 		Assert.Equal(ExtractSpotlightBody(Text(byPattern)), ExtractSpotlightBody(Text(byPaths)));

@@ -785,7 +785,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regular expression. It matches file content, never paths; find files by name with get_tree include_patterns. Use it to locate symbols or phrases; use related_files instead for dependency links. Returns matches grouped by file: the path on its own line, then line:text for a match and line-text for context, with -- between groups in one file; plus exact match and file counts and the count of additional matches beyond max_results. Line numbers refer to that text, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
+		"Searches safe transformed project text with a timed .NET regular expression. It matches file content, never paths; find files by name with get_tree include_patterns. Use it to locate symbols or phrases; use related_files instead for dependency links. Returns matches under each path as number:text, context number-text, -- between groups, exact match and file counts, and additional matches beyond max_results; line numbers refer to that text, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1469,7 +1469,10 @@ internal sealed class DevProjexMcpTools(
 			maximumItems: ProjectSelectionTokens.Exclusions.Count,
 			maximumItemScalarValues: MaximumExclusionTokenLength,
 			tooManyItemsHint: "remove duplicate or extra tokens and retry",
-			overLengthHint: "use the published exclusion tokens");
+			overLengthHint: "use the published exclusion tokens",
+			// Exclusions are a closed vocabulary with a published enum and a standing contract
+			// that refuses anything but an array. Widening that one is its own decision.
+			allowScalar: false);
 		if (tokens is null)
 			return null;
 

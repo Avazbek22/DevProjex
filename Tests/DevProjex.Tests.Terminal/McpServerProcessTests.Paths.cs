@@ -45,7 +45,8 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain("Other.txt", treeText, StringComparison.Ordinal);
 		Assert.DoesNotContain("Outside.txt", treeText, StringComparison.Ordinal);
 		var searchText = AllProcessText(search);
-		Assert.Contains("src/Selected file.txt:1:selected-process-marker", searchText, StringComparison.Ordinal);
+		Assert.Contains("src/Selected file.txt", searchText, StringComparison.Ordinal);
+		Assert.Contains("1:selected-process-marker", searchText, StringComparison.Ordinal);
 		Assert.DoesNotContain("other-process-marker", searchText, StringComparison.Ordinal);
 		Assert.DoesNotContain("outside-process-marker", searchText, StringComparison.Ordinal);
 	}

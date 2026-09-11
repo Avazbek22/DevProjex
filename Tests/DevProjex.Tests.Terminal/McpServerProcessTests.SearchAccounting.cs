@@ -52,7 +52,10 @@ public sealed partial class McpServerProcessTests
 			progress: null,
 			options: null,
 			TestContext.Current.CancellationToken);
-		var match = Regex.Match(AllProcessText(search), @"(?<path>src/Needle\.ts):(?<line>\d+):");
+		// The path heads the block and the match line carries the number, so the workflow reads
+		// both out of the grouped shape before feeding them back to get_file.
+		var match = Regex.Match(AllProcessText(search), @"(?<path>src/Needle\.ts)?
+(?<line>\d+):");
 		Assert.True(match.Success, AllProcessText(search));
 		var file = await server.Client.CallToolAsync(
 			"get_file",
@@ -144,7 +147,7 @@ public sealed partial class McpServerProcessTests
 		var text = AllProcessText(result).Replace("\r\n", "\n", StringComparison.Ordinal);
 		var shown = Regex.Matches(
 			text,
-			@"^(?:A-unicode\.txt:\d+:needle-\d{3}-😀-a{290}|B-ascii\.txt:\d+:needle-\d{3}-b{296})$",
+			@"^(?:\d+:needle-\d{3}-😀-a{290}|\d+:needle-\d{3}-b{296})$",
 			RegexOptions.Multiline).Count;
 		var additionalMatch = Regex.Match(text, @"\[(\d+) additional matches not shown;");
 
