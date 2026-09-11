@@ -472,9 +472,9 @@ legal Unix and macOS directory names containing `:` remain local. An explicit
 
 Cached repositories are reusable offline. A successful first clone records the
 safe source in recent-repository history only for network clone sources:
-`https://`, `http://`, `ssh://`, `git://`, and SCP syntax. Local paths remain
-valid clone sources and use the managed cache, but are never written to
-recent-repository history. A `file://` source is refused. Cancellation removes clone staging;
+`https://`, `http://`, `ssh://`, `git://`, and SCP syntax. An existing local path
+is opened as an ordinary project rather than cloned, so it reaches neither the
+managed cache nor that history. A `file://` source is refused. Cancellation removes clone staging;
 network and clone failures return runtime exit `1` without opening or exporting
 partial content. The generated cache path is internal and is never reported by
 direct URL-source commands or Terminal Workspace repository details. In particular,

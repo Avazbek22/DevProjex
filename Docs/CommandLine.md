@@ -407,9 +407,9 @@ devprojex export context https://github.com/owner/repo -o -
 ```
 
 A successful first clone is added to repository history only for network clone
-sources: `https://`, `http://`, `ssh://`, `git://`, and SCP syntax. Local paths
-remain valid clone sources and use the managed cache, but are never added to
-repository history. A `file://` source is refused. Later invocations reuse the complete
+sources: `https://`, `http://`, `ssh://`, `git://`, and SCP syntax. An existing
+local path is opened as an ordinary project rather than cloned, so it reaches
+neither the managed cache nor that history. A `file://` source is refused. Later invocations reuse the complete
 cached checkout and can work offline. Clone progress follows
 `--progress`, `--verbosity`, and `--plain`: an interactive stderr reuses one line,
 while redirected, CI, dumb-terminal, and plain output is limited to start, three
