@@ -233,6 +233,13 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("There is no parameter for it", normalized, StringComparison.Ordinal);
 		Assert.Contains("### Reading a declaration by name", server, StringComparison.Ordinal);
+		Assert.Contains("### A withheld search stays in the session", server, StringComparison.Ordinal);
+		Assert.Contains("Withheld matches by file:", server, StringComparison.Ordinal);
+		Assert.Contains("Counts, not line numbers", normalized, StringComparison.Ordinal);
+		Assert.Contains(
+			"expiry or eviction of one is reported in search terms",
+			normalized,
+			StringComparison.Ordinal);
 		Assert.Contains(
 			"`symbol` cannot be combined with `start_line`, `end_line`, or `start_column`",
 			normalized,

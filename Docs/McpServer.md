@@ -290,11 +290,11 @@ server instructions. Measured on 2026-09-11 from the characters a client receive
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` result, default server | 35,176 |
-| `tools/list` result, `--allow-agent-exclusions` | 39,094 |
+| `tools/list` result, default server | 43,323 |
+| `tools/list` result, `--allow-agent-exclusions` | 47,241 |
 | `instructions` | 1,044 |
 
-`analyze` is the largest single tool at 9,219 characters, most of it schema. The `exclusions`
+`analyze` is the largest single tool at 13,604 characters, most of it schema. The `exclusions`
 parameter costs a flat 3,918 characters, 653 on each of the six tools that take it. A process
 test holds the default `tools/list` result and the instructions under ceilings with deliberate
 headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
@@ -306,7 +306,7 @@ description has to fit a budget rather than grow one silently.
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
-| `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
+| `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
 | `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
 | `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen ranges. Batch ranges use inclusive `start_line`/`end_line`, read and redact each physical file once, merge overlaps, and report `ok`, `partial`, `not-returned`, or `unavailable` for every range. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
@@ -918,6 +918,53 @@ would leave the hits beneath it reading as part of the declaration named above t
 so when the headers do not fit, none are written and the coverage line reports that
 nothing was named, rather than going silent about naming it did compute. The match lines, the `--` group separators, the match and file
 counters, and the "N additional matches" contract are unchanged.
+
+### A withheld search stays in the session
+
+A search that has to withhold matches keeps the rest of what it already found, so
+the way forward is to page that result rather than to run the same search again.
+Nothing changes for a search that returns everything it found: it stores nothing,
+says nothing new, and is byte-identical.
+
+When matches are withheld the response carries three things beyond what it carried
+before. Inside the untrusted block, after the matches, the distribution of what was
+withheld, because a path is project text:
+
+```text
+Withheld matches by file:
+src/router/match.ts 31
+src/router/parse.ts 12
+and 4 more file(s)
+```
+
+Counts, not line numbers. One recorded search withheld 861 matches; their numbers
+would be noise, while the per-file counts tell a caller where to look next for a few
+characters per file. At most 20 files are listed and the rest are summarised as a
+count.
+
+Outside the block, in trusted text, one line of counts and a server-minted id:
+
+```text
+[Search stored] pack_id=<id> · matches=N · files=M; read_pack pages the withheld matches without searching again.
+```
+
+`read_pack` pages that id exactly as it pages a `pack_context` result: it does not
+rebuild a plan, does not take the project-operation gate, and does not search again.
+The stored result holds the complete result for every file that withheld anything,
+so a page never shows half a group.
+
+Two bounds apply, and the response says when either decided the answer. Matching
+runs to 5,000 matches per search, and the stored text stops at 2,000,000 characters;
+beyond either, the id holds only the first of the withheld matches and the trusted
+line says so. A stored search result is subject to the same session quota and
+least-recently-read eviction as any other stored result, and expiry or eviction of
+one is reported in search terms: it names the search result and tells the caller to
+call `search_project` again, not `pack_context`.
+
+The counting contract is untouched. The match and matching-file totals, the withheld
+count in `[N additional matches not shown]`, `[Search totals]` and the truncation
+notice all report exactly what they reported before, and `max_results` still bounds
+the matches a response displays.
 
 ### Reading a declaration by name
 

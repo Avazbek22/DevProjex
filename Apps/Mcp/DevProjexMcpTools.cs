@@ -26,6 +26,13 @@ internal sealed class DevProjexMcpTools(
 	// context budget in one unpredictable call. The cap bounds that, and the totals line
 	// tells the caller how much it did not get.
 	private const int MaximumSearchContentCharacters = 16_000;
+	// A search that withholds matches keeps the rest of what it already scanned, so the caller can
+	// page it instead of running the same scan again. These bound what one session will hold for
+	// that: matches beyond the first are counted but not kept, and the response says so.
+	private const int MaximumStoredSearchMatches = 5_000;
+	private const int MaximumStoredSearchCharacters = 2_000_000;
+	private const int MaximumWithheldFilesReported = 20;
+	private const string WithheldHeading = "Withheld matches by file:";
 	// Closes a run of named hits when the next one belongs to nothing. A constant, not a name.
 	private static readonly string OutsideDeclarationHeader = $"in (no declaration){Environment.NewLine}";
 	// Asking for a file by name is the one request the selection vocabulary answers in a form a
@@ -792,7 +799,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads one page of a stored result created by pack_context or related_files in this server process. Use it for a returned pack_id; use pack_context instead, or related_files for dependency results, when an id is absent or expired. Returns untrusted result data up to 1,000 lines or 50,000 characters plus trusted continuation or range-clamp notes. Required: pack_id. Optional start_line and end_line are inclusive 1-based integers or numeric strings; start_column continues within start_line using 1-based Unicode characters.")]
+		"Reads one page of a stored result created by pack_context, search_project, or related_files in this server process. Use it for a returned pack_id; use pack_context instead, or related_files for dependency results, when an id is absent or expired. Returns untrusted result data up to 1,000 lines or 50,000 characters plus trusted continuation or range-clamp notes. Required: pack_id. Optional start_line and end_line are inclusive 1-based integers or numeric strings; start_column continues within start_line using 1-based Unicode characters.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -863,6 +870,10 @@ internal sealed class DevProjexMcpTools(
 			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
 			var writtenHits = new List<McpSearchHit>();
 			var renderedLines = new List<McpSearchRenderedLine>();
+			var withheld = new StringBuilder();
+			var withheldByFile = new Dictionary<string, int>(StringComparer.Ordinal);
+			var withheldStored = 0;
+			var withheldTruncated = false;
 			long inspectedBytes = 0;
 			foreach (var path in plan.IncludedFiles)
 			{
@@ -875,48 +886,100 @@ internal sealed class DevProjexMcpTools(
 				inspectedBytes += fileBytes;
 			}
 			var inspectionBudgetReached = inspectedFiles.Count < plan.IncludedFiles.Count;
+			var materialisedMatches = 0;
 			await using var searched = await Projects.ConsumeSearchTextAsync(
 				plan with { IncludedFiles = inspectedFiles },
 				(file, token) =>
 				{
+					// Matching runs to the stored bound rather than to what the response can show,
+					// because a match the response withholds is exactly the one the caller would
+					// otherwise ask a second search to find.
+					var displayLimit = Math.Max(0, maximumResults - totalMatches);
 					var scan = McpSearchTextScanner.Scan(
 						file.Content,
 						regex,
 						contextLines,
-						Math.Max(0, maximumResults - totalMatches),
+						Math.Max(0, MaximumStoredSearchMatches - materialisedMatches),
 						file.ReplacementRanges,
 						token);
 					totalMatches += scan.TotalMatches;
+					var found = scan.Matches.Sum(static group => group.MatchLineNumbers.Count);
+					materialisedMatches += found;
 					if (scan.TotalMatches > 0)
 						matchingFiles++;
-					if (responseLimitReached)
-						return ValueTask.CompletedTask;
+
+					// The response keeps the grouping a display-limited pass produces, so what a
+					// caller sees is what it always saw. That pass is only needed when this file
+					// has more than the response will show.
+					var display = found <= displayLimit
+						? scan
+						: McpSearchTextScanner.Scan(
+							file.Content,
+							regex,
+							contextLines,
+							displayLimit,
+							file.ReplacementRanges,
+							token);
 
 					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
-					var startsNewFile = true;
+					var shownHere = 0;
+					if (!responseLimitReached)
+					{
+						var startsNewFile = true;
+						foreach (var match in display.Matches)
+						{
+							var appended = AppendSearchResult(
+								output,
+								relative,
+								file.Content,
+								match,
+								MaximumSearchContentCharacters,
+								startsNewFile,
+								renderedLines);
+							startsNewFile = false;
+							shownMatches += appended.WrittenMatches;
+							shownHere += appended.WrittenMatches;
+							// Only the lines that reached the caller are worth naming; a match the cap
+							// dropped is not in the response to be annotated.
+							foreach (var line in match.MatchLineNumbers.Take(appended.WrittenMatches))
+								writtenHits.Add(new McpSearchHit(relative, file.Path, line));
+							if (appended.Truncated)
+							{
+								responseLimitReached = true;
+								resultGroupTruncated = true;
+								break;
+							}
+						}
+					}
+
+					var withheldHere = scan.TotalMatches - shownHere;
+					if (withheldHere <= 0)
+						return ValueTask.CompletedTask;
+
+					if (withheld.Length >= MaximumStoredSearchCharacters)
+					{
+						withheldTruncated = true;
+						return ValueTask.CompletedTask;
+					}
+
+					// This file's whole result is kept, so a page of it never shows half a group.
+					var startsStoredFile = true;
 					foreach (var match in scan.Matches)
 					{
-						var appended = AppendSearchResult(
-							output,
+						AppendSearchResult(
+							withheld,
 							relative,
 							file.Content,
 							match,
-							MaximumSearchContentCharacters,
-							startsNewFile,
-							renderedLines);
-						startsNewFile = false;
-						shownMatches += appended.WrittenMatches;
-						// Only the lines that reached the caller are worth naming; a match the cap
-						// dropped is not in the response to be annotated.
-						foreach (var line in match.MatchLineNumbers.Take(appended.WrittenMatches))
-							writtenHits.Add(new McpSearchHit(relative, file.Path, line));
-						if (appended.Truncated)
-						{
-							responseLimitReached = true;
-							resultGroupTruncated = true;
-							break;
-						}
+							MaximumStoredSearchCharacters,
+							startsStoredFile);
+						startsStoredFile = false;
 					}
+
+					if (found < scan.TotalMatches)
+						withheldTruncated = true;
+					withheldStored += withheldHere;
+					withheldByFile[relative] = withheldHere;
 					return ValueTask.CompletedTask;
 				},
 				cancellationToken).ConfigureAwait(false);
@@ -932,6 +995,13 @@ internal sealed class DevProjexMcpTools(
 			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols);
 			if (namesRefused)
 				symbols = symbols with { AnnotatedHits = 0 };
+			// What the response could not carry is kept in the session, so the way forward is to
+			// page what this scan already found rather than to run the same scan again.
+			var storedSearch = withheld.Length == 0
+				? null
+				: await StoreWithheldMatchesAsync(withheld.ToString(), cancellationToken)
+					.ConfigureAwait(false);
+			AppendWithheldDistribution(output, withheldByFile);
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
 				: null;
@@ -952,6 +1022,7 @@ internal sealed class DevProjexMcpTools(
 				FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
+				FormatStoredSearchNotice(storedSearch, withheldStored, withheldByFile.Count, withheldTruncated),
 				FormatSymbolCoverageNotice(symbols, namesRefused),
 				FormatNameSearchNotice(plan, paths, pattern, totalMatches),
 				additionalMatchesNotice,
@@ -2363,6 +2434,88 @@ internal sealed class DevProjexMcpTools(
 				$"{McpErrorCodes.InvalidArguments}: 'symbol' matches no declaration in this file; " +
 				"search_project names the declaration each hit sits inside.")
 		};
+
+	/// <summary>
+	/// Keeps what the response could not carry, under an id the caller can page, so the matches
+	/// this scan already found are not scanned for a second time.
+	/// </summary>
+	private async Task<McpPackDocument> StoreWithheldMatchesAsync(
+		string withheld,
+		CancellationToken cancellationToken) =>
+		await packs.CreateAsync(
+				async (stream, token) =>
+				{
+					await using var writer = new StreamWriter(
+						stream,
+						new UTF8Encoding(false),
+						bufferSize: 16 * 1024,
+						leaveOpen: true);
+					await writer.WriteAsync(withheld.AsMemory(), token).ConfigureAwait(false);
+				},
+				McpStoredResultKind.Search,
+				cancellationToken)
+			.ConfigureAwait(false);
+
+	/// <summary>
+	/// Writes where the withheld matches are, as counts per file. A path is project text, so this
+	/// belongs with the match lines inside the untrusted block; only the totals leave it. Counts,
+	/// not line numbers: one recorded search withheld 861 matches, and their numbers would be noise.
+	/// </summary>
+	private static void AppendWithheldDistribution(
+		StringBuilder output,
+		IReadOnlyDictionary<string, int> withheldByFile)
+	{
+		if (withheldByFile.Count == 0)
+			return;
+
+		var ordered = withheldByFile
+			.OrderByDescending(static entry => entry.Value)
+			.ThenBy(static entry => entry.Key, StringComparer.Ordinal)
+			.ToArray();
+		if (output.Length > 0)
+			output.AppendLine();
+		output.AppendLine(WithheldHeading);
+		foreach (var entry in ordered.Take(MaximumWithheldFilesReported))
+		{
+			output.Append(EscapeSingleLine(entry.Key))
+				.Append(' ')
+				.Append(entry.Value.ToString(CultureInfo.InvariantCulture))
+				.Append(Environment.NewLine);
+		}
+
+		var remaining = ordered.Length - MaximumWithheldFilesReported;
+		if (remaining > 0)
+		{
+			output.Append("and ")
+				.Append(remaining.ToString(CultureInfo.InvariantCulture))
+				.Append(" more file(s)")
+				.Append(Environment.NewLine);
+		}
+	}
+
+	/// <summary>
+	/// Names the stored result in codes, counts and one server-minted id. No project text reaches
+	/// this line: the paths that carry the distribution stay inside the untrusted block.
+	/// </summary>
+	private static string? FormatStoredSearchNotice(
+		McpPackDocument? stored,
+		int storedMatches,
+		int storedFiles,
+		bool storedTruncated)
+	{
+		if (stored is null)
+			return null;
+		var reported =
+			$"[Search stored] pack_id={stored.Id} · " +
+			$"matches={storedMatches.ToString(CultureInfo.InvariantCulture)} · " +
+			$"files={storedFiles.ToString(CultureInfo.InvariantCulture)}; " +
+			"read_pack pages the withheld matches without searching again";
+		return storedTruncated
+			? $"{reported}, and stopped at the " +
+			  $"{MaximumStoredSearchCharacters.ToString(CultureInfo.InvariantCulture)}-character " +
+			  "store limit, so it holds only the first of them."
+			: $"{reported}.";
+	}
 
 	/// <summary>
 	/// Writes the declaration a run of hits sits inside as a header inside its own file block, the
