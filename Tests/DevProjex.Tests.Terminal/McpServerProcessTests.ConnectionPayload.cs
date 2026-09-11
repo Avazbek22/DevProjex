@@ -9,8 +9,10 @@ public sealed partial class McpServerProcessTests
 	// recorded measurement, not the measurement itself: a ceiling with a few characters to spare is
 	// a tripwire for the next honest addition rather than a budget.
 	//
-	// Recorded on 2026-09-11 from the characters the client received: tools/list result 40,566 on a
-	// default server, 44,484 on a delegation server, and 1,044 of instructions.
+	// Recorded on 2026-09-11 from the characters the client received: tools/list result 43,323 on a
+	// default server, 47,241 on a delegation server, and 1,044 of instructions. The figure recorded
+	// here before this line said 40,566, which was two branches out of date; a stale record is worse
+	// than none, because the next addition sizes itself against it.
 	//
 	// The previous ceiling of 37,500 stood over a 35,176 measurement and was sized for one packing
 	// parameter. Per-file detail is that parameter, and it costs 1,422 characters because
@@ -20,8 +22,9 @@ public sealed partial class McpServerProcessTests
 	// files a budget admits without buying a pack. Descriptions that only restated their field
 	// names were removed before this ceiling moved.
 	//
-	// The headroom is again roughly three thousand characters: enough for the next honest
-	// parameter, short of another schema. A delegation server is the larger payer, but its excess
+	// The headroom against the ceiling is 177 characters. It is no longer enough for a parameter of
+	// any size, and the next addition to this surface has to move the ceiling and say what it
+	// bought, or take its characters back out of a description. A delegation server is the larger payer, but its excess
 	// over a default server is the exclusion parameter and nothing else, so it is pinned as an
 	// exact difference rather than as a second ceiling that could never fire before the first one.
 	private const int ToolsListResultCeiling = 43_500;

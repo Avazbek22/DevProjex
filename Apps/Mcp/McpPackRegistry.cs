@@ -17,8 +17,13 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	private static readonly TimeSpan ScavengeShutdownTimeout = TimeSpan.FromSeconds(5);
 	private static readonly ConcurrentDictionary<string, byte> ActiveSessions = new(PathComparer.Default);
 	private readonly Dictionary<string, PackEntry> _packs = new(StringComparer.Ordinal);
-	private readonly HashSet<string> _quotaEvictedPackIds = new(StringComparer.Ordinal);
+	private readonly Dictionary<string, McpStoredResultKind> _quotaEvictedPackIds =
+		new(StringComparer.Ordinal);
 	private readonly Queue<string> _quotaEvictionOrder = new();
+	// What produced each id this session issued, kept after the entry itself is gone so that a
+	// caller returning with an id this session no longer holds is still told the right way back.
+	private readonly Dictionary<string, McpStoredResultKind> _issuedKinds = new(StringComparer.Ordinal);
+	private readonly Queue<string> _issuedKindOrder = new();
 	private readonly string _sessionDirectory;
 	private readonly FileStream _sessionLease;
 	private readonly long _maximumPackBytes;
@@ -131,8 +136,14 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		return document.Id;
 	}
 
-	public async Task<McpPackDocument> CreateAsync(
+	public Task<McpPackDocument> CreateAsync(
 		Func<Stream, CancellationToken, Task> writer,
+		CancellationToken cancellationToken) =>
+		CreateAsync(writer, McpStoredResultKind.Pack, cancellationToken);
+
+	internal async Task<McpPackDocument> CreateAsync(
+		Func<Stream, CancellationToken, Task> writer,
+		McpStoredResultKind kind,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(writer);
@@ -173,7 +184,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 				{
 					ObjectDisposedException.ThrowIf(_disposed, this);
 					cancellationToken.ThrowIfCancellationRequested();
-					_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow()));
+					_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow(), kind));
+					RememberIssuedKind(id, kind);
 				}
 				reservation.Commit();
 				return document;
@@ -218,10 +230,10 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			if (entry is not null)
 				entry.LastReadUtc = TimeProvider.GetUtcNow();
 			else
-				quotaEvicted = _quotaEvictedPackIds.Contains(packId);
+				quotaEvicted = _quotaEvictedPackIds.ContainsKey(packId);
 		}
 		if (entry is null || !File.Exists(entry.Document.Path))
-			throw Expired(quotaEvicted || IsQuotaEvicted(packId));
+			throw Expired(StoredKind(packId), quotaEvicted || IsQuotaEvicted(packId));
 		return entry.Document;
 	}
 
@@ -235,7 +247,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			ObjectDisposedException.ThrowIf(_disposed, this);
 			_packs.TryGetValue(packId, out entry);
 			if (entry is null)
-				throw Expired(_quotaEvictedPackIds.Contains(packId));
+				throw Expired(StoredKindLocked(packId), _quotaEvictedPackIds.ContainsKey(packId));
 			entry.ActiveReaders++;
 			entry.LastReadUtc = TimeProvider.GetUtcNow();
 		}
@@ -253,7 +265,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		catch
 		{
 			ReleaseReader(entry);
-			throw Expired(IsQuotaEvicted(packId));
+			throw Expired(StoredKind(packId), IsQuotaEvicted(packId));
 		}
 	}
 
@@ -531,10 +543,34 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	}
 
 	private static McpToolException Expired(bool quotaEvicted = false) =>
-		new(
+		Expired(McpStoredResultKind.Pack, quotaEvicted);
+
+	/// <summary>
+	/// Names the tool that produced the missing id, so a caller is told how to obtain that kind of
+	/// result again rather than how to obtain a pack.
+	/// </summary>
+	private static McpToolException Expired(McpStoredResultKind kind, bool quotaEvicted)
+	{
+		var subject = kind switch
+		{
+			McpStoredResultKind.Search => "search result",
+			McpStoredResultKind.Related => "related-files result",
+			_ => "pack"
+		};
+		var remedy = kind switch
+		{
+			McpStoredResultKind.Search => "search_project",
+			McpStoredResultKind.Related => "related_files",
+			_ => "pack_context"
+		};
+		return new McpToolException(
 			McpErrorCodes.PackExpired,
-			$"{McpErrorCodes.PackExpired}: pack expired or belongs to another server session; call pack_context again." +
-			(quotaEvicted ? " The pack was evicted to satisfy the session quota." : string.Empty));
+			$"{McpErrorCodes.PackExpired}: {subject} expired or belongs to another server session; " +
+			$"call {remedy} again." +
+			(quotaEvicted
+				? $" The {subject} was evicted to satisfy the session quota."
+				: string.Empty));
+	}
 
 	private static McpToolException TooLarge() =>
 		new(
@@ -564,7 +600,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 				_packs.Remove(victim.Key);
 				_allocatedBytes -= victim.Value.Document.Bytes;
 				reservation.EvictedPackCount++;
-				RememberQuotaEviction(victim.Key);
+				RememberQuotaEviction(victim.Key, victim.Value.Kind);
 				(evictedPaths ??= []).Add(victim.Value.Document.Path);
 			}
 			reservation.Add(count);
@@ -577,10 +613,10 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		}
 	}
 
-	private void RememberQuotaEviction(string packId)
+	private void RememberQuotaEviction(string packId, McpStoredResultKind kind)
 	{
 		const int maximumRememberedEvictions = 1024;
-		if (_quotaEvictedPackIds.Add(packId))
+		if (_quotaEvictedPackIds.TryAdd(packId, kind))
 			_quotaEvictionOrder.Enqueue(packId);
 		while (_quotaEvictionOrder.Count > maximumRememberedEvictions)
 			_quotaEvictedPackIds.Remove(_quotaEvictionOrder.Dequeue());
@@ -589,7 +625,35 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	private bool IsQuotaEvicted(string packId)
 	{
 		lock (_sync)
-			return _quotaEvictedPackIds.Contains(packId);
+			return _quotaEvictedPackIds.ContainsKey(packId);
+	}
+
+	private void RememberIssuedKind(string packId, McpStoredResultKind kind)
+	{
+		const int maximumRememberedKinds = 1024;
+		if (_issuedKinds.TryAdd(packId, kind))
+			_issuedKindOrder.Enqueue(packId);
+		while (_issuedKindOrder.Count > maximumRememberedKinds)
+			_issuedKinds.Remove(_issuedKindOrder.Dequeue());
+	}
+
+	/// <summary>
+	/// What produced an id: one still held, one already evicted, or one this session issued and has
+	/// since dropped. An id from another session is unknown, and the wording says so either way.
+	/// </summary>
+	private McpStoredResultKind StoredKind(string packId)
+	{
+		lock (_sync)
+			return StoredKindLocked(packId);
+	}
+
+	private McpStoredResultKind StoredKindLocked(string packId)
+	{
+		if (_packs.TryGetValue(packId, out var entry))
+			return entry.Kind;
+		if (_quotaEvictedPackIds.TryGetValue(packId, out var evicted))
+			return evicted;
+		return _issuedKinds.TryGetValue(packId, out var issued) ? issued : McpStoredResultKind.Pack;
 	}
 
 	private void ReleaseReader(PackEntry entry)
@@ -604,12 +668,16 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			_allocatedBytes -= bytes;
 	}
 
-	internal sealed class PackEntry(McpPackDocument document, DateTimeOffset createdUtc)
+	internal sealed class PackEntry(
+		McpPackDocument document,
+		DateTimeOffset createdUtc,
+		McpStoredResultKind kind)
 	{
 		public McpPackDocument Document { get; } = document;
 		public DateTimeOffset CreatedUtc { get; } = createdUtc;
 		public DateTimeOffset LastReadUtc { get; set; } = createdUtc;
 		public int ActiveReaders { get; set; }
+		public McpStoredResultKind Kind { get; } = kind;
 	}
 
 	private sealed class PackReservation(McpPackRegistry owner) : IDisposable

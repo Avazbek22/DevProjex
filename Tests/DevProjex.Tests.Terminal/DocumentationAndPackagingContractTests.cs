@@ -219,13 +219,43 @@ public sealed class DocumentationAndPackagingContractTests
 			"### Search hits name the declaration that contains them",
 			server,
 			StringComparison.Ordinal);
-		Assert.Contains("Enclosing declarations:", server, StringComparison.Ordinal);
+		Assert.Contains("in P.App", server, StringComparison.Ordinal);
+		Assert.Contains("in (no declaration)", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"Location is therefore spelled once in a response",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("Placement is all or nothing", normalized, StringComparison.Ordinal);
+		Assert.DoesNotContain("Enclosing declarations:", server, StringComparison.Ordinal);
 		Assert.Contains(
 			"[Symbols] annotated=N · files-without-declarations=K.",
 			server,
 			StringComparison.Ordinal);
 		Assert.Contains("There is no parameter for it", normalized, StringComparison.Ordinal);
 		Assert.Contains("### Reading a declaration by name", server, StringComparison.Ordinal);
+		Assert.Contains("### The search result carries the selector", server, StringComparison.Ordinal);
+		Assert.Contains("Declarations found (path, symbol, line):", server, StringComparison.Ordinal);
+		Assert.Contains("[Read declarations]", server, StringComparison.Ordinal);
+		Assert.Contains("**A cut listing keeps its breadth.**", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"### What a slice shows when matches are withheld",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Search order] hits inside a declaration first, then the rest; selection order breaks ties.",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"applies no order and announces none rather than claiming an order it did not apply",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("### A withheld search stays in the session", server, StringComparison.Ordinal);
+		Assert.Contains("Withheld matches by file:", server, StringComparison.Ordinal);
+		Assert.Contains("Counts, not line numbers", normalized, StringComparison.Ordinal);
+		Assert.Contains(
+			"expiry or eviction of one is reported in search terms",
+			normalized,
+			StringComparison.Ordinal);
 		Assert.Contains(
 			"`symbol` cannot be combined with `start_line`, `end_line`, or `start_column`",
 			normalized,

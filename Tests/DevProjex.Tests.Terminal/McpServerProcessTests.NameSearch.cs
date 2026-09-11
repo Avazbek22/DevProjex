@@ -78,8 +78,11 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("[No matches]", missed, StringComparison.Ordinal);
 			Assert.DoesNotContain("[Name search]", missed, StringComparison.Ordinal);
 
-			// A search that found something never carries the pointer either.
-			Assert.Contains("src/App.cs:", found, StringComparison.Ordinal);
+			// A search that found something never carries the pointer either. The hit is written in
+			// the grouped shape: the path heads its block and the line carries only its number.
+			var foundLines = found.Replace("\r\n", "\n", StringComparison.Ordinal);
+			Assert.Contains("src/App.cs\n", foundLines, StringComparison.Ordinal);
+			Assert.Contains("3:public sealed class App;", foundLines, StringComparison.Ordinal);
 			Assert.DoesNotContain("[No matches]", found, StringComparison.Ordinal);
 			Assert.DoesNotContain("[Name search]", found, StringComparison.Ordinal);
 

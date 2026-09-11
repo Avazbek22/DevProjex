@@ -1338,14 +1338,31 @@ that expanded carries a trusted `[Expanded]` line of counts. Without the paramet
 `pack_context` responses are byte-identical.
 
 MCP `search_project` names the declaration each shown hit sits inside. It takes no
-input: after the match lines, inside the same untrusted block, the response lists
-`path:line: Name` under `Enclosing declarations:`, and one trusted
+input: inside the untrusted block, an `in <Name>` header heads its hits within the
+file's own block and is written again only when the declaration changes, the way the
+path is written once. A run of hits that belongs to no declaration is closed with the
+constant `in (no declaration)` so the header above it stops claiming them. One trusted
 `[Symbols] annotated=N · files-without-declarations=K.` line reports coverage in
 counts. Names come from the dependency index over the files that produced hits, one
 bounded parse per such file. Naming shares the 16,000-character search cap rather
-than adding to it, and a response that cap already cut carries none, so no response
-grows past the bound it already had. Match lines, group separators, the match and
-file counters, and the additional-matches contract are unchanged.
+than adding to it, a response that cap already cut carries none, and placement is all
+or nothing, so no response grows past the bound it already had. Match lines, group
+separators, the match and file counters, and the additional-matches contract are
+unchanged.
+
+MCP `search_project` chooses which matches a withheld listing carries: a hit inside a
+declaration before one that is not, every matched file given a hit before any file
+gets a second, and the rule named by the constant `[Search order]`. Files are ordered
+rather than groups, so a file's matches stay one block. A search that matched more
+files than the naming bound can reach applies no order and announces none, and a
+search that showed everything keeps selection order and is byte-identical.
+
+MCP `search_project` lists the declarations its shown hits sit in, once each, as
+`path symbol line` inside the untrusted block, closed by a trusted constant naming
+`get_file` with `path` and `symbol` and the batched `requests` form. The list ships on
+every search that showed a hit, including one the character cap cut. When either bound
+cuts a listing, every matched file gets a hit before any file gets a second, and the
+withheld distribution leads each line with its count.
 
 MCP `get_file` gains the optional `symbol` input, used beside `path` in place of a
 line range, returning the lines that declare it. It accepts a qualified name or a

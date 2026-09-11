@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace DevProjex.Mcp;
 
 /// <summary>
@@ -18,8 +16,6 @@ namespace DevProjex.Mcp;
 /// </remarks>
 internal static class McpSearchSymbols
 {
-	public const string SectionHeading = "Enclosing declarations:";
-
 	/// <summary>
 	/// A search can touch many files, and every one of them would be a parse. Hits beyond this many
 	/// distinct files are left unannotated and counted, rather than turning a search into an index.
@@ -87,7 +83,9 @@ internal static class McpSearchSymbols
 				spansByFile[file.RelativePath] = spans;
 		}
 
-		var lines = new List<string>();
+		var names = new Dictionary<McpSearchHitKey, string>();
+		var declarations = new List<McpSearchDeclaration>();
+		var declared = new HashSet<string>(StringComparer.Ordinal);
 		var annotated = 0;
 		var unannotatedFiles = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var hit in hits)
@@ -115,12 +113,17 @@ internal static class McpSearchSymbols
 				continue;
 			}
 
-			lines.Add($"{hit.RelativePath}:{hit.Line.ToString(CultureInfo.InvariantCulture)}: {best.Name}");
+			names[new McpSearchHitKey(hit.RelativePath, hit.Line)] = best.Name;
+			// One entry per declaration, not per hit: this is the list a caller reads back, and a
+			// declaration touched by ten matches is still one thing to open.
+			if (declared.Add($"{hit.RelativePath}\u0000{best.Name}"))
+				declarations.Add(new McpSearchDeclaration(hit.RelativePath, best.Name, best.Start));
 			annotated++;
 		}
 
 		return new McpSearchSymbolResult(
-			lines,
+			names,
+			declarations,
 			annotated,
 			unannotatedFiles.Count,
 			skippedFiles);
@@ -225,11 +228,50 @@ internal readonly record struct McpSymbolLookup(
 
 internal readonly record struct McpSearchHit(string RelativePath, string FullPath, int Line);
 
+/// <summary>One matched line, as the key the renderer and the naming agree on.</summary>
+internal readonly record struct McpSearchHitKey(string RelativePath, int Line);
+
+/// <summary>
+/// One rendered line of one group, kept so that the slice a response shows can be chosen after the
+/// whole result is known rather than as each file streams past.
+/// </summary>
+internal readonly record struct McpSearchGroupLine(int LineNumber, bool IsMatch, string Text);
+
+/// <summary>
+/// One context group, rendered and set aside. The path heading and the group separator are not in
+/// <see cref="Lines"/>: both depend on what ends up next to the group, which is not known until the
+/// slice is chosen.
+/// </summary>
+internal sealed record McpSearchRenderedGroup(
+	string RelativePath,
+	string FullPath,
+	IReadOnlyList<int> MatchLines,
+	IReadOnlyList<McpSearchGroupLine> Lines);
+
+/// <summary>
+/// One line the renderer wrote in full, and where it starts in the response. A declaration header
+/// is placed at one of these offsets after the render finishes.
+/// </summary>
+internal readonly record struct McpSearchRenderedLine(
+	string RelativePath,
+	int Offset,
+	int LineNumber,
+	bool IsMatch,
+	bool StartsGroup);
+
+/// <summary>
+/// One declaration a search touched, in the shape a caller passes back: the file to open, the name
+/// to ask for, and the line it starts on.
+/// </summary>
+internal readonly record struct McpSearchDeclaration(string RelativePath, string Name, int Line);
+
 internal sealed record McpSearchSymbolResult(
-	IReadOnlyList<string> Lines,
+	IReadOnlyDictionary<McpSearchHitKey, string> Names,
+	IReadOnlyList<McpSearchDeclaration> Declarations,
 	int AnnotatedHits,
 	int FilesWithoutDeclarations,
 	int FilesBeyondTheLimit)
 {
-	public static readonly McpSearchSymbolResult None = new([], 0, 0, 0);
+	public static readonly McpSearchSymbolResult None =
+		new(new Dictionary<McpSearchHitKey, string>(), [], 0, 0, 0);
 }
