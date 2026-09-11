@@ -95,6 +95,17 @@ public sealed partial class McpServerProcessTests
 		process.Dispose();
 	}
 
+	/// <summary>
+	/// A large manifest reports progress while it is walked, and the walk ends at 100.
+	/// </summary>
+	/// <remarks>
+	/// The terminal notification is waited for rather than assumed. The server writes it before
+	/// the result — <see cref="AssertFinalProgressPrecedesResult"/> pins that on the recorded stream —
+	/// but it is delivered on its own path, and the return of the call says nothing about whether
+	/// that delivery has happened yet. Reading the collected values at the moment the call returns
+	/// asked the wrong question, and answered it differently depending on how loaded the machine
+	/// was: the last value, or all of them, could still be in flight.
+	/// </remarks>
 	[Fact(Timeout = 120_000)]
 	public async Task RealProcessThrottlesDependencyProgressForTenThousandFiles()
 	{
@@ -113,6 +124,9 @@ public sealed partial class McpServerProcessTests
 				TestContext.Current.CancellationToken);
 
 			Assert.NotEqual(true, result.IsError);
+			await progress
+				.WaitForAsync(static value => value.Progress >= 100f, TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 			Assert.InRange(progress.Values.Count, 2, 20);
 			Assert.Equal(5f, progress.Values[0].Progress);
 			Assert.Equal(100f, progress.Values[^1].Progress);
@@ -123,7 +137,60 @@ public sealed partial class McpServerProcessTests
 			await client.DisposeAsync();
 		}
 		await CompletePublishedMcpAsync(process, errorTask, output);
+		AssertFinalProgressPrecedesResult(output.GetRecordedText());
 	}
+
+	/// <summary>
+	/// The terminal progress notification is written before the result of the call it belongs to,
+	/// so a caller that treats the result as the end of the call cannot be handed a truncated
+	/// sequence by anything the server did.
+	/// </summary>
+	/// <remarks>
+	/// Read from the recorded bytes rather than from what arrived, because the two are different
+	/// claims: this one is about the order things were written in, and it is the half that a test
+	/// waiting for delivery would otherwise stop checking.
+	/// </remarks>
+	private static void AssertFinalProgressPrecedesResult(string recordedTransport)
+	{
+		var finalProgress = -1;
+		var callResult = -1;
+		var position = 0;
+		foreach (var line in recordedTransport.Split('\n'))
+		{
+			position++;
+			if (line.Contains("notifications/progress", StringComparison.Ordinal))
+			{
+				var reported = Regex.Match(line, @"""progress""\s*:\s*([0-9.]+)");
+				if (reported.Success &&
+					float.TryParse(
+						reported.Groups[1].Value,
+						System.Globalization.CultureInfo.InvariantCulture,
+						out var value) &&
+					value >= 100f)
+				{
+					finalProgress = position;
+				}
+			}
+			else if (line.Contains("\"result\"", StringComparison.Ordinal))
+			{
+				callResult = position;
+			}
+		}
+
+		Assert.True(finalProgress > 0, "The server never wrote a terminal progress notification.");
+		Assert.True(callResult > 0, "The server never wrote a result for the call.");
+		Assert.True(
+			finalProgress < callResult,
+			$"The result was written at line {callResult}, ahead of the terminal progress " +
+			$"notification at line {finalProgress}, so a caller that stops at the result cannot " +
+			"see the whole sequence.");
+	}
+
+	/// <summary>
+	/// The same check, reachable from the cases that drive it with a written-out sequence.
+	/// </summary>
+	internal static void AssertFinalProgressPrecedesResultForContract(string recordedTransport) =>
+		AssertFinalProgressPrecedesResult(recordedTransport);
 
 	[Fact(Timeout = 120_000)]
 	public async Task RealProcessReportsWhenSearchStopsAtTheInspectedByteBudget()
