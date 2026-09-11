@@ -237,6 +237,18 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Declarations found (path, symbol, line):", server, StringComparison.Ordinal);
 		Assert.Contains("[Read declarations]", server, StringComparison.Ordinal);
 		Assert.Contains("**A cut listing keeps its breadth.**", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"### What a slice shows when matches are withheld",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Search order] hits inside a declaration first, then the rest; selection order breaks ties.",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"applies no order and announces none rather than claiming an order it did not apply",
+			normalized,
+			StringComparison.Ordinal);
 		Assert.Contains("### A withheld search stays in the session", server, StringComparison.Ordinal);
 		Assert.Contains("Withheld matches by file:", server, StringComparison.Ordinal);
 		Assert.Contains("Counts, not line numbers", normalized, StringComparison.Ordinal);

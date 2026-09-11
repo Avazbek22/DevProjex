@@ -1350,6 +1350,13 @@ or nothing, so no response grows past the bound it already had. Match lines, gro
 separators, the match and file counters, and the additional-matches contract are
 unchanged.
 
+MCP `search_project` chooses which matches a withheld listing carries: a hit inside a
+declaration before one that is not, every matched file given a hit before any file
+gets a second, and the rule named by the constant `[Search order]`. Files are ordered
+rather than groups, so a file's matches stay one block. A search that matched more
+files than the naming bound can reach applies no order and announces none, and a
+search that showed everything keeps selection order and is byte-identical.
+
 MCP `search_project` lists the declarations its shown hits sit in, once each, as
 `path symbol line` inside the untrusted block, closed by a trusted constant naming
 `get_file` with `path` and `symbol` and the batched `requests` form. The list ships on

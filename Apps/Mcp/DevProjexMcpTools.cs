@@ -987,17 +987,29 @@ internal sealed class DevProjexMcpTools(
 				}
 			}
 
-			// Everything the response did not carry stays in the session under one id, whole group by
-			// whole group, so a page of it never shows half of one.
+			// What each file withheld, counted first, because it decides both the distribution the
+			// response prints and which files the store has to carry.
 			var shownLines = writtenHits
 				.Select(static hit => new McpSearchHitKey(hit.RelativePath, hit.Line))
 				.ToHashSet();
+			foreach (var group in ordered)
+			{
+				foreach (var line in group.MatchLines)
+				{
+					if (shownLines.Contains(new McpSearchHitKey(group.RelativePath, line)))
+						continue;
+					withheldByFile[group.RelativePath] =
+						withheldByFile.GetValueOrDefault(group.RelativePath) + 1;
+				}
+			}
+
+			// A file that withheld anything is stored whole. Storing only its unshown groups would
+			// hand back a file the caller cannot read continuously, and the page would still repeat
+			// shown matches wherever a group straddles the two.
 			string? storedFile = null;
 			foreach (var group in ordered)
 			{
-				var remaining = group.MatchLines.Where(line =>
-					!shownLines.Contains(new McpSearchHitKey(group.RelativePath, line))).ToArray();
-				if (remaining.Length == 0)
+				if (!withheldByFile.ContainsKey(group.RelativePath))
 					continue;
 				if (withheld.Length >= MaximumStoredSearchCharacters)
 				{
@@ -1017,9 +1029,7 @@ internal sealed class DevProjexMcpTools(
 
 				foreach (var line in group.Lines)
 					withheld.Append(line.Text).Append(Environment.NewLine);
-				withheldStored += remaining.Length;
-				withheldByFile[group.RelativePath] =
-					withheldByFile.GetValueOrDefault(group.RelativePath) + remaining.Length;
+				withheldStored += group.MatchLines.Count;
 			}
 
 			// Resolved on every search that showed a hit, including one the cap cut: the selector
@@ -1030,11 +1040,10 @@ internal sealed class DevProjexMcpTools(
 				.ConfigureAwait(false);
 			// A response the character cap already cut has no room to spend on labelling each run,
 			// so the headers are dropped and the remaining characters go to matches. The list stays.
-			var namesRefused = resultGroupTruncated ||
-				!InsertDeclarationHeaders(output, renderedLines, symbols);
+			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols);
 			if (namesRefused)
 				symbols = symbols with { AnnotatedHits = 0 };
-			AppendDeclarationSelectors(output, symbols.Declarations);
+			var declarationsListed = AppendDeclarationSelectors(output, symbols.Declarations);
 			// What the response could not carry is kept in the session, so the way forward is to
 			// page what this scan already found rather than to run the same scan again.
 			var storedSearch = withheld.Length == 0
@@ -1068,7 +1077,7 @@ internal sealed class DevProjexMcpTools(
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					noMatches,
 					ordering is null ? null : SearchOrderNotice,
-				symbols.Declarations.Count == 0 ? null : ReadDeclarationsNotice,
+				declarationsListed ? ReadDeclarationsNotice : null,
 					FormatStoredSearchNotice(
 						storedSearch,
 						withheldStored,
@@ -2549,7 +2558,12 @@ internal sealed class DevProjexMcpTools(
 		var heading = startsNewFile
 			? $"{EscapeSingleLine(group.RelativePath)}{Environment.NewLine}"
 			: $"--{Environment.NewLine}";
-		if (output.Length + heading.Length > MaximumSearchContentCharacters)
+		// A heading with nothing under it is a file that did not match as far as a reader can tell,
+		// so it is written only once the first line is known to fit beside it.
+		var firstLine = group.Lines.Count == 0
+			? 0
+			: group.Lines[0].Text.Length + Environment.NewLine.Length;
+		if (output.Length + heading.Length + firstLine > MaximumSearchContentCharacters)
 			return new McpSearchAppendResult(0, Truncated: true);
 		output.Append(heading);
 
@@ -2650,7 +2664,9 @@ internal sealed class DevProjexMcpTools(
 			}
 		}
 
-		return (allowance, characterCapReached);
+		// Only characters stopping an allocation that max_results still had room for is the cap
+		// truncating a listing. Running out of max_results is not, and must not say it is.
+		return (allowance, characterCapReached && budget > 0);
 	}
 
 	/// <summary>
@@ -2700,7 +2716,7 @@ internal sealed class DevProjexMcpTools(
 	/// Both sides keep their existing relative order, so the same query on the same tree always
 	/// produces the same answer.
 	/// </remarks>
-	private static async Task<IReadOnlyList<McpSearchRenderedGroup>> OrderDeclarationsFirstAsync(
+	private static async Task<IReadOnlyList<McpSearchRenderedGroup>?> OrderDeclarationsFirstAsync(
 		DependencyFactsEngine engine,
 		ProjectContextPlan plan,
 		IReadOnlyList<McpSearchRenderedGroup> groups,
@@ -2713,17 +2729,31 @@ internal sealed class DevProjexMcpTools(
 		var declarations = await McpSearchSymbols
 			.ResolveAsync(engine, plan, hits, cancellationToken)
 			.ConfigureAwait(false);
-		if (declarations.Names.Count == 0)
-			return groups;
+		// A search that touched more files than the naming can reach knows nothing about the ones
+		// past that bound, and ordering on a signal it does not have would claim an order it did
+		// not apply. It keeps selection order instead, and says nothing.
+		if (declarations.Names.Count == 0 || declarations.FilesBeyondTheLimit > 0)
+			return null;
+
+		// Files, not groups: a file's groups must stay one block, in their own order, or the same
+		// path is written twice and its line numbers stop climbing.
+		var declaringFiles = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var group in groups)
+		{
+			if (group.MatchLines.Any(line =>
+				    declarations.Names.ContainsKey(new McpSearchHitKey(group.RelativePath, line))))
+			{
+				declaringFiles.Add(group.RelativePath);
+			}
+		}
+
+		if (declaringFiles.Count == 0)
+			return null;
 
 		var declaring = new List<McpSearchRenderedGroup>(groups.Count);
 		var mentioning = new List<McpSearchRenderedGroup>(groups.Count);
 		foreach (var group in groups)
-		{
-			var sitsInDeclaration = group.MatchLines.Any(line =>
-				declarations.Names.ContainsKey(new McpSearchHitKey(group.RelativePath, line)));
-			(sitsInDeclaration ? declaring : mentioning).Add(group);
-		}
+			(declaringFiles.Contains(group.RelativePath) ? declaring : mentioning).Add(group);
 
 		return [.. declaring, .. mentioning];
 	}
@@ -2755,27 +2785,31 @@ internal sealed class DevProjexMcpTools(
 	/// belongs inside the untrusted block; the sentence that says what to do with it is a constant
 	/// and sits outside.
 	/// </summary>
-	private static void AppendDeclarationSelectors(
+	private static bool AppendDeclarationSelectors(
 		StringBuilder output,
 		IReadOnlyList<McpSearchDeclaration> declarations)
 	{
 		if (declarations.Count == 0)
-			return;
+			return false;
 
 		var heading = $"{Environment.NewLine}{DeclarationsHeading}{Environment.NewLine}";
-		if (output.Length + heading.Length > MaximumSearchContentCharacters)
-			return;
-		output.Append(heading);
-
+		var room = MaximumSearchContentCharacters - output.Length - heading.Length;
+		var rows = new StringBuilder();
 		foreach (var declaration in declarations.Take(MaximumDeclarationsReported))
 		{
 			var line =
 				$"{EscapeSingleLine(declaration.RelativePath)} {EscapeSingleLine(declaration.Name)} " +
 				$"{declaration.Line.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
-			if (output.Length + line.Length > MaximumSearchContentCharacters)
+			if (rows.Length + line.Length > room)
 				break;
-			output.Append(line);
+			rows.Append(line);
 		}
+
+		// A heading with nothing under it says a search found declarations and then shows none.
+		if (rows.Length == 0)
+			return false;
+		output.Append(heading).Append(rows);
+		return true;
 	}
 
 	/// <summary>
@@ -2783,12 +2817,12 @@ internal sealed class DevProjexMcpTools(
 	/// belongs with the match lines inside the untrusted block; only the totals leave it. Counts,
 	/// not line numbers: one recorded search withheld 861 matches, and their numbers would be noise.
 	/// </summary>
-	private static void AppendWithheldDistribution(
+	private static bool AppendWithheldDistribution(
 		StringBuilder output,
 		IReadOnlyDictionary<string, int> withheldByFile)
 	{
 		if (withheldByFile.Count == 0)
-			return;
+			return false;
 
 		var ordered = withheldByFile
 			.OrderByDescending(static entry => entry.Value)
@@ -2797,10 +2831,8 @@ internal sealed class DevProjexMcpTools(
 		// The distribution shares the search character cap with the matches, so a response cannot
 		// exceed the bound its own truncation notice names.
 		var heading = $"{Environment.NewLine}{WithheldHeading}{Environment.NewLine}";
-		if (output.Length + heading.Length > MaximumSearchContentCharacters)
-			return;
-		output.Append(heading);
-
+		var room = MaximumSearchContentCharacters - output.Length - heading.Length;
+		var rows = new StringBuilder();
 		var listed = 0;
 		foreach (var entry in ordered.Take(MaximumWithheldFilesReported))
 		{
@@ -2809,20 +2841,27 @@ internal sealed class DevProjexMcpTools(
 			var line =
 				$"{entry.Value.ToString(CultureInfo.InvariantCulture)} " +
 				$"{EscapeSingleLine(entry.Key)}{Environment.NewLine}";
-			if (output.Length + line.Length > MaximumSearchContentCharacters)
+			if (rows.Length + line.Length > room)
 				break;
-			output.Append(line);
+			rows.Append(line);
 			listed++;
 		}
 
+		if (rows.Length == 0)
+			return false;
+
 		var remaining = ordered.Length - listed;
-		if (remaining <= 0)
-			return;
-		var tail =
-			$"and {remaining.ToString(CultureInfo.InvariantCulture)} more file(s)" +
-			$"{Environment.NewLine}";
-		if (output.Length + tail.Length <= MaximumSearchContentCharacters)
-			output.Append(tail);
+		if (remaining > 0)
+		{
+			var tail =
+				$"and {remaining.ToString(CultureInfo.InvariantCulture)} more file(s)" +
+				$"{Environment.NewLine}";
+			if (rows.Length + tail.Length <= room)
+				rows.Append(tail);
+		}
+
+		output.Append(heading).Append(rows);
+		return true;
 	}
 
 	/// <summary>
@@ -2842,7 +2881,7 @@ internal sealed class DevProjexMcpTools(
 			$"[Search stored] pack_id={stored.Id} · " +
 			$"matches={storedMatches.ToString(CultureInfo.InvariantCulture)} · " +
 			$"files={storedFiles.ToString(CultureInfo.InvariantCulture)}; " +
-			"read_pack pages the withheld matches without searching again";
+			"read_pack pages those files whole, without searching again";
 		// Two bounds can stop a store, and a caller narrowing its next search needs to know which.
 		if (!hitMatchBound && !hitCharacterBound)
 			return $"{reported}.";
@@ -2907,9 +2946,11 @@ internal sealed class DevProjexMcpTools(
 					insertions.Add((line.Offset, OutsideDeclarationHeader));
 					cost += OutsideDeclarationHeader.Length;
 					named = null;
-					groupNamed = true;
 				}
 
+				// Either way the group's top has now been spoken for by a match that belongs to
+				// nothing, so a later header in this group belongs on its own line, not above it.
+				groupNamed = true;
 				continue;
 			}
 
@@ -2918,7 +2959,10 @@ internal sealed class DevProjexMcpTools(
 
 			// A declaration that changes at a group's first match labels the whole group, so the
 			// header sits above that group's leading context rather than between it and the hit.
-			var header = $"in {name}{Environment.NewLine}";
+			// A declaration name is raw source text: a namespace can carry a block comment, and a
+			// qualified name in some languages embeds the file path. Unescaped it forges a path
+			// heading, a header and a match line against a file that did not match.
+			var header = $"in {EscapeSingleLine(name)}{Environment.NewLine}";
 			insertions.Add((groupNamed ? line.Offset : groupOffset, header));
 			cost += header.Length;
 			groupNamed = true;

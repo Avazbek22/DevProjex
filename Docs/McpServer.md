@@ -955,13 +955,48 @@ happened to be last.
 Outside the block, in trusted text, one line of counts and a server-minted id:
 
 ```text
-[Search stored] pack_id=<id> · matches=N · files=M; read_pack pages the withheld matches without searching again.
+[Search stored] pack_id=<id> · matches=N · files=M; read_pack pages those files whole, without searching again.
 ```
 
 `read_pack` pages that id exactly as it pages a `pack_context` result: it does not
 rebuild a plan, does not take the project-operation gate, and does not search again.
-The stored result holds the complete result for every file that withheld anything,
-so a page never shows half a group.
+The stored result holds the complete result of every file that withheld anything, so
+`matches` counts what the store holds rather than what was withheld, and a page reads
+continuously instead of as the fragments a per-group store would leave. The
+distribution beside it counts what each file withheld, which is the smaller number.
+
+Both the distribution and the selector list share the response's character budget
+with the matches, and neither is written unless at least one of its rows fits: a
+heading with nothing under it would report a search that found something and then
+show none of it. A trusted line that points at one of those lists is written only
+when the list was.
+
+### What a slice shows when matches are withheld
+
+When `max_results` withholds, the response chooses which matches to carry rather than
+taking whatever the file order happened to reach first. Two rules decide it, and a
+constant names them:
+
+```text
+[Search order] hits inside a declaration first, then the rest; selection order breaks ties.
+```
+
+A hit that sits inside a declaration comes before one that does not, so a committed
+generated report stops crowding out the declaration of the term that was searched
+for. The signal is the one the naming already computes; there is no directory list,
+which this project does not keep on principle, and no ranking graph, which needs an
+index a search does not build. Files are ordered, not groups, so each file's matches
+stay one block with its line numbers climbing.
+
+Whichever bound cuts the listing, every matched file gets a hit before any file gets
+a second. An alphabetical cut that never reached the file a caller wanted was the
+largest single class of whole-file reads in the recorded sessions.
+
+Ordering rests on the naming, and the naming reaches a bounded number of files. A
+search that matched more files than it can name knows nothing about the ones past
+that bound, so it applies no order and announces none rather than claiming an order
+it did not apply. A search that showed everything it found has nothing to choose
+between: it keeps selection order, says nothing, and is byte-identical.
 
 Two bounds apply, and the response says when either decided the answer. Matching
 runs to 5,000 matches per search, and the stored text stops at 2,000,000 characters;

@@ -57,7 +57,9 @@ public sealed partial class McpServerProcessTests
 
 		var stored = Regex.Match(searched, @"\[Search stored\] pack_id=([0-9a-f]+) · matches=(\d+) · files=(\d+);");
 		Assert.True(stored.Success, searched);
-		Assert.Equal(55, int.Parse(stored.Groups[2].Value, CultureInfo.InvariantCulture));
+		// Every file withheld something, so every file is stored whole: the store carries all 60,
+		// which is what makes a page of it readable rather than a set of fragments.
+		Assert.Equal(60, int.Parse(stored.Groups[2].Value, CultureInfo.InvariantCulture));
 		Assert.Equal(6, int.Parse(stored.Groups[3].Value, CultureInfo.InvariantCulture));
 
 		// Nothing may be read from the project again. If paging still answers in full, the only
