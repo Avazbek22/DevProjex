@@ -569,7 +569,14 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		if (!isCompact)
 		{
 			var text = materialization.Read(node);
-			return CreateCapture(captureName, node, text, null, 0, false,
+			// A type-parameter owner is a method or local function the resolver already visits.
+			// Reading the name it declares costs one child lookup and lets the adapter recognise
+			// an entry point without a second pass over the tree.
+			var ownerName = captureName == "context.type_parameter_owner" &&
+				node.GetChildForField("name") is { } owner
+					? materialization.Read(owner)
+					: null;
+			return CreateCapture(captureName, node, text, ownerName, 0, false,
 				captureName == "context.module_assignment"
 					? FindContainingDeclaration(node, materialization)
 					: null,
