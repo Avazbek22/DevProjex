@@ -9,15 +9,20 @@ public sealed partial class McpServerProcessTests
 	// recorded measurement, not the measurement itself: a ceiling with a few characters to spare is
 	// a tripwire for the next honest addition rather than a budget.
 	//
-	// Recorded on 2026-09-11 against the built application: tools/list result 33,981 characters on
-	// a default server and 37,869 on a delegation server, initialize result 1,223 of which
-	// instructions are 1,044. The exclusion parameter costs a flat 3,888 characters.
-	private const int ToolsListResultCeiling = 38_000;
-	private const int ToolsListResultFloor = 30_000;
-	private const int DelegationToolsListResultCeiling = 42_000;
-	private const int DelegationToolsListResultFloor = 34_000;
-	private const int InstructionsCeiling = 1_400;
-	private const int InstructionsFloor = 800;
+	// Recorded on 2026-09-11 from the characters the client received: tools/list result 35,176 on a
+	// default server, 39,094 on a delegation server, and 1,044 of instructions.
+	//
+	// The headroom is sized from the additions already planned — one packing parameter and one
+	// symbol-addressed read — not from a round number: roughly two thousand characters each way,
+	// enough for both and far short of a schema-sized addition. A delegation server is the larger
+	// payer, but its excess over a default server is the exclusion parameter and nothing else, so
+	// it is pinned as an exact difference rather than as a second ceiling that could never fire
+	// before the first one.
+	private const int ToolsListResultCeiling = 37_500;
+	private const int ToolsListResultFloor = 33_000;
+	private const int ExclusionsParameterCost = 3_918;
+	private const int InstructionsCeiling = 1_200;
+	private const int InstructionsFloor = 900;
 
 	[Fact]
 	public async Task RealProcessKeepsTheConnectionPayloadInsideItsBudget()
@@ -26,14 +31,12 @@ public sealed partial class McpServerProcessTests
 		Assert.InRange(defaultPayload, ToolsListResultFloor, ToolsListResultCeiling);
 		Assert.InRange(instructions.Length, InstructionsFloor, InstructionsCeiling);
 
-		// A delegation server publishes the exclusion parameter on six tools and is the larger
-		// payer, so it carries its own ceiling rather than riding on the default one.
+		// A delegation server publishes the exclusion parameter on six tools and pays for nothing
+		// else, so the whole difference is that parameter. Pinning it exactly reports a growing
+		// parameter by name instead of waiting for a total to cross a line.
 		var (delegationPayload, delegationInstructions) =
 			await MeasureConnectionPayloadAsync(["--allow-agent-exclusions"]);
-		Assert.InRange(
-			delegationPayload,
-			DelegationToolsListResultFloor,
-			DelegationToolsListResultCeiling);
+		Assert.Equal(ExclusionsParameterCost, delegationPayload - defaultPayload);
 		Assert.Equal(instructions, delegationInstructions);
 	}
 

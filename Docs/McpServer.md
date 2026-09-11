@@ -265,20 +265,19 @@ open-world.
 ### What a connection costs
 
 Before a client asks anything about a project it has already paid for the tool schemas and the
-server instructions. Measured on 2026-09-11 against the built application:
+server instructions. Measured on 2026-09-11 from the characters a client received:
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` result, default server | 33,981 |
-| `tools/list` result, `--allow-agent-exclusions` | 37,869 |
-| `initialize` result | 1,223 |
-| of which `instructions` | 1,044 |
+| `tools/list` result, default server | 35,176 |
+| `tools/list` result, `--allow-agent-exclusions` | 39,094 |
+| `instructions` | 1,044 |
 
-`analyze` is the largest single tool at 8,325 characters: 4,545 of output schema, 3,076 of input
-schema, and 482 of description. The `exclusions` parameter costs a flat 3,888 characters, 648 on
-each of the six tools that take it. A process test holds both `tools/list` shapes and the
-instructions under explicit ceilings with deliberate headroom, so a new parameter or description
-has to fit a budget rather than grow one silently.
+`analyze` is the largest single tool at 9,219 characters, most of it schema. The `exclusions`
+parameter costs a flat 3,918 characters, 653 on each of the six tools that take it. A process
+test holds the default `tools/list` result and the instructions under ceilings with deliberate
+headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
+description has to fit a budget rather than grow one silently.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|

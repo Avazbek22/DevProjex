@@ -511,7 +511,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "estimated": {
 	          "type": "object",
 	          "properties": {
-	            "files": { "type": "integer", "description": "Text files." },
+	            "files": { "type": "integer", "description": "Text files with size-based estimates only." },
 	            "characters": { "type": "integer", "description": "Normalized characters." },
 	            "tokens": { "type": "integer" }
 	          },
@@ -551,7 +551,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "type": "object",
 	      "description": "Content-protection policy applied to this analysis.",
 	      "properties": {
-	        "secrets": { "type": "string", "const": "always" },
+	        "secrets": { "type": "string", "const": "always", "description": "Mandatory secret-redaction state." },
 	        "privateData": { "type": "string", "enum": ["enabled", "disabled"], "description": "Server-startup redaction state." }
 	      },
 	      "required": ["secrets", "privateData"],
