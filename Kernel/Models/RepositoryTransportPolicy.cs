@@ -9,21 +9,22 @@ namespace DevProjex.Kernel.Models;
 /// internal, no shipped assembly is granted access to it, and no environment variable, profile,
 /// configuration file, or command-line value reaches it. A test host opens the scope around the
 /// operation that needs a synthetic <c>file://</c> remote and restores the previous state when the
-/// scope is disposed. Scope state follows the async operation that opened it, so a concurrent
-/// operation keeps the shipped policy; once every scope is disposed the shipped policy applies
-/// again everywhere.
+/// scope is disposed.
+/// <para>
+/// A grant belongs to the operation that opened it and to the work that operation starts, because
+/// the state travels with the execution context. It never reaches an unrelated operation, and it
+/// is never revoked underneath work that was started while it was held.
+/// </para>
 /// </remarks>
 public static class RepositoryTransportPolicy
 {
 	private static readonly AsyncLocal<bool> LocalFileTransportAllowed = new();
-	private static int _activeScopes;
 
 	/// <summary>
 	/// Whether the current operation may treat a <c>file://</c> URL as a Git transport. A shipped
 	/// build has no code path that opens a scope, so this is always <see langword="false"/> there.
 	/// </summary>
-	public static bool AllowsLocalFileTransport =>
-		Volatile.Read(ref _activeScopes) != 0 && LocalFileTransportAllowed.Value;
+	public static bool AllowsLocalFileTransport => LocalFileTransportAllowed.Value;
 
 	/// <summary>
 	/// Permits the local <c>file://</c> transport for the current operation until the returned
@@ -33,7 +34,6 @@ public static class RepositoryTransportPolicy
 	{
 		var previous = LocalFileTransportAllowed.Value;
 		LocalFileTransportAllowed.Value = true;
-		Interlocked.Increment(ref _activeScopes);
 		return new LocalFileTransportScope(previous);
 	}
 
@@ -50,7 +50,6 @@ public static class RepositoryTransportPolicy
 				return;
 
 			LocalFileTransportAllowed.Value = _previous;
-			Interlocked.Decrement(ref _activeScopes);
 		}
 	}
 }
