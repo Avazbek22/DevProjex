@@ -618,11 +618,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Requested top-file entries omitted by the aggregate character budget." },
 	    "admission": {
 	      "type": "object",
-	      "description": "Files a max_tokens budget would admit; only with max_tokens. Same greedy first-fit pass pack_context uses, so the admitted set matches for one snapshot, configuration, filters and effective transforms. Produces no content.",
+	      "description": "Files a max_tokens budget would admit, from the same greedy first-fit pass pack_context uses, so the admitted set matches for one snapshot, configuration, filters and effective transforms. Produces no content. Paths are project-relative; token counts are the transformed file at its effective detail; priority is the position in the admission order, only with rank.",
 	      "properties": {
 	        "budget": { "type": "integer", "minimum": 1, "description": "Estimated content tokens requested." },
 	        "includedFileCount": { "type": "integer", "minimum": 0 },
-	        "skippedFileCount": { "type": "integer", "minimum": 0, "description": "A skipped file never stops later, smaller files from being admitted." },
+	        "skippedFileCount": { "type": "integer", "minimum": 0, "description": "A skipped file never stops later, smaller ones from being admitted." },
 	        "includedEstimatedTokens": { "type": "integer", "minimum": 0 },
 	        "skippedEstimatedTokens": { "type": "integer", "minimum": 0 },
 	        "includedFiles": {
@@ -631,9 +631,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	          "items": {
 	            "type": "object",
 	            "properties": {
-	              "path": { "type": "string", "description": "Project-relative path." },
-	              "tokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the transformed file at its effective detail." },
-	              "priority": { "type": "integer", "minimum": 1, "description": "Position in the admission order; only with rank." },
+	              "path": { "type": "string" },
+	              "tokens": { "type": "integer", "minimum": 0 },
+	              "priority": { "type": "integer", "minimum": 1 },
 	              "hop": { "type": "integer", "minimum": 0, "description": "Minimum undirected graph hop from a focus seed; only with focus." }
 	            },
 	            "required": ["path", "tokens"],
@@ -642,18 +642,18 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        },
 	        "includedFilesTruncated": { "type": "boolean", "description": "True when the bounds omitted admitted entries." },
 	        "additionalIncludedFileCount": { "type": "integer", "minimum": 0, "description": "Admitted files omitted from includedFiles." },
-	        "includedOrderDigest": { "type": "string", "description": "Hash of the complete ordered admitted path list, so equality with a pack is checkable without listing it. An order digest: compare only across calls with the same rank and focus." },
+	        "includedOrderDigest": { "type": "string", "description": "Hash of the complete ordered admitted path list, so equality with a pack is checkable without listing it. Compare only across calls with the same rank and focus." },
 	        "skippedFiles": {
 	          "type": "array",
 	          "description": "The 25 largest skipped files plus, with rank, the 10 highest-priority ones.",
 	          "items": {
 	            "type": "object",
 	            "properties": {
-	              "path": { "type": "string", "description": "Project-relative path." },
-	              "tokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the transformed file at its effective detail." },
-	              "priority": { "type": "integer", "minimum": 1, "description": "Position in the admission order; only with rank." },
+	              "path": { "type": "string" },
+	              "tokens": { "type": "integer", "minimum": 0 },
+	              "priority": { "type": "integer", "minimum": 1 },
 	              "remainingTokens": { "type": "integer", "minimum": 0, "description": "Budget still free when this file was considered." },
-	              "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Level resolved for this file and used for its cost; only with detail_by_pattern. Names the resolved level, not a guarantee a transformation applied." }
+	              "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Level resolved for this file, only with detail_by_pattern; resolved, not a guarantee a transformation applied." }
 	            },
 	            "required": ["path", "tokens", "remainingTokens"],
 	            "additionalProperties": false

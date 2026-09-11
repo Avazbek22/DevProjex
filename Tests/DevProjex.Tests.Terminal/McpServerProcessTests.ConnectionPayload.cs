@@ -9,16 +9,22 @@ public sealed partial class McpServerProcessTests
 	// recorded measurement, not the measurement itself: a ceiling with a few characters to spare is
 	// a tripwire for the next honest addition rather than a budget.
 	//
-	// Recorded on 2026-09-11 from the characters the client received: tools/list result 35,176 on a
-	// default server, 39,094 on a delegation server, and 1,044 of instructions.
+	// Recorded on 2026-09-11 from the characters the client received: tools/list result 41,008 on a
+	// default server, 44,926 on a delegation server, and 1,044 of instructions.
 	//
-	// The headroom is sized from the additions already planned — one packing parameter and one
-	// symbol-addressed read — not from a round number: roughly two thousand characters each way,
-	// enough for both and far short of a schema-sized addition. A delegation server is the larger
-	// payer, but its excess over a default server is the exclusion parameter and nothing else, so
-	// it is pinned as an exact difference rather than as a second ceiling that could never fire
-	// before the first one.
-	private const int ToolsListResultCeiling = 37_500;
+	// The previous ceiling of 37,500 stood over a 35,176 measurement and was sized for one packing
+	// parameter. Per-file detail is that parameter, and it costs 1,420 characters because
+	// pack_context and analyze both publish it. The admission preview is the schema-sized addition
+	// the old headroom deliberately excluded: 2,949 characters of output schema plus 1,069 for the
+	// ordering inputs analyze gained, all of it paid on every connection so a caller can see which
+	// files a budget admits without buying a pack. Descriptions that only restated their field
+	// names were removed before this ceiling moved.
+	//
+	// The headroom is again roughly two and a half thousand characters: enough for the next honest
+	// parameter, short of another schema. A delegation server is the larger payer, but its excess
+	// over a default server is the exclusion parameter and nothing else, so it is pinned as an
+	// exact difference rather than as a second ceiling that could never fire before the first one.
+	private const int ToolsListResultCeiling = 43_500;
 	private const int ToolsListResultFloor = 33_000;
 	private const int ExclusionsParameterCost = 3_918;
 	private const int InstructionsCeiling = 1_200;
