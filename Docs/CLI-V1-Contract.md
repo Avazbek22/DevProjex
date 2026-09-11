@@ -1297,11 +1297,13 @@ consumers that pinned the pre-v5.2 output schemas must refresh their copies.
 have to explain themselves. It is never the last line: an `[Empty selection]`
 line can follow it, `[Protection]` comes after that, a pinned remote checkout
 adds `[Remote]`, and a budgeted `pack_context` ends with `[Budget accounting]`.
-A session is told each trusted service line once and then receives the constant
-`[Unchanged] filters, protection; see list_projects.` line until that content
-changes; an `[Empty selection]` response and any call that passed
+A session is told each trusted service line once and then receives a constant
+`[Unchanged] ...; see list_projects.` line naming exactly the lines that
+response withheld -- `filters, protection`, `filters`, or `protection` -- until
+that content changes; an `[Empty selection]` response and any call that passed
 `max_file_bytes` report the full set instead. `analyze` reports no protection
-line on any call. Every selection tool adds an `[Empty selection]` line when
+line on any call, so no `analyze` response names one as unchanged, and the tools
+that report no effective-filters line name only the protection line. Every selection tool adds an `[Empty selection]` line when
 nothing survived the filters, and a `DPX-MCP-PATH-NOT-FOUND` error for a file
 the filters hide names the effective filters. Glob patterns gain `{a,b}` alternatives; `!` negation and
 `[...]` classes, previously matched as literal characters, are rejected with
@@ -1316,7 +1318,42 @@ truncation trailers are trusted text outside the untrusted-data block.
 recognize Markdown-escaped names copied from the default tree format;
 `max_file_bytes` appears in effective-filter diagnostics when supplied; and
 wrong-case path diagnostics are platform-independent and name the spelling
-listed by `get_tree`.
+listed by `get_tree`. A constant `[Name search]` line names the form that finds a
+file by name: `search_project` adds it when it searched at least one file, matched
+nothing, and the pattern carries a `/` or ends in something shaped like an
+extension, and `get_tree` adds it when a `paths` entry with no separator was not
+present in the effective tree. It states a fact about one call and is never
+memoised; searches that matched, ordinary content patterns, and already-empty
+selections are byte-identical to v5.2 without it.
+
+MCP `pack_context` gains the optional object input `expand_related`
+(`seeds`, `hops`, `direction`), which packs the seeds together with their
+statically resolved dependency neighbours in one call. It only narrows: the
+neighbourhood is computed over the dependency index built from the plan's own
+included files, so no value can admit a file the effective filters, the Git scope,
+or the project root kept out, and an excluded file never bridges two hops. A seed
+that is not a selected file returns the existing `DPX-MCP-PATH-NOT-FOUND`. The
+expansion stops at 400 files and reports the constant that stopped it. Every call
+that expanded carries a trusted `[Expanded]` line of counts. Without the parameter,
+`pack_context` responses are byte-identical.
+
+MCP `search_project` names the declaration each shown hit sits inside. It takes no
+input: after the match lines, inside the same untrusted block, the response lists
+`path:line: Name` under `Enclosing declarations:`, and one trusted
+`[Symbols] annotated=N · files-without-declarations=K.` line reports coverage in
+counts. Names come from the dependency index over the files that produced hits, one
+bounded parse per such file. Naming shares the 16,000-character search cap rather
+than adding to it, and a response that cap already cut carries none, so no response
+grows past the bound it already had. Match lines, group separators, the match and
+file counters, and the additional-matches contract are unchanged.
+
+MCP `get_file` gains the optional `symbol` input, used beside `path` in place of a
+line range, returning the lines that declare it. It accepts a qualified name or a
+simple name unique in the file, cannot be combined with `start_line`, `end_line`,
+or `start_column`, and returns `DPX-MCP-INVALID-ARGUMENTS` for a name matching
+several declarations (reporting the count, never the names), a name matching none,
+and a file no declarations were extracted from. Without it every `get_file`
+response is byte-identical, and the batch `requests` form is unchanged.
 
 MCP `get_tree.format` is an additive input with `markdown` as its compact default.
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;

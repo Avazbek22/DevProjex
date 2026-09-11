@@ -163,10 +163,30 @@ batched `get_file` call instead of several single reads; see
   access outside those roots. Content files are opened before their final handle
   path is validated, and the validated handle is the one read, so a path swap
   cannot escape the root jail.
-- Without `--allow-remote`, tools perform no network operations. With the flag,
-  network access is limited to the RepoCache clone/acquire step for a Git URL;
-  all project inspection handlers operate only on the pinned checkout. With
-  `tracked_only` or `git_scope`, the server may also start the local Git
+- Without `--allow-remote`, tools perform no network operations, and no probe leaves
+  the machine before that permission is considered. A `project` value is classified by its
+  spelling alone, and a form that names a host is refused with `DPX-MCP-INVALID-ARGUMENTS`
+  before anything opens it: `\\server\share` and `//server/share`, the UNC device path
+  `\\?\UNC\server\share`, anything in the NT object namespace `\??\`, and the automount
+  host maps `/net/server/…` and `/Network/Servers/server/…`. Opening such a path is itself
+  the network operation: the operating system contacts the named host in order to answer, so
+  a check that first asked whether the path existed would already have sent the traffic it was
+  meant to prevent. The refusal applies with `--allow-remote` as well — a remote project is
+  named by its URL, and these spellings are refused in both states.
+- Three device forms address this machine and are not refused: a drive, as in
+  `\\?\C:\project`, which is an ordinary local directory written the long way; a volume,
+  `\\?\Volume{…}\project`; and a named pipe, `\\.\pipe\name`. Every other device is refused,
+  and so is a relative segment inside an accepted one, because `\\.\` is normalised before the
+  operating system reads it and `..` would otherwise put any device in the accepted one's place.
+- A root listed at startup stays addressable in any spelling that resolves
+  to the recorded one — a trailing separator, forward slashes, or the extended-length prefix —
+  because deciding that compares strings and opens nothing. What the refusal cannot cover is a
+  drive letter, a mount point, or a working directory that the operator has already bound to a
+  remote share: by its spelling it is indistinguishable from a local path, and that binding is
+  the operator's own configuration rather than something a client chose.
+- With `--allow-remote`, network access is limited to the RepoCache clone/acquire step
+  for a Git URL; all project inspection handlers operate only on the pinned checkout.
+  With `tracked_only` or `git_scope`, the server may also start the local Git
   executable solely to read repository state. It never runs project executables
   or arbitrary project commands.
 - Remote network sources use HTTPS, SSH, or SCP syntax. Query
@@ -239,7 +259,8 @@ and returns JSON-RPC code `-32602`.
 
 Remote-specific errors are `DPX-MCP-REMOTE-DISABLED` when a URL is passed to a
 server started without `--allow-remote`, `DPX-MCP-INVALID-ARGUMENTS` for an
-unsupported URL or a branch used with a local path, and `DPX-MCP-REMOTE-FAILED`
+unsupported URL, a branch used with a local path, or a `project` written as a path that
+names a host, and `DPX-MCP-REMOTE-FAILED`
 when Git, cloning, cache publication, or branch checkout fails.
 `DPX-MCP-REMOTE-LIMIT` reports that the 16-source session cap was reached. Error
 text uses the credential-free display form of the URL.
@@ -359,6 +380,54 @@ affected snapshot. Changing only `related_files` seeds or `direction` does not;
 those are projections over the same immutable index. This is an optimization,
 not a strict filesystem snapshot mode, and no strict cache switch is offered.
 
+### `pack_context.expand_related`
+
+`expand_related` packs the seeds together with their statically resolved
+neighbours, so the documented `search_project` to `related_files` to
+`pack_context` sequence becomes one call. It takes `seeds` (1 to 16
+project-relative files), `hops` (1 or 2, default 1), and `direction`
+(`dependencies`, `dependents`, or `both`, default `both`, the same enum
+`related_files.direction` uses). `related_files` keeps its own purpose: it shows
+evidence, resolution status, and candidate lists, and lets a reader choose
+neighbours by hand.
+
+**Expansion only ever narrows.** The neighbourhood is computed over the dependency
+index built from the plan's own included files, which is the set the baseline,
+profile, exclusions, Git scope, `tracked_only`, `paths`, the glob parameters, and
+`max_file_bytes` already produced. A file those filters keep out is not in the
+index, so no value of `expand_related` can reach it, and an excluded file cannot
+act as a bridge: if the only route from a seed to a second-hop file runs through a
+file the filters hid, that second-hop file is not packed. Only `Resolved` edges
+travel; an `Ambiguous` or `Unresolved` reference names a file the engine would not
+commit to, and following it would put a guess in the pack.
+
+A seed must be a file inside the effective selection. A directory, a glob, or a
+path the filters hide returns the existing `DPX-MCP-PATH-NOT-FOUND` error naming
+the effective filters, which is the same answer any other unselected path gets.
+
+Two hops do not bound the result: one widely imported file can reach most of a
+repository. The expansion therefore stops at 400 files, counting the seeds, and
+takes each hop in ordinal path order so the admitted prefix is deterministic rather
+than an arbitrary choice between neighbours.
+
+Every call that expanded reports one trusted line of counts and constants:
+
+```text
+[Expanded] seeds=1 · hop1=+11 · hop2=+0 · seeds-without-facts=0.
+```
+
+and, when the limit decided the answer, `; stopped at the 400-file expansion
+limit, so the neighbourhood is incomplete.` The paths themselves stay in the
+untrusted block with the rest of the pack, as every project path does.
+
+Expansion selects the candidate set; it does not order it. Without `rank` the pack
+keeps canonical path order, and with `rank` the existing ranking orders what
+expansion admitted. To put particular files first under a binding `max_tokens`,
+combine `expand_related` with `rank` and `focus`: a `focus` seed the expansion
+admitted is ranked first as usual, and one it did not admit is a path outside the
+selection and returns `DPX-MCP-PATH-NOT-FOUND`. Without `expand_related` every
+response is byte-identical to a server without it.
+
 ## Result Contract
 
 Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
@@ -475,10 +544,21 @@ The `[Effective filters]` and `[Protection]` lines describe server state, not th
 call, so a session receives them once and then only when what they say changes.
 The change signal is the state the lines are made of: the project, the profile,
 the effective exclusion set, the Git mode, and the protection policy. A response
-that withholds them carries the constant
-`[Unchanged] filters, protection; see list_projects.` instead, which is never
-longer than the shortest set it can replace, so no response grows by omitting a
-notice.
+that withholds them carries a constant pointer instead, and the pointer names
+exactly the lines that response withheld:
+`[Unchanged] filters, protection; see list_projects.` when it would have carried
+both, `[Unchanged] filters; see list_projects.` or
+`[Unchanged] protection; see list_projects.` when it would have carried one. Each
+is never longer than the shortest set it can replace, so no response grows by
+omitting a notice.
+
+A tool that never reports one of the lines is not withholding it, so the pointer
+never names it. `analyze` reports no protection line on any call, and no response
+in a session of `analyze` calls says a protection line is unchanged.
+`search_project` and `get_file` report no effective-filters line while the
+selection is not empty, so what they withhold is the protection line alone and
+that is all their pointer names. A session is never told that a line it was never
+sent has not changed.
 
 Omission has to be provable. When the project cannot be identified, when either
 line would say something this session has not been told for that project, or when
@@ -504,8 +584,8 @@ filters]` line.
 
 Only the repetition of unchanged trusted lines changes. Lines that state a fact
 about one call — `[Remote] commit=`, `[Resolution]`, `[Facts coverage]`,
-`[Search scope]`, `[Budget accounting]`, `[Search totals]`, search and tree
-truncation notices, and every `[Warning ...]` — are computed and sent for every
+`[Search scope]`, `[Budget accounting]`, `[Search totals]`, `[Name search]`,
+search and tree truncation notices, and every `[Warning ...]` — are computed and sent for every
 call as before, and the untrusted-data wrapper around project text is never
 affected.
 
@@ -755,10 +835,81 @@ classes (`[...]`) are rejected with `DPX-MCP-INVALID-PATTERN` rather than
 matched literally, because a silently empty result reads as "no such files".
 `paths` contains existing project-relative files or directories for `get_tree`,
 `analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
-glob metacharacters have meaning only in the pattern parameters. Every array
+glob metacharacters have meaning only in the pattern parameters. A `paths` entry
+carrying no separator therefore names one entry directly in the project root, and
+matches nothing when a file of that name lives deeper. Every array
 parameter requires a JSON array: a bare string where an array is expected returns
 `DPX-MCP-INVALID-ARGUMENTS` naming the argument, for example
 `'paths' must be an array of strings.`, instead of a partial or empty result.
+
+### Finding a file by name
+
+`include_patterns` is the only parameter that matches a file by its name. Content
+search never matches a path, and `paths` selects a path that already exists at the
+depth it names, so both answer a name lookup with nothing useful. Two responses
+therefore carry the constant `[Name search]` line, which names the form that
+works: `search_project` when it searched at least one file, found no match, and
+the pattern carries a `/` or ends in something shaped like an extension; and
+`get_tree` when a `paths` entry with no separator was not present in the effective
+tree. The line is a constant — the pattern and the paths a caller sent never reach
+it — and neither `analyze` nor `pack_context` needs it, because a missing `paths`
+entry there is a `DPX-MCP-PATH-NOT-FOUND` error rather than a partial answer. A
+search that found matches, a search whose pattern reads as ordinary content, and a
+selection that was already empty are all unchanged.
+
+### Search hits name the declaration that contains them
+
+`search_project` names the declaration each shown hit sits inside. There is no
+parameter for it: a hit without the thing that contains it is what made callers
+guess a line range and read twice. After the match lines, inside the same
+untrusted block, the response carries:
+
+```text
+Enclosing declarations:
+src/App.cs:5: P.App
+```
+
+A declaration name is text this project wrote, so it stays inside the untrusted
+block with the match lines it describes. Only counts leave it, as one trusted
+line: `[Symbols] annotated=N · files-without-declarations=K.`, which
+distinguishes a hit that sits in no declaration from a file that was never
+parsed, plus a `files-past-the-64-file naming limit=` term when a search touched
+more files than the naming bound allows.
+
+The names come from the dependency index built over the files that actually
+produced hits: one bounded parse per such file, never one per hit, and never over
+the whole selection. Granularity is whatever that index declares, which for C# is
+the enclosing type rather than the enclosing member. Hit lines are lines of the
+transformed text the tool returns and the index parses the file on disk; redaction
+replaces a secret with a placeholder on the same line and adds no lines, so the
+two agree on the only coordinate this uses.
+
+Naming shares the 16,000-character search cap rather than adding to it, and a
+response the cap already cut carries no naming at all, so turning it on cannot make
+any response larger than the bound it already had. The match lines, the `--` group
+separators, the match and file counters, and the "N additional matches" contract are
+unchanged.
+
+### Reading a declaration by name
+
+`get_file` accepts `symbol` beside `path` in place of a line range, and returns the
+lines that declare it. It takes a qualified name, or a simple name that is unique
+in that file; the last segment is compared when the qualified form does not match.
+It is the other half of the naming `search_project` does: a hit tells you the
+declaration, and `symbol` reads it without a line arithmetic step in between.
+
+`symbol` cannot be combined with `start_line`, `end_line`, or `start_column`, and
+that combination is rejected before the file is read. Three cases return
+`DPX-MCP-INVALID-ARGUMENTS` rather than a guess: a name matching more than one
+declaration, which reports how many and asks for the qualified form; a name
+matching none; and a file no declarations were extracted from, which is how an
+unsupported language answers. None of these echoes a declaration name, because the
+error text sits outside the untrusted block and a declaration name is project text.
+
+The range is the declaration the index reports, so its granularity is the same as
+the naming on search hits: for C# that is the enclosing type rather than the
+enclosing member. Without `symbol`, every `get_file` response is byte-identical,
+and the batch `requests` form is untouched.
 
 ### Batch `get_file`
 

@@ -17,6 +17,11 @@ public sealed class DependencyFactsDocumentationContractTests
 		Assert.Contains("**Ambiguous**", dependencies, StringComparison.Ordinal);
 		Assert.Contains("Merely failing to find a name in the manifest never", dependencies, StringComparison.Ordinal);
 		Assert.Contains("2 Mi characters", dependencies, StringComparison.Ordinal);
+		Assert.Contains(
+			"Without an owning `tsconfig.json` or `jsconfig.json`, one narrow capability applies",
+			dependencies,
+			StringComparison.Ordinal);
+		Assert.Contains("exactly one of `index.ts`", dependencies, StringComparison.Ordinal);
 		Assert.Contains("related_files.path", mcp, StringComparison.Ordinal);
 		Assert.Contains("[Facts coverage]", mcp, StringComparison.Ordinal);
 		Assert.Contains("devprojex related <PATH>", commandLine, StringComparison.Ordinal);

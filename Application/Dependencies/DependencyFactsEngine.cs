@@ -819,6 +819,9 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	private static string PortableRelative(string root, string path) => Normalize(Path.GetRelativePath(root, path));
 	private static string Normalize(string path) => path.Replace('\\', '/').TrimStart('/');
+	private const string MissingTypeScriptConfigurationReason =
+		"no owning tsconfig.json or jsconfig.json in the manifest";
+
 	private static StringComparer PathComparer => OperatingSystem.IsWindows()
 		? StringComparer.OrdinalIgnoreCase
 		: StringComparer.Ordinal;
@@ -1288,8 +1291,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					import.Reason, []);
 			var scope = FindScope(source.ScopeId);
 			if (scope is null || !scope.HasConfiguration)
-				return Edge(source, import, ResolutionStatus.Unresolved, null,
-					"no owning tsconfig.json or jsconfig.json in the manifest", []);
+				return ResolveTypeScriptImportWithoutConfiguration(source, import);
 			if (ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			if (FindNearestPackageMap(source) is { ConfigurationState: not DependencyConfigurationState.Valid } packageMap)
@@ -1359,13 +1361,13 @@ public sealed class DependencyFactsEngine : IDisposable
 				"one module target under configured module resolution");
 		}
 
-		private bool SupportsCommonJs(FileFacts source, DependencyScopeDescriptor scope)
+		private bool SupportsCommonJs(FileFacts source, DependencyScopeDescriptor? scope)
 		{
 			var extension = Path.GetExtension(source.Path).ToLowerInvariant();
 			if (extension is ".cjs" or ".cts") return true;
 			if (extension is ".mjs" or ".mts") return false;
 			if (extension is not (".ts" or ".tsx" or ".js" or ".jsx"))
-				return scope.LegacyTypeScriptConfiguration;
+				return scope?.LegacyTypeScriptConfiguration == true;
 			var moduleType = FindNearestPackageMap(source)?.ModuleType;
 			if (string.Equals(moduleType, "commonjs", StringComparison.OrdinalIgnoreCase)) return true;
 			if (string.Equals(moduleType, "module", StringComparison.OrdinalIgnoreCase)) return false;
@@ -1652,6 +1654,96 @@ public sealed class DependencyFactsEngine : IDisposable
 				}
 			}
 			return candidates;
+		}
+
+		/// <summary>
+		/// Index files a relative directory specifier may name. This is the same list, in the same
+		/// order, that a configured project probes, so a directory resolved without configuration is
+		/// always a directory a configured project would have resolved too.
+		/// </summary>
+		private static readonly string[] TypeScriptIndexSuffixes =
+			[".ts", ".tsx", ".d.ts", ".js", ".jsx"];
+
+		/// <summary>
+		/// Suffixes that make a sibling file compete with a directory of the same stem. Choosing
+		/// between <c>util.js</c> and <c>util/index.js</c> is what module resolution settings decide,
+		/// so the presence of any of these leaves the specifier unresolved.
+		/// </summary>
+		private static readonly string[] TypeScriptSiblingSuffixes =
+			[".ts", ".tsx", ".d.ts", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"];
+
+		/// <summary>
+		/// Resolution for a file that no <c>tsconfig.json</c> or <c>jsconfig.json</c> owns. Only what
+		/// the specifier literally names can be proven without configuration: a relative path that is
+		/// itself a manifest file, or a relative directory holding exactly one index file and nothing
+		/// that competes with it. Extension substitution, root and path mapping, package resolution,
+		/// and <c>main</c> or <c>types</c> entry points all need configuration and keep the existing
+		/// unresolved reason.
+		/// </summary>
+		private DependencyEdge ResolveTypeScriptImportWithoutConfiguration(FileFacts source, ImportFact import)
+		{
+			if (!IsExplicitRelativeSpecifier(import.Specifier))
+				return MissingTypeScriptConfiguration(source, import);
+			if (FindNearestPackageMap(source) is { ConfigurationState: not DependencyConfigurationState.Valid })
+				return MissingTypeScriptConfiguration(source, import);
+			if (IsRequire(import) && !SupportsCommonJs(source, scope: null))
+				return MissingTypeScriptConfiguration(source, import);
+			var physical = PhysicalModuleSpecifier(import.Specifier);
+			if (physical.Length == 0)
+				return MissingTypeScriptConfiguration(source, import);
+			var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path));
+			if (directory is null)
+				return MissingTypeScriptConfiguration(source, import);
+			var target = Path.GetFullPath(Path.Combine(directory, physical));
+			if (!IsWithin(_root, target))
+				return MissingTypeScriptConfiguration(source, import);
+			var relative = PortableRelative(_root, target);
+			if (TryGetManifestPath(relative, out var named))
+				return Edge(source, import, ResolutionStatus.Resolved, named,
+					"relative specifier names a file in the manifest", [named]);
+			if (SingleTypeScriptDirectoryIndex(relative) is not { } index)
+				return MissingTypeScriptConfiguration(source, import);
+			return Edge(source, import, ResolutionStatus.Resolved, index,
+				"relative specifier names a directory with one index file", [index]);
+		}
+
+		/// <summary>
+		/// A specifier that names a path relative to the importing file. A bare specifier that merely
+		/// starts with a dot, such as <c>.config/app.js</c>, is a package name and is not relative.
+		/// </summary>
+		private static bool IsExplicitRelativeSpecifier(string specifier) =>
+			specifier is "." or ".." ||
+			specifier.StartsWith("./", StringComparison.Ordinal) ||
+			specifier.StartsWith("../", StringComparison.Ordinal);
+
+		private DependencyEdge MissingTypeScriptConfiguration(FileFacts source, ImportFact import) =>
+			Edge(source, import, ResolutionStatus.Unresolved, null,
+				MissingTypeScriptConfigurationReason, []);
+
+		/// <summary>
+		/// The single <c>index.*</c> file directly inside a manifest directory, or
+		/// <see langword="null"/> when the directory owns a <c>package.json</c>, when a sibling file
+		/// of the same stem competes with it, or when it holds none or more than one index file.
+		/// Each of those is a choice only the configuration could make.
+		/// </summary>
+		private string? SingleTypeScriptDirectoryIndex(string relativeDirectory)
+		{
+			if (_configuration.PackageMaps.ContainsKey(relativeDirectory))
+				return null;
+			foreach (var suffix in TypeScriptSiblingSuffixes)
+				if (TryGetManifestPath(relativeDirectory + suffix, out _))
+					return null;
+			var prefix = relativeDirectory is "." or "" ? string.Empty : relativeDirectory + "/";
+			string? single = null;
+			foreach (var suffix in TypeScriptIndexSuffixes)
+			{
+				if (!TryGetManifestPath(prefix + "index" + suffix, out var candidate))
+					continue;
+				if (single is not null)
+					return null;
+				single = candidate;
+			}
+			return single;
 		}
 
 		private bool TryGetManifestPath(string relative, out string manifestPath)
@@ -2004,7 +2096,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				return Edge(source, reference, ResolutionStatus.Unresolved, null,
 					source.LanguageId == LanguageId.CSharp
 						? "no owning .csproj in the manifest"
-						: "no owning tsconfig.json or jsconfig.json in the manifest", []);
+						: MissingTypeScriptConfigurationReason, []);
 			}
 			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);

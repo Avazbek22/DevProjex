@@ -50,7 +50,15 @@ public enum DependencyDirection
 	Both
 }
 
-public sealed record SourceSite(string File, int Line, string Evidence);
+public sealed record SourceSite(string File, int Line, string Evidence)
+{
+	/// <summary>
+	/// Last line of the declaration this site names, or -1 when the extractor did not report one.
+	/// <see cref="Line"/> and this bound together are what let a caller say which declaration a
+	/// line belongs to without parsing the file again.
+	/// </summary>
+	public int EndLine { get; init; } = -1;
+}
 
 public sealed record TypeParameterScope(string Name, int StartIndex, int EndIndex);
 

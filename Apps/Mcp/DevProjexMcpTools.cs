@@ -26,6 +26,16 @@ internal sealed class DevProjexMcpTools(
 	// context budget in one unpredictable call. The cap bounds that, and the totals line
 	// tells the caller how much it did not get.
 	private const int MaximumSearchContentCharacters = 16_000;
+	// Asking for a file by name is the one request the selection vocabulary answers in a form a
+	// caller rarely guesses: a bare name is root-only, and paths selects what already exists at
+	// the depth it names. Both roads end in an empty or misleading answer, so the two tools that
+	// tolerate them point at the form that works. The pointer is a constant; nothing the caller
+	// sent reaches it.
+	private const string NameSearchNotice =
+		"[Name search] File names and paths are matched only by include_patterns: prefix a bare name " +
+		"with '**/' to find it at any depth, or append '/**' to a directory to select its files. " +
+		"search_project matches file content, and paths selects a path that already exists.";
+	private const int MaximumNameSearchExtensionLength = 8;
 	private const string SearchContentCapNotice =
 		"[Search truncated] The returned text reached the 16000-character search cap. " +
 		"Narrow the pattern, add paths or include_patterns, or lower context_lines.";
@@ -64,7 +74,7 @@ internal sealed class DevProjexMcpTools(
 	private readonly IReadOnlySet<string> packArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "view",
 		"format", "detail", "detail_by_pattern", "tracked_only", "git_scope", "rank", "focus",
-		"max_tokens", "max_file_bytes");
+		"max_tokens", "max_file_bytes", McpRelatedExpansion.ParameterName);
 	private readonly IReadOnlySet<string> searchArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "context_lines",
 		"ignore_case", "max_results", "tracked_only", "git_scope", "max_file_bytes");
@@ -72,7 +82,8 @@ internal sealed class DevProjexMcpTools(
 		"project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile",
 		"tracked_only", "git_scope", "max_file_bytes");
 	private readonly IReadOnlySet<string> getFileArgumentNames = Allowed(agentExclusions,
-		"project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column");
+		"project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column",
+		"symbol");
 	private McpProjectService Projects => projectService.Value;
 
 	[Description(
@@ -215,6 +226,7 @@ internal sealed class DevProjexMcpTools(
 				McpSpotlight.Wrap(treeWriter.Text),
 				treeTruncationNotice,
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
+				FormatNameSearchNotice(plan, paths),
 				SelectionNotices(
 					plan,
 					includeFilters: true,
@@ -470,7 +482,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. focus requires rank=importance and seeds graph-hop ordering without widening selection; max_tokens applies greedy content admission and reports heuristic token estimates, not tokenizer counts. detail_by_pattern overrides detail per file; entries apply in order and the last matching entry wins, so list general globs before specific ones.")]
+		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. expand_related also packs the resolved dependency neighbours of its seeds and only narrows. focus requires rank=importance; max_tokens applies greedy content admission and reports heuristic token estimates, not tokenizer counts. detail_by_pattern overrides detail per file; the last matching entry wins, so list general globs first.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -511,6 +523,7 @@ internal sealed class DevProjexMcpTools(
 					$"{McpErrorCodes.InvalidArguments}: {McpDetailOverrides.ParameterName} is valid only when " +
 					"pack_context includes file content.");
 			}
+			var expansionRequest = McpRelatedExpansion.Parse(arguments);
 			var selection = await BuildSelectionAsync(
 					arguments,
 					cancellationToken,
@@ -519,6 +532,29 @@ internal sealed class DevProjexMcpTools(
 						format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 				.ConfigureAwait(false);
 			var plan = selection.Plan;
+			// Expansion runs against the plan the filters produced and can only remove from it, so
+			// a neighbour outside the effective selection has no way in. It also runs before focus
+			// is resolved, which is what makes a focus seed the expansion did not admit fail with
+			// the same error any unselected path gets.
+			var expansionResult = expansionRequest is null
+				? null
+				: await McpRelatedExpansion.ExpandAsync(
+						Projects.DependencyFactsEngine,
+						plan,
+						Projects.ResolveRequestedFiles(plan, expansionRequest.Seeds, cancellationToken)
+							.Select(seed => McpProjectService.ToRelative(plan.SourceRoot, seed))
+							.ToArray(),
+						expansionRequest,
+						operationProgress.MeasureFacts("Indexing dependency facts", 2, 8),
+						cancellationToken)
+					.ConfigureAwait(false);
+			if (expansionResult is not null)
+			{
+				plan = await Projects
+					.NarrowSelectionAsync(plan, expansionResult.RelativePaths, cancellationToken)
+					.ConfigureAwait(false);
+			}
+
 			var selectedFileCount = plan.IncludedFiles.Count;
 			var focusSeeds = focus is null
 				? null
@@ -528,6 +564,7 @@ internal sealed class DevProjexMcpTools(
 			// A pack is the answer many agents read instead of get_tree, so it carries the same
 			// effective-filters footer next to its tree.
 			var trustedPlanWarnings = CombineTrustedNotices(
+				FormatExpansionNotice(expansionResult),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				SelectionNotices(plan, includeFilters: true, selection.NoticeContext));
 			operationProgress.Milestone(
@@ -822,6 +859,7 @@ internal sealed class DevProjexMcpTools(
 			var responseLimitReached = false;
 			var resultGroupTruncated = false;
 			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
+			var writtenHits = new List<McpSearchHit>();
 			long inspectedBytes = 0;
 			foreach (var path in plan.IncludedFiles)
 			{
@@ -851,18 +889,23 @@ internal sealed class DevProjexMcpTools(
 					if (responseLimitReached)
 						return ValueTask.CompletedTask;
 
+					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
 					var startsNewFile = true;
 					foreach (var match in scan.Matches)
 					{
 						var appended = AppendSearchResult(
 							output,
-							McpProjectService.ToRelative(plan.SourceRoot, file.Path),
+							relative,
 							file.Content,
 							match,
 							MaximumSearchContentCharacters,
 							startsNewFile);
 						startsNewFile = false;
 						shownMatches += appended.WrittenMatches;
+						// Only the lines that reached the caller are worth naming; a match the cap
+						// dropped is not in the response to be annotated.
+						foreach (var line in match.MatchLineNumbers.Take(appended.WrittenMatches))
+							writtenHits.Add(new McpSearchHit(relative, file.Path, line));
 						if (appended.Truncated)
 						{
 							responseLimitReached = true;
@@ -873,6 +916,14 @@ internal sealed class DevProjexMcpTools(
 					return ValueTask.CompletedTask;
 				},
 				cancellationToken).ConfigureAwait(false);
+			// A response the character cap already cut has no room to spend on naming, and the
+			// caller's next move there is to narrow the pattern rather than to read a symbol.
+			var symbols = resultGroupTruncated
+				? McpSearchSymbolResult.None
+				: await McpSearchSymbols
+					.ResolveAsync(Projects.DependencyFactsEngine, plan, writtenHits, cancellationToken)
+					.ConfigureAwait(false);
+			AppendEnclosingDeclarations(output, symbols);
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
 				: null;
@@ -893,6 +944,8 @@ internal sealed class DevProjexMcpTools(
 				FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
+				FormatSymbolCoverageNotice(symbols),
+				FormatNameSearchNotice(plan, paths, pattern, totalMatches),
 				additionalMatchesNotice,
 				searchTotalsNotice,
 				inspectionBudgetReached
@@ -1028,6 +1081,15 @@ internal sealed class DevProjexMcpTools(
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var startColumn = arguments.OptionalInteger("start_column", 1, int.MaxValue);
+			var symbol = arguments.OptionalString("symbol");
+			if (symbol is not null && (start is not null || end is not null || startColumn is not null))
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: 'symbol' addresses a declaration and cannot be " +
+					"combined with start_line, end_line, or start_column.");
+			}
+
 			ValidateLineRange(start, end);
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
@@ -1043,6 +1105,20 @@ internal sealed class DevProjexMcpTools(
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			var file = Projects.ResolveFile(plan, requestedPath);
+			if (symbol is not null)
+			{
+				var located = await McpSearchSymbols
+					.ResolveSymbolAsync(
+						Projects.DependencyFactsEngine,
+						plan,
+						McpProjectService.ToRelative(plan.SourceRoot, file),
+						file,
+						symbol,
+						cancellationToken)
+					.ConfigureAwait(false);
+				(start, end) = ResolveSymbolRange(located);
+			}
+
 			TransformedTextFile? transformed = null;
 			await using var inspected = await Projects.ConsumeSearchTextAsync(
 					plan with { IncludedFiles = [file] },
@@ -2253,6 +2329,151 @@ internal sealed class DevProjexMcpTools(
 					: $" seeds={item.Seeds.ToString(CultureInfo.InvariantCulture)}"))
 			.ToArray();
 		return notices.Length == 0 ? null : string.Join('\n', notices);
+	}
+
+	/// <summary>
+	/// Turns a symbol lookup into the line range to read, or into the error that says why there is
+	/// none. An ambiguous name reports how many declarations answered to it and asks for a
+	/// qualified name; it never names them, because a declaration name is project text and the
+	/// error text is outside the untrusted block.
+	/// </summary>
+	private static (int? Start, int? End) ResolveSymbolRange(McpSymbolLookup located) =>
+		located.Status switch
+		{
+			McpSymbolLookupStatus.Resolved => (located.StartLine, located.EndLine),
+			McpSymbolLookupStatus.Ambiguous => throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: 'symbol' matches " +
+				$"{located.CandidateCount.ToString(CultureInfo.InvariantCulture)} declarations in this " +
+				"file; pass the qualified name, or read the file and choose a line range."),
+			McpSymbolLookupStatus.Unsupported => throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: 'symbol' is not supported for this file, because no " +
+				"declarations were extracted from it; pass start_line and end_line instead."),
+			_ => throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: 'symbol' matches no declaration in this file; " +
+				"search_project names the declaration each hit sits inside.")
+		};
+
+	/// <summary>
+	/// Writes the declaration each shown hit sits inside, inside the untrusted block, because a
+	/// declaration name is text this project wrote.
+	/// </summary>
+	private static void AppendEnclosingDeclarations(StringBuilder output, McpSearchSymbolResult symbols)
+	{
+		if (symbols.Lines.Count == 0)
+			return;
+		if (output.Length > 0)
+			output.AppendLine();
+		output.AppendLine(McpSearchSymbols.SectionHeading);
+		foreach (var line in symbols.Lines)
+		{
+			// The naming shares the search character cap rather than adding to it, so turning it
+			// on cannot make any response larger than the published bound.
+			if (output.Length + line.Length >= MaximumSearchContentCharacters)
+				break;
+			output.AppendLine(line);
+		}
+	}
+
+	/// <summary>
+	/// Reports how far the naming reached, in counts alone, so a caller can tell "this hit is in no
+	/// declaration" from "this file was never parsed".
+	/// </summary>
+	private static string? FormatSymbolCoverageNotice(McpSearchSymbolResult symbols)
+	{
+		if (symbols.AnnotatedHits == 0 && symbols.FilesWithoutDeclarations == 0 && symbols.FilesBeyondTheLimit == 0)
+			return null;
+		var reported =
+			$"[Symbols] annotated={symbols.AnnotatedHits.ToString(CultureInfo.InvariantCulture)} · " +
+			$"files-without-declarations={symbols.FilesWithoutDeclarations.ToString(CultureInfo.InvariantCulture)}";
+		return symbols.FilesBeyondTheLimit > 0
+			? $"{reported} · files-past-the-" +
+			  $"{McpSearchSymbols.MaximumAnnotatedFiles.ToString(CultureInfo.InvariantCulture)}-file " +
+			  $"naming limit={symbols.FilesBeyondTheLimit.ToString(CultureInfo.InvariantCulture)}."
+			: $"{reported}.";
+	}
+
+	/// <summary>
+	/// Points at the form that finds a file by name when this call asked for one in the only way
+	/// the tool tolerates: a requested path that the effective tree does not hold.
+	/// </summary>
+	private static string? FormatNameSearchNotice(
+		ProjectContextPlan plan,
+		IReadOnlyList<string>? paths) =>
+		McpTrustedDiagnosticFormatter.ReportsMissingSelectedPath(plan) && HasBareNamePath(paths)
+			? NameSearchNotice
+			: null;
+
+	/// <summary>
+	/// The search form of the same pointer. A content pattern that searched files and found
+	/// nothing while reading like a file name was almost certainly aimed at one, and this tool
+	/// never matches a path. A selection that held no file to search explains itself through
+	/// <c>[Empty selection]</c> instead, and is left alone.
+	/// </summary>
+	private static string? FormatNameSearchNotice(
+		ProjectContextPlan plan,
+		IReadOnlyList<string>? paths,
+		string pattern,
+		int totalMatches) =>
+		(McpTrustedDiagnosticFormatter.ReportsMissingSelectedPath(plan) && HasBareNamePath(paths)) ||
+		(totalMatches == 0 && plan.IncludedFiles.Count > 0 && LooksLikeANameSearch(pattern))
+			? NameSearchNotice
+			: null;
+
+	/// <summary>
+	/// A requested path with no separator names one entry directly in the project root, so a
+	/// caller who meant "this name, wherever it lives" gets nothing from it.
+	/// </summary>
+	private static bool HasBareNamePath(IReadOnlyList<string>? paths) =>
+		paths?.Any(static path =>
+			!string.IsNullOrWhiteSpace(path) &&
+			!path.Contains('/', StringComparison.Ordinal) &&
+			!path.Contains('\\', StringComparison.Ordinal)) == true;
+
+	/// <summary>
+	/// Whether a pattern that matched no content reads as a file name or path: it carries a path
+	/// separator, or it ends in what looks like an extension, with or without the regex escape
+	/// and the end anchor a caller would write around it. Both are syntactic, both are computed
+	/// only for a response that already found nothing, and neither reaches the response text.
+	/// </summary>
+	private static bool LooksLikeANameSearch(string pattern)
+	{
+		if (string.IsNullOrWhiteSpace(pattern))
+			return false;
+		if (pattern.Contains('/', StringComparison.Ordinal))
+			return true;
+
+		var end = pattern.Length;
+		if (pattern[end - 1] == '$')
+			end--;
+		var start = end;
+		while (start > 0 && char.IsAsciiLetterOrDigit(pattern[start - 1]))
+			start--;
+		return end - start is > 0 and <= MaximumNameSearchExtensionLength &&
+			start > 0 &&
+			pattern[start - 1] == '.';
+	}
+
+	/// <summary>
+	/// Reports what the expansion added, in counts and one constant. The paths themselves are in
+	/// the untrusted block with the rest of the pack, as every project path is.
+	/// </summary>
+	private static string? FormatExpansionNotice(McpRelatedExpansionResult? expansion)
+	{
+		if (expansion is null)
+			return null;
+		var reported =
+			$"[Expanded] seeds={expansion.SeedCount.ToString(CultureInfo.InvariantCulture)} · " +
+			$"hop1=+{expansion.FirstHopCount.ToString(CultureInfo.InvariantCulture)} · " +
+			$"hop2=+{expansion.SecondHopCount.ToString(CultureInfo.InvariantCulture)} · " +
+			$"seeds-without-facts={expansion.SeedsWithoutFacts.ToString(CultureInfo.InvariantCulture)}";
+		return expansion.LimitReached
+			? $"{reported}; stopped at the " +
+			  $"{McpRelatedExpansion.MaximumExpandedFiles.ToString(CultureInfo.InvariantCulture)}-file " +
+			  "expansion limit, so the neighbourhood is incomplete."
+			: $"{reported}.";
 	}
 
 	private static IReadOnlyList<string>? ParsePaths(McpJsonArguments arguments) =>
