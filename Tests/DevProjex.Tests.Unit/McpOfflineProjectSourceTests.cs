@@ -49,6 +49,8 @@ public sealed class McpOfflineProjectSourceTests
 	[InlineData(@"\??\GLOBALROOT\Device\Mup\host.invalid\share")]
 	[InlineData("/net/host.invalid/share")]
 	[InlineData("/Network/Servers/host.invalid/share")]
+	[InlineData(@"\\?\GLOBALROOT\Device\Mup\host.invalid\share")]
+	[InlineData(@"\\?\\UNC\host.invalid\share")]
 	public async Task ARemoteFormIsRefusedWithoutAnythingOpeningIt(string project)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -60,6 +62,10 @@ public sealed class McpOfflineProjectSourceTests
 
 		Assert.Equal(0, probes.Value);
 		Assert.Equal(McpErrorCodes.InvalidArguments, refusal.Code);
+		Assert.Contains(
+			"refused before 'project' is read as a path at all",
+			refusal.Message,
+			StringComparison.Ordinal);
 	}
 
 	/// <summary>
@@ -113,7 +119,12 @@ public sealed class McpOfflineProjectSourceTests
 
 		Assert.Equal(0, probes.Value);
 		Assert.Equal(McpErrorCodes.InvalidArguments, refusal.Code);
-		Assert.Contains("written as a path that names a host", refusal.Message, StringComparison.Ordinal);
+		// The first sentence of both refusals is the same, so the assertion is on the second, which
+		// is what says whether the source resolver or the registry answered.
+		Assert.Contains(
+			"refused before 'project' is read as a path at all",
+			refusal.Message,
+			StringComparison.Ordinal);
 	}
 
 	/// <summary>

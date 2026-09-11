@@ -256,8 +256,8 @@ and returns JSON-RPC code `-32602`.
 
 Remote-specific errors are `DPX-MCP-REMOTE-DISABLED` when a URL is passed to a
 server started without `--allow-remote`, `DPX-MCP-INVALID-ARGUMENTS` for an
-unsupported URL, a branch used with a local path, or a `project` written as a UNC or
-device path form, and `DPX-MCP-REMOTE-FAILED`
+unsupported URL, a branch used with a local path, or a `project` written as a path that
+names a host, and `DPX-MCP-REMOTE-FAILED`
 when Git, cloning, cache publication, or branch checkout fails.
 `DPX-MCP-REMOTE-LIMIT` reports that the 16-source session cap was reached. Error
 text uses the credential-free display form of the URL.

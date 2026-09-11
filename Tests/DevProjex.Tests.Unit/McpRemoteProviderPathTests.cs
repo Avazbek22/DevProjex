@@ -27,9 +27,9 @@ public sealed class McpRemoteProviderPathTests
 		Assert.True(McpRemoteProviderPath.ReachesRemoteProvider(path));
 
 	/// <summary>
-	/// The one entry in the Win32 device namespace that leaves the machine, and the NT object
-	/// namespace, which is refused whole because it reaches the redirector by more than one
-	/// spelling and nothing legitimate addresses a project through it.
+	/// Everything in the device namespaces except the three local forms below. Windows reaches the
+	/// same redirector through several of these, and GLOBALROOT opens onto an object namespace of
+	/// aliases that cannot be enumerated, which is why the accepted set is listed instead.
 	/// </summary>
 	[Theory]
 	[InlineData(@"\\?\UNC\server\share")]
@@ -41,6 +41,17 @@ public sealed class McpRemoteProviderPathTests
 	[InlineData(@"\??\GLOBALROOT\Device\Mup\server\share")]
 	[InlineData(@"\??\C:\repository")]
 	[InlineData("/??/UNC/server/share")]
+	[InlineData(@"\\?\GLOBALROOT\Device\Mup\server\share")]
+	[InlineData(@"\\.\GLOBALROOT\Device\Mup\server\share")]
+	[InlineData(@"\\?\GLOBALROOT\Device\LanmanRedirector\server\share")]
+	[InlineData(@"\\?\GLOBALROOT\??\UNC\server\share")]
+	[InlineData(@"\\?\GLOBALROOT\GLOBAL??\UNC\server\share")]
+	[InlineData(@"\\?\GLOBALROOT\Device\WebDavRedirector\server\DavWWWRoot")]
+	[InlineData(@"\\?\\UNC\server\share")]
+	[InlineData(@"\\.\\UNC\server\share")]
+	[InlineData(@"\\?\Device\Mup\server\share")]
+	[InlineData(@"\\?\UNCertain\repository")]
+	[InlineData(@"\\?\")]
 	public void ADeviceNamespaceFormThatLeavesTheMachineIsRecognised(string path) =>
 		Assert.True(McpRemoteProviderPath.ReachesRemoteProvider(path));
 
@@ -66,8 +77,6 @@ public sealed class McpRemoteProviderPathTests
 	[InlineData("//?/C:/repository")]
 	[InlineData(@"\\.\pipe\name")]
 	[InlineData(@"\\?\Volume{00000000-0000-0000-0000-000000000000}\repository")]
-	[InlineData(@"\\?\UNCertain\repository")]
-	[InlineData(@"\\?\")]
 	public void ALocalDeviceFormIsNotARemoteForm(string path) =>
 		Assert.False(McpRemoteProviderPath.ReachesRemoteProvider(path));
 

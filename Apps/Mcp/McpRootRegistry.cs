@@ -243,6 +243,8 @@ public sealed class McpRootRegistry
 			         StringSplitOptions.RemoveEmptyEntries))
 		{
 			var candidate = Path.Combine(current, segment);
+			// Each segment is opened in turn, so each one reports itself.
+			McpProjectPathProbe.Record();
 			FileSystemInfo info = Directory.Exists(candidate)
 				? new DirectoryInfo(candidate)
 				: new FileInfo(candidate);

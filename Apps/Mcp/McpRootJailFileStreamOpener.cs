@@ -30,6 +30,7 @@ internal sealed class McpRootJailFileStreamOpener
 		bool asynchronous)
 	{
 		var lexicalRoot = _roots.ResolveLexicalRoot(path);
+		McpProjectPathProbe.Record();
 		UnixFileTypeInspector.EnsureRegularFile(path);
 		var stream = new FileStream(
 			path,
