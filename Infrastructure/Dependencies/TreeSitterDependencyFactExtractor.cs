@@ -375,7 +375,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var definition = _definitions[id];
 			var queryHash = Hash(Encoding.UTF8.GetBytes(
 				ReadQuery(definition.QueryDirectory, "declarations.scm") + "\0" +
-				ReadQuery(definition.QueryDirectory, "references.scm") + "\0" + DiagnosticErrorQuery));
+				ReadQuery(definition.QueryDirectory, "references.scm") + "\0" +
+				ReadQuery(definition.QueryDirectory, "navigation.scm") + "\0" + DiagnosticErrorQuery));
 			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}";
 		});
 
@@ -420,11 +421,17 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				declarations,
 				references);
 			var result = runtime.Adapter.Extract(context, limits);
+			var navigation = CaptureNavigation(
+				runtime.Navigation,
+				tree.RootNode,
+				source.LanguageId,
+				source.ContentFingerprint,
+				cancellationToken);
 			Interlocked.Add(ref _adapterVisitedRanges, context.Work.VisitedRanges);
 			Interlocked.Add(ref _adapterComparisons, context.Work.Comparisons);
 			Interlocked.Add(ref _createdFacts,
 				result.Declarations.Count + result.Imports.Count + result.References.Count);
-			return result;
+			return result with { NavigationDeclarations = navigation };
 		}
 		catch (Exception exception) when (exception is
 		       IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -454,8 +461,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 						ReadQuery(definition.QueryDirectory, "declarations.scm") + "\n" +
 						ReadQuery(definition.QueryDirectory, "references.scm") + "\n" +
 						DiagnosticErrorQuery);
+					var navigation = new Query(language, ReadQuery(definition.QueryDirectory, "navigation.scm"));
 					Interlocked.Increment(ref _compiledQuerySetCount);
-					return new LanguageRuntime(language, facts, definition.Adapter);
+					return new LanguageRuntime(language, facts, navigation, definition.Adapter);
 				}
 				catch
 				{
@@ -535,6 +543,156 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				.ThenBy(static capture => capture.Name, StringComparer.Ordinal).ToArray(),
 			errorKinds,
 			rawCaptureLimitExceeded);
+	}
+
+	private static IReadOnlyList<NavigationDeclaration> CaptureNavigation(
+		Query query,
+		Node root,
+		LanguageId language,
+		string contentFingerprint,
+		CancellationToken cancellationToken)
+	{
+		using var cursor = query.Execute(root);
+		var declarations = new List<NavigationDeclaration>();
+		var seen = new HashSet<(int Start, int End, NavigationSymbolKind Kind, string Name)>();
+		var visited = 0;
+		foreach (var capture in cursor.Captures)
+		{
+			if ((visited++ & 255) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			var name = ReadNavigationName(capture.Node, language);
+			if (string.IsNullOrWhiteSpace(name))
+				continue;
+			var owners = ReadNavigationOwners(capture.Node, language);
+			var owner = owners.Count == 0 ? null : string.Join('.', owners);
+			var qualifiedName = owner is null ? name : $"{owner}.{name}";
+			var kind = capture.Name switch
+			{
+				"navigation.method" => NavigationSymbolKind.Method,
+				"navigation.property" => NavigationSymbolKind.Property,
+				"navigation.field" => NavigationSymbolKind.Field,
+				"navigation.function" => NavigationSymbolKind.Function,
+				"navigation.module" => NavigationSymbolKind.Module,
+				_ => NavigationSymbolKind.Type
+			};
+			var start = checked((int)capture.Node.StartPosition.Row + 1);
+			var end = checked((int)capture.Node.EndPosition.Row + 1);
+			if (seen.Add((checked((int)capture.Node.StartIndex), checked((int)capture.Node.EndIndex), kind, qualifiedName)))
+			{
+				declarations.Add(new NavigationDeclaration(
+					qualifiedName,
+					kind,
+					owner,
+					start,
+					end,
+					contentFingerprint)
+				{
+					StartIndex = checked((int)capture.Node.StartIndex),
+					EndIndex = checked((int)capture.Node.EndIndex)
+				});
+			}
+		}
+		return declarations
+			.OrderBy(static declaration => declaration.StartLine)
+			.ThenBy(static declaration => declaration.EndLine)
+			.ThenBy(static declaration => declaration.Name, StringComparer.Ordinal)
+			.ToArray();
+	}
+
+	private static string? ReadNavigationName(Node node, LanguageId language)
+	{
+		var named = node.GetChildForField("name") ?? node.GetChildForField("key");
+		if (named is not null)
+			return NormalizeNavigationName(named.Text);
+
+		if (language == LanguageId.Go)
+		{
+			if (node.Type == "short_var_declaration")
+				return FirstIdentifier(node.GetChildForField("left")?.Text);
+			if (node.Type is "field_declaration" or "var_spec")
+				return FirstIdentifier(node.Text);
+		}
+		return null;
+	}
+
+	private static IReadOnlyList<string> ReadNavigationOwners(Node node, LanguageId language)
+	{
+		var owners = new List<string>();
+		for (var parent = node.Parent; parent is not null; parent = parent.Parent)
+		{
+			if (!IsNavigationOwner(parent.Type, language))
+				continue;
+			var name = ReadNavigationName(parent, language);
+			if (!string.IsNullOrWhiteSpace(name))
+				owners.Add(name);
+		}
+		owners.Reverse();
+		if (language == LanguageId.Go && node.Type == "method_declaration")
+		{
+			var receiver = GoReceiverType(node.GetChildForField("receiver")?.Text);
+			if (!string.IsNullOrWhiteSpace(receiver))
+				owners.Add(receiver);
+		}
+		return owners;
+	}
+
+	private static bool IsNavigationOwner(string nodeType, LanguageId language) => language switch
+	{
+		LanguageId.CSharp => nodeType is "namespace_declaration" or "file_scoped_namespace_declaration" or
+			"class_declaration" or "struct_declaration" or "interface_declaration" or "record_declaration" or
+			"enum_declaration" or "method_declaration" or "local_function_statement" or "property_declaration",
+		LanguageId.Python => nodeType is "class_definition" or "function_definition",
+		LanguageId.TypeScript or LanguageId.Tsx or LanguageId.JavaScript => nodeType is
+			"class_declaration" or "abstract_class_declaration" or "interface_declaration" or
+			"internal_module" or "function_declaration" or "generator_function_declaration" or
+			"method_definition" or "variable_declarator" or "pair",
+		LanguageId.Go => nodeType is "type_spec" or "function_declaration" or "method_declaration",
+		_ => false
+	};
+
+	private static string? NormalizeNavigationName(string value)
+	{
+		var name = value.Trim();
+		if (name.Length >= 2 && name[0] is '\'' or '"' && name[^1] == name[0])
+			name = name[1..^1];
+		return name.Length == 0 ? null : name;
+	}
+
+	private static string? FirstIdentifier(string? value)
+	{
+		if (string.IsNullOrEmpty(value))
+			return null;
+		for (var start = 0; start < value.Length; start++)
+		{
+			if (!(value[start] == '_' || char.IsLetter(value[start])))
+				continue;
+			var end = start + 1;
+			while (end < value.Length && (value[end] == '_' || char.IsLetterOrDigit(value[end])))
+				end++;
+			return value[start..end];
+		}
+		return null;
+	}
+
+	private static string? GoReceiverType(string? receiver)
+	{
+		if (string.IsNullOrWhiteSpace(receiver))
+			return null;
+		string? result = null;
+		for (var index = 0; index < receiver.Length;)
+		{
+			if (!(receiver[index] == '_' || char.IsLetter(receiver[index])))
+			{
+				index++;
+				continue;
+			}
+			var end = index + 1;
+			while (end < receiver.Length && (receiver[end] == '_' || char.IsLetterOrDigit(receiver[end])))
+				end++;
+			result = receiver[index..end];
+			index = end;
+		}
+		return result;
 	}
 
 	private static bool IsDeclarationCapture(string captureName) =>
@@ -1249,11 +1407,13 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private sealed class LanguageRuntime(
 		Language language,
 		Query facts,
+		Query navigation,
 		IDependencyLanguageAdapter adapter) : IDisposable
 	{
 		private readonly ConcurrentBag<Parser> _parsers = [];
 		private int _retained;
 		public Query Facts { get; } = facts;
+		public Query Navigation { get; } = navigation;
 		public IDependencyLanguageAdapter Adapter { get; } = adapter;
 
 		public ParserLease Rent(SemaphoreSlim budget)
@@ -1283,6 +1443,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		{
 			while (_parsers.TryTake(out var parser)) parser.Dispose();
 			Facts.Dispose();
+			Navigation.Dispose();
 			language.Dispose();
 		}
 	}

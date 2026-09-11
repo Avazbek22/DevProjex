@@ -4,6 +4,75 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed partial class McpServerProcessTests
 {
+	public static TheoryData<string, string, string, string> MemberNavigationCases => new()
+	{
+		{
+			"Members.cs",
+			"namespace P;\nclass A { string Run() { return \"member-marker-a\"; } }\nclass B { string Run() { return \"member-marker-b\"; } }\n// fallback-marker\n",
+			"A.Run",
+			"B.Run"
+		},
+		{
+			"members.js",
+			"class A { run() { return 'member-marker-a'; } }\nclass B { run() { return 'member-marker-b'; } }\n(function () { return 'fallback-marker'; })();\n",
+			"A.run",
+			"B.run"
+		},
+		{
+			"members.ts",
+			"class A { run(): string { return 'member-marker-a'; } }\nclass B { run(): string { return 'member-marker-b'; } }\n(function (): string { return 'fallback-marker'; })();\n",
+			"A.run",
+			"B.run"
+		},
+		{
+			"members.go",
+			"package sample\ntype A struct{}\ntype B struct{}\nfunc (a A) Run() string { return \"member-marker-a\" }\nfunc (b B) Run() string { return \"member-marker-b\" }\nvar fallback = func() string { return \"fallback-marker\" }\n",
+			"A.Run",
+			"B.Run"
+		},
+		{
+			"members.py",
+			"class A:\n    def run(self):\n        return 'member-marker-a'\nclass B:\n    def run(self):\n        return 'member-marker-b'\n(lambda: 'fallback-marker')()\n",
+			"A.run",
+			"B.run"
+		}
+	};
+
+	[Theory]
+	[MemberData(nameof(MemberNavigationCases))]
+	public async Task RealProcessUsesTheNearestNamedMemberAcrossSupportedLanguages(
+		string fileName,
+		string source,
+		string firstSymbol,
+		string secondSymbol)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("member-project");
+		workspace.WriteFile($"member-project/{fileName}", source);
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var search = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "member-marker|fallback-marker",
+				["context_lines"] = 0
+			})));
+		Assert.Contains($"in {firstSymbol}\n", search, StringComparison.Ordinal);
+		Assert.Contains($"in {secondSymbol}\n", search, StringComparison.Ordinal);
+		Assert.Contains("in (no declaration)\n", search, StringComparison.Ordinal);
+
+		var first = Normalize(AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = fileName, ["symbol"] = firstSymbol })));
+		Assert.Contains("member-marker-a", first, StringComparison.Ordinal);
+		Assert.DoesNotContain("member-marker-b", first, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task RealProcessNamesTheDeclarationEachSearchHitSitsInsideWithoutBeingAsked()
 	{
@@ -28,8 +97,8 @@ public sealed partial class McpServerProcessTests
 
 		// The declaration heads its hits inside the file's own block, the way the path does, and
 		// location is spelled exactly once: no row anywhere repeats the path beside a line number.
-		Assert.Contains("src/App.cs\nin P.App\n5:", Normalize(code), StringComparison.Ordinal);
-		Assert.Contains("src/Helper.cs\nin P.Helper\n5:", Normalize(code), StringComparison.Ordinal);
+		Assert.Contains("src/App.cs\nin App.Run\n5:", Normalize(code), StringComparison.Ordinal);
+		Assert.Contains("src/Helper.cs\nin Helper.Assist\n5:", Normalize(code), StringComparison.Ordinal);
 		Assert.DoesNotContain("src/App.cs:5:", code, StringComparison.Ordinal);
 		Assert.DoesNotContain("src/Helper.cs:5:", code, StringComparison.Ordinal);
 		Assert.Contains("[Symbols] annotated=2 · files-without-declarations=0.", code, StringComparison.Ordinal);
@@ -39,9 +108,32 @@ public sealed partial class McpServerProcessTests
 		var untrustedEnd = code.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
 		Assert.True(untrustedEnd > 0);
 		Assert.True(
-			code.IndexOf("in P.App", StringComparison.Ordinal) < untrustedEnd,
+			code.IndexOf("in App.Run", StringComparison.Ordinal) < untrustedEnd,
 			"The declaration name must not be reported outside the untrusted block.");
 		Assert.True(code.IndexOf("[Symbols]", StringComparison.Ordinal) > untrustedEnd);
+	}
+
+	[Fact]
+	public async Task RealProcessDoesNotAttributeALateMethodHitToItsLargeOwnerType()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("large-owner-project");
+		var source = new StringBuilder("public sealed class Logger\n{\n");
+		for (var line = 0; line < 1_430; line++)
+			source.Append("    // padding\n");
+		source.Append("    public void Write()\n    {\n        var text = \"late-method-marker\";\n    }\n}\n");
+		workspace.WriteFile("large-owner-project/Logger.cs", source.ToString());
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "late-method-marker", ["context_lines"] = 0 })));
+
+		Assert.Contains("in Logger.Write\n", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("\nin Logger\n", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -51,7 +143,7 @@ public sealed partial class McpServerProcessTests
 		var project = workspace.CreateDirectory("run-project");
 		workspace.WriteFile(
 			"run-project/src/App.cs",
-			"namespace P;\n\npublic sealed class App\n{\n\tpublic int One() => 1;\n\n\tpublic int Two() => 2;\n}\n\npublic sealed class Other\n{\n\tpublic int Three() => 3;\n}\n");
+			"namespace P;\n\npublic sealed class App\n{\n\tpublic int One()\n\t{\n\t\tvar first = 1;\n\t\treturn 2;\n\t}\n}\n\npublic sealed class Other\n{\n\tpublic int Three() => 3;\n}\n");
 		await using var server = await ActualMcpProcess.StartAsync(
 			project,
 			workspace.CreateDirectory("data"));
@@ -59,12 +151,16 @@ public sealed partial class McpServerProcessTests
 		var text = Normalize(AllProcessText(await CallAsync(
 			server,
 			"search_project",
-			new Dictionary<string, object?> { ["pattern"] = "=> [0-9]", ["context_lines"] = 0 })));
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "var first|return 2|=> 3",
+				["context_lines"] = 0
+			})));
 
 		// Two hits share a declaration and are headed once; the third changes declaration and is
 		// headed again. That collapsing is the whole saving over a row per hit.
-		Assert.Equal(1, CountOccurrences(text, "in P.App\n"));
-		Assert.Equal(1, CountOccurrences(text, "in P.Other\n"));
+		Assert.Equal(1, CountOccurrences(text, "in App.One\n"));
+		Assert.Equal(1, CountOccurrences(text, "in Other.Three\n"));
 		Assert.Contains("[Symbols] annotated=3 · files-without-declarations=0.", text, StringComparison.Ordinal);
 	}
 
@@ -218,7 +314,7 @@ public sealed partial class McpServerProcessTests
 
 		// The comment on the last line is inside no declaration. Without a closing header it would
 		// render under the one above it and read as part of that type.
-		var named = text.IndexOf("in P.App\n", StringComparison.Ordinal);
+		var named = text.IndexOf("in App.Run\n", StringComparison.Ordinal);
 		var closed = text.IndexOf("in (no declaration)\n", StringComparison.Ordinal);
 		var outside = text.IndexOf("8:// tail marker note", StringComparison.Ordinal);
 		Assert.True(named >= 0, text);
@@ -287,12 +383,13 @@ public sealed partial class McpServerProcessTests
 		// Two hits share one declaration, so the list carries it once: this is what a caller reads
 		// back, and a declaration touched twice is still one thing to open.
 		Assert.Contains("Declarations found (path, symbol, line):", text, StringComparison.Ordinal);
-		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App 3"));
+		Assert.Equal(1, CountOccurrences(text, "src/App.cs App.One 5"));
+		Assert.Equal(1, CountOccurrences(text, "src/App.cs App.Two 7"));
 
 		// The sentence that turns the list into a call is a constant and sits outside the block,
 		// while the paths and names inside it are project text and stay in.
 		var untrustedEnd = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
-		Assert.True(text.IndexOf("src/App.cs P.App 3", StringComparison.Ordinal) < untrustedEnd);
+		Assert.True(text.IndexOf("src/App.cs App.One 5", StringComparison.Ordinal) < untrustedEnd);
 		Assert.True(
 			text.IndexOf("[Read declarations]", StringComparison.Ordinal) > untrustedEnd,
 			"The instruction must be trusted text, outside the untrusted block.");

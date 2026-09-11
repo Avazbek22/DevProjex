@@ -64,20 +64,17 @@ internal static class McpSearchSymbols
 			if (!index.FileByPath.TryGetValue(file.RelativePath, out var facts))
 				continue;
 
-			var spans = new List<DeclarationSpan>();
-			foreach (var declaration in facts.Declarations)
-			{
-				foreach (var site in declaration.DeclarationSites)
-				{
-					// A site without an end line comes from an extractor that reports none, and a
-					// one-line guess would claim containment it cannot know.
-					if (site.EndLine >= site.Line &&
-					    string.Equals(site.File, file.RelativePath, StringComparison.Ordinal))
-					{
-						spans.Add(new DeclarationSpan(site.Line, site.EndLine, declaration.Identity.QualifiedName));
-					}
-				}
-			}
+			var spans = facts.NavigationDeclarations
+				.Where(declaration => string.Equals(
+					declaration.ContentFingerprint,
+					facts.ContentFingerprint,
+					StringComparison.Ordinal))
+				.Select(static declaration => new DeclarationSpan(
+					declaration.StartLine,
+					declaration.EndLine,
+					declaration.Name,
+					declaration.EndIndex - declaration.StartIndex))
+				.ToList();
 
 			if (spans.Count > 0)
 				spansByFile[file.RelativePath] = spans;
@@ -103,7 +100,8 @@ internal static class McpSearchSymbols
 			{
 				if (hit.Line < span.Start || hit.Line > span.End)
 					continue;
-				if (best is null || span.End - span.Start < best.End - best.Start)
+				if (best is null || span.End - span.Start < best.End - best.Start ||
+				    span.End - span.Start == best.End - best.Start && span.CharacterLength < best.CharacterLength)
 					best = span;
 			}
 
@@ -160,18 +158,17 @@ internal static class McpSearchSymbols
 			return McpSymbolLookup.Unsupported;
 		}
 
-		var spans = new List<DeclarationSpan>();
-		foreach (var declaration in facts.Declarations)
-		{
-			foreach (var site in declaration.DeclarationSites)
-			{
-				if (site.EndLine >= site.Line &&
-				    string.Equals(site.File, relativePath, StringComparison.Ordinal))
-				{
-					spans.Add(new DeclarationSpan(site.Line, site.EndLine, declaration.Identity.QualifiedName));
-				}
-			}
-		}
+		var spans = facts.NavigationDeclarations
+			.Where(declaration => string.Equals(
+				declaration.ContentFingerprint,
+				facts.ContentFingerprint,
+				StringComparison.Ordinal))
+			.Select(static declaration => new DeclarationSpan(
+				declaration.StartLine,
+				declaration.EndLine,
+				declaration.Name,
+				declaration.EndIndex - declaration.StartIndex))
+			.ToList();
 
 		if (spans.Count == 0)
 			return McpSymbolLookup.Unsupported;
@@ -183,6 +180,14 @@ internal static class McpSearchSymbols
 			return McpSymbolLookup.Found(qualified[0].Start, qualified[0].End);
 		if (qualified.Length > 1)
 			return McpSymbolLookup.Ambiguous(qualified.Length);
+
+		var ownerQualified = spans
+			.Where(span => span.Name.EndsWith('.' + symbol, StringComparison.Ordinal))
+			.ToArray();
+		if (ownerQualified.Length == 1)
+			return McpSymbolLookup.Found(ownerQualified[0].Start, ownerQualified[0].End);
+		if (ownerQualified.Length > 1)
+			return McpSymbolLookup.Ambiguous(ownerQualified.Length);
 
 		var simple = spans.Where(span => LastSegment(span.Name).Equals(symbol, StringComparison.Ordinal)).ToArray();
 		return simple.Length switch
@@ -199,7 +204,7 @@ internal static class McpSearchSymbols
 		return separator >= 0 ? name.AsSpan(separator + 1) : name.AsSpan();
 	}
 
-	private sealed record DeclarationSpan(int Start, int End, string Name);
+	private sealed record DeclarationSpan(int Start, int End, string Name, int CharacterLength);
 }
 
 internal enum McpSymbolLookupStatus

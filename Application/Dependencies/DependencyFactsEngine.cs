@@ -635,6 +635,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			strings.Add(declaration.Identity.QualifiedName) + strings.Add(declaration.Identity.FileScope) +
 			strings.Add(declaration.ContainingNamespace) +
 			declaration.DeclarationSites.Sum(site => SiteBytes(site, strings))) +
+		facts.NavigationDeclarations.Sum(declaration => 96 + strings.Add(declaration.Name) +
+			strings.Add(declaration.Owner) + strings.Add(declaration.ContentFingerprint)) +
 		facts.Imports.Sum(import => 128 + strings.Add(import.Specifier) + strings.Add(import.ImportedName) +
 			strings.Add(import.Alias) + strings.Add(import.ContainingDeclaration) + SiteBytes(import.Site, strings)) +
 		facts.References.Sum(reference => 160 + strings.Add(reference.Name) + strings.Add(reference.SyntaxKind) +

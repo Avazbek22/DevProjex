@@ -11,6 +11,40 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyFactsEngineIntegrationTests
 {
 	[Fact]
+	public async Task NavigationMembersRemainSeparateFromResolutionDeclarations()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var source = fixture.CreateFile("Members.cs", """
+			namespace Sample;
+			sealed class Holder
+			{
+				private string field = "field";
+				public string Property => field;
+				public string Method() => Property;
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[project, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "Members.cs");
+
+		Assert.Single(facts.Declarations, static declaration =>
+			declaration.Identity.QualifiedName == "Sample.Holder");
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "Holder.field" && declaration.Kind == NavigationSymbolKind.Field);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "Holder.Property" && declaration.Kind == NavigationSymbolKind.Property);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "Holder.Method" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.EndsWith(".Method", StringComparison.Ordinal));
+	}
+
+	[Fact]
 	public async Task CSharpFacts_MergePartialsHonorUsingAndKeepFileLocalTypesScoped()
 	{
 		using var fixture = new TemporaryDirectory();

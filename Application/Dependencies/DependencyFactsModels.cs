@@ -23,6 +23,28 @@ public enum SymbolKind
 	Module
 }
 
+public enum NavigationSymbolKind
+{
+	Type,
+	Method,
+	Property,
+	Field,
+	Function,
+	Module
+}
+
+public sealed record NavigationDeclaration(
+	string Name,
+	NavigationSymbolKind Kind,
+	string? Owner,
+	int StartLine,
+	int EndLine,
+	string ContentFingerprint)
+{
+	public int StartIndex { get; init; } = -1;
+	public int EndIndex { get; init; } = -1;
+}
+
 public enum EvidenceLayer
 {
 	ExplicitImport,
@@ -145,6 +167,7 @@ public sealed record FileFacts(
 	IReadOnlyList<string> TypeParameters)
 {
 	public bool CanCache { get; init; } = true;
+	public IReadOnlyList<NavigationDeclaration> NavigationDeclarations { get; init; } = [];
 	public IReadOnlyList<TypeParameterScope> TypeParameterScopes { get; init; } = [];
 	public IReadOnlyList<CSharpUsingDirective> CSharpUsingDirectives { get; init; } = [];
 }

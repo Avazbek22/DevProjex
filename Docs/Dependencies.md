@@ -245,8 +245,17 @@ produces `External`.
 ## Extraction, limits, and diagnostics
 
 C#, TypeScript/TSX/JavaScript, Python, and Go adapters use shipped Tree-sitter grammars and embedded
-`declarations.scm` and `references.scm` query data. Each supported source file is parsed once per
-content fingerprint; its syntax tree is disposed immediately and only compact facts remain. Files
+`declarations.scm` and `references.scm` query data. A separate `navigation.scm` projection records
+named types and members with their owner chain, exact line and character ranges, and content
+fingerprint. Search annotations and named `get_file` reads use this compact projection; navigation
+members never enter dependency resolution, its fact limits, or the related-file graph. The projection
+currently covers named methods and fields in all five languages, plus C# properties and events,
+TypeScript signatures, and Go interface methods. Anonymous functions, C# accessors and operators,
+Python lambdas, and Go function literals fall back to the nearest supported named owner rather than
+claiming a false member.
+
+Each supported source file is parsed once per content fingerprint. Both fact and navigation queries
+run against that same live tree before it is disposed; only compact facts remain. Files
 without an adapter are counted as unsupported instead of disappearing. Read, grammar, and query
 failures are counted separately as extraction failures.
 The same per-file handling applies before language dispatch: if an unsupported file disappears or its
