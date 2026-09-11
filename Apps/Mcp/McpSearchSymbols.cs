@@ -126,7 +126,101 @@ internal static class McpSearchSymbols
 			skippedFiles);
 	}
 
+	/// <summary>
+	/// Turns a declaration name into the lines that declare it, so a caller can read a symbol
+	/// without first learning where it lives.
+	/// </summary>
+	/// <remarks>
+	/// A fully qualified name wins outright. Otherwise the last segment of each declared name is
+	/// compared, and a name that matches more than one declaration is reported as ambiguous rather
+	/// than resolved to whichever came first: choosing silently would return the wrong code with
+	/// nothing in the response to say so.
+	/// </remarks>
+	public static async Task<McpSymbolLookup> ResolveSymbolAsync(
+		DependencyFactsEngine engine,
+		ProjectContextPlan plan,
+		string relativePath,
+		string fullPath,
+		string symbol,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(engine);
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentException.ThrowIfNullOrWhiteSpace(symbol);
+
+		var index = await engine
+			.IndexAsync(plan.SourceRoot, [fullPath], progress: null, cancellationToken)
+			.ConfigureAwait(false);
+		if (!index.FileByPath.TryGetValue(relativePath, out var facts) ||
+		    facts.Status != DependencyFileStatus.Supported)
+		{
+			return McpSymbolLookup.Unsupported;
+		}
+
+		var spans = new List<DeclarationSpan>();
+		foreach (var declaration in facts.Declarations)
+		{
+			foreach (var site in declaration.DeclarationSites)
+			{
+				if (site.EndLine >= site.Line &&
+				    string.Equals(site.File, relativePath, StringComparison.Ordinal))
+				{
+					spans.Add(new DeclarationSpan(site.Line, site.EndLine, declaration.Identity.QualifiedName));
+				}
+			}
+		}
+
+		if (spans.Count == 0)
+			return McpSymbolLookup.Unsupported;
+
+		var qualified = spans
+			.Where(span => string.Equals(span.Name, symbol, StringComparison.Ordinal))
+			.ToArray();
+		if (qualified.Length == 1)
+			return McpSymbolLookup.Found(qualified[0].Start, qualified[0].End);
+		if (qualified.Length > 1)
+			return McpSymbolLookup.Ambiguous(qualified.Length);
+
+		var simple = spans.Where(span => LastSegment(span.Name).Equals(symbol, StringComparison.Ordinal)).ToArray();
+		return simple.Length switch
+		{
+			1 => McpSymbolLookup.Found(simple[0].Start, simple[0].End),
+			> 1 => McpSymbolLookup.Ambiguous(simple.Length),
+			_ => McpSymbolLookup.Unknown
+		};
+	}
+
+	private static ReadOnlySpan<char> LastSegment(string name)
+	{
+		var separator = name.AsSpan().LastIndexOfAny('.', '#', '/');
+		return separator >= 0 ? name.AsSpan(separator + 1) : name.AsSpan();
+	}
+
 	private sealed record DeclarationSpan(int Start, int End, string Name);
+}
+
+internal enum McpSymbolLookupStatus
+{
+	Resolved,
+	Unknown,
+	Ambiguous,
+	Unsupported
+}
+
+internal readonly record struct McpSymbolLookup(
+	McpSymbolLookupStatus Status,
+	int StartLine,
+	int EndLine,
+	int CandidateCount)
+{
+	public static readonly McpSymbolLookup Unknown = new(McpSymbolLookupStatus.Unknown, 0, 0, 0);
+	public static readonly McpSymbolLookup Unsupported = new(McpSymbolLookupStatus.Unsupported, 0, 0, 0);
+
+	public static McpSymbolLookup Found(int startLine, int endLine) =>
+		new(McpSymbolLookupStatus.Resolved, startLine, endLine, 1);
+
+	public static McpSymbolLookup Ambiguous(int candidates) =>
+		new(McpSymbolLookupStatus.Ambiguous, 0, 0, candidates);
 }
 
 internal readonly record struct McpSearchHit(string RelativePath, string FullPath, int Line);

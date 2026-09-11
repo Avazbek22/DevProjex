@@ -1347,6 +1347,14 @@ than adding to it, and a response that cap already cut carries none, so no respo
 grows past the bound it already had. Match lines, group separators, the match and
 file counters, and the additional-matches contract are unchanged.
 
+MCP `get_file` gains the optional `symbol` input, used beside `path` in place of a
+line range, returning the lines that declare it. It accepts a qualified name or a
+simple name unique in the file, cannot be combined with `start_line`, `end_line`,
+or `start_column`, and returns `DPX-MCP-INVALID-ARGUMENTS` for a name matching
+several declarations (reporting the count, never the names), a name matching none,
+and a file no declarations were extracted from. Without it every `get_file`
+response is byte-identical, and the batch `requests` form is unchanged.
+
 MCP `get_tree.format` is an additive input with `markdown` as its compact default.
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;
 structured output that cannot fit the 2,000-line response limit fails with an

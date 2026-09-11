@@ -869,6 +869,27 @@ any response larger than the bound it already had. The match lines, the `--` gro
 separators, the match and file counters, and the "N additional matches" contract are
 unchanged.
 
+### Reading a declaration by name
+
+`get_file` accepts `symbol` beside `path` in place of a line range, and returns the
+lines that declare it. It takes a qualified name, or a simple name that is unique
+in that file; the last segment is compared when the qualified form does not match.
+It is the other half of the naming `search_project` does: a hit tells you the
+declaration, and `symbol` reads it without a line arithmetic step in between.
+
+`symbol` cannot be combined with `start_line`, `end_line`, or `start_column`, and
+that combination is rejected before the file is read. Three cases return
+`DPX-MCP-INVALID-ARGUMENTS` rather than a guess: a name matching more than one
+declaration, which reports how many and asks for the qualified form; a name
+matching none; and a file no declarations were extracted from, which is how an
+unsupported language answers. None of these echoes a declaration name, because the
+error text sits outside the untrusted block and a declaration name is project text.
+
+The range is the declaration the index reports, so its granularity is the same as
+the naming on search hits: for C# that is the enclosing type rather than the
+enclosing member. Without `symbol`, every `get_file` response is byte-identical,
+and the batch `requests` form is untouched.
+
 ### Batch `get_file`
 
 Use `requests` when several source excerpts are already known; use `search_project`

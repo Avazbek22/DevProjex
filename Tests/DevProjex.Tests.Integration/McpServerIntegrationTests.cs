@@ -1963,7 +1963,7 @@ public sealed partial class McpServerIntegrationTests
 			["read_pack"] = ["pack_id", "start_line", "end_line", "start_column"],
 			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "max_results"],
 			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
-			["get_file"] = ["project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column"]
+			["get_file"] = ["project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column", "symbol"]
 		};
 		foreach (var tool in tools)
 		{

@@ -428,7 +428,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    },
 	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Read the lines that declare this symbol instead of a line range, with path. Takes a qualified name, or a simple name that is unique in the file; search_project names the declaration each hit sits inside. Cannot be combined with start_line, end_line, or start_column. A name matching several declarations, no declaration, or a file none were extracted from returns DPX-MCP-INVALID-ARGUMENTS." }
 	  },
 	  "additionalProperties": false
 	}

@@ -82,7 +82,8 @@ internal sealed class DevProjexMcpTools(
 		"project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile",
 		"tracked_only", "git_scope", "max_file_bytes");
 	private readonly IReadOnlySet<string> getFileArgumentNames = Allowed(agentExclusions,
-		"project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column");
+		"project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column",
+		"symbol");
 	private McpProjectService Projects => projectService.Value;
 
 	[Description(
@@ -1077,6 +1078,15 @@ internal sealed class DevProjexMcpTools(
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var startColumn = arguments.OptionalInteger("start_column", 1, int.MaxValue);
+			var symbol = arguments.OptionalString("symbol");
+			if (symbol is not null && (start is not null || end is not null || startColumn is not null))
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: 'symbol' addresses a declaration and cannot be " +
+					"combined with start_line, end_line, or start_column.");
+			}
+
 			ValidateLineRange(start, end);
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
@@ -1092,6 +1102,20 @@ internal sealed class DevProjexMcpTools(
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			var file = Projects.ResolveFile(plan, requestedPath);
+			if (symbol is not null)
+			{
+				var located = await McpSearchSymbols
+					.ResolveSymbolAsync(
+						Projects.DependencyFactsEngine,
+						plan,
+						McpProjectService.ToRelative(plan.SourceRoot, file),
+						file,
+						symbol,
+						cancellationToken)
+					.ConfigureAwait(false);
+				(start, end) = ResolveSymbolRange(located);
+			}
+
 			TransformedTextFile? transformed = null;
 			await using var inspected = await Projects.ConsumeSearchTextAsync(
 					plan with { IncludedFiles = [file] },
@@ -2300,6 +2324,31 @@ internal sealed class DevProjexMcpTools(
 			.ToArray();
 		return notices.Length == 0 ? null : string.Join('\n', notices);
 	}
+
+	/// <summary>
+	/// Turns a symbol lookup into the line range to read, or into the error that says why there is
+	/// none. An ambiguous name reports how many declarations answered to it and asks for a
+	/// qualified name; it never names them, because a declaration name is project text and the
+	/// error text is outside the untrusted block.
+	/// </summary>
+	private static (int? Start, int? End) ResolveSymbolRange(McpSymbolLookup located) =>
+		located.Status switch
+		{
+			McpSymbolLookupStatus.Resolved => (located.StartLine, located.EndLine),
+			McpSymbolLookupStatus.Ambiguous => throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: 'symbol' matches " +
+				$"{located.CandidateCount.ToString(CultureInfo.InvariantCulture)} declarations in this " +
+				"file; pass the qualified name, or read the file and choose a line range."),
+			McpSymbolLookupStatus.Unsupported => throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: 'symbol' is not supported for this file, because no " +
+				"declarations were extracted from it; pass start_line and end_line instead."),
+			_ => throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: 'symbol' matches no declaration in this file; " +
+				"search_project names the declaration each hit sits inside.")
+		};
 
 	/// <summary>
 	/// Writes the declaration each shown hit sits inside, inside the untrusted block, because a

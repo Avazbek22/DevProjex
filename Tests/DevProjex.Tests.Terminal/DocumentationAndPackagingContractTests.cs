@@ -224,6 +224,11 @@ public sealed class DocumentationAndPackagingContractTests
 			server,
 			StringComparison.Ordinal);
 		Assert.Contains("There is no parameter for it", normalized, StringComparison.Ordinal);
+		Assert.Contains("### Reading a declaration by name", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"`symbol` cannot be combined with `start_line`, `end_line`, or `start_column`",
+			normalized,
+			StringComparison.Ordinal);
 		Assert.Contains("### `pack_context.expand_related`", server, StringComparison.Ordinal);
 		Assert.Contains("**Expansion only ever narrows.**", server, StringComparison.Ordinal);
 		Assert.Contains(
