@@ -1104,6 +1104,92 @@ internal sealed partial class KotlinDependencyLanguageAdapter : DependencyLangua
 	private static partial Regex TypeNameRegex();
 }
 
+internal sealed class RubyDependencyLanguageAdapter : DependencyLanguageAdapter
+{
+	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
+		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+		{
+			["declaration.class"] = SymbolKind.Class,
+			["declaration.module"] = SymbolKind.Module
+		};
+
+	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
+	{
+		if (context.HasSyntaxErrors)
+			return Failed(context, "syntax tree contains errors");
+		var declarationCaptures = context.Declarations
+			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName))
+			.ToArray();
+		var declarations = declarationCaptures.Select(capture =>
+		{
+			var owners = declarationCaptures.Where(owner => Contains(owner, capture))
+				.OrderBy(static owner => owner.StartIndex).Select(static owner => owner.CapturedName!).ToArray();
+			var localName = capture.CapturedName!.Contains("::", StringComparison.Ordinal) || owners.Length == 0
+				? capture.CapturedName!
+				: string.Join("::", owners.Append(capture.CapturedName!));
+			return new DeclarationFact(
+				new SymbolIdentity(context.ScopeId, context.LanguageId, Kinds[capture.Name], localName, 0),
+				[Site(context, capture)])
+			{
+				ContainingNamespace = string.Empty,
+				ContainingType = owners.Length == 0 ? null : string.Join("::", owners)
+			};
+		}).ToArray();
+		var imports = context.References
+			.Where(static capture => capture.Name == "import.ruby" && capture.ImportSyntax is not null)
+			.Select(capture =>
+			{
+				var syntax = capture.ImportSyntax!;
+				return new ImportFact(syntax.Specifier, syntax.Bindings.Single().Name, null, false, 0, Site(context, capture));
+			}).ToArray();
+		var importRanges = context.References.Where(static capture => capture.Name == "import.ruby")
+			.Select(static capture => (capture.StartIndex, capture.EndIndex)).ToArray();
+		var declaredNames = declarationCaptures.Where(static capture => capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex)
+			.Concat(context.References.Where(static capture => capture.Name == "context.assigned_constant")
+				.Select(static capture => capture.StartIndex))
+			.ToHashSet();
+		var qualifiedRanges = context.References.Where(static capture => capture.NodeType == "scope_resolution")
+			.Select(static capture => (capture.StartIndex, capture.EndIndex)).ToArray();
+		var references = Distinct(context.References
+			.Where(capture => capture.Name == "reference.type" &&
+				!declaredNames.Contains(capture.StartIndex) &&
+				!importRanges.Any(range => Within(range, capture)) &&
+				(capture.NodeType == "scope_resolution" ||
+				 !qualifiedRanges.Any(range => Within(range, capture) &&
+					range != (capture.StartIndex, capture.EndIndex))))
+			.Select(capture =>
+			{
+				var owners = declarationCaptures.Where(owner => Contains(owner, capture))
+					.OrderBy(static owner => owner.StartIndex).Select(static owner => owner.CapturedName!).ToArray();
+				return new ReferenceFact(
+					EvidenceLayer.TypeReference,
+					capture.Text.TrimStart(':'),
+					0,
+					capture.NodeType,
+					Site(context, capture))
+				{
+					ContainingNamespace = string.Empty,
+					ContainingType = owners.Length == 0 ? null : string.Join("::", owners),
+					SourceStartIndex = capture.StartIndex
+				};
+			}));
+		if (declarations.Length + imports.Length + references.Count > limits.MaximumFactsPerFile)
+			return Failed(context, "fact limit exceeded");
+		return Complete(context, declarations, imports, references, [string.Empty],
+			new Dictionary<string, string>(), globalNamespaces: []);
+	}
+
+	private static bool Contains(DependencySyntaxCapture owner, DependencySyntaxCapture capture) =>
+		owner.StartIndex < capture.StartIndex && owner.EndIndex >= capture.EndIndex;
+	private static bool Within((int StartIndex, int EndIndex) range, DependencySyntaxCapture capture) =>
+		capture.StartIndex >= range.StartIndex && capture.EndIndex <= range.EndIndex;
+	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(
+		context.RelativePath, context.ScopeId, context.LanguageId, context.ContentFingerprint, context.Source.Length,
+		DependencyFileStatus.ExtractionFailed, reason, context.HasSyntaxErrors, context.ErrorNodeKinds,
+		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+}
+
 internal sealed class RustDependencyLanguageAdapter : DependencyLanguageAdapter
 {
 	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =

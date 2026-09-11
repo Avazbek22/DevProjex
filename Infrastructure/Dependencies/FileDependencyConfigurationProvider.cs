@@ -86,6 +86,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var packageFiles = new List<string>();
 		var javaConfigFiles = new List<string>();
 		var rustConfigFiles = new List<string>();
+		var rubyConfigFiles = new List<string>();
 		foreach (var path in manifest.Order(StringComparer.Ordinal))
 		{
 			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
@@ -94,6 +95,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			if (Path.GetFileName(path).Equals("package.json", StringComparison.OrdinalIgnoreCase)) packageFiles.Add(path);
 			if (IsJavaConfig(path)) javaConfigFiles.Add(path);
 			if (Path.GetFileName(path).Equals("Cargo.toml", StringComparison.OrdinalIgnoreCase)) rustConfigFiles.Add(path);
+			if (Path.GetFileName(path).Equals("Gemfile", StringComparison.OrdinalIgnoreCase) ||
+			    path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase)) rubyConfigFiles.Add(path);
 		}
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
@@ -476,6 +479,53 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				new HashSet<string>(),
 				[],
 				true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason
+			});
+		}
+
+		var rubyProjects = new List<(string Directory, string ScopeId, string? PackageName,
+			IReadOnlyList<string> ProjectDirectories, DependencyConfigurationState State, string? Reason)>();
+		foreach (var group in rubyConfigFiles.GroupBy(static path => Path.GetDirectoryName(path)!, PathComparer)
+			.OrderBy(static group => group.Key, StringComparer.Ordinal))
+		{
+			var state = DependencyConfigurationState.Valid;
+			string? reason = null;
+			string? packageName = null;
+			var projectDirectories = new HashSet<string>(PathComparer);
+			foreach (var configPath in group.Order(StringComparer.Ordinal))
+			{
+				var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+				AddFingerprint(configPath, snapshot);
+				if (snapshot.State != DependencyConfigurationState.Valid)
+				{
+					state = snapshot.State;
+					reason = snapshot.Reason;
+				}
+				else
+				{
+					var parsed = ParseRubyProject(root, configPath, snapshot.Content);
+					packageName ??= parsed.PackageName;
+					foreach (var directory in parsed.ProjectDirectories) projectDirectories.Add(directory);
+				}
+				AddDiagnostic(configPath, snapshot.State, snapshot.Reason,
+					"ruby:" + PortableRelative(root, group.Key));
+			}
+			rubyProjects.Add((group.Key, "ruby:" + PortableRelative(root, group.Key), packageName,
+				projectDirectories.Order(StringComparer.Ordinal).ToArray(), state, reason));
+		}
+		var rubyScopeByDirectory = rubyProjects.ToDictionary(
+			static project => Path.GetFullPath(project.Directory), static project => project.ScopeId, PathComparer);
+		foreach (var project in rubyProjects)
+		{
+			var references = project.ProjectDirectories.Where(rubyScopeByDirectory.ContainsKey)
+				.Select(directory => rubyScopeByDirectory[directory])
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				project.ScopeId, project.Directory, LanguageId.Ruby, references, null, false,
+				new Dictionary<string, IReadOnlyList<string>>(), project.PackageName,
+				new HashSet<string>(), [], true)
 			{
 				ConfigurationState = project.State,
 				ConfigurationDiagnostic = project.Reason
@@ -1280,6 +1330,33 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				"Cargo project configuration is invalid");
 		}
 	}
+
+	private static RubyProjectConfiguration ParseRubyProject(string root, string path, string content)
+	{
+		var directory = Path.GetDirectoryName(path)!;
+		string? packageName = null;
+		if (path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase))
+		{
+			var name = Regex.Match(content,
+				"""\b(?:name|spec\.name)\s*=\s*['\"](?<name>[^'\"]+)['\"]""",
+				RegexOptions.CultureInvariant);
+			if (name.Success) packageName = name.Groups["name"].Value;
+		}
+		var directories = new HashSet<string>(PathComparer);
+		if (Path.GetFileName(path).Equals("Gemfile", StringComparison.OrdinalIgnoreCase))
+		{
+			foreach (Match match in Regex.Matches(content,
+				"""\bgem\s*\(?\s*['\"][^'\"]+['\"]\s*,[^\r\n]*?\bpath\s*:\s*['\"](?<path>[^'\"]+)['\"]""",
+				RegexOptions.CultureInvariant))
+			{
+				var relative = match.Groups["path"].Value;
+				if (Path.IsPathFullyQualified(relative)) continue;
+				var candidate = Path.GetFullPath(Path.Combine(directory, relative));
+				if (IsWithin(root, candidate)) directories.Add(candidate);
+			}
+		}
+		return new RubyProjectConfiguration(packageName, directories.Order(StringComparer.Ordinal).ToArray());
+	}
 	private static readonly Lazy<IReadOnlySet<string>> DotNetCatalog = new(
 		() => LoadCatalog("dotnet-net10.0.json"),
 		LazyThreadSafetyMode.ExecutionAndPublication);
@@ -1403,6 +1480,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	{
 		public static RustProjectConfiguration Empty { get; } = new(null, []);
 	}
+	private sealed record RubyProjectConfiguration(string? PackageName, IReadOnlyList<string> ProjectDirectories);
 	private sealed record TypeScriptConfiguration(
 		string ModuleResolution,
 		bool Legacy,

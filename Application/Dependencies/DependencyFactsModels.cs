@@ -11,6 +11,7 @@ public enum LanguageId
 	Java,
 	Rust,
 	Kotlin,
+	Ruby,
 	Unsupported
 }
 

@@ -89,6 +89,26 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessRelatedFilesReportsRubyManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("ruby-project");
+		workspace.WriteFile("ruby-project/lib/model.rb", "module Models\n class User\n end\nend\n");
+		workspace.WriteFile("ruby-project/lib/service.rb", "require_relative 'model'\nclass Service\n VALUE = Models::User\nend\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "lib/service.rb",
+			["direction"] = "dependencies"
+		});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("lib/model.rb", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" — unresolved — ", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesPreservesParsedImportSemantics()
 	{
 		using var workspace = new TemporaryDirectory();

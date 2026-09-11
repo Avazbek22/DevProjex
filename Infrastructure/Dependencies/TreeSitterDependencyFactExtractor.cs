@@ -586,7 +586,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		using var cursor = query.Execute(root);
 		var declarations = new List<NavigationDeclaration>();
 		var seen = new HashSet<(int Start, int End, NavigationSymbolKind Kind, string Name)>();
-		var javaNames = language is LanguageId.Java or LanguageId.Kotlin
+		var javaNames = language is LanguageId.Java or LanguageId.Kotlin or LanguageId.Ruby
 			? new Dictionary<string, int>(StringComparer.Ordinal)
 			: null;
 		var visited = 0;
@@ -610,9 +610,16 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			{
 				owners.Insert(0, fileScopedNamespace);
 			}
-			var separator = language == LanguageId.Rust ? "::" : ".";
+			var separator = language is LanguageId.Rust or LanguageId.Ruby ? "::" : ".";
 			var owner = owners.Count == 0 ? null : string.Join(separator, owners);
-			var qualifiedName = owner is null ? name : $"{owner}{separator}{name}";
+			var qualifiedName = language == LanguageId.Ruby && owner is not null
+				? capture.Node.Type switch
+				{
+					"method" => $"{owner}#{name}",
+					"singleton_method" => $"{owner}.{name}",
+					_ => $"{owner}::{name}"
+				}
+				: owner is null ? name : $"{owner}{separator}{name}";
 			if (javaNames is not null && capture.Node.Type is not ("package_declaration" or "package_header"))
 			{
 				var ordinal = javaNames.GetValueOrDefault(qualifiedName) + 1;
@@ -672,6 +679,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return NormalizeNavigationName(node.NamedChildren.FirstOrDefault()?.Text ?? string.Empty);
 		if (language == LanguageId.Kotlin && node.Type is "primary_constructor" or "secondary_constructor") return "constructor";
 		if (language == LanguageId.Kotlin && node.Type == "anonymous_initializer") return "init";
+		if (language == LanguageId.Ruby && node.Type == "assignment")
+			return NormalizeNavigationName(node.GetChildForField("left")?.Text ?? string.Empty);
 		if (language == LanguageId.Rust && node.Type == "impl_item")
 		{
 			var implementedType = node.GetChildForField("type")?.Text;
@@ -734,6 +743,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		LanguageId.Kotlin => nodeType is "class_declaration" or "object_declaration" or
 			"function_declaration" or "property_declaration" or "secondary_constructor" or
 			"anonymous_initializer",
+		LanguageId.Ruby => nodeType is "class" or "module" or "method" or "singleton_method",
 		_ => false
 	};
 
@@ -1146,6 +1156,24 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				0,
 				[new DependencyImportBinding(specifier.Split('.').Last(), alias, wildcard)]);
 		}
+		if (captureName == "import.ruby")
+		{
+			var text = materialization.Read(node).Trim();
+			var relative = text.StartsWith("require_relative", StringComparison.Ordinal);
+			var keyword = relative ? "require_relative" : "require";
+			if (!text.StartsWith(keyword, StringComparison.Ordinal)) return null;
+			var remainder = text[keyword.Length..].Trim();
+			if (remainder.StartsWith('(') && remainder.EndsWith(')'))
+				remainder = remainder[1..^1].Trim();
+			if (remainder.Length < 2 || remainder[0] is not ('\'' or '"') || remainder[^1] != remainder[0])
+				return null;
+			var specifier = remainder[1..^1];
+			if (specifier.Length == 0 || specifier.Contains('\\')) return null;
+			return new DependencyImportSyntax(
+				specifier,
+				0,
+				[new DependencyImportBinding(relative ? "$relative" : "$require", null, false)]);
+		}
 		return null;
 	}
 
@@ -1283,6 +1311,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".java" => LanguageId.Java,
 		".rs" => LanguageId.Rust,
 		".kt" or ".kts" => LanguageId.Kotlin,
+		".rb" or ".rake" or ".gemspec" => LanguageId.Ruby,
 		_ => LanguageId.Unsupported
 	};
 
@@ -1621,7 +1650,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.Go] = new("tree-sitter-go", "tree_sitter_go", "go", new GoDependencyLanguageAdapter()),
 				[LanguageId.Java] = new("tree-sitter-java", "tree_sitter_java", "java", new JavaDependencyLanguageAdapter()),
 				[LanguageId.Rust] = new("tree-sitter-rust", "tree_sitter_rust", "rust", new RustDependencyLanguageAdapter()),
-				[LanguageId.Kotlin] = new("tree-sitter-kotlin", "tree_sitter_kotlin", "kotlin", new KotlinDependencyLanguageAdapter())
+				[LanguageId.Kotlin] = new("tree-sitter-kotlin", "tree_sitter_kotlin", "kotlin", new KotlinDependencyLanguageAdapter()),
+				[LanguageId.Ruby] = new("tree-sitter-ruby", "tree_sitter_ruby", "ruby", new RubyDependencyLanguageAdapter())
 			};
 	}
 

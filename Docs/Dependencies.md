@@ -221,6 +221,21 @@ in a file is unique. Anonymous functions and local values that do not provide a 
 name fall back to the nearest supported owner. A syntax tree containing an error publishes neither
 recovered declarations nor recovered edges.
 
+Ruby source files contribute classes and modules under their complete lexical owner chain. Literal
+`require_relative` resolves only the corresponding `.rb` file beside the source, while literal
+`require` probes the repository root, its `lib` directory, and `lib` directories of repository gems
+made visible by a literal `path:` entry in `Gemfile`. Gem specifications are read as bounded data for
+their literal name; Ruby code in Gemfiles or gemspecs is never executed. Installed gems, generated
+load paths, interpolated require strings, autoload hooks, and runtime constant mutation are not
+inferred and remain unresolved.
+
+Ruby navigation includes nested modules and classes, ordinary methods, singleton methods, instance
+variable assignments, and lambdas bound by assignment. Names use `::` for nesting, `#` for ordinary
+methods, and `.` for singleton methods, so equal member names remain distinct. Repeated names receive
+a stable source-order suffix. Attribute macros, anonymous blocks, dynamically defined methods, and
+metaprogrammed members fall back to the nearest supported named owner. A syntax tree containing an
+error publishes neither recovered declarations nor recovered edges.
+
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
 makes resolvable. Top-level `func`, method and `type` declarations are importable names within
@@ -244,7 +259,7 @@ One consequence is worth stating because it is not visible in the edges. A Go fi
 containing Go reports higher coverage and gives the graph signal more weight in importance
 ranking than it did while Go was unsupported. That is the intended effect of adding an adapter,
 but Go's graph is package-local by construction, so its coverage is not comparable with the
-cross-file graphs the other four languages build.
+cross-file graphs built by adapters that resolve repository imports.
 
 Configuration reads have four explicit outcomes: valid, missing, corrupt, and unsupported semantics.
 A malformed JSON document, a `null` or non-object `compilerOptions`, or an unsupported value shape is
@@ -298,7 +313,7 @@ produces `External`.
 
 ## Extraction, limits, and diagnostics
 
-C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, and Kotlin adapters use shipped Tree-sitter grammars and embedded
+C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, Kotlin, and Ruby adapters use shipped Tree-sitter grammars and embedded
 `declarations.scm` and `references.scm` query data. A separate `navigation.scm` projection records
 named types and members with their owner chain, exact line and character ranges, and content
 fingerprint. The owner chain starts with the language namespace, package, or module when one is
@@ -306,8 +321,8 @@ declared, so the exact name printed by search is also the exact `symbol` accepte
 Search annotations and named `get_file` reads use this compact projection; navigation
 members never enter dependency resolution, its fact limits, or the related-file graph. The projection
 currently covers named methods and fields in all supported languages, plus C# properties and events,
-TypeScript signatures, Go interface methods, and Java and Kotlin members. Anonymous functions, C# accessors and operators,
-Python lambdas, Go function literals, and unnamed Kotlin lambdas fall back to the nearest supported named owner rather than
+TypeScript signatures, Go interface methods, and Java, Kotlin, and Ruby members. Anonymous functions, C# accessors and operators,
+Python lambdas, Go function literals, unnamed Kotlin lambdas, and Ruby metaprogramming fall back to the nearest supported named owner rather than
 claiming a false member.
 
 Each supported source file is parsed once per content fingerprint. Both fact and navigation queries

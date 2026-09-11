@@ -76,6 +76,23 @@ public sealed class RelatedCommandProcessTests
 	}
 
 	[Fact]
+	public void RealPublishedCommandReportsRubyManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/lib/model.rb", "module Models\n class User\n end\nend\n");
+		workspace.WriteFile("project/lib/service.rb", "require_relative 'model'\nclass Service\n VALUE = Models::User\nend\n");
+
+		var result = Run(
+			workspace, "related", "lib/service.rb", "--project", project,
+			"--direction", "dependencies", "--format", "json", "--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("lib/model.rb", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"status\": \"unresolved\"", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RealPublishedCommandUsesPythonDottedImportBindingAndPackageBoundaries()
 	{
 		using var workspace = new TemporaryDirectory();

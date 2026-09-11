@@ -1293,6 +1293,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			LanguageId.Python => ResolvePythonImport(source, import),
 			LanguageId.Java or LanguageId.Kotlin => ResolveJavaImport(source, import),
 			LanguageId.Rust => ResolveRustImport(source, import),
+			LanguageId.Ruby => ResolveRubyImport(source, import),
 			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
 				"explicit imports are context, not dependency edges, for this language", [])
 		};
@@ -1363,6 +1364,35 @@ public sealed class DependencyFactsEngine : IDisposable
 				1 => Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files),
 				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple imported declarations", files)
 			};
+		}
+
+		private DependencyEdge ResolveRubyImport(FileFacts source, ImportFact import)
+		{
+			var sourceDirectory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
+			var roots = new List<string>();
+			if (import.ImportedName == "$relative")
+				roots.Add(sourceDirectory);
+			else
+			{
+				roots.Add(_root);
+				roots.Add(Path.Combine(_root, "lib"));
+				foreach (var scopeId in VisibleScopeIds(source.ScopeId))
+				{
+					if (FindScope(scopeId) is not { } scope) continue;
+					roots.Add(scope.Root);
+					roots.Add(Path.Combine(scope.Root, "lib"));
+				}
+			}
+			var paths = new List<string>();
+			foreach (var root in roots)
+			{
+				var requested = import.Specifier.EndsWith(".rb", StringComparison.OrdinalIgnoreCase)
+					? import.Specifier
+					: import.Specifier + ".rb";
+				var fullPath = Path.GetFullPath(Path.Combine(root, requested.Replace('/', Path.DirectorySeparatorChar)));
+				if (IsWithin(_root, fullPath)) paths.Add(PortableRelative(_root, fullPath));
+			}
+			return FinishImport(source, import, paths.Where(_files.ContainsKey), "one repository Ruby source");
 		}
 
 		public long EstimateResolutionWork(FileFacts source, int maximumWork)
@@ -2276,6 +2306,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			else if (source.LanguageId == LanguageId.Rust && !requiresQualifiedLookup)
 				candidates = SelectVisibleRustCandidates(source, reference, candidates);
+			else if (source.LanguageId == LanguageId.Ruby)
+				candidates = SelectVisibleRubyCandidates(reference, candidates);
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
@@ -2439,6 +2471,26 @@ public sealed class DependencyFactsEngine : IDisposable
 				candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
 		}
 
+		private static DeclarationFact[] SelectVisibleRubyCandidates(
+			ReferenceFact reference,
+			DeclarationFact[] candidates)
+		{
+			if (reference.Name.Contains("::", StringComparison.Ordinal)) return candidates;
+			if (reference.ContainingType is null)
+				return candidates.Where(static candidate => candidate.ContainingType is null).ToArray();
+			var owner = reference.ContainingType;
+			while (owner.Length > 0)
+			{
+				var nested = candidates.Where(candidate =>
+					string.Equals(candidate.ContainingType, owner, StringComparison.Ordinal)).ToArray();
+				if (nested.Length > 0) return nested;
+				var separator = owner.LastIndexOf("::", StringComparison.Ordinal);
+				if (separator < 0) break;
+				owner = owner[..separator];
+			}
+			return candidates.Where(static candidate => candidate.ContainingType is null).ToArray();
+		}
+
 		private DeclarationFact[] LookupContextualCSharpQualified(
 			FileFacts source,
 			ReferenceFact reference,
@@ -2497,7 +2549,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				return false;
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
-			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust &&
+			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby &&
 			       VisibleScopeIds(source.ScopeId).Contains(
 			       declaration.Identity.ScopeId, StringComparer.Ordinal);
 		}
@@ -2756,7 +2808,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (pending.TryDequeue(out var scopeId))
 				{
 					if (!visited.Add(scopeId)) continue;
-					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust) ||
+					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby) ||
 					    !scopes.TryGetValue(scopeId, out var current)) continue;
 					foreach (var projectReference in current.ProjectReferences) pending.Enqueue(projectReference);
 				}

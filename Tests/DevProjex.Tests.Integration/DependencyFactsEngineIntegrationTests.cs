@@ -11,6 +11,116 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyFactsEngineIntegrationTests
 {
 	[Fact]
+	public async Task RubyFactsResolveRelativeRequiresConstantsAndNestedOwners()
+	{
+		using var fixture = new TemporaryDirectory();
+		var model = fixture.CreateFile("lib/model.rb", "module Models\n class Base\n end\n class User\n end\nend\n");
+		var service = fixture.CreateFile("lib/service.rb", """
+			require_relative "model"
+			module App
+			  class Service < Models::Base
+			    def read
+			      Models::User.new
+			    end
+			    def self.build
+			      new
+			    end
+			  end
+			end
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[model, service],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "lib/service.rb");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "Models::User");
+		Assert.Contains(index.Edges, static edge => edge.Source == "lib/service.rb" &&
+			edge.Target == "lib/model.rb" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "App::Service#read" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "App::Service.build" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.Contains("read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task RubyNavigationDistinguishesOrdinarySingletonAndNestedMethods()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("members.rb", """
+			module First
+			  def run
+			    @value = 1
+			  end
+			  def self.run
+			    2
+			  end
+			end
+			module Second
+			  def run
+			    3
+			  end
+			end
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var declarations = Assert.Single(index.Files).NavigationDeclarations;
+
+		Assert.Contains(declarations, static item => item.Name == "First#run");
+		Assert.Contains(declarations, static item => item.Name == "First.run");
+		Assert.Contains(declarations, static item => item.Name == "Second#run");
+		Assert.Contains(declarations, static item => item.Name == "First::run::@value" &&
+			item.Kind == NavigationSymbolKind.Field);
+		Assert.Equal(declarations.Count, declarations.Select(static item => item.Name).Distinct(StringComparer.Ordinal).Count());
+	}
+
+	[Fact]
+	public async Task RubyGemfilePathDependenciesExposeDeclaredRepositoryScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var gemspec = fixture.CreateFile("shared/shared.gemspec", "Gem::Specification.new { |spec| spec.name = 'shared' }");
+		var shared = fixture.CreateFile("shared/lib/shared.rb", "module Shared\n class Item\n end\nend\n");
+		var gemfile = fixture.CreateFile("app/Gemfile", "source 'https://example.invalid'\ngem 'shared', path: '../shared'\n");
+		var app = fixture.CreateFile("app/lib/app.rb", "require 'shared'\nclass App\n VALUE = Shared::Item\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[gemspec, shared, gemfile, app],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "app/lib/app.rb" &&
+			edge.Target == "shared/lib/shared.rb" && edge.Status == ResolutionStatus.Resolved && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task RubySyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("broken.rb", "class Broken\n  def run(\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
 	public async Task KotlinFactsResolveImportsAliasesAndRepositoryTypes()
 	{
 		using var fixture = new TemporaryDirectory();

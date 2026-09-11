@@ -54,6 +54,12 @@ public sealed partial class McpServerProcessTests
 			"package sample\nclass A {\n fun run(): String { return \"member-marker-a\" }\n}\nclass B {\n fun run(): String { return \"member-marker-b\" }\n}\n// fallback-marker\n",
 			"sample.A.run",
 			"sample.B.run"
+		},
+		{
+			"members.rb",
+			"module A\n def run\n  'member-marker-a'\n end\nend\nmodule B\n def run\n  'member-marker-b'\n end\nend\n# fallback-marker\n",
+			"A#run",
+			"B#run"
 		}
 	};
 
