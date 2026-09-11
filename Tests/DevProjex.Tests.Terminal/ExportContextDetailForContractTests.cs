@@ -95,9 +95,9 @@ public sealed class ExportContextDetailForContractTests
 		var exitCode = await RunAsync(workspace, environment, ["src/file0.cs=signatures"]);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.Contains(BodyMarker, environment.Output.ToString(), StringComparison.Ordinal);
+		Assert.Contains(BodyMarker, environment.StandardOutput, StringComparison.Ordinal);
 		// file0 lost its body; a file the glob did not claim kept its own.
-		Assert.Contains("accumulated += step", environment.Output.ToString(), StringComparison.Ordinal);
+		Assert.Contains("accumulated += step", environment.StandardOutput, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -113,10 +113,10 @@ public sealed class ExportContextDetailForContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		// A level never contains the separator, so the tail is unambiguous and the head keeps it.
-		Assert.Contains("Detail mix:", environment.Error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("Detail mix:", environment.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain(
 			"Detail patterns matching nothing",
-			environment.Error.ToString(),
+			environment.StandardError,
 			StringComparison.Ordinal);
 	}
 
@@ -136,7 +136,7 @@ public sealed class ExportContextDetailForContractTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		// The command line has no detail level of its own: the three toggles are the call, so an
 		// override back to full really does mean full for the file it claims.
-		Assert.Contains(BodyMarker, environment.Output.ToString(), StringComparison.Ordinal);
+		Assert.Contains(BodyMarker, environment.StandardOutput, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -153,8 +153,8 @@ public sealed class ExportContextDetailForContractTests
 			dryRun: true);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.Empty(environment.Output.ToString());
-		var error = environment.Error.ToString();
+		Assert.Empty(environment.StandardOutput);
+		var error = environment.StandardError;
 		Assert.Contains("Detail mix: full 1; compact 0; signatures 10", error, StringComparison.Ordinal);
 		Assert.Contains(
 			"Detail patterns matching nothing: absent/**",
@@ -179,7 +179,7 @@ public sealed class ExportContextDetailForContractTests
 		var diagnostics = measurement.Capture();
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.Empty(environment.Output.ToString());
+		Assert.Empty(environment.StandardOutput);
 		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
 		Assert.Equal(0, diagnostics.PreparedWriteBytes);
 		Assert.Equal(0, diagnostics.DocumentWriteBytes);
@@ -195,7 +195,7 @@ public sealed class ExportContextDetailForContractTests
 		var exitCode = await RunAsync(workspace, environment, [], dryRun: true);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.DoesNotContain("Detail mix:", environment.Error.ToString(), StringComparison.Ordinal);
+		Assert.DoesNotContain("Detail mix:", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -212,7 +212,7 @@ public sealed class ExportContextDetailForContractTests
 			format: "json");
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		using var document = JsonDocument.Parse(environment.Output.ToString());
+		using var document = JsonDocument.Parse(environment.StandardOutput);
 		var byPath = document.RootElement.GetProperty("files").EnumerateArray()
 			.ToDictionary(
 				file => file.GetProperty("path").GetString()!.Replace('\\', '/'),
@@ -231,7 +231,7 @@ public sealed class ExportContextDetailForContractTests
 		var exitCode = await RunAsync(workspace, environment, [], format: "json");
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		using var document = JsonDocument.Parse(environment.Output.ToString());
+		using var document = JsonDocument.Parse(environment.StandardOutput);
 		Assert.All(
 			document.RootElement.GetProperty("files").EnumerateArray(),
 			file => Assert.False(file.TryGetProperty("detail", out _)));
@@ -251,7 +251,7 @@ public sealed class ExportContextDetailForContractTests
 		var exitCode = await RunAsync(workspace, environment, [value]);
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
-		Assert.Contains("--detail-for", environment.Error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("--detail-for", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -268,6 +268,6 @@ public sealed class ExportContextDetailForContractTests
 			view: "tree");
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
-		Assert.Contains("--detail-for", environment.Error.ToString(), StringComparison.Ordinal);
+		Assert.Contains("--detail-for", environment.StandardError, StringComparison.Ordinal);
 	}
 }

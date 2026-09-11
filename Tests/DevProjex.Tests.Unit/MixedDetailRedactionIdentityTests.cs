@@ -35,11 +35,13 @@ public sealed class MixedDetailRedactionIdentityTests
 			},
 			new SecretRedactionContext(workspace.Path, redactionSession))!;
 
-		using var scope = context.BeginOutput([
-			Path.Combine(workspace.Path, "src", "base.cs"),
-			Path.Combine(workspace.Path, "src", "reduced.cs"),
-			Path.Combine(workspace.Path, "src", "verbatim.cs")
-		]);
+		using var scope = context.BeginOutput(
+			[
+				Path.Combine(workspace.Path, "src", "base.cs"),
+				Path.Combine(workspace.Path, "src", "reduced.cs"),
+				Path.Combine(workspace.Path, "src", "verbatim.cs")
+			],
+			TestContext.Current.CancellationToken);
 		var redaction = scope.Redaction!;
 
 		// Two calls that share a default level and differ only in which files an override claims
@@ -70,10 +72,12 @@ public sealed class MixedDetailRedactionIdentityTests
 			null,
 			new SecretRedactionContext(workspace.Path, redactionSession))!;
 
-		using var mixedScope = mixed.BeginOutput([Path.Combine(workspace.Path, "src", "verbatim.cs")]);
-		using var plainScope = withoutCompression.BeginOutput([
-			Path.Combine(workspace.Path, "src", "verbatim.cs")
-		]);
+		using var mixedScope = mixed.BeginOutput(
+			[Path.Combine(workspace.Path, "src", "verbatim.cs")],
+			TestContext.Current.CancellationToken);
+		using var plainScope = withoutCompression.BeginOutput(
+			[Path.Combine(workspace.Path, "src", "verbatim.cs")],
+			TestContext.Current.CancellationToken);
 
 		// An untransformed file must land on exactly the value a pack with no compression uses, so
 		// its scans and placeholder identities stay interchangeable between the two shapes - and the
@@ -96,10 +100,12 @@ public sealed class MixedDetailRedactionIdentityTests
 			new CodeCompressionContext(workspace.Path, compressionSession, Compact) { Policy = policy },
 			new SecretRedactionContext(workspace.Path, redactionSession))!;
 
-		using var scope = context.BeginOutput([
-			Path.Combine(workspace.Path, "src", "base.cs"),
-			Path.Combine(workspace.Path, "src", "other.cs")
-		]);
+		using var scope = context.BeginOutput(
+			[
+				Path.Combine(workspace.Path, "src", "base.cs"),
+				Path.Combine(workspace.Path, "src", "other.cs")
+			],
+			TestContext.Current.CancellationToken);
 		var expected = compressionSession.GetTransformIdentity(Compact);
 
 		Assert.Equal(
