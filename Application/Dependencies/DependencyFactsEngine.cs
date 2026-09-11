@@ -90,13 +90,17 @@ public sealed class DependencyFactsEngine : IDisposable
 					snapshot.Files.Count,
 					0,
 					started.ElapsedMilliseconds,
-					true)
+					true),
+				// Nothing was prepared or read here, so the observations an earlier pass made are
+				// not repeated as if this pass had just made them.
+				ContentObservations = NoContentObservations
 			};
 		}
 		var configuration = await _configurationProvider
 			.ReadAsync(root, manifest, cancellationToken)
 			.ConfigureAwait(false);
 		var prepared = new PreparedDependencyIdentity[manifest.Length];
+		var observations = new DependencySourceObservation[manifest.Length];
 		var parsedBefore = _extractor.ParseCount;
 		var facts = new FileFacts[prepared.Length];
 		var cacheable = new bool[prepared.Length];
@@ -119,6 +123,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					canonicalManifest[index].RelativePath,
 					source.ContentFingerprint,
 					source.LanguageId);
+				observations[index] = source.ContentObservation;
 				if (source.PreparedStatus != DependencyFileStatus.Supported)
 				{
 					var extracted = _extractor.Extract(source, _limits, token);
@@ -215,6 +220,11 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (!resolutionCacheHit)
 				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		}
+		var contentObservations = new Dictionary<string, DependencySourceObservation>(
+			manifest.Length,
+			PathComparer);
+		for (var index = 0; index < manifest.Length; index++)
+			contentObservations[manifest[index]] = observations[index];
 		var coverage = BuildCoverage(resolved.Files, configuration.ConfigurationDiagnostics);
 		var result = new DependencyIndexSnapshot(
 			root,
@@ -233,7 +243,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				started.ElapsedMilliseconds,
 				resolutionCacheHit))
 		{
-			FileByPath = resolved.FileByPath
+			FileByPath = resolved.FileByPath,
+			ContentObservations = contentObservations
 		};
 		var finalStamps = TryCaptureFileStamps(manifest);
 		if (canCacheIndex && initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
@@ -825,6 +836,9 @@ public sealed class DependencyFactsEngine : IDisposable
 	private static StringComparer PathComparer => OperatingSystem.IsWindows()
 		? StringComparer.OrdinalIgnoreCase
 		: StringComparer.Ordinal;
+
+	private static readonly IReadOnlyDictionary<string, DependencySourceObservation> NoContentObservations =
+		new Dictionary<string, DependencySourceObservation>(PathComparer);
 
 	public void Dispose()
 	{

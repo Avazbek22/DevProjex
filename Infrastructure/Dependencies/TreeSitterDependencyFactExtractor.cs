@@ -150,6 +150,14 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				RemovePreparedSource(key, entry);
 				throw;
 			}
+			// Only a call that performed the read may claim to have observed the file. A reused
+			// preparation is reported as reuse, so a caller can tell an observation apart from an
+			// echo of the identity it supplied itself.
+			var observation = !ownsEntry
+				? new DependencySourceObservation(DependencySourceObservationKind.ReusedPreparation)
+				: content.ObservedContentDigest is { } observedDigest
+					? new DependencySourceObservation(DependencySourceObservationKind.Read, observedDigest)
+					: default;
 			return new PreparedDependencySource(
 				fullPath,
 				relative,
@@ -160,7 +168,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				content.Source,
 				content.Status,
 				content.StatusReason,
-				content.CanCache);
+				content.CanCache,
+				observation);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
 		{
@@ -251,7 +260,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				read.Source,
 				read.Status,
 				read.StatusReason,
-				read.CanCache);
+				read.CanCache,
+				read.ObservedContentDigest);
 		}
 		await using var snapshot = await _contentAnalyzer
 			.OpenCompleteSnapshotAsync(fullPath, cancellationToken)
@@ -1021,6 +1031,10 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				var lastWrite = File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks;
 				var byteBufferSize = checked((int)Math.Clamp(length, 1, BufferSize));
 				byteBuffer = ArrayPool<byte>.Shared.Rent(byteBufferSize);
+				// Digest the bytes in the pass that decodes them, so a caller that hashed the same
+				// file earlier can compare without opening it again. It covers the whole stream,
+				// preamble included, and is only reported when the stream was read to its end.
+				using var observed = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 				Decoder? decoder = null;
 				StringBuilder? source = null;
 				while (true)
@@ -1032,6 +1046,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					if (bytesRead == 0)
 						break;
 					bytesReadTotal += bytesRead;
+					observed.AppendData(byteBuffer.AsSpan(0, bytesRead));
 					var input = byteBuffer.AsSpan(0, bytesRead);
 					if (decoder is null)
 					{
@@ -1099,13 +1114,15 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 						MetadataFingerprint("binary", length, lastWrite),
 						string.Empty,
 						DependencyFileStatus.ExtractionFailed,
-						"source is binary");
+						"source is binary",
+						ObservedContentDigest: Convert.ToHexString(observed.GetCurrentHash()));
 				}
 				return new BoundedDependencySourceRead(
 					ContentFingerprint.Compute(content.AsSpan()).ToHexString().ToLowerInvariant(),
 					content,
 					DependencyFileStatus.Supported,
-					null);
+					null,
+					ObservedContentDigest: Convert.ToHexString(observed.GetCurrentHash()));
 			}
 			catch (DecoderFallbackException)
 			{
@@ -1178,7 +1195,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string Source,
 		DependencyFileStatus Status,
 		string? StatusReason,
-		bool CanCache = true);
+		bool CanCache = true,
+		string? ObservedContentDigest = null);
 
 	internal readonly record struct DependencyExtractionWorkState(
 		long RawCapturesVisited,
@@ -1207,7 +1225,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string Source,
 		DependencyFileStatus Status = DependencyFileStatus.Supported,
 		string? StatusReason = null,
-		bool CanCache = true);
+		bool CanCache = true,
+		string? ObservedContentDigest = null);
 
 	private sealed record LanguageDefinition(
 		string Library,

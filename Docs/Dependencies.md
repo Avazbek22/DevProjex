@@ -316,10 +316,18 @@ length, modification-time, and creation-time compromise. A same-length replaceme
 are deliberately restored can therefore remain cached for those two related-file surfaces until the
 entry is evicted or its metadata changes.
 
-The content identity passed to the extractor is an observed cache label; the extractor does not hash
-the bytes again while reading. An adversarial `hash A -> read B -> restore A -> hash A` sequence between
-the two observations is therefore not detected. This is a known coherence limitation, not evidence
-that the intermediate bytes belonged to identity A.
+The content identity passed to the extractor is an opaque cache label, but the extractor no longer
+relies on it to describe what it read. While it decodes a file it digests the raw bytes in the same
+pass, and the index snapshot reports that digest per file. Importance ranking hashes each source once
+before indexing and compares its own hash with the reported digest, so a `hash A -> replace with B ->
+restore A's metadata` sequence between the two observations is detected even though length, write time
+and creation time never changed.
+
+That comparison covers every file the pass actually read. Where the pass answered from a retained
+prepared source or a retained manifest snapshot it read nothing, and the snapshot reports reuse instead
+of a digest rather than repeating an earlier observation as a fresh one. Those files carry one
+observation, and the currency check performed when their content is read for output remains their
+second.
 
 Changing one source reparses that source. Changing resolver configuration invalidates resolution but
 reuses file facts, so no source parse is required. Before every result is exposed, it is gated against

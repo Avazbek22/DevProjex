@@ -114,6 +114,15 @@ public sealed record ImportanceRankingReport(
 	internal IReadOnlyDictionary<string, RankingSourceVersion> SourceVersions { get; init; } =
 		new Dictionary<string, RankingSourceVersion>(StringComparer.Ordinal);
 
+	/// <summary>
+	/// Whether indexing read each selected file again after <see cref="SourceVersions"/> was
+	/// captured, keyed by absolute path. A file reported as read was observed twice and the two
+	/// observations agreed; a file reported as reused or absent from this map was observed once,
+	/// and only a later currency check can speak for it.
+	/// </summary>
+	internal IReadOnlyDictionary<string, DependencySourceObservation> SourceObservations { get; init; } =
+		new Dictionary<string, DependencySourceObservation>(StringComparer.Ordinal);
+
 	internal DependencyIndexMetrics? DependencyMetrics { get; init; }
 }
 

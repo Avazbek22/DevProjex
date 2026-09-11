@@ -10,7 +10,8 @@ public sealed record PreparedDependencySource(
 	string Source,
 	DependencyFileStatus PreparedStatus = DependencyFileStatus.Supported,
 	string? PreparedStatusReason = null,
-	bool CanCache = true);
+	bool CanCache = true,
+	DependencySourceObservation ContentObservation = default);
 
 public sealed class DependencyManifestContentIdentities
 {
