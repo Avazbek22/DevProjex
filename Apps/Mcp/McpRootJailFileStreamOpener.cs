@@ -30,6 +30,7 @@ internal sealed class McpRootJailFileStreamOpener
 		bool asynchronous)
 	{
 		var lexicalRoot = _roots.ResolveLexicalRoot(path);
+		McpProjectPathProbe.Record();
 		UnixFileTypeInspector.EnsureRegularFile(path);
 		var stream = new FileStream(
 			path,
@@ -69,6 +70,7 @@ internal sealed class McpRootJailFileStreamOpener
 	internal static string ResolveDirectoryPath(string path)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		McpProjectPathProbe.Record();
 		if (!OperatingSystem.IsWindows())
 			return ResolveUnixDirectoryPath(path);
 

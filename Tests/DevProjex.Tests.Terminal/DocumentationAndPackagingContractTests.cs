@@ -215,6 +215,44 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("16,000 characters", normalized, StringComparison.Ordinal);
 	}
 
+	/// <summary>
+	/// The offline guarantee is only worth stating if it says when the refusal happens: before
+	/// anything opens the path, because opening one of these forms is the network operation.
+	/// </summary>
+	[Fact]
+	public void McpDocumentationStatesThatNoProbeLeavesTheMachineBeforeTheRemoteOptIn()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var security = File.ReadAllText(Path.Combine(rootPath, "Docs", "Security.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedSecurity = Regex.Replace(security, @"\s+", " ");
+
+		Assert.Contains(
+			"no probe leaves the machine before that permission is considered",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			@"a form that names a host is refused with `DPX-MCP-INVALID-ARGUMENTS` before" +
+			@" anything opens it: `\\server\share` and `//server/share`, the UNC device" +
+			@" path `\\?\UNC\server\share`, anything in the NT object namespace `\??\`," +
+			" and the automount host maps",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Opening such a path is itself the network operation",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Three device forms address this machine and are not refused",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"No probe leaves the machine before the remote opt-in is considered",
+			normalizedSecurity,
+			StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public void McpDocumentationStatesWhenServiceNoticesRepeat()
 	{
