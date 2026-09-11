@@ -164,7 +164,8 @@ public sealed class ExportContextCommandHandler(
 				environment,
 				services.Localization,
 				requestedOutputPath ?? "-",
-				plan);
+				plan,
+				cancellationToken);
 			var unscannableFiles = budgetResult?.UnscannableFiles ??
 			                       redactionSnapshot?.UnscannableFiles;
 			if (unscannableFiles is not null)

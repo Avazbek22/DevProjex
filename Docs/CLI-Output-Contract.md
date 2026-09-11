@@ -548,8 +548,9 @@ user segment with the same placeholder as the document header.
 
 With `--detail-for`, every entry in `files` and every entry in
 `tokenBudget.largestSkippedFiles` additionally carries `detail`, a
-`full|compact|signatures` string naming that file's effective level. The field is
-additive and present only for a call that supplied the option.
+`full|compact|signatures` string naming the level resolved for that file. It names the
+resolved level, not a guarantee that a transformation applied. The field is additive
+and present only for a call that supplied the option.
 
 ## Context XML
 

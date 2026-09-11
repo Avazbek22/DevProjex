@@ -653,7 +653,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	              "tokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the transformed file at its effective detail." },
 	              "priority": { "type": "integer", "minimum": 1, "description": "Position in the admission order; present only with rank." },
 	              "remainingTokens": { "type": "integer", "minimum": 0, "description": "Budget still free when this file was considered." },
-	              "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective detail this file was costed at; present only when detail_by_pattern was supplied." }
+	              "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Detail level resolved for this file and used for its cost; present only when detail_by_pattern was supplied. It names the requested level, not a guarantee that a transformation applied: unsupported files stay unchanged." }
 	            },
 	            "required": ["path", "tokens", "remainingTokens"],
 	            "additionalProperties": false

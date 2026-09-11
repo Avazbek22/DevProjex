@@ -31,10 +31,13 @@ public static class ContentDetailSelection
 			return null;
 
 		var selectionKinds = ResolveSelectionKinds(selection);
+		// A selection that never crossed the resolver has no separate record of what the profile asked
+		// for; its own kinds are the closest honest answer. The share is also clamped to what the
+		// selection resolved to: an override must never be able to ADD a transformation that no
+		// unmatched file receives, which is the inverse of the rule it exists to protect.
+		var profileKinds = (selection.ProfileContentKinds ?? selectionKinds) & selectionKinds;
 		return new ContentDetailPolicy(
-			// A selection that never crossed the resolver has no separate record of what the profile
-			// asked for; its own kinds are the closest honest answer.
-			selection.ProfileContentKinds ?? selectionKinds,
+			profileKinds,
 			selectionKinds | requestedKinds,
 			overrides);
 	}

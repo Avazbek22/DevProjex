@@ -123,7 +123,6 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	private long _prewarmReuses;
 	private long _unsupportedFastPaths;
 	private long _retainedCacheBytes;
-	private long _nextOperationId;
 	private bool _disposed;
 
 	internal CodeCompressionSession(
@@ -318,9 +317,10 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			? GetTransformIdentity(kinds)
 			: GetTransformIdentity(effectivePolicy);
 		var generation = CaptureGeneration();
-		// Every parse scope a mixed operation materialises belongs to one operation, so the
-		// identifier is captured once here rather than once per inner scope.
-		var operationId = Interlocked.Increment(ref _nextOperationId);
+		// Every parse scope a mixed operation materialises belongs to one operation, so the identifier
+		// is reserved once here rather than once per inner scope. The compressor is the single
+		// generator, so no other caller can be handed the same number.
+		var operationId = compressor.BeginOperation();
 		return new CodeCompressionScope(
 			this,
 			effectivePolicy is null
@@ -1039,9 +1039,6 @@ public sealed class CodeCompressionScope : IDisposable
 		return new FileTransformTarget(scope, fileKinds, session.GetTransformIdentity(fileKinds));
 	}
 
-	internal CodeTransformKinds KindsFor(string relativePath) =>
-		detailPolicy is null ? kinds : detailPolicy.KindsFor(relativePath);
-
 	public CodeCompressionResult Transform(
 		string fullPath,
 		string relativePath,
@@ -1497,10 +1494,23 @@ public sealed record CodeCompressionContext(
 			ProjectRoot,
 			ContentSelectionSnapshot.Create(ProjectRoot, orderedFilePaths),
 			Kinds,
-			Policy);
+			RejectPolicyForPrewarm());
 
 	internal CodeCompressionScope BeginPrewarm(ContentSelectionSnapshot selection) =>
-		Session.BeginPrewarm(ProjectRoot, selection, Kinds, Policy);
+		Session.BeginPrewarm(ProjectRoot, selection, Kinds, RejectPolicyForPrewarm());
+
+	/// <summary>
+	/// Prewarm stamps <see cref="TransformIdentity"/> onto per-file retained metrics, and under a
+	/// policy that string identifies the operation rather than any one file. Reusing those facts later
+	/// would match a file by path, size and write time without comparing text - exactly the aliasing
+	/// this design avoids elsewhere - so the combination is refused rather than merely discouraged.
+	/// </summary>
+	private ContentDetailPolicy? RejectPolicyForPrewarm() =>
+		Policy is null
+			? null
+			: throw new NotSupportedException(
+				"Prewarm does not support per-file detail: its retained metrics are keyed by a single " +
+				"transform identity.");
 
 	public CodeCompressionScope BeginMeasurement() =>
 		Session.BeginMeasurement(ProjectRoot, Kinds, Policy);

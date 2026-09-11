@@ -447,14 +447,18 @@ internal sealed class DevProjexMcpTools(
 				FormatCompressionUnavailable(prepared.CompressionSnapshot),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				SelectionNotices(plan, includeFilters: false, selection.NoticeContext, includeProtection: false));
-			if (admissionBudget is not null)
-			{
-				notices = AppendBudgetAccounting(
-					notices ?? string.Empty,
-					admissionBudget,
-					formattedAdmissionReport!.Length);
-			}
-			return McpToolResults.StructuredSuccess(envelope, notices);
+			return McpToolResults.StructuredSuccess(
+				envelope,
+				notices,
+				(structuredCharacters, trailer) => admissionBudget is null
+					? trailer
+					// The reply is the spotlighted structured block plus these notices, so both are
+					// counted: measuring only the notices would understate it by the whole plan.
+					: AppendBudgetAccounting(
+						trailer ?? string.Empty,
+						admissionBudget,
+						formattedAdmissionReport!.Length,
+						additionalReplyCharacters: structuredCharacters));
 		}, cancellationToken);
 
 	[Description(
@@ -523,13 +527,6 @@ internal sealed class DevProjexMcpTools(
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
 			plan = Projects.ApplyDetail(plan, effectiveDetail, detailOverrides, cancellationToken);
-			var detailMix = ContentDetailSelection.Resolve(plan.Selection) is { } packPolicy
-				? ContentDetailMix.Create(
-					packPolicy,
-					plan.SourceRoot,
-					plan.IncludedFiles,
-					cancellationToken)
-				: null;
 			var rankingService = rank is null
 				? null
 				: new ImportanceRankingService(
@@ -592,6 +589,15 @@ internal sealed class DevProjexMcpTools(
 				plan = admission.Plan;
 				admissionResult = admission.WriteResult;
 			}
+			// Computed after admission, so the reported mix describes what the pack actually carries
+			// rather than a selection a budget has since narrowed.
+			var detailMix = ContentDetailSelection.Resolve(plan.Selection) is { } packPolicy
+				? ContentDetailMix.Create(
+					packPolicy,
+					plan.SourceRoot,
+					plan.IncludedFiles,
+					cancellationToken)
+				: null;
 			await McpProjectService.EnsureRankingSourcesCurrentAsync(
 				ranking,
 				plan.IncludedFiles,
@@ -2080,10 +2086,12 @@ internal sealed class DevProjexMcpTools(
 		string responseWithoutAccounting,
 		ProjectContextTokenBudgetReport report,
 		int formattedReportCharacters,
-		long? storedDocumentCharacters = null)
+		long? storedDocumentCharacters = null,
+		int additionalReplyCharacters = 0)
 	{
 		var reportTokens = CodeCompressionSnapshot.EstimateTokens(formattedReportCharacters);
-		var replyTokens = CodeCompressionSnapshot.EstimateTokens(responseWithoutAccounting.Length);
+		var replyTokens = CodeCompressionSnapshot.EstimateTokens(
+			responseWithoutAccounting.Length + additionalReplyCharacters);
 		string? result = null;
 		for (var attempt = 0; attempt < 8; attempt++)
 		{
@@ -2095,7 +2103,7 @@ internal sealed class DevProjexMcpTools(
 				                 : string.Empty) +
 			                 $" · reply ≈ {replyTokens.ToString(CultureInfo.InvariantCulture)}";
 			result = AppendTrustedNotices(responseWithoutAccounting, accounting);
-			var next = CodeCompressionSnapshot.EstimateTokens(result.Length);
+			var next = CodeCompressionSnapshot.EstimateTokens(result.Length + additionalReplyCharacters);
 			if (next == replyTokens)
 				break;
 			replyTokens = next;

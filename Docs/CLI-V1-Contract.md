@@ -1415,8 +1415,10 @@ XML must parse with standard parsers.
 
 When `export context --detail-for` is present, context JSON and XML add a `detail`
 string to every file entry and to every `tokenBudget.largestSkippedFiles` entry,
-carrying that file's effective level. Both are additive and appear only for a call
-that supplies the option, so a call without it keeps its exact bytes and its existing
+carrying the detail level resolved for that file. It names the resolved level rather
+than guaranteeing a transformation applied: an unsupported language or a binary still
+reports its level and still ships unchanged. Both are additive and appear only for a
+call that supplies the option, so a call without it keeps its exact bytes and its existing
 `schemaVersion`.
 
 When `export context --max-tokens` is present, context JSON and XML add an

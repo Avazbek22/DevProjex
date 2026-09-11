@@ -238,8 +238,10 @@ public sealed class TreeSitterCodeCompressor :
 	public ICodeCompressionScope CreateScope(string projectRoot) =>
 		CreateScope(projectRoot, CodeTransformKinds.Bodies);
 
+	public long BeginOperation() => Interlocked.Increment(ref _nextScopeId);
+
 	public ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds) =>
-		CreateScope(projectRoot, kinds, Interlocked.Increment(ref _nextScopeId));
+		CreateScope(projectRoot, kinds, BeginOperation());
 
 	public ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds, long operationId)
 	{

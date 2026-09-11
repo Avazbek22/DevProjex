@@ -133,4 +133,45 @@ public sealed class ContentDetailPolicyTests
 	{
 		Assert.Throws<ProjectRelativeGlobException>(() => ContentDetailPatternSet.Create([]));
 	}
+
+	[Fact]
+	public void TheTotalNumberOfCompiledAlternativesIsBounded()
+	{
+		// Each mask is individually legal, but their brace expansions together would build far more
+		// automata than the entry cap suggests, and every one of them runs against every selected
+		// file. The aggregate is capped so an accepted call cannot wedge the server.
+		var alternatives = string.Join(",", Enumerable.Range(0, 64).Select(index => $"a{index}"));
+		var patterns = Enumerable.Range(0, 8).Select(_ => $"src/{{{alternatives}}}.cs").ToArray();
+
+		var failure = Assert.Throws<ProjectRelativeGlobException>(
+			() => ContentDetailPatternSet.Create(patterns));
+
+		Assert.Contains(
+			ContentDetailPatternSet.MaximumExpandedPatterns.ToString(CultureInfo.InvariantCulture),
+			failure.Reason,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void TheSameOrderedPatternListIsCompiledOnce()
+	{
+		var first = ContentDetailPatternSet.Create(["src/**", "docs/**"]);
+		var second = ContentDetailPatternSet.Create(["src/**", "docs/**"]);
+		var different = ContentDetailPatternSet.Create(["docs/**", "src/**"]);
+
+		Assert.Same(first, second);
+		// Order is part of the identity, because last-match precedence depends on it.
+		Assert.NotSame(first, different);
+	}
+
+	[Fact]
+	public void PatternsAreValidatedBeforeTheCompiledSetCacheIsConsulted()
+	{
+		// A mask rejected once must be rejected every time, not only on the call that first compiled
+		// it, so validation cannot sit behind the cache.
+		Assert.Throws<ProjectRelativeGlobException>(
+			() => ContentDetailPatternSet.Create(["cached/**", "!bad"]));
+		Assert.Throws<ProjectRelativeGlobException>(
+			() => ContentDetailPatternSet.Create(["cached/**", "!bad"]));
+	}
 }

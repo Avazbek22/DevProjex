@@ -62,14 +62,19 @@ public sealed record ProjectContextTokenBudgetReport(
 	public string IncludedOrderDigest { get; init; } = string.Empty;
 }
 
-internal sealed class ProjectContextTokenBudgetAccumulator
+internal sealed class ProjectContextTokenBudgetAccumulator : IDisposable
 {
 	internal const int MaximumReportedSkippedFiles = 25;
 	internal const int MaximumReportedRankedSkippedFiles = 10;
 	internal const int MaximumReportedIncludedFiles = 1_000;
+	// The digest of an empty admission: SHA-256 of no input, so it is stable and comparable.
+	private static readonly string EmptyIncludedOrderDigest =
+		Convert.ToHexString(SHA256.HashData([]));
 	private readonly long _maximumEstimatedTokens;
 	private readonly string? _sourceRoot;
-	private readonly IncrementalHash _includedOrder = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+	// Created on first admitted file. A replay over a completed admission never appends and never
+	// reads it, so it must not hold a hash handle either.
+	private IncrementalHash? _includedOrder;
 	private readonly List<ProjectContextTokenBudgetIncludedFile> _includedFiles = [];
 	private List<ProjectContextTokenBudgetSkippedFile>? _largestSkippedFiles;
 	private List<ProjectContextTokenBudgetSkippedFile>? _rankedSkippedFiles;
@@ -173,12 +178,21 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			AdmittedSourceFiles = _admittedSourceFiles.ToArray(),
 			IncludedFiles = _includedFiles.ToArray(),
 			AdditionalIncludedFileCount = _includedFileCount - _includedFiles.Count,
-			IncludedOrderDigest = Convert.ToHexString(_includedOrder.GetCurrentHash())
+			IncludedOrderDigest = _includedOrder is null
+				? EmptyIncludedOrderDigest
+				: Convert.ToHexString(_includedOrder.GetCurrentHash())
 		};
+	}
+
+	public void Dispose()
+	{
+		_includedOrder?.Dispose();
+		_includedOrder = null;
 	}
 
 	private void AppendToIncludedOrder(string sourcePath)
 	{
+		_includedOrder ??= IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		var relativePath = ContentDetailPolicy.ToProjectRelativePath(_sourceRoot ?? string.Empty, sourcePath);
 		var bytes = Encoding.UTF8.GetBytes(relativePath);
 		Span<byte> length = stackalloc byte[4];

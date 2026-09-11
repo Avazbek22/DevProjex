@@ -121,7 +121,7 @@ public sealed class ExportContextDetailForContractTests
 	}
 
 	[Fact]
-	public async Task AnOverrideToFullDoesNotUndoAnExplicitCompressionFlag()
+	public async Task AnOverrideToFullReallyMeansFullBecauseTheToggleIsTheCallLevel()
 	{
 		using var workspace = new TemporaryDirectory();
 		CreateFixture(workspace);

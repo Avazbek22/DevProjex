@@ -2342,9 +2342,11 @@ public sealed class SecretRedactionScope
 		_session = session;
 		_transformIdentity = transformIdentity;
 		_perFileTransformIdentity = perFileTransformIdentity;
+		// Keyed ordinally, not canonically: detail globs match case-sensitively on every platform, so
+		// two casings of one path can resolve to different kinds and must not share a cache entry.
 		_resolvedTransformIdentities = perFileTransformIdentity is null
 			? null
-			: new ConcurrentDictionary<string, string>(ProjectTreePathIdentity.CanonicalComparer);
+			: new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
 		_projectRoot = PathUtility.Normalize(projectRoot);
 		_keptOccurrenceIds = keptOccurrenceIds;
 		_overrideRevision = overrideRevision;

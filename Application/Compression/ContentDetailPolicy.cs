@@ -11,6 +11,18 @@ namespace DevProjex.Application.Compression;
 /// </summary>
 public sealed class ContentDetailPatternSet
 {
+	/// <summary>
+	/// Upper bound on the automata one entry may compile after brace expansion. Without it, an entry
+	/// of 32 masks each expanding to the brace limit would build thousands of automata and then run
+	/// every one of them against every selected file.
+	/// </summary>
+	public const int MaximumExpandedPatterns = 256;
+
+	private const int MaximumCachedPatternSets = 64;
+	private static readonly object CacheSync = new();
+	private static readonly Dictionary<string, ContentDetailPatternSet> Cache = new(StringComparer.Ordinal);
+	private static readonly Queue<string> CacheOrder = new();
+
 	// Grouped by the caller's pattern rather than flattened, because a brace group expands to
 	// several automata and the report has to say which of the *supplied* masks claimed nothing.
 	private readonly IReadOnlyList<Regex[]> _compiled;
@@ -35,16 +47,46 @@ public sealed class ContentDetailPatternSet
 		if (patterns.Count == 0)
 			throw new ProjectRelativeGlobException("patterns must not be empty");
 
-		var compiled = new Regex[patterns.Count][];
+		// Validate before consulting the cache so a rejected mask is rejected every time, not only
+		// on the call that happened to compile it first.
+		var expanded = new List<string>[patterns.Count];
+		var total = 0;
 		for (var index = 0; index < patterns.Count; index++)
 		{
-			var pattern = patterns[index];
-			ProjectRelativeGlob.Validate(pattern);
-			compiled[index] = ProjectRelativeGlob.ExpandBraces(pattern)
-				.Select(ProjectRelativeGlob.Compile)
-				.ToArray();
+			ProjectRelativeGlob.Validate(patterns[index]);
+			expanded[index] = [.. ProjectRelativeGlob.ExpandBraces(patterns[index])];
+			total += expanded[index].Count;
+			if (total > MaximumExpandedPatterns)
+			{
+				throw new ProjectRelativeGlobException(
+					$"the patterns expand to at most {MaximumExpandedPatterns} alternatives in total");
+			}
 		}
-		return new ContentDetailPatternSet(patterns.ToArray(), compiled);
+
+		// Compiling a non-backtracking automaton is not cheap and the same override list recurs
+		// across calls, so a bounded cache keyed on the whole ordered list is reused.
+		// NUL-separated: a space would let "a b" and the pair "a","b" share one entry.
+		var key = string.Join('\0', patterns);
+		lock (CacheSync)
+		{
+			if (Cache.TryGetValue(key, out var cached))
+				return cached;
+		}
+
+		var compiled = new Regex[patterns.Count][];
+		for (var index = 0; index < patterns.Count; index++)
+			compiled[index] = [.. expanded[index].Select(ProjectRelativeGlob.Compile)];
+		var set = new ContentDetailPatternSet([.. patterns], compiled);
+		lock (CacheSync)
+		{
+			if (Cache.TryAdd(key, set))
+			{
+				CacheOrder.Enqueue(key);
+				while (CacheOrder.Count > MaximumCachedPatternSets)
+					Cache.Remove(CacheOrder.Dequeue());
+			}
+		}
+		return set;
 	}
 
 	public bool Matches(string relativePath)
@@ -94,8 +136,9 @@ public sealed record ContentDetailOverride(
 /// become a way to escape a saved profile. Keeping <see cref="ProfileKinds"/> explicit lets the
 /// union run again for every single file.
 ///
-/// <see cref="KindsFor"/> is pure and allocation-free: it is called from the preparation workers,
-/// where nothing serializes access to redaction state.
+/// <see cref="KindsFor"/> is pure: it reads only immutable state and precompiled matchers, which is
+/// what makes it safe to call from the preparation workers, where nothing serializes access to
+/// redaction state.
 /// </summary>
 public sealed class ContentDetailPolicy
 {

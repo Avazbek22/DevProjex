@@ -63,6 +63,13 @@ public interface ICodeCompressor
 	/// </summary>
 	ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds, long operationId) =>
 		CreateScope(projectRoot, kinds);
+
+	/// <summary>
+	/// Reserves one operation identity. There must be a single generator: the identifier keys
+	/// per-operation state such as a memoised transient grammar-load failure, so two generators
+	/// handing out the same number would let one operation's failure short-circuit another's.
+	/// </summary>
+	long BeginOperation() => 0;
 }
 
 /// <summary>Optional native-runtime facts used by bounded orchestration and developer diagnostics.</summary>

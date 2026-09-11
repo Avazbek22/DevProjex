@@ -381,13 +381,24 @@ aggregate budget; the flag and the count say what was cut. `skippedFiles` follow
 pack report shape: the 25 largest skipped files plus, with `rank`, the 10
 highest-priority skipped ones. `detail` is the effective default level the admission
 was measured at; a per-file level appears on each skipped entry when
-`detail_by_pattern` was supplied.
+`detail_by_pattern` was supplied. The reported per-file level is the level resolved for
+that file, not a claim that a transformation succeeded: an unsupported language, a
+binary, or a file past the inspection boundary still reports its resolved level and
+still ships unchanged, exactly as the `detail` parameter behaves generally.
+
+`admission` paths are project-relative. A pack renders its own paths according to its
+`view` and `format` - JSON and XML on a remote checkout use the safe repository URL -
+so compare the two by `includedOrderDigest` and the counts rather than by string
+equality of paths. Together with the existing `topFiles` budget, a fully populated
+`admission` can roughly double an `analyze` reply; `analyze` has no paged fallback, so
+prefer a smaller `top_files` when previewing a large selection.
 
 For the same content snapshot, configuration, filters, and effective transforms, the
 admitted set of `analyze` equals the set `pack_context` admits. `includedOrderDigest`
 is a hash of the complete ordered admitted list of project-relative paths, computed in
-the shared admission service and taken from the source path rather than the printed
-one, so it is comparable across `markdown`, `text`, `json`, and `xml`. It is an
+the shared admission accumulator and nowhere else, and taken from the source path
+rather than the printed one, so it is comparable across `markdown`, `text`, `json`,
+and `xml`. It is an
 **order** digest: compare it only between calls with the same `rank` and `focus`, and
 use the counts for set equality. A metadata fingerprint is not a promise of
 byte-identical content.
@@ -791,6 +802,10 @@ The union with profile transformations happens for every file separately, so an
 override back to `full` adds no reduction of its own and still never removes one a
 saved profile requires. Selection is never widened: a pattern that matches nothing is
 reported rather than adding files.
+
+The mix a pack reports describes the files the pack carries: with `max_tokens` it is
+counted after admission, not over the selection a budget then narrowed. For `analyze`
+it describes the measured selection.
 
 A call that supplies `detail_by_pattern` gains a trusted trailer stating the mix,
 `[Detail] full 7 · compact 0 · signatures 3 · overrides 2 of 2 patterns matched`,
