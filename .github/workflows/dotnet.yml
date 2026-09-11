@@ -114,6 +114,38 @@ jobs:
           .github/workflows/grammar-delivery.yml
           .github/workflows/store-package-smoke.yml
 
+  indentation:
+    name: Indentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Check the indentation of changed C# files
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          $head = git rev-parse HEAD
+          # Outside a pull request there is nothing to compare a file against, so the gate reports
+          # no changed files and passes. That is what keeps it runnable rather than skipped, which
+          # a `force_full` run counts as a failure.
+          $base = if ([string]::IsNullOrWhiteSpace($env:BASE_SHA) -or $env:BASE_SHA -match '^0+$') {
+            $head
+          } else {
+            $env:BASE_SHA
+          }
+          ./Scripts/ci/Test-Indentation.ps1 -BaseSha $base -HeadSha $head
+
   test-suite:
     name: CI (${{ matrix.os_name }} / ${{ matrix.suite_name }})
     needs: prepare-matrix
@@ -535,6 +567,7 @@ jobs:
       - documentation-contracts
       - ranking-eval-tests
       - workflow-lint
+      - indentation
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -550,6 +583,7 @@ jobs:
           DOCUMENTATION_RESULT: ${{ needs.documentation-contracts.result }}
           RANKING_EVAL_RESULT: ${{ needs.ranking-eval-tests.result }}
           WORKFLOW_LINT_RESULT: ${{ needs.workflow-lint.result }}
+          INDENTATION_RESULT: ${{ needs.indentation.result }}
           FORCE_FULL: ${{ inputs.force_full }}
         run: |
           $results = @{
@@ -560,6 +594,7 @@ jobs:
             documentation = $env:DOCUMENTATION_RESULT
             rankingEval = $env:RANKING_EVAL_RESULT
             workflowLint = $env:WORKFLOW_LINT_RESULT
+            indentation = $env:INDENTATION_RESULT
           }
           $accepted = if ($env:FORCE_FULL -eq 'true') { @('success') } else { @('success', 'skipped') }
           $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin $accepted })
