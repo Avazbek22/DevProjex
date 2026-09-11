@@ -262,6 +262,24 @@ non-idempotent because either may create a stored result with a new session id. 
 closed-world; with it, the six tools that accept `project` Git URLs are annotated
 open-world.
 
+### What a connection costs
+
+Before a client asks anything about a project it has already paid for the tool schemas and the
+server instructions. Measured on 2026-09-11 against the built application:
+
+| Payload | Characters |
+|---|---:|
+| `tools/list` result, default server | 33,981 |
+| `tools/list` result, `--allow-agent-exclusions` | 37,869 |
+| `initialize` result | 1,223 |
+| of which `instructions` | 1,044 |
+
+`analyze` is the largest single tool at 8,325 characters: 4,545 of output schema, 3,076 of input
+schema, and 482 of description. The `exclusions` parameter costs a flat 3,888 characters, 648 on
+each of the six tools that take it. A process test holds both `tools/list` shapes and the
+instructions under explicit ceilings with deliberate headroom, so a new parameter or description
+has to fit a budget rather than grow one silently.
+
 | Tool | Parameters | Result and limits |
 |---|---|---|
 | `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
