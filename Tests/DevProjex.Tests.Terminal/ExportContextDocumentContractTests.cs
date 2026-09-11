@@ -967,7 +967,8 @@ public sealed class ExportContextDocumentContractTests
 		string view = "tree-content",
 		bool compressCode = false,
 		bool rank = false,
-		bool hideSecrets = false)
+		bool hideSecrets = false,
+		IReadOnlyList<string>? detailFor = null)
 	{
 		var arguments = new List<string>
 		{
@@ -994,6 +995,11 @@ public sealed class ExportContextDocumentContractTests
 		{
 			arguments.Add("--rank");
 			arguments.Add("importance");
+		}
+		foreach (var value in detailFor ?? [])
+		{
+			arguments.Add("--detail-for");
+			arguments.Add(value);
 		}
 
 		return new TerminalApplication(

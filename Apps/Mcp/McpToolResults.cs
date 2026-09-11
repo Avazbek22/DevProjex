@@ -19,16 +19,27 @@ internal static class McpToolResults
 				: null
 		};
 
-	public static CallToolResult StructuredSuccess(object value, string? notice = null)
+	public static CallToolResult StructuredSuccess(object value, string? notice = null) =>
+		StructuredSuccess(value, notice, static (_, trailer) => trailer);
+
+	/// <summary>
+	/// Builds the result, letting the caller finish its trailing notice once the spotlighted
+	/// structured block is known. A caller that reports how large its own reply is needs that length:
+	/// the structured block is most of the reply, so measuring only the notice understates it.
+	/// </summary>
+	public static CallToolResult StructuredSuccess(
+		object value,
+		string? notice,
+		Func<int, string?, string?> completeNotice)
 	{
 		ArgumentNullException.ThrowIfNull(value);
+		ArgumentNullException.ThrowIfNull(completeNotice);
 		var structured = JsonSerializer.SerializeToElement(value);
+		var spotlighted = McpSpotlight.Wrap(JsonSerializer.Serialize(structured, StructuredTextOptions));
+		notice = completeNotice(spotlighted.Length, notice);
 		List<ContentBlock> content =
 		[
-			new TextContentBlock
-			{
-				Text = McpSpotlight.Wrap(JsonSerializer.Serialize(structured, StructuredTextOptions))
-			}
+			new TextContentBlock { Text = spotlighted }
 		];
 		if (!string.IsNullOrWhiteSpace(notice))
 			content.Add(new TextContentBlock { Text = notice });

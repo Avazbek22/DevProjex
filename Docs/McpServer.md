@@ -283,8 +283,8 @@ description has to fit a budget rather than grow one silently.
 |---|---|---|
 | `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
-| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. |
-| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
+| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
 | `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
@@ -389,6 +389,52 @@ When the requested count exceeds that budget, `topFilesTruncated` is `true` and
 contains `protection`, whose `secrets` value is always enabled and whose
 `privateData` value reflects the server startup policy. A remote result adds
 `remote.commit` and `remote.branch` from the pinned checkout session.
+`analyze.admission` is an optional v5.2 addition present only when `max_tokens` was
+supplied. It reports which files that budget would admit, from the same first-fit
+greedy pass `pack_context` uses, and produces no context document, no prepared file,
+and no stored pack. It carries `budget`, `includedFileCount`, `skippedFileCount`,
+`includedEstimatedTokens`, `skippedEstimatedTokens`, `includedFiles`,
+`includedFilesTruncated`, `additionalIncludedFileCount`, `includedOrderDigest`,
+`skippedFiles`, `additionalSkippedFileCount`, and `detail`. `includedFiles` is a
+prefix of the admission order, bounded by 1,000 entries and by a 32,000-character
+aggregate budget; the flag and the count say what was cut. `skippedFiles` follows the
+pack report shape: the 25 largest skipped files plus, with `rank`, the 10
+highest-priority skipped ones. `detail` is the effective default level the admission
+was measured at; a per-file level appears on each skipped entry when
+`detail_by_pattern` was supplied. The reported per-file level is the level resolved for
+that file, not a claim that a transformation succeeded: an unsupported language, a
+binary, or a file past the inspection boundary still reports its resolved level and
+still ships unchanged, exactly as the `detail` parameter behaves generally.
+
+`admission` paths are project-relative. A pack renders its own paths according to its
+`view` and `format` - JSON and XML on a remote checkout use the safe repository URL -
+so compare the two by `includedOrderDigest` and the counts rather than by string
+equality of paths. Together with the existing `topFiles` budget, a fully populated
+`admission` can roughly double an `analyze` reply; `analyze` has no paged fallback, so
+prefer a smaller `top_files` when previewing a large selection.
+
+For the same content snapshot, configuration, filters, and effective transforms, the
+admitted set of `analyze` equals the set `pack_context` admits. `includedOrderDigest`
+is a hash of the complete ordered admitted list of project-relative paths, computed in
+the shared admission accumulator and nowhere else, and taken from the source path
+rather than the printed one, so it is comparable across `markdown`, `text`, `json`,
+and `xml`. It is an
+**order** digest: compare it only between calls with the same `rank` and `focus`, and
+use the counts for set equality. A metadata fingerprint is not a promise of
+byte-identical content.
+
+`analyze` with `max_tokens` is a budget-fitting tool, not a required step before every
+`pack_context`. It reads, inspects, and transforms the selection exactly as a pack
+does, so calling it before every pack doubles that work; it pays off when choosing a
+budget or checking an admission decision without receiving content. Cost units differ
+from `related_files`: this reports the admission cost of the transformed file at its
+effective detail, while `related_files` reports `EstimatedTokens` from the source
+character count. The two can differ for the same file.
+
+The budget report and `[Budget accounting]` for `analyze` are appended as trusted text
+after the structured block, never inside it, because the first text block stays a
+byte-identical serialization of `structuredContent`.
+
 When requested compression cannot inspect its delivery source or load a language
 grammar, `analyze` adds optional `compressionUnavailable` with a one-line `reason`
 and a deterministic `languages` array. The array is empty when the whole delivery
@@ -683,6 +729,10 @@ Defaults:
 - `pack_context.focus`: absent
 - `analyze.detail`: `full`
 - `analyze.top_files`: `10` (`1..1000`)
+- `analyze.max_tokens`: absent (no admission preview)
+- `analyze.rank`: absent
+- `analyze.focus`: absent
+- `detail_by_pattern`: absent (one detail level for the whole selection)
 - `tracked_only`: `false`
 - `git_scope`: absent
 - `exclusions`: absent — the server baseline or profile set applies (parameter
@@ -866,6 +916,32 @@ lines removed by the profile. The `analyze` structured result reports the
 effective detail tier; `pack_context` returns the transformed pack itself.
 Use `compact` or `signatures` together with `max_tokens` to fit more supported
 source files into the same estimated-token budget.
+
+`detail_by_pattern` sets the level per file. It is an ordered array of
+`{ "patterns": [glob, ...], "detail": "full" | "compact" | "signatures" }`, at most
+16 entries with at most 32 patterns each. The call-level `detail` is the default;
+entries apply in order and the **last** matching entry wins, so list general globs
+before specific ones. This is last-match, not the first-match rule some other tools
+use. Patterns are validated, normalized, and matched exactly like `include_patterns`;
+an invalid entry returns `DPX-MCP-INVALID-ARGUMENTS` naming its index. The parameter
+is accepted by `analyze` and `pack_context`, and is invalid for a tree-only pack.
+
+The union with profile transformations happens for every file separately, so an
+override back to `full` adds no reduction of its own and still never removes one a
+saved profile requires. Selection is never widened: a pattern that matches nothing is
+reported rather than adding files.
+
+The mix a pack reports describes the files the pack carries: with `max_tokens` it is
+counted after admission, not over the selection a budget then narrowed. For `analyze`
+it describes the measured selection.
+
+A call that supplies `detail_by_pattern` gains a trusted trailer stating the mix,
+`[Detail] full 7 · compact 0 · signatures 3 · overrides 2 of 2 patterns matched`,
+followed by `[Detail] unmatched: ...` when some pattern claimed nothing. In JSON and
+XML the per-file entry and the skipped-file entries then carry `detail` with that
+file's effective level, and the text budget report names the level a skipped file was
+costed at. All of that appears only when a call asks for a mix; a call with one
+detail level is unchanged, byte for byte.
 
 ## Client Configuration
 

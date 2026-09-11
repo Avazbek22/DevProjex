@@ -228,7 +228,8 @@ public sealed class SecretRedactionSession : IDisposable
 		string projectRoot,
 		ContentSelectionSnapshot selection,
 		string transformIdentity = "",
-		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets)
+		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets,
+		Func<string, string>? perFileTransformIdentity = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(selection);
@@ -298,7 +299,8 @@ public sealed class SecretRedactionSession : IDisposable
 			generation,
 			generationToken,
 			transformIdentity,
-			features);
+			features,
+			perFileTransformIdentity);
 	}
 
 	private void ClearProjectSpecificStateForSwitchLocked(string newProjectRoot)
@@ -2300,6 +2302,11 @@ public sealed class SecretRedactionScope
 	private readonly MarkedSecretsMatcher _markedSecretsMatcher;
 	private readonly int _markedSecretsRevision;
 	private readonly string _transformIdentity;
+	// Set only for a mixed detail policy. The scan cache's metadata lookup compares source length
+	// and write time but never the transformed text, so the identity is the only thing separating
+	// two transformations of one file - it has to follow the file, not the operation.
+	private readonly Func<string, string>? _perFileTransformIdentity;
+	private readonly ConcurrentDictionary<string, string>? _resolvedTransformIdentities;
 	private readonly ISecretDetectionScope _detectorScope;
 	private readonly Dictionary<SecretFindingIdentity, int> _identityIndexes = [];
 	private readonly Dictionary<string, int> _ruleIdentityCounts = new(StringComparer.Ordinal);
@@ -2329,10 +2336,17 @@ public sealed class SecretRedactionScope
 		long generation,
 		CancellationToken generationToken,
 		string transformIdentity = "",
-		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets)
+		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets,
+		Func<string, string>? perFileTransformIdentity = null)
 	{
 		_session = session;
 		_transformIdentity = transformIdentity;
+		_perFileTransformIdentity = perFileTransformIdentity;
+		// Keyed ordinally, not canonically: detail globs match case-sensitively on every platform, so
+		// two casings of one path can resolve to different kinds and must not share a cache entry.
+		_resolvedTransformIdentities = perFileTransformIdentity is null
+			? null
+			: new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
 		_projectRoot = PathUtility.Normalize(projectRoot);
 		_keptOccurrenceIds = keptOccurrenceIds;
 		_overrideRevision = overrideRevision;
@@ -2348,6 +2362,15 @@ public sealed class SecretRedactionScope
 	public string SelectionKey { get; }
 	public int DetectedCount => _detectedCount;
 	public int RedactedCount => _redactedCount;
+
+	/// <summary>
+	/// The transform identity that keys this file's cached scans. Without a per-file resolver every
+	/// file shares the operation's identity, which is what a uniform transformation means.
+	/// </summary>
+	internal string ResolveTransformIdentity(string filePath) =>
+		_perFileTransformIdentity is null
+			? _transformIdentity
+			: _resolvedTransformIdentities!.GetOrAdd(filePath, _perFileTransformIdentity);
 
 	internal SecretContentInspectionMode GetContentInspectionMode(string filePath)
 	{
@@ -2393,7 +2416,7 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity,
+			ResolveTransformIdentity(filePath),
 			_generation,
 			_generationToken,
 			out entry);
@@ -2442,7 +2465,7 @@ public sealed class SecretRedactionScope
 			_markedSecretsMatcher,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity,
+			ResolveTransformIdentity(filePath),
 			_generation,
 			_generationToken,
 			cancellationToken);
@@ -2461,7 +2484,7 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity,
+			ResolveTransformIdentity(filePath),
 			_generation,
 			_generationToken);
 	}
@@ -2479,7 +2502,7 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity,
+			ResolveTransformIdentity(filePath),
 			_generation,
 			_generationToken);
 	}
@@ -2502,7 +2525,7 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity,
+			ResolveTransformIdentity(filePath),
 			_generation,
 			_generationToken);
 	}
@@ -2525,7 +2548,7 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity,
+			ResolveTransformIdentity(filePath),
 			_generation,
 			_generationToken);
 	}
@@ -2728,7 +2751,7 @@ public sealed class SecretRedactionScope
 			    _detectorScope,
 			    includeAutomaticDetection,
 			    _markedSecretsRevision,
-			    _transformIdentity,
+			    ResolveTransformIdentity(filePath),
 			    _generation,
 			    _generationToken,
 			    out var combinedEntry))
@@ -2746,12 +2769,13 @@ public sealed class SecretRedactionScope
 			_markedSecretsMatcher,
 			includeAutomaticDetection,
 			_markedSecretsRevision,
-			_transformIdentity + TransformedDetectionStageSuffix,
+			ResolveTransformIdentity(filePath) + TransformedDetectionStageSuffix,
 			_generation,
 			_generationToken,
 			cancellationToken,
 			transformMap);
 		return MergeDetectionEntries(
+			filePath,
 			sourceEntry,
 			transformedEntry,
 			combinedFingerprint,
@@ -2817,7 +2841,7 @@ public sealed class SecretRedactionScope
 			_markedSecretsMatcher,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity,
+			ResolveTransformIdentity(filePath),
 			_generation,
 			_generationToken,
 			cancellationToken,
@@ -2838,6 +2862,7 @@ public sealed class SecretRedactionScope
 	}
 
 	private SecretScanCacheEntry MergeDetectionEntries(
+		string filePath,
 		SecretScanCacheEntry sourceEntry,
 		SecretScanCacheEntry transformedEntry,
 		string combinedFingerprint,
@@ -2866,7 +2891,7 @@ public sealed class SecretRedactionScope
 		return _session.StoreCombinedTransformFindings(
 			transformedEntry,
 			combinedFingerprint,
-			_transformIdentity,
+			ResolveTransformIdentity(filePath),
 			candidates,
 			segments,
 			_generation,
@@ -3110,7 +3135,7 @@ public sealed class SecretRedactionScope
 		if (candidates.Count == 0 && segments.Count == 0)
 			return SecretFileRedactionPlan.Empty;
 		var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
-		var occurrenceIds = BuildOccurrenceIds(relativePath, entry, candidates, transformMap);
+		var occurrenceIds = BuildOccurrenceIds(relativePath, entry, candidates, transformMap, ResolveTransformIdentity(filePath));
 		var identityIndexes = new int[candidates.Count];
 		for (var index = 0; index < candidates.Count; index++)
 			identityIndexes[index] = GetOrCreateIdentityIndex(candidates[index]);
@@ -3194,7 +3219,7 @@ public sealed class SecretRedactionScope
 		if (_keptOccurrenceIds.Count > 0)
 		{
 			var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
-			occurrenceIds = BuildOccurrenceIds(relativePath, entry, candidates, transformMap);
+			occurrenceIds = BuildOccurrenceIds(relativePath, entry, candidates, transformMap, ResolveTransformIdentity(filePath));
 		}
 
 		foreach (var segment in segments)
@@ -3256,7 +3281,8 @@ public sealed class SecretRedactionScope
 		string relativePath,
 		SecretScanCacheEntry? entry,
 		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
-		ContentTransformMap? transformMap)
+		ContentTransformMap? transformMap,
+		string transformIdentity)
 	{
 		var occurrenceIds = new string[candidates.Count];
 		var namespaceMatches = entry is not null &&
@@ -3287,7 +3313,11 @@ public sealed class SecretRedactionScope
 				continue;
 			}
 
-			var occurrenceId = CreateOccurrenceId(relativePath, candidate, coordinateIdentity);
+			var occurrenceId = CreateOccurrenceId(
+				relativePath,
+				candidate,
+				coordinateIdentity,
+				transformIdentity);
 			occurrenceIds[index] = namespaceMatches &&
 			                       coordinateIdentity == candidate.OccurrenceCoordinateIdentity
 				? candidate.CacheOccurrenceId(occurrenceId)
@@ -3311,14 +3341,15 @@ public sealed class SecretRedactionScope
 	private string CreateOccurrenceId(
 		string relativePath,
 		SecretFindingCandidateMetadata finding,
-		SecretOccurrenceCoordinateIdentity coordinateIdentity)
+		SecretOccurrenceCoordinateIdentity coordinateIdentity,
+		string transformIdentity)
 	{
 		ContentPipelineDiagnostics.RecordOccurrenceIdComputation();
 		var coordinateText = coordinateIdentity.IsSourceBacked
 			? $"source:{coordinateIdentity.Start}:{coordinateIdentity.Length}"
 			// Replacement-only text has no source coordinate. Its namespace includes the exact
 			// transform identity so it can never inherit a keep decision from source content.
-			: $"transform:{_transformIdentity}:{coordinateIdentity.Start}:{coordinateIdentity.Length}";
+			: $"transform:{transformIdentity}:{coordinateIdentity.Start}:{coordinateIdentity.Length}";
 		return SecretRedactionSession.HashValue(
 			$"{_projectRoot}\n{relativePath}\n{finding.RuleId}\n{finding.ValueFingerprint}\n{coordinateText}".AsSpan());
 	}

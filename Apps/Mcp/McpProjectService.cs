@@ -716,9 +716,42 @@ internal sealed class McpProjectService(
 	public ProjectContextPlan ApplyDetail(
 		ProjectContextPlan plan,
 		McpDetailResolution resolution,
+		CancellationToken cancellationToken) =>
+		ApplyDetail(plan, resolution, overrides: null, cancellationToken);
+
+	/// <summary>
+	/// Bakes the call-level detail into the selection and attaches the per-file overrides. Baking
+	/// merges the profile's kinds with the call's, which is why the profile's own share is recorded
+	/// separately by the selection resolver: after this the booleans alone can no longer say what the
+	/// profile required, and a per-file override back to <c>full</c> has to know.
+	/// </summary>
+	public ProjectContextPlan ApplyDetail(
+		ProjectContextPlan plan,
+		McpDetailResolution resolution,
+		IReadOnlyList<ContentDetailOverride>? overrides,
+		CancellationToken cancellationToken) =>
+		ApplyContentDetail(plan, McpDetailPolicy.Apply(plan.Selection, resolution), overrides, cancellationToken);
+
+	/// <summary>
+	/// Attaches per-file overrides without baking a call level, for a tool that passes its detail
+	/// level to measurement instead of writing it into the plan.
+	/// </summary>
+	public ProjectContextPlan ApplyDetailOverrides(
+		ProjectContextPlan plan,
+		IReadOnlyList<ContentDetailOverride>? overrides,
+		CancellationToken cancellationToken) =>
+		overrides is null
+			? plan
+			: ApplyContentDetail(plan, plan.Selection, overrides, cancellationToken);
+
+	private ProjectContextPlan ApplyContentDetail(
+		ProjectContextPlan plan,
+		ProjectSelectionSpec selection,
+		IReadOnlyList<ContentDetailOverride>? overrides,
 		CancellationToken cancellationToken)
 	{
-		var selection = McpDetailPolicy.Apply(plan.Selection, resolution);
+		if (overrides is not null)
+			selection = selection with { ContentDetailOverrides = overrides };
 		return services.Planner.ApplyContentTransformationSelectionWithCancellation(
 			plan,
 			selection.HideSecrets == true,
@@ -726,7 +759,8 @@ internal sealed class McpProjectService(
 			selection.StripComments,
 			selection.StripBlankLines,
 			selection.HidePrivateData,
-			cancellationToken);
+			cancellationToken,
+			selection.ContentDetailOverrides);
 	}
 
 	private static McpGitScope? ParseGitScope(string? value)
@@ -758,11 +792,17 @@ internal sealed class McpProjectService(
 		ProjectContextPlan plan,
 		McpDetailLevel detail = McpDetailLevel.Full)
 	{
-		var transformKinds = ResolveDetail(plan, detail).Kinds;
+		var requestedKinds = ResolveDetail(plan, detail).Kinds;
+		// The gate is every kind any file can request, not the level unmatched files land on: a call
+		// whose default is full and whose overrides ask for signatures has no default kinds at all.
+		var transformKinds = ContentDetailSelection.ResolveContextKinds(plan.Selection, requestedKinds);
 		return ContentTransformationContext.For(
 			transformKinds == CodeTransformKinds.None
 				? null
-				: new CodeCompressionContext(plan.SourceRoot, services.CompressionSession, transformKinds),
+				: new CodeCompressionContext(plan.SourceRoot, services.CompressionSession, transformKinds)
+				{
+					Policy = ContentDetailSelection.Resolve(plan.Selection, requestedKinds)
+				},
 			new SecretRedactionContext(
 				plan.SourceRoot,
 				services.RedactionSession,

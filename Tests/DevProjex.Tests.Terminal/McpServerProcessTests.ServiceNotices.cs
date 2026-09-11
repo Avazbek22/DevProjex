@@ -53,6 +53,60 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessRepeatsTheDetailMixOnEveryCallThatProducedOne()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("detail-project");
+		workspace.WriteFile(
+			"detail-project/src/Alpha.cs",
+			"namespace P;\n\npublic static class Alpha\n{\n\n	public static int Run() => 1;\n}\n");
+		workspace.WriteFile(
+			"detail-project/src/Beta.cs",
+			"namespace P;\n\npublic static class Beta\n{\n\n	public static int Run() => 2;\n}\n");
+		workspace.WriteFile("detail-project/docs/Notes.md", "# Notes\n\nProse.\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		// The same arguments every time, so the filters and protection lines stay byte-equal and the
+		// memo is free to collapse them. Nothing here sets alwaysSend: no max_file_bytes, and the
+		// selection is not empty.
+		var arguments = new Dictionary<string, object?>
+		{
+			["view"] = "content",
+			["format"] = "text",
+			["detail"] = "compact",
+			["detail_by_pattern"] = new object[]
+			{
+				new Dictionary<string, object?>
+				{
+					["patterns"] = new[] { "src/Alpha.cs" },
+					["detail"] = "signatures"
+				}
+			}
+		};
+
+		var texts = new List<string>();
+		for (var call = 0; call < 4; call++)
+			texts.Add(AllProcessText(await CallAsync(server, "pack_context", arguments)));
+
+		// The mix reports what THIS call did, so it is never memoised: it is on every response.
+		Assert.All(
+			texts,
+			static text => Assert.Contains("[Detail] full", text, StringComparison.Ordinal));
+
+		// Meanwhile the session-state lines behave exactly as they do without a detail mix: sent once,
+		// then replaced by the continuation line.
+		Assert.Single(texts, static text => text.Contains("[Effective filters]", StringComparison.Ordinal));
+		Assert.Single(texts, static text => text.Contains("[Protection]", StringComparison.Ordinal));
+		Assert.Contains("[Effective filters]", texts[0], StringComparison.Ordinal);
+		Assert.DoesNotContain(UnchangedServiceNotice, texts[0], StringComparison.Ordinal);
+		Assert.Equal(
+			3,
+			texts.Count(static text => text.Contains(UnchangedServiceNotice, StringComparison.Ordinal)));
+	}
+
+	[Fact]
 	public async Task RealProcessRepeatsServiceNoticesWhenTheirContentChanges()
 	{
 		using var workspace = new TemporaryDirectory();
