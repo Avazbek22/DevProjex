@@ -120,6 +120,43 @@ A literal `Passed!  - Failed:     0` line for a run the host crashed out of. The
 exit code, but any check that read that line would have called it green. The crashing test is a
 close neighbour of the two in entry 1.
 
+## 4. A refreshed tree observed before it was published, macOS
+
+- **Test**: `DevProjex.Tests.UI.MainWindowApplySettingsSelectionUiTests.RefreshProject_PreservesSelectionAndExpansion`
+  (`Tests/DevProjex.Tests.UI/MainWindowApplySettingsSelectionUiTests.cs`, failing assertion at line 305)
+- **Run**: [34589280620](https://github.com/Avazbek22/DevProjex/actions/runs/34589280620), job `103230753677`
+- **Commit**: `c50df55d` on `chore/ci-known-failures`
+- **Job**: `CI (macOS / UI)` — `Failed: 1, Passed: 432, Total: 433`
+- **Message**: `Assert.NotSame() Failure: Values are the same instance`
+
+The change under test is three files: this document and two PowerShell scripts, one of which runs
+after `dotnet test` and only reads the result file it emitted. Fifteen minutes earlier the same
+product tree passed the same leg — run
+[34588080388](https://github.com/Avazbek22/DevProjex/actions/runs/34588080388) on `3fb4e4f2`, 433 of
+433, this test in 0.576 s against 0.595 s when it failed. `acbfa6bb`, the base merged into that
+branch, passes all three UI legs in run
+[34584479932](https://github.com/Avazbek22/DevProjex/actions/runs/34584479932), and no commit
+between `61b5f004` and `acbfa6bb` touches `Apps/Avalonia` at all.
+
+Across 300 runs of `.NET CI` from 2026-08-31 to 2026-09-11 this test failed once — this job. It has
+never failed on Linux or Windows. Seventeen other UI jobs failed in that window, all on other tests.
+
+**Cause, as far as the code shows.** The assertion requires that a refresh rebuilt and republished
+the tree, so that carried-over state sits on fresh nodes rather than surviving by identity. The two
+are the same instance whenever the refresh has not published yet. `MainWindow.ReloadProjectAsync`
+returns whether it published, and the test never observes that: it waits on the selection
+coordinator, polls a busy flag, then pumps a few settled frames. Any window in which the status
+operation has completed — or has not yet begun, the handler being `async void` — while the node
+graph has not yet been swapped satisfies that wait early. CI compresses the margin further:
+`DEVPROJEX_FAST_UI_TESTS=1` is set at workflow level, which collapses the poll and frame delays to
+a millisecond and scales the settle down to roughly two frames, which is why this reproduces on a
+runner and not locally.
+
+Not fixed here, and not by this work: the refresh path and its test belong to the desktop surface.
+Whoever takes it will want the test to observe what `ReloadProjectAsync` returns rather than infer
+publication from a busy flag.
+
+
 ## What now fails that did not
 
 `Scripts/ci/Test-ExecutedTests.ps1` runs after each test step and fails the job when a results
