@@ -1084,7 +1084,7 @@ when their locations are not known. Exactly one of `path` or `requests` is requi
 supplying both or neither returns `DPX-MCP-INVALID-ARGUMENTS` before any file is read.
 The batch contains one to eight records. Each has a path and exactly one selector:
 `{"path":"src/App.cs","ranges":[{"start_line":10,"end_line":30}]}` or
-`{"path":"src/App.cs","symbol":"App.Run"}`. A call contains at most sixteen
+`{"path":"src/App.cs","symbol":"Example.App.Run"}`. A call contains at most sixteen
 ranges or symbols in total. Each range is inclusive, starts at line
 one, and requires both `start_line` and `end_line`. Unknown properties, empty ranges,
 missing selectors, combined `ranges` and `symbol`, and invalid indexed records fail before project access with

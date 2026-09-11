@@ -247,7 +247,9 @@ produces `External`.
 C#, TypeScript/TSX/JavaScript, Python, and Go adapters use shipped Tree-sitter grammars and embedded
 `declarations.scm` and `references.scm` query data. A separate `navigation.scm` projection records
 named types and members with their owner chain, exact line and character ranges, and content
-fingerprint. Search annotations and named `get_file` reads use this compact projection; navigation
+fingerprint. The owner chain starts with the language namespace, package, or module when one is
+declared, so the exact name printed by search is also the exact `symbol` accepted by `get_file`.
+Search annotations and named `get_file` reads use this compact projection; navigation
 members never enter dependency resolution, its fact limits, or the related-file graph. The projection
 currently covers named methods and fields in all five languages, plus C# properties and events,
 TypeScript signatures, and Go interface methods. Anonymous functions, C# accessors and operators,
