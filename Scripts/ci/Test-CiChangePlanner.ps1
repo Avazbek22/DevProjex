@@ -170,7 +170,13 @@ if (-not $fullPlan.Documentation) {
 
 $beforeSha = '1111111111111111111111111111111111111111'
 $afterSha = '2222222222222222222222222222222222222222'
-$syncComparison = Get-CiEventComparison -EventName pull_request -Event ([pscustomobject]@{
+$baseSha = '3333333333333333333333333333333333333333'
+# None of these commits exist in any checkout, so what the comparison would find is said here
+# instead of looked up.
+$everythingExists = { param([string] $Sha) $true }
+$beforeIsGone = { param([string] $Sha) $Sha -ne $beforeSha }
+$nothingExists = { param([string] $Sha) $false }
+$syncComparison = Get-CiEventComparison -EventName pull_request -CommitReachable $everythingExists -Event ([pscustomobject]@{
 	action = 'synchronize'
 	before = $beforeSha
 	after = $afterSha
@@ -179,7 +185,7 @@ if ($syncComparison.Full -or $syncComparison.MergeBase -or $syncComparison.BaseS
 	throw '[PR synchronize] Expected an incremental previous-HEAD to new-HEAD comparison.'
 }
 
-$openedComparison = Get-CiEventComparison -EventName pull_request -Event ([pscustomobject]@{
+$openedComparison = Get-CiEventComparison -EventName pull_request -CommitReachable $everythingExists -Event ([pscustomobject]@{
 	action = 'opened'
 	pull_request = [pscustomobject]@{
 		base = [pscustomobject]@{ sha = $beforeSha }
@@ -190,12 +196,108 @@ if ($openedComparison.Full -or -not $openedComparison.MergeBase) {
 	throw '[PR opened] Expected a complete merge-base comparison.'
 }
 
-$newBranchComparison = Get-CiEventComparison -EventName push -Event ([pscustomobject]@{
+$newBranchComparison = Get-CiEventComparison -EventName push -CommitReachable $everythingExists -Event ([pscustomobject]@{
 	before = '0000000000000000000000000000000000000000'
 	after = $afterSha
 })
 if (-not $newBranchComparison.Full) {
 	throw '[New branch push] Expected safe full validation when no previous commit exists.'
+}
+
+# A rebase or an amended push leaves the event naming a commit that is on no ref. The delta
+# cannot be built from it, and the pull request still has a base to compare against.
+$forcePushComparison = Get-CiEventComparison -EventName pull_request -CommitReachable $beforeIsGone -Event ([pscustomobject]@{
+	action = 'synchronize'
+	before = $beforeSha
+	after = $afterSha
+	pull_request = [pscustomobject]@{
+		base = [pscustomobject]@{ sha = $baseSha }
+		head = [pscustomobject]@{ sha = $afterSha }
+	}
+})
+if ($forcePushComparison.Full) {
+	throw '[PR synchronize after a force-push] Expected the merge-base comparison, not the full plan.'
+}
+if (-not $forcePushComparison.MergeBase -or
+	$forcePushComparison.BaseSha -ne $baseSha -or
+	$forcePushComparison.HeadSha -ne $afterSha) {
+	throw '[PR synchronize after a force-push] Expected a base-to-head merge-base comparison.'
+}
+
+# With no pull request on the event there is nothing left to compare against.
+$forcePushWithoutPullRequest = Get-CiEventComparison -EventName pull_request -CommitReachable $beforeIsGone -Event ([pscustomobject]@{
+	action = 'synchronize'
+	before = $beforeSha
+	after = $afterSha
+})
+if (-not $forcePushWithoutPullRequest.Full) {
+	throw '[PR synchronize after a force-push] Expected the full plan when no base remains.'
+}
+
+# The same commit can be missing on an opened event, and on a branch push, where no merge base
+# is on offer at all.
+$openedWithoutBase = Get-CiEventComparison -EventName pull_request -CommitReachable $nothingExists -Event ([pscustomobject]@{
+	action = 'opened'
+	pull_request = [pscustomobject]@{
+		base = [pscustomobject]@{ sha = $baseSha }
+		head = [pscustomobject]@{ sha = $afterSha }
+	}
+})
+if (-not $openedWithoutBase.Full) {
+	throw '[PR opened with a missing base] Expected safe full validation.'
+}
+
+$forcePushToBranch = Get-CiEventComparison -EventName push -CommitReachable $beforeIsGone -Event ([pscustomobject]@{
+	before = $beforeSha
+	after = $afterSha
+})
+if (-not $forcePushToBranch.Full) {
+	throw '[Branch force-push] Expected safe full validation when the previous commit is gone.'
+}
+
+# A plan that was built has to end its step successfully, whichever plan it is. GitHub's pwsh shell
+# ends a step with whatever the last native command left in $LASTEXITCODE, so git failing on an
+# unbuildable range used to fail the step that had already fallen back to the full plan -- and every
+# job waiting on that plan with it. The step is composed here the way the runner composes one, with
+# the same prologue, epilogue and invocation.
+$planScriptPath = Join-Path $PSScriptRoot 'Select-CiPlan.ps1'
+$stepIdentifier = [Guid]::NewGuid().ToString('N')
+$stepOutputPath = Join-Path ([IO.Path]::GetTempPath()) "devprojex-ci-step-$stepIdentifier.txt"
+$stepScriptPath = Join-Path ([IO.Path]::GetTempPath()) "devprojex-ci-step-$stepIdentifier.ps1"
+$unreachableSha = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
+try {
+	Set-Content -LiteralPath $stepScriptPath -Encoding utf8 -Value @(
+		'$ErrorActionPreference = ''stop''',
+		"& '$planScriptPath' -BaseSha '$unreachableSha' -HeadSha '$unreachableSha' -GitHubOutputPath '$stepOutputPath'",
+		'if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }')
+
+	$shellCommand = Get-Command pwsh -ErrorAction SilentlyContinue
+	$shellPath = if ($shellCommand) {
+		$shellCommand.Source
+	}
+	else {
+		[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+	}
+
+	& $shellPath -NoProfile -Command ". '$stepScriptPath'" *> $null
+	$stepExitCode = $LASTEXITCODE
+	# Cleared for the same reason the plan clears it: this file is a CI step too.
+	$global:LASTEXITCODE = 0
+
+	if ($stepExitCode -ne 0) {
+		throw "[Unbuildable range] The step ended with exit code $stepExitCode although it produced a plan."
+	}
+
+	$stepOutput = @(Get-Content -LiteralPath $stepOutputPath)
+	if ($stepOutput -notcontains 'full=true') {
+		throw '[Unbuildable range] Expected the safe full plan in the step outputs.'
+	}
+	if ($stepOutput -notcontains 'has_test_matrix=true') {
+		throw '[Unbuildable range] Expected the safe full plan to carry a test matrix.'
+	}
+}
+finally {
+	Remove-Item -LiteralPath $stepScriptPath, $stepOutputPath -Force -ErrorAction SilentlyContinue
 }
 
 $metadataPlan = Get-CiChangePlan -ChangedPath 'release-note.txt'

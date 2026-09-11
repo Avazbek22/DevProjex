@@ -163,6 +163,12 @@ if (-not $Full -and -not [string]::IsNullOrWhiteSpace($effectiveBaseSha)) {
 		$Full = $true
 		$ChangedPath = @()
 	}
+
+	# The safe full plan is only safe if the step that built it succeeds. GitHub's pwsh shell ends
+	# a step with whatever the last native command left in $LASTEXITCODE, so git's code has to be
+	# cleared here: handling the failure and then failing the step anyway means the fallback never
+	# runs, and every job waiting on the plan goes down with it.
+	$global:LASTEXITCODE = 0
 }
 
 $plan = if ($Full) {
