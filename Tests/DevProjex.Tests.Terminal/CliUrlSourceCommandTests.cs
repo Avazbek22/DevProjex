@@ -148,9 +148,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task LocalUrlSourceClonesReusesCacheSelectsBranchWithoutRecordingRecentHistory()
 	{
-		using var fileTransport = new EnvironmentVariableScope(
-			GitRepositoryService.TestFileTransportPolicyVariable,
-			"1");
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -225,9 +223,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task UrlSourceFlowsThroughTreeAndExportsUsingTheManagedCache()
 	{
-		using var fileTransport = new EnvironmentVariableScope(
-			GitRepositoryService.TestFileTransportPolicyVariable,
-			"1");
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -292,9 +288,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task RemoteShallowDiffIsConsistentAcrossCliContentCommands()
 	{
-		using var fileTransport = new EnvironmentVariableScope(
-			GitRepositoryService.TestFileTransportPolicyVariable,
-			"1");
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -369,9 +363,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task RedirectedUrlCloneProgressNeverContaminatesContextPayloadAndStaysBounded()
 	{
-		using var fileTransport = new EnvironmentVariableScope(
-			GitRepositoryService.TestFileTransportPolicyVariable,
-			"1");
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -423,9 +415,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task MissingFileRemoteReturnsRuntimeFailureWithoutPayload()
 	{
-		using var fileTransport = new EnvironmentVariableScope(
-			GitRepositoryService.TestFileTransportPolicyVariable,
-			"1");
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		using var workspace = new TemporaryDirectory();
 		using var data = new TemporaryDirectory();
 		var missing = Path.Combine(workspace.Path, "missing.git");
@@ -546,21 +536,6 @@ public sealed class CliUrlSourceCommandTests
 		Assert.True(
 			result.ExitCode == 0,
 			$"git {string.Join(' ', arguments)} failed: {result.StandardOutput}{result.StandardError}");
-	}
-
-	private sealed class EnvironmentVariableScope : IDisposable
-	{
-		private readonly string _name;
-		private readonly string? _previousValue;
-
-		public EnvironmentVariableScope(string name, string value)
-		{
-			_name = name;
-			_previousValue = Environment.GetEnvironmentVariable(name);
-			Environment.SetEnvironmentVariable(name, value);
-		}
-
-		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
 	}
 
 	private sealed class BlockingCloneService : IGitRepositoryService

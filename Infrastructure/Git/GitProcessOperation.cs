@@ -444,17 +444,27 @@ internal sealed record GitProcessOperation
 
 internal static class GitNetworkPolicy
 {
+	private const string UnsupportedUrlMessage = "Only explicit HTTPS and SSH Git URLs are allowed.";
 	private static readonly string[] SupportedSchemes = ["https", "ssh"];
 
 	public static string ValidateUrl(string? url, bool allowFileTransport = false)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(url);
-		if (Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
-		    (SupportedSchemes.Contains(uri.Scheme, StringComparer.OrdinalIgnoreCase) ||
-		     allowFileTransport && uri.IsFile) &&
-		    (!string.IsNullOrWhiteSpace(uri.Host) || uri.IsFile))
+		if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
 		{
-			return url;
+			if ((SupportedSchemes.Contains(uri.Scheme, StringComparer.OrdinalIgnoreCase) ||
+			     allowFileTransport && uri.IsFile) &&
+			    (!string.IsNullOrWhiteSpace(uri.Host) || uri.IsFile))
+			{
+				return url;
+			}
+
+			// A value that parses as a file URI requests the local transport, whatever its
+			// authority looks like. Without the policy it is refused here rather than falling
+			// through to the scheme-less syntax below, which would otherwise accept forms such
+			// as "file:C:/repository" and select the file protocol for the Git invocation.
+			if (uri.IsFile)
+				throw new ArgumentException(UnsupportedUrlMessage, nameof(url));
 		}
 
 		// Git's scp-like SSH syntax has no URI scheme.
@@ -469,7 +479,7 @@ internal static class GitNetworkPolicy
 			return url;
 		}
 
-		throw new ArgumentException("Only explicit HTTPS and SSH Git URLs are allowed.", nameof(url));
+		throw new ArgumentException(UnsupportedUrlMessage, nameof(url));
 	}
 
 	public static string GetAllowedProtocols(string url)

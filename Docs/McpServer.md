@@ -169,11 +169,12 @@ batched `get_file` call instead of several single reads; see
   `tracked_only` or `git_scope`, the server may also start the local Git
   executable solely to read repository state. It never runs project executables
   or arbitrary project commands.
-- Remote network sources use HTTP(S), SSH, Git protocol, or SCP syntax. Query
+- Remote network sources use HTTPS, SSH, or SCP syntax. Query
   strings and fragments are rejected so credentials cannot enter Git process
   arguments. When `--remote-hosts` is present, network URLs and SCP forms must
-  use one of its exact normalized hosts. A `file://` source is accepted only when it resolves inside an
-  already configured local root and never expands the local root jail.
+  use one of its exact normalized hosts. `http`, `git` and `file` URLs are refused: a built product
+  accepts a repository URL only over `https` or `ssh`, including the SCP form, and nothing in the
+  environment or the call widens that set.
 - A server session pins at most 16 distinct remote URL-and-branch sources. Existing
   keys are reused and valid sources are never evicted; exceeding the cap returns
   `DPX-MCP-REMOTE-LIMIT` with guidance to reuse a source or restart the server.
@@ -260,6 +261,23 @@ because none modifies the source project. `pack_context` and `related_files` are
 non-idempotent because either may create a stored result with a new session id. Without `--allow-remote`, every tool is
 closed-world; with it, the six tools that accept `project` Git URLs are annotated
 open-world.
+
+### What a connection costs
+
+Before a client asks anything about a project it has already paid for the tool schemas and the
+server instructions. Measured on 2026-09-11 from the characters a client received:
+
+| Payload | Characters |
+|---|---:|
+| `tools/list` result, default server | 35,176 |
+| `tools/list` result, `--allow-agent-exclusions` | 39,094 |
+| `instructions` | 1,044 |
+
+`analyze` is the largest single tool at 9,219 characters, most of it schema. The `exclusions`
+parameter costs a flat 3,918 characters, 653 on each of the six tools that take it. A process
+test holds the default `tools/list` result and the instructions under ceilings with deliberate
+headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
+description has to fit a budget rather than grow one silently.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
@@ -380,14 +398,22 @@ schema must refresh it.
 Filters are never silent, though an unchanged filter line is reported once per
 session rather than on every response — see
 [Service notices repeat only when they change](#service-notices-repeat-only-when-they-change).
-`get_tree` and `pack_context` end with a trusted
+`get_tree`, `pack_context`, and `related_files` carry a trusted
 `[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
 exclusion toggles that shaped the tree and who can widen them: the server
-startup line, or a per-call `exclusions` value on a delegation server. When
+startup line, or a per-call `exclusions` value on a delegation server. It sits
+among the trailing diagnostics rather than last: an `[Empty selection]` line can
+follow it, `[Protection]` comes after that, a pinned remote checkout adds
+`[Remote]`, and a budgeted `pack_context` ends with `[Budget accounting]`. When
 `max_file_bytes` is supplied, every tool that accepts it also reports
 `; max_file_bytes: <bytes>` in its effective-filter diagnostics. Every selection
 tool adds an `[Empty selection]` line when no file survived the
-filters and the request arguments, `search_project` adds a `[No matches]` line
+filters and the request arguments. That line opens with the stage that emptied the
+selection as a constant token — `stage=patterns`, `stage=paths`, `stage=git-scope`,
+or `stage=filters` — so a caller can tell a pattern that matched nothing from a
+server that hides the file, without a second call. A pattern with no `/` and no
+`**` matches only an entry directly in the project root, and its empty result
+names the `**/` and `/**` rewrites instead of restating the general rule. `search_project` adds a `[No matches]` line
 with the searched-file count when the pattern matched nothing, and a
 `DPX-MCP-PATH-NOT-FOUND` error for a filtered file names the effective filters
 and the party able to widen them — the startup line, or a per-call `exclusions`
@@ -453,9 +479,9 @@ the final text; only those ranges are excluded from pattern matches. Placeholder
 source text, including an unfinished `DEVPROJEX_REDACTED[` prefix, remains searchable.
 The search is streamed: no intermediate export is written or read. Context windows that overlap or touch
 are emitted once as a merged grep-style group, with `--` between separate groups.
-If the response character limit cuts a group, only matching lines whose complete
+If the search cap below cuts a group, only matching lines whose complete
 prefix, text, and line ending were written count as shown; the remaining count is
-exact and `[Search group truncated at the response character limit.]` marks the partial group.
+exact, and the `[Search truncated]` line names the cap that stopped it.
 
 The match text a `search_project` call returns is capped at 16,000 characters, well
 below the general 50,000-character response limit, because a wide alternation with

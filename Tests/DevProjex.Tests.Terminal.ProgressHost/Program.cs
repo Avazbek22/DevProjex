@@ -9,6 +9,7 @@ using DevProjex.Kernel.Models;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Tui;
+using DevProjex.Tests.Terminal.Host;
 using DevProjex.Tests.Terminal.Progress;
 
 namespace DevProjex.Tests.Terminal.ProgressHost;
@@ -17,6 +18,19 @@ internal static class Program
 {
 	public static int Main(string[] args)
 	{
+		// The shipped application refuses the local file transport unconditionally. This test host
+		// is the only executable that grants it, and only when a test asks for it in the child
+		// environment, so a synthetic local remote stays a test-protocol detail.
+		using RepositoryTransportPolicy.LocalFileTransportScope? transportPolicy =
+			TerminalTransportPolicyProtocol.IsLocalFileTransportRequested()
+				? RepositoryTransportPolicy.AllowLocalFileTransport()
+				: null;
+
+		// Runs an ordinary terminal command without the progress checkpoint observer, so a journey
+		// that only needs this host's transport grant does not have to configure checkpoints.
+		if (args is [TerminalTransportPolicyProtocol.TerminalCommandArgument, .. var terminalArguments])
+			return RunTerminalApplication(terminalArguments);
+
 		if (args is ["--pipe-flood"])
 		{
 			Console.Error.Write(new string('x', 1024 * 1024));
@@ -81,6 +95,26 @@ internal static class Program
 				developerCommandRunner: null,
 				operationObserver: observer)
 			.RunAsync(args, cancellation.Token)
+			.GetAwaiter()
+			.GetResult();
+	}
+
+	private static int RunTerminalApplication(string[] arguments)
+	{
+		var dataRoot = Environment.GetEnvironmentVariable(
+			InvocationEnvironment.InternalDataRootVariable);
+		if (string.IsNullOrWhiteSpace(dataRoot) ||
+		    !Path.IsPathFullyQualified(dataRoot))
+		{
+			Console.Error.WriteLine("The isolated terminal test data root is required.");
+			return CommandLineExitCodes.RuntimeError;
+		}
+
+		var environment = new InvocationEnvironment(hasAttachedConsole: true);
+		var services = new TerminalServiceFactory(() => dataRoot);
+		using var cancellation = TerminalCancellationCoordinator.Register();
+		return new TerminalApplication(environment, services, developerCommandRunner: null)
+			.RunAsync(arguments, cancellation.Token)
 			.GetAwaiter()
 			.GetResult();
 	}

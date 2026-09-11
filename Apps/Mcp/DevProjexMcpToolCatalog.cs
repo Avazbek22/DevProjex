@@ -489,7 +489,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    "files": { "type": "integer", "description": "Number of files in the effective selection." },
+	    "files": { "type": "integer", "description": "Files in the effective selection." },
 	    "characters": { "type": "integer", "description": "Rendered characters, including estimates for uninspected text files." },
 	    "tokens": { "type": "integer", "description": "Estimated tokens for the same character total." },
 	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective content-detail level used for measurement." },
@@ -500,10 +500,10 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "measured": {
 	          "type": "object",
 	          "properties": {
-	            "files": { "type": "integer", "description": "Number of files measured from inspected transformed text." },
-	            "lines": { "type": "integer", "description": "Lines in measured transformed file bodies." },
-	            "characters": { "type": "integer", "description": "Normalized characters in measured transformed file bodies." },
-	            "tokens": { "type": "integer", "description": "Estimated tokens for measured transformed file bodies." }
+	            "files": { "type": "integer" },
+	            "lines": { "type": "integer" },
+	            "characters": { "type": "integer", "description": "Normalized characters." },
+	            "tokens": { "type": "integer", "description": "Estimated tokens." }
 	          },
 	          "required": ["files", "lines", "characters", "tokens"],
 	          "additionalProperties": false
@@ -511,9 +511,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "estimated": {
 	          "type": "object",
 	          "properties": {
-	            "files": { "type": "integer", "description": "Number of text files represented only by size-based estimates." },
-	            "characters": { "type": "integer", "description": "Estimated normalized characters for those files." },
-	            "tokens": { "type": "integer", "description": "Estimated tokens for those files." }
+	            "files": { "type": "integer", "description": "Text files with size-based estimates only." },
+	            "characters": { "type": "integer", "description": "Normalized characters." },
+	            "tokens": { "type": "integer" }
 	          },
 	          "required": ["files", "characters", "tokens"],
 	          "additionalProperties": false
@@ -526,11 +526,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "type": "object",
 	      "description": "Metrics for the canonical pack_context content/text document, including its root and relative-path headings.",
 	      "properties": {
-	        "view": { "type": "string", "const": "content", "description": "Pack view used for document measurement." },
-	        "format": { "type": "string", "const": "text", "description": "Pack format used for document measurement." },
-	        "lines": { "type": "integer", "description": "Rendered document lines." },
-	        "characters": { "type": "integer", "description": "Rendered normalized document characters." },
-	        "tokens": { "type": "integer", "description": "Estimated tokens for the rendered document." },
+	        "view": { "type": "string", "const": "content" },
+	        "format": { "type": "string", "const": "text" },
+	        "lines": { "type": "integer" },
+	        "characters": { "type": "integer", "description": "Normalized characters." },
+	        "tokens": { "type": "integer", "description": "Estimated tokens." },
 	        "estimated": { "type": "boolean", "description": "True when one or more file bodies use size-based estimates or lack text metrics." }
 	      },
 	      "required": ["view", "format", "lines", "characters", "tokens", "estimated"],
@@ -552,7 +552,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "description": "Content-protection policy applied to this analysis.",
 	      "properties": {
 	        "secrets": { "type": "string", "const": "always", "description": "Mandatory secret-redaction state." },
-	        "privateData": { "type": "string", "enum": ["enabled", "disabled"], "description": "Server-startup private-data redaction state." }
+	        "privateData": { "type": "string", "enum": ["enabled", "disabled"], "description": "Server-startup redaction state." }
 	      },
 	      "required": ["secrets", "privateData"],
 	      "additionalProperties": false
@@ -574,7 +574,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "type": "object",
 	        "properties": {
 	          "path": { "type": "string", "description": "Project-relative file path." },
-	          "tokens": { "type": "integer", "description": "Estimated tokens for this file." },
+	          "tokens": { "type": "integer", "description": "Estimated tokens." },
 	          "estimated": { "type": "boolean", "description": "True when this entry uses size-based metrics instead of inspected transformed content." },
 	          "uninspected": { "type": "boolean", "description": "True when bounded secret inspection could not read this file and its metrics are estimated." }
 	        },
@@ -583,7 +583,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      }
 	    },
 	    "topFilesTruncated": { "type": "boolean", "description": "True when the aggregate top-files character budget omitted remaining entries." },
-	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Number of requested top-file entries omitted by the aggregate character budget." }
+	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Requested top-file entries omitted by the aggregate character budget." }
 	  },
 	  "required": ["files", "characters", "tokens", "detail", "contentMetrics", "documentMetrics", "exclusions", "protection", "topFiles", "topFilesTruncated", "topFilesRemaining"],
 	  "additionalProperties": false

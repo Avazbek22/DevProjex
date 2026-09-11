@@ -43,12 +43,41 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("ProxyCommand", security, StringComparison.Ordinal);
 		Assert.Contains("same operating-system user", security, StringComparison.Ordinal);
 		Assert.Contains("paths, names, configuration keys, parser reasons", security, StringComparison.Ordinal);
+		Assert.Contains("only over `https` or `ssh`", security, StringComparison.Ordinal);
+		Assert.Contains("That transport set is fixed in the build", security, StringComparison.Ordinal);
+		Assert.Contains(
+			"no environment variable, profile, configuration file, or command-line value widens it",
+			security,
+			StringComparison.Ordinal);
 		Assert.Contains("d318b683471101618febed18996405ad26462110", benchmarks, StringComparison.Ordinal);
 		Assert.Contains("85e3969b010c72b905203812d1a3f5beb84a2102", benchmarks, StringComparison.Ordinal);
 		Assert.Contains("three", benchmarks, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("operating-system page cache", benchmarks, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("Benchmarks.md", comparison, StringComparison.Ordinal);
 		Assert.Contains("different", comparison, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public void PublishedDocumentationNamesEveryMcpToolAndTheirCount()
+	{
+		var rootPath = FindRepositoryRoot();
+		var toolNames = ReadCatalogToolNames(rootPath);
+		var readMe = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+		var contract = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var enumeration = FirstSentence(
+			ParagraphContaining(readMe, "read-only tools cover the whole workflow"));
+
+		foreach (var name in toolNames)
+			Assert.Contains($"`{name}`", enumeration, StringComparison.Ordinal);
+
+		Assert.Contains(
+			$"{CountWord(toolNames.Length)} read-only tools",
+			enumeration,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"all {CountWord(toolNames.Length).ToLowerInvariant()} tool descriptions",
+			contract,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -196,6 +225,7 @@ public sealed class DocumentationAndPackagingContractTests
 		var normalizedSecurity = Regex.Replace(security, @"\s+", " ");
 
 		Assert.Contains("### Service notices repeat only when they change", server, StringComparison.Ordinal);
+		Assert.Contains("### What a connection costs", server, StringComparison.Ordinal);
 		Assert.Contains(
 			"`[Unchanged] filters, protection; see list_projects.`",
 			normalizedServer,
@@ -1616,4 +1646,64 @@ public sealed class DocumentationAndPackagingContractTests
 
 	private static string FindRepositoryRoot()
 		=> PublishedApplicationLocator.FindRepositoryRoot();
+
+	/// <summary>
+	/// The tool names the MCP catalog registers, read from its source so that adding a tool is
+	/// what makes the documentation assertions fail.
+	/// </summary>
+	private static string[] ReadCatalogToolNames(string rootPath)
+	{
+		var catalog = File.ReadAllText(
+			Path.Combine(rootPath, "Apps", "Mcp", "DevProjexMcpToolCatalog.cs"));
+		var names = Regex
+			.Matches(
+				catalog,
+				@"Create\(\s*target,\s*nameof\(DevProjexMcpTools\.\w+\),\s*""(?<name>[a-z_]+)""")
+			.Select(match => match.Groups["name"].Value)
+			.ToArray();
+		Assert.NotEmpty(names);
+		Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+
+		// A registration this reader cannot parse must fail loudly rather than lower the count on
+		// both sides of the comparison and let a stale document pass.
+		Assert.Equal(Regex.Matches(catalog, @"Create\(\s*target,").Count, names.Length);
+		return names;
+	}
+
+	private static string ParagraphContaining(string document, string marker)
+	{
+		var paragraph = document
+			.ReplaceLineEndings("\n")
+			.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+			.FirstOrDefault(block => block.Contains(marker, StringComparison.Ordinal));
+		Assert.True(paragraph is not null, $"No paragraph contains '{marker}'.");
+		return paragraph!;
+	}
+
+	/// <summary>
+	/// The opening sentence of a paragraph, so that a name mentioned in later prose cannot stand in
+	/// for a name missing from the enumeration itself.
+	/// </summary>
+	private static string FirstSentence(string paragraph)
+	{
+		var end = paragraph.IndexOf(". ", StringComparison.Ordinal);
+		return end < 0 ? paragraph : paragraph[..(end + 1)];
+	}
+
+	private static string CountWord(int value) => value switch
+	{
+		1 => "One",
+		2 => "Two",
+		3 => "Three",
+		4 => "Four",
+		5 => "Five",
+		6 => "Six",
+		7 => "Seven",
+		8 => "Eight",
+		9 => "Nine",
+		10 => "Ten",
+		11 => "Eleven",
+		12 => "Twelve",
+		_ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
+	};
 }

@@ -182,13 +182,32 @@ public sealed class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(project, "src", "Nested.cs"), "nested-marker\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
-		// '*' stays inside one segment, so a root-level pattern misses a nested file: the
-		// empty result carries the rule instead of reading as "no C# files here".
+		// '*' stays inside one segment, so a pattern without '/' misses a nested file: the empty
+		// result names the stage and the rewrite instead of reading as "no C# files here".
 		var rootOnly = new Dictionary<string, object?> { ["include_patterns"] = new[] { "*.cs" } };
 		var tree = Text(await server.CallAsync("get_tree", rootOnly));
 		Assert.DoesNotContain("Nested.cs", tree, StringComparison.Ordinal);
 		Assert.Contains("[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.", tree, StringComparison.Ordinal);
-		Assert.Contains("[Empty selection] No file passed the effective filters and the request arguments. Patterns match the whole project-relative path: '*' stays inside one segment, '**/' spans any depth; paths the filters hide never match.", tree, StringComparison.Ordinal);
+		Assert.Contains("[Empty selection] stage=patterns. A pattern with no '/' and no '**' matches only an entry directly in the project root; prefix it with '**/' to match that name at any depth, or append '/**' to select a directory's files. Paths the filters hide never match.", tree, StringComparison.Ordinal);
+
+		// A pattern that already spans depth gets the general rule, not the rewrite. '**' spans
+		// separators even without a trailing '/', so carrying it is what decides, not the '/'.
+		foreach (var spanning in new[] { "**/*.txt", "**Absent.cs" })
+		{
+			var spanningTree = Text(await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["include_patterns"] = new[] { spanning } }));
+			Assert.Contains("[Empty selection] stage=patterns. No file passed the effective filters and the request patterns.", spanningTree, StringComparison.Ordinal);
+			Assert.DoesNotContain("prefix it with", spanningTree, StringComparison.Ordinal);
+		}
+
+		// An exclude-only call removed every file rather than failing to match one, so the line
+		// must not claim that nothing matched the request.
+		var excludeOnly = Text(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclude_patterns"] = new[] { "**/*.cs" } }));
+		Assert.Contains("[Empty selection] stage=patterns. No file passed the effective filters and the request patterns.", excludeOnly, StringComparison.Ordinal);
+		Assert.DoesNotContain("prefix it with", excludeOnly, StringComparison.Ordinal);
 
 		var analysis = await server.CallAsync("analyze", rootOnly);
 		Assert.Equal(0, analysis.StructuredContent?.GetProperty("files").GetInt32());
@@ -219,7 +238,7 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?> { ["paths"] = new[] { ".hidden.cs" } });
 		Assert.Equal(0, pathSelection.StructuredContent?.GetProperty("files").GetInt32());
 		Assert.Contains(
-			"[Empty selection] None of the requested paths is in the effective selection; paths the filters hide never match.",
+			"[Empty selection] stage=paths. None of the requested paths is in the effective selection; paths the filters hide never match.",
 			AllText(pathSelection),
 			StringComparison.Ordinal);
 
@@ -244,7 +263,7 @@ public sealed class McpServerIntegrationTests
 			"get_tree",
 			new Dictionary<string, object?> { ["tracked_only"] = true }));
 		Assert.Contains(
-			"[Empty selection] Git reports no files for this scope (git: tracked).",
+			"[Empty selection] stage=git-scope. Git reports no files for this scope (git: tracked).",
 			gitSelection,
 			StringComparison.Ordinal);
 
@@ -252,7 +271,7 @@ public sealed class McpServerIntegrationTests
 		await using var emptyServer = await McpTestServer.StartAsync(emptyProject, workspace.Path);
 		var projectSelection = Text(await emptyServer.CallAsync("get_tree"));
 		Assert.Contains(
-			"[Empty selection] The effective filters leave no file in this project.",
+			"[Empty selection] stage=filters. The effective filters leave no file in this project.",
 			projectSelection,
 			StringComparison.Ordinal);
 	}
@@ -489,9 +508,7 @@ public sealed class McpServerIntegrationTests
 		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
 		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
 		var cachePath = Path.Combine(workspace.Path, "repo-cache");
-		using var fileTransportPolicy = new TestEnvironmentVariableScope(
-			"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT",
-			"1");
+		using var fileTransportPolicy = RepositoryTransportPolicy.AllowLocalFileTransport();
 		await using var server = await McpTestServer.StartAsync(
 			localProject,
 			workspace.Path,
@@ -2622,9 +2639,7 @@ public sealed class McpServerIntegrationTests
 		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
 		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
 		var cachePath = Path.Combine(workspace.Path, "repo-cache");
-		using var fileTransportPolicy = new TestEnvironmentVariableScope(
-			"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT",
-			"1");
+		using var fileTransportPolicy = RepositoryTransportPolicy.AllowLocalFileTransport();
 		var git = new CountingGitRepositoryService(
 			new GitRepositoryService(allowFileTransportForTests: true));
 		await using var server = await McpTestServer.StartAsync(
@@ -6787,9 +6802,7 @@ public sealed class McpServerIntegrationTests
 		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
 		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
 		var cachePath = Path.Combine(workspace.Path, "hostile-branch-cache");
-		using var fileTransportPolicy = new TestEnvironmentVariableScope(
-			"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT",
-			"1");
+		using var fileTransportPolicy = RepositoryTransportPolicy.AllowLocalFileTransport();
 		await using var server = await McpTestServer.StartAsync(
 			localProject,
 			workspace.Path,
@@ -7322,21 +7335,6 @@ public sealed class McpServerIntegrationTests
 		string ToolName,
 		IReadOnlyDictionary<string, object?> Arguments,
 		IReadOnlyList<string> ExpectedPhases);
-
-	private sealed class TestEnvironmentVariableScope : IDisposable
-	{
-		private readonly string _name;
-		private readonly string? _previousValue;
-
-		public TestEnvironmentVariableScope(string name, string value)
-		{
-			_name = name;
-			_previousValue = Environment.GetEnvironmentVariable(name);
-			Environment.SetEnvironmentVariable(name, value);
-		}
-
-		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
-	}
 
 	private sealed class InlineProgress<T> : IProgress<T>
 	{
