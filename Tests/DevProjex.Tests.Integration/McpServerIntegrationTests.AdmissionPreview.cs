@@ -21,8 +21,12 @@ public sealed partial class McpServerIntegrationTests
 
 	private static JsonElement Structured(CallToolResult result)
 	{
-		Assert.NotNull(result.StructuredContent);
-		return result.StructuredContent!.Value;
+		if (result.StructuredContent is { } structured)
+			return structured;
+
+		var firstBlock = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+		using var document = JsonDocument.Parse(ExtractSpotlightBody(firstBlock));
+		return document.RootElement.Clone();
 	}
 
 	[Fact]

@@ -10,8 +10,8 @@ public sealed partial class McpServerProcessTests
 		{
 			"Members.cs",
 			"namespace P;\nclass A { string Run() { return \"member-marker-a\"; } }\nclass B { string Run() { return \"member-marker-b\"; } }\n// fallback-marker\n",
-			"A.Run",
-			"B.Run"
+			"P.A.Run",
+			"P.B.Run"
 		},
 		{
 			"members.js",
@@ -98,8 +98,8 @@ public sealed partial class McpServerProcessTests
 
 		// The declaration heads its hits inside the file's own block, the way the path does, and
 		// location is spelled exactly once: no row anywhere repeats the path beside a line number.
-		Assert.Contains("src/App.cs\nin App.Run\n5:", Normalize(code), StringComparison.Ordinal);
-		Assert.Contains("src/Helper.cs\nin Helper.Assist\n5:", Normalize(code), StringComparison.Ordinal);
+		Assert.Contains("src/App.cs\nin P.App.Run\n5:", Normalize(code), StringComparison.Ordinal);
+		Assert.Contains("src/Helper.cs\nin P.Helper.Assist\n5:", Normalize(code), StringComparison.Ordinal);
 		Assert.DoesNotContain("src/App.cs:5:", code, StringComparison.Ordinal);
 		Assert.DoesNotContain("src/Helper.cs:5:", code, StringComparison.Ordinal);
 		Assert.Contains("[Symbols] annotated=2 · files-without-declarations=0.", code, StringComparison.Ordinal);
@@ -109,7 +109,7 @@ public sealed partial class McpServerProcessTests
 		var untrustedEnd = code.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
 		Assert.True(untrustedEnd > 0);
 		Assert.True(
-			code.IndexOf("in App.Run", StringComparison.Ordinal) < untrustedEnd,
+			code.IndexOf("in P.App.Run", StringComparison.Ordinal) < untrustedEnd,
 			"The declaration name must not be reported outside the untrusted block.");
 		Assert.True(code.IndexOf("[Symbols]", StringComparison.Ordinal) > untrustedEnd);
 	}
@@ -206,8 +206,8 @@ public sealed partial class McpServerProcessTests
 
 		// Two hits share a declaration and are headed once; the third changes declaration and is
 		// headed again. That collapsing is the whole saving over a row per hit.
-		Assert.Equal(1, CountOccurrences(text, "in App.One\n"));
-		Assert.Equal(1, CountOccurrences(text, "in Other.Three\n"));
+		Assert.Equal(1, CountOccurrences(text, "in P.App.One\n"));
+		Assert.Equal(1, CountOccurrences(text, "in P.Other.Three\n"));
 		Assert.Contains("[Symbols] annotated=3 · files-without-declarations=0.", text, StringComparison.Ordinal);
 	}
 
@@ -361,7 +361,7 @@ public sealed partial class McpServerProcessTests
 
 		// The comment on the last line is inside no declaration. Without a closing header it would
 		// render under the one above it and read as part of that type.
-		var named = text.IndexOf("in App.Run\n", StringComparison.Ordinal);
+		var named = text.IndexOf("in P.App.Run\n", StringComparison.Ordinal);
 		var closed = text.IndexOf("in (no declaration)\n", StringComparison.Ordinal);
 		var outside = text.IndexOf("8:// tail marker note", StringComparison.Ordinal);
 		Assert.True(named >= 0, text);
@@ -430,13 +430,13 @@ public sealed partial class McpServerProcessTests
 		// Two hits share one declaration, so the list carries it once: this is what a caller reads
 		// back, and a declaration touched twice is still one thing to open.
 		Assert.Contains("Declarations found (path, symbol, line):", text, StringComparison.Ordinal);
-		Assert.Equal(1, CountOccurrences(text, "src/App.cs App.One 5"));
-		Assert.Equal(1, CountOccurrences(text, "src/App.cs App.Two 7"));
+		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.One 5"));
+		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.Two 7"));
 
 		// The sentence that turns the list into a call is a constant and sits outside the block,
 		// while the paths and names inside it are project text and stay in.
 		var untrustedEnd = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
-		Assert.True(text.IndexOf("src/App.cs App.One 5", StringComparison.Ordinal) < untrustedEnd);
+		Assert.True(text.IndexOf("src/App.cs P.App.One 5", StringComparison.Ordinal) < untrustedEnd);
 		Assert.True(
 			text.IndexOf("[Read declarations]", StringComparison.Ordinal) > untrustedEnd,
 			"The instruction must be trusted text, outside the untrusted block.");

@@ -172,10 +172,7 @@ public sealed class CompressionAvailabilityProcessTests
 			timeout.Token))
 		{
 			var tools = await client.ListToolsAsync(options: null, timeout.Token);
-			var analysisSchema = Assert.IsType<JsonElement>(
-				tools.Single(static tool => tool.Name == "analyze").ProtocolTool.OutputSchema);
-			Assert.True(
-				analysisSchema.GetProperty("properties").TryGetProperty("compressionUnavailable", out _));
+			Assert.Null(tools.Single(static tool => tool.Name == "analyze").ProtocolTool.OutputSchema);
 
 			var analysis = await client.CallToolAsync(
 				"analyze",
@@ -189,7 +186,7 @@ public sealed class CompressionAvailabilityProcessTests
 			Assert.Contains("[Compression unavailable]", analysisText, StringComparison.Ordinal);
 			Assert.True(analysisText.LastIndexOf("[Compression unavailable]", StringComparison.Ordinal) >
 			            analysisText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal));
-			var unavailable = analysis.StructuredContent!.Value.GetProperty("compressionUnavailable");
+			var unavailable = Structured(analysis).GetProperty("compressionUnavailable");
 			Assert.Contains("grammars", unavailable.GetProperty("reason").GetString(), StringComparison.OrdinalIgnoreCase);
 
 			var pack = await client.CallToolAsync(
@@ -268,5 +265,19 @@ public sealed class CompressionAvailabilityProcessTests
 		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = dataRoot;
 		startInfo.Environment["DOTNET_NOLOGO"] = "1";
 		return startInfo;
+	}
+
+	private static JsonElement Structured(CallToolResult result)
+	{
+		if (result.StructuredContent is { } structured)
+			return structured;
+
+		var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+		var opening = text.IndexOf("<untrusted-data-", StringComparison.Ordinal);
+		var contentStart = text.IndexOf(">\n", opening, StringComparison.Ordinal) + 2;
+		var contentEnd = text.IndexOf("\n</untrusted-data-", contentStart, StringComparison.Ordinal);
+		Assert.True(opening >= 0 && contentStart > 1 && contentEnd >= contentStart, text);
+		using var document = JsonDocument.Parse(text[contentStart..contentEnd]);
+		return document.RootElement.Clone();
 	}
 }

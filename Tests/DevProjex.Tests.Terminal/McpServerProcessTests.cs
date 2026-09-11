@@ -930,7 +930,7 @@ public sealed partial class McpServerProcessTests
 				options: null,
 				TestContext.Current.CancellationToken);
 			Assert.NotEqual(true, result.IsError);
-			var listedProject = result.StructuredContent!.Value
+			var listedProject = Structured(result)
 				.GetProperty("projects")[0]
 				.GetProperty("path")
 				.GetString();
@@ -1150,6 +1150,23 @@ public sealed partial class McpServerProcessTests
 
 	private static StringComparison PathComparison =>
 		OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+	private static JsonElement Structured(CallToolResult result)
+	{
+		if (result.StructuredContent is { } structured)
+			return structured;
+
+		var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+		var opening = System.Text.RegularExpressions.Regex.Match(
+			text,
+			"<untrusted-data-[0-9a-f]{24}>\\n");
+		Assert.True(opening.Success, text);
+		var contentStart = opening.Index + opening.Length;
+		var contentEnd = text.IndexOf("\n</untrusted-data-", contentStart, StringComparison.Ordinal);
+		Assert.True(contentEnd >= contentStart, text);
+		using var document = JsonDocument.Parse(text[contentStart..contentEnd]);
+		return document.RootElement.Clone();
+	}
 
 	private sealed record ProcessResult(int ExitCode, string Output, string Error);
 

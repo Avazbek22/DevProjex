@@ -31,7 +31,7 @@ public sealed partial class McpServerProcessTests
 			progress: null,
 			options: null,
 			TestContext.Current.CancellationToken);
-		var projectName = listed.StructuredContent!.Value.GetProperty("projects")[0].GetProperty("name").GetString();
+		var projectName = Structured(listed).GetProperty("projects")[0].GetProperty("name").GetString();
 		var tree = await server.Client.CallToolAsync(
 			"get_tree",
 			new Dictionary<string, object?> { ["project"] = projectName, ["format"] = "text" },

@@ -584,6 +584,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		var declarations = new List<NavigationDeclaration>();
 		var seen = new HashSet<(int Start, int End, NavigationSymbolKind Kind, string Name)>();
 		var visited = 0;
+		string? fileScopedNamespace = null;
 		foreach (var capture in cursor.Captures)
 		{
 			if ((visited++ & 255) == 0)
@@ -591,7 +592,13 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var name = ReadNavigationName(capture.Node, language);
 			if (string.IsNullOrWhiteSpace(name))
 				continue;
-			var owners = ReadNavigationOwners(capture.Node, language);
+			if (language == LanguageId.CSharp && capture.Node.Type == "file_scoped_namespace_declaration")
+				fileScopedNamespace = name;
+			var owners = ReadNavigationOwners(capture.Node, language).ToList();
+			if (fileScopedNamespace is not null && capture.Node.Type != "file_scoped_namespace_declaration")
+			{
+				owners.Insert(0, fileScopedNamespace);
+			}
 			var owner = owners.Count == 0 ? null : string.Join('.', owners);
 			var qualifiedName = owner is null ? name : $"{owner}.{name}";
 			var kind = capture.Name switch
