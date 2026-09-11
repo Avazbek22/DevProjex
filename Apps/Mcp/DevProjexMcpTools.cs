@@ -26,6 +26,16 @@ internal sealed class DevProjexMcpTools(
 	// context budget in one unpredictable call. The cap bounds that, and the totals line
 	// tells the caller how much it did not get.
 	private const int MaximumSearchContentCharacters = 16_000;
+	// Asking for a file by name is the one request the selection vocabulary answers in a form a
+	// caller rarely guesses: a bare name is root-only, and paths selects what already exists at
+	// the depth it names. Both roads end in an empty or misleading answer, so the two tools that
+	// tolerate them point at the form that works. The pointer is a constant; nothing the caller
+	// sent reaches it.
+	private const string NameSearchNotice =
+		"[Name search] File names and paths are matched only by include_patterns: prefix a bare name " +
+		"with '**/' to find it at any depth, or append '/**' to a directory to select its files. " +
+		"search_project matches file content, and paths selects a path that already exists.";
+	private const int MaximumNameSearchExtensionLength = 8;
 	private const string SearchContentCapNotice =
 		"[Search truncated] The returned text reached the 16000-character search cap. " +
 		"Narrow the pattern, add paths or include_patterns, or lower context_lines.";
@@ -215,6 +225,7 @@ internal sealed class DevProjexMcpTools(
 				McpSpotlight.Wrap(treeWriter.Text),
 				treeTruncationNotice,
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
+				FormatNameSearchNotice(plan, paths),
 				SelectionNotices(
 					plan,
 					includeFilters: true,
@@ -890,6 +901,7 @@ internal sealed class DevProjexMcpTools(
 				FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
+				FormatNameSearchNotice(plan, paths, pattern, totalMatches),
 				additionalMatchesNotice,
 				searchTotalsNotice,
 				inspectionBudgetReached
@@ -2247,6 +2259,67 @@ internal sealed class DevProjexMcpTools(
 					: $" seeds={item.Seeds.ToString(CultureInfo.InvariantCulture)}"))
 			.ToArray();
 		return notices.Length == 0 ? null : string.Join('\n', notices);
+	}
+
+	/// <summary>
+	/// Points at the form that finds a file by name when this call asked for one in the only way
+	/// the tool tolerates: a requested path that the effective tree does not hold.
+	/// </summary>
+	private static string? FormatNameSearchNotice(
+		ProjectContextPlan plan,
+		IReadOnlyList<string>? paths) =>
+		McpTrustedDiagnosticFormatter.ReportsMissingSelectedPath(plan) && HasBareNamePath(paths)
+			? NameSearchNotice
+			: null;
+
+	/// <summary>
+	/// The search form of the same pointer. A content pattern that searched files and found
+	/// nothing while reading like a file name was almost certainly aimed at one, and this tool
+	/// never matches a path. A selection that held no file to search explains itself through
+	/// <c>[Empty selection]</c> instead, and is left alone.
+	/// </summary>
+	private static string? FormatNameSearchNotice(
+		ProjectContextPlan plan,
+		IReadOnlyList<string>? paths,
+		string pattern,
+		int totalMatches) =>
+		(McpTrustedDiagnosticFormatter.ReportsMissingSelectedPath(plan) && HasBareNamePath(paths)) ||
+		(totalMatches == 0 && plan.IncludedFiles.Count > 0 && LooksLikeANameSearch(pattern))
+			? NameSearchNotice
+			: null;
+
+	/// <summary>
+	/// A requested path with no separator names one entry directly in the project root, so a
+	/// caller who meant "this name, wherever it lives" gets nothing from it.
+	/// </summary>
+	private static bool HasBareNamePath(IReadOnlyList<string>? paths) =>
+		paths?.Any(static path =>
+			!string.IsNullOrWhiteSpace(path) &&
+			!path.Contains('/', StringComparison.Ordinal) &&
+			!path.Contains('\\', StringComparison.Ordinal)) == true;
+
+	/// <summary>
+	/// Whether a pattern that matched no content reads as a file name or path: it carries a path
+	/// separator, or it ends in what looks like an extension, with or without the regex escape
+	/// and the end anchor a caller would write around it. Both are syntactic, both are computed
+	/// only for a response that already found nothing, and neither reaches the response text.
+	/// </summary>
+	private static bool LooksLikeANameSearch(string pattern)
+	{
+		if (string.IsNullOrWhiteSpace(pattern))
+			return false;
+		if (pattern.Contains('/', StringComparison.Ordinal))
+			return true;
+
+		var end = pattern.Length;
+		if (pattern[end - 1] == '$')
+			end--;
+		var start = end;
+		while (start > 0 && char.IsAsciiLetterOrDigit(pattern[start - 1]))
+			start--;
+		return end - start is > 0 and <= MaximumNameSearchExtensionLength &&
+			start > 0 &&
+			pattern[start - 1] == '.';
 	}
 
 	private static IReadOnlyList<string>? ParsePaths(McpJsonArguments arguments) =>

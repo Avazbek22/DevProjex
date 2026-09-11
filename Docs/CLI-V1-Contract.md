@@ -1318,7 +1318,13 @@ truncation trailers are trusted text outside the untrusted-data block.
 recognize Markdown-escaped names copied from the default tree format;
 `max_file_bytes` appears in effective-filter diagnostics when supplied; and
 wrong-case path diagnostics are platform-independent and name the spelling
-listed by `get_tree`.
+listed by `get_tree`. A constant `[Name search]` line names the form that finds a
+file by name: `search_project` adds it when it searched at least one file, matched
+nothing, and the pattern carries a `/` or ends in something shaped like an
+extension, and `get_tree` adds it when a `paths` entry with no separator was not
+present in the effective tree. It states a fact about one call and is never
+memoised; searches that matched, ordinary content patterns, and already-empty
+selections are byte-identical to v5.2 without it.
 
 MCP `get_tree.format` is an additive input with `markdown` as its compact default.
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;

@@ -213,6 +213,12 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("[Search totals] matches=N · files=M", server, StringComparison.Ordinal);
 		Assert.Contains("[Search truncated]", server, StringComparison.Ordinal);
 		Assert.Contains("16,000 characters", normalized, StringComparison.Ordinal);
+		Assert.Contains("### Finding a file by name", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"`include_patterns` is the only parameter that matches a file by its name",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("the constant `[Name search]` line", normalized, StringComparison.Ordinal);
 	}
 
 	[Fact]

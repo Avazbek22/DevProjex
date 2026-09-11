@@ -515,8 +515,8 @@ filters]` line.
 
 Only the repetition of unchanged trusted lines changes. Lines that state a fact
 about one call — `[Remote] commit=`, `[Resolution]`, `[Facts coverage]`,
-`[Search scope]`, `[Budget accounting]`, `[Search totals]`, search and tree
-truncation notices, and every `[Warning ...]` — are computed and sent for every
+`[Search scope]`, `[Budget accounting]`, `[Search totals]`, `[Name search]`,
+search and tree truncation notices, and every `[Warning ...]` — are computed and sent for every
 call as before, and the untrusted-data wrapper around project text is never
 affected.
 
@@ -766,10 +766,27 @@ classes (`[...]`) are rejected with `DPX-MCP-INVALID-PATTERN` rather than
 matched literally, because a silently empty result reads as "no such files".
 `paths` contains existing project-relative files or directories for `get_tree`,
 `analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
-glob metacharacters have meaning only in the pattern parameters. Every array
+glob metacharacters have meaning only in the pattern parameters. A `paths` entry
+carrying no separator therefore names one entry directly in the project root, and
+matches nothing when a file of that name lives deeper. Every array
 parameter requires a JSON array: a bare string where an array is expected returns
 `DPX-MCP-INVALID-ARGUMENTS` naming the argument, for example
 `'paths' must be an array of strings.`, instead of a partial or empty result.
+
+### Finding a file by name
+
+`include_patterns` is the only parameter that matches a file by its name. Content
+search never matches a path, and `paths` selects a path that already exists at the
+depth it names, so both answer a name lookup with nothing useful. Two responses
+therefore carry the constant `[Name search]` line, which names the form that
+works: `search_project` when it searched at least one file, found no match, and
+the pattern carries a `/` or ends in something shaped like an extension; and
+`get_tree` when a `paths` entry with no separator was not present in the effective
+tree. The line is a constant — the pattern and the paths a caller sent never reach
+it — and neither `analyze` nor `pack_context` needs it, because a missing `paths`
+entry there is a `DPX-MCP-PATH-NOT-FOUND` error rather than a partial answer. A
+search that found matches, a search whose pattern reads as ordinary content, and a
+selection that was already empty are all unchanged.
 
 ### Batch `get_file`
 
