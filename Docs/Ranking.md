@@ -63,10 +63,12 @@ Extracted-facts coverage is `Supported / candidates`. `Supported`, `Unsupported`
 Git activity is commit count plus recency by position in a safe 200-commit LocalRead window. History is cached only after success, by repository identity, pinned HEAD, window, shallow state, and completeness. An incomplete shallow window has confidence `commits read / 200`; it is reported as, for example, `read 1/200 commits; shallow history`, and is not treated as evidence of low activity. Candidate repository boundaries are indexed once per operation. History paths are parsed as NUL-delimited fields; one Git-generated framing LF is removed from the first path field, while newline and `0x1e` bytes belonging to a filename are preserved.
 
 Manifests and explicit `Main` or executable-module evidence are entry points. For C# the
-evidence is a static method named `Main` or a compilation unit made of top-level statements,
+evidence is a static, non-generic method declaration named `Main`, or a compilation unit made of
+top-level statements,
 read from captures the extraction pass already visits; no project file is consulted, so a
-library that declares a static `Main` carries the same evidence, while a type named `Main` and
-an instance method named `Main` do not. Test evidence is still checked first and keeps
+library that declares a static `Main` carries the same evidence, while a type named `Main`, an
+instance method named `Main`, a static local function named `Main`, and a generic `Main<T>`
+do not. Test evidence is still checked first and keeps
 precedence over entry-point evidence. A source with no dependents and at least three dependencies is only a `coordinator`, not an inferred entry point. Tests are deprioritized but never excluded. The final tie-break is the canonical relative path.
 
 Facts, preparation, cost, and emitted bytes are bound to one source identity. SHA-256 content plus length and last-write metadata are captured around fact indexing. For source-backed output, raw SHA-256 is then calculated from the same opened handle that supplies the decoded or direct UTF-8 payload; path metadata remains a second guard against replacement. Application-owned immutable prepared content needs no source check after ownership transfer. A mismatch fails closed with guidance to repeat the export. Ranking still never widens the effective selection. Without `rank`, it performs no fact indexing, Git work, or content hashing and preserves the existing bytes and metadata-coherence behavior.
@@ -268,10 +270,11 @@ byte-identical in the pinned tests. The query content is part of the extractor i
 Before this signal the `EntryPoint` role could not fire for C# at all: the predicate looks for a
 `Function` or `Module` declaration named `Main`, and the C# adapter emits only type declarations,
 so every `Program.cs` ranked as ordinary source. The evidence now comes from what the adapter
-already produces. `method_declaration` is captured as a type-parameter owner and its text is
-already materialized, so the capture additionally carries the declared name; the compilation unit
-of a top-level-statement file is captured compactly, without materializing its body. A file that
-carries either signal gets one metadata entry, and role classification reads it with one
+already produces. `method_declaration` is captured as a type-parameter owner and is now a compact
+capture, so its body is no longer materialized and discarded, and the declared name, the generic
+arity and the `static` modifier fall out of the compact path that already reads modifier
+children. The compilation unit of a top-level-statement file is captured compactly too. A file
+that carries either signal gets one metadata entry, and role classification reads it with one
 dictionary lookup. No traversal and no second query pass are added on the ranking path.
 
 The timing criterion for this signal was registered before any measurement was taken: the warm
