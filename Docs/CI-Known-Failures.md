@@ -157,6 +157,47 @@ Whoever takes it will want the test to observe what `ReloadProjectAsync` returns
 publication from a busy flag.
 
 
+## 5. Git settings reported unavailable after one failed read
+
+- **Cause**: #377 — a failed read of a repository's git configuration was cached and served for five
+  seconds without anything looking again, so a single miss took the repository out of reach for
+  every caller in that window.
+- **Run**: [34584479932](https://github.com/Avazbek22/DevProjex/actions/runs/34584479932), job `103215930387`
+- **Commit**: `acbfa6bb` on `v5.2`
+- **Job**: `CI (Windows / Terminal)` — `Failed: 1, Passed: 1705, Skipped: 201, Total: 1907`
+- **Test**: `DevProjex.Tests.Terminal.GitModeCommandContractTests.DesktopOpenReadinessAcceptsValidMomentaryScopeWithoutGitIgnore(mode: Changes)`
+  (`Tests/DevProjex.Tests.Terminal/GitModeCommandContractTests.cs:532`, assertion at `:551`)
+- **Message**:
+
+```
+Assert.DoesNotContain() Failure: Filter matched in collection
+Collection: [ContextDiagnostic { Code = DPX-GIT-STATE-UNAVAILABLE, Severity = Error,
+Message = Git path comparison settings could not be resolved., … }]
+```
+
+The same job skipped seven tests with `Git is required for this regression test.` between the xUnit
+clock readings `00:00:58` and `00:02:00`, and the failure above lands at `00:01:05`, inside that
+window. So `git` could not be launched on that runner for about a minute; the read failed, the
+failure was cached, and a caller met it.
+
+**Named in #377, not reproduced here.** The issue cites two tests —
+`DevProjex.Tests.Integration.McpServerIntegrationTests.RemoteProjectClonesSelectsBranchReusesPinnedCacheAndKeepsJailAndRedaction`
+(`Tests/DevProjex.Tests.Integration/McpServerIntegrationTests.cs:2629`) and a Windows terminal test
+on a cached remote workspace, which matches
+`DevProjex.Tests.Terminal.TerminalWorkspaceContractTests.CachedRemoteWorkspaceHydratesShallowDiffWithoutChangingItsCheckout`
+(`Tests/DevProjex.Tests.Terminal/TerminalWorkspaceContractTests.cs:1487`). Both are recorded here
+with #377 as their cause, as the issue asks. Neither was found failing: all 60 runs of `.NET CI`
+from 2026-09-09 to 2026-09-11 were searched, covering every run of the day the issue describes, and
+in them the first is `Passed` where it appears and the second is `Passed` or `NotExecuted` — it is
+one of the seven skipped in the window above. The mechanism is confirmed by the code and by the run
+recorded here; the two specific occurrences are not in the logs that remain.
+
+**Fixed.** The read is attempted twice before an unreadable answer is believed, so a single miss
+costs one extra read rather than five seconds of unavailability, and a repository that genuinely
+cannot be read still backs off after the retry instead of being probed by every caller. These
+entries come out of this list once the change has run clean for a week.
+
+
 ## What now fails that did not
 
 `Scripts/ci/Test-ExecutedTests.ps1` runs after each test step and fails the job when a results

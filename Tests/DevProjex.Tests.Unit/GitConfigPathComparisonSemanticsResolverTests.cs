@@ -4,6 +4,15 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class GitConfigPathComparisonSemanticsResolverTests
 {
+	/// <summary>
+	/// A repository whose settings cannot be read backs off rather than being probed on every
+	/// call, and is read again once the back-off has passed.
+	/// </summary>
+	/// <remarks>
+	/// The read is attempted twice before an unreadable answer is believed, so the counts here
+	/// are in pairs. That is the point of the pair: a single miss is not what puts a repository
+	/// out of reach.
+	/// </remarks>
 	[Fact]
 	public void Resolve_RetriesUnavailableRepositorySemanticsAfterBackoff()
 	{
@@ -13,7 +22,7 @@ public sealed class GitConfigPathComparisonSemanticsResolverTests
 		var now = new DateTime(2026, 8, 20, 1, 0, 0, DateTimeKind.Utc);
 		var resolutionCount = 0;
 		var resolver = new GitConfigPathComparisonSemanticsResolver(
-			(_, _) => ++resolutionCount == 1
+			(_, _) => ++resolutionCount <= 2
 				? new GitPathComparisonSemantics(
 					IgnoreCase: true,
 					NormalizeUnicode: true,
@@ -35,7 +44,106 @@ public sealed class GitConfigPathComparisonSemanticsResolverTests
 		Assert.True(recovered.IsAuthoritative);
 		Assert.False(recovered.IgnoreCase);
 		Assert.Equal(recovered, cached);
+		// Two reads to disbelieve the first miss, one to recover after the back-off. The call
+		// between them and the call after recovery are served from the cache and read nothing.
+		Assert.Equal(3, resolutionCount);
+	}
+
+	/// <summary>
+	/// One miss does not put a repository out of reach: the next call sees the settings.
+	/// </summary>
+	[Fact]
+	public void Resolve_DoesNotBelieveASingleFailedRead()
+	{
+		using var workspace = new TemporaryDirectory();
+		var repositoryRoot = workspace.CreateFolder("repository");
+		workspace.CreateFolder("repository/.git");
+		var now = new DateTime(2026, 8, 20, 1, 0, 0, DateTimeKind.Utc);
+		var resolutionCount = 0;
+		var resolver = new GitConfigPathComparisonSemanticsResolver(
+			(_, _) => ++resolutionCount == 1
+				? new GitPathComparisonSemantics(
+					IgnoreCase: true,
+					NormalizeUnicode: true,
+					IsAuthoritative: false)
+				: new GitPathComparisonSemantics(
+					IgnoreCase: false,
+					NormalizeUnicode: false),
+			() => now,
+			TimeSpan.FromMinutes(1));
+
+		var first = resolver.Resolve(repositoryRoot);
+		var second = resolver.Resolve(repositoryRoot);
+
+		// The miss is not returned to anyone and never reaches the cache, so the settings the
+		// second read found are what both calls see.
+		Assert.True(first.IsAuthoritative);
+		Assert.False(first.IgnoreCase);
+		Assert.Equal(first, second);
 		Assert.Equal(2, resolutionCount);
+	}
+
+	/// <summary>
+	/// A repository that fails every read is read twice and then left alone until the back-off
+	/// passes, rather than being probed by every caller.
+	/// </summary>
+	[Fact]
+	public void Resolve_StopsReadingARepositoryThatAlwaysFails()
+	{
+		using var workspace = new TemporaryDirectory();
+		var repositoryRoot = workspace.CreateFolder("repository");
+		workspace.CreateFolder("repository/.git");
+		var now = new DateTime(2026, 8, 20, 1, 0, 0, DateTimeKind.Utc);
+		var resolutionCount = 0;
+		var resolver = new GitConfigPathComparisonSemanticsResolver(
+			(_, _) =>
+			{
+				resolutionCount++;
+				return new GitPathComparisonSemantics(
+					IgnoreCase: true,
+					NormalizeUnicode: true,
+					IsAuthoritative: false);
+			},
+			() => now,
+			TimeSpan.FromMinutes(1));
+
+		var first = resolver.Resolve(repositoryRoot);
+		var readsAfterFirstCall = resolutionCount;
+		for (var call = 0; call < 8; call++)
+			_ = resolver.Resolve(repositoryRoot);
+
+		Assert.False(first.IsAuthoritative);
+		// The retry is one extra read, not a read for every caller: eight further calls inside
+		// the back-off read nothing at all.
+		Assert.Equal(2, readsAfterFirstCall);
+		Assert.Equal(2, resolutionCount);
+	}
+
+	/// <summary>
+	/// The counts the cases above rest on are counts of something. A repository that is read
+	/// successfully is read once, so a resolver that had stopped reading at all would fail here
+	/// rather than quietly satisfy every assertion that a count is small.
+	/// </summary>
+	[Fact]
+	public void Resolve_ReadsOnceWhenTheFirstReadSucceeds()
+	{
+		using var workspace = new TemporaryDirectory();
+		var repositoryRoot = workspace.CreateFolder("repository");
+		workspace.CreateFolder("repository/.git");
+		var resolutionCount = 0;
+		var resolver = new GitConfigPathComparisonSemanticsResolver(
+			(_, _) =>
+			{
+				resolutionCount++;
+				return new GitPathComparisonSemantics(IgnoreCase: false, NormalizeUnicode: false);
+			},
+			static () => new DateTime(2026, 8, 20, 1, 0, 0, DateTimeKind.Utc),
+			TimeSpan.FromMinutes(1));
+
+		var resolved = resolver.Resolve(repositoryRoot);
+
+		Assert.True(resolved.IsAuthoritative);
+		Assert.Equal(1, resolutionCount);
 	}
 
 	[Fact]
