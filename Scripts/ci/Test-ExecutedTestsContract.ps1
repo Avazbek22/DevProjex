@@ -41,6 +41,21 @@ function New-VsTestResult {
 "@ | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
+function New-RawResult {
+	param([string] $Path, [string] $Counters, [string] $Outcome = 'Completed', [string] $Extra = '')
+
+	New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+	@"
+<?xml version="1.0" encoding="UTF-8"?>
+<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+	<ResultSummary outcome="$Outcome">
+		<Counters $Counters />
+		$Extra
+	</ResultSummary>
+</TestRun>
+"@ | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
 function Test-Case {
 	param([string] $Name, [string[]] $ResultsPath, [switch] $ShouldPass)
 
@@ -108,6 +123,39 @@ try {
 	'<?xml version="1.0" encoding="UTF-8"?><TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010" />' |
 		Set-Content -LiteralPath (Join-Path $noSummary 'unit.trx') -Encoding UTF8
 	Test-Case -Name 'a result file with no summary' -ResultsPath $noSummary
+
+	# A result file that says it enumerated nothing must not be absorbed by another file beside
+	# it. Rerun and retry artifacts land in the same directory.
+	$sibling = Join-Path $root 'sibling/TestResults/unit'
+	New-VsTestResult -Path (Join-Path $sibling 'unit.trx') -Total 0 -Executed 0
+	New-VsTestResult -Path (Join-Path $sibling 'unit_rerun.trx') -Total 12 -Executed 12
+	Test-Case -Name 'an empty result file beside a full one' -ResultsPath $sibling
+
+	# Results left under the directory by an earlier run are not this run's evidence.
+	$stale = Join-Path $root 'stale/TestResults/unit'
+	New-Item -ItemType Directory -Path $stale -Force | Out-Null
+	New-VsTestResult -Path (Join-Path $stale '2026-09-04_old/attachments/unit.trx') -Total 431 -Executed 431
+	Test-Case -Name 'only stale results nested below the directory' -ResultsPath $stale
+
+	# Counters that contradict themselves prove nothing.
+	$impossible = Join-Path $root 'impossible/TestResults/unit'
+	New-RawResult -Path (Join-Path $impossible 'unit.trx') -Counters 'total="0" executed="4" passed="0" failed="0"'
+	Test-Case -Name 'more tests executed than exist' -ResultsPath $impossible
+
+	$noOutcomes = Join-Path $root 'nooutcomes/TestResults/unit'
+	New-RawResult -Path (Join-Path $noOutcomes 'unit.trx') -Counters 'total="312" executed="312" passed="0" failed="0" error="0" timeout="0" aborted="0" notExecuted="312"'
+	Test-Case -Name 'tests counted as executed that reported no outcome' -ResultsPath $noOutcomes
+
+	# --- accepted: neither skips nor an awkward byte makes a real run suspect ---------------
+	$skips = Join-Path $root 'skips/TestResults/unit'
+	New-RawResult -Path (Join-Path $skips 'unit.trx') -Counters 'total="11271" executed="11215" passed="11215" failed="0"'
+	Test-Case -Name 'a run with skipped tests' -ResultsPath $skips -ShouldPass
+
+	# This repository drives terminals, so a raw control byte reaches captured output. A
+	# complete run must not be failed over a character in something nobody reads.
+	$controlChar = Join-Path $root 'control/TestResults/terminal'
+	New-RawResult -Path (Join-Path $controlChar 'terminal.trx') -Counters 'total="8" executed="8" passed="8" failed="0"' -Extra "<Output><StdOut>$([char]0x1B)[31mred$([char]0x1B)[0m</StdOut></Output>"
+	Test-Case -Name 'a run whose output carries a control byte' -ResultsPath $controlChar -ShouldPass
 }
 finally {
 	Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue

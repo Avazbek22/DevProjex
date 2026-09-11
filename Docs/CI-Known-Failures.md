@@ -133,11 +133,26 @@ either failure above: in entry 2 no `Passed!` or `Failed!` line was printed at a
 `Passed!` line was printed for a run that had been aborted.
 
 The check is itself checked. `Scripts/ci/Test-ExecutedTestsContract.ps1` runs in `prepare-matrix`
-and drives the check in both directions against built fixtures: three runs it must accept and six
-it must reject. A check that quietly became a no-op would fail the six; a check that stopped
-finding results — which is what happened once, when a completed run of 433 tests was reported as
-empty because the UI suite writes its `.trx` elsewhere — fails the three. There is no state in
-which the check does nothing and that script still passes.
+and drives it in both directions against built fixtures: five runs it must accept and ten it must
+reject. A check that quietly became a no-op fails the ten; a check that stopped finding results —
+which is what happened once, when a completed run of 433 tests was reported as empty because the
+UI suite writes its `.trx` elsewhere — fails the five. There is no state in which the check does
+nothing and that script still passes.
+
+The rejecting cases are there because each one was reachable. Every result file is judged on its
+own and so is every results directory, because anything that adds up first lets a healthy sibling
+vouch for an empty one — which is the shape entry 2 actually had, a suite that enumerated nothing
+sitting beside one that had not. Only files written directly into the directory are read, because
+recursing found results left underneath it by an earlier run and counted them as this one's. And
+counters that contradict themselves are refused: more executed than exist, or tests counted as
+executed while none passed, failed, errored, timed out or aborted.
+
+One limit is worth stating rather than leaving to be discovered. The `outcome` attribute is how a
+completed run admits it was cut short, and the two writers disagree on the vocabulary: the VSTest
+logger emits `Aborted` and `Error`, while the xUnit writer behind `--report-xunit-trx` emits
+neither, so only `Timeout` of the three is reachable for the UI suite. There an aborted host is
+caught by the step's own exit code instead, which is why the check runs only when the steps before
+it succeeded.
 
 That UI divergence is fixed at its cause rather than worked around. The UI suite runs on the
 Microsoft Testing Platform, so its `--results-directory` is passed after `--` to the test
