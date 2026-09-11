@@ -155,8 +155,76 @@ public sealed partial class McpServerProcessTests
 		Assert.True(
 			shown + additional == 200,
 			$"shown={shown}, additional={additional}\n{text[^Math.Min(text.Length, 2_000)..]}");
-		Assert.Contains("[Search group truncated at the response character limit.]", text, StringComparison.Ordinal);
+		// One condition, one notice, naming the cap that actually stopped the output.
+		Assert.Contains("[Search truncated]", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("response character limit", text, StringComparison.Ordinal);
+		Assert.Single(Regex.Matches(text, @"\[Search truncated\]"));
 		Assert.Contains("😀", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("\uD83D</untrusted-data-", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessBoundsAWideSearchAndSizesItWithExactTotals()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("wide-search-project");
+		for (var file = 0; file < 40; file++)
+		{
+			var lines = Enumerable
+				.Range(0, 60)
+				.Select(line => line % 3 == 0
+					? $"const needle{line:D2} = {new string('n', 60)}"
+					: $"const filler{line:D2} = {new string('f', 60)}");
+			workspace.WriteFile($"wide-search-project/src/Module{file:D2}.ts", string.Join("\n", lines) + "\n");
+		}
+		workspace.WriteFile("wide-search-project/src/Single.ts", "const solitaryMarker = 1\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var wide = await server.Client.CallToolAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "needle",
+				["context_lines"] = 3,
+				["ignore_case"] = false,
+				["max_results"] = 200
+			},
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var narrow = await server.Client.CallToolAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "solitaryMarker",
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			},
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		var wideText = AllProcessText(wide).Replace("\r\n", "\n", StringComparison.Ordinal);
+		Assert.NotEqual(true, wide.IsError);
+		Assert.True(wideText.Length <= 18_000, $"Wide search returned {wideText.Length} characters.");
+		Assert.Contains("[Search truncated]", wideText, StringComparison.Ordinal);
+		Assert.Contains("Narrow the pattern", wideText, StringComparison.Ordinal);
+		Assert.Contains("lower context_lines", wideText, StringComparison.Ordinal);
+		// 40 files carry 20 matching lines each, and the counters stay exact under the cap.
+		Assert.Contains("[Search totals] matches=800 · files=40", wideText, StringComparison.Ordinal);
+		var shown = Regex.Matches(wideText, @"^src/Module\d{2}\.ts:\d+:const needle", RegexOptions.Multiline).Count;
+		var additional = Regex.Match(wideText, @"\[(\d+) additional matches not shown;");
+		Assert.True(additional.Success, wideText);
+		Assert.Equal(800, shown + int.Parse(additional.Groups[1].Value));
+
+		// A search that returns everything it found keeps its previous response exactly.
+		var narrowText = AllProcessText(narrow).Replace("\r\n", "\n", StringComparison.Ordinal);
+		Assert.NotEqual(true, narrow.IsError);
+		Assert.Contains("src/Single.ts:1:const solitaryMarker = 1", narrowText, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Search totals]", narrowText, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Search truncated]", narrowText, StringComparison.Ordinal);
+		Assert.DoesNotContain("additional matches", narrowText, StringComparison.Ordinal);
 	}
 }

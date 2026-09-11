@@ -7,8 +7,6 @@ public static class RepositoryUrlUtility
 {
 	private const string ComparisonIdentityVersionPrefix = "v2:";
 	private const string SourceCacheIdentityVersionPrefix = "v3:";
-	private const string TestFileTransportPolicyVariable =
-		"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT";
 	private static readonly HashSet<string> CaseInsensitiveRepositoryPathHosts = new(
 		StringComparer.OrdinalIgnoreCase)
 	{
@@ -243,10 +241,7 @@ public static class RepositoryUrlUtility
 		if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
 		{
 			return uri.Scheme is "https" or "ssh" ||
-			       uri.IsFile && string.Equals(
-				       Environment.GetEnvironmentVariable(TestFileTransportPolicyVariable),
-				       "1",
-				       StringComparison.Ordinal);
+			       uri.IsFile && RepositoryTransportPolicy.AllowsLocalFileTransport;
 		}
 
 		try

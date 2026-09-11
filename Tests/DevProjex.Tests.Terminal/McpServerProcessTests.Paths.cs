@@ -49,4 +49,103 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain("other-process-marker", searchText, StringComparison.Ordinal);
 		Assert.DoesNotContain("outside-process-marker", searchText, StringComparison.Ordinal);
 	}
+
+	[Fact]
+	public async Task RealProcessListsOneDirectoryInASingleCallAndNamesAScalarArgument()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("listing-project");
+		workspace.WriteFile("listing-project/src/router/router.ts", "export const router = 1\n");
+		workspace.WriteFile("listing-project/src/router/trie/node.ts", "export const node = 1\n");
+		workspace.WriteFile("listing-project/src/context.ts", "export const context = 1\n");
+		workspace.WriteFile("listing-project/docs/guide.md", "guide\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		// One call, no depth or pattern tuning, must answer "what is in this directory".
+		var listing = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/router" },
+				["format"] = "text"
+			},
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var byName = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["include_patterns"] = new[] { "**/*router*.ts" },
+				["format"] = "text"
+			},
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var scalar = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["paths"] = "src/router" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		var listingText = AllProcessText(listing);
+		Assert.NotEqual(true, listing.IsError);
+		Assert.Contains("router.ts", listingText, StringComparison.Ordinal);
+		Assert.Contains("node.ts", listingText, StringComparison.Ordinal);
+		Assert.DoesNotContain("context.ts", listingText, StringComparison.Ordinal);
+		Assert.DoesNotContain("guide.md", listingText, StringComparison.Ordinal);
+
+		var byNameText = AllProcessText(byName);
+		Assert.Contains("router.ts", byNameText, StringComparison.Ordinal);
+		Assert.DoesNotContain("node.ts", byNameText, StringComparison.Ordinal);
+		Assert.DoesNotContain("guide.md", byNameText, StringComparison.Ordinal);
+
+		var scalarText = AllProcessText(scalar);
+		Assert.True(scalar.IsError);
+		Assert.Contains("DPX-MCP-INVALID-ARGUMENTS", scalarText, StringComparison.Ordinal);
+		Assert.Contains("'paths' must be an array of strings", scalarText, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessCountsTreeDepthFromTheProjectRootWhateverPathsNarrowsTo()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("depth-project");
+		workspace.WriteFile("depth-project/src/router/trie/node.ts", "export const node = 1\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		async Task<string> TreeAsync(int depth)
+		{
+			var result = await server.Client.CallToolAsync(
+				"get_tree",
+				new Dictionary<string, object?>
+				{
+					["paths"] = new[] { "src/router" },
+					["max_depth"] = depth,
+					["format"] = "text"
+				},
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			Assert.NotEqual(true, result.IsError);
+			return AllProcessText(result);
+		}
+
+		// max_depth counts levels below the project root, never below a paths entry:
+		// src is level 1, router level 2, trie level 3 and node.ts level 4.
+		var depthOne = await TreeAsync(1);
+		var depthTwo = await TreeAsync(2);
+		var depthFour = await TreeAsync(4);
+
+		Assert.Contains("src", depthOne, StringComparison.Ordinal);
+		Assert.DoesNotContain("router", depthOne, StringComparison.Ordinal);
+		Assert.Contains("router", depthTwo, StringComparison.Ordinal);
+		Assert.DoesNotContain("trie", depthTwo, StringComparison.Ordinal);
+		Assert.Contains("node.ts", depthFour, StringComparison.Ordinal);
+	}
 }

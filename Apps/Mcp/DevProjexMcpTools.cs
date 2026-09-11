@@ -22,7 +22,13 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumPageLines = 1_000;
 	private const int MaximumPageCharacters = 50_000;
 	private const int MaximumExclusionTokenLength = 32;
-	private const int MaximumSearchContentCharacters = 49_000;
+	// A wide alternation with context lines used to spend a quarter of an agent's whole
+	// context budget in one unpredictable call. The cap bounds that, and the totals line
+	// tells the caller how much it did not get.
+	private const int MaximumSearchContentCharacters = 16_000;
+	private const string SearchContentCapNotice =
+		"[Search truncated] The returned text reached the 16000-character search cap. " +
+		"Narrow the pattern, add paths or include_patterns, or lower context_lines.";
 	private const int MaximumAnalyzeTopFilesCharacters = 32_000;
 	private const int MaximumAdmissionIncludedFilesCharacters = 32_000;
 	private const int MaximumReportedUnmatchedDetailPatterns = 8;
@@ -44,6 +50,7 @@ internal sealed class DevProjexMcpTools(
 		"fact limit exceeded"
 	];
 	private readonly McpProjectOperationGate _projectOperation = new();
+	private readonly McpServiceNoticeMemo serviceNotices = new();
 	private static readonly IReadOnlySet<string> EmptyArgumentNames = McpJsonArguments.FreezeAllowed();
 	private static readonly IReadOnlySet<string> ReadPackArgumentNames =
 		McpJsonArguments.FreezeAllowed("pack_id", "start_line", "end_line", "start_column");
@@ -126,7 +133,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Returns the filtered project structure without file contents. Use it to orient before reading; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML and limits large text trees within 2,000 lines and 50,000 characters. project accepts a unique name or path from list_projects, or an allowed remote Git URL. Key parameters: paths narrows to literal files or directories; format=markdown|text|json|xml; max_depth=0..1000; git_scope=staged|changes|diff:<ref>..<ref>; include/exclude patterns and max_file_bytes narrow further.")]
+		"Returns the filtered project structure without file contents. Use it to orient, to list what a directory holds, or to find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML within 2,000 lines and 50,000 characters. project accepts a unique name or path from list_projects, or an allowed remote Git URL. Key parameters: paths narrows to literal files or directories; include_patterns finds files by name, as include_patterns=[\"**/*router*.ts\"]; format=markdown|text|json|xml; max_depth=0..1000 counts levels below the project root, not below paths; git_scope=staged|changes|diff:<ref>..<ref>; exclude_patterns and max_file_bytes narrow further.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -213,7 +220,8 @@ internal sealed class DevProjexMcpTools(
 					includeFilters: true,
 					new McpSelectionNoticeContext(
 						HasPaths: HasItems(paths),
-						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
+						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
+						HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
 		}, cancellationToken);
 
 	[Description(
@@ -777,7 +785,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regular expression. Use it to locate symbols or phrases; use related_files instead for static dependency links, or get_file for a known file page. Returns path:line:text matches, merged context groups separated by --, and the count of additional matches beyond max_results; line numbers refer to returned text after replacements, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further.")]
+		"Searches safe transformed project text with a timed .NET regular expression. It matches file content, never paths; find files by name with get_tree include_patterns. Use it to locate symbols or phrases; use related_files instead for dependency links. Returns path:line:text matches, merged context groups separated by --, exact match and file counts, and the count of additional matches beyond max_results; line numbers refer to that text, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -810,6 +818,7 @@ internal sealed class DevProjexMcpTools(
 			var output = new StringBuilder();
 			var totalMatches = 0;
 			var shownMatches = 0;
+			var matchingFiles = 0;
 			var responseLimitReached = false;
 			var resultGroupTruncated = false;
 			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
@@ -837,6 +846,8 @@ internal sealed class DevProjexMcpTools(
 						file.ReplacementRanges,
 						token);
 					totalMatches += scan.TotalMatches;
+					if (scan.TotalMatches > 0)
+						matchingFiles++;
 					if (responseLimitReached)
 						return ValueTask.CompletedTask;
 
@@ -862,6 +873,13 @@ internal sealed class DevProjexMcpTools(
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
 				: null;
+			// Sizing information is only worth its characters when the caller did not
+			// receive every match the pattern found. A group cut in its trailing context
+			// lines withheld no match and gets the cap notice alone.
+			var searchTotalsNotice = totalMatches > shownMatches
+				? $"[Search totals] matches={totalMatches.ToString(CultureInfo.InvariantCulture)} · " +
+				  $"files={matchingFiles.ToString(CultureInfo.InvariantCulture)}"
+				: null;
 			// An empty search result must say whether nothing matched or nothing was searched;
 			// the count is trusted data, the file names never are.
 			var noMatches = totalMatches == 0 && plan.IncludedFiles.Count > 0
@@ -873,16 +891,18 @@ internal sealed class DevProjexMcpTools(
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
 				additionalMatchesNotice,
+				searchTotalsNotice,
 				inspectionBudgetReached
 					? "[Search incomplete] The inspected-text byte budget was reached; additional selected files were not searched and match counts are partial."
 					: null,
-				resultGroupTruncated ? "[Search group truncated at the response character limit.]" : null,
+				resultGroupTruncated ? SearchContentCapNotice : null,
 				SelectionNotices(
 					plan,
 					includeFilters: false,
 					new McpSelectionNoticeContext(
 						HasPaths: HasItems(paths),
-						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
+						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
+						HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
 		}, cancellationToken);
 
 	[Description(
@@ -935,7 +955,8 @@ internal sealed class DevProjexMcpTools(
 			var configurationData = FormatDependencyConfigurationData(coverage.ConfigurationDiagnostics);
 			var selectionContext = new McpSelectionNoticeContext(
 				HasPaths: false,
-				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns));
+				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
+				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns));
 			var noRelatedNotice = resolution.Resolved == 0
 				? resolution.Unresolved == 0
 					? "[No related files] in the effective selection."
@@ -987,7 +1008,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page, or requests for up to eight files and sixteen inclusive ranges; the forms are mutually exclusive. Batch responses report ok, partial, not-returned, or unavailable for every range, merge overlaps, and share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements; start_column continues a single-file page.")]
+		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page, or requests for up to eight files and sixteen inclusive ranges; the forms are mutually exclusive. Send one batched call whenever you want more than one file or more than one range, as requests=[{\"path\":\"src/a.ts\",\"ranges\":[{\"start_line\":10,\"end_line\":30}]}]. Batch responses report ok, partial, not-returned, or unavailable for every range, merge overlaps, and share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements; start_column continues a single-file page.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1354,20 +1375,49 @@ internal sealed class DevProjexMcpTools(
 			plan,
 			new McpSelectionNoticeContext(
 				HasPaths: HasItems(paths),
-				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)));
+				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
+				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)));
 	}
 
 	private string? SelectionNotices(
 		ProjectContextPlan plan,
 		bool includeFilters,
 		McpSelectionNoticeContext request,
-		bool includeProtection = true) =>
-		CombineTrustedNotices(
-			McpEffectiveFilters.SelectionNotices(plan, agentExclusions, includeFilters, request),
-			includeProtection
-				? $"[Protection] secrets=always · private-data={(Projects.HidePrivateData ? "enabled" : "disabled")}."
-				: null,
+		bool includeProtection = true)
+	{
+		var selection = McpEffectiveFilters.SelectionNoticeParts(plan, agentExclusions, includeFilters, request);
+		var protection = includeProtection
+			? $"[Protection] secrets=always · private-data={(Projects.HidePrivateData ? "enabled" : "disabled")}."
+			: null;
+		// Two cases always answer in full: a response that has to explain an empty selection
+		// names the filters that emptied it, and a max_file_bytes echo reports a value the
+		// caller passed on this call rather than session state.
+		var notices = serviceNotices.Prepare(
+			NoticeIdentity(plan),
+			selection.Filters,
+			protection,
+			alwaysSend: selection.EmptySelection is not null || plan.FileSizeFilter is not null);
+		return CombineTrustedNotices(
+			notices.Continuation,
+			notices.Filters,
+			selection.EmptySelection,
+			notices.Protection,
 			FormatRemoteNotice(plan));
+	}
+
+	/// <summary>
+	/// The project a set of service notices describes. Remote checkouts are keyed by their safe
+	/// address as well as their pinned root, and an unresolvable project yields no identity, which
+	/// makes the memo send the full set.
+	/// </summary>
+	private static string? NoticeIdentity(ProjectContextPlan plan)
+	{
+		if (string.IsNullOrEmpty(plan.SourceRoot))
+			return null;
+		return plan.SourceIdentity is { } identity
+			? string.Join(" ", plan.SourceRoot, identity.SourceType.ToString(), identity.RepositoryUrl ?? "")
+			: plan.SourceRoot;
+	}
 
 	private static string? FormatRemoteNotice(ProjectContextPlan plan) =>
 		plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } identity
@@ -1389,6 +1439,16 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	private static bool HasItems<T>(IReadOnlyCollection<T>? items) => items is { Count: > 0 };
+
+	// A pattern is matched against the whole project-relative path, and without '/' every remaining
+	// wildcard stays inside one segment, so such a pattern can only match a file directly in the
+	// project root. '**' is the exception: it spans separators even without a trailing '/', so a
+	// pattern carrying it already reaches any depth and must not be offered the same rewrite.
+	private static bool HasRootOnlyPattern(IReadOnlyList<string>? includePatterns) =>
+		includePatterns?.Any(static pattern =>
+			!string.IsNullOrWhiteSpace(pattern) &&
+			!pattern.Contains('/', StringComparison.Ordinal) &&
+			!pattern.Contains("**", StringComparison.Ordinal)) == true;
 
 	// The exclusions argument exists only on servers started with --allow-agent-exclusions;
 	// everywhere else the allowlist rejects it, so a default server keeps the
@@ -1447,7 +1507,30 @@ internal sealed class DevProjexMcpTools(
 	private Task<CallToolResult> RunProjectAsync(
 		Func<Task<CallToolResult>> operation,
 		CancellationToken cancellationToken) =>
-		_projectOperation.RunAsync(() => ExecuteAsync(operation), cancellationToken);
+		_projectOperation.RunAsync(() => RunAndConfirmServiceNoticesAsync(operation), cancellationToken);
+
+	/// <summary>
+	/// Service notices count as reported only once they are in the text the caller receives.
+	/// A stored pack, a truncated diagnostic tail, or a failed call therefore leaves the memo
+	/// where it was, and the next response repeats the full set.
+	/// </summary>
+	private async Task<CallToolResult> RunAndConfirmServiceNoticesAsync(Func<Task<CallToolResult>> operation)
+	{
+		try
+		{
+			var result = await ExecuteAsync(operation).ConfigureAwait(false);
+			serviceNotices.CommitDelivered(ResponseText(result));
+			return result;
+		}
+		catch
+		{
+			serviceNotices.DiscardPending();
+			throw;
+		}
+	}
+
+	private static string ResponseText(CallToolResult result) =>
+		string.Join('\n', result.Content.OfType<TextContentBlock>().Select(static block => block.Text));
 
 	private static async Task<CallToolResult> ExecuteAsync(Func<Task<CallToolResult>> operation)
 	{

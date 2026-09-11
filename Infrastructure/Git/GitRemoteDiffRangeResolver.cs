@@ -98,7 +98,7 @@ public sealed class GitRemoteDiffRangeResolver
 				GitProcessOperation.FetchDeepen(
 					remoteUrl,
 					depth,
-					allowFileTransport: true),
+					allowFileTransport: RepositoryTransportPolicy.AllowsLocalFileTransport),
 				cancellationToken,
 				askPass).ConfigureAwait(false);
 			if (deepen?.ExitCode == 0)
@@ -122,7 +122,7 @@ public sealed class GitRemoteDiffRangeResolver
 				remoteUrl,
 				remoteReference,
 				depth,
-				allowFileTransport: true),
+				allowFileTransport: RepositoryTransportPolicy.AllowsLocalFileTransport),
 			cancellationToken,
 			askPass).ConfigureAwait(false);
 		return fetch?.ExitCode == 0

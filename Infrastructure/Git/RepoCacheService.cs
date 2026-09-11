@@ -1511,7 +1511,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			       GitProcessOperation.FetchBranch(
 				       repositoryUrl,
 				       normalizedBranch,
-				       allowFileTransport: true),
+				       allowFileTransport: RepositoryTransportPolicy.AllowsLocalFileTransport),
 			       cancellationToken).ConfigureAwait(false) is not null;
 	}
 

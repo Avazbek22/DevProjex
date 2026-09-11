@@ -128,6 +128,8 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 	[Fact]
 	public async Task IndexedBranchMissingLocally_IsFetchedAndRestoredFromOrigin()
 	{
+		// Restoring the branch fetches from the synthetic origin, which is a local file remote.
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		await using var source = await GitTestRepository.CreateAsync(
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
@@ -419,6 +421,8 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 	[Fact]
 	public async Task TransientWorktreeProbeFailure_DoesNotRejectRequestedBranch()
 	{
+		// The retried acquisition fetches from the synthetic origin, which is a local file remote.
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		await using var source = await GitTestRepository.CreateAsync(
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();

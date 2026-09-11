@@ -337,7 +337,13 @@ public sealed partial class McpServerProcessTests
 				CreateNoWindow = true,
 				WorkingDirectory = project
 			};
-			startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+			// Only the terminal test host grants the local file transport that a synthetic origin
+			// needs; it serves the same MCP server from the same libraries as the shipped host.
+			startInfo.ArgumentList.Add(allowFileGitTransport
+				? PublishedApplicationLocator.FindTerminalTestHostAssembly()
+				: PublishedApplicationLocator.FindApplicationAssembly());
+			if (allowFileGitTransport)
+				startInfo.ArgumentList.Add(TerminalTransportPolicyProtocol.TerminalCommandArgument);
 			startInfo.ArgumentList.Add("mcp");
 			startInfo.ArgumentList.Add("--root");
 			startInfo.ArgumentList.Add(project);
@@ -346,7 +352,8 @@ public sealed partial class McpServerProcessTests
 			startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot;
 			if (allowFileGitTransport)
 			{
-				startInfo.Environment[GitRepositoryService.TestFileTransportPolicyVariable] = "1";
+				startInfo.Environment[TerminalTransportPolicyProtocol.AllowLocalFileTransportVariable] =
+					TerminalTransportPolicyProtocol.Enabled;
 			}
 
 			var process = Process.Start(startInfo) ??

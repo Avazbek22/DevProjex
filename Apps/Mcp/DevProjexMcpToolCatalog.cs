@@ -185,18 +185,18 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "minItems": 1,
 	        "maxItems": 32,
 	        "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-	        "description": "Project-relative globs with the same syntax, validation, and matcher as include_patterns."
+	        "description": "Same syntax and matcher as include_patterns."
 	      },
 	      "detail": {
 	        "type": "string",
 	        "enum": ["full", "compact", "signatures"],
-	        "description": "Detail level for files this entry claims."
+	        "description": "Level for files this entry claims."
 	      }
 	    },
 	    "required": ["patterns", "detail"],
 	    "additionalProperties": false
 	  },
-	  "description": "Per-file detail overrides layered on detail. Entries apply in order and the LAST matching entry wins, so list general globs before specific ones; note this is last-match, not first-match. Never widens the selection: a glob matching nothing is reported in the trailer. Invalid entries name their index."
+	  "description": "Per-file overrides on detail. Entries apply in order and the LAST match wins - last-match, not first-match - so list general globs first. Never widens the selection; a glob matching nothing is reported in the trailer. An invalid entry names its index."
 	}
 	""";
 
@@ -283,7 +283,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{GitScopeProperty}},
 	    {{MaxFileBytesProperty}},
 	    "max_depth": {
-	      "description": "Maximum tree depth from 0 to 1000; accepts an integer or numeric string.",
+	      "description": "Maximum tree depth from 0 to 1000, counted in levels below the project root and never below a paths entry: 0 returns the root alone, 1 adds its direct children, and a file inside src/router needs 3. Omit it to let a large tree pick the deepest complete depth that fits. Accepts an integer or numeric string.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
 	    },
 	    {{TreeFormatProperty}}
@@ -361,7 +361,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    {{ProjectProperty}},
 	    {{BranchProperty}},
-	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression, limited to 4,096 characters and a 2-second evaluation timeout, applied after redaction. Text inserted by redaction never matches." },
+	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression, limited to 4,096 characters and a 2-second evaluation timeout, applied after redaction. It is matched against file content only and never against file names or paths; use get_tree with include_patterns to find files by name. Text inserted by redaction never matches." },
 	    {{PathsProperty}},
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
@@ -521,7 +521,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    "files": { "type": "integer", "description": "Number of files in the effective selection." },
+	    "files": { "type": "integer", "description": "Files in the effective selection." },
 	    "characters": { "type": "integer", "description": "Rendered characters, including estimates for uninspected text files." },
 	    "tokens": { "type": "integer", "description": "Estimated tokens for the same character total." },
 	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective content-detail level used for measurement." },
@@ -532,10 +532,10 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "measured": {
 	          "type": "object",
 	          "properties": {
-	            "files": { "type": "integer", "description": "Number of files measured from inspected transformed text." },
-	            "lines": { "type": "integer", "description": "Lines in measured transformed file bodies." },
-	            "characters": { "type": "integer", "description": "Normalized characters in measured transformed file bodies." },
-	            "tokens": { "type": "integer", "description": "Estimated tokens for measured transformed file bodies." }
+	            "files": { "type": "integer" },
+	            "lines": { "type": "integer" },
+	            "characters": { "type": "integer", "description": "Normalized characters." },
+	            "tokens": { "type": "integer", "description": "Estimated tokens." }
 	          },
 	          "required": ["files", "lines", "characters", "tokens"],
 	          "additionalProperties": false
@@ -543,9 +543,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "estimated": {
 	          "type": "object",
 	          "properties": {
-	            "files": { "type": "integer", "description": "Number of text files represented only by size-based estimates." },
-	            "characters": { "type": "integer", "description": "Estimated normalized characters for those files." },
-	            "tokens": { "type": "integer", "description": "Estimated tokens for those files." }
+	            "files": { "type": "integer", "description": "Text files with size-based estimates only." },
+	            "characters": { "type": "integer", "description": "Normalized characters." },
+	            "tokens": { "type": "integer" }
 	          },
 	          "required": ["files", "characters", "tokens"],
 	          "additionalProperties": false
@@ -558,11 +558,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "type": "object",
 	      "description": "Metrics for the canonical pack_context content/text document, including its root and relative-path headings.",
 	      "properties": {
-	        "view": { "type": "string", "const": "content", "description": "Pack view used for document measurement." },
-	        "format": { "type": "string", "const": "text", "description": "Pack format used for document measurement." },
-	        "lines": { "type": "integer", "description": "Rendered document lines." },
-	        "characters": { "type": "integer", "description": "Rendered normalized document characters." },
-	        "tokens": { "type": "integer", "description": "Estimated tokens for the rendered document." },
+	        "view": { "type": "string", "const": "content" },
+	        "format": { "type": "string", "const": "text" },
+	        "lines": { "type": "integer" },
+	        "characters": { "type": "integer", "description": "Normalized characters." },
+	        "tokens": { "type": "integer", "description": "Estimated tokens." },
 	        "estimated": { "type": "boolean", "description": "True when one or more file bodies use size-based estimates or lack text metrics." }
 	      },
 	      "required": ["view", "format", "lines", "characters", "tokens", "estimated"],
@@ -584,7 +584,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "description": "Content-protection policy applied to this analysis.",
 	      "properties": {
 	        "secrets": { "type": "string", "const": "always", "description": "Mandatory secret-redaction state." },
-	        "privateData": { "type": "string", "enum": ["enabled", "disabled"], "description": "Server-startup private-data redaction state." }
+	        "privateData": { "type": "string", "enum": ["enabled", "disabled"], "description": "Server-startup redaction state." }
 	      },
 	      "required": ["secrets", "privateData"],
 	      "additionalProperties": false
@@ -606,7 +606,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "type": "object",
 	        "properties": {
 	          "path": { "type": "string", "description": "Project-relative file path." },
-	          "tokens": { "type": "integer", "description": "Estimated tokens for this file." },
+	          "tokens": { "type": "integer", "description": "Estimated tokens." },
 	          "estimated": { "type": "boolean", "description": "True when this entry uses size-based metrics instead of inspected transformed content." },
 	          "uninspected": { "type": "boolean", "description": "True when bounded secret inspection could not read this file and its metrics are estimated." }
 	        },
@@ -615,51 +615,51 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      }
 	    },
 	    "topFilesTruncated": { "type": "boolean", "description": "True when the aggregate top-files character budget omitted remaining entries." },
-	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Number of requested top-file entries omitted by the aggregate character budget." },
+	    "topFilesRemaining": { "type": "integer", "minimum": 0, "description": "Requested top-file entries omitted by the aggregate character budget." },
 	    "admission": {
 	      "type": "object",
-	      "description": "Which files a max_tokens budget would admit, present only when max_tokens was supplied. The same greedy first-fit pass pack_context uses, so the admitted set matches for the same snapshot, configuration, filters, and effective transforms. No content is produced.",
+	      "description": "Files a max_tokens budget would admit; only with max_tokens. Same greedy first-fit pass pack_context uses, so the admitted set matches for one snapshot, configuration, filters and effective transforms. Produces no content.",
 	      "properties": {
-	        "budget": { "type": "integer", "minimum": 1, "description": "Requested maximum estimated content tokens." },
-	        "includedFileCount": { "type": "integer", "minimum": 0, "description": "Number of admitted files." },
-	        "skippedFileCount": { "type": "integer", "minimum": 0, "description": "Number of files that did not fit; a skipped file never stops later, smaller files from being admitted." },
-	        "includedEstimatedTokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the admitted files." },
-	        "skippedEstimatedTokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the skipped files." },
+	        "budget": { "type": "integer", "minimum": 1, "description": "Estimated content tokens requested." },
+	        "includedFileCount": { "type": "integer", "minimum": 0 },
+	        "skippedFileCount": { "type": "integer", "minimum": 0, "description": "A skipped file never stops later, smaller files from being admitted." },
+	        "includedEstimatedTokens": { "type": "integer", "minimum": 0 },
+	        "skippedEstimatedTokens": { "type": "integer", "minimum": 0 },
 	        "includedFiles": {
 	          "type": "array",
-	          "description": "Prefix of the admission order, at most 1000 entries and bounded by an aggregate character budget.",
+	          "description": "Prefix of the admission order; at most 1000 entries and a character budget.",
 	          "items": {
 	            "type": "object",
 	            "properties": {
-	              "path": { "type": "string", "description": "Project-relative path of the admitted file." },
+	              "path": { "type": "string", "description": "Project-relative path." },
 	              "tokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the transformed file at its effective detail." },
-	              "priority": { "type": "integer", "minimum": 1, "description": "Position in the admission order; present only with rank." },
-	              "hop": { "type": "integer", "minimum": 0, "description": "Minimum undirected graph hop from a focus seed; present only with focus." }
+	              "priority": { "type": "integer", "minimum": 1, "description": "Position in the admission order; only with rank." },
+	              "hop": { "type": "integer", "minimum": 0, "description": "Minimum undirected graph hop from a focus seed; only with focus." }
 	            },
 	            "required": ["path", "tokens"],
 	            "additionalProperties": false
 	          }
 	        },
-	        "includedFilesTruncated": { "type": "boolean", "description": "True when the bounds omitted admitted entries from includedFiles." },
-	        "additionalIncludedFileCount": { "type": "integer", "minimum": 0, "description": "Number of admitted files omitted from includedFiles." },
-	        "includedOrderDigest": { "type": "string", "description": "Hash of the complete ordered admitted path list, so equality with a pack can be checked without listing it. It is an order digest: compare it only between calls with the same rank and focus." },
+	        "includedFilesTruncated": { "type": "boolean", "description": "True when the bounds omitted admitted entries." },
+	        "additionalIncludedFileCount": { "type": "integer", "minimum": 0, "description": "Admitted files omitted from includedFiles." },
+	        "includedOrderDigest": { "type": "string", "description": "Hash of the complete ordered admitted path list, so equality with a pack is checkable without listing it. An order digest: compare only across calls with the same rank and focus." },
 	        "skippedFiles": {
 	          "type": "array",
-	          "description": "The 25 largest skipped files plus, with rank, the 10 highest-priority skipped files.",
+	          "description": "The 25 largest skipped files plus, with rank, the 10 highest-priority ones.",
 	          "items": {
 	            "type": "object",
 	            "properties": {
-	              "path": { "type": "string", "description": "Project-relative path of the skipped file." },
+	              "path": { "type": "string", "description": "Project-relative path." },
 	              "tokens": { "type": "integer", "minimum": 0, "description": "Estimated tokens of the transformed file at its effective detail." },
-	              "priority": { "type": "integer", "minimum": 1, "description": "Position in the admission order; present only with rank." },
+	              "priority": { "type": "integer", "minimum": 1, "description": "Position in the admission order; only with rank." },
 	              "remainingTokens": { "type": "integer", "minimum": 0, "description": "Budget still free when this file was considered." },
-	              "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Detail level resolved for this file and used for its cost; present only when detail_by_pattern was supplied. It names the requested level, not a guarantee that a transformation applied: unsupported files stay unchanged." }
+	              "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Level resolved for this file and used for its cost; only with detail_by_pattern. Names the resolved level, not a guarantee a transformation applied." }
 	            },
 	            "required": ["path", "tokens", "remainingTokens"],
 	            "additionalProperties": false
 	          }
 	        },
-	        "additionalSkippedFileCount": { "type": "integer", "minimum": 0, "description": "Number of skipped files omitted from skippedFiles." },
+	        "additionalSkippedFileCount": { "type": "integer", "minimum": 0, "description": "Skipped files omitted from skippedFiles." },
 	        "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective default detail level the admission was measured at." }
 	      },
 	      "required": ["budget", "includedFileCount", "skippedFileCount", "includedEstimatedTokens", "skippedEstimatedTokens", "includedFiles", "includedFilesTruncated", "additionalIncludedFileCount", "includedOrderDigest", "skippedFiles", "additionalSkippedFileCount", "detail"],

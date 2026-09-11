@@ -151,7 +151,9 @@ for transformed size and token estimates before packing, `search_project` for
 textual locations, `related_files` for statically evidenced relationships,
 `get_file` for one file page, and `pack_context` for multi-file context. A large
 pack returns an id that `read_pack` pages; `read_pack` does not recreate expired
-packs.
+packs. When a step wants more than one file or more than one range, send one
+batched `get_file` call instead of several single reads; see
+[Search, then one batched read](#search-then-one-batched-read).
 
 ## Security Model
 
@@ -167,11 +169,12 @@ packs.
   `tracked_only` or `git_scope`, the server may also start the local Git
   executable solely to read repository state. It never runs project executables
   or arbitrary project commands.
-- Remote network sources use HTTP(S), SSH, Git protocol, or SCP syntax. Query
+- Remote network sources use HTTPS, SSH, or SCP syntax. Query
   strings and fragments are rejected so credentials cannot enter Git process
   arguments. When `--remote-hosts` is present, network URLs and SCP forms must
-  use one of its exact normalized hosts. A `file://` source is accepted only when it resolves inside an
-  already configured local root and never expands the local root jail.
+  use one of its exact normalized hosts. `http`, `git` and `file` URLs are refused: a built product
+  accepts a repository URL only over `https` or `ssh`, including the SCP form, and nothing in the
+  environment or the call widens that set.
 - A server session pins at most 16 distinct remote URL-and-branch sources. Existing
   keys are reused and valid sources are never evicted; exceeding the cap returns
   `DPX-MCP-REMOTE-LIMIT` with guidance to reuse a source or restart the server.
@@ -259,6 +262,23 @@ non-idempotent because either may create a stored result with a new session id. 
 closed-world; with it, the six tools that accept `project` Git URLs are annotated
 open-world.
 
+### What a connection costs
+
+Before a client asks anything about a project it has already paid for the tool schemas and the
+server instructions. Measured on 2026-09-11 from the characters a client received:
+
+| Payload | Characters |
+|---|---:|
+| `tools/list` result, default server | 35,176 |
+| `tools/list` result, `--allow-agent-exclusions` | 39,094 |
+| `instructions` | 1,044 |
+
+`analyze` is the largest single tool at 9,219 characters, most of it schema. The `exclusions`
+parameter costs a flat 3,918 characters, 653 on each of the six tools that take it. A process
+test holds the default `tools/list` result and the instructions under ceilings with deliberate
+headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
+description has to fit a budget rather than grow one silently.
+
 | Tool | Parameters | Result and limits |
 |---|---|---|
 | `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
@@ -266,7 +286,7 @@ open-world.
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context` or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
-| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
+| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style `path:line:text` matches over safe transformed text; line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
 | `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen ranges. Batch ranges use inclusive `start_line`/`end_line`, read and redact each physical file once, merge overlaps, and report `ok`, `partial`, `not-returned`, or `unavailable` for every range. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
 
@@ -421,14 +441,25 @@ and a deterministic `languages` array. The array is empty when the whole deliver
 source is unavailable. This is an additive schema field; clients that cache the
 schema must refresh it.
 
-Filters are never silent. `get_tree` and `pack_context` end with a trusted
+Filters are never silent, though an unchanged filter line is reported once per
+session rather than on every response — see
+[Service notices repeat only when they change](#service-notices-repeat-only-when-they-change).
+`get_tree`, `pack_context`, and `related_files` carry a trusted
 `[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
 exclusion toggles that shaped the tree and who can widen them: the server
-startup line, or a per-call `exclusions` value on a delegation server. When
+startup line, or a per-call `exclusions` value on a delegation server. It sits
+among the trailing diagnostics rather than last: an `[Empty selection]` line can
+follow it, `[Protection]` comes after that, a pinned remote checkout adds
+`[Remote]`, and a budgeted `pack_context` ends with `[Budget accounting]`. When
 `max_file_bytes` is supplied, every tool that accepts it also reports
 `; max_file_bytes: <bytes>` in its effective-filter diagnostics. Every selection
 tool adds an `[Empty selection]` line when no file survived the
-filters and the request arguments, `search_project` adds a `[No matches]` line
+filters and the request arguments. That line opens with the stage that emptied the
+selection as a constant token — `stage=patterns`, `stage=paths`, `stage=git-scope`,
+or `stage=filters` — so a caller can tell a pattern that matched nothing from a
+server that hides the file, without a second call. A pattern with no `/` and no
+`**` matches only an entry directly in the project root, and its empty result
+names the `**/` and `/**` rewrites instead of restating the general rule. `search_project` adds a `[No matches]` line
 with the searched-file count when the pattern matched nothing, and a
 `DPX-MCP-PATH-NOT-FOUND` error for a filtered file names the effective filters
 and the party able to widen them — the startup line, or a per-call `exclusions`
@@ -437,6 +468,46 @@ When selection produces warnings, `analyze` appends separate human-readable
 trusted warning text blocks without changing its structured schema. Warning
 messages contain stable codes and safe counts or retry guidance, never diagnostic
 paths or project-controlled message text.
+
+### Service notices repeat only when they change
+
+The `[Effective filters]` and `[Protection]` lines describe server state, not the
+call, so a session receives them once and then only when what they say changes.
+The change signal is the state the lines are made of: the project, the profile,
+the effective exclusion set, the Git mode, and the protection policy. A response
+that withholds them carries the constant
+`[Unchanged] filters, protection; see list_projects.` instead, which is never
+longer than the shortest set it can replace, so no response grows by omitting a
+notice.
+
+Omission has to be provable. When the project cannot be identified, when either
+line would say something this session has not been told for that project, or when
+the response has to explain itself anyway, the full set goes out again. Concretely
+the full set always returns for: the first response of a session, the first
+response after any of those inputs changed, an `[Empty selection]` response, and
+any call that passed `max_file_bytes`, whose echo reports a per-call argument
+rather than session state. A new server process is a new session and always starts
+in full.
+
+A line counts as reported only once it is in the text the caller receives. A
+result whose body moved into a stored pack, a response whose trailing diagnostics
+were truncated to fit a stored-pack limit, and a failed call all leave the session
+where it was, so the next response reports the full set again rather than pointing
+back at something the caller never saw.
+
+`list_projects` is unaffected and always answers with the complete `baseline`
+object, including the Git mode, exclusion tokens, `agentExclusions`, and
+`protection`. It is the orientation call and the way an agent that lost its
+history recovers the whole picture; it never counts as having reported a
+per-call effective selection, so it does not suppress a later `[Effective
+filters]` line.
+
+Only the repetition of unchanged trusted lines changes. Lines that state a fact
+about one call — `[Remote] commit=`, `[Resolution]`, `[Facts coverage]`,
+`[Search scope]`, `[Budget accounting]`, `[Search totals]`, search and tree
+truncation notices, and every `[Warning ...]` — are computed and sent for every
+call as before, and the untrusted-data wrapper around project text is never
+affected.
 
 If mandatory secret redaction cannot inspect a selected file, including text
 larger than the 16 MiB inspection boundary, selection-wide content tools return
@@ -454,9 +525,24 @@ the final text; only those ranges are excluded from pattern matches. Placeholder
 source text, including an unfinished `DEVPROJEX_REDACTED[` prefix, remains searchable.
 The search is streamed: no intermediate export is written or read. Context windows that overlap or touch
 are emitted once as a merged grep-style group, with `--` between separate groups.
-If the response character limit cuts a group, only matching lines whose complete
+If the search cap below cuts a group, only matching lines whose complete
 prefix, text, and line ending were written count as shown; the remaining count is
-exact and `[Search group truncated at the response character limit.]` marks the partial group.
+exact, and the `[Search truncated]` line names the cap that stopped it.
+
+The match text a `search_project` call returns is capped at 16,000 characters, well
+below the general 50,000-character response limit, because a wide alternation with
+context lines could otherwise spend a large share of an agent's context in one
+unpredictable call. When the cap stops the output, the response adds the constant
+`[Search truncated] The returned text reached the 16000-character search cap. Narrow
+the pattern, add paths or include_patterns, or lower context_lines.` Whenever a call
+does not return every match it found — because `max_results`, the cap, or both
+withheld some — it also reports `[Search totals] matches=N · files=M`, the exact
+number of matches and the exact number of files containing at least one match inside
+the inspected selection. A group cut only in its trailing context lines withheld no
+match, so it receives the cap notice without the totals line. Both lines are trusted
+counts and constants; no path enters them. A call whose output was not cut and that
+returned every match it found keeps its previous response unchanged. The
+`[N additional matches not shown]` count keeps its existing meaning and precision.
 
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append
@@ -484,6 +570,16 @@ before EOF, the existing
 When the character cap falls inside one long line, the trailer keeps that line and
 adds the next 1-based Unicode column:
 `[Showing lines A-A of N; continue with start_line=A start_column=C.]`.
+
+`max_depth` counts levels below the project root. Depth 0 returns the root alone,
+depth 1 adds its direct children, and a file inside `src/router` first appears at
+depth 3. `paths` narrows the selection but never re-roots the tree, so the depth a
+subtree needs is still counted from the project root, not from the `paths` entry.
+The three narrowing parameters compose in a fixed order and never widen each other:
+`paths` and the pattern arrays intersect to form the selection, and `max_depth`
+then prunes the rendering of that selection. Listing one directory therefore needs
+no depth at all — `paths: ["src/router"]` alone returns everything selected under
+it, and `include_patterns: ["**/*router*.ts"]` is how a file is found by name.
 
 For `get_tree`, omitted `max_depth` on an oversized `text` or `markdown` result
 selects the deepest depth whose complete tree fits the 2,000-line limit and
@@ -659,7 +755,10 @@ classes (`[...]`) are rejected with `DPX-MCP-INVALID-PATTERN` rather than
 matched literally, because a silently empty result reads as "no such files".
 `paths` contains existing project-relative files or directories for `get_tree`,
 `analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
-glob metacharacters have meaning only in the pattern parameters.
+glob metacharacters have meaning only in the pattern parameters. Every array
+parameter requires a JSON array: a bare string where an array is expected returns
+`DPX-MCP-INVALID-ARGUMENTS` naming the argument, for example
+`'paths' must be an array of strings.`, instead of a partial or empty result.
 
 ### Batch `get_file`
 
@@ -683,6 +782,35 @@ inspection withheld the file. The latter status contains only a count-safe reaso
 The complete batch, including section headers, is limited to 1,000 lines and 50,000
 characters. A partial section reports the next 1-based `start_line` and
 `start_column`; call `get_file` again for that continuation.
+
+### Search, then one batched read
+
+This is the normal reading pattern, not an advanced one. A search returns several
+interesting locations; the follow-up is a single call, not one call per location.
+
+```json
+{"name": "search_project", "arguments": {"pattern": "createRouter", "context_lines": 2}}
+```
+
+```json
+{
+  "name": "get_file",
+  "arguments": {
+    "requests": [
+      {"path": "src/hono-base.ts", "ranges": [{"start_line": 415, "end_line": 430}]},
+      {"path": "src/hono.test.ts", "ranges": [{"start_line": 811, "end_line": 855}]},
+      {"path": "src/utils/url.ts", "ranges": [{"start_line": 1, "end_line": 95}]},
+      {"path": "src/utils/url.test.ts", "ranges": [{"start_line": 147, "end_line": 175}]}
+    ]
+  }
+}
+```
+
+Four single reads of four locations are one call with four records. The batch
+reads and redacts each physical file once, reports a status per range, and pays
+one set of response notices instead of four. Use the single `path` form only when
+exactly one range of one file is wanted.
+
 Numeric parameters accept JSON numbers and decimal numeric strings.
 Boolean parameters accept JSON booleans and the exact strings `"true"` and
 `"false"`.
