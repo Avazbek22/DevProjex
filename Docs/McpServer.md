@@ -411,9 +411,9 @@ tool adds an `[Empty selection]` line when no file survived the
 filters and the request arguments. That line opens with the stage that emptied the
 selection as a constant token — `stage=patterns`, `stage=paths`, `stage=git-scope`,
 or `stage=filters` — so a caller can tell a pattern that matched nothing from a
-server that hides the file, without a second call. A pattern without `/` matches
-only a file directly in the project root, and its empty result names the `**/`
-rewrite instead of restating the general rule. `search_project` adds a `[No matches]` line
+server that hides the file, without a second call. A pattern with no `/` and no
+`**` matches only an entry directly in the project root, and its empty result
+names the `**/` and `/**` rewrites instead of restating the general rule. `search_project` adds a `[No matches]` line
 with the searched-file count when the pattern matched nothing, and a
 `DPX-MCP-PATH-NOT-FOUND` error for a filtered file names the effective filters
 and the party able to widen them — the startup line, or a per-call `exclusions`

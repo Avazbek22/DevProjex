@@ -32,12 +32,13 @@ internal static class McpEffectiveFilters
 	// the proximate one the server can name; overlapping narrowing is reported as the request
 	// argument that was applied, not as a claim about which one removed the last file.
 	private const string PatternSelectionEmptyNotice =
-		"[Empty selection] stage=patterns. No file matched the request patterns inside the effective " +
-		"filters. Patterns match the whole project-relative path: '*' stays inside one segment, '**/' spans any depth; " +
+		"[Empty selection] stage=patterns. No file passed the effective filters and the request patterns. " +
+		"Patterns match the whole project-relative path: '*' stays inside one segment, '**/' spans any depth; " +
 		"paths the filters hide never match.";
 	private const string RootOnlyPatternSelectionEmptyNotice =
-		"[Empty selection] stage=patterns. A pattern without '/' matches only a file directly in the " +
-		"project root; prefix it with '**/' to match that name at any depth. Paths the filters hide never match.";
+		"[Empty selection] stage=patterns. A pattern with no '/' and no '**' matches only an entry directly " +
+		"in the project root; prefix it with '**/' to match that name at any depth, or append '/**' to select " +
+		"a directory's files. Paths the filters hide never match.";
 	private const string PathSelectionEmptyNotice =
 		"[Empty selection] stage=paths. None of the requested paths is in the effective selection; paths the filters hide never match.";
 	private const string ProjectSelectionEmptyNotice =

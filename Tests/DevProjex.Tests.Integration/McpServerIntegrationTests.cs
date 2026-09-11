@@ -188,13 +188,26 @@ public sealed class McpServerIntegrationTests
 		var tree = Text(await server.CallAsync("get_tree", rootOnly));
 		Assert.DoesNotContain("Nested.cs", tree, StringComparison.Ordinal);
 		Assert.Contains("[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders.", tree, StringComparison.Ordinal);
-		Assert.Contains("[Empty selection] stage=patterns. A pattern without '/' matches only a file directly in the project root; prefix it with '**/' to match that name at any depth. Paths the filters hide never match.", tree, StringComparison.Ordinal);
+		Assert.Contains("[Empty selection] stage=patterns. A pattern with no '/' and no '**' matches only an entry directly in the project root; prefix it with '**/' to match that name at any depth, or append '/**' to select a directory's files. Paths the filters hide never match.", tree, StringComparison.Ordinal);
 
-		// A pattern that already spans depth gets the general rule, not the rewrite.
-		var anchored = new Dictionary<string, object?> { ["include_patterns"] = new[] { "**/*.txt" } };
-		var anchoredTree = Text(await server.CallAsync("get_tree", anchored));
-		Assert.Contains("[Empty selection] stage=patterns. No file matched the request patterns inside the effective filters.", anchoredTree, StringComparison.Ordinal);
-		Assert.DoesNotContain("prefix it with", anchoredTree, StringComparison.Ordinal);
+		// A pattern that already spans depth gets the general rule, not the rewrite. '**' spans
+		// separators even without a trailing '/', so carrying it is what decides, not the '/'.
+		foreach (var spanning in new[] { "**/*.txt", "**Absent.cs" })
+		{
+			var spanningTree = Text(await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["include_patterns"] = new[] { spanning } }));
+			Assert.Contains("[Empty selection] stage=patterns. No file passed the effective filters and the request patterns.", spanningTree, StringComparison.Ordinal);
+			Assert.DoesNotContain("prefix it with", spanningTree, StringComparison.Ordinal);
+		}
+
+		// An exclude-only call removed every file rather than failing to match one, so the line
+		// must not claim that nothing matched the request.
+		var excludeOnly = Text(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclude_patterns"] = new[] { "**/*.cs" } }));
+		Assert.Contains("[Empty selection] stage=patterns. No file passed the effective filters and the request patterns.", excludeOnly, StringComparison.Ordinal);
+		Assert.DoesNotContain("prefix it with", excludeOnly, StringComparison.Ordinal);
 
 		var analysis = await server.CallAsync("analyze", rootOnly);
 		Assert.Equal(0, analysis.StructuredContent?.GetProperty("files").GetInt32());

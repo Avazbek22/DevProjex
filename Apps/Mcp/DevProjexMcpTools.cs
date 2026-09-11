@@ -216,7 +216,7 @@ internal sealed class DevProjexMcpTools(
 					new McpSelectionNoticeContext(
 						HasPaths: HasItems(paths),
 						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
-				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
+						HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
 		}, cancellationToken);
 
 	[Description(
@@ -807,7 +807,7 @@ internal sealed class DevProjexMcpTools(
 					new McpSelectionNoticeContext(
 						HasPaths: HasItems(paths),
 						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
-				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
+						HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
 		}, cancellationToken);
 
 	[Description(
@@ -1345,14 +1345,15 @@ internal sealed class DevProjexMcpTools(
 
 	private static bool HasItems<T>(IReadOnlyCollection<T>? items) => items is { Count: > 0 };
 
-	// A pattern without '/' can only match a file directly in the project root, because a pattern is
-	// matched against the whole project-relative path. That is the shape a caller types when all
-	// they know is a file name, so an empty result deserves the concrete rewrite rather than the
-	// general rule.
+	// A pattern is matched against the whole project-relative path, and without '/' every remaining
+	// wildcard stays inside one segment, so such a pattern can only match a file directly in the
+	// project root. '**' is the exception: it spans separators even without a trailing '/', so a
+	// pattern carrying it already reaches any depth and must not be offered the same rewrite.
 	private static bool HasRootOnlyPattern(IReadOnlyList<string>? includePatterns) =>
 		includePatterns?.Any(static pattern =>
 			!string.IsNullOrWhiteSpace(pattern) &&
-			!pattern.Contains('/', StringComparison.Ordinal)) == true;
+			!pattern.Contains('/', StringComparison.Ordinal) &&
+			!pattern.Contains("**", StringComparison.Ordinal)) == true;
 
 	// The exclusions argument exists only on servers started with --allow-agent-exclusions;
 	// everywhere else the allowlist rejects it, so a default server keeps the
