@@ -2141,6 +2141,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				else if (!requiresQualifiedLookup)
 					candidates = SelectVisibleCSharpCandidates(source, reference, candidates);
 			}
+			else if (source.LanguageId == LanguageId.Go)
+				candidates = SelectSamePackageGoCandidates(source, candidates);
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
@@ -2491,6 +2493,27 @@ public sealed class DependencyFactsEngine : IDisposable
 				: 0;
 		}
 
+		/// <summary>
+		/// A Go package is a directory, so a name is visible to a file only when it is declared in
+		/// the same directory. Without this the one Go scope spans the whole root and a name
+		/// declared in two packages would read as ambiguous.
+		/// </summary>
+		private static DeclarationFact[] SelectSamePackageGoCandidates(
+			FileFacts source,
+			DeclarationFact[] candidates)
+		{
+			var package = GoPackageDirectory(source.Path);
+			return candidates
+				.Where(candidate => candidate.DeclarationSites.Any(site =>
+					string.Equals(GoPackageDirectory(site.File), package, StringComparison.Ordinal)))
+				.ToArray();
+		}
+
+		private static string GoPackageDirectory(string portablePath)
+		{
+			var separator = portablePath.LastIndexOf('/');
+			return separator < 0 ? string.Empty : portablePath[..separator];
+		}
 		private static string SimpleName(string qualified)
 		{
 			var value = qualified[(Math.Max(qualified.LastIndexOf('.'), qualified.LastIndexOf('#')) + 1)..];
