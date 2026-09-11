@@ -113,19 +113,21 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private const string IncludeProperty = """
 	"include_patterns": {
-	  "type": "array",
-	  "maxItems": 256,
-	  "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-	  "description": "Project-relative glob patterns using '/' that only narrow the effective filters. A pattern matches the whole relative path: '*' and '?' stay inside one path segment, '**/' spans any depth ('**/*.cs' is every C# file, 'src/**' a subtree), '{a,b}' lists alternatives. Matching is case-sensitive on every platform; '!' negation and '[...]' classes are rejected."
+	  "description": "One project-relative glob pattern using '/', or an array of up to 256 of them, that only narrow the effective filters. A pattern matches the whole relative path: '*' and '?' stay inside one path segment, '**/' spans any depth ('**/*.cs' is every C# file, 'src/**' a subtree), '{a,b}' lists alternatives. Matching is case-sensitive on every platform; '!' negation and '[...]' classes are rejected.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 512 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	  ]
 	}
 	""";
 
 	private const string ExcludeProperty = """
 	"exclude_patterns": {
-	  "type": "array",
-	  "maxItems": 256,
-	  "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-	  "description": "Project-relative glob patterns using '/' that remove further paths; same syntax as include_patterns."
+	  "description": "One project-relative glob pattern using '/', or an array of up to 256 of them, that remove further paths; same syntax as include_patterns.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 512 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	  ]
 	}
 	""";
 
@@ -149,10 +151,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private const string PathsProperty = """
 	"paths": {
-	  "type": "array",
-	  "maxItems": 256,
-	  "items": { "type": "string", "minLength": 1, "maxLength": 4096 },
-	  "description": "Existing project-relative files or directories that narrow the selection. Values are literal paths: *, ?, {, and [ are ordinary filename characters here, not glob syntax."
+	  "description": "One existing project-relative file or directory, or an array of up to 256 of them, that narrow the selection. Values are literal paths: *, ?, {, and [ are ordinary filename characters here, not glob syntax.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 4096 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	  ]
 	}
 	""";
 
