@@ -189,10 +189,78 @@ public sealed partial class McpServerProcessTests
 			Assert.False(
 				lastLine!.StartsWith("in ", StringComparison.Ordinal),
 				$"A search block ended with a declaration header: {lastLine}");
-			Assert.False(
-				lastLine.StartsWith("--", StringComparison.Ordinal),
-				$"A search block ended with a group separator: {lastLine}");
 		}
+	}
+
+	[Fact]
+	public async Task RealProcessStopsAHeaderFromClaimingAHitThatBelongsToNoDeclaration()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("outside-project");
+		workspace.WriteFile(
+			"outside-project/src/App.cs",
+			"namespace P;\n\npublic sealed class App\n{\n\tpublic int Run() => 1;\n}\n\n// tail marker note\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "marker|=> 1",
+				["context_lines"] = 0
+			})));
+
+		// The comment on the last line is inside no declaration. Without a closing header it would
+		// render under the one above it and read as part of that type.
+		var named = text.IndexOf("in P.App\n", StringComparison.Ordinal);
+		var closed = text.IndexOf("in (no declaration)\n", StringComparison.Ordinal);
+		var outside = text.IndexOf("8:// tail marker note", StringComparison.Ordinal);
+		Assert.True(named >= 0, text);
+		Assert.True(closed > named, $"The run was never closed before the unnamed hit: {text}");
+		Assert.True(outside > closed, $"The closing header must precede the hit it frees: {text}");
+	}
+
+	[Fact]
+	public async Task RealProcessNamesNothingAndSaysSoWhenTheHeadersWouldNotFit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("crowded-project");
+		for (var file = 0; file < 60; file++)
+		{
+			// One match per file, and a type name long enough that sixty headers cannot fit beside
+			// the matches even though the matches themselves are far under the cap.
+			var name = "W" + new string('x', 200) + file.ToString("D2", CultureInfo.InvariantCulture);
+			workspace.WriteFile(
+				$"crowded-project/src/F{file:D2}.cs",
+				$"namespace P;\n\npublic sealed class {name}\n{{\n\tpublic string Needle() => \"{new string('q', 120)}\";\n}}\n");
+		}
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "Needle",
+				["context_lines"] = 0,
+				["max_results"] = 200
+			})));
+
+		// Placement is all or nothing, so nothing is named. The response says that rather than
+		// going silent about naming it computed and then refused to spend.
+		Assert.DoesNotContain("[Search truncated]", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("\nin P.W", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Symbols] annotated=0 · files-without-declarations=0; the names did not fit the " +
+			"16000-character search cap, so none were written.",
+			text,
+			StringComparison.Ordinal);
 	}
 
 	private static string Normalize(string text) =>

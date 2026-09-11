@@ -866,12 +866,18 @@ block, the way the path does, and is written again only when it changes:
 
 ```text
 src/App.cs
-in P.App.Run
+in P.App
 5:    public int Run() => 1;
 --
-in P.App.Stop
 12:   public int Stop() => 2;
+src/Router.cs
+in P.Router
+9:    public int Route() => 3;
 ```
+
+Both hits in `src/App.cs` sit in the same declaration, so it is written once. The
+granularity is the index's, which for C# is the enclosing type rather than the
+enclosing member, so two methods of one type share a header.
 
 Location is therefore spelled once in a response: the path heads its block, each
 line carries its number, and no row repeats the two together. A run of hits inside
@@ -880,6 +886,12 @@ carries a handful of headers. A header labels the group it opens, so it sits abo
 that group's leading context rather than between the context and the hit, and a
 group whose later matches cross into another declaration is headed again at the
 match that crosses.
+
+A hit can belong to no declaration at all — a top-level statement, an import, a
+comment past the end of a type. A run of those is opened with the constant
+`in (no declaration)`, so the header above them stops claiming them. It is written
+only to close a run that a name had opened; a file whose hits never sit in a
+declaration carries no header at all.
 
 A declaration name is text this project wrote, so it stays inside the untrusted
 block with the match lines it describes. Only counts leave it, as one trusted
@@ -904,7 +916,7 @@ that are already present, so no header can be left as the last line of a respons
 with no hit under it. Placement is all or nothing: a header skipped for want of room
 would leave the hits beneath it reading as part of the declaration named above them,
 so when the headers do not fit, none are written and the coverage line reports that
-nothing was named. The match lines, the `--` group separators, the match and file
+nothing was named, rather than going silent about naming it did compute. The match lines, the `--` group separators, the match and file
 counters, and the "N additional matches" contract are unchanged.
 
 ### Reading a declaration by name

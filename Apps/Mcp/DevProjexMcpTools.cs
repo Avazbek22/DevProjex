@@ -26,6 +26,8 @@ internal sealed class DevProjexMcpTools(
 	// context budget in one unpredictable call. The cap bounds that, and the totals line
 	// tells the caller how much it did not get.
 	private const int MaximumSearchContentCharacters = 16_000;
+	// Closes a run of named hits when the next one belongs to nothing. A constant, not a name.
+	private static readonly string OutsideDeclarationHeader = $"in (no declaration){Environment.NewLine}";
 	// Asking for a file by name is the one request the selection vocabulary answers in a form a
 	// caller rarely guesses: a bare name is root-only, and paths selects what already exists at
 	// the depth it names. Both roads end in an empty or misleading answer, so the two tools that
@@ -925,8 +927,11 @@ internal sealed class DevProjexMcpTools(
 				: await McpSearchSymbols
 					.ResolveAsync(Projects.DependencyFactsEngine, plan, writtenHits, cancellationToken)
 					.ConfigureAwait(false);
-			if (!InsertDeclarationHeaders(output, renderedLines, symbols))
-				symbols = McpSearchSymbolResult.None;
+			// A placement the character budget refused names nothing, and says so, rather than
+			// leaving the response silent about naming it did compute.
+			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols);
+			if (namesRefused)
+				symbols = symbols with { AnnotatedHits = 0 };
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
 				: null;
@@ -947,7 +952,7 @@ internal sealed class DevProjexMcpTools(
 				FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
-				FormatSymbolCoverageNotice(symbols),
+				FormatSymbolCoverageNotice(symbols, namesRefused),
 				FormatNameSearchNotice(plan, paths, pattern, totalMatches),
 				additionalMatchesNotice,
 				searchTotalsNotice,
@@ -2401,12 +2406,27 @@ internal sealed class DevProjexMcpTools(
 				groupNamed = false;
 			}
 
-			if (!line.IsMatch ||
-			    !symbols.Names.TryGetValue(new McpSearchHitKey(line.RelativePath, line.LineNumber), out var name) ||
-			    string.Equals(name, named, StringComparison.Ordinal))
+			if (!line.IsMatch)
+				continue;
+
+			if (!symbols.Names.TryGetValue(new McpSearchHitKey(line.RelativePath, line.LineNumber), out var name))
 			{
+				// A hit that sits in no declaration would otherwise read as part of the one named
+				// above it, which is the same mislabelling a skipped header would cause. It only
+				// needs closing when something is open.
+				if (named is not null)
+				{
+					insertions.Add((line.Offset, OutsideDeclarationHeader));
+					cost += OutsideDeclarationHeader.Length;
+					named = null;
+					groupNamed = true;
+				}
+
 				continue;
 			}
+
+			if (string.Equals(name, named, StringComparison.Ordinal))
+				continue;
 
 			// A declaration that changes at a group's first match labels the whole group, so the
 			// header sits above that group's leading context rather than between it and the hit.
@@ -2433,17 +2453,31 @@ internal sealed class DevProjexMcpTools(
 	/// Reports how far the naming reached, in counts alone, so a caller can tell "this hit is in no
 	/// declaration" from "this file was never parsed".
 	/// </summary>
-	private static string? FormatSymbolCoverageNotice(McpSearchSymbolResult symbols)
+	private static string? FormatSymbolCoverageNotice(McpSearchSymbolResult symbols, bool namesRefused)
 	{
-		if (symbols.AnnotatedHits == 0 && symbols.FilesWithoutDeclarations == 0 && symbols.FilesBeyondTheLimit == 0)
+		if (!namesRefused &&
+		    symbols.AnnotatedHits == 0 &&
+		    symbols.FilesWithoutDeclarations == 0 &&
+		    symbols.FilesBeyondTheLimit == 0)
+		{
 			return null;
+		}
 		var reported =
 			$"[Symbols] annotated={symbols.AnnotatedHits.ToString(CultureInfo.InvariantCulture)} · " +
 			$"files-without-declarations={symbols.FilesWithoutDeclarations.ToString(CultureInfo.InvariantCulture)}";
-		return symbols.FilesBeyondTheLimit > 0
-			? $"{reported} · files-past-the-" +
-			  $"{McpSearchSymbols.MaximumAnnotatedFiles.ToString(CultureInfo.InvariantCulture)}-file " +
-			  $"naming limit={symbols.FilesBeyondTheLimit.ToString(CultureInfo.InvariantCulture)}."
+		if (symbols.FilesBeyondTheLimit > 0)
+		{
+			reported +=
+				$" · files-past-the-" +
+				$"{McpSearchSymbols.MaximumAnnotatedFiles.ToString(CultureInfo.InvariantCulture)}-file " +
+				$"naming limit={symbols.FilesBeyondTheLimit.ToString(CultureInfo.InvariantCulture)}";
+		}
+
+		// Names were resolved and then not spent, which is a different thing from nothing to name.
+		return namesRefused
+			? $"{reported}; the names did not fit the " +
+			  $"{MaximumSearchContentCharacters.ToString(CultureInfo.InvariantCulture)}-character " +
+			  "search cap, so none were written."
 			: $"{reported}.";
 	}
 

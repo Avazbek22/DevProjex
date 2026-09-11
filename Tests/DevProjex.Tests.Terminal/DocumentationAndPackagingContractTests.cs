@@ -219,7 +219,8 @@ public sealed class DocumentationAndPackagingContractTests
 			"### Search hits name the declaration that contains them",
 			server,
 			StringComparison.Ordinal);
-		Assert.Contains("in P.App.Run", server, StringComparison.Ordinal);
+		Assert.Contains("in P.App", server, StringComparison.Ordinal);
+		Assert.Contains("in (no declaration)", server, StringComparison.Ordinal);
 		Assert.Contains(
 			"Location is therefore spelled once in a response",
 			normalized,

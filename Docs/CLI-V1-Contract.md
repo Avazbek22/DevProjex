@@ -1338,14 +1338,17 @@ that expanded carries a trusted `[Expanded]` line of counts. Without the paramet
 `pack_context` responses are byte-identical.
 
 MCP `search_project` names the declaration each shown hit sits inside. It takes no
-input: after the match lines, inside the same untrusted block, the response lists
-`path:line: Name` under `Enclosing declarations:`, and one trusted
+input: inside the untrusted block, an `in <Name>` header heads its hits within the
+file's own block and is written again only when the declaration changes, the way the
+path is written once. A run of hits that belongs to no declaration is closed with the
+constant `in (no declaration)` so the header above it stops claiming them. One trusted
 `[Symbols] annotated=N · files-without-declarations=K.` line reports coverage in
 counts. Names come from the dependency index over the files that produced hits, one
 bounded parse per such file. Naming shares the 16,000-character search cap rather
-than adding to it, and a response that cap already cut carries none, so no response
-grows past the bound it already had. Match lines, group separators, the match and
-file counters, and the additional-matches contract are unchanged.
+than adding to it, a response that cap already cut carries none, and placement is all
+or nothing, so no response grows past the bound it already had. Match lines, group
+separators, the match and file counters, and the additional-matches contract are
+unchanged.
 
 MCP `get_file` gains the optional `symbol` input, used beside `path` in place of a
 line range, returning the lines that declare it. It accepts a qualified name or a
