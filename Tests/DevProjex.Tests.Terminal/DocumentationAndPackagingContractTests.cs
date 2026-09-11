@@ -230,6 +230,22 @@ public sealed class DocumentationAndPackagingContractTests
 			"`[Unchanged] filters, protection; see list_projects.`",
 			normalizedServer,
 			StringComparison.Ordinal);
+		Assert.Contains(
+			"`[Unchanged] filters; see list_projects.`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`[Unchanged] protection; see list_projects.`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"the pointer names exactly the lines that response withheld",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"A session is never told that a line it was never sent has not changed",
+			normalizedServer,
+			StringComparison.Ordinal);
 		Assert.Contains("Omission has to be provable", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains(
 			"any call that passed `max_file_bytes`",

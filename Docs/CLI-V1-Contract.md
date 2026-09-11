@@ -1297,11 +1297,13 @@ consumers that pinned the pre-v5.2 output schemas must refresh their copies.
 have to explain themselves. It is never the last line: an `[Empty selection]`
 line can follow it, `[Protection]` comes after that, a pinned remote checkout
 adds `[Remote]`, and a budgeted `pack_context` ends with `[Budget accounting]`.
-A session is told each trusted service line once and then receives the constant
-`[Unchanged] filters, protection; see list_projects.` line until that content
-changes; an `[Empty selection]` response and any call that passed
+A session is told each trusted service line once and then receives a constant
+`[Unchanged] ...; see list_projects.` line naming exactly the lines that
+response withheld -- `filters, protection`, `filters`, or `protection` -- until
+that content changes; an `[Empty selection]` response and any call that passed
 `max_file_bytes` report the full set instead. `analyze` reports no protection
-line on any call. Every selection tool adds an `[Empty selection]` line when
+line on any call, so no `analyze` response names one as unchanged, and the tools
+that report no effective-filters line name only the protection line. Every selection tool adds an `[Empty selection]` line when
 nothing survived the filters, and a `DPX-MCP-PATH-NOT-FOUND` error for a file
 the filters hide names the effective filters. Glob patterns gain `{a,b}` alternatives; `!` negation and
 `[...]` classes, previously matched as literal characters, are rejected with

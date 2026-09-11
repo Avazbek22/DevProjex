@@ -475,10 +475,21 @@ The `[Effective filters]` and `[Protection]` lines describe server state, not th
 call, so a session receives them once and then only when what they say changes.
 The change signal is the state the lines are made of: the project, the profile,
 the effective exclusion set, the Git mode, and the protection policy. A response
-that withholds them carries the constant
-`[Unchanged] filters, protection; see list_projects.` instead, which is never
-longer than the shortest set it can replace, so no response grows by omitting a
-notice.
+that withholds them carries a constant pointer instead, and the pointer names
+exactly the lines that response withheld:
+`[Unchanged] filters, protection; see list_projects.` when it would have carried
+both, `[Unchanged] filters; see list_projects.` or
+`[Unchanged] protection; see list_projects.` when it would have carried one. Each
+is never longer than the shortest set it can replace, so no response grows by
+omitting a notice.
+
+A tool that never reports one of the lines is not withholding it, so the pointer
+never names it. `analyze` reports no protection line on any call, and no response
+in a session of `analyze` calls says a protection line is unchanged.
+`search_project` and `get_file` report no effective-filters line while the
+selection is not empty, so what they withhold is the protection line alone and
+that is all their pointer names. A session is never told that a line it was never
+sent has not changed.
 
 Omission has to be provable. When the project cannot be identified, when either
 line would say something this session has not been told for that project, or when
