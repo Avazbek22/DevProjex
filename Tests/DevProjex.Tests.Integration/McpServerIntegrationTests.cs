@@ -251,7 +251,7 @@ public sealed partial class McpServerIntegrationTests
 		var matched = Text(await server.CallAsync(
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "nested-marker" }));
-		Assert.Contains("Nested.cs:1:", matched, StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(matched, "Nested.cs", 1);
 		Assert.DoesNotContain("[No matches]", matched, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Effective filters]", matched, StringComparison.Ordinal);
 
@@ -1052,7 +1052,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains("markdown-path-marker", Text(file), StringComparison.Ordinal);
 		Assert.Equal(1, analysis.StructuredContent?.GetProperty("files").GetInt32());
 		Assert.Contains("image_58500.txt", Text(selectedTree), StringComparison.Ordinal);
-		Assert.Contains("image_58500.txt:1:markdown-path-marker", Text(search), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "image_58500.txt", 1, "markdown-path-marker");
 		Assert.NotEqual(true, pack.IsError);
 		Assert.Contains("markdown-path-marker", Text(pack), StringComparison.Ordinal);
 
@@ -1353,7 +1353,7 @@ public sealed partial class McpServerIntegrationTests
 				});
 			var searchText = Text(search);
 			Assert.NotEqual(true, search.IsError);
-			Assert.Contains("inner.txt:1:open-marker", searchText, StringComparison.Ordinal);
+			McpSearchOutputAssertions.ContainsMatch(searchText, "inner.txt", 1, "open-marker");
 			Assert.DoesNotContain("blocked-marker", searchText, StringComparison.Ordinal);
 			Assert.Contains("[Warning DPX-PROJECT-PARTIAL-ACCESS]", searchText, StringComparison.Ordinal);
 		}
@@ -1402,7 +1402,7 @@ public sealed partial class McpServerIntegrationTests
 				});
 			var searchText = Text(search);
 			Assert.NotEqual(true, search.IsError);
-			Assert.Contains("Readable.txt:1:readable-marker", searchText, StringComparison.Ordinal);
+			McpSearchOutputAssertions.ContainsMatch(searchText, "Readable.txt", 1, "readable-marker");
 			Assert.DoesNotContain("blocked-marker", searchText, StringComparison.Ordinal);
 			Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", searchText, StringComparison.Ordinal);
 			Assert.Contains("could not fully inspect 1 selected file.", searchText, StringComparison.Ordinal);
@@ -2754,7 +2754,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(featureCommit,
 			diffAnalyze.StructuredContent?.GetProperty("remote").GetProperty("commit").GetString());
 		Assert.Contains("remote-tail-marker", Text(diffPack), StringComparison.Ordinal);
-		Assert.Contains("FeatureTail.txt:1:", Text(diffSearch), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(diffSearch), "FeatureTail.txt", 1);
 		Assert.Contains("Feature.txt", Text(branchDiff), StringComparison.Ordinal);
 		Assert.Contains("FeatureTail.txt", Text(branchDiff), StringComparison.Ordinal);
 		Assert.DoesNotContain("Main.txt", Text(branchDiff), StringComparison.Ordinal);
@@ -3069,7 +3069,8 @@ public sealed partial class McpServerIntegrationTests
 		var search = await server.CallAsync(
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "search-marker", ["max_results"] = "5" });
-		AssertTextOnlyResult(server, search, "Secret.cs:3:");
+		AssertTextOnlyResult(server, search, "Secret.cs");
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "Secret.cs", 3);
 		AssertSecretRedactedAndSpotlighted(search);
 		Assert.Contains(PrivateEmail, Text(search), StringComparison.Ordinal);
 
@@ -3788,7 +3789,7 @@ public sealed partial class McpServerIntegrationTests
 		else
 		{
 			Assert.Contains(PrivateEmail, Text(privateDataSearch), StringComparison.Ordinal);
-			Assert.Contains("Sensitive.txt:2:", Text(privateDataSearch), StringComparison.Ordinal);
+			McpSearchOutputAssertions.ContainsMatch(Text(privateDataSearch), "Sensitive.txt", 2);
 		}
 	}
 
@@ -3958,9 +3959,9 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.Contains("Sample.cs", tree, StringComparison.Ordinal);
 		Assert.Contains("needle-value", file, StringComparison.Ordinal);
-		Assert.Contains("Sample.cs:2:needle-value", search, StringComparison.Ordinal);
-		Assert.Contains("Sample.cs-1-before-context", search, StringComparison.Ordinal);
-		Assert.Contains("Sample.cs-3-after-context", search, StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(search, "Sample.cs", 2, "needle-value");
+		McpSearchOutputAssertions.ContainsContext(search, "Sample.cs", 1, "before-context");
+		McpSearchOutputAssertions.ContainsContext(search, "Sample.cs", 3, "after-context");
 	}
 
 	[Fact]
@@ -3979,7 +3980,7 @@ public sealed partial class McpServerIntegrationTests
 			new Dictionary<string, object?> { ["pattern"] = " ", ["context_lines"] = 0 });
 
 		Assert.False(search.IsError is true, Text(search));
-		Assert.Contains("Sample.txt:1:alpha beta", Text(search), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "Sample.txt", 1, "alpha beta");
 		if (OperatingSystem.IsWindows())
 			return;
 
@@ -4520,8 +4521,8 @@ public sealed partial class McpServerIntegrationTests
 		var text = Text(result);
 
 		Assert.NotEqual(true, result.IsError);
-		Assert.Contains("Sensitive.txt:1:", text, StringComparison.Ordinal);
-		Assert.Contains("Sensitive.txt:2:", text, StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(text, "Sensitive.txt", 1);
+		McpSearchOutputAssertions.ContainsMatch(text, "Sensitive.txt", 2);
 		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
 		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
 		Assert.Equal(0, diagnostics.PreparedWriteBytes);
@@ -4719,7 +4720,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.DoesNotContain("Untracked.cs", Text(tree), StringComparison.Ordinal);
 			Assert.Contains("tracked-marker", Text(pack), StringComparison.Ordinal);
 			Assert.DoesNotContain("untracked-marker", Text(pack), StringComparison.Ordinal);
-			Assert.Contains("Tracked.cs:1:", Text(search), StringComparison.Ordinal);
+			McpSearchOutputAssertions.ContainsMatch(Text(search), "Tracked.cs", 1);
 			Assert.DoesNotContain("Untracked.cs", Text(search), StringComparison.Ordinal);
 		}
 
@@ -4792,7 +4793,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("Large.txt", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Included: 2 files", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Skipped: 0 files", Text(pack), StringComparison.Ordinal);
-		Assert.Contains("Small.txt:1:", Text(search), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "Small.txt", 1);
 		Assert.DoesNotContain("Large.txt", Text(search), StringComparison.Ordinal);
 		Assert.All(
 			new[] { Text(tree), Text(pack), Text(search) },
@@ -4887,10 +4888,10 @@ public sealed partial class McpServerIntegrationTests
 			Assert.Contains("tracked-ignored-marker", Text(pack), StringComparison.Ordinal);
 			Assert.Contains("untracked-marker", Text(pack), StringComparison.Ordinal);
 			Assert.DoesNotContain("excluded-marker", Text(pack), StringComparison.Ordinal);
-			Assert.Contains("Tracked.cs:1:", Text(search), StringComparison.Ordinal);
-			Assert.Contains("Staged.cs:1:", Text(search), StringComparison.Ordinal);
-			Assert.Contains("Tracked.ignored:1:", Text(search), StringComparison.Ordinal);
-			Assert.Contains("Untracked.cs:1:", Text(search), StringComparison.Ordinal);
+			McpSearchOutputAssertions.ContainsMatch(Text(search), "Tracked.cs", 1);
+			McpSearchOutputAssertions.ContainsMatch(Text(search), "Staged.cs", 1);
+			McpSearchOutputAssertions.ContainsMatch(Text(search), "Tracked.ignored", 1);
+			McpSearchOutputAssertions.ContainsMatch(Text(search), "Untracked.cs", 1);
 			Assert.DoesNotContain("Hidden.ignored", Text(search), StringComparison.Ordinal);
 		}
 
@@ -4996,7 +4997,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("Outside.cs", Text(tree), StringComparison.Ordinal);
 		Assert.Equal(1, analyze.StructuredContent?.GetProperty("files").GetInt32());
 		Assert.Contains("pinned-subdirectory-marker", Text(pack), StringComparison.Ordinal);
-		Assert.Contains("Selected.cs:1:", Text(search), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "Selected.cs", 1);
 	}
 
 	[Fact]
@@ -5075,7 +5076,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(1, stagedAnalyze.StructuredContent?.GetProperty("files").GetInt32());
 		Assert.Contains("selected-staged-marker", Text(stagedPack), StringComparison.Ordinal);
 		Assert.DoesNotContain("ordinary-baseline", Text(stagedPack), StringComparison.Ordinal);
-		Assert.Contains("Selected.cs:1:", Text(stagedSearch), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(stagedSearch), "Selected.cs", 1);
 		Assert.DoesNotContain("Baseline.cs:", Text(stagedSearch), StringComparison.Ordinal);
 		Assert.DoesNotContain("Nested.cs:", Text(stagedSearch), StringComparison.Ordinal);
 		Assert.DoesNotContain(".metadata:", Text(stagedSearch), StringComparison.Ordinal);
@@ -5163,7 +5164,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(1, analysis.StructuredContent?.GetProperty("files").GetInt32());
 		Assert.Contains("selected-current-marker", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain("broken-marker", Text(pack), StringComparison.Ordinal);
-		Assert.Contains("good/App.cs:1:selected-current-marker", Text(search), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "good/App.cs", 1, "selected-current-marker");
 		Assert.DoesNotContain("broken-marker", Text(search), StringComparison.Ordinal);
 	}
 
@@ -5426,8 +5427,8 @@ public sealed partial class McpServerIntegrationTests
 			});
 		var searchText = Text(search);
 		Assert.NotEqual(true, search.IsError);
-		Assert.Contains("Small.txt:1:small-marker", searchText, StringComparison.Ordinal);
-		Assert.Contains("Exact.txt:1:exact-marker", searchText, StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(searchText, "Small.txt", 1, "small-marker");
+		McpSearchOutputAssertions.ContainsMatch(searchText, "Exact.txt", 1, "exact-marker");
 		Assert.DoesNotContain("oversized-marker", searchText, StringComparison.Ordinal);
 		Assert.DoesNotContain(Secret, searchText, StringComparison.Ordinal);
 		Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", searchText, StringComparison.Ordinal);
@@ -5602,7 +5603,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains("selected-current-worktree", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain("selected-committed", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain("untouched-marker", Text(pack), StringComparison.Ordinal);
-		Assert.Contains("Selected.cs:1:", Text(search), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "Selected.cs", 1);
 		Assert.DoesNotContain("Untouched.cs:", Text(search), StringComparison.Ordinal);
 		Assert.True(missingRef.IsError);
 		Assert.Contains(McpErrorCodes.ProjectUnavailable, Text(missingRef), StringComparison.Ordinal);
@@ -6194,10 +6195,11 @@ public sealed partial class McpServerIntegrationTests
 		var text = Text(result).Replace("\r\n", "\n", StringComparison.Ordinal);
 
 		Assert.NotEqual(true, result.IsError);
-		Assert.True(Regex.Matches(text, "Context\\.txt:[248]:").Count == 3);
+		// One file, so a line number anchored to the start of a line is unambiguous.
+		Assert.True(Regex.Matches(text, "(?m)^[248]:").Count == 3);
 		foreach (var line in new[] { 1, 2, 3, 4, 5, 7, 8, 9 })
-			Assert.True(Regex.Matches(text, $"Context\\.txt[:-]{line}[:-]").Count == 1);
-		Assert.DoesNotContain("Context.txt-6-", text, StringComparison.Ordinal);
+			Assert.True(Regex.Matches(text, $"(?m)^{line}[:-]").Count == 1);
+		McpSearchOutputAssertions.DoesNotContainContext(text, "Context.txt", 6);
 		Assert.Single(Regex.Matches(text, "\n--\n").Cast<Match>());
 		Assert.DoesNotContain("additional matches", text, StringComparison.Ordinal);
 	}
@@ -6577,7 +6579,7 @@ public sealed partial class McpServerIntegrationTests
 		var text = Text(result);
 
 		Assert.NotEqual(true, result.IsError);
-		Assert.DoesNotContain("Large4.txt:1:", text, StringComparison.Ordinal);
+		McpSearchOutputAssertions.DoesNotContainMatch(text, "Large4.txt", 1);
 		Assert.Contains("[Search incomplete] The inspected-text byte budget was reached; " +
 		                "additional selected files were not searched and match counts are partial.", text,
 			StringComparison.Ordinal);
@@ -7043,7 +7045,7 @@ public sealed partial class McpServerIntegrationTests
 			});
 
 		Assert.False(missing.IsError == true, Text(missing));
-		Assert.Contains("other.txt:1:other-marker", Text(missing), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(missing), "other.txt", 1, "other-marker");
 		Assert.Contains("DPX-SELECTION-PATH-MISSING", Text(missing), StringComparison.Ordinal);
 		Assert.DoesNotContain("missing.txt", Text(missing), StringComparison.Ordinal);
 		Assert.False(emptyIntersection.IsError == true, Text(emptyIntersection));
@@ -7097,7 +7099,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains("Tracked.txt", Text(tree), StringComparison.Ordinal);
 		Assert.DoesNotContain("OutsideScope.txt", Text(tree), StringComparison.Ordinal);
 		Assert.NotEqual(true, search.IsError);
-		Assert.Contains("Tracked.txt:1:staged-marker", Text(search), StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(Text(search), "Tracked.txt", 1, "staged-marker");
 		Assert.DoesNotContain("outside-marker", Text(search), StringComparison.Ordinal);
 		Assert.True(wrongCase.IsError);
 		Assert.Contains(McpErrorCodes.PathNotFound, Text(wrongCase), StringComparison.Ordinal);

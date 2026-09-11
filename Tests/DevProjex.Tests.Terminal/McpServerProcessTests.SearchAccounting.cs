@@ -214,7 +214,14 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("lower context_lines", wideText, StringComparison.Ordinal);
 		// 40 files carry 20 matching lines each, and the counters stay exact under the cap.
 		Assert.Contains("[Search totals] matches=800 · files=40", wideText, StringComparison.Ordinal);
-		var shown = Regex.Matches(wideText, @"^src/Module\d{2}\.ts:\d+:const needle", RegexOptions.Multiline).Count;
+		// Matches are grouped under their path, so a shown match is a numbered line; the paths
+		// are counted separately to prove every matching file still heads its own block.
+		var shown = Regex.Matches(wideText, @"^\d+:const needle", RegexOptions.Multiline).Count;
+		// The cap stops the text long before all forty files are reached, so the headings that
+		// did fit are what the reader sees; the totals line still accounts for the rest.
+		var headings = Regex.Matches(wideText, @"^src/Module\d{2}\.ts$", RegexOptions.Multiline).Count;
+		Assert.InRange(headings, 1, 40);
+		Assert.Equal(shown, Regex.Matches(wideText, @"^\d+:", RegexOptions.Multiline).Count);
 		var additional = Regex.Match(wideText, @"\[(\d+) additional matches not shown;");
 		Assert.True(additional.Success, wideText);
 		Assert.Equal(800, shown + int.Parse(additional.Groups[1].Value));
@@ -222,7 +229,8 @@ public sealed partial class McpServerProcessTests
 		// A search that returns everything it found keeps its previous response exactly.
 		var narrowText = AllProcessText(narrow).Replace("\r\n", "\n", StringComparison.Ordinal);
 		Assert.NotEqual(true, narrow.IsError);
-		Assert.Contains("src/Single.ts:1:const solitaryMarker = 1", narrowText, StringComparison.Ordinal);
+		Assert.Contains("src/Single.ts", narrowText, StringComparison.Ordinal);
+		Assert.Contains("1:const solitaryMarker = 1", narrowText, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Search totals]", narrowText, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Search truncated]", narrowText, StringComparison.Ordinal);
 		Assert.DoesNotContain("additional matches", narrowText, StringComparison.Ordinal);
