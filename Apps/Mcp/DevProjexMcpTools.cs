@@ -822,7 +822,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regular expression. It matches file content, never paths; find files by name with get_tree include_patterns. Use it to locate symbols or phrases; use related_files instead for dependency links. Returns path:line:text matches, merged context groups separated by --, exact match and file counts, and the count of additional matches beyond max_results; line numbers refer to that text, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
+		"Searches safe transformed project text with a timed .NET regular expression. It matches file content, never paths; find files by name with get_tree include_patterns. Use it to locate symbols or phrases; use related_files instead for dependency links. Returns matches under each path as number:text, context number-text, -- between groups, exact match and file counts, and additional matches beyond max_results; line numbers refer to that text, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -890,6 +890,7 @@ internal sealed class DevProjexMcpTools(
 						return ValueTask.CompletedTask;
 
 					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
+					var startsNewFile = true;
 					foreach (var match in scan.Matches)
 					{
 						var appended = AppendSearchResult(
@@ -897,7 +898,9 @@ internal sealed class DevProjexMcpTools(
 							relative,
 							file.Content,
 							match,
-							MaximumSearchContentCharacters);
+							MaximumSearchContentCharacters,
+							startsNewFile);
+						startsNewFile = false;
 						shownMatches += appended.WrittenMatches;
 						// Only the lines that reached the caller are worth naming; a match the cap
 						// dropped is not in the response to be annotated.
@@ -1542,7 +1545,10 @@ internal sealed class DevProjexMcpTools(
 			maximumItems: ProjectSelectionTokens.Exclusions.Count,
 			maximumItemScalarValues: MaximumExclusionTokenLength,
 			tooManyItemsHint: "remove duplicate or extra tokens and retry",
-			overLengthHint: "use the published exclusion tokens");
+			overLengthHint: "use the published exclusion tokens",
+			// Exclusions are a closed vocabulary with a published enum and a standing contract
+			// that refuses anything but an array. Widening that one is its own decision.
+			allowScalar: false);
 		if (tokens is null)
 			return null;
 
@@ -2903,9 +2909,24 @@ internal sealed class DevProjexMcpTools(
 		string relativePath,
 		string content,
 		McpSearchMatchContext match,
-		int maximumCharacters)
+		int maximumCharacters,
+		bool startsNewFile = true)
 	{
-		if (match.StartsNewGroup)
+		// The path heads its own file once. Repeating it on every matched and context line
+		// spent characters on text the reader already had and buried the line number that
+		// the reader actually needed, in the middle of a long prefix.
+		if (startsNewFile)
+		{
+			var heading = $"{EscapeSingleLine(relativePath)}{Environment.NewLine}";
+			var headingRemaining = maximumCharacters - output.Length;
+			if (heading.Length > headingRemaining)
+			{
+				AppendBoundedPrefix(output, heading, Math.Max(0, headingRemaining));
+				return new McpSearchAppendResult(0, Truncated: true);
+			}
+			output.Append(heading);
+		}
+		else if (match.StartsNewGroup)
 		{
 			var separator = $"--{Environment.NewLine}";
 			var separatorRemaining = maximumCharacters - output.Length;
@@ -2916,14 +2937,13 @@ internal sealed class DevProjexMcpTools(
 			}
 			output.Append(separator);
 		}
-		var safePath = EscapeSingleLine(relativePath);
 		var matchingLines = match.MatchLineNumbers.ToHashSet();
 		var writtenMatches = 0;
 		foreach (var line in match.Lines)
 		{
 			var isMatchingLine = matchingLines.Contains(line.LineNumber);
 			var marker = isMatchingLine ? ':' : '-';
-			var prefix = $"{safePath}{marker}{line.LineNumber}{marker}";
+			var prefix = $"{line.LineNumber}{marker}";
 			var remaining = maximumCharacters - output.Length;
 			if (prefix.Length > remaining)
 			{

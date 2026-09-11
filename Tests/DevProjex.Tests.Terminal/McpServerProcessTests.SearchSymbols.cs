@@ -58,7 +58,10 @@ public sealed partial class McpServerProcessTests
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "marker", ["context_lines"] = 0 }));
 
-		Assert.Contains("README.md:3:marker line", prose, StringComparison.Ordinal);
+		// Matches are grouped under their path, so the file heads its own block and the
+		// matched line carries only its number.
+		Assert.Contains("README.md", prose, StringComparison.Ordinal);
+		Assert.Contains("3:marker line", prose, StringComparison.Ordinal);
 		Assert.DoesNotContain("Enclosing declarations:", prose, StringComparison.Ordinal);
 		Assert.Contains("[Symbols] annotated=0 · files-without-declarations=1.", prose, StringComparison.Ordinal);
 	}
