@@ -132,13 +132,25 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				"Interactive TUI PTY journeys are disabled in broad CI jobs; Release Validation runs the curated PTY matrix.");
 		}
 
-		var binary = binaryOverride ?? (useProgressCheckpointHost
+		// A synthetic file:// remote is granted by the terminal test host only. The shipped
+		// application refuses that transport, so a journey needing one runs on the test host,
+		// which is built from the same DevProjex.Terminal library.
+		var usesTerminalTestHost = useProgressCheckpointHost || allowFileGitTransport;
+		var binary = binaryOverride ?? (usesTerminalTestHost
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
 			: PublishedApplicationLocator.FindExecutable());
 		var launchArguments = arguments?.ToArray() ?? [];
+		if (allowFileGitTransport && !useProgressCheckpointHost)
+		{
+			launchArguments =
+			[
+				TerminalTransportPolicyProtocol.TerminalCommandArgument,
+				.. launchArguments
+			];
+		}
 		var launchesThroughDotNetHost = false;
 		if (OperatingSystem.IsWindows() &&
-		    (useProgressCheckpointHost ||
+		    (usesTerminalTestHost ||
 		     Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY") is null) &&
 		    File.Exists(Path.ChangeExtension(binary, ".dll")))
 		{
@@ -171,7 +183,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		};
 		if (allowFileGitTransport)
 		{
-			variables[GitRepositoryService.TestFileTransportPolicyVariable] = "1";
+			variables[TerminalTransportPolicyProtocol.AllowLocalFileTransportVariable] =
+				TerminalTransportPolicyProtocol.Enabled;
 		}
 		if (environment is not null)
 		{
@@ -186,7 +199,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			launchArguments,
 			variables,
 			writeShellCompletionMarker,
-			verifyExecutableRelaunch && !useProgressCheckpointHost,
+			verifyExecutableRelaunch && !usesTerminalTestHost,
 			launchesThroughDotNetHost);
 
 		var process = new Hex1bTerminalChildProcess(
@@ -1139,6 +1152,29 @@ internal static class PublishedApplicationLocator
 			return path;
 		throw new FileNotFoundException(
 			"Build the terminal progress checkpoint test host before running progress PTY tests.",
+			path);
+	}
+
+	/// <summary>
+	/// The terminal test host assembly. It hosts the same DevProjex.Terminal library as the shipped
+	/// application and is the only executable that can grant the local file Git transport.
+	/// </summary>
+	public static string FindTerminalTestHostAssembly()
+	{
+		var repository = FindRepositoryRoot();
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
+		var path = Path.Combine(
+			repository,
+			"Tests",
+			"DevProjex.Tests.Terminal.ProgressHost",
+			"bin",
+			configuration,
+			"net10.0",
+			$"{ProgressCheckpointHostName}.dll");
+		if (File.Exists(path))
+			return path;
+		throw new FileNotFoundException(
+			"Build the terminal test host before running process tests that need a local remote.",
 			path);
 	}
 

@@ -472,9 +472,9 @@ legal Unix and macOS directory names containing `:` remain local. An explicit
 
 Cached repositories are reusable offline. A successful first clone records the
 safe source in recent-repository history only for network clone sources:
-`https://`, `http://`, `ssh://`, `git://`, and SCP syntax. Local paths and
-`file://` sources remain valid clone sources and use the managed cache, but are
-never written to recent-repository history. Cancellation removes clone staging;
+`https://`, `http://`, `ssh://`, `git://`, and SCP syntax. An existing local path
+is opened as an ordinary project rather than cloned, so it reaches neither the
+managed cache nor that history. A `file://` source is refused. Cancellation removes clone staging;
 network and clone failures return runtime exit `1` without opening or exporting
 partial content. The generated cache path is internal and is never reported by
 direct URL-source commands or Terminal Workspace repository details. In particular,
@@ -1238,9 +1238,8 @@ accept a Git URL in `project` plus an optional URL-only `branch`. RepoCache owns
 clone publication and the server pins each resolved checkout until shutdown.
 `list_projects` remains the stable list of configured local roots.
 Remote network URLs use HTTP(S), SSH, Git protocol, or SCP syntax and cannot
-contain query strings or fragments. A `file://` source must resolve inside an
-already configured local root, so this opt-in never broadens local filesystem
-access.
+contain query strings or fragments. A `file://` source is refused, so this opt-in
+never broadens local filesystem access.
 
 `analyze --top-files N` is an additive CLI-v1 option with range `1..1000`.
 The MCP `analyze` tool exposes the matching optional `top_files` parameter with

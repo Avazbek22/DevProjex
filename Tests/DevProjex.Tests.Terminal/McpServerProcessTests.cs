@@ -799,7 +799,9 @@ public sealed partial class McpServerProcessTests
 
 		var dataRoot = workspace.CreateDirectory("data");
 		var repositoryUrl = new Uri(Path.GetFullPath(repository)).AbsoluteUri;
-		var application = PublishedApplicationLocator.FindApplicationAssembly();
+		// The synthetic origin uses the local file transport, which only the terminal test host
+		// grants. It serves the same MCP server from the same libraries as the shipped host.
+		var application = PublishedApplicationLocator.FindTerminalTestHostAssembly();
 		var startInfo = new ProcessStartInfo("dotnet")
 		{
 			UseShellExecute = false,
@@ -810,12 +812,14 @@ public sealed partial class McpServerProcessTests
 			WorkingDirectory = root
 		};
 		startInfo.ArgumentList.Add(application);
+		startInfo.ArgumentList.Add(TerminalTransportPolicyProtocol.TerminalCommandArgument);
 		startInfo.ArgumentList.Add("mcp");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(root);
 		startInfo.ArgumentList.Add("--allow-remote");
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot;
-		startInfo.Environment[GitRepositoryService.TestFileTransportPolicyVariable] = "1";
+		startInfo.Environment[TerminalTransportPolicyProtocol.AllowLocalFileTransportVariable] =
+			TerminalTransportPolicyProtocol.Enabled;
 
 		using var process = Process.Start(startInfo) ??
 		                    throw new InvalidOperationException("MCP process did not start.");

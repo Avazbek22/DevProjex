@@ -27,8 +27,6 @@ namespace DevProjex.Infrastructure.Git;
 /// </summary>
 public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 {
-	internal const string TestFileTransportPolicyVariable =
-		"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT";
     private const int CommandOutputBufferChars = 64 * 1024;
     private const int CommandErrorBufferChars = 64 * 1024;
 	internal const int MaximumProgressFrameCharacters = 4 * 1024;
@@ -47,12 +45,10 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 
     public GitRepositoryService()
     {
-		// Synthetic file:// remotes are enabled only by explicit test-process policy;
-		// no production host sets or documents this internal escape hatch.
-		_allowFileTransport = string.Equals(
-			Environment.GetEnvironmentVariable(TestFileTransportPolicyVariable),
-			"1",
-			StringComparison.Ordinal);
+		// Synthetic file:// remotes require an armed RepositoryTransportPolicy scope or the
+		// internal test constructor below. No shipped assembly can arm that scope, so a published
+		// build clones over https and ssh only.
+		_allowFileTransport = RepositoryTransportPolicy.AllowsLocalFileTransport;
 		_materializeTestClone = _allowFileTransport;
 		_resourceLimits = GitRepositoryResourceLimits.Default;
         _ = GitRuntime.VersionDisplay;

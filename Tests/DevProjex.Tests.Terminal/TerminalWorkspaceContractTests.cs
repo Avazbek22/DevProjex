@@ -1506,9 +1506,7 @@ public sealed class TerminalWorkspaceContractTests
 		var bare = Path.Combine(workspace.Path, "origin.git");
 		Assert.True(TryRunGit(workspace.Path, "clone", "--quiet", "--bare", source, bare));
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		using var fileTransportPolicy = new TestEnvironmentVariableScope(
-			"DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT",
-			"1");
+		using var fileTransportPolicy = RepositoryTransportPolicy.AllowLocalFileTransport();
 		var services = new TerminalServiceFactory(
 			() => appData.Path,
 			new GitRepositoryService(
@@ -1748,21 +1746,6 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.DoesNotContain("remove this comment", exported, StringComparison.Ordinal);
 		Assert.DoesNotContain($"{Environment.NewLine}{Environment.NewLine}", exported, StringComparison.Ordinal);
 		Assert.DoesNotContain("Console.WriteLine(Token)", exported, StringComparison.Ordinal);
-	}
-
-	private sealed class TestEnvironmentVariableScope : IDisposable
-	{
-		private readonly string _name;
-		private readonly string? _previousValue;
-
-		public TestEnvironmentVariableScope(string name, string value)
-		{
-			_name = name;
-			_previousValue = Environment.GetEnvironmentVariable(name);
-			Environment.SetEnvironmentVariable(name, value);
-		}
-
-		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
 	}
 
 	private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
