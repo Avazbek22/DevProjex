@@ -40,20 +40,20 @@ internal sealed class McpProjectSourceResolver : IDisposable
 	{
 		ThrowIfDisposed();
 
-		// Before anything reads the string: a remote-provider form is refused here, ahead of both
-		// the repository-url classifier and local root resolution, because both of those open the
-		// path and opening a remote form contacts a host. The operator decides whether this server
-		// reaches the network; a client naming a path must not be able to decide it instead. An
-		// already configured root stays addressable by its listed spelling, which is an in-memory
-		// comparison and opens nothing.
+		// Before anything reads the string: a path that names a host is refused here, ahead of
+		// both the repository-url classifier and local root resolution, because both of those
+		// open the path and opening such a form is what contacts the host. The operator decides
+		// whether this server reaches the network; a client naming a path must not be able to
+		// decide it instead. A configured root stays addressable in any spelling that resolves to
+		// a listed one, which is lexical work over the startup table and opens nothing.
 		if (McpRemoteProviderPath.ReachesRemoteProvider(project) &&
 		    !_localRoots.IsConfiguredRootSpelling(project))
 		{
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
-				$"{McpErrorCodes.InvalidArguments}: 'project' uses a UNC or device path form. " +
-				"Those are refused before any filesystem access, so that naming one cannot make the " +
-				"server contact a host. Call list_projects and use a listed name or path.");
+				$"{McpErrorCodes.InvalidArguments}: 'project' is written as a path that names a host. " +
+				"Such a form is refused before 'project' is read as a path at all, so that naming one " +
+				"cannot make the server reach it. Call list_projects and use a listed name or path.");
 		}
 
 		if (!LooksLikeRepositoryUrl(project))
@@ -350,6 +350,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		{
 			return true;
 		}
+		McpProjectPathProbe.Record();
 		if (Directory.Exists(source))
 			return false;
 		var colon = source.IndexOf(':');

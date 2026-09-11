@@ -69,6 +69,7 @@ internal sealed class McpRootJailFileStreamOpener
 	internal static string ResolveDirectoryPath(string path)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		McpProjectPathProbe.Record();
 		if (!OperatingSystem.IsWindows())
 			return ResolveUnixDirectoryPath(path);
 

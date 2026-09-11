@@ -164,20 +164,23 @@ batched `get_file` call instead of several single reads; see
   path is validated, and the validated handle is the one read, so a path swap
   cannot escape the root jail.
 - Without `--allow-remote`, tools perform no network operations, and no probe leaves
-  the machine before that permission is considered. A `project` value is classified by
-  its spelling alone: a UNC or device path form — `\\server\share`, `//server/share`,
-  `\\?\UNC\server\share`, `\\.\pipe\name` — is refused with
-  `DPX-MCP-INVALID-ARGUMENTS` before anything opens it. Opening such a path is itself
-  the network operation: the operating system contacts the named host in order to
-  answer, so a check that first asked whether the path existed would already have sent
-  the traffic it was meant to prevent. The refusal applies with `--allow-remote` too,
-  because a UNC path is not a supported clone source in either state.
-- A root listed at startup stays addressable by its listed spelling even when that
-  spelling is one of those forms, because matching it is a comparison against the
-  startup list rather than an open. What the refusal cannot cover is a drive letter or
-  mount point that the operator has already bound to a remote share: by its spelling it
-  is indistinguishable from a local path, and that binding is the operator's own
-  configuration rather than something a client chose.
+  the machine before that permission is considered. A `project` value is classified by its
+  spelling alone, and a form that names a host is refused with `DPX-MCP-INVALID-ARGUMENTS`
+  before anything opens it: `\\server\share` and `//server/share`, the UNC device path
+  `\\?\UNC\server\share`, anything in the NT object namespace `\??\`, and the automount
+  host maps `/net/server/…` and `/Network/Servers/server/…`. Opening such a path is itself
+  the network operation: the operating system contacts the named host in order to answer, so
+  a check that first asked whether the path existed would already have sent the traffic it was
+  meant to prevent. The refusal applies with `--allow-remote` as well — a remote project is
+  named by its URL, and these spellings are refused in both states.
+- The rest of the device namespace addresses this machine and is not refused:
+  `\\?\C:\project` is an ordinary local directory written the long way, and `\\.\pipe\name`
+  is local machinery. A root listed at startup stays addressable in any spelling that resolves
+  to the recorded one — a trailing separator, forward slashes, or the extended-length prefix —
+  because deciding that compares strings and opens nothing. What the refusal cannot cover is a
+  drive letter, a mount point, or a working directory that the operator has already bound to a
+  remote share: by its spelling it is indistinguishable from a local path, and that binding is
+  the operator's own configuration rather than something a client chose.
 - With `--allow-remote`, network access is limited to the RepoCache clone/acquire step
   for a Git URL; all project inspection handlers operate only on the pinned checkout.
   With `tracked_only` or `git_scope`, the server may also start the local Git

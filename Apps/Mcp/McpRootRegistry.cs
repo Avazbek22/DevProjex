@@ -60,20 +60,21 @@ public sealed class McpRootRegistry
 				$"Call list_projects and use one of these paths: {string.Join(", ", namedRoots.Select(static root => $"'{root}'"))}.");
 		}
 
-		// A UNC or device path form is refused here, ahead of the resolution below rather than after
-		// it. Everything from this point opens the path, and opening one of those forms is what makes
-		// the operating system contact a host: the answer would already have travelled over the
-		// network by the time the containment comparison at the end of this method could reject it.
-		// A form listed at startup stays addressable by its recorded spelling, which is decided by
-		// the name lookup above and by the comparison here, both of them in memory.
+		// A path that names a host is refused here, ahead of the resolution below rather than
+		// after it. Everything from this point opens the path, and opening such a form is what
+		// makes the operating system contact the host: the answer would already have travelled
+		// over the network by the time the containment comparison at the end of this method could
+		// reject it. A root listed at startup stays addressable through the name lookup above and
+		// through the comparison here, both of them in memory.
 		if (McpRemoteProviderPath.ReachesRemoteProvider(requestedProject) &&
 		    !IsConfiguredRootSpelling(requestedProject))
 		{
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
-				$"{McpErrorCodes.InvalidArguments}: 'project' uses a UNC or device path form, which is " +
-				"refused before any filesystem access so that naming one cannot make the server contact " +
-				$"a host. Call list_projects and use a listed name or path: {FormatRoots()}.");
+				$"{McpErrorCodes.InvalidArguments}: 'project' is written as a path that names a host. " +
+				"Such a form is refused before 'project' is resolved against the allowed roots, so that " +
+				"naming one cannot make the server reach it. " +
+				$"Call list_projects and use a listed name or path: {FormatRoots()}.");
 		}
 
 		string physical;
@@ -92,18 +93,57 @@ public sealed class McpRootRegistry
 	}
 
 	/// <summary>
-	/// Whether the string is one of the root spellings this server was started with, compared as
-	/// written.
+	/// Whether the string names one of the roots this server was started with, as written or in
+	/// any spelling that resolves to the same recorded one.
 	/// </summary>
 	/// <remarks>
 	/// A comparison over the table the constructor built: it opens nothing, which is what makes it
 	/// safe to ask about a path shape that has not yet been cleared for filesystem access. Roots
-	/// given at startup are the operator's own choice, so a remote one among them stays usable.
+	/// given at startup are the operator's own choice, so a remote one among them stays usable,
+	/// and under every spelling of itself rather than only the one the operator typed.
 	/// </remarks>
-	internal bool IsConfiguredRootSpelling(string? path) =>
-		path is not null &&
+	internal bool IsConfiguredRootSpelling(string? path)
+	{
+		if (path is null)
+			return false;
+		return IsRecordedSpelling(path) ||
+		       (CanonicalSpelling(path) is { } canonical && IsRecordedSpelling(canonical));
+	}
+
+	private bool IsRecordedSpelling(string spelling) =>
 		_lexicalRootsByPhysical.Values.Any(
-			spellings => spellings.Contains(path, StringComparer.Ordinal));
+			spellings => spellings.Contains(spelling, StringComparer.Ordinal));
+
+	/// <summary>
+	/// The spelling a recorded root would carry if it were written this way, or null when the
+	/// string cannot be read as a path at all.
+	/// </summary>
+	/// <remarks>
+	/// Roots are recorded as <see cref="Path.GetFullPath(string)"/> produced them, so a client that writes
+	/// the same root with forward slashes, a trailing separator, or the extended-length prefix is
+	/// naming something already listed and has to keep resolving. Every step here is lexical:
+	/// <see cref="Path.GetFullPath(string)"/> consults the filesystem for nothing, which is what
+	/// allows the question to be asked about a form that has not been cleared to touch it.
+	/// </remarks>
+	private static string? CanonicalSpelling(string path)
+	{
+		const string uncDevicePrefix = @"\\?\UNC\";
+		const string extendedPrefix = @"\\?\";
+		try
+		{
+			var candidate = Path.GetFullPath(path.Trim());
+			if (candidate.StartsWith(uncDevicePrefix, StringComparison.OrdinalIgnoreCase))
+				candidate = @"\\" + candidate[uncDevicePrefix.Length..];
+			else if (candidate.StartsWith(extendedPrefix, StringComparison.OrdinalIgnoreCase))
+				candidate = candidate[extendedPrefix.Length..];
+			return Path.TrimEndingDirectorySeparator(candidate);
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return null;
+		}
+	}
 
 	public string ResolveExistingPath(string projectRoot, string path, bool requireDirectory = false)
 	{
@@ -186,6 +226,7 @@ public sealed class McpRootRegistry
 	public static string ResolvePhysicalExistingPath(string path, bool requireDirectory)
 	{
 		var fullPath = Path.GetFullPath(path);
+		McpProjectPathProbe.Record();
 		if (requireDirectory && !Directory.Exists(fullPath))
 			throw new DirectoryNotFoundException(fullPath);
 		if (!requireDirectory && !Directory.Exists(fullPath) && !File.Exists(fullPath))

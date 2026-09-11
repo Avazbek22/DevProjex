@@ -233,10 +233,10 @@ public sealed class DocumentationAndPackagingContractTests
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			@"a UNC or device path form — `\\server\share`, `//server/share`," +
-			@" `\\?\UNC\server\share`, `\\.\pipe\name`" +
-			" — is refused with" +
-			" `DPX-MCP-INVALID-ARGUMENTS` before anything opens it",
+			@"a form that names a host is refused with `DPX-MCP-INVALID-ARGUMENTS` before" +
+			@" anything opens it: `\\server\share` and `//server/share`, the UNC device" +
+			@" path `\\?\UNC\server\share`, anything in the NT object namespace `\??\`," +
+			" and the automount host maps",
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains(
@@ -244,7 +244,7 @@ public sealed class DocumentationAndPackagingContractTests
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"A root listed at startup stays addressable by its listed spelling",
+			"The rest of the device namespace addresses this machine and is not refused",
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains(

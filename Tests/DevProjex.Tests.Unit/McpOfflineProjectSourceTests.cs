@@ -7,17 +7,16 @@ namespace DevProjex.Tests.Unit;
 /// reach the network, and a UNC or device path form reaches it simply by being opened.
 /// </summary>
 /// <remarks>
-/// None of these cases needs a reachable host, and none of them waits. They read the error code
-/// instead, because the codes say which step answered. For a path form, exactly three answers are
-/// reachable: the refusal below returns <c>DPX-MCP-INVALID-ARGUMENTS</c> without opening anything;
-/// resolution against the configured roots returns <c>DPX-MCP-UNKNOWN-PROJECT</c>, and it can only
-/// return that after the open it performs has already come back; classification as a repository url
-/// returns <c>DPX-MCP-REMOTE-DISABLED</c>. Observing the first code therefore witnesses that neither
-/// of the other two steps ran, which is the property under test — a step that had run would have
-/// answered, and its answer would have been a different code.
+/// No case here needs a reachable host and none of them waits. What they observe is the count of
+/// probes: every place that hands a path to the operating system reports itself through
+/// <see cref="McpProjectPathProbe"/>, so a refusal that happened before any of them ran is a
+/// measurement rather than an inference. An error code cannot make that measurement, because a
+/// probe that ran and then fell through to the same refusal would produce the same code and the
+/// same message. The codes are still asserted alongside, because they say which refusal answered
+/// and the two are worded apart for exactly that reason.
 /// <para>
-/// Host names here are deliberately unreachable in every environment: <c>.invalid</c> is reserved by
-/// RFC 2606 and <c>.example</c> by RFC 6761, so a regression that removes the refusal fails these
+/// Host names are unreachable in every environment by standard: <c>.invalid</c> is reserved by
+/// RFC 2606 and <c>.example</c> by RFC 6761. So a regression that removes a refusal fails these
 /// cases rather than quietly contacting something.
 /// </para>
 /// </remarks>
@@ -28,10 +27,17 @@ public sealed class McpOfflineProjectSourceTests
 
 	/// <summary>
 	/// A url-shaped UNC string: the part before its colon carries a dot, which is what the
-	/// repository-url classifier reads to call a string a scp-style remote. Without the refusal it
-	/// would take the remote branch and answer <c>DPX-MCP-REMOTE-DISABLED</c>.
+	/// repository-url classifier reads to call a string an scp-style remote. Without the refusal it
+	/// takes the remote branch, and it is the one literal here that reaches that branch at all — so
+	/// it is the only case that can witness the refusal standing ahead of the classifier.
 	/// </summary>
 	private const string UrlShapedUncProject = "//host.example/share:repository";
+
+	/// <summary>
+	/// The NT object namespace carries one leading separator rather than two and still reaches the
+	/// redirector, so it is the shape a two-separator test would miss.
+	/// </summary>
+	private const string NtObjectUncProject = @"\??\UNC\host.invalid\share";
 
 	[Theory]
 	[InlineData(UncProject)]
@@ -39,49 +45,59 @@ public sealed class McpOfflineProjectSourceTests
 	[InlineData("//host.invalid/share")]
 	[InlineData(@"\\host.invalid")]
 	[InlineData(@"\\?\UNC\host.invalid\share")]
-	[InlineData(@"\\.\pipe\devprojex")]
-	public async Task ARemoteFormIsRefusedBeforeAnythingOpensIt(string project)
+	[InlineData(NtObjectUncProject)]
+	[InlineData(@"\??\GLOBALROOT\Device\Mup\host.invalid\share")]
+	[InlineData("/net/host.invalid/share")]
+	[InlineData("/Network/Servers/host.invalid/share")]
+	public async Task ARemoteFormIsRefusedWithoutAnythingOpeningIt(string project)
 	{
 		using var workspace = new TemporaryDirectory();
 		using var resolver = CreateOfflineResolver(workspace.CreateFolder("local"));
 
+		using var probes = McpProjectPathProbe.Count();
 		var refusal = await Assert.ThrowsAsync<McpToolException>(() =>
 			resolver.ResolveAsync(project, branch: null, TestContext.Current.CancellationToken));
 
-		// Not DPX-MCP-UNKNOWN-PROJECT: that code is only reachable once the configured-root
-		// resolution has opened the path and the open has returned.
+		Assert.Equal(0, probes.Value);
 		Assert.Equal(McpErrorCodes.InvalidArguments, refusal.Code);
-		Assert.Contains("UNC or device path form", refusal.Message, StringComparison.Ordinal);
 	}
 
 	/// <summary>
-	/// The refusal also precedes the repository-url classifier, which probes the string with
-	/// <c>Directory.Exists</c> before deciding. That probe is itself an open, so a refusal placed
-	/// after it would be too late.
+	/// The refusal that answers is the one in the source resolver, ahead of the repository-url
+	/// classifier. That matters because the classifier probes the string with
+	/// <c>Directory.Exists</c> before deciding, and a refusal placed after it would be too late.
 	/// </summary>
-	[Fact]
-	public async Task AUrlShapedRemoteFormIsRefusedBeforeTheRepositoryUrlClassifier()
+	[Theory]
+	[InlineData(UncProject)]
+	[InlineData(UrlShapedUncProject)]
+	[InlineData(NtObjectUncProject)]
+	public async Task TheSourceResolverIsWhatRefuses(string project)
 	{
 		using var workspace = new TemporaryDirectory();
 		using var resolver = CreateOfflineResolver(workspace.CreateFolder("local"));
 
+		using var probes = McpProjectPathProbe.Count();
 		var refusal = await Assert.ThrowsAsync<McpToolException>(() =>
-			resolver.ResolveAsync(UrlShapedUncProject, branch: null, TestContext.Current.CancellationToken));
+			resolver.ResolveAsync(project, branch: null, TestContext.Current.CancellationToken));
 
-		// Not DPX-MCP-REMOTE-DISABLED: that is what the classifier's branch answers, and reaching it
-		// means the classifier had already run its probe.
-		Assert.Equal(McpErrorCodes.InvalidArguments, refusal.Code);
-		Assert.Contains("UNC or device path form", refusal.Message, StringComparison.Ordinal);
+		// The two refusals are worded apart on purpose: sharing a code and a message would leave the
+		// registry's refusal, which stands after the classifier, indistinguishable from this one.
+		Assert.Equal(0, probes.Value);
+		Assert.Contains(
+			"refused before 'project' is read as a path at all",
+			refusal.Message,
+			StringComparison.Ordinal);
 	}
 
 	/// <summary>
-	/// Remote permission does not buy a client the UNC forms: they are not a supported clone source
-	/// in either state, and the shape is refused the same way with permission granted.
+	/// Remote permission does not buy a client these forms. They are refused in the same place and
+	/// for the same reason, and no remote machinery is built for them.
 	/// </summary>
 	[Theory]
 	[InlineData(UncProject)]
 	[InlineData(WindowsUncProject)]
 	[InlineData(UrlShapedUncProject)]
+	[InlineData(NtObjectUncProject)]
 	public async Task ARemoteFormIsRefusedEvenWhenRemoteProjectsArePermitted(string project)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -91,34 +107,38 @@ public sealed class McpOfflineProjectSourceTests
 			static () => throw new InvalidOperationException(
 				"Remote services must not be created for a refused path form."));
 
+		using var probes = McpProjectPathProbe.Count();
 		var refusal = await Assert.ThrowsAsync<McpToolException>(() =>
 			resolver.ResolveAsync(project, branch: null, TestContext.Current.CancellationToken));
 
-		// The message is asserted, not only the code: a permitted server rejects an unsupported clone
-		// source under the same code further down, so the code alone would not say which step
-		// answered, and the step is the point.
+		Assert.Equal(0, probes.Value);
 		Assert.Equal(McpErrorCodes.InvalidArguments, refusal.Code);
-		Assert.Contains("UNC or device path form", refusal.Message, StringComparison.Ordinal);
+		Assert.Contains("written as a path that names a host", refusal.Message, StringComparison.Ordinal);
 	}
 
 	/// <summary>
-	/// The same refusal guards the registry itself, so a caller that resolves a project without
-	/// going through the source resolver is covered as well.
+	/// The same refusal guards the registry, so a caller that resolves a project without going
+	/// through the source resolver is covered too.
 	/// </summary>
 	[Theory]
 	[InlineData(UncProject)]
 	[InlineData(WindowsUncProject)]
+	[InlineData(NtObjectUncProject)]
 	[InlineData(@"\\?\UNC\host.invalid\share")]
-	public void TheRootRegistryRefusesARemoteFormBeforeResolvingIt(string project)
+	public void TheRootRegistryRefusesARemoteFormWithoutResolvingIt(string project)
 	{
 		using var workspace = new TemporaryDirectory();
 		var registry = new McpRootRegistry([workspace.CreateFolder("local")]);
 
+		using var probes = McpProjectPathProbe.Count();
 		var refusal = Assert.Throws<McpToolException>(() => registry.ResolveProject(project));
 
-		// Not DPX-MCP-UNKNOWN-PROJECT, which is the code this method reaches only by way of the open.
+		Assert.Equal(0, probes.Value);
 		Assert.Equal(McpErrorCodes.InvalidArguments, refusal.Code);
-		Assert.Contains("UNC or device path form", refusal.Message, StringComparison.Ordinal);
+		Assert.Contains(
+			"refused before 'project' is resolved against the allowed roots",
+			refusal.Message,
+			StringComparison.Ordinal);
 	}
 
 	/// <summary>
@@ -131,8 +151,7 @@ public sealed class McpOfflineProjectSourceTests
 		using var workspace = new TemporaryDirectory();
 		var local = workspace.CreateFolder("local");
 		var outside = workspace.CreateFolder("outside");
-		var expected = McpRootJailFileStreamOpener.ResolveDirectoryPath(
-			McpRootRegistry.ResolvePhysicalExistingPath(local, requireDirectory: true));
+		var expected = PhysicalPathOf(local);
 		using var resolver = CreateOfflineResolver(local);
 
 		var byPath = await resolver.ResolveAsync(local, branch: null, TestContext.Current.CancellationToken);
@@ -151,42 +170,94 @@ public sealed class McpOfflineProjectSourceTests
 	}
 
 	/// <summary>
-	/// The operator keeps the last word. A root listed at startup stays addressable by the spelling
-	/// it was listed with, even when that spelling is one of the refused forms, because deciding it
-	/// is a comparison against the startup list rather than an open.
+	/// The Win32 device namespace addresses this machine, so an extended-length path to an ordinary
+	/// local directory is not a remote form and must keep resolving. It is how a path longer than
+	/// <c>MAX_PATH</c> is written, and real Windows tooling emits it.
 	/// </summary>
-	/// <remarks>
-	/// The device prefix is the one refused form that can be pointed at a local directory, so it is
-	/// what makes this case runnable without a share. The prefix is Windows-only.
-	/// </remarks>
 	[Fact]
-	public async Task ARootListedAtStartupStaysAddressableByItsListedSpelling()
+	public async Task AnExtendedLengthLocalPathStillResolves()
 	{
 		if (!OperatingSystem.IsWindows())
-			Assert.Skip("The device path prefix that makes this case runnable is Windows-only.");
+			Assert.Skip("The extended-length prefix is Windows-only.");
 
 		using var workspace = new TemporaryDirectory();
 		var local = workspace.CreateFolder("local");
-		var deviceSpelling = $@"\\?\{local}";
-		Assert.True(McpRemoteProviderPath.ReachesRemoteProvider(deviceSpelling));
-		using var resolver = CreateOfflineResolver(deviceSpelling);
+		var outside = workspace.CreateFolder("outside");
+		using var resolver = CreateOfflineResolver(local);
 
 		var resolved = await resolver.ResolveAsync(
-			deviceSpelling,
+			$@"\\?\{local}",
 			branch: null,
 			TestContext.Current.CancellationToken);
-		var refusal = await Assert.ThrowsAsync<McpToolException>(() =>
-			resolver.ResolveAsync(
-				$@"\\?\{workspace.CreateFolder("unlisted")}",
-				branch: null,
-				TestContext.Current.CancellationToken));
+		var unknown = await Assert.ThrowsAsync<McpToolException>(() =>
+			resolver.ResolveAsync($@"\\?\{outside}", branch: null, TestContext.Current.CancellationToken));
 
-		Assert.Equal(
-			McpRootJailFileStreamOpener.ResolveDirectoryPath(
-				McpRootRegistry.ResolvePhysicalExistingPath(local, requireDirectory: true)),
-			resolved.Root);
-		Assert.Equal(McpErrorCodes.InvalidArguments, refusal.Code);
+		Assert.Equal(PhysicalPathOf(local), resolved.Root);
+		// Not the refusal: an unlisted local directory is unknown, exactly as it was before.
+		Assert.Equal(McpErrorCodes.UnknownProject, unknown.Code);
 	}
+
+	/// <summary>
+	/// The operator keeps the last word. A root listed at startup stays addressable in any spelling
+	/// that resolves to the recorded one, because deciding that is lexical work over the startup
+	/// table and opens nothing.
+	/// </summary>
+	/// <remarks>
+	/// A doubled leading separator is the one refused spelling that can be pointed at an ordinary
+	/// local directory without a share, which is what makes this runnable. Unix collapses it, so the
+	/// canonical comparison is what has to recognise it.
+	/// </remarks>
+	[Fact]
+	public async Task ARootListedAtStartupStaysAddressableUnderAnySpellingOfItself()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("A doubled leading separator names a host on Windows, not a local directory.");
+
+		using var workspace = new TemporaryDirectory();
+		var local = workspace.CreateFolder("local");
+		var doubled = "/" + local;
+		Assert.True(McpRemoteProviderPath.ReachesRemoteProvider(doubled));
+		using var resolver = CreateOfflineResolver(local);
+
+		var resolved = await resolver.ResolveAsync(
+			doubled,
+			branch: null,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(PhysicalPathOf(local), resolved.Root);
+	}
+
+	/// <summary>
+	/// The trailing separator, the forward-slash spelling and the extended-length spelling of a
+	/// listed root all name the same recorded root. This settles the comparison itself, which is
+	/// pure, so it needs no share to stand behind the path.
+	/// </summary>
+	[Fact]
+	public void EverySpellingOfAListedRootIsRecognised()
+	{
+		using var workspace = new TemporaryDirectory();
+		var local = workspace.CreateFolder("local");
+		var registry = new McpRootRegistry([local]);
+		var separator = Path.DirectorySeparatorChar;
+
+		using var probes = McpProjectPathProbe.Count();
+
+		Assert.True(registry.IsConfiguredRootSpelling(local));
+		Assert.True(registry.IsConfiguredRootSpelling(local + separator));
+		Assert.True(registry.IsConfiguredRootSpelling("  " + local + "  "));
+		Assert.True(registry.IsConfiguredRootSpelling(local.Replace(separator, '/')));
+		Assert.False(registry.IsConfiguredRootSpelling(Path.Combine(local, "nested")));
+		if (OperatingSystem.IsWindows())
+			Assert.True(registry.IsConfiguredRootSpelling($@"\\?\{local}"));
+
+		// Deciding any of this opened nothing, which is what allows it to be asked before the shape
+		// has been cleared to touch the filesystem.
+		Assert.Equal(0, probes.Value);
+	}
+
+	private static string PhysicalPathOf(string path) =>
+		McpRootJailFileStreamOpener.ResolveDirectoryPath(
+			McpRootRegistry.ResolvePhysicalExistingPath(path, requireDirectory: true));
 
 	/// <summary>
 	/// A server without remote permission never builds its remote machinery, so the factory throws:
