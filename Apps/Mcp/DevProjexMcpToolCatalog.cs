@@ -187,11 +187,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "items": { "type": "string", "minLength": 1, "maxLength": 512 },
 	        "description": "Same syntax and matcher as include_patterns."
 	      },
-	      "detail": {
-	        "type": "string",
-	        "enum": ["full", "compact", "signatures"],
-	        "description": "Level for files this entry claims."
-	      }
+	      "detail": { "type": "string", "enum": ["full", "compact", "signatures"] }
 	    },
 	    "required": ["patterns", "detail"],
 	    "additionalProperties": false
@@ -640,8 +636,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	            "additionalProperties": false
 	          }
 	        },
-	        "includedFilesTruncated": { "type": "boolean", "description": "True when the bounds omitted admitted entries." },
-	        "additionalIncludedFileCount": { "type": "integer", "minimum": 0, "description": "Admitted files omitted from includedFiles." },
+	        "includedFilesTruncated": { "type": "boolean" },
+	        "additionalIncludedFileCount": { "type": "integer", "minimum": 0 },
 	        "includedOrderDigest": { "type": "string", "description": "Hash of the complete ordered admitted path list, so equality with a pack is checkable without listing it. Compare only across calls with the same rank and focus." },
 	        "skippedFiles": {
 	          "type": "array",
@@ -659,7 +655,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	            "additionalProperties": false
 	          }
 	        },
-	        "additionalSkippedFileCount": { "type": "integer", "minimum": 0, "description": "Skipped files omitted from skippedFiles." },
+	        "additionalSkippedFileCount": { "type": "integer", "minimum": 0 },
 	        "detail": { "type": "string", "enum": ["full", "compact", "signatures"], "description": "Effective default detail level the admission was measured at." }
 	      },
 	      "required": ["budget", "includedFileCount", "skippedFileCount", "includedEstimatedTokens", "skippedEstimatedTokens", "includedFiles", "includedFilesTruncated", "additionalIncludedFileCount", "includedOrderDigest", "skippedFiles", "additionalSkippedFileCount", "detail"],
