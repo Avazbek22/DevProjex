@@ -292,43 +292,43 @@ against the same measurement on the unmodified base, with a ten per cent allowan
 measurement is not grounds to accept or reject the signal. The registered evaluation criterion in
 `tools/RankingEval/registry.json` keeps its own seven-repetition median independently of this.
 
-The measurement was taken after the criterion was registered. Warm ranking medians of five
-independent `measure-one` processes per repository, base and signal measured back to back:
+The measurement was taken after the criterion was registered, on the state that merges the
+current `v5.2` into this work, against a base measured on that same `v5.2` tip. Warm
+`importance-v1` medians of five independent `measure-one` processes per repository, base and
+signal measured back to back in one quiet window:
 
-| Repository | Warm base | Warm with the signal | Change |
-|---|---:|---:|---:|
-| DevProjex | `1009.83` | `1046.77` | `+3.7%` |
-| Repomix | `541.85` | `522.04` | `-3.7%` |
-| Flask | `210.49` | `194.26` | `-7.7%` |
+| Repository | Warm base | Warm with the signal | Change | Signal samples |
+|---|---:|---:|---:|---|
+| DevProjex | `943.29` | `817.01` | `-13.4%` | `814, 806, 819, 817, 833` |
+| Repomix | `376.17` | `380.35` | `+1.1%` | `406, 380, 390, 375, 377` |
+| Flask | `164.13` | `166.40` | `+1.4%` | `166, 164, 178, 168, 161` |
 
-All three are inside the ten per cent allowance. Two caveats belong with those numbers. Warm
-ranking reuses the cached index - `measure-index-one` reports `parsed=0, reused=2299` for the warm
-DevProjex cell - so this figure observes only the one dictionary probe per candidate that role
-classification adds, not the extraction side. And an earlier pair of five-run sets taken while the
-machine was busier produced base medians of `1095.38`, `658.57` and `375.69` milliseconds for the
-same unmodified code, a spread wider than the allowance itself, which is why the criterion was
-registered as a repeated measurement rather than a single run.
+All three are inside the ten per cent allowance. The two repositories that contain no C# moved
+`+1.1%` and `+1.4%`, which is the run-to-run floor for this window, so the DevProjex figure is
+outside the noise rather than inside it. Warm ranking reuses the cached index -
+`measure-index-one` reports `parsed=0, reused=2299` for the warm DevProjex cell - so the saving
+is not in the timed ranking itself; it comes from the untimed warm-up pass in the same process,
+which no longer materializes and discards every C# method body.
 
-The extraction side is measured with `measure-index-one`, which times
-`DependencyFactsEngine.IndexAsync` directly. Medians of five isolated processes per cell:
+The extraction path is measured directly with `measure-index-one`, medians of five isolated
+processes per cell:
 
 | Repository | Cold base | Cold with the signal | Change | Warm base | Warm with the signal | Change |
 |---|---:|---:|---:|---:|---:|---:|
-| DevProjex | `2415.39` | `2160.28` | `-10.6%` | `60.51` | `54.43` | `-10.0%` |
-| Repomix | `359.39` | `325.66` | `-9.4%` | `92.35` | `85.09` | `-7.9%` |
-| Flask | `241.10` | `210.75` | `-12.6%` | `6.01` | `5.55` | `-7.7%` |
+| DevProjex | `1774.63` | `1753.64` | `-1.2%` | `39.57` | `41.23` | `+4.2%` |
+| Repomix | `276.99` | `269.50` | `-2.7%` | `67.92` | `67.48` | `-0.6%` |
+| Flask | `181.01` | `183.68` | `+1.5%` | `4.13` | `4.13` | `+0.1%` |
 
-No cell is slower. The C# corpus is the only one whose extraction changed, yet Repomix and Flask
-moved by the same order, so the improvement cannot be attributed above run-to-run drift; what the
-table does establish is that the signal costs nothing measurable. Making a method declaration a
-compact capture is the reason a saving is plausible at all: its body is no longer materialized and
-discarded on every C# file.
+Indexing is unchanged within the measurement floor. An earlier pair of runs taken while the
+machine was busier read `-10.6%` on DevProjex cold, but Repomix and Flask moved the same way with
+byte-identical code paths, so that reading was drift; the quiet window above resolves it to
+`-1.2%`. The honest statement is that the signal costs nothing measurable on either path.
 
-The frozen evaluation was re-run on the registered three-repository corpus: every cell is identical
-to the base run, and the registered release criterion passes. The signal is not inert on that
-corpus. `Apps/TerminalHost/Program.cs`, `Apps/Avalonia/Program.cs` and
-`tools/DependencyFactsSpike/Program.cs` declare `public static int Main(string[] args)`, and
-`Packaging/GrammarDeliveryProbe/Program.cs`, `tools/SegmentedRedactionBenchmark/Program.cs` and
-`tools/StoreMediaCapture/Program.cs` are top-level-statement files, so both branches of the
-evidence fire. The role weight of `0.05` does not move any registered task's admitted set at any
-registered budget.
+The frozen evaluation was re-run on the merged state and compared cell by cell against a base run
+taken on the same `v5.2` tip: every cell is identical, and the registered release criterion
+passes. The signal is not inert on that corpus. `Apps/TerminalHost/Program.cs`,
+`Apps/Avalonia/Program.cs` and `tools/DependencyFactsSpike/Program.cs` declare
+`public static int Main(string[] args)`, and `Packaging/GrammarDeliveryProbe/Program.cs`,
+`tools/SegmentedRedactionBenchmark/Program.cs` and `tools/StoreMediaCapture/Program.cs` are
+top-level-statement files, so both branches of the evidence fire. The role weight of `0.05` does
+not move any registered task's admitted set at any registered budget.
