@@ -43,6 +43,12 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("ProxyCommand", security, StringComparison.Ordinal);
 		Assert.Contains("same operating-system user", security, StringComparison.Ordinal);
 		Assert.Contains("paths, names, configuration keys, parser reasons", security, StringComparison.Ordinal);
+		Assert.Contains("only over `https` or `ssh`", security, StringComparison.Ordinal);
+		Assert.Contains("That transport set is fixed in the build", security, StringComparison.Ordinal);
+		Assert.Contains(
+			"no environment variable, profile, configuration file, or command-line value widens it",
+			security,
+			StringComparison.Ordinal);
 		Assert.Contains("d318b683471101618febed18996405ad26462110", benchmarks, StringComparison.Ordinal);
 		Assert.Contains("85e3969b010c72b905203812d1a3f5beb84a2102", benchmarks, StringComparison.Ordinal);
 		Assert.Contains("three", benchmarks, StringComparison.OrdinalIgnoreCase);
