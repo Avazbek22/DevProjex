@@ -40,8 +40,13 @@ whose diffs cannot affect them.
 | [34361399181](https://github.com/Avazbek22/DevProjex/actions/runs/34361399181) | `fe69ba2` | `fix/mcp-remote-trailer-and-analyze-metrics` | CI (macOS / Integration) | `DependencyProgress…` | `Assert.InRange() Failure` · `Range: (2 - 20)` · `Actual: 1` |
 | [34364269973](https://github.com/Avazbek22/DevProjex/actions/runs/34364269973) | `b62a612` | `v5.2` | CI (macOS / Integration) | `DependencyProgress…` | `Expected: 100` · `Actual: 10.0065002` |
 | [34370676670](https://github.com/Avazbek22/DevProjex/actions/runs/34370676670) | `e056940` | `v5.2` | CI (Windows / Integration), also Linux and macOS | `DependencyProgress…` | `Test execution timed out after 60000 milliseconds` |
+| [34586921966](https://github.com/Avazbek22/DevProjex/actions/runs/34586921966) | `596def1` | `chore/ci-known-failures` | CI (Windows / Terminal) | `RealProcessThrottles…` | `Expected: 100` · `Actual: 10.0065002` |
 
-None of those branches touches progress reporting; `b62a612` and `e056940` are merges into `v5.2`.
+None of those branches touches progress reporting; `b62a612` and `e056940` are merges into `v5.2`,
+and `596def1` changes only CI scripts and this document — the clearest evidence available that the
+change under test cannot be the cause. That occurrence also puts `10.0065002` on the Terminal test,
+a value previously seen only on its Integration sibling, which is what one would expect if the two
+share a mechanism rather than a behaviour.
 Both tests pass locally, the Terminal one in about nine seconds.
 
 **Cause.** One test producing several different final values is the signature of a delivery race,
@@ -117,13 +122,28 @@ close neighbour of the two in entry 1.
 
 ## What now fails that did not
 
-`Scripts/ci/Test-ExecutedTests.ps1` runs after each test step and fails the job when the results
+`Scripts/ci/Test-ExecutedTests.ps1` runs after each test step and fails the job when a results
 directory is absent, when no `.trx` was written, when a `.trx` reports an outcome of `Aborted`,
-`Error` or `Timeout`, or when the executed count is zero.
+`Error` or `Timeout`, or when the executed count is zero. Each results directory is judged on its
+own: a job that writes two of them has to have run something in each, because one full directory
+saying nothing about the other is how a suite that enumerated nothing would pass unnoticed.
 
 It reads the result file rather than the console summary, because the console cannot be trusted for
 either failure above: in entry 2 no `Passed!` or `Failed!` line was printed at all, and in entry 3 a
 `Passed!` line was printed for a run that had been aborted.
+
+The check is itself checked. `Scripts/ci/Test-ExecutedTestsContract.ps1` runs in `prepare-matrix`
+and drives the check in both directions against built fixtures: three runs it must accept and six
+it must reject. A check that quietly became a no-op would fail the six; a check that stopped
+finding results — which is what happened once, when a completed run of 433 tests was reported as
+empty because the UI suite writes its `.trx` elsewhere — fails the three. There is no state in
+which the check does nothing and that script still passes.
+
+That UI divergence is fixed at its cause rather than worked around. The UI suite runs on the
+Microsoft Testing Platform, so its `--results-directory` is passed after `--` to the test
+executable, which resolves a relative path against the test project rather than the repository.
+Those two steps now pass an absolute path, so every suite writes where the workflow says and a
+missing directory means what it says: the step produced nothing.
 
 The two jobs that ran without a `--logger` — `documentation-contracts` and `ranking-eval-tests` —
 now write one, so that they can be checked at all. A stale `--filter` in either of them would

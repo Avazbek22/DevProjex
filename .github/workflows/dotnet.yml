@@ -62,6 +62,10 @@ jobs:
         shell: pwsh
         run: ./Scripts/ci/Test-CiChangePlanner.ps1
 
+      - name: Validate the executed-tests check
+        shell: pwsh
+        run: ./Scripts/ci/Test-ExecutedTestsContract.ps1
+
       - name: Select CI plan
         id: plan
         shell: pwsh
@@ -189,7 +193,7 @@ jobs:
           --no-build
           --verbosity minimal
           --
-          --results-directory "TestResults/${{ matrix.suite_id }}"
+          --results-directory "${{ github.workspace }}/TestResults/${{ matrix.suite_id }}"
           --report-xunit-trx
           --report-xunit-trx-filename "${{ matrix.trx_name }}"
           --timeout 20m
@@ -220,7 +224,7 @@ jobs:
           --no-build
           --verbosity minimal
           --
-          --results-directory "TestResults/${{ matrix.suite_id }}"
+          --results-directory "${{ github.workspace }}/TestResults/${{ matrix.suite_id }}"
           --report-xunit-trx
           --report-xunit-trx-filename "${{ matrix.trx_name }}"
           --timeout 20m
