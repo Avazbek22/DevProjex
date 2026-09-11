@@ -832,8 +832,24 @@ internal sealed class GoDependencyLanguageAdapter : DependencyLanguageAdapter
 					0),
 				[Site(context, capture)]))
 			.ToArray();
+		// A declaration's own name is a type identifier too, and so is every predeclared type, so
+		// neither becomes a reference. A type identifier inside a qualified type names another
+		// package, which is outside this capability, so it is dropped rather than matched against a
+		// same-named local declaration.
+		var declaredAt = context.Declarations
+			.Where(static capture => capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex)
+			.ToHashSet();
+		var qualified = context.References
+			.Where(static capture => capture.Name == "context.qualified_type")
+			.Select(static capture => (capture.StartIndex, capture.EndIndex))
+			.ToArray();
 		var references = Distinct(context.References
-			.Where(static capture => capture.Name == "reference.type")
+			.Where(capture => capture.Name == "reference.type" &&
+				!declaredAt.Contains(capture.StartIndex) &&
+				!PredeclaredTypes.Contains(capture.Text) &&
+				!qualified.Any(span =>
+					capture.StartIndex >= span.StartIndex && capture.EndIndex <= span.EndIndex))
 			.Select(capture => new ReferenceFact(
 				EvidenceLayer.TypeReference,
 				capture.Text,
@@ -844,6 +860,14 @@ internal sealed class GoDependencyLanguageAdapter : DependencyLanguageAdapter
 			return Failed(context);
 		return Complete(context, declarations, [], references);
 	}
+
+	/// <summary>Go predeclared type names, which name no file in the manifest.</summary>
+	private static readonly HashSet<string> PredeclaredTypes = new(StringComparer.Ordinal)
+	{
+		"any", "bool", "byte", "comparable", "complex64", "complex128", "error", "float32",
+		"float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8",
+		"uint16", "uint32", "uint64", "uintptr"
+	};
 
 	/// <summary>The directory that is the Go package, from an already portable relative path.</summary>
 	private static string PackageDirectory(string relativePath)

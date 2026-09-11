@@ -1140,6 +1140,51 @@ public sealed class DependencyFactsEngineIntegrationTests
 			edge.Reference.Contains("example.com", StringComparison.Ordinal));
 	}
 	[Fact]
+	public async Task GoFacts_IgnorePredeclaredTypesDeclarationNamesAndOtherPackages()
+	{
+		using var fixture = new TemporaryDirectory();
+		var alpha = fixture.CreateFile("alpha/kind.go", """
+			package alpha
+
+			type Shared struct {
+			}
+			""");
+		var beta = fixture.CreateFile("beta/kind.go", """
+			package beta
+
+			type Shared struct {
+				Name string
+				Count int
+			}
+			""");
+		var consumer = fixture.CreateFile("beta/use.go", """
+			package beta
+
+			import "example.com/module/alpha"
+
+			func Borrow() alpha.Shared {
+				return alpha.Shared{}
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[alpha, beta, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// A declaration's own name is not a reference to itself.
+		Assert.DoesNotContain(result.Edges, edge => edge.Source == "beta/kind.go" &&
+			edge.Target == "beta/kind.go");
+		// Predeclared types name no file and produce no edge.
+		Assert.DoesNotContain(result.Edges, edge =>
+			edge.Reference == "string" || edge.Reference == "int");
+		// A qualified reference names another package, which is outside this capability, so it is
+		// not matched against the same-named type in this directory.
+		Assert.DoesNotContain(result.Edges, edge => edge.Source == "beta/use.go" &&
+			edge.Reference == "Shared");
+	}
+	[Fact]
 	public async Task PythonFacts_ResolveRelativeImportsAndClassifyKnownStdlibOnly()
 	{
 		using var fixture = new TemporaryDirectory();
