@@ -295,8 +295,8 @@ public sealed class ImportanceRankingService(
 		foreach (var (path, version) in versions)
 		{
 			if (version.ContentHash is not { } captured ||
-			    !observations.TryGetValue(path, out var observation) ||
-			    observation.ContentDigest is not { } observed)
+				!observations.TryGetValue(path, out var observation) ||
+				observation.ContentDigest is not { } observed)
 				continue;
 			if (!string.Equals(captured, observed, StringComparison.Ordinal))
 				return true;

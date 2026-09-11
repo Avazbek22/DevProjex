@@ -340,7 +340,7 @@ public sealed class ImportanceRankingManifestIdentityTests
 		public FileStream Open(string path, int bufferSize, FileShare fileShare, bool asynchronous)
 		{
 			if (Applied < rewrites &&
-			    PathComparer.Default.Equals(Path.GetFullPath(path), Path.GetFullPath(target)))
+				PathComparer.Default.Equals(Path.GetFullPath(path), Path.GetFullPath(target)))
 				Rewrite();
 			return new FileStream(
 				path,
