@@ -60,6 +60,22 @@ public sealed class McpRootRegistry
 				$"Call list_projects and use one of these paths: {string.Join(", ", namedRoots.Select(static root => $"'{root}'"))}.");
 		}
 
+		// A UNC or device path form is refused here, ahead of the resolution below rather than after
+		// it. Everything from this point opens the path, and opening one of those forms is what makes
+		// the operating system contact a host: the answer would already have travelled over the
+		// network by the time the containment comparison at the end of this method could reject it.
+		// A form listed at startup stays addressable by its recorded spelling, which is decided by
+		// the name lookup above and by the comparison here, both of them in memory.
+		if (McpRemoteProviderPath.ReachesRemoteProvider(requestedProject) &&
+		    !IsConfiguredRootSpelling(requestedProject))
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: 'project' uses a UNC or device path form, which is " +
+				"refused before any filesystem access so that naming one cannot make the server contact " +
+				$"a host. Call list_projects and use a listed name or path: {FormatRoots()}.");
+		}
+
 		string physical;
 		try
 		{
@@ -74,6 +90,20 @@ public sealed class McpRootRegistry
 		var match = _roots.FirstOrDefault(root => StringComparer.Ordinal.Equals(root, physical));
 		return match ?? throw UnknownProject(requestedProject);
 	}
+
+	/// <summary>
+	/// Whether the string is one of the root spellings this server was started with, compared as
+	/// written.
+	/// </summary>
+	/// <remarks>
+	/// A comparison over the table the constructor built: it opens nothing, which is what makes it
+	/// safe to ask about a path shape that has not yet been cleared for filesystem access. Roots
+	/// given at startup are the operator's own choice, so a remote one among them stays usable.
+	/// </remarks>
+	internal bool IsConfiguredRootSpelling(string? path) =>
+		path is not null &&
+		_lexicalRootsByPhysical.Values.Any(
+			spellings => spellings.Contains(path, StringComparer.Ordinal));
 
 	public string ResolveExistingPath(string projectRoot, string path, bool requireDirectory = false)
 	{

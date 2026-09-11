@@ -39,6 +39,23 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ThrowIfDisposed();
+
+		// Before anything reads the string: a remote-provider form is refused here, ahead of both
+		// the repository-url classifier and local root resolution, because both of those open the
+		// path and opening a remote form contacts a host. The operator decides whether this server
+		// reaches the network; a client naming a path must not be able to decide it instead. An
+		// already configured root stays addressable by its listed spelling, which is an in-memory
+		// comparison and opens nothing.
+		if (McpRemoteProviderPath.ReachesRemoteProvider(project) &&
+		    !_localRoots.IsConfiguredRootSpelling(project))
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: 'project' uses a UNC or device path form. " +
+				"Those are refused before any filesystem access, so that naming one cannot make the " +
+				"server contact a host. Call list_projects and use a listed name or path.");
+		}
+
 		if (!LooksLikeRepositoryUrl(project))
 		{
 			if (branch is not null)
