@@ -181,6 +181,34 @@ public sealed record DependencyIndexMetrics(
 	long ElapsedMilliseconds,
 	bool ResolutionCacheHit);
 
+/// <summary>
+/// How much an indexing pass learned about one file's bytes while it built the snapshot.
+/// </summary>
+public enum DependencySourceObservationKind
+{
+	/// <summary>The pass did not observe the file's content.</summary>
+	None,
+
+	/// <summary>The pass read the file's bytes and reported their digest.</summary>
+	Read,
+
+	/// <summary>
+	/// A preparation cached from an earlier pass was reused, so nothing was read this time.
+	/// </summary>
+	ReusedPreparation
+}
+
+/// <summary>
+/// What an indexing pass observed of one file's content. <see cref="ContentDigest"/> is the
+/// uppercase hexadecimal SHA-256 of the raw bytes the extractor read, and is present only for
+/// <see cref="DependencySourceObservationKind.Read"/>. A caller that hashed the same file
+/// before indexing can compare the two digests to learn whether it was rewritten in between;
+/// where there is no digest there was no second observation to compare against.
+/// </summary>
+public readonly record struct DependencySourceObservation(
+	DependencySourceObservationKind Kind,
+	string? ContentDigest = null);
+
 public sealed record DependencyIndexSnapshot(
 	string SourceRoot,
 	string ManifestGeneration,
@@ -195,6 +223,13 @@ public sealed record DependencyIndexSnapshot(
 {
 	public IReadOnlyDictionary<string, FileFacts> FileByPath { get; init; } =
 		new Dictionary<string, FileFacts>(StringComparer.Ordinal);
+
+	/// <summary>
+	/// What this pass observed of each manifest file's content, keyed by absolute path. A
+	/// snapshot served whole from the cache observed nothing and reports nothing.
+	/// </summary>
+	public IReadOnlyDictionary<string, DependencySourceObservation> ContentObservations { get; init; } =
+		new Dictionary<string, DependencySourceObservation>(StringComparer.Ordinal);
 }
 
 public sealed record RelatedFile(

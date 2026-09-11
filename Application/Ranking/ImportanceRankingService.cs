@@ -229,6 +229,7 @@ public sealed class ImportanceRankingService(
 			HasMissingSignals = hasMissingSignals,
 			MissingSignalPolicy = MissingSignalPolicy,
 			SourceVersions = sourceVersions,
+			SourceObservations = dependency.ContentObservations,
 			DependencyMetrics = dependency.Metrics
 		};
 		return focus is null
@@ -257,10 +258,10 @@ public sealed class ImportanceRankingService(
 	{
 		for (var attempt = 0; attempt < 2; attempt++)
 		{
-			var before = await CaptureVersionsAsync(candidatePaths, cancellationToken)
+			var versions = await CaptureVersionsAsync(candidatePaths, cancellationToken)
 				.ConfigureAwait(false);
 			var contentIdentities = new DependencyManifestContentIdentities(
-				before.ToDictionary(
+				versions.ToDictionary(
 					static pair => pair.Key,
 					static pair => pair.Value.ContentHash ?? string.Empty,
 					PathComparer.Default));
@@ -272,13 +273,36 @@ public sealed class ImportanceRankingService(
 					cancellationToken,
 					contentIdentities)
 				.ConfigureAwait(false);
-			var after = await CaptureVersionsAsync(candidatePaths, cancellationToken)
-				.ConfigureAwait(false);
-			if (VersionsEqual(before, after))
-				return (snapshot, after);
+			if (!ContentChangedDuringIndexing(versions, snapshot.ContentObservations))
+				return (snapshot, versions);
 		}
 
 		throw new IOException("Selected source files changed while dependency facts were being indexed.");
+	}
+
+	/// <summary>
+	/// Indexing reads every file it prepares, and the snapshot reports the digest of the bytes
+	/// it read. That digest and the one captured above are two observations of the same file at
+	/// two moments, so comparing them detects a rewrite that happened in between, including one
+	/// that leaves length and write time untouched. Files the pass did not read carry no digest
+	/// and are not compared: there is no second observation to compare them against, and the
+	/// report says so for each of them.
+	/// </summary>
+	private static bool ContentChangedDuringIndexing(
+		IReadOnlyDictionary<string, RankingSourceVersion> versions,
+		IReadOnlyDictionary<string, DependencySourceObservation> observations)
+	{
+		foreach (var (path, version) in versions)
+		{
+			if (version.ContentHash is not { } captured ||
+			    !observations.TryGetValue(path, out var observation) ||
+			    observation.ContentDigest is not { } observed)
+				continue;
+			if (!string.Equals(captured, observed, StringComparison.Ordinal))
+				return true;
+		}
+
+		return false;
 	}
 
 	private static async Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsAsync(
@@ -296,11 +320,6 @@ public sealed class ImportanceRankingService(
 		return versions;
 	}
 
-	private static bool VersionsEqual(
-		IReadOnlyDictionary<string, RankingSourceVersion> left,
-		IReadOnlyDictionary<string, RankingSourceVersion> right) =>
-		left.Count == right.Count && left.All(pair =>
-			right.TryGetValue(pair.Key, out var version) && version == pair.Value);
 
 	internal static IReadOnlyDictionary<string, double?> RankNormalize(
 		IReadOnlyDictionary<string, double?> values,
