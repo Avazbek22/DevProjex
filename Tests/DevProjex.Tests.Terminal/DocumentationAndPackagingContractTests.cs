@@ -64,7 +64,8 @@ public sealed class DocumentationAndPackagingContractTests
 		var toolNames = ReadCatalogToolNames(rootPath);
 		var readMe = File.ReadAllText(Path.Combine(rootPath, "README.md"));
 		var contract = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
-		var enumeration = ParagraphContaining(readMe, "read-only tools cover the whole workflow");
+		var enumeration = FirstSentence(
+			ParagraphContaining(readMe, "read-only tools cover the whole workflow"));
 
 		foreach (var name in toolNames)
 			Assert.Contains($"`{name}`", enumeration, StringComparison.Ordinal);
@@ -1661,6 +1662,10 @@ public sealed class DocumentationAndPackagingContractTests
 			.ToArray();
 		Assert.NotEmpty(names);
 		Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+
+		// A registration this reader cannot parse must fail loudly rather than lower the count on
+		// both sides of the comparison and let a stale document pass.
+		Assert.Equal(Regex.Matches(catalog, @"Create\(\s*target,").Count, names.Length);
 		return names;
 	}
 
@@ -1672,6 +1677,16 @@ public sealed class DocumentationAndPackagingContractTests
 			.FirstOrDefault(block => block.Contains(marker, StringComparison.Ordinal));
 		Assert.True(paragraph is not null, $"No paragraph contains '{marker}'.");
 		return paragraph!;
+	}
+
+	/// <summary>
+	/// The opening sentence of a paragraph, so that a name mentioned in later prose cannot stand in
+	/// for a name missing from the enumeration itself.
+	/// </summary>
+	private static string FirstSentence(string paragraph)
+	{
+		var end = paragraph.IndexOf(". ", StringComparison.Ordinal);
+		return end < 0 ? paragraph : paragraph[..(end + 1)];
 	}
 
 	private static string CountWord(int value) => value switch
