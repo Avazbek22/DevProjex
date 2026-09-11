@@ -11,6 +11,125 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyFactsEngineIntegrationTests
 {
 	[Fact]
+	public async Task JavaFactsResolveManifestTypesAndKeepMembersInNavigationOnly()
+	{
+		using var fixture = new TemporaryDirectory();
+		var dependency = fixture.CreateFile("src/sample/Dependency.java", "package sample; public class Dependency { }");
+		var remote = fixture.CreateFile("src/library/Remote.java", "package library; public interface Remote { }");
+		var consumer = fixture.CreateFile("src/sample/Consumer.java", """
+			package sample;
+			import library.Remote;
+			public class Consumer extends Dependency implements Remote {
+			    private Dependency value;
+			    public Dependency read() { return value; }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[dependency, remote, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "src/sample/Consumer.java");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName == "sample.Consumer");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/sample/Consumer.java" &&
+			edge.Target == "src/sample/Dependency.java" && edge.Reference == "Dependency");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/sample/Consumer.java" &&
+			edge.Target == "src/library/Remote.java" && edge.Layer == EvidenceLayer.ExplicitImport);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "sample.Consumer.read" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.EndsWith(".read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task JavaNavigationDistinguishesNestedOwnersAndOverloads()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Members.java", """
+			package sample;
+			class First { void run() { } void run(int value) { } }
+			class Second { void run() { } }
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations
+			.Where(static declaration => declaration.Kind == NavigationSymbolKind.Method)
+			.Select(static declaration => declaration.Name)
+			.ToArray();
+
+		Assert.Equal(["sample.First.run", "sample.First.run#2", "sample.Second.run"], names);
+		Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+	}
+
+	[Fact]
+	public async Task JavaSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Broken.java", "package sample; class Broken { Missing value");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Equal("syntax tree contains errors", facts.StatusReason);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
+	public async Task JavaMavenAndGradleProjectReferencesBoundCrossScopeImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var mavenLibrary = fixture.CreateFile("maven-lib/pom.xml", """
+			<project><modelVersion>4.0.0</modelVersion><groupId>sample</groupId><artifactId>library</artifactId></project>
+			""");
+		var mavenLibrarySource = fixture.CreateFile(
+			"maven-lib/src/main/java/library/Remote.java",
+			"package library; public class Remote { }");
+		var mavenApp = fixture.CreateFile("maven-app/pom.xml", """
+			<project><modelVersion>4.0.0</modelVersion><groupId>sample</groupId><artifactId>app</artifactId>
+			<dependencies><dependency><groupId>sample</groupId><artifactId>library</artifactId></dependency></dependencies></project>
+			""");
+		var mavenAppSource = fixture.CreateFile(
+			"maven-app/src/main/java/app/App.java",
+			"package app; import library.Remote; public class App { Remote value; }");
+		var gradleLibrary = fixture.CreateFile("gradle/lib/build.gradle", "plugins { id 'java' }");
+		var gradleLibrarySource = fixture.CreateFile(
+			"gradle/lib/src/main/java/shared/Service.java",
+			"package shared; public class Service { }");
+		var gradleApp = fixture.CreateFile(
+			"gradle/app/build.gradle",
+			"dependencies { implementation(project(\":gradle:lib\")) }");
+		var gradleAppSource = fixture.CreateFile(
+			"gradle/app/src/main/java/client/Client.java",
+			"package client; import shared.Service; public class Client { Service value; }");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[mavenLibrary, mavenLibrarySource, mavenApp, mavenAppSource,
+				gradleLibrary, gradleLibrarySource, gradleApp, gradleAppSource],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("maven-app/src/main/java/app/App.java", StringComparison.Ordinal) &&
+			edge.Target == "maven-lib/src/main/java/library/Remote.java" && edge.CrossScope);
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("gradle/app/src/main/java/client/Client.java", StringComparison.Ordinal) &&
+			edge.Target == "gradle/lib/src/main/java/shared/Service.java" && edge.CrossScope);
+	}
+
+	[Fact]
 	public async Task NavigationMembersRemainSeparateFromResolutionDeclarations()
 	{
 		using var fixture = new TemporaryDirectory();

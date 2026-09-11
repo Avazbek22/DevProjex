@@ -882,6 +882,123 @@ internal sealed class GoDependencyLanguageAdapter : DependencyLanguageAdapter
 		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
 }
 
+internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
+{
+	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
+		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+		{
+			["declaration.class"] = SymbolKind.Class,
+			["declaration.interface"] = SymbolKind.Interface,
+			["declaration.enum"] = SymbolKind.Enum,
+			["declaration.record"] = SymbolKind.Record
+		};
+
+	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(limits);
+		if (context.HasSyntaxErrors)
+			return Failed(context, "syntax tree contains errors");
+
+		var packageName = context.Declarations
+			.Where(static capture => capture.Name == "context.namespace")
+			.Select(static capture => capture.CapturedName)
+			.FirstOrDefault(static name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty;
+		var declarationCaptures = context.Declarations
+			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName))
+			.ToArray();
+		var declarations = declarationCaptures.Select(capture =>
+		{
+			var owners = declarationCaptures
+				.Where(candidate => candidate.StartIndex < capture.StartIndex && candidate.EndIndex >= capture.EndIndex)
+				.OrderBy(static candidate => candidate.StartIndex)
+				.Select(static candidate => candidate.CapturedName!)
+				.ToArray();
+			var localName = owners.Length == 0
+				? capture.CapturedName!
+				: string.Join('.', owners.Append(capture.CapturedName!));
+			var qualifiedName = packageName.Length == 0 ? localName : $"{packageName}.{localName}";
+			return new DeclarationFact(
+				new SymbolIdentity(context.ScopeId, context.LanguageId, Kinds[capture.Name], qualifiedName, capture.GenericArity),
+				[Site(context, capture)])
+			{
+				ContainingNamespace = packageName,
+				ContainingType = owners.Length == 0
+					? null
+					: packageName.Length == 0 ? string.Join('.', owners) : $"{packageName}.{string.Join('.', owners)}"
+			};
+		}).ToArray();
+
+		var imports = context.References
+			.Where(static capture => capture.Name == "import.java" && capture.ImportSyntax is not null)
+			.Select(capture =>
+			{
+				var syntax = capture.ImportSyntax!;
+				var binding = syntax.Bindings.Single();
+				return new ImportFact(syntax.Specifier, null, null, binding.IsWildcard, 0, Site(context, capture));
+			}).ToArray();
+		var declarationNames = declarationCaptures
+			.Where(static capture => capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex)
+			.ToHashSet();
+		var importRanges = context.References
+			.Where(static capture => capture.Name == "import.java")
+			.Select(static capture => (capture.StartIndex, capture.EndIndex))
+			.ToArray();
+		var references = Distinct(context.References
+			.Where(capture => capture.Name == "reference.type" &&
+				!declarationNames.Contains(capture.StartIndex) &&
+				!PrimitiveTypes.Contains(capture.Text) &&
+				!importRanges.Any(range => capture.StartIndex >= range.StartIndex && capture.EndIndex <= range.EndIndex))
+			.Select(capture =>
+			{
+				var containingTypes = declarationCaptures
+					.Where(candidate => candidate.StartIndex < capture.StartIndex && candidate.EndIndex >= capture.EndIndex)
+					.OrderBy(static candidate => candidate.StartIndex)
+					.Select(static candidate => candidate.CapturedName!)
+					.ToArray();
+				return new ReferenceFact(
+				EvidenceLayer.TypeReference,
+				capture.Text,
+				0,
+				capture.NodeType,
+				Site(context, capture))
+			{
+				ContainingNamespace = packageName,
+				ContainingType = containingTypes.Length == 0
+					? null
+					: packageName.Length == 0 ? string.Join('.', containingTypes) : $"{packageName}.{string.Join('.', containingTypes)}",
+				SourceStartIndex = capture.StartIndex
+			};
+			}));
+		if (declarations.Length + imports.Length + references.Count > limits.MaximumFactsPerFile)
+			return Failed(context, "fact limit exceeded");
+
+		var importedPackages = imports.Where(static import => import.IsWildcard)
+			.Select(static import => import.Specifier).Distinct(StringComparer.Ordinal).ToArray();
+		var aliases = imports.Where(static import => !import.IsWildcard)
+			.GroupBy(static import => import.Specifier.Split('.').Last(), StringComparer.Ordinal)
+			.Where(static group => group.Select(static import => import.Specifier)
+				.Distinct(StringComparer.Ordinal).Take(2).Count() == 1)
+			.ToDictionary(
+				static group => group.Key,
+				static group => group.First().Specifier,
+				StringComparer.Ordinal);
+		return Complete(context, declarations, imports, references, [packageName], aliases,
+			globalNamespaces: importedPackages);
+	}
+
+	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(
+		context.RelativePath, context.ScopeId, context.LanguageId, context.ContentFingerprint, context.Source.Length,
+		DependencyFileStatus.ExtractionFailed, reason, context.HasSyntaxErrors, context.ErrorNodeKinds,
+		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+
+	private static readonly HashSet<string> PrimitiveTypes = new(StringComparer.Ordinal)
+	{
+		"boolean", "byte", "char", "double", "float", "int", "long", "short", "void", "var"
+	};
+}
+
 internal sealed partial class PythonDependencyLanguageAdapter : DependencyLanguageAdapter
 {
 	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)

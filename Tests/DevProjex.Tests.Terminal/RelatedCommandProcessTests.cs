@@ -5,6 +5,30 @@ namespace DevProjex.Tests.Terminal;
 public sealed class RelatedCommandProcessTests
 {
 	[Fact]
+	public void RealPublishedCommandReportsJavaManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/library/Remote.java", "package library; public class Remote { }");
+		workspace.WriteFile(
+			"project/app/Consumer.java",
+			"package app; import library.Remote; public class Consumer { Remote value; }");
+
+		var result = Run(
+			workspace,
+			"related", "app/Consumer.java",
+			"--project", project,
+			"--direction", "dependencies",
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("library/Remote.java", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"status\": \"unresolved\"", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RealPublishedCommandUsesPythonDottedImportBindingAndPackageBoundaries()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -167,6 +167,25 @@ an absent control file, so its later appearance invalidates a cached dependency 
 existing base is outside the effective manifest, the manifest-snapshot shortcut is bypassed; this
 keeps later edits observable without widening the selected dependency manifest.
 
+Java source files contribute classes, interfaces, enums, records, and annotation types under their
+declared package and complete nesting chain. Exact imports resolve only to matching declarations in
+the allowed manifest; static imports walk back to the nearest declaring type. Same-package types and
+types admitted by an exact or wildcard import are visible to type references. Two visible declarations
+remain ambiguous, and a name elsewhere in the repository is never selected merely because it is the
+only match. Bounded `pom.xml`, `build.gradle`, and `build.gradle.kts` files divide a repository into
+source scopes. Literal Maven `groupId`/`artifactId` dependencies and literal Gradle `project(...)`
+dependencies expose referenced repository scopes transitively. Parent coordinates and Maven dependency
+coordinates are read as data; Gradle scripts are never executed. External artifacts, generated sources,
+annotation-processor output, the JDK class path, interpolated coordinates, and build-script-computed
+source sets are not inferred and remain unresolved.
+
+Java navigation is independent of dependency declarations. It includes packages, nested types,
+methods, constructors, fields, and record compact constructors. Names start with the package and carry
+every owning type. Repeated member names in one owner receive a stable source-order suffix, so every
+navigation name in a file is unique and the exact name printed by search can be passed unchanged to
+`get_file`. A syntax tree containing an error publishes neither recovered declarations nor recovered
+edges.
+
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
 makes resolvable. Top-level `func`, method and `type` declarations are importable names within
@@ -244,7 +263,7 @@ produces `External`.
 
 ## Extraction, limits, and diagnostics
 
-C#, TypeScript/TSX/JavaScript, Python, and Go adapters use shipped Tree-sitter grammars and embedded
+C#, TypeScript/TSX/JavaScript, Python, Go, and Java adapters use shipped Tree-sitter grammars and embedded
 `declarations.scm` and `references.scm` query data. A separate `navigation.scm` projection records
 named types and members with their owner chain, exact line and character ranges, and content
 fingerprint. The owner chain starts with the language namespace, package, or module when one is
@@ -252,7 +271,7 @@ declared, so the exact name printed by search is also the exact `symbol` accepte
 Search annotations and named `get_file` reads use this compact projection; navigation
 members never enter dependency resolution, its fact limits, or the related-file graph. The projection
 currently covers named methods and fields in all five languages, plus C# properties and events,
-TypeScript signatures, and Go interface methods. Anonymous functions, C# accessors and operators,
+TypeScript signatures, Go interface methods, and Java members. Anonymous functions, C# accessors and operators,
 Python lambdas, and Go function literals fall back to the nearest supported named owner rather than
 claiming a false member.
 

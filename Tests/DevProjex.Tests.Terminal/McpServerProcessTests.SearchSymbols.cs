@@ -36,6 +36,12 @@ public sealed partial class McpServerProcessTests
 			"class A:\n    def run(self):\n        return 'member-marker-a'\nclass B:\n    def run(self):\n        return 'member-marker-b'\n(lambda: 'fallback-marker')()\n",
 			"A.run",
 			"B.run"
+		},
+		{
+			"Members.java",
+			"package sample;\nclass A { String run() { return \"member-marker-a\"; } }\nclass B { String run() { return \"member-marker-b\"; } }\n// fallback-marker\n",
+			"sample.A.run",
+			"sample.B.run"
 		}
 	};
 

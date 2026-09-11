@@ -1291,9 +1291,35 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			LanguageId.TypeScript or LanguageId.JavaScript or LanguageId.Tsx => ResolveTypeScriptImport(source, import),
 			LanguageId.Python => ResolvePythonImport(source, import),
+			LanguageId.Java => ResolveJavaImport(source, import),
 			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
 				"explicit imports are context, not dependency edges, for this language", [])
 		};
+
+		private DependencyEdge ResolveJavaImport(FileFacts source, ImportFact import)
+		{
+			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
+			if (import.IsWildcard)
+				return Edge(source, import, ResolutionStatus.Unresolved, null,
+					"wildcard import is resolution context, not a dependency target", []);
+			var qualifiedName = import.Specifier;
+			while (qualifiedName.Length > 0)
+			{
+				var declarations = LookupQualified(source, qualifiedName, 0);
+				var files = declarations.SelectMany(static declaration => declaration.DeclarationSites)
+					.Select(static site => site.File).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+				if (files.Length > 0)
+					return files.Length == 1
+						? Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files)
+						: Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple imported declarations", files);
+				var separator = qualifiedName.LastIndexOf('.');
+				if (separator < 0) break;
+				qualifiedName = qualifiedName[..separator];
+			}
+			return Edge(source, import, ResolutionStatus.Unresolved, null,
+				"no imported declaration in the manifest", []);
+		}
 
 		public long EstimateResolutionWork(FileFacts source, int maximumWork)
 		{
@@ -2151,6 +2177,12 @@ public sealed class DependencyFactsEngine : IDisposable
 			var aliasExpanded = source.LanguageId == LanguageId.CSharp &&
 			                    !reference.IsGlobalQualified &&
 			                    TryExpandCSharpAlias(source, reference, out expandedAlias);
+			if (!aliasExpanded && source.LanguageId == LanguageId.Java && !isSyntacticallyQualified &&
+			    source.Aliases.TryGetValue(simpleName, out var javaImport))
+			{
+				expandedAlias = javaImport;
+				aliasExpanded = true;
+			}
 			var expandedName = aliasExpanded ? expandedAlias! : reference.Name;
 			var requiresQualifiedLookup = isSyntacticallyQualified || aliasExpanded;
 			var expandedArity = aliasExpanded ? GenericArityFromQualifiedName(expandedName) : 0;
@@ -2180,6 +2212,17 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			else if (source.LanguageId == LanguageId.Go)
 				candidates = SelectSamePackageGoCandidates(source, candidates);
+			else if (source.LanguageId == LanguageId.Java)
+			{
+				if (reference.Name.Contains('.') && candidates.Length == 0)
+					candidates = LookupQualified(source,
+						reference.ContainingNamespace.Length == 0
+							? reference.Name
+							: reference.ContainingNamespace + "." + reference.Name,
+							reference.GenericArity);
+				if (!requiresQualifiedLookup)
+					candidates = SelectVisibleJavaCandidates(source, reference, candidates);
+			}
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
@@ -2306,6 +2349,31 @@ public sealed class DependencyFactsEngine : IDisposable
 				candidate.ContainingType is null && candidate.ContainingNamespace.Length == 0).ToArray();
 		}
 
+		private static DeclarationFact[] SelectVisibleJavaCandidates(
+			FileFacts source,
+			ReferenceFact reference,
+			DeclarationFact[] candidates)
+		{
+			if (reference.ContainingType is not null)
+			{
+				var containingType = reference.ContainingType;
+				while (containingType.Length > 0)
+				{
+					var nested = candidates.Where(candidate =>
+						string.Equals(candidate.ContainingType, containingType, StringComparison.Ordinal)).ToArray();
+					if (nested.Length > 0) return nested;
+					var separator = containingType.LastIndexOf('.');
+					if (separator < 0) break;
+					containingType = containingType[..separator];
+				}
+			}
+			var samePackage = candidates.Where(candidate => candidate.ContainingType is null &&
+				string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();
+			if (samePackage.Length > 0) return samePackage;
+			return candidates.Where(candidate => candidate.ContainingType is null &&
+				source.GlobalContextNamespaces.Contains(candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
+		}
+
 		private DeclarationFact[] LookupContextualCSharpQualified(
 			FileFacts source,
 			ReferenceFact reference,
@@ -2364,7 +2432,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				return false;
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
-			return source.LanguageId == LanguageId.CSharp &&
+			return source.LanguageId is LanguageId.CSharp or LanguageId.Java &&
 			       VisibleScopeIds(source.ScopeId).Contains(
 			       declaration.Identity.ScopeId, StringComparer.Ordinal);
 		}
@@ -2620,7 +2688,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (pending.TryDequeue(out var scopeId))
 				{
 					if (!visited.Add(scopeId)) continue;
-					if (scope.LanguageId != LanguageId.CSharp || !scopes.TryGetValue(scopeId, out var current)) continue;
+					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java) ||
+					    !scopes.TryGetValue(scopeId, out var current)) continue;
 					foreach (var projectReference in current.ProjectReferences) pending.Enqueue(projectReference);
 				}
 				result[scope.ScopeId] = visited.Order(StringComparer.Ordinal).ToArray();

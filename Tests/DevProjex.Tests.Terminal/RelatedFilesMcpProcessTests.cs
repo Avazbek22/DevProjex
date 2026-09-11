@@ -9,6 +9,33 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
+	public async Task RealProcessRelatedFilesReportsJavaManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("java-project");
+		workspace.WriteFile("java-project/library/Remote.java", "package library; public class Remote { }");
+		workspace.WriteFile(
+			"java-project/app/Consumer.java",
+			"package app; import library.Remote; public class Consumer { Remote value; }");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "app/Consumer.java",
+				["direction"] = "dependencies"
+			});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("library/Remote.java", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" — unresolved — ", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesPreservesParsedImportSemantics()
 	{
 		using var workspace = new TemporaryDirectory();

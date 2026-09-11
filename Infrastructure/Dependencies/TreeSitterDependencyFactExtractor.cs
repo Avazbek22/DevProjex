@@ -583,6 +583,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		using var cursor = query.Execute(root);
 		var declarations = new List<NavigationDeclaration>();
 		var seen = new HashSet<(int Start, int End, NavigationSymbolKind Kind, string Name)>();
+		var javaNames = language == LanguageId.Java
+			? new Dictionary<string, int>(StringComparer.Ordinal)
+			: null;
 		var visited = 0;
 		string? fileScopedNamespace = null;
 		foreach (var capture in cursor.Captures)
@@ -594,13 +597,22 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				continue;
 			if (language == LanguageId.CSharp && capture.Node.Type == "file_scoped_namespace_declaration")
 				fileScopedNamespace = name;
+			else if (language == LanguageId.Java && capture.Node.Type == "package_declaration")
+				fileScopedNamespace = name;
 			var owners = ReadNavigationOwners(capture.Node, language).ToList();
-			if (fileScopedNamespace is not null && capture.Node.Type != "file_scoped_namespace_declaration")
+			if (fileScopedNamespace is not null &&
+			    capture.Node.Type is not ("file_scoped_namespace_declaration" or "package_declaration"))
 			{
 				owners.Insert(0, fileScopedNamespace);
 			}
 			var owner = owners.Count == 0 ? null : string.Join('.', owners);
 			var qualifiedName = owner is null ? name : $"{owner}.{name}";
+			if (javaNames is not null && capture.Node.Type != "package_declaration")
+			{
+				var ordinal = javaNames.GetValueOrDefault(qualifiedName) + 1;
+				javaNames[qualifiedName] = ordinal;
+				if (ordinal > 1) qualifiedName += $"#{ordinal}";
+			}
 			var kind = capture.Name switch
 			{
 				"navigation.method" => NavigationSymbolKind.Method,
@@ -639,6 +651,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		var named = node.GetChildForField("name") ?? node.GetChildForField("key");
 		if (named is not null)
 			return NormalizeNavigationName(named.Text);
+		if (language == LanguageId.Java && node.Type == "package_declaration")
+			return NormalizeNavigationName(node.NamedChildren.LastOrDefault()?.Text ?? string.Empty);
 
 		if (language == LanguageId.Go)
 		{
@@ -682,6 +696,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			"internal_module" or "function_declaration" or "generator_function_declaration" or
 			"method_definition" or "variable_declarator" or "pair",
 		LanguageId.Go => nodeType is "type_spec" or "function_declaration" or "method_declaration",
+		LanguageId.Java => nodeType is "class_declaration" or "interface_declaration" or
+			"enum_declaration" or "record_declaration" or "annotation_type_declaration" or
+			"method_declaration" or "constructor_declaration" or "compact_constructor_declaration",
 		_ => false
 	};
 
@@ -765,6 +782,21 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var importEvidence = CreateCompactImportEvidence(captureName, importSyntax);
 			return CreateCapture(captureName, node, importEvidence, null, 0, false, false,
 				FindImportOwner(captureName, node, materialization), importSyntax, evidence: importEvidence);
+		}
+		if (captureName == "context.namespace" && node.Type == "package_declaration")
+		{
+			var packageNameNode = node.NamedChildren.LastOrDefault();
+			var packageName = packageNameNode is null ? null : materialization.Read(packageNameNode);
+			return CreateCapture(
+				captureName,
+				node,
+				packageName ?? string.Empty,
+				packageName,
+				0,
+				false,
+				false,
+				capturedNameStartIndex: packageNameNode is null ? -1 : checked((int)packageNameNode.StartIndex),
+				evidence: packageName ?? string.Empty);
 		}
 
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
@@ -966,6 +998,24 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				bindings = [new DependencyImportBinding("*", null, true)];
 			return new DependencyImportSyntax(moduleText[relativeLevel..], relativeLevel, bindings);
 		}
+		if (captureName == "import.java")
+		{
+			var text = materialization.Read(node).Trim();
+			if (!text.StartsWith("import ", StringComparison.Ordinal) || !text.EndsWith(';'))
+				return null;
+			var specifier = text["import ".Length..^1].Trim();
+			if (specifier.StartsWith("static ", StringComparison.Ordinal))
+				specifier = specifier["static ".Length..].Trim();
+			var wildcard = specifier.EndsWith(".*", StringComparison.Ordinal);
+			if (wildcard)
+				specifier = specifier[..^2];
+			return specifier.Length == 0
+				? null
+				: new DependencyImportSyntax(
+					specifier,
+					0,
+					[new DependencyImportBinding(specifier.Split('.').Last(), null, wildcard)]);
+		}
 		return null;
 	}
 
@@ -1100,6 +1150,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".js" or ".mjs" or ".cjs" => LanguageId.JavaScript,
 		".py" or ".pyi" => LanguageId.Python,
 		".go" => LanguageId.Go,
+		".java" => LanguageId.Java,
 		_ => LanguageId.Unsupported
 	};
 
@@ -1435,7 +1486,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.Tsx] = new("tree-sitter-tsx", "tree_sitter_tsx", "typescript", new TypeScriptDependencyLanguageAdapter()),
 				[LanguageId.JavaScript] = new("tree-sitter-javascript", "tree_sitter_javascript", "javascript", new TypeScriptDependencyLanguageAdapter()),
 				[LanguageId.Python] = new("tree-sitter-python", "tree_sitter_python", "python", new PythonDependencyLanguageAdapter()),
-				[LanguageId.Go] = new("tree-sitter-go", "tree_sitter_go", "go", new GoDependencyLanguageAdapter())
+				[LanguageId.Go] = new("tree-sitter-go", "tree_sitter_go", "go", new GoDependencyLanguageAdapter()),
+				[LanguageId.Java] = new("tree-sitter-java", "tree_sitter_java", "java", new JavaDependencyLanguageAdapter())
 			};
 	}
 

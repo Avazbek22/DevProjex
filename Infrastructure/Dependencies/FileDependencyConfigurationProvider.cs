@@ -84,12 +84,14 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var typeScriptConfigFiles = new List<string>();
 		var pythonConfigFiles = new List<string>();
 		var packageFiles = new List<string>();
+		var javaConfigFiles = new List<string>();
 		foreach (var path in manifest.Order(StringComparer.Ordinal))
 		{
 			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
 			if (IsTypeScriptConfig(path)) typeScriptConfigFiles.Add(path);
 			if (IsPythonConfig(path)) pythonConfigFiles.Add(path);
 			if (Path.GetFileName(path).Equals("package.json", StringComparison.OrdinalIgnoreCase)) packageFiles.Add(path);
+			if (IsJavaConfig(path)) javaConfigFiles.Add(path);
 		}
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
@@ -358,6 +360,50 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			{
 				ConfigurationState = python.State,
 				ConfigurationDiagnostic = python.Reason
+			});
+		}
+
+		var javaProjects = new List<(string Path, string ScopeId, string ProjectKey,
+			IReadOnlyList<string> ReferenceKeys, DependencyConfigurationState State, string? Reason)>();
+		foreach (var configPath in javaConfigFiles)
+		{
+			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+			AddFingerprint(configPath, snapshot);
+			var parsed = snapshot.State == DependencyConfigurationState.Valid
+				? ParseJavaProject(root, configPath, snapshot.Content)
+				: ConfigurationParseResult<JavaProjectConfiguration>.Failure(
+					JavaProjectConfiguration.Empty, snapshot.State, snapshot.Reason);
+			var scopeId = "java:" + PortableRelative(root, configPath);
+			javaProjects.Add((configPath, scopeId, parsed.Value.ProjectKey,
+				parsed.Value.ProjectReferences, parsed.State, parsed.Reason));
+			AddDiagnostic(configPath, parsed.State, parsed.Reason, scopeId);
+		}
+		var javaScopeByKey = javaProjects
+			.Where(static project => project.ProjectKey.Length > 0)
+			.GroupBy(static project => project.ProjectKey, StringComparer.Ordinal)
+			.Where(static group => group.Count() == 1)
+			.ToDictionary(static group => group.Key, static group => group.Single().ScopeId, StringComparer.Ordinal);
+		foreach (var project in javaProjects.OrderBy(static project => project.Path, StringComparer.Ordinal))
+		{
+			var references = project.ReferenceKeys
+				.Where(javaScopeByKey.ContainsKey)
+				.Select(key => javaScopeByKey[key])
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				project.ScopeId,
+				Path.GetDirectoryName(project.Path)!,
+				LanguageId.Java,
+				references,
+				null,
+				false,
+				new Dictionary<string, IReadOnlyList<string>>(),
+				null,
+				new HashSet<string>(),
+				[],
+				true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason
 			});
 		}
 
@@ -1052,6 +1098,73 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			static pair => (IReadOnlySet<string>)pair.Value.ToFrozenSet(StringComparer.Ordinal),
 			StringComparer.Ordinal);
 	}
+
+	private static ConfigurationParseResult<JavaProjectConfiguration> ParseJavaProject(
+		string root,
+		string path,
+		string content)
+	{
+		if (Path.GetFileName(path).Equals("pom.xml", StringComparison.OrdinalIgnoreCase))
+		{
+			try
+			{
+				var document = XDocument.Parse(content, LoadOptions.None);
+				var project = document.Root;
+				if (project is null || project.Name.LocalName != "project")
+					return ConfigurationParseResult<JavaProjectConfiguration>.Failure(
+						JavaProjectConfiguration.Empty,
+						DependencyConfigurationState.Corrupt,
+						"Maven project configuration is invalid");
+				string? DirectValue(XElement element, string name) => element.Elements()
+					.FirstOrDefault(candidate => candidate.Name.LocalName == name)?.Value.Trim();
+				var artifact = DirectValue(project, "artifactId");
+				var group = DirectValue(project, "groupId");
+				if (group is null && project.Elements()
+				    .FirstOrDefault(static element => element.Name.LocalName == "parent") is { } parent)
+					group = DirectValue(parent, "groupId");
+				if (string.IsNullOrWhiteSpace(artifact) || string.IsNullOrWhiteSpace(group))
+					return ConfigurationParseResult<JavaProjectConfiguration>.Failure(
+						JavaProjectConfiguration.Empty,
+						DependencyConfigurationState.UnsupportedSemantics,
+						"Maven project coordinates are unavailable");
+				var mavenReferences = project.Elements()
+					.Where(static element => element.Name.LocalName == "dependencies")
+					.SelectMany(static element => element.Elements()
+						.Where(static candidate => candidate.Name.LocalName == "dependency"))
+					.Select(element =>
+					{
+						var dependencyGroup = DirectValue(element, "groupId");
+						var dependencyArtifact = DirectValue(element, "artifactId");
+						return string.IsNullOrWhiteSpace(dependencyGroup) || string.IsNullOrWhiteSpace(dependencyArtifact)
+							? null
+							: $"{dependencyGroup}:{dependencyArtifact}";
+					})
+					.Where(static value => value is not null).Cast<string>()
+					.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+				return ConfigurationParseResult<JavaProjectConfiguration>.Valid(
+					new JavaProjectConfiguration($"{group}:{artifact}", mavenReferences));
+			}
+			catch (Exception exception) when (exception is System.Xml.XmlException or InvalidOperationException)
+			{
+				return ConfigurationParseResult<JavaProjectConfiguration>.Failure(
+					JavaProjectConfiguration.Empty,
+					DependencyConfigurationState.Corrupt,
+					"Maven project configuration is invalid");
+			}
+		}
+
+		var directory = Path.GetDirectoryName(path)!;
+		var relative = PortableRelative(root, directory);
+		var projectKey = relative == "." ? ":" : ":" + relative.Replace('/', ':');
+		var gradleReferences = Regex.Matches(
+			content,
+			"""\bproject\s*\(\s*(?:path\s*=\s*)?['"](?<path>:[^'"]+)['"]\s*\)""",
+			RegexOptions.CultureInvariant)
+			.Select(static match => match.Groups["path"].Value)
+			.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+		return ConfigurationParseResult<JavaProjectConfiguration>.Valid(
+			new JavaProjectConfiguration(projectKey, gradleReferences));
+	}
 	private static readonly Lazy<IReadOnlySet<string>> DotNetCatalog = new(
 		() => LoadCatalog("dotnet-net10.0.json"),
 		LazyThreadSafetyMode.ExecutionAndPublication);
@@ -1064,6 +1177,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 
 	private static bool IsTypeScriptConfig(string path) => Path.GetFileName(path) is "tsconfig.json" or "jsconfig.json";
 	private static bool IsPythonConfig(string path) => Path.GetFileName(path) is "pyproject.toml" or "setup.cfg";
+	private static bool IsJavaConfig(string path) => Path.GetFileName(path) is "pom.xml" or "build.gradle" or "build.gradle.kts";
 	private static void MarkAmbiguousScopeOwnership(
 		IList<DependencyScopeDescriptor> scopes,
 		ICollection<DependencyConfigurationDiagnostic> diagnostics,
@@ -1165,6 +1279,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	private sealed record PythonConfiguration(IReadOnlySet<string> Dependencies, string? Version)
 	{
 		public static PythonConfiguration Default { get; } = new(new HashSet<string>(), null);
+	}
+	private sealed record JavaProjectConfiguration(string ProjectKey, IReadOnlyList<string> ProjectReferences)
+	{
+		public static JavaProjectConfiguration Empty { get; } = new(string.Empty, []);
 	}
 	private sealed record TypeScriptConfiguration(
 		string ModuleResolution,

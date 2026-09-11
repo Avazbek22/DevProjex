@@ -8,6 +8,7 @@ public enum LanguageId
 	Tsx,
 	Python,
 	Go,
+	Java,
 	Unsupported
 }
 
