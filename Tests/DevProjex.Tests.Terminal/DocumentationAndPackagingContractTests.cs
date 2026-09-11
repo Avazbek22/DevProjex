@@ -219,7 +219,13 @@ public sealed class DocumentationAndPackagingContractTests
 			"### Search hits name the declaration that contains them",
 			server,
 			StringComparison.Ordinal);
-		Assert.Contains("Enclosing declarations:", server, StringComparison.Ordinal);
+		Assert.Contains("in P.App.Run", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"Location is therefore spelled once in a response",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("Placement is all or nothing", normalized, StringComparison.Ordinal);
+		Assert.DoesNotContain("Enclosing declarations:", server, StringComparison.Ordinal);
 		Assert.Contains(
 			"[Symbols] annotated=N · files-without-declarations=K.",
 			server,

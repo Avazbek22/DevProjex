@@ -860,6 +860,7 @@ internal sealed class DevProjexMcpTools(
 			var resultGroupTruncated = false;
 			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
 			var writtenHits = new List<McpSearchHit>();
+			var renderedLines = new List<McpSearchRenderedLine>();
 			long inspectedBytes = 0;
 			foreach (var path in plan.IncludedFiles)
 			{
@@ -899,7 +900,8 @@ internal sealed class DevProjexMcpTools(
 							file.Content,
 							match,
 							MaximumSearchContentCharacters,
-							startsNewFile);
+							startsNewFile,
+							renderedLines);
 						startsNewFile = false;
 						shownMatches += appended.WrittenMatches;
 						// Only the lines that reached the caller are worth naming; a match the cap
@@ -923,7 +925,8 @@ internal sealed class DevProjexMcpTools(
 				: await McpSearchSymbols
 					.ResolveAsync(Projects.DependencyFactsEngine, plan, writtenHits, cancellationToken)
 					.ConfigureAwait(false);
-			AppendEnclosingDeclarations(output, symbols);
+			if (!InsertDeclarationHeaders(output, renderedLines, symbols))
+				symbols = McpSearchSymbolResult.None;
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
 				: null;
@@ -2357,24 +2360,73 @@ internal sealed class DevProjexMcpTools(
 		};
 
 	/// <summary>
-	/// Writes the declaration each shown hit sits inside, inside the untrusted block, because a
-	/// declaration name is text this project wrote.
+	/// Writes the declaration a run of hits sits inside as a header inside its own file block, the
+	/// way the path is written: once, and again only when it changes.
 	/// </summary>
-	private static void AppendEnclosingDeclarations(StringBuilder output, McpSearchSymbolResult symbols)
+	/// <remarks>
+	/// Headers are placed into a finished render rather than written during it, which is what makes
+	/// the two rules hold without unwinding anything. A render the character cap cut is left exactly
+	/// as it was, so a capped response spends every character it has on matches; and a header can
+	/// only ever be placed in front of lines that are already present, so none can be left with no
+	/// hit under it. Placement is all or nothing: a header skipped for want of room would leave the
+	/// hits beneath it reading as part of the declaration named above them.
+	/// </remarks>
+	private static bool InsertDeclarationHeaders(
+		StringBuilder output,
+		IReadOnlyList<McpSearchRenderedLine> rendered,
+		McpSearchSymbolResult symbols)
 	{
-		if (symbols.Lines.Count == 0)
-			return;
-		if (output.Length > 0)
-			output.AppendLine();
-		output.AppendLine(McpSearchSymbols.SectionHeading);
-		foreach (var line in symbols.Lines)
+		// Nothing to place is not a failure to place: a search whose files declare nothing still
+		// reports honestly how far the naming reached.
+		if (rendered.Count == 0 || symbols.Names.Count == 0)
+			return true;
+
+		var insertions = new List<(int Offset, string Text)>();
+		var cost = 0;
+		string? file = null;
+		string? named = null;
+		var groupOffset = 0;
+		var groupNamed = false;
+		foreach (var line in rendered)
 		{
-			// The naming shares the search character cap rather than adding to it, so turning it
-			// on cannot make any response larger than the published bound.
-			if (output.Length + line.Length >= MaximumSearchContentCharacters)
-				break;
-			output.AppendLine(line);
+			if (!string.Equals(line.RelativePath, file, StringComparison.Ordinal))
+			{
+				file = line.RelativePath;
+				named = null;
+			}
+
+			if (line.StartsGroup)
+			{
+				groupOffset = line.Offset;
+				groupNamed = false;
+			}
+
+			if (!line.IsMatch ||
+			    !symbols.Names.TryGetValue(new McpSearchHitKey(line.RelativePath, line.LineNumber), out var name) ||
+			    string.Equals(name, named, StringComparison.Ordinal))
+			{
+				continue;
+			}
+
+			// A declaration that changes at a group's first match labels the whole group, so the
+			// header sits above that group's leading context rather than between it and the hit.
+			var header = $"in {name}{Environment.NewLine}";
+			insertions.Add((groupNamed ? line.Offset : groupOffset, header));
+			cost += header.Length;
+			groupNamed = true;
+			named = name;
 		}
+
+		if (insertions.Count == 0)
+			return true;
+
+		// Naming shares the search character cap rather than adding to it.
+		if (output.Length + cost > MaximumSearchContentCharacters)
+			return false;
+
+		for (var index = insertions.Count - 1; index >= 0; index--)
+			output.Insert(insertions[index].Offset, insertions[index].Text);
+		return true;
 	}
 
 	/// <summary>
@@ -2910,7 +2962,8 @@ internal sealed class DevProjexMcpTools(
 		string content,
 		McpSearchMatchContext match,
 		int maximumCharacters,
-		bool startsNewFile = true)
+		bool startsNewFile = true,
+		List<McpSearchRenderedLine>? rendered = null)
 	{
 		// The path heads its own file once. Repeating it on every matched and context line
 		// spent characters on text the reader already had and buried the line number that
@@ -2939,11 +2992,13 @@ internal sealed class DevProjexMcpTools(
 		}
 		var matchingLines = match.MatchLineNumbers.ToHashSet();
 		var writtenMatches = 0;
+		var startsGroup = true;
 		foreach (var line in match.Lines)
 		{
 			var isMatchingLine = matchingLines.Contains(line.LineNumber);
 			var marker = isMatchingLine ? ':' : '-';
 			var prefix = $"{line.LineNumber}{marker}";
+			var lineOffset = output.Length;
 			var remaining = maximumCharacters - output.Length;
 			if (prefix.Length > remaining)
 			{
@@ -2963,6 +3018,15 @@ internal sealed class DevProjexMcpTools(
 			}
 			if (isMatchingLine)
 				writtenMatches++;
+			// Recorded only once the line's text is whole, which is the same point the match is
+			// counted, so a header can never be placed against a line the caller did not receive.
+			rendered?.Add(new McpSearchRenderedLine(
+				relativePath,
+				lineOffset,
+				line.LineNumber,
+				isMatchingLine,
+				startsGroup));
+			startsGroup = false;
 
 			remaining = maximumCharacters - output.Length;
 			if (Environment.NewLine.Length > remaining)

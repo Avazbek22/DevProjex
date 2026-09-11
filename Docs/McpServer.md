@@ -861,13 +861,25 @@ selection that was already empty are all unchanged.
 
 `search_project` names the declaration each shown hit sits inside. There is no
 parameter for it: a hit without the thing that contains it is what made callers
-guess a line range and read twice. After the match lines, inside the same
-untrusted block, the response carries:
+guess a line range and read twice. The name heads its hits inside the file's own
+block, the way the path does, and is written again only when it changes:
 
 ```text
-Enclosing declarations:
-src/App.cs:5: P.App
+src/App.cs
+in P.App.Run
+5:    public int Run() => 1;
+--
+in P.App.Stop
+12:   public int Stop() => 2;
 ```
+
+Location is therefore spelled once in a response: the path heads its block, each
+line carries its number, and no row repeats the two together. A run of hits inside
+one declaration is headed once, so a response that would have listed fifty rows
+carries a handful of headers. A header labels the group it opens, so it sits above
+that group's leading context rather than between the context and the hit, and a
+group whose later matches cross into another declaration is headed again at the
+match that crosses.
 
 A declaration name is text this project wrote, so it stays inside the untrusted
 block with the match lines it describes. Only counts leave it, as one trusted
@@ -884,11 +896,16 @@ transformed text the tool returns and the index parses the file on disk; redacti
 replaces a secret with a placeholder on the same line and adds no lines, so the
 two agree on the only coordinate this uses.
 
-Naming shares the 16,000-character search cap rather than adding to it, and a
-response the cap already cut carries no naming at all, so turning it on cannot make
-any response larger than the bound it already had. The match lines, the `--` group
-separators, the match and file counters, and the "N additional matches" contract are
-unchanged.
+Headers are placed into a finished render rather than written during it, which is
+what makes two rules hold without unwinding anything. A render the character cap cut
+is left exactly as it was, so a capped response carries no naming at all and spends
+every character it has on matches. And a header is only ever placed in front of lines
+that are already present, so no header can be left as the last line of a response
+with no hit under it. Placement is all or nothing: a header skipped for want of room
+would leave the hits beneath it reading as part of the declaration named above them,
+so when the headers do not fit, none are written and the coverage line reports that
+nothing was named. The match lines, the `--` group separators, the match and file
+counters, and the "N additional matches" contract are unchanged.
 
 ### Reading a declaration by name
 

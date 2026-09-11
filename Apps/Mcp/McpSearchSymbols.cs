@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace DevProjex.Mcp;
 
 /// <summary>
@@ -18,8 +16,6 @@ namespace DevProjex.Mcp;
 /// </remarks>
 internal static class McpSearchSymbols
 {
-	public const string SectionHeading = "Enclosing declarations:";
-
 	/// <summary>
 	/// A search can touch many files, and every one of them would be a parse. Hits beyond this many
 	/// distinct files are left unannotated and counted, rather than turning a search into an index.
@@ -87,7 +83,7 @@ internal static class McpSearchSymbols
 				spansByFile[file.RelativePath] = spans;
 		}
 
-		var lines = new List<string>();
+		var names = new Dictionary<McpSearchHitKey, string>();
 		var annotated = 0;
 		var unannotatedFiles = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var hit in hits)
@@ -115,12 +111,12 @@ internal static class McpSearchSymbols
 				continue;
 			}
 
-			lines.Add($"{hit.RelativePath}:{hit.Line.ToString(CultureInfo.InvariantCulture)}: {best.Name}");
+			names[new McpSearchHitKey(hit.RelativePath, hit.Line)] = best.Name;
 			annotated++;
 		}
 
 		return new McpSearchSymbolResult(
-			lines,
+			names,
 			annotated,
 			unannotatedFiles.Count,
 			skippedFiles);
@@ -225,11 +221,26 @@ internal readonly record struct McpSymbolLookup(
 
 internal readonly record struct McpSearchHit(string RelativePath, string FullPath, int Line);
 
+/// <summary>One matched line, as the key the renderer and the naming agree on.</summary>
+internal readonly record struct McpSearchHitKey(string RelativePath, int Line);
+
+/// <summary>
+/// One line the renderer wrote in full, and where it starts in the response. A declaration header
+/// is placed at one of these offsets after the render finishes.
+/// </summary>
+internal readonly record struct McpSearchRenderedLine(
+	string RelativePath,
+	int Offset,
+	int LineNumber,
+	bool IsMatch,
+	bool StartsGroup);
+
 internal sealed record McpSearchSymbolResult(
-	IReadOnlyList<string> Lines,
+	IReadOnlyDictionary<McpSearchHitKey, string> Names,
 	int AnnotatedHits,
 	int FilesWithoutDeclarations,
 	int FilesBeyondTheLimit)
 {
-	public static readonly McpSearchSymbolResult None = new([], 0, 0, 0);
+	public static readonly McpSearchSymbolResult None =
+		new(new Dictionary<McpSearchHitKey, string>(), 0, 0, 0);
 }
