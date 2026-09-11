@@ -117,6 +117,80 @@ public sealed class ImportanceRankingCoverageIntegrationTests
 	}
 
 	[Fact]
+	public async Task AnAttributedMainIsStillTheEntryPoint()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var program = fixture.CreateFile("Program.cs", """
+			using System;
+			namespace Fixture;
+			public static class Program
+			{
+				[Obsolete("kept for compatibility")]
+				public static void Main(string[] args) { }
+			}
+			""");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[project, program],
+			TestContext.Current.CancellationToken);
+
+		// The attribute's own parentheses must not hide the modifiers from the check.
+		Assert.Equal(
+			ImportanceFileRole.EntryPoint,
+			report.Entries.Single(entry => entry.Path == "Program.cs").Role);
+	}
+
+	[Fact]
+	public async Task AStaticLocalFunctionAGenericMainAndAnotherStaticMethodAreNotEntryPoints()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var local = fixture.CreateFile("Local.cs", """
+			namespace Fixture;
+			public sealed class Local
+			{
+				public void Run()
+				{
+					static void Main() { }
+					Main();
+				}
+			}
+			""");
+		var generic = fixture.CreateFile("Generic.cs", """
+			namespace Fixture;
+			public static class Generic
+			{
+				public static void Main<T>() { }
+			}
+			""");
+		var other = fixture.CreateFile("Other.cs", """
+			namespace Fixture;
+			public static class Other
+			{
+				public static void Start() { }
+			}
+			""");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[project, local, generic, other],
+			TestContext.Current.CancellationToken);
+
+		// A local function cannot start a program, the runtime rejects a generic entry point,
+		// and an ordinary static method is not one either.
+		Assert.All(
+			new[] { "Local.cs", "Generic.cs", "Other.cs" },
+			path => Assert.Equal(
+				ImportanceFileRole.Source,
+				report.Entries.Single(entry => entry.Path == path).Role));
+	}
+	[Fact]
 	public async Task ATestFileKeepsItsTestRoleEvenWithAStaticMain()
 	{
 		using var fixture = new TemporaryDirectory();

@@ -560,23 +560,16 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		{
 			var importSyntax = CreateImportSyntax(captureName, node, materialization, moduleCallName);
 			var importEvidence = CreateCompactImportEvidence(captureName, importSyntax);
-			return CreateCapture(captureName, node, importEvidence, null, 0, false,
+			return CreateCapture(captureName, node, importEvidence, null, 0, false, false,
 				FindImportOwner(captureName, node, materialization), importSyntax, evidence: importEvidence);
 		}
 
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
-			captureName == "context.namespace";
+			captureName is "context.namespace" or "context.type_parameter_owner";
 		if (!isCompact)
 		{
 			var text = materialization.Read(node);
-			// A type-parameter owner is a method or local function the resolver already visits.
-			// Reading the name it declares costs one child lookup and lets the adapter recognise
-			// an entry point without a second pass over the tree.
-			var ownerName = captureName == "context.type_parameter_owner" &&
-				node.GetChildForField("name") is { } owner
-					? materialization.Read(owner)
-					: null;
-			return CreateCapture(captureName, node, text, ownerName, 0, false,
+			return CreateCapture(captureName, node, text, null, 0, false, false,
 				captureName == "context.module_assignment"
 					? FindContainingDeclaration(node, materialization)
 					: null,
@@ -592,10 +585,20 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		var evidence = string.IsNullOrEmpty(capturedName)
 			? string.Empty
 			: capturedName + (genericArity == 0 ? string.Empty : $"`{genericArity}");
-		var isFileLocal = captureName.StartsWith("declaration.", StringComparison.Ordinal) &&
-			node.Children.Any(child => child.Type == "modifier" && materialization.Read(child) == "file");
+		var isFileLocal = false;
+		var isStatic = false;
+		foreach (var child in node.Children)
+		{
+			if (child.Type != "modifier") continue;
+			var modifier = materialization.Read(child);
+			if (modifier == "file") isFileLocal = true;
+			else if (modifier == "static") isStatic = true;
+		}
+
+		isFileLocal = isFileLocal && captureName.StartsWith("declaration.", StringComparison.Ordinal);
 		return CreateCapture(captureName, node, evidence, capturedName, genericArity, isFileLocal,
-			FindContainingDeclaration(node, materialization), capturedNameStartIndex: capturedNameStartIndex, evidence: evidence);
+			isStatic, FindContainingDeclaration(node, materialization),
+			capturedNameStartIndex: capturedNameStartIndex, evidence: evidence);
 	}
 
 	private static bool TryReadSupportedModuleCall(
@@ -682,6 +685,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string? capturedName,
 		int genericArity,
 		bool isFileLocal,
+		bool isStatic,
 		string? containingDeclaration = null,
 		DependencyImportSyntax? importSyntax = null,
 		int capturedNameStartIndex = -1,
@@ -696,6 +700,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			capturedName,
 			genericArity,
 			isFileLocal,
+			isStatic,
 			containingDeclaration,
 			importSyntax,
 			capturedNameStartIndex,

@@ -14,6 +14,7 @@ internal sealed record DependencySyntaxCapture(
 	string? CapturedName = null,
 	int GenericArity = 0,
 	bool IsFileLocal = false,
+	bool IsStatic = false,
 	string? ContainingDeclaration = null,
 	DependencyImportSyntax? ImportSyntax = null,
 	int CapturedNameStartIndex = -1,
@@ -148,9 +149,11 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 	internal const string EntryPointMarker = "$csharp-entry-point";
 
 	/// <summary>
-	/// Entry-point evidence from captures the extraction pass already produced: a static method
-	/// named <c>Main</c>, or a compilation unit made of top-level statements. No project file is
-	/// read, so a library that declares a static <c>Main</c> carries the same evidence.
+	/// Entry-point evidence from captures the extraction pass already produced: a static,
+	/// non-generic method declaration named <c>Main</c>, or a compilation unit made of top-level
+	/// statements. A local function cannot start a program, and the runtime rejects a generic
+	/// entry point, so both are excluded. No project file is read, so a library that declares a
+	/// static <c>Main</c> carries the same evidence.
 	/// </summary>
 	private static bool HasEntryPointEvidence(
 		DependencyExtractionContext context,
@@ -158,23 +161,10 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		context.Declarations.Any(static capture =>
 			capture.Name == "declaration.top_level_statement") ||
 		typeParameterOwners.Any(static capture =>
-			capture.Name == "context.type_parameter_owner" &&
+			capture.NodeType == "method_declaration" &&
 			capture.CapturedName == "Main" &&
-			DeclaresStaticMethod(capture.Text));
-
-	/// <summary>
-	/// Whether the modifiers that precede a method's parameter list contain <c>static</c>. Only the
-	/// signature prefix is examined, and only for a method already named <c>Main</c>.
-	/// </summary>
-	private static bool DeclaresStaticMethod(string text)
-	{
-		var parameters = text.IndexOf('(', StringComparison.Ordinal);
-		var signature = parameters < 0 ? text : text[..parameters];
-		return StaticModifierRegex().IsMatch(signature);
-	}
-
-	[GeneratedRegex(@"(?:^|\s)static(?=\s)")]
-	private static partial Regex StaticModifierRegex();
+			capture.GenericArity == 0 &&
+			capture.IsStatic);
 
 	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
 		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
