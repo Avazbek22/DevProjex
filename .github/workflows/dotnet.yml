@@ -66,6 +66,10 @@ jobs:
         shell: pwsh
         run: ./Scripts/ci/Test-ExecutedTestsContract.ps1
 
+      - name: Validate the indentation gate
+        shell: pwsh
+        run: ./Scripts/ci/Test-IndentationContract.ps1
+
       - name: Select CI plan
         id: plan
         shell: pwsh
