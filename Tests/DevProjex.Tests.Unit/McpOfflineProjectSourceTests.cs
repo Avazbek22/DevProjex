@@ -311,6 +311,27 @@ public sealed class McpOfflineProjectSourceTests
 	}
 
 	/// <summary>
+	/// The same positive control for the rest of the recording sites: resolving an ordinary local
+	/// project runs the repository-url classifier's probe and the root opener as well as the walk,
+	/// so a count above zero here is what fails if any of those stops reporting.
+	/// </summary>
+	[Fact]
+	public async Task ResolvingALocalProjectRecordsTheProbesItMakes()
+	{
+		using var workspace = new TemporaryDirectory();
+		var local = workspace.CreateFolder("local");
+		using var resolver = CreateOfflineResolver(local);
+
+		using var probes = McpProjectPathProbe.Count();
+		_ = await resolver.ResolveAsync(local, branch: null, TestContext.Current.CancellationToken);
+
+		Assert.True(
+			probes.Value > 1,
+			$"Resolving a local project recorded {probes.Value} probe(s). It opens the path more " +
+			"than once, so a lower count means a probe has stopped reporting itself.");
+	}
+
+	/// <summary>
 	/// The operator's exemption, end to end, on Windows: a root listed in a spelling the classifier
 	/// refuses stays addressable by it, and the same spelling of something unlisted does not.
 	/// </summary>

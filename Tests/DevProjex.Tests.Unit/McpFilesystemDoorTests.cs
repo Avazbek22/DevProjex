@@ -27,7 +27,8 @@ public sealed class McpFilesystemDoorTests
 		"Apps/Mcp/McpProjectSourceResolver.cs",
 		"Apps/Mcp/McpRootRegistry.cs",
 		"Apps/Mcp/McpRemoteProviderPath.cs",
-		"Apps/Mcp/McpProjectPathProbe.cs"
+		"Apps/Mcp/McpProjectPathProbe.cs",
+		"Apps/Mcp/McpRootJailFileStreamOpener.cs"
 	];
 
 	/// <summary>
@@ -73,7 +74,7 @@ public sealed class McpFilesystemDoorTests
 	/// </summary>
 	private static readonly Dictionary<(string File, string Call), string> Exempt = new()
 	{
-		[("Apps/Mcp/McpProjectSourceResolver.cs", "Directory.Exists")] =
+		[("Apps/Mcp/McpProjectSourceResolver.cs", "Directory.Exists(clone.LocalPath)")] =
 			"Only on clone.LocalPath, the checkout the cache produced, reached after remote access " +
 			"was granted. Guarded by the single-call rule below, so it cannot cover a second call."
 	};
@@ -122,22 +123,44 @@ public sealed class McpFilesystemDoorTests
 	private static bool IsExempt(string relative, string call, string line) =>
 		Exempt.ContainsKey((relative, call)) && FilesystemCalls(line).Count == 1;
 
+	/// <summary>
+	/// Every filesystem call on the line, written as the call plus its arguments. The arguments
+	/// are part of it because an exemption names one call: keyed on the member alone it would
+	/// cover every other call spelled the same way, wherever it appeared in the file.
+	/// </summary>
 	private static List<string> FilesystemCalls(string line)
 	{
 		var calls = new List<string>();
 		foreach (Match match in FilesystemCall.Matches(line))
 		{
 			var member = match.Groups["member"];
-			if (member.Success)
-			{
-				if (LexicalMembers.Contains(member.Value))
-					continue;
-				calls.Add(match.Value);
+			if (member.Success && LexicalMembers.Contains(member.Value))
 				continue;
-			}
-			calls.Add(match.Value.Trim());
+			calls.Add(WithArguments(line, match));
 		}
 		return calls;
+	}
+
+	/// <summary>
+	/// The matched call extended over a balanced argument list when one follows it.
+	/// </summary>
+	private static string WithArguments(string line, Match match)
+	{
+		var index = match.Index + match.Length;
+		while (index < line.Length && line[index] == ' ')
+			index++;
+		if (index >= line.Length || line[index] != '(')
+			return match.Value.Trim();
+		var depth = 0;
+		for (var scan = index; scan < line.Length; scan++)
+		{
+			if (line[scan] == '(')
+				depth++;
+			else if (line[scan] == ')' && --depth == 0)
+				return (match.Value + line[index..(scan + 1)]).Trim();
+		}
+		// An argument list broken across lines cannot be named exactly, so it is never exempt.
+		return (match.Value + line[index..]).Trim();
 	}
 
 	/// <summary>
@@ -147,15 +170,24 @@ public sealed class McpFilesystemDoorTests
 	/// </summary>
 	private static bool StartsMember(string line)
 	{
-		if (!line.StartsWith('\t') || line.StartsWith("\t\t", StringComparison.Ordinal))
+		if (!line.StartsWith('\t'))
 			return false;
 		var trimmed = line.TrimStart();
-		return trimmed.Length > 0 &&
-		       !IsComment(line) &&
-		       !trimmed.StartsWith('[') &&
-		       !trimmed.StartsWith('{') &&
-		       !trimmed.StartsWith('}');
+		if (trimmed.Length == 0 || IsComment(line) ||
+		    trimmed.StartsWith('[') || trimmed.StartsWith('{') || trimmed.StartsWith('}'))
+			return false;
+		// A member of a nested type is one tab deeper, and an access modifier is what tells it
+		// apart from a statement at the same depth.
+		if (line.StartsWith("		", StringComparison.Ordinal))
+			return !line.StartsWith("			", StringComparison.Ordinal) &&
+			       Modifiers.Any(modifier => trimmed.StartsWith(modifier, StringComparison.Ordinal));
+		return true;
 	}
+
+	private static readonly string[] Modifiers =
+	[
+		"public ", "internal ", "private ", "protected ", "static "
+	];
 
 	private static bool IsComment(string line)
 	{

@@ -178,9 +178,10 @@ batched `get_file` call instead of several single reads; see
   `\\?\Volume{…}\project`; and a named pipe, `\\.\pipe\name`. Every other device is refused,
   and so is a relative segment inside an accepted one, because `\\.\` is normalised before the
   operating system reads it and `..` would otherwise put any device in the accepted one's place.
-- A root listed at startup stays addressable in any spelling that resolves
-  to the recorded one — a trailing separator, forward slashes, or the extended-length prefix —
-  because deciding that compares strings and opens nothing. What the refusal cannot cover is a
+- A root listed at startup stays addressable in any spelling that lexically normalises
+  to the recorded one — a trailing separator, or the extended-length prefix — because
+  deciding that compares strings and opens nothing. It resolves no symbolic link and no
+  difference of case. What the refusal cannot cover is a
   drive letter, a mount point, or a working directory that the operator has already bound to a
   remote share: by its spelling it is indistinguishable from a local path, and that binding is
   the operator's own configuration rather than something a client chose.
