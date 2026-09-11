@@ -875,6 +875,195 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task WithoutCompilationConfiguration_ALiteralRelativeSpecifierNamingAManifestFileResolves()
+	{
+		using var fixture = new TemporaryDirectory();
+		var helper = fixture.CreateFile("lib/helper.mjs", "export const helper = 1;");
+		var typed = fixture.CreateFile("lib/typed.ts", "export const typed = 1;");
+		var plain = fixture.CreateFile("plain.js", "export const plain = 1;");
+		var reexport = fixture.CreateFile("lib/reexport.js", "export { typed } from './typed.ts';");
+		var entry = fixture.CreateFile("app/entry.js", """
+			import { helper } from '../lib/helper.mjs';
+			import { typed } from '../lib/typed.ts';
+			import { plain } from '../plain.js';
+			const lazy = await import('../plain.js');
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[helper, typed, plain, reexport, entry],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.All(
+			new[] { "../lib/helper.mjs", "../lib/typed.ts", "../plain.js" },
+			reference => Assert.Contains(
+				result.Edges, edge => edge.Source == "app/entry.js" &&
+					edge.Reference == reference &&
+					edge.Status == ResolutionStatus.Resolved &&
+					edge.Reasons.Contains("relative specifier names a file in the manifest")));
+		// Re-export and dynamic import reach the same rule as a static import.
+		Assert.Contains(result.Edges, edge => edge.Source == "lib/reexport.js" &&
+			edge.Reference == "./typed.ts" && edge.Status == ResolutionStatus.Resolved &&
+			edge.Target == "lib/typed.ts");
+		Assert.Contains(result.Edges, edge => edge.Source == "app/entry.js" &&
+			edge.Reference == "../plain.js" && edge.Target == "plain.js");
+	}
+
+	[Fact]
+	public async Task WithoutCompilationConfiguration_ADirectoryResolvesOnlyWhenOneIndexFileIsUncontested()
+	{
+		using var fixture = new TemporaryDirectory();
+		var single = fixture.CreateFile("single/index.ts", "export const single = 1;");
+		var declaration = fixture.CreateFile("typings/index.d.ts", "export declare const typed: number;");
+		var firstOfTwo = fixture.CreateFile("both/index.ts", "export const both = 1;");
+		var secondOfTwo = fixture.CreateFile("both/index.js", "export const both = 1;");
+		var siblingFile = fixture.CreateFile("util.js", "export const util = 1;");
+		var siblingIndex = fixture.CreateFile("util/index.js", "export const util = 2;");
+		var packaged = fixture.CreateFile("pkg/package.json", "{ \"main\": \"./dist/entry.js\" }");
+		var packagedIndex = fixture.CreateFile("pkg/index.js", "export const pkg = 1;");
+		var entry = fixture.CreateFile("entry.js", """
+			import { single } from './single';
+			import { typed } from './typings';
+			import { both } from './both';
+			import { util } from './util';
+			import { pkg } from './pkg';
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[single, declaration, firstOfTwo, secondOfTwo, siblingFile, siblingIndex, packaged, packagedIndex, entry],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.All(
+			new[]
+			{
+				("./single", "single/index.ts"),
+				("./typings", "typings/index.d.ts")
+			},
+			expected => Assert.Contains(
+				result.Edges, edge => edge.Source == "entry.js" &&
+					edge.Reference == expected.Item1 &&
+					edge.Status == ResolutionStatus.Resolved &&
+					edge.Target == expected.Item2 &&
+					edge.Reasons.Contains("relative specifier names a directory with one index file")));
+		// Two index files, a sibling module of the same stem, and a directory that owns
+		// package.json are all choices only the configuration could make.
+		Assert.All(
+			new[] { "./both", "./util", "./pkg" },
+			reference => Assert.Contains(
+				result.Edges, edge => edge.Source == "entry.js" &&
+					edge.Reference == reference &&
+					edge.Status == ResolutionStatus.Unresolved &&
+					edge.Target is null &&
+					edge.Reasons.Contains("no owning tsconfig.json or jsconfig.json in the manifest")));
+	}
+
+	[Fact]
+	public async Task WithoutCompilationConfiguration_NothingBeyondTheLiteralNameIsGuessed()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("src/value.ts", "export const value = 1;");
+		var built = fixture.CreateFile("dist/value.js", "export const value = 1;");
+		var dotted = fixture.CreateFile(".config/app.js", "export const app = 1;");
+		var entry = fixture.CreateFile("src/entry.ts", """
+			import { value } from './value';
+			import { built } from '../dist/value.mjs';
+			import { app } from '.config/app.js';
+			import { lodash } from 'lodash';
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[source, built, dotted, entry],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// No extension substitution, no counterpart file, no bare specifier that merely starts
+		// with a dot, and no package name.
+		Assert.All(
+			new[] { "./value", "../dist/value.mjs", ".config/app.js", "lodash" },
+			reference => Assert.Contains(
+				result.Edges, edge => edge.Source == "src/entry.ts" &&
+					edge.Reference == reference &&
+					edge.Status == ResolutionStatus.Unresolved &&
+					edge.Target is null &&
+					edge.Reasons.Contains("no owning tsconfig.json or jsconfig.json in the manifest")));
+	}
+
+	[Fact]
+	public async Task WithoutCompilationConfiguration_RequireKeepsItsCommonJsContextRule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("package.json", "{ \"type\": \"module\" }");
+		var target = fixture.CreateFile("value.js", "module.exports = 1;");
+		var moduleSource = fixture.CreateFile("main.mjs", "const value = require('./value.js');");
+		var commonJsSource = fixture.CreateFile("worker.cjs", "const value = require('./value.js');");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[package, target, moduleSource, commonJsSource],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "worker.cjs" &&
+			edge.Reference == "./value.js" && edge.Status == ResolutionStatus.Resolved &&
+			edge.Target == "value.js");
+		Assert.Contains(result.Edges, edge => edge.Source == "main.mjs" &&
+			edge.Reference == "./value.js" && edge.Status == ResolutionStatus.Unresolved &&
+			edge.Target is null &&
+			edge.Reasons.Contains("no owning tsconfig.json or jsconfig.json in the manifest"));
+	}
+
+	[Fact]
+	public async Task WithoutOwningConfiguration_AFileOutsideEveryConfigResolvesAcrossScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("packages/web/tsconfig.json", "{ }");
+		var owned = fixture.CreateFile("packages/web/src/app.ts", "export const app = 1;");
+		var unowned = fixture.CreateFile(
+			"tools/build.js",
+			"import { app } from '../packages/web/src/app.ts';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, owned, unowned],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// The tsconfig owns packages/web only, so tools/build.js has no owning configuration
+		// and the edge it produces crosses into the configured scope.
+		Assert.Contains(result.Edges, edge => edge.Source == "tools/build.js" &&
+			edge.Reference == "../packages/web/src/app.ts" &&
+			edge.Status == ResolutionStatus.Resolved &&
+			edge.Target == "packages/web/src/app.ts" && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task WithCompilationConfiguration_TheCounterpartProbeStillOutranksTheLiteralFile()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{ }");
+		var typed = fixture.CreateFile("value.ts", "export const value = 1;");
+		var literal = fixture.CreateFile("value.js", "export const value = 2;");
+		var entry = fixture.CreateFile("entry.ts", "import { value } from './value.js';");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, typed, literal, entry],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// With configuration the .ts counterpart wins over the literally named .js file;
+		// the no-configuration rule would have taken value.js instead.
+		Assert.Contains(result.Edges, edge => edge.Source == "entry.ts" &&
+			edge.Reference == "./value.js" && edge.Status == ResolutionStatus.Resolved &&
+			edge.Target == "value.ts" &&
+			edge.Reasons.Contains("one module target under configured module resolution"));
+	}
+
+	[Fact]
 	public async Task PythonFacts_ResolveRelativeImportsAndClassifyKnownStdlibOnly()
 	{
 		using var fixture = new TemporaryDirectory();

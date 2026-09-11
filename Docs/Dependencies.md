@@ -131,8 +131,30 @@ and directory probes. A relative directory containing `package.json` stays unres
 When `moduleResolution` is absent, `module: node16` or `module: nodenext` selects the matching
 resolution mode; other module values keep the existing bundler default.
 `node10`/`node` and `baseUrl` are marked legacy under the TypeScript 7 contract.
-DevProjex never guesses a `dist` to `src` mapping without configuration, and module references without
-an owning `tsconfig.json` or `jsconfig.json` stay unresolved.
+DevProjex never guesses a `dist` to `src` mapping without configuration.
+
+Without an owning `tsconfig.json` or `jsconfig.json`, one narrow capability applies to module
+specifiers. A literal relative specifier, one that starts with `./` or `../`, is resolved when it
+names a file already in the allowed manifest with the exact extension it wrote, such as
+`./util.mjs`, `../lib/x.js`, or `./x.ts`. A relative specifier that names a directory resolves to
+that directory's index file when the manifest holds exactly one of `index.ts`, `index.tsx`,
+`index.d.ts`, `index.js`, and `index.jsx` there. That is the same index list, in the same order,
+that a configured project probes, so an unconfigured project never resolves a directory a
+configured project would refuse.
+
+The directory rule withdraws wherever the answer would depend on configuration: a directory that
+owns a `package.json` stays unresolved because `main` and `types` are not emulated, a directory
+whose stem also names a sibling module such as `util.js` beside `util/index.js` stays unresolved
+because module resolution settings decide that order, and two index files in one directory stay
+unresolved. A `require(...)` call keeps its CommonJS-context rule, and an invalid `package.json`
+above the importing file suppresses resolution exactly as it does with configuration. Everything
+else keeps the reason `no owning tsconfig.json or jsconfig.json in the manifest`: an extensionless
+specifier that names no such directory, a `.js` specifier whose only counterpart is a `.ts` file,
+a path that leaves the project root, a bare specifier including one that merely begins with a dot
+such as `.config/app.js`, a `#imports` specifier, and every form of `paths`, `rootDirs`,
+`moduleSuffixes`, or `package.json` `exports` resolution. This path reads the manifest and the
+package-map boundary only; it substitutes no extension, so it cannot change what a configured
+project resolves.
 
 TypeScript configuration supports a bounded `extends` chain when every value is one explicit relative
 path inside the project root. At most eight inheritance edges are followed; cycles, arrays, package or
