@@ -172,8 +172,9 @@ batched `get_file` call instead of several single reads; see
 - Remote network sources use HTTP(S), SSH, Git protocol, or SCP syntax. Query
   strings and fragments are rejected so credentials cannot enter Git process
   arguments. When `--remote-hosts` is present, network URLs and SCP forms must
-  use one of its exact normalized hosts. A `file://` source is accepted only when it resolves inside an
-  already configured local root and never expands the local root jail.
+  use one of its exact normalized hosts. A `file://` source is refused: a built product accepts a
+  repository URL only over `https` or `ssh`, including the SCP form, and nothing in the environment
+  or the call widens that set.
 - A server session pins at most 16 distinct remote URL-and-branch sources. Existing
   keys are reused and valid sources are never evicted; exceeding the cap returns
   `DPX-MCP-REMOTE-LIMIT` with guidance to reuse a source or restart the server.
