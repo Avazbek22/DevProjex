@@ -89,6 +89,18 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		}
 
 		var resolved = _repositorySemanticsResolver(repositoryRoot, gitMetadataPath);
+		if (!resolved.IsAuthoritative)
+		{
+			// A failure to read is cached, and while it is cached every caller of this repository is
+			// told the settings are unavailable without anything looking again. That is the right
+			// trade for a repository that genuinely cannot be read, and the wrong one for a single
+			// miss: a clone that has just finished writing its metadata loses every call made in the
+			// next few seconds. So the read is attempted once more before the answer is believed. A
+			// repository that is genuinely unreadable costs one extra read and then backs off as
+			// before; a momentary miss costs nothing beyond that read.
+			resolved = _repositorySemanticsResolver(repositoryRoot, gitMetadataPath);
+		}
+
 		lock (_cacheSync)
 		{
 			if (cacheGeneration != _cacheGeneration ||
