@@ -215,7 +215,8 @@ internal sealed class DevProjexMcpTools(
 					includeFilters: true,
 					new McpSelectionNoticeContext(
 						HasPaths: HasItems(paths),
-						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
+						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
+				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
 		}, cancellationToken);
 
 	[Description(
@@ -799,14 +800,14 @@ internal sealed class DevProjexMcpTools(
 				inspectionBudgetReached
 					? "[Search incomplete] The inspected-text byte budget was reached; additional selected files were not searched and match counts are partial."
 					: null,
-				resultGroupTruncated ? "[Search group truncated at the response character limit.]" : null,
 				resultGroupTruncated ? SearchContentCapNotice : null,
 				SelectionNotices(
 					plan,
 					includeFilters: false,
 					new McpSelectionNoticeContext(
 						HasPaths: HasItems(paths),
-						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)))));
+						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
+				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
 		}, cancellationToken);
 
 	[Description(
@@ -859,7 +860,8 @@ internal sealed class DevProjexMcpTools(
 			var configurationData = FormatDependencyConfigurationData(coverage.ConfigurationDiagnostics);
 			var selectionContext = new McpSelectionNoticeContext(
 				HasPaths: false,
-				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns));
+				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
+				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns));
 			var noRelatedNotice = resolution.Resolved == 0
 				? resolution.Unresolved == 0
 					? "[No related files] in the effective selection."
@@ -1278,7 +1280,8 @@ internal sealed class DevProjexMcpTools(
 			plan,
 			new McpSelectionNoticeContext(
 				HasPaths: HasItems(paths),
-				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns)));
+				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
+				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)));
 	}
 
 	private string? SelectionNotices(
@@ -1341,6 +1344,15 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	private static bool HasItems<T>(IReadOnlyCollection<T>? items) => items is { Count: > 0 };
+
+	// A pattern without '/' can only match a file directly in the project root, because a pattern is
+	// matched against the whole project-relative path. That is the shape a caller types when all
+	// they know is a file name, so an empty result deserves the concrete rewrite rather than the
+	// general rule.
+	private static bool HasRootOnlyPattern(IReadOnlyList<string>? includePatterns) =>
+		includePatterns?.Any(static pattern =>
+			!string.IsNullOrWhiteSpace(pattern) &&
+			!pattern.Contains('/', StringComparison.Ordinal)) == true;
 
 	// The exclusions argument exists only on servers started with --allow-agent-exclusions;
 	// everywhere else the allowlist rejects it, so a default server keeps the
