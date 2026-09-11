@@ -940,7 +940,17 @@ and 4 more file(s)
 Counts, not line numbers. One recorded search withheld 861 matches; their numbers
 would be noise, while the per-file counts tell a caller where to look next for a few
 characters per file. At most 20 files are listed and the rest are summarised as a
-count.
+count, and the count leads each line so that a path containing spaces, or ending in
+digits, stays unambiguous to read.
+
+**A cut listing keeps its breadth.** Whichever bound cuts it, `max_results` or the
+character cap, every matched file gets a hit before any file gets a second. Three
+recorded whole-file reads, 46 KB and the largest single class of them, happened
+because an alphabetical cut never reached the file the caller was after: it held only
+a name from an import line and opened the file. The choice is made one file at a time
+over the whole result, and the character cost counted is what the renderer will
+actually write, so the bound is honoured without a cut falling on whichever file
+happened to be last.
 
 Outside the block, in trusted text, one line of counts and a server-minted id:
 
@@ -965,6 +975,33 @@ The counting contract is untouched. The match and matching-file totals, the with
 count in `[N additional matches not shown]`, `[Search totals]` and the truncation
 notice all report exactly what they reported before, and `max_results` still bounds
 the matches a response displays.
+
+### The search result carries the selector
+
+After the matches, inside the same untrusted block, a search that found a hit in a
+declaration lists each declaration once, in the shape a caller passes straight back:
+
+```text
+Declarations found (path, symbol, line):
+src/Core/LevelOverrideMap.cs Core.LevelOverrideMap 17
+```
+
+One line per declaration, not per hit: a declaration ten matches landed in is still
+one thing to open. The name is the innermost declaration the index reports, which is
+method level in the languages whose extractors declare members and type level in C#.
+At most 20 are listed.
+
+One trusted constant closes it:
+
+```text
+[Read declarations] To read any declaration listed above in full, call get_file with its path and symbol; for several of them, one get_file requests call.
+```
+
+The list ships on every search that showed a hit, including a search the character
+cap cut, because a cut response is exactly when a caller would otherwise open a whole
+file to find a declaration it was already holding. The `in <Name>` headers are a
+different thing and keep their rule: they label runs of hits while reading, and a
+capped response drops them so the remaining characters go to matches.
 
 ### Reading a declaration by name
 

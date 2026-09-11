@@ -43,10 +43,15 @@ public sealed partial class McpServerProcessTests
 				["max_results"] = 5
 			})));
 
-		// The response shows what max_results allows and says where the rest is, by file.
+		// The five matches max_results allows are spread one per file, so five of the six files are
+		// named rather than the first file being exhausted alphabetically.
+		foreach (var file in new[] { "File00", "File01", "File02", "File03", "File04" })
+			Assert.Contains($"src/{file}.cs\n", searched, StringComparison.Ordinal);
 		Assert.Contains("Withheld matches by file:", searched, StringComparison.Ordinal);
-		// The count leads, so a path with spaces or trailing digits stays unambiguous.
-		Assert.Contains("10 src/File01.cs", searched, StringComparison.Ordinal);
+		// The count leads, so a path with spaces or trailing digits stays unambiguous. One hit of
+		// this file was shown, so nine of its ten are withheld.
+		Assert.Contains("9 src/File01.cs", searched, StringComparison.Ordinal);
+		Assert.Contains("10 src/File05.cs", searched, StringComparison.Ordinal);
 		Assert.Contains("[55 additional matches not shown", searched, StringComparison.Ordinal);
 		Assert.Contains("[Search totals] matches=60 · files=6", searched, StringComparison.Ordinal);
 

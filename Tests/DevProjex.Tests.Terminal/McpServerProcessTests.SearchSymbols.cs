@@ -136,7 +136,10 @@ public sealed partial class McpServerProcessTests
 		// all: turning naming on cannot push a capped response past the size it already had.
 		Assert.Contains("[Search truncated]", wide, StringComparison.Ordinal);
 		Assert.DoesNotContain("\nin P.Wide", wide, StringComparison.Ordinal);
-		Assert.DoesNotContain("[Symbols]", wide, StringComparison.Ordinal);
+		// The selector list still ships on a cut response: that is exactly when a caller would
+		// otherwise open a whole file to find a declaration it is already holding.
+		Assert.Contains("Declarations found (path, symbol, line):", wide, StringComparison.Ordinal);
+		Assert.Contains("[Symbols] annotated=0", wide, StringComparison.Ordinal);
 		Assert.True(wide.Length <= 18_000, $"Capped search returned {wide.Length} characters.");
 	}
 
@@ -259,6 +262,43 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains(
 			"[Symbols] annotated=0 · files-without-declarations=0; the names did not fit the " +
 			"16000-character search cap, so none were written.",
+			text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessListsEachDeclarationOnceAsSomethingTheCallerCanPassBack()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("selector-project");
+		workspace.WriteFile(
+			"selector-project/src/App.cs",
+			"namespace P;\n\npublic sealed class App\n{\n\tpublic int One() => 1;\n\n\tpublic int Two() => 1;\n}\n");
+		workspace.WriteFile("selector-project/README.md", "# Notes\n\nmentions 1 here\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "1", ["context_lines"] = 0 })));
+
+		// Two hits share one declaration, so the list carries it once: this is what a caller reads
+		// back, and a declaration touched twice is still one thing to open.
+		Assert.Contains("Declarations found (path, symbol, line):", text, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App 3"));
+
+		// The sentence that turns the list into a call is a constant and sits outside the block,
+		// while the paths and names inside it are project text and stay in.
+		var untrustedEnd = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+		Assert.True(text.IndexOf("src/App.cs P.App 3", StringComparison.Ordinal) < untrustedEnd);
+		Assert.True(
+			text.IndexOf("[Read declarations]", StringComparison.Ordinal) > untrustedEnd,
+			"The instruction must be trusted text, outside the untrusted block.");
+		Assert.Contains(
+			"[Read declarations] To read any declaration listed above in full, call get_file with " +
+			"its path and symbol; for several of them, one get_file requests call.",
 			text,
 			StringComparison.Ordinal);
 	}

@@ -1350,6 +1350,13 @@ or nothing, so no response grows past the bound it already had. Match lines, gro
 separators, the match and file counters, and the additional-matches contract are
 unchanged.
 
+MCP `search_project` lists the declarations its shown hits sit in, once each, as
+`path symbol line` inside the untrusted block, closed by a trusted constant naming
+`get_file` with `path` and `symbol` and the batched `requests` form. The list ships on
+every search that showed a hit, including one the character cap cut. When either bound
+cuts a listing, every matched file gets a hit before any file gets a second, and the
+withheld distribution leads each line with its count.
+
 MCP `get_file` gains the optional `symbol` input, used beside `path` in place of a
 line range, returning the lines that declare it. It accepts a qualified name or a
 simple name unique in the file, cannot be combined with `start_line`, `end_line`,

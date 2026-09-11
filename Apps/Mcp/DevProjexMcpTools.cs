@@ -33,6 +33,13 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumStoredSearchCharacters = 2_000_000;
 	private const int MaximumWithheldFilesReported = 20;
 	private const string WithheldHeading = "Withheld matches by file:";
+	private const string DeclarationsHeading = "Declarations found (path, symbol, line):";
+	// The one sentence that turns the list above into a call. Seven of twelve whole-file reads in
+	// the recorded sessions were issued with the declaration's name already on screen.
+	private const string ReadDeclarationsNotice =
+		"[Read declarations] To read any declaration listed above in full, call get_file with its " +
+		"path and symbol; for several of them, one get_file requests call.";
+	private const int MaximumDeclarationsReported = 20;
 	// Named because a caller that sees part of a result is entitled to know what decided which part.
 	// A constant: the order is a rule, not a property of this project's files.
 	private const string SearchOrderNotice =
@@ -944,20 +951,32 @@ internal sealed class DevProjexMcpTools(
 				: null;
 			var ordered = ordering ?? groups;
 
+			// Which groups are shown is decided one file at a time, so every matched file gets a
+			// hit before any file gets a second. A listing cut alphabetically never reached the file
+			// the caller was after, and it read the whole file instead.
+			var (allowance, characterCapReached) = ChooseBreadthFirst(ordered, maximumResults);
+			if (characterCapReached)
+				resultGroupTruncated = true;
+			var usedByFile = new Dictionary<string, int>(StringComparer.Ordinal);
 			string? lastFile = null;
 			foreach (var group in ordered)
 			{
-				if (shownMatches >= maximumResults || responseLimitReached)
+				if (responseLimitReached)
 					break;
+				var used = usedByFile.GetValueOrDefault(group.RelativePath);
+				var room = allowance.GetValueOrDefault(group.RelativePath) - used;
+				if (room <= 0)
+					continue;
 
 				var startsNewFile = !string.Equals(group.RelativePath, lastFile, StringComparison.Ordinal);
 				var written = AppendRenderedGroup(
 					output,
 					group,
 					startsNewFile,
-					maximumResults - shownMatches,
+					room,
 					renderedLines,
 					writtenHits);
+				usedByFile[group.RelativePath] = used + written.WrittenMatches;
 				shownMatches += written.WrittenMatches;
 				if (written.WrittenMatches > 0 || !startsNewFile)
 					lastFile = group.RelativePath;
@@ -1003,18 +1022,19 @@ internal sealed class DevProjexMcpTools(
 					withheldByFile.GetValueOrDefault(group.RelativePath) + remaining.Length;
 			}
 
-			// A response the character cap already cut has no room to spend on naming, and the
-			// caller's next move there is to narrow the pattern rather than to read a symbol.
-			var symbols = resultGroupTruncated
-				? McpSearchSymbolResult.None
-				: await McpSearchSymbols
-					.ResolveAsync(Projects.DependencyFactsEngine, plan, writtenHits, cancellationToken)
-					.ConfigureAwait(false);
-			// A placement the character budget refused names nothing, and says so, rather than
-			// leaving the response silent about naming it did compute.
-			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols);
+			// Resolved on every search that showed a hit, including one the cap cut: the selector
+			// list below is what stops a caller opening a whole file to find a declaration it was
+			// already holding, and a cut response is exactly when that happens.
+			var symbols = await McpSearchSymbols
+				.ResolveAsync(Projects.DependencyFactsEngine, plan, writtenHits, cancellationToken)
+				.ConfigureAwait(false);
+			// A response the character cap already cut has no room to spend on labelling each run,
+			// so the headers are dropped and the remaining characters go to matches. The list stays.
+			var namesRefused = resultGroupTruncated ||
+				!InsertDeclarationHeaders(output, renderedLines, symbols);
 			if (namesRefused)
 				symbols = symbols with { AnnotatedHits = 0 };
+			AppendDeclarationSelectors(output, symbols.Declarations);
 			// What the response could not carry is kept in the session, so the way forward is to
 			// page what this scan already found rather than to run the same scan again.
 			var storedSearch = withheld.Length == 0
@@ -1048,6 +1068,7 @@ internal sealed class DevProjexMcpTools(
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					noMatches,
 					ordering is null ? null : SearchOrderNotice,
+				symbols.Declarations.Count == 0 ? null : ReadDeclarationsNotice,
 					FormatStoredSearchNotice(
 						storedSearch,
 						withheldStored,
@@ -2536,6 +2557,11 @@ internal sealed class DevProjexMcpTools(
 		var startsGroup = true;
 		foreach (var line in group.Lines)
 		{
+			// Stop before a match there is no room for, not after the last one there was room for:
+			// a group's trailing context belongs to the match above it and goes out with it.
+			if (line.IsMatch && written >= remainingMatches)
+				break;
+
 			var text = line.Text + Environment.NewLine;
 			if (output.Length + text.Length > MaximumSearchContentCharacters)
 				return new McpSearchAppendResult(written, Truncated: true);
@@ -2554,11 +2580,113 @@ internal sealed class DevProjexMcpTools(
 
 			writtenHits.Add(new McpSearchHit(group.RelativePath, group.FullPath, line.LineNumber));
 			written++;
-			if (written >= remainingMatches)
-				break;
 		}
 
 		return new McpSearchAppendResult(written, Truncated: false);
+	}
+
+	/// <summary>
+	/// Chooses which groups the response carries by taking one from each matched file in turn, so a
+	/// cut listing still names every file that matched rather than exhausting the alphabet.
+	/// </summary>
+	/// <remarks>
+	/// Both bounds are honoured here rather than during rendering, because a cut applied afterwards
+	/// falls on whatever happens to be last and takes a file's only hit with it. The cost of a group
+	/// is counted exactly as the renderer will write it: a heading the first time its file appears,
+	/// a separator afterwards, and its own lines.
+	/// </remarks>
+	private static (Dictionary<string, int> Allowance, bool CharacterCapReached) ChooseBreadthFirst(
+		IReadOnlyList<McpSearchRenderedGroup> ordered,
+		int maximumResults)
+	{
+		var order = new List<string>();
+		var byFile = new Dictionary<string, List<McpSearchRenderedGroup>>(StringComparer.Ordinal);
+		foreach (var group in ordered)
+		{
+			if (!byFile.TryGetValue(group.RelativePath, out var groups))
+			{
+				groups = [];
+				byFile[group.RelativePath] = groups;
+				order.Add(group.RelativePath);
+			}
+
+			groups.Add(group);
+		}
+
+		var allowance = order.ToDictionary(static path => path, static _ => 0, StringComparer.Ordinal);
+		var cost = order.ToDictionary(static path => path, static _ => 0, StringComparer.Ordinal);
+		var budget = maximumResults;
+		var characters = 0;
+		var advanced = true;
+		// A match this cannot afford is a match the character cap withheld, which is what the
+		// truncation notice reports. Running out of max_results is not that.
+		var characterCapReached = false;
+		while (budget > 0 && advanced)
+		{
+			advanced = false;
+			foreach (var path in order)
+			{
+				if (budget <= 0)
+					break;
+
+				var groups = byFile[path];
+				if (allowance[path] >= groups.Sum(static group => group.MatchLines.Count))
+					continue;
+
+				// One more hit from this file, but only if the whole response still fits. The cost
+				// is what the renderer will actually write, not an estimate.
+				var trial = FileRenderCost(groups, path, allowance[path] + 1);
+				if (characters - cost[path] + trial > MaximumSearchContentCharacters)
+				{
+					characterCapReached = true;
+					continue;
+				}
+
+				characters += trial - cost[path];
+				cost[path] = trial;
+				allowance[path]++;
+				budget--;
+				advanced = true;
+			}
+		}
+
+		return (allowance, characterCapReached);
+	}
+
+	/// <summary>
+	/// What the renderer will spend on one file when it is allowed a given number of its matches:
+	/// its heading once, a separator before each further group, and the lines up to the match that
+	/// uses the allowance.
+	/// </summary>
+	private static int FileRenderCost(
+		IReadOnlyList<McpSearchRenderedGroup> groups,
+		string relativePath,
+		int allowance)
+	{
+		if (allowance <= 0)
+			return 0;
+
+		var cost = EscapeSingleLine(relativePath).Length + Environment.NewLine.Length;
+		var taken = 0;
+		var first = true;
+		foreach (var group in groups)
+		{
+			if (taken >= allowance)
+				break;
+			if (!first)
+				cost += "--".Length + Environment.NewLine.Length;
+			first = false;
+			foreach (var line in group.Lines)
+			{
+				if (line.IsMatch && taken >= allowance)
+					break;
+				cost += line.Text.Length + Environment.NewLine.Length;
+				if (line.IsMatch)
+					taken++;
+			}
+		}
+
+		return cost;
 	}
 
 	/// <summary>
@@ -2620,6 +2748,35 @@ internal sealed class DevProjexMcpTools(
 				McpStoredResultKind.Search,
 				cancellationToken)
 			.ConfigureAwait(false);
+
+	/// <summary>
+	/// Writes the declarations the shown hits sit in, one line each, in the shape a caller passes
+	/// straight back to <c>get_file</c>. A path and a declaration name are project text, so this
+	/// belongs inside the untrusted block; the sentence that says what to do with it is a constant
+	/// and sits outside.
+	/// </summary>
+	private static void AppendDeclarationSelectors(
+		StringBuilder output,
+		IReadOnlyList<McpSearchDeclaration> declarations)
+	{
+		if (declarations.Count == 0)
+			return;
+
+		var heading = $"{Environment.NewLine}{DeclarationsHeading}{Environment.NewLine}";
+		if (output.Length + heading.Length > MaximumSearchContentCharacters)
+			return;
+		output.Append(heading);
+
+		foreach (var declaration in declarations.Take(MaximumDeclarationsReported))
+		{
+			var line =
+				$"{EscapeSingleLine(declaration.RelativePath)} {EscapeSingleLine(declaration.Name)} " +
+				$"{declaration.Line.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
+			if (output.Length + line.Length > MaximumSearchContentCharacters)
+				break;
+			output.Append(line);
+		}
+	}
 
 	/// <summary>
 	/// Writes where the withheld matches are, as counts per file. A path is project text, so this

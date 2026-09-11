@@ -233,6 +233,10 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("There is no parameter for it", normalized, StringComparison.Ordinal);
 		Assert.Contains("### Reading a declaration by name", server, StringComparison.Ordinal);
+		Assert.Contains("### The search result carries the selector", server, StringComparison.Ordinal);
+		Assert.Contains("Declarations found (path, symbol, line):", server, StringComparison.Ordinal);
+		Assert.Contains("[Read declarations]", server, StringComparison.Ordinal);
+		Assert.Contains("**A cut listing keeps its breadth.**", server, StringComparison.Ordinal);
 		Assert.Contains("### A withheld search stays in the session", server, StringComparison.Ordinal);
 		Assert.Contains("Withheld matches by file:", server, StringComparison.Ordinal);
 		Assert.Contains("Counts, not line numbers", normalized, StringComparison.Ordinal);

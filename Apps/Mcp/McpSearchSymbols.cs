@@ -84,6 +84,8 @@ internal static class McpSearchSymbols
 		}
 
 		var names = new Dictionary<McpSearchHitKey, string>();
+		var declarations = new List<McpSearchDeclaration>();
+		var declared = new HashSet<string>(StringComparer.Ordinal);
 		var annotated = 0;
 		var unannotatedFiles = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var hit in hits)
@@ -112,11 +114,16 @@ internal static class McpSearchSymbols
 			}
 
 			names[new McpSearchHitKey(hit.RelativePath, hit.Line)] = best.Name;
+			// One entry per declaration, not per hit: this is the list a caller reads back, and a
+			// declaration touched by ten matches is still one thing to open.
+			if (declared.Add($"{hit.RelativePath}\u0000{best.Name}"))
+				declarations.Add(new McpSearchDeclaration(hit.RelativePath, best.Name, best.Start));
 			annotated++;
 		}
 
 		return new McpSearchSymbolResult(
 			names,
+			declarations,
 			annotated,
 			unannotatedFiles.Count,
 			skippedFiles);
@@ -252,12 +259,19 @@ internal readonly record struct McpSearchRenderedLine(
 	bool IsMatch,
 	bool StartsGroup);
 
+/// <summary>
+/// One declaration a search touched, in the shape a caller passes back: the file to open, the name
+/// to ask for, and the line it starts on.
+/// </summary>
+internal readonly record struct McpSearchDeclaration(string RelativePath, string Name, int Line);
+
 internal sealed record McpSearchSymbolResult(
 	IReadOnlyDictionary<McpSearchHitKey, string> Names,
+	IReadOnlyList<McpSearchDeclaration> Declarations,
 	int AnnotatedHits,
 	int FilesWithoutDeclarations,
 	int FilesBeyondTheLimit)
 {
 	public static readonly McpSearchSymbolResult None =
-		new(new Dictionary<McpSearchHitKey, string>(), 0, 0, 0);
+		new(new Dictionary<McpSearchHitKey, string>(), [], 0, 0, 0);
 }
