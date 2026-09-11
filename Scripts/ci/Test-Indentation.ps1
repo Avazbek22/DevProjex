@@ -114,6 +114,19 @@ if (-not (Test-Path -LiteralPath $editorConfig)) {
 
 Push-Location $RepositoryRoot
 try {
+	# The whole check is the question "did a file that matched these rules stop matching them", and
+	# that question has no answer when the base never had the rules. A release pull request is the
+	# case in point: its base is master, hundreds of commits behind and from before the rules
+	# existed, so every file that happens to match them there and was edited since would be reported
+	# as a regression by a gate that never judged any of those edits. This resolves itself — once a
+	# release carries the rules into master, the comparison becomes meaningful there too.
+	& git cat-file -e "${BaseSha}:.editorconfig" 2>$null
+	if ($LASTEXITCODE -ne 0) {
+		Write-Host ("The base commit $BaseSha carries no .editorconfig, so there are no rules a " +
+		            'file could have stopped matching. Nothing to compare.')
+		exit 0
+	}
+
 	$changed = @(Get-ChangedCSharpFile -Base $BaseSha -Head $HeadSha)
 	if ($changed.Count -eq 0) {
 		Write-Host 'No C# files changed; nothing to check.'
@@ -151,7 +164,18 @@ try {
 			$carried | ForEach-Object { Write-Host "  $_" }
 		}
 		if ($StepSummaryPath) {
-			$summary = @('### Indentation') + $failed.ForEach({ "- FAIL $_" }) + $carried.ForEach({ "- carried $_" })
+			# Written with an ordinary loop rather than the .ForEach() method. That method does not
+			# populate $_ under Set-StrictMode -Version Latest, so it throws the moment a list is
+			# long enough for its body to run at all — which is to say, the moment a change touches
+			# a file that already differed from the rules.
+			$summary = [Collections.Generic.List[string]]::new()
+			$summary.Add('### Indentation')
+			foreach ($line in $failed) {
+				$summary.Add("- FAIL $line")
+			}
+			foreach ($line in $carried) {
+				$summary.Add("- carried $line")
+			}
 			Add-Content -LiteralPath $StepSummaryPath -Value ($summary -join "`n")
 		}
 		if ($failed.Count -gt 0) {
