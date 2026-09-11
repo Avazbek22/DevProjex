@@ -673,6 +673,8 @@ jobs:
           DOCUMENTATION_RESULT: ${{ needs.documentation-contracts.result }}
           PLANNER_PATHS: ${{ needs.prepare-matrix.outputs.changed_paths }}
           PLANNER_SUITES: ${{ needs.prepare-matrix.outputs.planned_suites }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_AFTER: ${{ github.event.after }}
           PLANNER_HAS_TESTS: ${{ needs.prepare-matrix.outputs.has_test_matrix }}
           PLANNER_TERMINAL_COMMAND: ${{ needs.prepare-matrix.outputs.run_terminal_command }}
           PLANNER_IGNORE_SCANNER: ${{ needs.prepare-matrix.outputs.run_ignore_scanner }}
@@ -726,10 +728,35 @@ jobs:
           $plannedSuites = @($env:PLANNER_SUITES -split ',' |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
+          # The plan is also allowed to have been decided from the delta of the push that
+          # triggered this run, which is what the incremental tier does. It is worked out here
+          # too, so that the plan is checked against a change rather than believed about one.
+          # A rebase leaves the event naming a commit that is on no ref, so the commits are
+          # looked for before a range is built from them.
+          $pushed = @()
+          $pushedAvailable = $false
+          $sha = '^[0-9a-fA-F]{40}$'
+          if ($env:EVENT_BEFORE -match $sha -and $env:EVENT_BEFORE -notmatch '^0{40}$' -and
+              $env:EVENT_AFTER -match $sha) {
+            git cat-file -e "$($env:EVENT_BEFORE)^{commit}" 2>$null
+            $beforeExists = $LASTEXITCODE -eq 0
+            git cat-file -e "$($env:EVENT_AFTER)^{commit}" 2>$null
+            $afterExists = $LASTEXITCODE -eq 0
+            if ($beforeExists -and $afterExists) {
+              $pushed = @(git -c core.quotepath=false diff --name-only "$($env:EVENT_BEFORE)..$($env:EVENT_AFTER)" --)
+              $pushedAvailable = $LASTEXITCODE -eq 0
+            }
+          }
+          # Looking for a commit that is not there is an answer, not a failure, and the step is
+          # ended by whatever the last native command leaves behind.
+          $global:LASTEXITCODE = 0
+
           ./Scripts/ci/Test-CiGateSkip.ps1 `
             -ChangedPath $changed `
             -PlannerChangedPathJson $env:PLANNER_PATHS `
             -SkippedJob $skipped `
             -PlannerWillRunJob $willRun `
-            -PlannerWillRunSuite $plannedSuites
+            -PlannerWillRunSuite $plannedSuites `
+            -PushedChangedPath $pushed `
+            -PushedChangeAvailable:$pushedAvailable
 
