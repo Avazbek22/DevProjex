@@ -1249,7 +1249,8 @@ default `10`; both surfaces share the same bounded, deterministic ranking.
 `--max-file-bytes SIZE` is an additive, invocation-only option on `analyze`,
 `tree`, and `export context`. The five MCP selection tools that narrow a file set
 — `get_tree`, `analyze`, `pack_context`, `search_project`, and `related_files` —
-expose the equivalent positive integer `max_file_bytes` parameter. Both surfaces use one Application
+expose the equivalent `max_file_bytes` parameter, as a positive integer or the
+same value written as a numeric string. Both surfaces use one Application
 filter and exclude files strictly larger than the limit without changing profile
 schemas. Existing machine documents add no property; their inventory, byte
 metrics, trees, and content reflect the effective narrowed selection.
@@ -1282,15 +1283,18 @@ effective set in an `exclusions` array and `list_projects` results carry a
 `baseline` object (`git`, `exclusions`, `agentExclusions`); both are required
 on every server — including servers started without the exclusion flags — so
 consumers that pinned the pre-v5.2 output schemas must refresh their copies.
-`get_tree` and `pack_context` responses carry a trusted `[Effective filters]`
-line among their trailing diagnostics, which also include `[Protection]` and,
-for a pinned remote checkout, `[Remote]`; a session receives that pair once and
-then the constant `[Unchanged] filters, protection; see list_projects.` line
-until what it says changes, while an `[Empty selection]` response and any call
-that passed `max_file_bytes` always report the full pair. Every selection tool
-adds an `[Empty selection]` line when nothing survived the filters, and a
-`DPX-MCP-PATH-NOT-FOUND` error for a file the filters hide names the effective
-filters. Glob patterns gain `{a,b}` alternatives; `!` negation and
+`get_tree`, `pack_context`, and `related_files` responses always carry a trusted
+`[Effective filters]` line; the other selection tools carry it only when they
+have to explain themselves. It is never the last line: an `[Empty selection]`
+line can follow it, `[Protection]` comes after that, a pinned remote checkout
+adds `[Remote]`, and a budgeted `pack_context` ends with `[Budget accounting]`.
+A session is told each trusted service line once and then receives the constant
+`[Unchanged] filters, protection; see list_projects.` line until that content
+changes; an `[Empty selection]` response and any call that passed
+`max_file_bytes` report the full set instead. `analyze` reports no protection
+line on any call. Every selection tool adds an `[Empty selection]` line when
+nothing survived the filters, and a `DPX-MCP-PATH-NOT-FOUND` error for a file
+the filters hide names the effective filters. Glob patterns gain `{a,b}` alternatives; `!` negation and
 `[...]` classes, previously matched as literal characters, are rejected with
 `DPX-MCP-INVALID-PATTERN`.
 

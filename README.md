@@ -206,7 +206,7 @@ devprojex mcp --root /path/to/project
 
 For Claude Code it's one command: `claude mcp add devprojex -- devprojex mcp --root .`
 
-Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`. `related_files` answers "what does this file actually use, and who uses it" from a static dependency index over up to 16 seed files, so following a thread never widens the selection. Only `pack_context` stores oversized context as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
+Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`. `related_files` answers "what does this file actually use, and who uses it" from a static dependency index over up to 16 seed files, so following a thread never widens the selection. `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
 
 The server enforces hard security boundaries on top of DevProjex's read-only design:
 
