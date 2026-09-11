@@ -7,6 +7,7 @@ public enum LanguageId
 	JavaScript,
 	Tsx,
 	Python,
+	Go,
 	Unsupported
 }
 

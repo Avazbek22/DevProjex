@@ -896,6 +896,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".tsx" or ".jsx" => LanguageId.Tsx,
 		".js" or ".mjs" or ".cjs" => LanguageId.JavaScript,
 		".py" or ".pyi" => LanguageId.Python,
+		".go" => LanguageId.Go,
 		_ => LanguageId.Unsupported
 	};
 
@@ -1221,7 +1222,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.TypeScript] = new("tree-sitter-typescript", "tree_sitter_typescript", "typescript", new TypeScriptDependencyLanguageAdapter()),
 				[LanguageId.Tsx] = new("tree-sitter-tsx", "tree_sitter_tsx", "typescript", new TypeScriptDependencyLanguageAdapter()),
 				[LanguageId.JavaScript] = new("tree-sitter-javascript", "tree_sitter_javascript", "javascript", new TypeScriptDependencyLanguageAdapter()),
-				[LanguageId.Python] = new("tree-sitter-python", "tree_sitter_python", "python", new PythonDependencyLanguageAdapter())
+				[LanguageId.Python] = new("tree-sitter-python", "tree_sitter_python", "python", new PythonDependencyLanguageAdapter()),
+				[LanguageId.Go] = new("tree-sitter-go", "tree_sitter_go", "go", new GoDependencyLanguageAdapter())
 			};
 	}
 

@@ -18,6 +18,11 @@ public sealed class DependencyFactsDocumentationContractTests
 		Assert.Contains("Merely failing to find a name in the manifest never", dependencies, StringComparison.Ordinal);
 		Assert.Contains("2 Mi characters", dependencies, StringComparison.Ordinal);
 		Assert.Contains(
+			"Go has one narrow capability: a package is a directory",
+			dependencies,
+			StringComparison.Ordinal);
+		Assert.Contains("Import paths are not resolved", dependencies, StringComparison.Ordinal);
+		Assert.Contains(
 			"Without an owning `tsconfig.json` or `jsconfig.json`, one narrow capability applies",
 			dependencies,
 			StringComparison.Ordinal);
