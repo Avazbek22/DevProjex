@@ -62,6 +62,10 @@ jobs:
         shell: pwsh
         run: ./Scripts/ci/Test-CiChangePlanner.ps1
 
+      - name: Validate the executed-tests check
+        shell: pwsh
+        run: ./Scripts/ci/Test-ExecutedTestsContract.ps1
+
       - name: Select CI plan
         id: plan
         shell: pwsh
@@ -221,7 +225,7 @@ jobs:
           --no-build
           --verbosity minimal
           --
-          --results-directory "TestResults/${{ matrix.suite_id }}"
+          --results-directory "${{ github.workspace }}/TestResults/${{ matrix.suite_id }}"
           --report-xunit-trx
           --report-xunit-trx-filename "${{ matrix.trx_name }}"
           --timeout 20m
@@ -252,10 +256,18 @@ jobs:
           --no-build
           --verbosity minimal
           --
-          --results-directory "TestResults/${{ matrix.suite_id }}"
+          --results-directory "${{ github.workspace }}/TestResults/${{ matrix.suite_id }}"
           --report-xunit-trx
           --report-xunit-trx-filename "${{ matrix.trx_name }}"
           --timeout 20m
+
+      - name: Confirm the ${{ matrix.suite_name }} tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/${{ matrix.suite_id }}"
+          -JobName 'CI (${{ matrix.os_name }} / ${{ matrix.suite_name }})'
 
       - name: Print Test Runner Logs
         if: ${{ failure() }}
@@ -397,6 +409,14 @@ jobs:
           --logger "trx;LogFileName=terminal-command-integration.trx"
           --results-directory "TestResults/terminal-command-integration"
 
+      - name: Confirm the terminal command tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/terminal-command-unit","TestResults/terminal-command-integration"
+          -JobName 'Terminal Command Matrix (${{ matrix.os_name }})'
+
       - name: Print terminal command test runner logs
         if: ${{ failure() }}
         shell: pwsh
@@ -494,6 +514,14 @@ jobs:
               Write-Host "::endgroup::"
             }
 
+      - name: Confirm the ignore/scanner tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/ignore-scanner"
+          -JobName 'Ignore/Scanner Matrix (${{ matrix.os_name }})'
+
       - name: Upload ignore/scanner results
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
@@ -533,7 +561,15 @@ jobs:
       - name: Run documentation contract tests
         shell: pwsh
         run: |
-          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~DocumentationAndPackagingContractTests|FullyQualifiedName~DocumentationExecutionRegressionTests"
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~DocumentationAndPackagingContractTests|FullyQualifiedName~DocumentationExecutionRegressionTests" --logger "trx;LogFileName=documentation.trx" --results-directory "TestResults/documentation"
+
+      - name: Confirm the documentation contract tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/documentation"
+          -JobName 'Documentation Contracts'
 
   ranking-eval-tests:
     name: Ranking Evaluator Tests
@@ -555,7 +591,15 @@ jobs:
         shell: pwsh
         run: |
           dotnet build tools/RankingEval/RankingEval.csproj -c Release
-          dotnet test tools/RankingEval/Tests/RankingEval.Tests.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~EvaluationMetricsTests"
+          dotnet test tools/RankingEval/Tests/RankingEval.Tests.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~EvaluationMetricsTests" --logger "trx;LogFileName=ranking-eval.trx" --results-directory "TestResults/ranking-eval"
+
+      - name: Confirm the ranking evaluator tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/ranking-eval"
+          -JobName 'Ranking Evaluator Tests'
 
   ci-gate:
     name: CI Gate

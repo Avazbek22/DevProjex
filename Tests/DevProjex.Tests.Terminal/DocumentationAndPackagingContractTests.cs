@@ -27,7 +27,8 @@ public sealed class DocumentationAndPackagingContractTests
 		"Dependencies.md",
 		"Ranking.md",
 		"Release-Channels.md",
-		"Release-Process.md"
+		"Release-Process.md",
+		"CI-Known-Failures.md"
 	];
 
 	[Fact]
