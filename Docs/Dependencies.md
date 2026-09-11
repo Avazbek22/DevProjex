@@ -179,7 +179,18 @@ Import paths are not resolved: `go.mod` is not read, a module path is not mapped
 and vendor directories, build tags, import aliases, dot imports and `internal` visibility are not
 interpreted. Package-level `const` and `var` declarations are not yet importable names, and a
 named type is recorded as one declaration without distinguishing struct, interface and alias.
-Go needs no configuration file, so a Go file has no owning-configuration failure mode.
+Go needs no configuration file, so a Go file has no owning-configuration failure mode. A
+predeclared type such as `string` or `error` names no file and produces no reference, a
+declaration's own name is not a reference to itself, and a qualified reference such as
+`alpha.Shared` names another package and is dropped rather than matched against a same-named
+type in the referring directory.
+
+One consequence is worth stating because it is not visible in the edges. A Go file now counts as
+`Supported`, and extracted-facts coverage is supported files over candidates, so a selection
+containing Go reports higher coverage and gives the graph signal more weight in importance
+ranking than it did while Go was unsupported. That is the intended effect of adding an adapter,
+but Go's graph is package-local by construction, so its coverage is not comparable with the
+cross-file graphs the other four languages build.
 
 Configuration reads have four explicit outcomes: valid, missing, corrupt, and unsupported semantics.
 A malformed JSON document, a `null` or non-object `compilerOptions`, or an unsupported value shape is
