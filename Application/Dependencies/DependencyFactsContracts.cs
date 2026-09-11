@@ -68,6 +68,7 @@ public sealed record DependencyScopeDescriptor(
 	public string? ConfigurationDiagnostic { get; init; }
 	public bool HasTypeScriptCustomConditions { get; init; }
 	public bool DisableTransitiveProjectReferences { get; init; }
+	public IReadOnlyList<string> CIncludeDirectories { get; init; } = [];
 }
 
 public sealed record PackageMapDescriptor(

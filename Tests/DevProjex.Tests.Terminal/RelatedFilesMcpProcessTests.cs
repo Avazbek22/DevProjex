@@ -9,6 +9,22 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
+	public async Task RealProcessRelatedFilesReportsCHeaderDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("c-project");
+		workspace.WriteFile("c-project/include/model.h", "typedef struct Model { int value; } Model;\n");
+		workspace.WriteFile("c-project/src/app.c", "#include \"../include/model.h\"\nModel read_model(void);\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "src/app.c", ["direction"] = "dependencies"
+		});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.Contains("include/model.h", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesReportsJavaManifestDependencies()
 	{
 		using var workspace = new TemporaryDirectory();

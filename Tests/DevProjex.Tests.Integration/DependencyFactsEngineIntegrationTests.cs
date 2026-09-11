@@ -11,6 +11,68 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyFactsEngineIntegrationTests
 {
 	[Fact]
+	public async Task CFactsResolveRepositoryHeadersAndNamedTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var header = fixture.CreateFile("include/model.h", "typedef struct Model { int value; } Model;\n");
+		var source = fixture.CreateFile("src/app.c", "#include \"../include/model.h\"\nstatic Model make(Model value) { return value; }\n");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [header, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "src/app.c");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/app.c" &&
+			edge.Target == "include/model.h" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName == "src/app.c#make" && declaration.Identity.FileScope == "src/app.c");
+		Assert.Contains(facts.References, static reference => reference.Name == "Model");
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.EndsWith("#value", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task CNavigationDistinguishesEqualFieldsAcrossOwners()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("members.c", "struct A { int value; }; struct B { int value; }; int run(void) { return 1; }");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations.Select(static item => item.Name).ToArray();
+		Assert.Contains("members.c#A#value", names);
+		Assert.Contains("members.c#B#value", names);
+		Assert.Contains("members.c#run", names);
+	}
+
+	[Fact]
+	public async Task CCMakeIncludeDirectoriesResolveOnlyManifestHeaders()
+	{
+		using var fixture = new TemporaryDirectory();
+		var configuration = fixture.CreateFile("CMakeLists.txt", "add_executable(app src/app.c)\ntarget_include_directories(app PRIVATE libs/include)\n");
+		var header = fixture.CreateFile("libs/include/model.h", "typedef struct Model { int value; } Model;\n");
+		var source = fixture.CreateFile("src/app.c", "#include <model.h>\nModel read_model(void);\n");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [configuration, header, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/app.c" &&
+			edge.Target == "libs/include/model.h" && edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task CSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("broken.c", "struct Broken { int value;");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
 	public async Task PhpFactsResolveUsesInheritanceAndNamespacedTypes()
 	{
 		using var fixture = new TemporaryDirectory();

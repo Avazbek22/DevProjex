@@ -66,6 +66,12 @@ public sealed partial class McpServerProcessTests
 			"<?php\nnamespace Sample;\nclass A {\n function run() { return 'member-marker-a'; }\n}\nclass B {\n function run() { return 'member-marker-b'; }\n}\n// fallback-marker\n",
 			"Sample.A.run",
 			"Sample.B.run"
+		},
+		{
+			"members.c",
+			"struct A { char member_marker_a[sizeof(\"member-marker-a\")]; };\nstruct B { char member_marker_b[sizeof(\"member-marker-b\")]; };\n// fallback-marker\n",
+			"members.c#A#member_marker_a",
+			"members.c#B#member_marker_b"
 		}
 	};
 

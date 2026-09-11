@@ -13,6 +13,7 @@ public enum LanguageId
 	Kotlin,
 	Ruby,
 	Php,
+	C,
 	Unsupported
 }
 

@@ -590,7 +590,12 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			? new Dictionary<string, int>(StringComparer.Ordinal)
 			: null;
 		var visited = 0;
-		string? fileScopedNamespace = language == LanguageId.Rust ? RustModulePath(relativePath) : null;
+		string? fileScopedNamespace = language switch
+		{
+			LanguageId.Rust => RustModulePath(relativePath),
+			LanguageId.C => relativePath,
+			_ => null
+		};
 		foreach (var capture in cursor.Captures)
 		{
 			if ((visited++ & 255) == 0)
@@ -612,7 +617,12 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			{
 				owners.Insert(0, fileScopedNamespace);
 			}
-			var separator = language is LanguageId.Rust or LanguageId.Ruby ? "::" : ".";
+			var separator = language switch
+			{
+				LanguageId.Rust or LanguageId.Ruby => "::",
+				LanguageId.C => "#",
+				_ => "."
+			};
 			var owner = owners.Count == 0 ? null : string.Join(separator, owners);
 			var qualifiedName = language == LanguageId.Ruby && owner is not null
 				? capture.Node.Type switch
@@ -685,6 +695,15 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return NormalizeNavigationName(node.GetChildForField("left")?.Text ?? string.Empty);
 		if (language == LanguageId.Php && node.Type is "property_element" or "const_element")
 			return NormalizeNavigationName(node.GetChildForField("name")?.Text ?? node.NamedChildren.FirstOrDefault()?.Text ?? string.Empty);
+		if (language == LanguageId.C)
+		{
+			if (node.Type is "function_definition" or "declaration")
+				return FirstNodeOrDescendantText(node.GetChildForField("declarator") ?? node, "identifier");
+			if (node.Type == "field_declaration")
+				return FirstNodeOrDescendantText(node.GetChildForField("declarator") ?? node, "field_identifier");
+			if (node.Type is "struct_specifier" or "union_specifier" or "enum_specifier")
+				return FirstNodeOrDescendantText(node.GetChildForField("name") ?? node, "type_identifier");
+		}
 		if (language == LanguageId.Rust && node.Type == "impl_item")
 		{
 			var implementedType = node.GetChildForField("type")?.Text;
@@ -751,6 +770,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		LanguageId.Php => nodeType is "namespace_definition" or "class_declaration" or
 			"interface_declaration" or "trait_declaration" or "enum_declaration" or
 			"function_definition" or "method_declaration",
+		LanguageId.C => nodeType is "function_definition" or "struct_specifier" or
+			"union_specifier" or "enum_specifier",
 		_ => false
 	};
 
@@ -853,6 +874,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		return null;
 	}
 
+	private static string? FirstNodeOrDescendantText(Node node, string nodeType) =>
+		node.Type == nodeType ? NormalizeNavigationName(node.Text) : FirstDescendantText(node, nodeType);
+
 	private static bool IsDeclarationCapture(string captureName) =>
 		captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 		captureName is "context.namespace" or "context.using";
@@ -923,6 +947,16 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var value = name is null ? string.Empty : materialization.Read(name).TrimStart('\\');
 			return CreateCapture(captureName, node, value, value, 0, false, false,
 				capturedNameStartIndex: name is null ? -1 : checked((int)name.StartIndex), evidence: value);
+		}
+		if (captureName.StartsWith("declaration.c_", StringComparison.Ordinal))
+		{
+			var cNameNode = FindCDeclarationName(node);
+			var cCapturedName = cNameNode is null ? null : materialization.Read(cNameNode);
+			var cIsStatic = node.Children.Any(child =>
+				child.Type == "storage_class_specifier" && materialization.Read(child) == "static");
+			return CreateCapture(captureName, node, cCapturedName ?? string.Empty, cCapturedName, 0,
+				cIsStatic, cIsStatic, capturedNameStartIndex: cNameNode is null ? -1 : checked((int)cNameNode.StartIndex),
+				evidence: cCapturedName ?? string.Empty);
 		}
 
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
@@ -1200,6 +1234,29 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return specifier.Length == 0 ? null : new DependencyImportSyntax(
 				specifier, 0, [new DependencyImportBinding(specifier.Split('\\').Last(), alias, false)]);
 		}
+		if (captureName == "import.c")
+		{
+			var path = node.GetChildForField("path") ?? node.NamedChildren.LastOrDefault();
+			if (path is null) return null;
+			var text = materialization.Read(path).Trim();
+			if (text.Length < 3 || text[0] is not ('\"' or '<')) return null;
+			var closing = text[0] == '<' ? '>' : text[0];
+			if (text[^1] != closing) return null;
+			var specifier = text[1..^1];
+			return specifier.Length == 0 ? null : new DependencyImportSyntax(
+				specifier, 0, [new DependencyImportBinding(text[0] == '"' ? "$quoted" : "$system", null)]);
+		}
+		return null;
+	}
+
+	private static Node? FindCDeclarationName(Node node)
+	{
+		var current = node.GetChildForField("declarator") ?? node.GetChildForField("name");
+		while (current is not null)
+		{
+			if (current.Type is "identifier" or "type_identifier" or "field_identifier") return current;
+			current = current.GetChildForField("declarator") ?? current.NamedChildren.FirstOrDefault();
+		}
 		return null;
 	}
 
@@ -1339,6 +1396,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".kt" or ".kts" => LanguageId.Kotlin,
 		".rb" or ".rake" or ".gemspec" => LanguageId.Ruby,
 		".php" or ".phtml" => LanguageId.Php,
+		".c" or ".h" => LanguageId.C,
 		_ => LanguageId.Unsupported
 	};
 
@@ -1679,7 +1737,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.Rust] = new("tree-sitter-rust", "tree_sitter_rust", "rust", new RustDependencyLanguageAdapter()),
 				[LanguageId.Kotlin] = new("tree-sitter-kotlin", "tree_sitter_kotlin", "kotlin", new KotlinDependencyLanguageAdapter()),
 				[LanguageId.Ruby] = new("tree-sitter-ruby", "tree_sitter_ruby", "ruby", new RubyDependencyLanguageAdapter()),
-				[LanguageId.Php] = new("tree-sitter-php", "tree_sitter_php", "php", new PhpDependencyLanguageAdapter())
+				[LanguageId.Php] = new("tree-sitter-php", "tree_sitter_php", "php", new PhpDependencyLanguageAdapter()),
+				[LanguageId.C] = new("tree-sitter-c", "tree_sitter_c", "c", new CDependencyLanguageAdapter())
 			};
 	}
 
