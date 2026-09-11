@@ -11,6 +11,79 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyFactsEngineIntegrationTests
 {
 	[Fact]
+	public async Task RustFactsResolveModulesUsesAndTypesFromTheManifest()
+	{
+		using var fixture = new TemporaryDirectory();
+		var root = fixture.CreateFile("src/lib.rs", "mod models; mod service;");
+		var model = fixture.CreateFile("src/models.rs", "pub struct User { pub id: u64 }");
+		var service = fixture.CreateFile("src/service.rs", """
+			use crate::models::User;
+			pub struct Service { value: User }
+			impl Service { pub fn read(&self) -> &User { &self.value } }
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[root, model, service],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "src/service.rs");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "models::User");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/service.rs" &&
+			edge.Target == "src/models.rs" && edge.Reference == "models::User");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/lib.rs" && edge.Target == "src/models.rs");
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "service::impl<Service>::read" && declaration.Kind == NavigationSymbolKind.Function);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.Contains("::read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task RustCargoPathDependenciesExposeOnlyDeclaredRepositoryScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var libraryManifest = fixture.CreateFile("library/Cargo.toml", "[package]\nname = \"shared-lib\"\nversion = \"1.0.0\"\n");
+		var librarySource = fixture.CreateFile("library/src/lib.rs", "pub struct Remote;");
+		var appManifest = fixture.CreateFile("app/Cargo.toml", """
+			[package]
+			name = "app"
+			version = "1.0.0"
+			[dependencies]
+			shared-lib = { path = "../library" }
+			""");
+		var appSource = fixture.CreateFile("app/src/lib.rs", "use shared_lib::Remote; pub struct App(Remote);");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[libraryManifest, librarySource, appManifest, appSource],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "app/src/lib.rs" &&
+			edge.Target == "library/src/lib.rs" && edge.Status == ResolutionStatus.Resolved && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task RustSyntaxErrorsFailClosedWithoutRecoveredEdges()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("src/lib.rs", "mod missing; struct Broken {");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
 	public async Task JavaFactsResolveManifestTypesAndKeepMembersInNavigationOnly()
 	{
 		using var fixture = new TemporaryDirectory();

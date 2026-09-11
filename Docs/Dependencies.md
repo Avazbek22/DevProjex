@@ -186,6 +186,24 @@ navigation name in a file is unique and the exact name printed by search can be 
 `get_file`. A syntax tree containing an error publishes neither recovered declarations nor recovered
 edges.
 
+Rust source files contribute modules, structs, enums, unions, traits, type aliases, and free
+functions under the module path implied by their repository path and inline `mod` nesting. A
+literal `mod name;` resolves to `name.rs` or `name/mod.rs` in the same directory. `use` trees,
+aliases, `crate`, `self`, and bounded `super` prefixes are expanded without executing code; exact
+items resolve only to matching declarations in the allowed manifest, while glob imports provide
+visibility context without inventing a module edge. A bounded `Cargo.toml` supplies the crate name
+and literal local `path` dependencies, including dev and build dependencies. Referenced repository
+crates are visible transitively. Registry crates, build-script output, generated modules, target-
+specific dependency tables, macro expansion, custom source roots, and absolute dependency paths are
+not inferred and remain unresolved.
+
+Rust navigation includes modules, types, traits, impl blocks, functions, methods, fields, constants,
+statics, and closures bound directly by `let`. Names use `::`, start with the file module, and carry
+inline-module, type, impl, and function owners. Thus equal method names in `impl<A>` and `impl<B>`
+remain distinct. Anonymous closures and macro-produced members fall back to their nearest supported
+named owner. A syntax tree containing an error publishes neither recovered declarations nor recovered
+edges.
+
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
 makes resolvable. Top-level `func`, method and `type` declarations are importable names within

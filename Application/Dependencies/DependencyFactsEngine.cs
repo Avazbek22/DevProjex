@@ -1292,6 +1292,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			LanguageId.TypeScript or LanguageId.JavaScript or LanguageId.Tsx => ResolveTypeScriptImport(source, import),
 			LanguageId.Python => ResolvePythonImport(source, import),
 			LanguageId.Java => ResolveJavaImport(source, import),
+			LanguageId.Rust => ResolveRustImport(source, import),
 			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
 				"explicit imports are context, not dependency edges, for this language", [])
 		};
@@ -1319,6 +1320,49 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			return Edge(source, import, ResolutionStatus.Unresolved, null,
 				"no imported declaration in the manifest", []);
+		}
+
+		private DependencyEdge ResolveRustImport(FileFacts source, ImportFact import)
+		{
+			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
+			if (import.ImportedName == "$module")
+			{
+				var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
+				var stem = import.Specifier["./".Length..];
+				var candidates = new[]
+				{
+					Path.Combine(directory, stem + ".rs"),
+					Path.Combine(directory, stem, "mod.rs")
+				}.Where(path => IsWithin(_root, path))
+					.Select(path => PortableRelative(_root, path))
+					.Where(_files.ContainsKey);
+				return FinishImport(source, import, candidates, "one declared Rust module");
+			}
+			if (import.IsWildcard)
+				return Edge(source, import, ResolutionStatus.Unresolved, null,
+					"wildcard import is resolution context, not a dependency target", []);
+
+			var names = new List<string> { import.Specifier };
+			var firstSeparator = import.Specifier.IndexOf("::", StringComparison.Ordinal);
+			var first = firstSeparator < 0 ? import.Specifier : import.Specifier[..firstSeparator];
+			foreach (var scopeId in VisibleScopeIds(source.ScopeId))
+			{
+				var visibleScope = FindScope(scopeId);
+				if (visibleScope?.PackageName == first && firstSeparator >= 0)
+					names.Add(import.Specifier[(firstSeparator + 2)..]);
+			}
+			var files = names.Distinct(StringComparer.Ordinal)
+				.SelectMany(name => LookupQualified(source, name, 0))
+				.SelectMany(static declaration => declaration.DeclarationSites)
+				.Select(static site => site.File).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			return files.Length switch
+			{
+				0 => Edge(source, import, ResolutionStatus.Unresolved, null,
+					"no imported declaration in the manifest", []),
+				1 => Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files),
+				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple imported declarations", files)
+			};
 		}
 
 		public long EstimateResolutionWork(FileFacts source, int maximumWork)
@@ -2163,7 +2207,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
-			var isSyntacticallyQualified = reference.IsGlobalQualified || reference.Name.Contains('.');
+			var isSyntacticallyQualified = reference.IsGlobalQualified || reference.Name.Contains('.') ||
+				reference.Name.Contains("::", StringComparison.Ordinal);
 			var typeParameterShadowsReference = !isSyntacticallyQualified && (source.TypeParameterScopes.Count > 0
 				? _typeParametersByFileAndName.GetValueOrDefault(source.Path)?
 					.GetValueOrDefault(simpleName)?.Any(parameter =>
@@ -2181,6 +2226,12 @@ public sealed class DependencyFactsEngine : IDisposable
 			    source.Aliases.TryGetValue(simpleName, out var javaImport))
 			{
 				expandedAlias = javaImport;
+				aliasExpanded = true;
+			}
+			if (!aliasExpanded && source.LanguageId == LanguageId.Rust && !isSyntacticallyQualified &&
+			    source.Aliases.TryGetValue(simpleName, out var rustImport))
+			{
+				expandedAlias = rustImport;
 				aliasExpanded = true;
 			}
 			var expandedName = aliasExpanded ? expandedAlias! : reference.Name;
@@ -2223,6 +2274,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (!requiresQualifiedLookup)
 					candidates = SelectVisibleJavaCandidates(source, reference, candidates);
 			}
+			else if (source.LanguageId == LanguageId.Rust && !requiresQualifiedLookup)
+				candidates = SelectVisibleRustCandidates(source, reference, candidates);
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
@@ -2374,6 +2427,18 @@ public sealed class DependencyFactsEngine : IDisposable
 				source.GlobalContextNamespaces.Contains(candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
 		}
 
+		private static DeclarationFact[] SelectVisibleRustCandidates(
+			FileFacts source,
+			ReferenceFact reference,
+			DeclarationFact[] candidates)
+		{
+			var sameModule = candidates.Where(candidate =>
+				string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();
+			if (sameModule.Length > 0) return sameModule;
+			return candidates.Where(candidate => source.GlobalContextNamespaces.Contains(
+				candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
+		}
+
 		private DeclarationFact[] LookupContextualCSharpQualified(
 			FileFacts source,
 			ReferenceFact reference,
@@ -2432,7 +2497,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				return false;
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
-			return source.LanguageId is LanguageId.CSharp or LanguageId.Java &&
+			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Rust &&
 			       VisibleScopeIds(source.ScopeId).Contains(
 			       declaration.Identity.ScopeId, StringComparer.Ordinal);
 		}
@@ -2621,7 +2686,10 @@ public sealed class DependencyFactsEngine : IDisposable
 		}
 		private static string SimpleName(string qualified)
 		{
-			var value = qualified[(Math.Max(qualified.LastIndexOf('.'), qualified.LastIndexOf('#')) + 1)..];
+			var separator = Math.Max(qualified.LastIndexOf('.'), qualified.LastIndexOf('#'));
+			var rustSeparator = qualified.LastIndexOf("::", StringComparison.Ordinal);
+			if (rustSeparator >= 0) separator = Math.Max(separator, rustSeparator + 1);
+			var value = qualified[(separator + 1)..];
 			var arity = value.IndexOf('`');
 			return arity < 0 ? value : value[..arity];
 		}
@@ -2688,7 +2756,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (pending.TryDequeue(out var scopeId))
 				{
 					if (!visited.Add(scopeId)) continue;
-					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java) ||
+					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Rust) ||
 					    !scopes.TryGetValue(scopeId, out var current)) continue;
 					foreach (var projectReference in current.ProjectReferences) pending.Enqueue(projectReference);
 				}

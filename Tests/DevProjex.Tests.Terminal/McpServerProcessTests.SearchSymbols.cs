@@ -42,6 +42,12 @@ public sealed partial class McpServerProcessTests
 			"package sample;\nclass A { String run() { return \"member-marker-a\"; } }\nclass B { String run() { return \"member-marker-b\"; } }\n// fallback-marker\n",
 			"sample.A.run",
 			"sample.B.run"
+		},
+		{
+			"members.rs",
+			"struct A;\nstruct B;\nimpl A { fn run(&self) -> &'static str { \"member-marker-a\" } }\nimpl B { fn run(&self) -> &'static str { \"member-marker-b\" } }\n// fallback-marker\n",
+			"members::impl<A>::run",
+			"members::impl<B>::run"
 		}
 	};
 

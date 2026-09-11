@@ -36,6 +36,32 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessRelatedFilesReportsRustManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("rust-project");
+		workspace.WriteFile("rust-project/src/lib.rs", "mod model; mod service;");
+		workspace.WriteFile("rust-project/src/model.rs", "pub struct User;");
+		workspace.WriteFile("rust-project/src/service.rs", "use crate::model::User; pub struct Service(User);");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "src/service.rs",
+				["direction"] = "dependencies"
+			});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("src/model.rs", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" — unresolved — ", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesPreservesParsedImportSemantics()
 	{
 		using var workspace = new TemporaryDirectory();

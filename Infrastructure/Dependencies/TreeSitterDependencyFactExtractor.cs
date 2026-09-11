@@ -407,6 +407,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			runtime.Navigation,
 			tree.RootNode,
 			language,
+			relativePath,
 			contentFingerprint,
 			cancellationToken);
 	}
@@ -453,6 +454,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				runtime.Navigation,
 				tree.RootNode,
 				source.LanguageId,
+				source.RelativePath,
 				source.ContentFingerprint,
 				cancellationToken);
 			Interlocked.Add(ref _adapterVisitedRanges, context.Work.VisitedRanges);
@@ -577,6 +579,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		Query query,
 		Node root,
 		LanguageId language,
+		string relativePath,
 		string contentFingerprint,
 		CancellationToken cancellationToken)
 	{
@@ -587,7 +590,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			? new Dictionary<string, int>(StringComparer.Ordinal)
 			: null;
 		var visited = 0;
-		string? fileScopedNamespace = null;
+		string? fileScopedNamespace = language == LanguageId.Rust ? RustModulePath(relativePath) : null;
 		foreach (var capture in cursor.Captures)
 		{
 			if ((visited++ & 255) == 0)
@@ -605,8 +608,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			{
 				owners.Insert(0, fileScopedNamespace);
 			}
-			var owner = owners.Count == 0 ? null : string.Join('.', owners);
-			var qualifiedName = owner is null ? name : $"{owner}.{name}";
+			var separator = language == LanguageId.Rust ? "::" : ".";
+			var owner = owners.Count == 0 ? null : string.Join(separator, owners);
+			var qualifiedName = owner is null ? name : $"{owner}{separator}{name}";
 			if (javaNames is not null && capture.Node.Type != "package_declaration")
 			{
 				var ordinal = javaNames.GetValueOrDefault(qualifiedName) + 1;
@@ -653,6 +657,17 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return NormalizeNavigationName(named.Text);
 		if (language == LanguageId.Java && node.Type == "package_declaration")
 			return NormalizeNavigationName(node.NamedChildren.LastOrDefault()?.Text ?? string.Empty);
+		if (language == LanguageId.Rust && node.Type == "impl_item")
+		{
+			var implementedType = node.GetChildForField("type")?.Text;
+			var implementedTrait = node.GetChildForField("trait")?.Text;
+			if (!string.IsNullOrWhiteSpace(implementedType))
+				return string.IsNullOrWhiteSpace(implementedTrait)
+					? $"impl<{implementedType}>"
+					: $"impl<{implementedTrait} for {implementedType}>";
+		}
+		if (language == LanguageId.Rust && node.Type == "let_declaration")
+			return NormalizeNavigationName(node.GetChildForField("pattern")?.Text ?? string.Empty);
 
 		if (language == LanguageId.Go)
 		{
@@ -699,6 +714,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		LanguageId.Java => nodeType is "class_declaration" or "interface_declaration" or
 			"enum_declaration" or "record_declaration" or "annotation_type_declaration" or
 			"method_declaration" or "constructor_declaration" or "compact_constructor_declaration",
+		LanguageId.Rust => nodeType is "mod_item" or "struct_item" or "enum_item" or "trait_item" or
+			"union_item" or "impl_item" or "function_item",
 		_ => false
 	};
 
@@ -745,6 +762,18 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			index = end;
 		}
 		return result;
+	}
+
+	private static string RustModulePath(string relativePath)
+	{
+		var portable = Normalize(relativePath);
+		var sourceMarker = portable.LastIndexOf("/src/", StringComparison.Ordinal);
+		if (sourceMarker >= 0) portable = portable[(sourceMarker + "/src/".Length)..];
+		else if (portable.StartsWith("src/", StringComparison.Ordinal)) portable = portable["src/".Length..];
+		portable = Path.ChangeExtension(portable, null) ?? portable;
+		if (portable is "lib" or "main" or "mod") return string.Empty;
+		if (portable.EndsWith("/mod", StringComparison.Ordinal)) portable = portable[..^"/mod".Length];
+		return string.Join("::", portable.Split('/', StringSplitOptions.RemoveEmptyEntries));
 	}
 
 	private static bool IsDeclarationCapture(string captureName) =>
@@ -1016,6 +1045,18 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					0,
 					[new DependencyImportBinding(specifier.Split('.').Last(), null, wildcard)]);
 		}
+		if (captureName == "import.rust")
+		{
+			var text = materialization.Read(node).Trim();
+			if (!text.StartsWith("use ", StringComparison.Ordinal) || !text.EndsWith(';')) return null;
+			return new DependencyImportSyntax(text["use ".Length..^1].Trim(), 0, []);
+		}
+		if (captureName == "import.rust_module")
+		{
+			if (node.GetChildForField("body") is not null) return null;
+			var name = node.GetChildForField("name");
+			return name is null ? null : new DependencyImportSyntax(materialization.Read(name), 0, []);
+		}
 		return null;
 	}
 
@@ -1151,6 +1192,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".py" or ".pyi" => LanguageId.Python,
 		".go" => LanguageId.Go,
 		".java" => LanguageId.Java,
+		".rs" => LanguageId.Rust,
 		_ => LanguageId.Unsupported
 	};
 
@@ -1487,7 +1529,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.JavaScript] = new("tree-sitter-javascript", "tree_sitter_javascript", "javascript", new TypeScriptDependencyLanguageAdapter()),
 				[LanguageId.Python] = new("tree-sitter-python", "tree_sitter_python", "python", new PythonDependencyLanguageAdapter()),
 				[LanguageId.Go] = new("tree-sitter-go", "tree_sitter_go", "go", new GoDependencyLanguageAdapter()),
-				[LanguageId.Java] = new("tree-sitter-java", "tree_sitter_java", "java", new JavaDependencyLanguageAdapter())
+				[LanguageId.Java] = new("tree-sitter-java", "tree_sitter_java", "java", new JavaDependencyLanguageAdapter()),
+				[LanguageId.Rust] = new("tree-sitter-rust", "tree_sitter_rust", "rust", new RustDependencyLanguageAdapter())
 			};
 	}
 

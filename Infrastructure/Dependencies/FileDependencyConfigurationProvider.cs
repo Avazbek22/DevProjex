@@ -85,6 +85,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var pythonConfigFiles = new List<string>();
 		var packageFiles = new List<string>();
 		var javaConfigFiles = new List<string>();
+		var rustConfigFiles = new List<string>();
 		foreach (var path in manifest.Order(StringComparer.Ordinal))
 		{
 			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
@@ -92,6 +93,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			if (IsPythonConfig(path)) pythonConfigFiles.Add(path);
 			if (Path.GetFileName(path).Equals("package.json", StringComparison.OrdinalIgnoreCase)) packageFiles.Add(path);
 			if (IsJavaConfig(path)) javaConfigFiles.Add(path);
+			if (Path.GetFileName(path).Equals("Cargo.toml", StringComparison.OrdinalIgnoreCase)) rustConfigFiles.Add(path);
 		}
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
@@ -398,6 +400,48 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				false,
 				new Dictionary<string, IReadOnlyList<string>>(),
 				null,
+				new HashSet<string>(),
+				[],
+				true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason
+			});
+		}
+
+		var rustProjects = new List<(string Path, string ScopeId, RustProjectConfiguration Configuration,
+			DependencyConfigurationState State, string? Reason)>();
+		foreach (var configPath in rustConfigFiles)
+		{
+			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+			AddFingerprint(configPath, snapshot);
+			var parsed = snapshot.State == DependencyConfigurationState.Valid
+				? ParseRustProject(configPath, snapshot.Content)
+				: ConfigurationParseResult<RustProjectConfiguration>.Failure(
+					RustProjectConfiguration.Empty, snapshot.State, snapshot.Reason);
+			var scopeId = "rust:" + PortableRelative(root, configPath);
+			rustProjects.Add((configPath, scopeId, parsed.Value, parsed.State, parsed.Reason));
+			AddDiagnostic(configPath, parsed.State, parsed.Reason, scopeId);
+		}
+		var rustScopeByDirectory = rustProjects
+			.GroupBy(static project => Path.GetDirectoryName(project.Path)!, PathComparer)
+			.Where(static group => group.Count() == 1)
+			.ToDictionary(static group => group.Key, static group => group.Single().ScopeId, PathComparer);
+		foreach (var project in rustProjects.OrderBy(static project => project.Path, StringComparer.Ordinal))
+		{
+			var references = project.Configuration.ProjectDirectories
+				.Where(rustScopeByDirectory.ContainsKey)
+				.Select(directory => rustScopeByDirectory[directory])
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				project.ScopeId,
+				Path.GetDirectoryName(project.Path)!,
+				LanguageId.Rust,
+				references,
+				null,
+				false,
+				new Dictionary<string, IReadOnlyList<string>>(),
+				project.Configuration.PackageName,
 				new HashSet<string>(),
 				[],
 				true)
@@ -1165,6 +1209,46 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		return ConfigurationParseResult<JavaProjectConfiguration>.Valid(
 			new JavaProjectConfiguration(projectKey, gradleReferences));
 	}
+
+	private static ConfigurationParseResult<RustProjectConfiguration> ParseRustProject(
+		string path,
+		string content)
+	{
+		try
+		{
+			var model = TomlSerializer.Deserialize<TomlTable>(content) ??
+				throw new InvalidDataException("Cargo configuration is empty.");
+			string? packageName = null;
+			if (TryGetTable(model, "package", out var package) &&
+			    package.TryGetValue("name", out var nameValue) && nameValue is string name)
+				packageName = name.Replace('-', '_');
+			var directories = new HashSet<string>(PathComparer);
+			foreach (var section in new[] { "dependencies", "dev-dependencies", "build-dependencies" })
+			{
+				if (!TryGetTable(model, section, out var dependencies)) continue;
+				foreach (var dependency in dependencies.Values.OfType<TomlTable>())
+				{
+					if (!dependency.TryGetValue("path", out var pathValue) || pathValue is not string relativePath)
+						continue;
+					if (Path.IsPathFullyQualified(relativePath))
+						return ConfigurationParseResult<RustProjectConfiguration>.Failure(
+							RustProjectConfiguration.Empty,
+							DependencyConfigurationState.UnsupportedSemantics,
+							"Cargo dependency path must be relative");
+					directories.Add(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path)!, relativePath)));
+				}
+			}
+			return ConfigurationParseResult<RustProjectConfiguration>.Valid(
+				new RustProjectConfiguration(packageName, directories.Order(StringComparer.Ordinal).ToArray()));
+		}
+		catch (Exception exception) when (exception is InvalidDataException or TomlException or InvalidOperationException)
+		{
+			return ConfigurationParseResult<RustProjectConfiguration>.Failure(
+				RustProjectConfiguration.Empty,
+				DependencyConfigurationState.Corrupt,
+				"Cargo project configuration is invalid");
+		}
+	}
 	private static readonly Lazy<IReadOnlySet<string>> DotNetCatalog = new(
 		() => LoadCatalog("dotnet-net10.0.json"),
 		LazyThreadSafetyMode.ExecutionAndPublication);
@@ -1283,6 +1367,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	private sealed record JavaProjectConfiguration(string ProjectKey, IReadOnlyList<string> ProjectReferences)
 	{
 		public static JavaProjectConfiguration Empty { get; } = new(string.Empty, []);
+	}
+	private sealed record RustProjectConfiguration(string? PackageName, IReadOnlyList<string> ProjectDirectories)
+	{
+		public static RustProjectConfiguration Empty { get; } = new(null, []);
 	}
 	private sealed record TypeScriptConfiguration(
 		string ModuleResolution,

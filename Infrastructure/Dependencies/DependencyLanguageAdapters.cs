@@ -999,6 +999,235 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 	};
 }
 
+internal sealed class RustDependencyLanguageAdapter : DependencyLanguageAdapter
+{
+	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
+		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+		{
+			["declaration.struct"] = SymbolKind.Struct,
+			["declaration.enum"] = SymbolKind.Enum,
+			["declaration.interface"] = SymbolKind.Interface,
+			["declaration.class"] = SymbolKind.Class,
+			["declaration.module"] = SymbolKind.Module,
+			["declaration.function"] = SymbolKind.Function
+		};
+
+	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(limits);
+		if (context.HasSyntaxErrors)
+			return Failed(context, "syntax tree contains errors");
+
+		var fileModule = ModulePath(context.RelativePath);
+		var allDeclarations = context.Declarations
+			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName))
+			.ToArray();
+		var implRanges = context.References.Where(static capture => capture.Name == "context.impl")
+			.Select(static capture => (capture.StartIndex, capture.EndIndex)).ToArray();
+		var functionRanges = allDeclarations.Where(static capture => capture.Name == "declaration.function")
+			.Select(static capture => (capture.StartIndex, capture.EndIndex)).ToArray();
+		var resolverDeclarations = allDeclarations.Where(capture =>
+		{
+			if (capture.Name == "declaration.function")
+				return !implRanges.Any(range => Contains(range, capture)) &&
+				       !allDeclarations.Any(owner => owner.Name is not ("declaration.module" or "declaration.function") &&
+					       Contains(owner, capture));
+			return !functionRanges.Any(range => Contains(range, capture));
+		}).ToArray();
+		var declarations = resolverDeclarations.Select(capture =>
+		{
+			var owners = resolverDeclarations
+				.Where(owner => owner.Name != "declaration.function" && Contains(owner, capture))
+				.OrderBy(static owner => owner.StartIndex)
+				.Select(static owner => owner.CapturedName!)
+				.ToArray();
+			var localName = JoinPath(fileModule, JoinPath(owners), capture.CapturedName!);
+			var moduleOwners = resolverDeclarations
+				.Where(owner => owner.Name == "declaration.module" && Contains(owner, capture))
+				.OrderBy(static owner => owner.StartIndex).Select(static owner => owner.CapturedName!).ToArray();
+			var typeOwners = resolverDeclarations
+				.Where(owner => owner.Name is not ("declaration.module" or "declaration.function") && Contains(owner, capture))
+				.OrderBy(static owner => owner.StartIndex).Select(static owner => owner.CapturedName!).ToArray();
+			return new DeclarationFact(
+				new SymbolIdentity(context.ScopeId, context.LanguageId, Kinds[capture.Name], localName, capture.GenericArity),
+				[Site(context, capture)])
+			{
+				ContainingNamespace = JoinPath(fileModule, JoinPath(moduleOwners)),
+				ContainingType = typeOwners.Length == 0
+					? null
+					: JoinPath(fileModule, JoinPath(moduleOwners), JoinPath(typeOwners))
+			};
+		}).ToArray();
+
+		var imports = context.References
+			.Where(static capture => capture.Name is "import.rust" or "import.rust_module")
+			.SelectMany(capture => ExtractImports(context, capture, fileModule))
+			.ToArray();
+		var declarationNames = allDeclarations.Where(static capture => capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex).ToHashSet();
+		var importRanges = context.References
+			.Where(static capture => capture.Name.StartsWith("import.rust", StringComparison.Ordinal))
+			.Select(static capture => (capture.StartIndex, capture.EndIndex)).ToArray();
+		var references = Distinct(context.References
+			.Where(capture => capture.Name == "reference.type" &&
+				!declarationNames.Contains(capture.StartIndex) &&
+				!PrimitiveTypes.Contains(capture.Text) &&
+				!importRanges.Any(range => capture.StartIndex >= range.StartIndex && capture.EndIndex <= range.EndIndex))
+			.Select(capture =>
+			{
+				var inlineModules = resolverDeclarations
+					.Where(owner => owner.Name == "declaration.module" && Contains(owner, capture))
+					.OrderBy(static owner => owner.StartIndex).Select(static owner => owner.CapturedName!).ToArray();
+				return new ReferenceFact(
+					EvidenceLayer.TypeReference,
+					capture.Text,
+					0,
+					capture.NodeType,
+					Site(context, capture))
+				{
+					ContainingNamespace = JoinPath(fileModule, JoinPath(inlineModules)),
+					SourceStartIndex = capture.StartIndex
+				};
+			}));
+		if (declarations.Length + imports.Length + references.Count > limits.MaximumFactsPerFile)
+			return Failed(context, "fact limit exceeded");
+
+		var globModules = imports.Where(static import => import.IsWildcard)
+			.Select(static import => import.Specifier).Distinct(StringComparer.Ordinal).ToArray();
+		var aliases = imports.Where(static import => !import.IsWildcard && import.ImportedName != "$module")
+			.GroupBy(static import => import.Alias ?? LastSegment(import.Specifier), StringComparer.Ordinal)
+			.Where(static group => group.Select(static import => import.Specifier)
+				.Distinct(StringComparer.Ordinal).Take(2).Count() == 1)
+			.ToDictionary(static group => group.Key, static group => group.First().Specifier, StringComparer.Ordinal);
+		return Complete(context, declarations, imports, references, [fileModule], aliases,
+			globalNamespaces: globModules);
+	}
+
+	private static IEnumerable<ImportFact> ExtractImports(
+		DependencyExtractionContext context,
+		DependencySyntaxCapture capture,
+		string fileModule)
+	{
+		if (capture.ImportSyntax is not { } syntax) yield break;
+		if (capture.Name == "import.rust_module")
+		{
+			yield return new ImportFact("./" + syntax.Specifier, "$module", null, false, 0, Site(context, capture));
+			yield break;
+		}
+		foreach (var item in ExpandUse(syntax.Specifier, string.Empty))
+			yield return new ImportFact(
+				NormalizeUsePath(fileModule, item.Path),
+				null,
+				item.Alias,
+				item.IsWildcard,
+				0,
+				Site(context, capture));
+	}
+
+	private static IEnumerable<RustUsePath> ExpandUse(string expression, string prefix)
+	{
+		foreach (var part in SplitTopLevel(expression))
+		{
+			var item = part.Trim();
+			var brace = FindTopLevel(item, '{');
+			if (brace >= 0 && item.EndsWith('}'))
+			{
+				var head = item[..brace].TrimEnd(':');
+				var combined = JoinPath(prefix, head);
+				foreach (var nested in ExpandUse(item[(brace + 1)..^1], combined)) yield return nested;
+				continue;
+			}
+			var aliasMarker = item.LastIndexOf(" as ", StringComparison.Ordinal);
+			var alias = aliasMarker < 0 ? null : item[(aliasMarker + " as ".Length)..].Trim();
+			if (aliasMarker >= 0) item = item[..aliasMarker].Trim();
+			if (item == "self") item = string.Empty;
+			var wildcard = item == "*";
+			if (wildcard) item = string.Empty;
+			var path = JoinPath(prefix, item);
+			if (path.Length > 0) yield return new RustUsePath(path, alias, wildcard);
+		}
+	}
+
+	private static IReadOnlyList<string> SplitTopLevel(string value)
+	{
+		var parts = new List<string>();
+		var depth = 0;
+		var start = 0;
+		for (var index = 0; index < value.Length; index++)
+		{
+			if (value[index] == '{') depth++;
+			else if (value[index] == '}') depth--;
+			else if (value[index] == ',' && depth == 0)
+			{
+				parts.Add(value[start..index]);
+				start = index + 1;
+			}
+		}
+		parts.Add(value[start..]);
+		return parts;
+	}
+
+	private static int FindTopLevel(string value, char token)
+	{
+		var depth = 0;
+		for (var index = 0; index < value.Length; index++)
+		{
+			if (value[index] == token && depth == 0) return index;
+			if (value[index] == '{') depth++;
+			else if (value[index] == '}') depth--;
+		}
+		return -1;
+	}
+
+	private static bool Contains((int StartIndex, int EndIndex) range, DependencySyntaxCapture capture) =>
+		range.StartIndex < capture.StartIndex && range.EndIndex >= capture.EndIndex;
+	private static bool Contains(DependencySyntaxCapture owner, DependencySyntaxCapture capture) =>
+		owner.StartIndex < capture.StartIndex && owner.EndIndex >= capture.EndIndex;
+	private static string JoinPath(params string[] parts) => string.Join("::", parts.Where(static part => part.Length > 0));
+	private static string JoinPath(IEnumerable<string> parts) => string.Join("::", parts);
+	private static string LastSegment(string value) => value.Split("::", StringSplitOptions.None).Last();
+	private static string NormalizeUsePath(string fileModule, string path)
+	{
+		if (path.StartsWith("crate::", StringComparison.Ordinal)) return path["crate::".Length..];
+		if (path == "crate") return string.Empty;
+		if (path.StartsWith("self::", StringComparison.Ordinal)) return JoinPath(fileModule, path["self::".Length..]);
+		if (path == "self") return fileModule;
+		if (!path.StartsWith("super::", StringComparison.Ordinal)) return path;
+		var moduleParts = fileModule.Split("::", StringSplitOptions.RemoveEmptyEntries).ToList();
+		while (path.StartsWith("super::", StringComparison.Ordinal))
+		{
+			if (moduleParts.Count == 0) return path;
+			moduleParts.RemoveAt(moduleParts.Count - 1);
+			path = path["super::".Length..];
+		}
+		return JoinPath(JoinPath(moduleParts), path);
+	}
+	private static string ModulePath(string relativePath)
+	{
+		var portable = relativePath.Replace('\\', '/');
+		var sourceMarker = portable.LastIndexOf("/src/", StringComparison.Ordinal);
+		if (sourceMarker >= 0) portable = portable[(sourceMarker + "/src/".Length)..];
+		else if (portable.StartsWith("src/", StringComparison.Ordinal)) portable = portable["src/".Length..];
+		portable = Path.ChangeExtension(portable, null) ?? portable;
+		if (portable is "lib" or "main" or "mod") return string.Empty;
+		if (portable.EndsWith("/mod", StringComparison.Ordinal)) portable = portable[..^"/mod".Length];
+		return string.Join("::", portable.Split('/', StringSplitOptions.RemoveEmptyEntries));
+	}
+
+	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(
+		context.RelativePath, context.ScopeId, context.LanguageId, context.ContentFingerprint, context.Source.Length,
+		DependencyFileStatus.ExtractionFailed, reason, context.HasSyntaxErrors, context.ErrorNodeKinds,
+		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+
+	private static readonly HashSet<string> PrimitiveTypes = new(StringComparer.Ordinal)
+	{
+		"bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "str",
+		"u8", "u16", "u32", "u64", "u128", "usize"
+	};
+	private readonly record struct RustUsePath(string Path, string? Alias, bool IsWildcard);
+}
+
 internal sealed partial class PythonDependencyLanguageAdapter : DependencyLanguageAdapter
 {
 	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)

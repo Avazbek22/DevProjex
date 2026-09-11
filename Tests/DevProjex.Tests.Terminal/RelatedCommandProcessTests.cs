@@ -29,6 +29,29 @@ public sealed class RelatedCommandProcessTests
 	}
 
 	[Fact]
+	public void RealPublishedCommandReportsRustManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/lib.rs", "mod model; mod service;");
+		workspace.WriteFile("project/src/model.rs", "pub struct User;");
+		workspace.WriteFile("project/src/service.rs", "use crate::model::User; pub struct Service(User);");
+
+		var result = Run(
+			workspace,
+			"related", "src/service.rs",
+			"--project", project,
+			"--direction", "dependencies",
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("src/model.rs", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"status\": \"unresolved\"", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RealPublishedCommandUsesPythonDottedImportBindingAndPackageBoundaries()
 	{
 		using var workspace = new TemporaryDirectory();

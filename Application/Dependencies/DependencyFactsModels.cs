@@ -9,6 +9,7 @@ public enum LanguageId
 	Python,
 	Go,
 	Java,
+	Rust,
 	Unsupported
 }
 
