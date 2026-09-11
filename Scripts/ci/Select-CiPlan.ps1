@@ -187,6 +187,13 @@ if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_STEP_SUMMARY)) {
 	Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $markdownSummary -Encoding utf8 -NoNewline
 }
 
+# The change the plan was decided from, sorted and de-duplicated so the gate can compare it as a
+# set against the change it works out for itself.
+$recordedChangedPaths = @($ChangedPath |
+	Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+	ForEach-Object { $_.Trim() } |
+	Sort-Object -Unique)
+
 $output = [ordered]@{
 	test_matrix = $plan.TestMatrix | ConvertTo-Json -Compress -Depth 5
 	has_test_matrix = $plan.HasTestMatrix.ToString().ToLowerInvariant()
@@ -198,6 +205,13 @@ $output = [ordered]@{
 	full = $plan.Full.ToString().ToLowerInvariant()
 	previous_gate_verified = $previousGateVerified.ToString().ToLowerInvariant()
 	summary = $safeSummary
+	# What the plan was decided from, so the gate can check the decision against the change
+	# rather than take the plan's word for it. Sorted and de-duplicated so the two sides can be
+	# compared as sets without either having to sort first.
+	# Passed as a typed array argument rather than piped: an empty pipeline reaches ConvertTo-Json
+	# as no input at all and yields an empty string, where the gate has to tell "no paths" from
+	# "nothing was recorded".
+	changed_paths = (ConvertTo-Json -Compress -InputObject ([string[]] $recordedChangedPaths))
 }
 
 if (-not [string]::IsNullOrWhiteSpace($GitHubOutputPath)) {

@@ -51,6 +51,7 @@ jobs:
       run_terminal_command: ${{ steps.plan.outputs.run_terminal_command }}
       run_ignore_scanner: ${{ steps.plan.outputs.run_ignore_scanner }}
       run_documentation: ${{ steps.plan.outputs.run_documentation }}
+      changed_paths: ${{ steps.plan.outputs.changed_paths }}
 
     steps:
       - uses: actions/checkout@v7
@@ -69,6 +70,10 @@ jobs:
       - name: Validate the indentation gate
         shell: pwsh
         run: ./Scripts/ci/Test-IndentationContract.ps1
+
+      - name: Validate the CI gate
+        shell: pwsh
+        run: ./Scripts/ci/Test-CiGateContract.ps1
 
       - name: Select CI plan
         id: plan
@@ -621,6 +626,11 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+          fetch-depth: 0
+
       - name: Verify selected jobs
         shell: pwsh
         env:
@@ -650,3 +660,70 @@ jobs:
             $details = $failed.ForEach({ "$($_.Key)=$($_.Value)" }) -join ', '
             throw "Selected CI jobs failed: $details"
           }
+
+      - name: Verify that skipped jobs could not have been affected
+        if: ${{ always() && inputs.force_full != true }}
+        shell: pwsh
+        env:
+          PREPARE_RESULT: ${{ needs.prepare-matrix.result }}
+          TEST_RESULT: ${{ needs.test-suite.result }}
+          TERMINAL_COMMAND_RESULT: ${{ needs.terminal-command-cross-platform.result }}
+          IGNORE_SCANNER_RESULT: ${{ needs.ignore-scanner-cross-platform.result }}
+          DOCUMENTATION_RESULT: ${{ needs.documentation-contracts.result }}
+          PLANNER_PATHS: ${{ needs.prepare-matrix.outputs.changed_paths }}
+          PLANNER_HAS_TESTS: ${{ needs.prepare-matrix.outputs.has_test_matrix }}
+          PLANNER_TERMINAL_COMMAND: ${{ needs.prepare-matrix.outputs.run_terminal_command }}
+          PLANNER_IGNORE_SCANNER: ${{ needs.prepare-matrix.outputs.run_ignore_scanner }}
+          PLANNER_DOCUMENTATION: ${{ needs.prepare-matrix.outputs.run_documentation }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # A plan the gate has not checked is a plan the gate is trusting. The changed paths are
+          # worked out here, from the commits, rather than taken from the job that made the plan.
+          if ($env:PREPARE_RESULT -ne 'success') {
+            Write-Host 'No plan was produced, so there is no skip to vouch for.'
+            exit 0
+          }
+
+          $results = @{
+            tests = $env:TEST_RESULT
+            terminalCommand = $env:TERMINAL_COMMAND_RESULT
+            ignoreScanner = $env:IGNORE_SCANNER_RESULT
+            documentation = $env:DOCUMENTATION_RESULT
+          }
+          $planned = @{
+            tests = $env:PLANNER_HAS_TESTS
+            terminalCommand = $env:PLANNER_TERMINAL_COMMAND
+            ignoreScanner = $env:PLANNER_IGNORE_SCANNER
+            documentation = $env:PLANNER_DOCUMENTATION
+          }
+          $skipped = @($results.GetEnumerator() | Where-Object { $_.Value -eq 'skipped' } |
+            ForEach-Object { $_.Key })
+          if ($skipped.Count -eq 0) {
+            Write-Host 'No job was skipped.'
+            exit 0
+          }
+
+          $willRun = @($planned.GetEnumerator() | Where-Object { $_.Value -eq 'true' } |
+            ForEach-Object { $_.Key })
+          $head = git rev-parse HEAD
+          $base = if ([string]::IsNullOrWhiteSpace($env:BASE_SHA) -or $env:BASE_SHA -match '^0+$') {
+            ''
+          } else {
+            $env:BASE_SHA
+          }
+          if ([string]::IsNullOrWhiteSpace($base)) {
+            Write-Host 'There is no base to compare against, so the change cannot be established here.'
+            exit 0
+          }
+
+          $changed = @(git -c core.quotepath=false diff --name-only "$base...$head" --)
+          if ($LASTEXITCODE -ne 0) {
+            throw "The changed paths could not be worked out from $base...$head, so the skips cannot be checked."
+          }
+
+          ./Scripts/ci/Test-CiGateSkip.ps1 `
+            -ChangedPath $changed `
+            -PlannerChangedPathJson $env:PLANNER_PATHS `
+            -SkippedJob $skipped `
+            -PlannerWillRunJob $willRun
+

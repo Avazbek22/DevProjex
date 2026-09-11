@@ -806,6 +806,82 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 	[GeneratedRegex(@"\bnew\s+(?<type>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)", RegexOptions.CultureInvariant)] private static partial Regex NewTypeRegex();
 }
 
+/// <summary>
+/// Go facts for one narrow capability: the package-level declarations a file contributes and
+/// the type names it mentions. A Go package is a directory, so a name declared in a sibling
+/// file needs no import; that is the relationship this adapter makes visible. Import paths are
+/// not resolved, and package-level constants and variables are not importable names yet.
+/// </summary>
+internal sealed class GoDependencyLanguageAdapter : DependencyLanguageAdapter
+{
+	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(limits);
+		// The package directory qualifies the name so that the same identifier declared in two
+		// packages stays two declarations instead of merging into one symbol with two sites.
+		var package = PackageDirectory(context.RelativePath);
+		var declarations = context.Declarations
+			.Where(static capture => !string.IsNullOrEmpty(capture.CapturedName))
+			.Select(capture => new DeclarationFact(
+				new SymbolIdentity(
+					context.ScopeId,
+					context.LanguageId,
+					capture.Name == "declaration.function" ? SymbolKind.Function : SymbolKind.Class,
+					package.Length == 0 ? capture.CapturedName! : $"{package}#{capture.CapturedName}",
+					0),
+				[Site(context, capture)]))
+			.ToArray();
+		// A declaration's own name is a type identifier too, and so is every predeclared type, so
+		// neither becomes a reference. A type identifier inside a qualified type names another
+		// package, which is outside this capability, so it is dropped rather than matched against a
+		// same-named local declaration.
+		var declaredAt = context.Declarations
+			.Where(static capture => capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex)
+			.ToHashSet();
+		var qualified = context.References
+			.Where(static capture => capture.Name == "context.qualified_type")
+			.Select(static capture => (capture.StartIndex, capture.EndIndex))
+			.ToArray();
+		var references = Distinct(context.References
+			.Where(capture => capture.Name == "reference.type" &&
+				!declaredAt.Contains(capture.StartIndex) &&
+				!PredeclaredTypes.Contains(capture.Text) &&
+				!qualified.Any(span =>
+					capture.StartIndex >= span.StartIndex && capture.EndIndex <= span.EndIndex))
+			.Select(capture => new ReferenceFact(
+				EvidenceLayer.TypeReference,
+				capture.Text,
+				0,
+				capture.NodeType,
+				Site(context, capture))));
+		if (declarations.Length + references.Count > limits.MaximumFactsPerFile)
+			return Failed(context);
+		return Complete(context, declarations, [], references);
+	}
+
+	/// <summary>Go predeclared type names, which name no file in the manifest.</summary>
+	private static readonly HashSet<string> PredeclaredTypes = new(StringComparer.Ordinal)
+	{
+		"any", "bool", "byte", "comparable", "complex64", "complex128", "error", "float32",
+		"float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8",
+		"uint16", "uint32", "uint64", "uintptr"
+	};
+
+	/// <summary>The directory that is the Go package, from an already portable relative path.</summary>
+	private static string PackageDirectory(string relativePath)
+	{
+		var separator = relativePath.LastIndexOf('/');
+		return separator < 0 ? string.Empty : relativePath[..separator];
+	}
+
+	private static FileFacts Failed(DependencyExtractionContext context) => new(
+		context.RelativePath, context.ScopeId, context.LanguageId, context.ContentFingerprint, context.Source.Length,
+		DependencyFileStatus.ExtractionFailed, "fact limit exceeded", context.HasSyntaxErrors, context.ErrorNodeKinds,
+		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+}
+
 internal sealed partial class PythonDependencyLanguageAdapter : DependencyLanguageAdapter
 {
 	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)

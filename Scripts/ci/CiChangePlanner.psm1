@@ -266,10 +266,10 @@ function New-CiTestMatrix {
 	param([Parameter(Mandatory)][System.Collections.IDictionary] $Plan)
 
 	$suites = @(
-		@{ Name = 'Unit'; Id = 'unit'; Project = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; Trx = 'unit.trx'; Filter = '' },
-		@{ Name = 'Integration'; Id = 'integration'; Project = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; Trx = 'integration.trx'; Filter = '--filter Category!=TerminalCommand' },
-		@{ Name = 'Terminal'; Id = 'terminal'; Project = 'Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj'; Trx = 'terminal.trx'; Filter = '' },
-		@{ Name = 'UI'; Id = 'ui'; Project = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; Trx = 'ui.trx'; Filter = '' }
+		@{ Name = 'Unit'; Id = 'unit'; Project = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; Trx = 'unit.trx' },
+		@{ Name = 'Integration'; Id = 'integration'; Project = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; Trx = 'integration.trx' },
+		@{ Name = 'Terminal'; Id = 'terminal'; Project = 'Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj'; Trx = 'terminal.trx' },
+		@{ Name = 'UI'; Id = 'ui'; Project = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; Trx = 'ui.trx' }
 	)
 	$operatingSystems = @(
 		@{ Name = 'Windows'; Runner = 'windows-latest'; Id = 'windows' },
@@ -292,7 +292,6 @@ function New-CiTestMatrix {
 				suite_id = $suite.Id
 				project_path = $suite.Project
 				trx_name = $suite.Trx
-				test_filter_args = $suite.Filter
 			})
 		}
 	}
