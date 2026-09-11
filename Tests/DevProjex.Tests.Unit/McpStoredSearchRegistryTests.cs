@@ -35,6 +35,21 @@ public sealed class McpStoredSearchRegistryTests
 	}
 
 	[Fact]
+	public async Task AnExpiredRelatedFilesResultTellsTheCallerToAskRelatedFilesAgain()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var stored = await WriteAsync(registry, McpStoredResultKind.Related, "dependencies");
+
+		registry.Remove(stored);
+
+		var failure = Assert.Throws<McpToolException>(() => registry.OpenReadDocument(stored));
+		Assert.Contains("related-files result expired", failure.Message, StringComparison.Ordinal);
+		Assert.Contains("call related_files again", failure.Message, StringComparison.Ordinal);
+		Assert.DoesNotContain("pack_context", failure.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void AnIdThisSessionNeverIssuedKeepsTheGeneralWording()
 	{
 		using var workspace = new TemporaryDirectory();

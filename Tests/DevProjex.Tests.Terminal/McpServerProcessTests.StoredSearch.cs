@@ -45,7 +45,8 @@ public sealed partial class McpServerProcessTests
 
 		// The response shows what max_results allows and says where the rest is, by file.
 		Assert.Contains("Withheld matches by file:", searched, StringComparison.Ordinal);
-		Assert.Contains("src/File01.cs 10", searched, StringComparison.Ordinal);
+		// The count leads, so a path with spaces or trailing digits stays unambiguous.
+		Assert.Contains("10 src/File01.cs", searched, StringComparison.Ordinal);
 		Assert.Contains("[55 additional matches not shown", searched, StringComparison.Ordinal);
 		Assert.Contains("[Search totals] matches=60 · files=6", searched, StringComparison.Ordinal);
 

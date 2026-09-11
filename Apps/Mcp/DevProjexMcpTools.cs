@@ -877,7 +877,8 @@ internal sealed class DevProjexMcpTools(
 			var withheld = new StringBuilder();
 			var withheldByFile = new Dictionary<string, int>(StringComparer.Ordinal);
 			var withheldStored = 0;
-			var withheldTruncated = false;
+			var storeHitMatchBound = false;
+			var storeHitCharacterBound = false;
 			long inspectedBytes = 0;
 			foreach (var path in plan.IncludedFiles)
 			{
@@ -914,7 +915,7 @@ internal sealed class DevProjexMcpTools(
 					if (scan.TotalMatches > 0)
 						matchingFiles++;
 					if (found < scan.TotalMatches)
-						withheldTruncated = true;
+						storeHitMatchBound = true;
 
 					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
 					foreach (var match in scan.Matches)
@@ -981,7 +982,7 @@ internal sealed class DevProjexMcpTools(
 					continue;
 				if (withheld.Length >= MaximumStoredSearchCharacters)
 				{
-					withheldTruncated = true;
+					storeHitCharacterBound = true;
 					break;
 				}
 
@@ -1036,28 +1037,46 @@ internal sealed class DevProjexMcpTools(
 			var noMatches = totalMatches == 0 && plan.IncludedFiles.Count > 0
 				? $"[No matches] The pattern matched nothing in {plan.IncludedFiles.Count} selected file(s) ({McpEffectiveFilters.Describe(plan)})."
 				: null;
-			return McpToolResults.TextSuccess(AppendTrustedNotices(
-				McpSpotlight.Wrap(output.ToString().TrimEnd()),
-				FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
-				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
-				noMatches,
-				ordering is null ? null : SearchOrderNotice,
-				FormatStoredSearchNotice(storedSearch, withheldStored, withheldByFile.Count, withheldTruncated),
-				FormatSymbolCoverageNotice(symbols, namesRefused),
-				FormatNameSearchNotice(plan, paths, pattern, totalMatches),
-				additionalMatchesNotice,
-				searchTotalsNotice,
-				inspectionBudgetReached
-					? "[Search incomplete] The inspected-text byte budget was reached; additional selected files were not searched and match counts are partial."
-					: null,
-				resultGroupTruncated ? SearchContentCapNotice : null,
-				SelectionNotices(
-					plan,
-					includeFilters: false,
-					new McpSelectionNoticeContext(
-						HasPaths: HasItems(paths),
-						HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
-						HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
+			// A stored result whose id never reaches the caller is a file nobody can page and
+			// nobody will remove, so it is dropped unless this response carries its id out.
+			var retained = false;
+			try
+			{
+				var result = McpToolResults.TextSuccess(AppendTrustedNotices(
+					McpSpotlight.Wrap(output.ToString().TrimEnd()),
+					FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
+					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
+					noMatches,
+					ordering is null ? null : SearchOrderNotice,
+					FormatStoredSearchNotice(
+						storedSearch,
+						withheldStored,
+						withheldByFile.Count,
+						storeHitMatchBound,
+						storeHitCharacterBound),
+					FormatSymbolCoverageNotice(symbols, namesRefused),
+					FormatNameSearchNotice(plan, paths, pattern, totalMatches),
+					additionalMatchesNotice,
+					searchTotalsNotice,
+					inspectionBudgetReached
+						? "[Search incomplete] The inspected-text byte budget was reached; additional selected files were not searched and match counts are partial."
+						: null,
+					resultGroupTruncated ? SearchContentCapNotice : null,
+					SelectionNotices(
+						plan,
+						includeFilters: false,
+						new McpSelectionNoticeContext(
+							HasPaths: HasItems(paths),
+							HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
+							HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
+				retained = true;
+				return result;
+			}
+			finally
+			{
+				if (!retained && storedSearch is not null)
+					packs.Remove(storedSearch.Id);
+			}
 		}, cancellationToken);
 
 	[Description(
@@ -1155,6 +1174,7 @@ internal sealed class DevProjexMcpTools(
 					WriteRelatedMessage(writer, protectedBody, trustedNotices);
 					await writer.FlushAsync(token).ConfigureAwait(false);
 				},
+				McpStoredResultKind.Related,
 				cancellationToken).ConfigureAwait(false);
 			return McpToolResults.TextSuccess(
 				$"Related-files result stored as '{pack.Id}' ({pack.Characters} characters). " +
@@ -2617,25 +2637,35 @@ internal sealed class DevProjexMcpTools(
 			.OrderByDescending(static entry => entry.Value)
 			.ThenBy(static entry => entry.Key, StringComparer.Ordinal)
 			.ToArray();
-		if (output.Length > 0)
-			output.AppendLine();
-		output.AppendLine(WithheldHeading);
+		// The distribution shares the search character cap with the matches, so a response cannot
+		// exceed the bound its own truncation notice names.
+		var heading = $"{Environment.NewLine}{WithheldHeading}{Environment.NewLine}";
+		if (output.Length + heading.Length > MaximumSearchContentCharacters)
+			return;
+		output.Append(heading);
+
+		var listed = 0;
 		foreach (var entry in ordered.Take(MaximumWithheldFilesReported))
 		{
-			output.Append(EscapeSingleLine(entry.Key))
-				.Append(' ')
-				.Append(entry.Value.ToString(CultureInfo.InvariantCulture))
-				.Append(Environment.NewLine);
+			// The count leads so that a path containing spaces, or ending in digits, stays
+			// unambiguous to read.
+			var line =
+				$"{entry.Value.ToString(CultureInfo.InvariantCulture)} " +
+				$"{EscapeSingleLine(entry.Key)}{Environment.NewLine}";
+			if (output.Length + line.Length > MaximumSearchContentCharacters)
+				break;
+			output.Append(line);
+			listed++;
 		}
 
-		var remaining = ordered.Length - MaximumWithheldFilesReported;
-		if (remaining > 0)
-		{
-			output.Append("and ")
-				.Append(remaining.ToString(CultureInfo.InvariantCulture))
-				.Append(" more file(s)")
-				.Append(Environment.NewLine);
-		}
+		var remaining = ordered.Length - listed;
+		if (remaining <= 0)
+			return;
+		var tail =
+			$"and {remaining.ToString(CultureInfo.InvariantCulture)} more file(s)" +
+			$"{Environment.NewLine}";
+		if (output.Length + tail.Length <= MaximumSearchContentCharacters)
+			output.Append(tail);
 	}
 
 	/// <summary>
@@ -2646,7 +2676,8 @@ internal sealed class DevProjexMcpTools(
 		McpPackDocument? stored,
 		int storedMatches,
 		int storedFiles,
-		bool storedTruncated)
+		bool hitMatchBound,
+		bool hitCharacterBound)
 	{
 		if (stored is null)
 			return null;
@@ -2655,11 +2686,13 @@ internal sealed class DevProjexMcpTools(
 			$"matches={storedMatches.ToString(CultureInfo.InvariantCulture)} · " +
 			$"files={storedFiles.ToString(CultureInfo.InvariantCulture)}; " +
 			"read_pack pages the withheld matches without searching again";
-		return storedTruncated
-			? $"{reported}, and stopped at the " +
-			  $"{MaximumStoredSearchCharacters.ToString(CultureInfo.InvariantCulture)}-character " +
-			  "store limit, so it holds only the first of them."
-			: $"{reported}.";
+		// Two bounds can stop a store, and a caller narrowing its next search needs to know which.
+		if (!hitMatchBound && !hitCharacterBound)
+			return $"{reported}.";
+		var bound = hitMatchBound
+			? $"{MaximumStoredSearchMatches.ToString("N0", CultureInfo.InvariantCulture)}-match"
+			: $"{MaximumStoredSearchCharacters.ToString("N0", CultureInfo.InvariantCulture)}-character";
+		return $"{reported}, and stopped at the {bound} store limit, so it holds only the first of them.";
 	}
 
 	/// <summary>

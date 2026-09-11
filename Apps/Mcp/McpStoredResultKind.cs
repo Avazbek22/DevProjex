@@ -8,5 +8,6 @@ namespace DevProjex.Mcp;
 internal enum McpStoredResultKind
 {
 	Pack,
-	Search
+	Search,
+	Related
 }

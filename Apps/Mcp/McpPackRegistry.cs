@@ -265,7 +265,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		catch
 		{
 			ReleaseReader(entry);
-			throw Expired(IsQuotaEvicted(packId));
+			throw Expired(StoredKind(packId), IsQuotaEvicted(packId));
 		}
 	}
 
@@ -551,8 +551,18 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	/// </summary>
 	private static McpToolException Expired(McpStoredResultKind kind, bool quotaEvicted)
 	{
-		var subject = kind == McpStoredResultKind.Search ? "search result" : "pack";
-		var remedy = kind == McpStoredResultKind.Search ? "search_project" : "pack_context";
+		var subject = kind switch
+		{
+			McpStoredResultKind.Search => "search result",
+			McpStoredResultKind.Related => "related-files result",
+			_ => "pack"
+		};
+		var remedy = kind switch
+		{
+			McpStoredResultKind.Search => "search_project",
+			McpStoredResultKind.Related => "related_files",
+			_ => "pack_context"
+		};
 		return new McpToolException(
 			McpErrorCodes.PackExpired,
 			$"{McpErrorCodes.PackExpired}: {subject} expired or belongs to another server session; " +
