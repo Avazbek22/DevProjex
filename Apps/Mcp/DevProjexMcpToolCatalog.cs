@@ -65,7 +65,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Idempotent = idempotent,
 			OpenWorld = openWorld
 		};
-		if (outputSchema is not null)
+		if (outputSchema is not null && name is not ("list_projects" or "analyze"))
 		{
 			options.UseStructuredContent = true;
 			options.OutputSchema = ParseSchema(outputSchema);

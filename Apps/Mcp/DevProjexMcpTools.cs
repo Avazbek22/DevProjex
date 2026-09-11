@@ -154,7 +154,7 @@ internal sealed class DevProjexMcpTools(
 					hosts = remoteHosts?.Order(StringComparer.Ordinal).ToArray() ?? []
 				}
 			};
-			return McpToolResults.StructuredSuccess(new
+			return McpToolResults.ProtectedJsonSuccess(new
 			{
 				projects = projectItems,
 				profiles,
@@ -487,7 +487,7 @@ internal sealed class DevProjexMcpTools(
 				FormatCompressionUnavailable(prepared.CompressionSnapshot),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				SelectionNotices(plan, includeFilters: false, selection.NoticeContext, includeProtection: false));
-			return McpToolResults.StructuredSuccess(
+			return McpToolResults.ProtectedJsonSuccess(
 				envelope,
 				notices,
 				(structuredCharacters, trailer) => admissionBudget is null

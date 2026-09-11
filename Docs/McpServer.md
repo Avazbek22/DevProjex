@@ -430,17 +430,19 @@ response is byte-identical to a server without it.
 
 ## Result Contract
 
-Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
-authoritative result is the complete object in `structuredContent`; the first
-text block in `content` is a spotlighted JSON serialization of that same object.
-Every field in these two output schemas has a short description. `analyze`
-results include an `exclusions` array that echoes the exclusion
+`list_projects` and `analyze` return their JSON object only as spotlighted text
+inside `content`; they deliberately omit `structuredContent` and `outputSchema`.
+Some clients discard all text whenever `structuredContent` exists, which would
+also discard the untrusted-data boundary around repository-controlled names and
+paths. The protected text is therefore the authoritative representation.
+`analyze` results include an `exclusions` array that echoes the exclusion
 tokens effective for the call, so the agent and a human reading the transcript
 always see which toggles shaped the measurement. `list_projects` results
 include a `baseline` object with the server `git` mode token, the baseline
 `exclusions` tokens, and an `agentExclusions` flag. Both fields are new in v5.2
 and required on every server, including servers started without the exclusion
-flags; consumers that pinned an earlier output schema must refresh it.
+flags; consumers must parse the spotlighted JSON text rather than expect a
+structured MCP result.
 `analyze.topFiles[].estimated` is required and marks whether an entry came from
 size-based rather than inspected transformed-content metrics.
 `analyze.topFiles[].uninspected` is an optional v5.2 addition: it is present and
@@ -501,8 +503,7 @@ effective detail, while `related_files` reports `EstimatedTokens` from the sourc
 character count. The two can differ for the same file.
 
 The budget report and `[Budget accounting]` for `analyze` are appended as trusted text
-after the structured block, never inside it, because the first text block stays a
-byte-identical serialization of `structuredContent`.
+after the spotlighted JSON block, never inside it.
 
 When requested compression cannot inspect its delivery source or load a language
 grammar, `analyze` adds optional `compressionUnavailable` with a one-line `reason`
@@ -632,9 +633,10 @@ contains counts only; structured analysis data remains inside its untrusted repr
 Unsupported languages and files rejected by parse or structural safety checks are
 separate unchanged-file outcomes and do not produce this trailer.
 
-`get_tree`, `pack_context`, `read_pack`, `search_project`, `related_files`, and `get_file` are
-text tools. They do not declare `outputSchema`, omit `structuredContent`, and
-return the useful payload directly in the first text block in `content`. This
+All eight tools omit `outputSchema` and `structuredContent` and return the useful
+payload in text blocks under `content`. `list_projects` and `analyze` place their
+JSON object inside the standard spotlighted untrusted-data block; the other tools
+return their existing text or document shape there. This
 avoids JSON escaping and unnecessary token overhead for trees, source text,
 search context, dependency facts, and packs. Truncation and continuation metadata is appended as
 trusted plain-text trailers outside every project spotlight block, such as
@@ -782,9 +784,9 @@ indexing, Git history work, nor ranking content hashes. See
 [Ranking.md](Ranking.md) for the algorithm, fixed weights, evaluation protocol,
 and measured limitations.
 
-Future tools must declare `outputSchema` only when their useful result is
-genuinely structured and can be returned completely in `structuredContent`.
-Metadata about a text payload is not sufficient reason to add a schema.
+Future tools must not add `structuredContent` when doing so can cause a client to
+discard the protected text representation. Metadata about a text payload is not
+sufficient reason to add an output schema.
 
 ## Progress Notifications
 
