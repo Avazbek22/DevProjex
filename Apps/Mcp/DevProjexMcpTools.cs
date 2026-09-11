@@ -33,6 +33,10 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumStoredSearchCharacters = 2_000_000;
 	private const int MaximumWithheldFilesReported = 20;
 	private const string WithheldHeading = "Withheld matches by file:";
+	// Named because a caller that sees part of a result is entitled to know what decided which part.
+	// A constant: the order is a rule, not a property of this project's files.
+	private const string SearchOrderNotice =
+		"[Search order] hits inside a declaration first, then the rest; selection order breaks ties.";
 	// Closes a run of named hits when the next one belongs to nothing. A constant, not a name.
 	private static readonly string OutsideDeclarationHeader = $"in (no declaration){Environment.NewLine}";
 	// Asking for a file by name is the one request the selection vocabulary answers in a form a
@@ -887,14 +891,16 @@ internal sealed class DevProjexMcpTools(
 			}
 			var inspectionBudgetReached = inspectedFiles.Count < plan.IncludedFiles.Count;
 			var materialisedMatches = 0;
+			var groups = new List<McpSearchRenderedGroup>();
 			await using var searched = await Projects.ConsumeSearchTextAsync(
 				plan with { IncludedFiles = inspectedFiles },
 				(file, token) =>
 				{
 					// Matching runs to the stored bound rather than to what the response can show,
 					// because a match the response withholds is exactly the one the caller would
-					// otherwise ask a second search to find.
-					var displayLimit = Math.Max(0, maximumResults - totalMatches);
+					// otherwise ask a second search to find. Groups are rendered and set aside here
+					// because this is the only point at which the file's text exists; which of them
+					// the response carries is decided once the whole result is known.
 					var scan = McpSearchTextScanner.Scan(
 						file.Content,
 						regex,
@@ -907,82 +913,95 @@ internal sealed class DevProjexMcpTools(
 					materialisedMatches += found;
 					if (scan.TotalMatches > 0)
 						matchingFiles++;
-
-					// The response keeps the grouping a display-limited pass produces, so what a
-					// caller sees is what it always saw. That pass is only needed when this file
-					// has more than the response will show.
-					var display = found <= displayLimit
-						? scan
-						: McpSearchTextScanner.Scan(
-							file.Content,
-							regex,
-							contextLines,
-							displayLimit,
-							file.ReplacementRanges,
-							token);
-
-					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
-					var shownHere = 0;
-					if (!responseLimitReached)
-					{
-						var startsNewFile = true;
-						foreach (var match in display.Matches)
-						{
-							var appended = AppendSearchResult(
-								output,
-								relative,
-								file.Content,
-								match,
-								MaximumSearchContentCharacters,
-								startsNewFile,
-								renderedLines);
-							startsNewFile = false;
-							shownMatches += appended.WrittenMatches;
-							shownHere += appended.WrittenMatches;
-							// Only the lines that reached the caller are worth naming; a match the cap
-							// dropped is not in the response to be annotated.
-							foreach (var line in match.MatchLineNumbers.Take(appended.WrittenMatches))
-								writtenHits.Add(new McpSearchHit(relative, file.Path, line));
-							if (appended.Truncated)
-							{
-								responseLimitReached = true;
-								resultGroupTruncated = true;
-								break;
-							}
-						}
-					}
-
-					var withheldHere = scan.TotalMatches - shownHere;
-					if (withheldHere <= 0)
-						return ValueTask.CompletedTask;
-
-					if (withheld.Length >= MaximumStoredSearchCharacters)
-					{
-						withheldTruncated = true;
-						return ValueTask.CompletedTask;
-					}
-
-					// This file's whole result is kept, so a page of it never shows half a group.
-					var startsStoredFile = true;
-					foreach (var match in scan.Matches)
-					{
-						AppendSearchResult(
-							withheld,
-							relative,
-							file.Content,
-							match,
-							MaximumStoredSearchCharacters,
-							startsStoredFile);
-						startsStoredFile = false;
-					}
-
 					if (found < scan.TotalMatches)
 						withheldTruncated = true;
-					withheldStored += withheldHere;
-					withheldByFile[relative] = withheldHere;
+
+					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
+					foreach (var match in scan.Matches)
+					{
+						var rendered = RenderGroupLines(relative, file.Content, match);
+						if (rendered.Count > 0)
+							groups.Add(new McpSearchRenderedGroup(relative, file.Path, match.MatchLineNumbers, rendered));
+					}
+
 					return ValueTask.CompletedTask;
 				},
 				cancellationToken).ConfigureAwait(false);
+
+			// A declaration of the searched term is worth more than a mention of it, and the only
+			// case where that choice exists is a slice: when max_results withholds, the response
+			// carries some of what was found and the rest is paged. A search that shows everything
+			// it found has nothing to choose between and is left exactly as it was.
+			var withholdsByCount = totalMatches > maximumResults;
+			var ordering = withholdsByCount && groups.Count > 0
+				? await OrderDeclarationsFirstAsync(
+						Projects.DependencyFactsEngine,
+						plan,
+						groups,
+						cancellationToken)
+					.ConfigureAwait(false)
+				: null;
+			var ordered = ordering ?? groups;
+
+			string? lastFile = null;
+			foreach (var group in ordered)
+			{
+				if (shownMatches >= maximumResults || responseLimitReached)
+					break;
+
+				var startsNewFile = !string.Equals(group.RelativePath, lastFile, StringComparison.Ordinal);
+				var written = AppendRenderedGroup(
+					output,
+					group,
+					startsNewFile,
+					maximumResults - shownMatches,
+					renderedLines,
+					writtenHits);
+				shownMatches += written.WrittenMatches;
+				if (written.WrittenMatches > 0 || !startsNewFile)
+					lastFile = group.RelativePath;
+				if (written.Truncated)
+				{
+					responseLimitReached = true;
+					resultGroupTruncated = true;
+				}
+			}
+
+			// Everything the response did not carry stays in the session under one id, whole group by
+			// whole group, so a page of it never shows half of one.
+			var shownLines = writtenHits
+				.Select(static hit => new McpSearchHitKey(hit.RelativePath, hit.Line))
+				.ToHashSet();
+			string? storedFile = null;
+			foreach (var group in ordered)
+			{
+				var remaining = group.MatchLines.Where(line =>
+					!shownLines.Contains(new McpSearchHitKey(group.RelativePath, line))).ToArray();
+				if (remaining.Length == 0)
+					continue;
+				if (withheld.Length >= MaximumStoredSearchCharacters)
+				{
+					withheldTruncated = true;
+					break;
+				}
+
+				if (!string.Equals(group.RelativePath, storedFile, StringComparison.Ordinal))
+				{
+					withheld.Append(EscapeSingleLine(group.RelativePath)).Append(Environment.NewLine);
+					storedFile = group.RelativePath;
+				}
+				else
+				{
+					withheld.Append("--").Append(Environment.NewLine);
+				}
+
+				foreach (var line in group.Lines)
+					withheld.Append(line.Text).Append(Environment.NewLine);
+				withheldStored += remaining.Length;
+				withheldByFile[group.RelativePath] =
+					withheldByFile.GetValueOrDefault(group.RelativePath) + remaining.Length;
+			}
+
 			// A response the character cap already cut has no room to spend on naming, and the
 			// caller's next move there is to narrow the pattern rather than to read a symbol.
 			var symbols = resultGroupTruncated
@@ -1022,6 +1041,7 @@ internal sealed class DevProjexMcpTools(
 				FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
+				ordering is null ? null : SearchOrderNotice,
 				FormatStoredSearchNotice(storedSearch, withheldStored, withheldByFile.Count, withheldTruncated),
 				FormatSymbolCoverageNotice(symbols, namesRefused),
 				FormatNameSearchNotice(plan, paths, pattern, totalMatches),
@@ -2434,6 +2454,131 @@ internal sealed class DevProjexMcpTools(
 				$"{McpErrorCodes.InvalidArguments}: 'symbol' matches no declaration in this file; " +
 				"search_project names the declaration each hit sits inside.")
 		};
+
+	/// <summary>
+	/// Renders one group's numbered lines and nothing else. The path heading and the group separator
+	/// depend on what ends up beside the group, which is not known while the file is streaming past.
+	/// </summary>
+	private static IReadOnlyList<McpSearchGroupLine> RenderGroupLines(
+		string relativePath,
+		string content,
+		McpSearchMatchContext match)
+	{
+		var buffer = new StringBuilder();
+		AppendSearchResult(
+			buffer,
+			relativePath,
+			content,
+			match with { StartsNewGroup = false },
+			MaximumStoredSearchCharacters,
+			startsNewFile: false);
+		var texts = buffer.ToString().Split(Environment.NewLine);
+		if (texts.Length > 0 && texts[^1].Length == 0)
+			texts = texts[..^1];
+		if (texts.Length != match.Lines.Count)
+			return [];
+
+		var matching = match.MatchLineNumbers.ToHashSet();
+		var lines = new List<McpSearchGroupLine>(texts.Length);
+		for (var index = 0; index < texts.Length; index++)
+		{
+			var number = match.Lines[index].LineNumber;
+			lines.Add(new McpSearchGroupLine(number, matching.Contains(number), texts[index]));
+		}
+
+		return lines;
+	}
+
+	/// <summary>
+	/// Writes one set-aside group into the response, heading it with its path when the file changes
+	/// and separating it from the previous group of the same file otherwise. Stops on the match that
+	/// exhausts the caller's <c>max_results</c>, so the bound is honoured exactly.
+	/// </summary>
+	private static McpSearchAppendResult AppendRenderedGroup(
+		StringBuilder output,
+		McpSearchRenderedGroup group,
+		bool startsNewFile,
+		int remainingMatches,
+		List<McpSearchRenderedLine> rendered,
+		List<McpSearchHit> writtenHits)
+	{
+		if (remainingMatches <= 0)
+			return new McpSearchAppendResult(0, Truncated: false);
+
+		var heading = startsNewFile
+			? $"{EscapeSingleLine(group.RelativePath)}{Environment.NewLine}"
+			: $"--{Environment.NewLine}";
+		if (output.Length + heading.Length > MaximumSearchContentCharacters)
+			return new McpSearchAppendResult(0, Truncated: true);
+		output.Append(heading);
+
+		var written = 0;
+		var startsGroup = true;
+		foreach (var line in group.Lines)
+		{
+			var text = line.Text + Environment.NewLine;
+			if (output.Length + text.Length > MaximumSearchContentCharacters)
+				return new McpSearchAppendResult(written, Truncated: true);
+
+			var offset = output.Length;
+			output.Append(text);
+			rendered.Add(new McpSearchRenderedLine(
+				group.RelativePath,
+				offset,
+				line.LineNumber,
+				line.IsMatch,
+				startsGroup));
+			startsGroup = false;
+			if (!line.IsMatch)
+				continue;
+
+			writtenHits.Add(new McpSearchHit(group.RelativePath, group.FullPath, line.LineNumber));
+			written++;
+			if (written >= remainingMatches)
+				break;
+		}
+
+		return new McpSearchAppendResult(written, Truncated: false);
+	}
+
+	/// <summary>
+	/// Puts the groups whose matches sit inside a declaration ahead of those whose do not, keeping
+	/// the order the selection produced within each. A generated report that declares nothing
+	/// therefore stops crowding out the declaration of the term that was searched for.
+	/// </summary>
+	/// <remarks>
+	/// The signal is the one the naming already computes, so this is a comparison rather than a
+	/// mechanism: no directory list, no ranking graph, no index a search does not already build.
+	/// Both sides keep their existing relative order, so the same query on the same tree always
+	/// produces the same answer.
+	/// </remarks>
+	private static async Task<IReadOnlyList<McpSearchRenderedGroup>> OrderDeclarationsFirstAsync(
+		DependencyFactsEngine engine,
+		ProjectContextPlan plan,
+		IReadOnlyList<McpSearchRenderedGroup> groups,
+		CancellationToken cancellationToken)
+	{
+		var hits = groups
+			.SelectMany(group => group.MatchLines.Select(line =>
+				new McpSearchHit(group.RelativePath, group.FullPath, line)))
+			.ToArray();
+		var declarations = await McpSearchSymbols
+			.ResolveAsync(engine, plan, hits, cancellationToken)
+			.ConfigureAwait(false);
+		if (declarations.Names.Count == 0)
+			return groups;
+
+		var declaring = new List<McpSearchRenderedGroup>(groups.Count);
+		var mentioning = new List<McpSearchRenderedGroup>(groups.Count);
+		foreach (var group in groups)
+		{
+			var sitsInDeclaration = group.MatchLines.Any(line =>
+				declarations.Names.ContainsKey(new McpSearchHitKey(group.RelativePath, line)));
+			(sitsInDeclaration ? declaring : mentioning).Add(group);
+		}
+
+		return [.. declaring, .. mentioning];
+	}
 
 	/// <summary>
 	/// Keeps what the response could not carry, under an id the caller can page, so the matches

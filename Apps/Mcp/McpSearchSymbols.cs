@@ -225,6 +225,23 @@ internal readonly record struct McpSearchHit(string RelativePath, string FullPat
 internal readonly record struct McpSearchHitKey(string RelativePath, int Line);
 
 /// <summary>
+/// One rendered line of one group, kept so that the slice a response shows can be chosen after the
+/// whole result is known rather than as each file streams past.
+/// </summary>
+internal readonly record struct McpSearchGroupLine(int LineNumber, bool IsMatch, string Text);
+
+/// <summary>
+/// One context group, rendered and set aside. The path heading and the group separator are not in
+/// <see cref="Lines"/>: both depend on what ends up next to the group, which is not known until the
+/// slice is chosen.
+/// </summary>
+internal sealed record McpSearchRenderedGroup(
+	string RelativePath,
+	string FullPath,
+	IReadOnlyList<int> MatchLines,
+	IReadOnlyList<McpSearchGroupLine> Lines);
+
+/// <summary>
 /// One line the renderer wrote in full, and where it starts in the response. A declaration header
 /// is placed at one of these offsets after the render finishes.
 /// </summary>
