@@ -244,7 +244,7 @@ public sealed class DocumentationAndPackagingContractTests
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"The rest of the device namespace addresses this machine and is not refused",
+			"Three device forms address this machine and are not refused",
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains(

@@ -27,6 +27,28 @@ public sealed class McpRemoteProviderPathTests
 		Assert.True(McpRemoteProviderPath.ReachesRemoteProvider(path));
 
 	/// <summary>
+	/// A relative segment erases the device that was accepted. The Win32 namespace normalises
+	/// before the object manager reads the path, so a traversal out of a drive, a volume or a pipe
+	/// arrives as whatever device follows it — the UNC one, in every case here.
+	/// </summary>
+	[Theory]
+	[InlineData(@"\\.\C:\..\UNC\server\share")]
+	[InlineData(@"\\.\c:\..\unc\server\share")]
+	[InlineData(@"\\.\Z:\..\UNC\server\share")]
+	[InlineData(@"\\.\Volume{00000000-0000-0000-0000-000000000000}\..\UNC\server\share")]
+	[InlineData(@"\\.\pipe\..\UNC\server\share")]
+	[InlineData(@"\\.\pipe\..\..\UNC\server\share")]
+	[InlineData(@"\\.\C:\Windows\..\..\UNC\server\share")]
+	[InlineData(@"\\.\C:\..\GLOBALROOT\Device\Mup\server\share")]
+	[InlineData(@"\\.\pipe\..\GLOBALROOT\Device\Mup\server\share")]
+	[InlineData(@"\\.\C:\.\..\UNC\server\share")]
+	[InlineData(@"\\?\C:\..\UNC\server\share")]
+	[InlineData("//./C:/../UNC/server/share")]
+	[InlineData("//./pipe/../UNC/server/share")]
+	public void ATraversalOutOfAnAcceptedDeviceFormIsRecognised(string path) =>
+		Assert.True(McpRemoteProviderPath.ReachesRemoteProvider(path));
+
+	/// <summary>
 	/// Everything in the device namespaces except the three local forms below. Windows reaches the
 	/// same redirector through several of these, and GLOBALROOT opens onto an object namespace of
 	/// aliases that cannot be enumerated, which is why the accepted set is listed instead.

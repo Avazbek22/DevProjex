@@ -51,6 +51,8 @@ public sealed class McpOfflineProjectSourceTests
 	[InlineData("/Network/Servers/host.invalid/share")]
 	[InlineData(@"\\?\GLOBALROOT\Device\Mup\host.invalid\share")]
 	[InlineData(@"\\?\\UNC\host.invalid\share")]
+	[InlineData(@"\\.\pipe\..\UNC\host.invalid\share")]
+	[InlineData(@"\\.\C:\..\UNC\host.invalid\share")]
 	public async Task ARemoteFormIsRefusedWithoutAnythingOpeningIt(string project)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -264,6 +266,83 @@ public sealed class McpOfflineProjectSourceTests
 		// Deciding any of this opened nothing, which is what allows it to be asked before the shape
 		// has been cleared to touch the filesystem.
 		Assert.Equal(0, probes.Value);
+	}
+
+	/// <summary>
+	/// The counter has to count. Every other assertion about it is that it reads zero, which a
+	/// recording call that did nothing would satisfy just as well, so this is the case that fails
+	/// when recording stops working and takes the meaning of the others with it.
+	/// </summary>
+	[Fact]
+	public void TheProbeCountRisesWhenTheFilesystemIsTouched()
+	{
+		using var workspace = new TemporaryDirectory();
+		var nested = workspace.CreateFolder("outer/inner");
+
+		using var probes = McpProjectPathProbe.Count();
+		_ = McpRootRegistry.ResolvePhysicalExistingPath(nested, requireDirectory: true);
+
+		// One for the path itself, then one for each segment the walk opens in turn.
+		Assert.True(
+			probes.Value > 1,
+			$"Resolving a real path recorded {probes.Value} probe(s); recording is not working, so " +
+			"every case that asserts nothing was opened is passing for no reason.");
+	}
+
+	/// <summary>
+	/// A scope inside another counts into both, so wrapping part of a case cannot blind the rest.
+	/// </summary>
+	[Fact]
+	public void ANestedCountIsVisibleToTheScopeAroundIt()
+	{
+		using var workspace = new TemporaryDirectory();
+		var local = workspace.CreateFolder("local");
+
+		using var outer = McpProjectPathProbe.Count();
+		using (var inner = McpProjectPathProbe.Count())
+		{
+			_ = McpRootRegistry.ResolvePhysicalExistingPath(local, requireDirectory: true);
+			Assert.True(inner.Value > 0);
+		}
+
+		Assert.True(
+			outer.Value > 0,
+			"A probe recorded inside a nested scope was lost to the scope around it.");
+	}
+
+	/// <summary>
+	/// The operator's exemption, end to end, on Windows: a root listed in a spelling the classifier
+	/// refuses stays addressable by it, and the same spelling of something unlisted does not.
+	/// </summary>
+	/// <remarks>
+	/// The object namespace is what makes this runnable without a share: it is refused, and it also
+	/// resolves to an ordinary local directory, which no other refused Windows form does.
+	/// </remarks>
+	[Fact]
+	public async Task ARootListedInARefusedSpellingStaysAddressable()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("The object namespace prefix is Windows-only.");
+
+		using var workspace = new TemporaryDirectory();
+		var local = workspace.CreateFolder("local");
+		var outside = workspace.CreateFolder("outside");
+		var listed = $@"\??\{local}";
+		Assert.True(McpRemoteProviderPath.ReachesRemoteProvider(listed));
+		using var resolver = CreateOfflineResolver(listed);
+
+		var resolved = await resolver.ResolveAsync(
+			listed,
+			branch: null,
+			TestContext.Current.CancellationToken);
+		var refusal = await Assert.ThrowsAsync<McpToolException>(() =>
+			resolver.ResolveAsync(
+				$@"\??\{outside}",
+				branch: null,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(PhysicalPathOf(local), resolved.Root);
+		Assert.Equal(McpErrorCodes.InvalidArguments, refusal.Code);
 	}
 
 	private static string PhysicalPathOf(string path) =>

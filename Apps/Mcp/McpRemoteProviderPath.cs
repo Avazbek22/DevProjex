@@ -15,14 +15,18 @@ namespace DevProjex.Mcp;
 /// <c>\\?\GLOBALROOT\Device\Mup\server\share</c> reaches the same redirector through the object
 /// namespace that <c>\\?\</c> and <c>\??\</c> both open onto. That namespace holds symbolic links
 /// and aliases of aliases, so no list of refused spellings can be finished. A list of accepted
-/// ones can: a drive, a volume, and a named pipe are the only device forms a project path needs.
+/// ones can: a drive, a volume, and a named pipe are the only device forms a project path needs,
+/// and a relative segment inside one is refused, because <c>\\.\</c> is normalised before the
+/// object manager reads it and <c>..</c> would otherwise put any device in the accepted one's place.
 /// </para>
 /// <para>
 /// Outside the device namespace the accepted set is everything ordinary — a relative path, a
 /// drive-rooted path, a POSIX absolute path. Refused there are the object namespace <c>\??\</c>,
 /// which is the same door under one separator, and the automount host maps <c>/net/host/…</c> and
 /// <c>/Network/Servers/host/…</c>, which mount on first access and so contact the host named in
-/// them. Both separators count on every platform, and so do the host maps, because the string
+/// them. Those two are the maps a system ships with; an automount point an operator configured
+/// elsewhere is their own configuration, and falls under the paragraph below. Both separators
+/// count on every platform, and so do the host maps, because the string
 /// arrives from a client that may have written it for another operating system and the answer has
 /// to be the same wherever the server runs. That is deliberately conservative: on Windows those two
 /// maps are ordinary drive-relative directories, and a server that has one as a root can still
@@ -54,7 +58,9 @@ internal static class McpRemoteProviderPath
 		if (IsSeparator(candidate[1]))
 		{
 			var rest = candidate[2..];
-			return !IsDeviceNamespace(rest) || !NamesLocalDevice(rest[2..]);
+			return !IsDeviceNamespace(rest) ||
+			       !NamesLocalDevice(rest[2..]) ||
+			       HasRelativeSegment(rest[2..]);
 		}
 
 		var afterSeparator = candidate[1..];
@@ -77,6 +83,31 @@ internal static class McpRemoteProviderPath
 		NamesDrive(afterPrefix) ||
 		afterPrefix.StartsWith("Volume{", StringComparison.OrdinalIgnoreCase) ||
 		NamesSegment(afterPrefix, "pipe");
+
+	/// <summary>
+	/// Whether a device path carries a <c>.</c> or <c>..</c> segment.
+	/// </summary>
+	/// <remarks>
+	/// Naming an accepted device is not enough, because <c>\\.\</c> is normalised before the object
+	/// manager reads it: <c>\\.\pipe\..\UNC\server\share</c> loses the segment that was accepted and
+	/// arrives as the UNC device. Refusing the traversal is decidable from the spelling, where asking
+	/// what the path normalises to would make the answer depend on which operating system is asking.
+	/// Nothing is lost by it — a device path has no use for a relative segment, and <c>\\?\</c> does
+	/// not resolve one at all.
+	/// </remarks>
+	private static bool HasRelativeSegment(ReadOnlySpan<char> afterPrefix)
+	{
+		var start = 0;
+		for (var index = 0; index <= afterPrefix.Length; index++)
+		{
+			if (index != afterPrefix.Length && !IsSeparator(afterPrefix[index]))
+				continue;
+			if (afterPrefix[start..index] is "." or "..")
+				return true;
+			start = index + 1;
+		}
+		return false;
+	}
 
 	private static bool NamesDrive(ReadOnlySpan<char> value) =>
 		value.Length >= 2 &&

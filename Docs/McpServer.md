@@ -173,9 +173,12 @@ batched `get_file` call instead of several single reads; see
   a check that first asked whether the path existed would already have sent the traffic it was
   meant to prevent. The refusal applies with `--allow-remote` as well — a remote project is
   named by its URL, and these spellings are refused in both states.
-- The rest of the device namespace addresses this machine and is not refused:
-  `\\?\C:\project` is an ordinary local directory written the long way, and `\\.\pipe\name`
-  is local machinery. A root listed at startup stays addressable in any spelling that resolves
+- Three device forms address this machine and are not refused: a drive, as in
+  `\\?\C:\project`, which is an ordinary local directory written the long way; a volume,
+  `\\?\Volume{…}\project`; and a named pipe, `\\.\pipe\name`. Every other device is refused,
+  and so is a relative segment inside an accepted one, because `\\.\` is normalised before the
+  operating system reads it and `..` would otherwise put any device in the accepted one's place.
+- A root listed at startup stays addressable in any spelling that resolves
   to the recorded one — a trailing separator, forward slashes, or the extended-length prefix —
   because deciding that compares strings and opens nothing. What the refusal cannot cover is a
   drive letter, a mount point, or a working directory that the operator has already bound to a
