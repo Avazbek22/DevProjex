@@ -257,13 +257,10 @@ public sealed class ImportanceRankingService(
 	{
 		for (var attempt = 0; attempt < 2; attempt++)
 		{
-			// One content pass per attempt. The captured versions are both the dependency-index
-			// identity and the baseline every later currency check compares against, so the
-			// baseline now covers the whole call instead of starting after indexing.
-			var versions = await CaptureVersionsAsync(candidatePaths, cancellationToken)
+			var before = await CaptureVersionsAsync(candidatePaths, cancellationToken)
 				.ConfigureAwait(false);
 			var contentIdentities = new DependencyManifestContentIdentities(
-				versions.ToDictionary(
+				before.ToDictionary(
 					static pair => pair.Key,
 					static pair => pair.Value.ContentHash ?? string.Empty,
 					PathComparer.Default));
@@ -275,11 +272,10 @@ public sealed class ImportanceRankingService(
 					cancellationToken,
 					contentIdentities)
 				.ConfigureAwait(false);
-			// A file rewritten while the index was being read is found by its size and write time,
-			// which needs no second read of the bytes. A rewrite that preserves both is left to the
-			// content comparison every currency check still performs against these versions.
-			if (MetadataUnchanged(versions, candidatePaths, cancellationToken))
-				return (snapshot, versions);
+			var after = await CaptureVersionsAsync(candidatePaths, cancellationToken)
+				.ConfigureAwait(false);
+			if (VersionsEqual(before, after))
+				return (snapshot, after);
 		}
 
 		throw new IOException("Selected source files changed while dependency facts were being indexed.");
@@ -300,21 +296,11 @@ public sealed class ImportanceRankingService(
 		return versions;
 	}
 
-	private static bool MetadataUnchanged(
-		IReadOnlyDictionary<string, RankingSourceVersion> versions,
-		IReadOnlyList<string> paths,
-		CancellationToken cancellationToken)
-	{
-		foreach (var path in paths)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			if (!versions.TryGetValue(Path.GetFullPath(path), out var version) ||
-			    !version.HasMatchingMetadata(path))
-				return false;
-		}
-
-		return true;
-	}
+	private static bool VersionsEqual(
+		IReadOnlyDictionary<string, RankingSourceVersion> left,
+		IReadOnlyDictionary<string, RankingSourceVersion> right) =>
+		left.Count == right.Count && left.All(pair =>
+			right.TryGetValue(pair.Key, out var version) && version == pair.Value);
 
 	internal static IReadOnlyDictionary<string, double?> RankNormalize(
 		IReadOnlyDictionary<string, double?> values,
