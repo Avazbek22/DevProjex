@@ -381,10 +381,13 @@ schema must refresh it.
 Filters are never silent, though an unchanged filter line is reported once per
 session rather than on every response — see
 [Service notices repeat only when they change](#service-notices-repeat-only-when-they-change).
-`get_tree` and `pack_context` end with a trusted
+`get_tree` and `pack_context` carry a trusted
 `[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
 exclusion toggles that shaped the tree and who can widen them: the server
-startup line, or a per-call `exclusions` value on a delegation server. When
+startup line, or a per-call `exclusions` value on a delegation server. It sits
+among the trailing diagnostics rather than last: `[Protection]` follows it, a
+pinned remote checkout adds `[Remote]`, and a budgeted `pack_context` ends with
+`[Budget accounting]`. When
 `max_file_bytes` is supplied, every tool that accepts it also reports
 `; max_file_bytes: <bytes>` in its effective-filter diagnostics. Every selection
 tool adds an `[Empty selection]` line when no file survived the
