@@ -1,0 +1,103 @@
+# Code style, measured from this repository rather than taken from a template.
+#
+# Every value below was counted over the 1,528 tracked C# files before it was written down, and the
+# count is quoted beside it. Where the tree is not uniform, the value follows the majority and the
+# minority is named, so that a later reader can tell a deliberate choice from an accident.
+#
+# Nothing here reformats anything on its own. `Scripts/ci/Test-Indentation.ps1` compares each
+# changed file against its own state at the base commit and fails only when a file that matched
+# these rules stops matching them; 727 files do not match them today and are left alone. Bringing
+# those into line rewrites authorship across the tree and collides with every open branch, so that
+# is a separate decision, taken separately.
+
+root = true
+
+[*.cs]
+
+# Indentation: 336,426 tab-led lines against 81,605 space-led, so 80.5% of indented lines and
+# 1,136 of 1,528 files. Apps/Terminal and Apps/Mcp are tabs without exception.
+indent_style = tab
+
+# Width 4 is pinned by the 105 files that carry both: N tabs and 4N spaces sit on adjacent lines at
+# the same nesting depth. Space indents elsewhere are a multiple of 4 in 99.4% of cases.
+indent_size = 4
+tab_width = 4
+
+# Safe as measured: no tracked file lacks a final newline.
+insert_final_newline = true
+
+# Not enabled: 421 files carry trailing whitespace. Turning this on would mark every one of them
+# the moment it is touched, which is the mass rewrite this gate exists to avoid.
+trim_trailing_whitespace = false
+
+# `end_of_line` is deliberately absent. The index stores LF and the working tree is CRLF through
+# `core.autocrlf`, with no `* text=auto` in .gitattributes, so pinning either value would declare
+# every checkout on the other platform wrong. The gate formats the base and the head on the same
+# runner, which makes the platform default cancel out.
+
+# Namespaces are file-scoped in all 1,502 declarations outside string literals.
+csharp_style_namespace_declarations = file_scoped:suggestion
+
+# Braces sit on their own line in 37,716 places against 115, and all 115 are inside string literals
+# holding embedded shell or JavaScript. `else`, `catch` and `finally` open a new line in 765, 1,349
+# and 1,027 places respectively.
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_between_query_expression_clauses = true
+
+csharp_indent_case_contents = true
+csharp_indent_case_contents_when_block = false
+csharp_indent_switch_labels = true
+csharp_indent_labels = one_less_than_current
+csharp_indent_block_contents = true
+csharp_indent_braces = false
+
+csharp_preserve_single_line_statements = true
+csharp_preserve_single_line_blocks = true
+
+# A single-statement `if` body is left unbraced in 8,158 of 11,537 places, 70.7%. Requiring braces
+# would flag every one of them, so this records what the code does.
+csharp_prefer_braces = false:silent
+
+# `var` in 47,291 declarations against 1,991 explicit, and the explicit residue is almost entirely
+# places where `var` is not legal: `var x = new ...` appears 7,867 times, `Type x = new ...` three.
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
+
+# Accessibility is explicit on all 2,475 type declarations, with no exception.
+dotnet_style_require_accessibility_modifiers = always:suggestion
+
+# `this.` appears 105 times across 21 of 1,528 files, against 19,073 references to an
+# underscore-prefixed field, and every use is constructor disambiguation.
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+# Imports sit outside the namespace in all 2,172 directives, System first in 90.4% of the files
+# that have both, and with no blank line between groups in 494 of 498 files.
+csharp_using_directive_placement = outside_namespace:suggestion
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+
+# 99.6% of lines are under 120 columns. Advisory: the formatter does not rewrap, and the longest
+# lines in the tree are single string literals that cannot be broken.
+max_line_length = 120
+
+[Apps/Avalonia/**.cs]
+
+# The one area where the majority runs the other way: 79 space-indented files against 27 tabbed,
+# and 28.9% of its indented lines are tab-led against 80.5% across the tree. Recorded here so the
+# gate judges those files by what they are, rather than dragging them toward the repository default.
+indent_style = space
+indent_size = 4
+tab_width = 4
+
+[*.{md,yml,yaml,json,ps1,psm1,sh}]
+indent_style = unset
+indent_size = unset
