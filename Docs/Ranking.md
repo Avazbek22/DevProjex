@@ -133,6 +133,15 @@ complete. It cannot add a seed, dependency, intermediate node, or any other file
 excluded by paths, globs, profiles, Git scope, submodule boundaries, exclusions,
 or the file-size limit. GUI and TUI remain human-ordered surfaces and do not use it.
 
+`expand_related` and `focus` act on different things and compose. Expansion changes
+the candidate set inside the effective selection S: it narrows S to the seeds plus
+their resolved neighbours, and because the dependency index is built from S itself,
+it can only remove from S, never add to it. Focus changes nothing about the set; it
+orders what the set already holds. So a file enters a pack only if the filters
+admitted it, expansion kept it, and the budget had room for it, in that order, and
+the frozen `directed-from-seed` result stands: expansion is that workflow expressed
+as one call, not a new ranking signal.
+
 The dependency facts are indexed once and build the same numeric, deduplicated
 resolved non-self graph used by importance PageRank. Only when focus is present,
 the reverse adjacency is built and a deterministic multi-source BFS treats the

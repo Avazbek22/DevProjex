@@ -113,19 +113,21 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private const string IncludeProperty = """
 	"include_patterns": {
-	  "type": "array",
-	  "maxItems": 256,
-	  "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-	  "description": "Project-relative glob patterns using '/' that only narrow the effective filters. A pattern matches the whole relative path: '*' and '?' stay inside one path segment, '**/' spans any depth ('**/*.cs' is every C# file, 'src/**' a subtree), '{a,b}' lists alternatives. Matching is case-sensitive on every platform; '!' negation and '[...]' classes are rejected."
+	  "description": "One project-relative glob pattern using '/', or an array of up to 256 of them, that only narrow the effective filters. A pattern matches the whole relative path: '*' and '?' stay inside one path segment, '**/' spans any depth ('**/*.cs' is every C# file, 'src/**' a subtree), '{a,b}' lists alternatives. Matching is case-sensitive on every platform; '!' negation and '[...]' classes are rejected.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 512 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	  ]
 	}
 	""";
 
 	private const string ExcludeProperty = """
 	"exclude_patterns": {
-	  "type": "array",
-	  "maxItems": 256,
-	  "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-	  "description": "Project-relative glob patterns using '/' that remove further paths; same syntax as include_patterns."
+	  "description": "One project-relative glob pattern using '/', or an array of up to 256 of them, that remove further paths; same syntax as include_patterns.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 512 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	  ]
 	}
 	""";
 
@@ -149,10 +151,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private const string PathsProperty = """
 	"paths": {
-	  "type": "array",
-	  "maxItems": 256,
-	  "items": { "type": "string", "minLength": 1, "maxLength": 4096 },
-	  "description": "Existing project-relative files or directories that narrow the selection. Values are literal paths: *, ?, {, and [ are ordinary filename characters here, not glob syntax."
+	  "description": "One existing project-relative file or directory, or an array of up to 256 of them, that narrow the selection. Values are literal paths: *, ?, {, and [ are ordinary filename characters here, not glob syntax.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 4096 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	  ]
 	}
 	""";
 
@@ -248,6 +251,21 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private static string ExpandRelatedProperty =>
+		$$"""
+	"expand_related": {
+	  "description": "Also pack the statically resolved neighbours of the given seed files, in one call instead of a related_files round trip. Expansion only narrows: a neighbour outside the effective filters, the Git scope, or paths never enters. Only resolved edges travel. Stops at {{McpRelatedExpansion.MaximumExpandedFiles}} files and says so.",
+	  "type": "object",
+	  "properties": {
+	    "seeds": { "type": "array", "minItems": 1, "maxItems": {{McpRelatedExpansion.MaximumSeeds}}, "items": { "type": "string" }, "description": "Project-relative files already inside the effective selection; directories and globs are rejected." },
+	    "hops": { "type": "integer", "minimum": {{McpRelatedExpansion.MinimumHops}}, "maximum": {{McpRelatedExpansion.MaximumHops}}, "default": {{McpRelatedExpansion.MinimumHops}}, "description": "How many edges out from each seed to follow." },
+	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Which way to follow edges; same meaning as related_files.direction." }
+	  },
+	  "required": ["seeds"],
+	  "additionalProperties": false
+	}
+	""";
+
 	private const string MaxFileBytesProperty = """
 	"max_file_bytes": {
 	  "description": "Exclude otherwise selected files strictly larger than this byte count; integer or numeric string.",
@@ -330,6 +348,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{FocusProperty}},
 	    {{MaximumTokensProperty}},
 	    {{MaxFileBytesProperty}},
+	    {{ExpandRelatedProperty}},
 	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Pack view: tree includes structure only, content includes files only, tree-content includes both." },
 	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown", "description": "Pack format: markdown or text for readable output; json or xml for structured output." }
 	  },
@@ -412,7 +431,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    },
 	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Read the lines that declare this symbol instead of a line range, with path. Takes a qualified name, or a simple name that is unique in the file; search_project names the declaration each hit sits inside. Cannot be combined with start_line, end_line, or start_column. A name matching several declarations, no declaration, or a file none were extracted from returns DPX-MCP-INVALID-ARGUMENTS." }
 	  },
 	  "additionalProperties": false
 	}

@@ -146,7 +146,7 @@ public sealed partial class McpServerProcessTests
 			}, progress: null, options: null, TestContext.Current.CancellationToken);
 			var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 			Assert.NotEqual(true, result.IsError);
-			Assert.DoesNotContain("Large4.txt:1:", text, StringComparison.Ordinal);
+			Assert.DoesNotContain("Large4.txt", text, StringComparison.Ordinal);
 			Assert.Contains("[Search incomplete] The inspected-text byte budget was reached; " +
 			                "additional selected files were not searched and match counts are partial.", text,
 				StringComparison.Ordinal);

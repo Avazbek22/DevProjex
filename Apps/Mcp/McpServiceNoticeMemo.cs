@@ -4,7 +4,8 @@ namespace DevProjex.Mcp;
 /// The trusted filter and protection lines describe server state, not the call. Repeating them
 /// on every response is a fixed tax that grows with exactly the workload the server is good at:
 /// many small, precise reads. This memo keeps one delivery per session per notice content, and
-/// replaces the repeat with a constant pointer back to <c>list_projects</c>.
+/// replaces the repeat with a constant pointer back to <c>list_projects</c> that names exactly
+/// the lines the response withheld.
 /// </summary>
 /// <remarks>
 /// Omission must be provable, so a line counts as delivered only after it is found in the text
@@ -15,10 +16,17 @@ namespace DevProjex.Mcp;
 internal sealed class McpServiceNoticeMemo
 {
 	/// <summary>
-	/// Never longer than the shortest set it can replace, so a response cannot grow by omitting
-	/// a notice. Its meaning is spelled out once in the server instructions.
+	/// Stands in for both lines on a response that would have carried both. Never longer than the
+	/// shortest set it can replace, so a response cannot grow by omitting a notice. The meaning of
+	/// the marker is spelled out once in the server instructions.
 	/// </summary>
 	public const string ContinuationNotice = "[Unchanged] filters, protection; see list_projects.";
+
+	/// <summary>Stands in for the effective-filters line alone, on a response that carries no protection line.</summary>
+	public const string FiltersContinuationNotice = "[Unchanged] filters; see list_projects.";
+
+	/// <summary>Stands in for the protection line alone, on a response that carries no effective-filters line.</summary>
+	public const string ProtectionContinuationNotice = "[Unchanged] protection; see list_projects.";
 
 	private readonly Lock gate = new();
 	private string? deliveredIdentity;
@@ -54,7 +62,7 @@ internal sealed class McpServiceNoticeMemo
 				IsDelivered(filters, deliveredFilters) &&
 				IsDelivered(protection, deliveredProtection);
 			if (!alwaysSend && alreadyDelivered)
-				return new McpServiceNotices(null, null, ContinuationNotice);
+				return new McpServiceNotices(null, null, Continuation(filters, protection));
 
 			pendingIdentity = identity;
 			pendingFilters = filters ?? pendingFilters;
@@ -112,6 +120,21 @@ internal sealed class McpServiceNoticeMemo
 
 	private static bool IsDelivered(string? current, string? delivered) =>
 		current is null || string.Equals(current, delivered, StringComparison.Ordinal);
+
+	/// <summary>
+	/// Names the lines this response is actually withholding. A tool that reports no protection
+	/// line is not suppressing one, so naming it would credit the session with a report it never
+	/// received; the same holds for the effective-filters line. A caller reaches this only once
+	/// every line it does carry has already been delivered unchanged, and a response carrying
+	/// neither line never gets here at all.
+	/// </summary>
+	private static string Continuation(string? filters, string? protection) =>
+		(filters, protection) switch
+		{
+			(null, _) => ProtectionContinuationNotice,
+			(_, null) => FiltersContinuationNotice,
+			_ => ContinuationNotice
+		};
 }
 
 internal readonly record struct McpServiceNotices(

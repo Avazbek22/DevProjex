@@ -136,7 +136,8 @@ public sealed partial class McpServerProcessTests
 		var text = AllProcessText(search);
 
 		Assert.NotEqual(true, search.IsError);
-		Assert.Contains("Readable.txt:1:readable-process-marker", text, StringComparison.Ordinal);
+		Assert.Contains("Readable.txt", text, StringComparison.Ordinal);
+		Assert.Contains("1:readable-process-marker", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("blocked-process-marker", text, StringComparison.Ordinal);
 		Assert.Contains("[Warning DPX-MCP-PAYLOAD-TRUNCATED]", text, StringComparison.Ordinal);
 		Assert.Contains("could not fully inspect 1 selected file", text, StringComparison.Ordinal);

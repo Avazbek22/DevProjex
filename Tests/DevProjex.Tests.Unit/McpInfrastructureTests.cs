@@ -2127,7 +2127,8 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(1, completeResult.WrittenMatches);
 		Assert.False(completeResult.Truncated);
 		var rendered = complete.ToString();
-		var matchingPrefix = $"src/😀.cs:2:";
+		// The path heads the block, so a match line begins with its own number.
+		var matchingPrefix = "2:";
 		var matchingStart = rendered.IndexOf(matchingPrefix, StringComparison.Ordinal);
 		Assert.True(matchingStart > 0);
 		var matchingTextEnd = matchingStart + matchingPrefix.Length + "needle 😀".Length;

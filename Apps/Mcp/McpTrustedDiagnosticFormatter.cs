@@ -14,6 +14,19 @@ internal static class McpTrustedDiagnosticFormatter
 		return FormatWarnings(plan.Diagnostics);
 	}
 
+	/// <summary>
+	/// Whether the plan reported a requested path the effective tree does not hold. Tools that
+	/// tolerate a missing path answer over the rest of the selection, so this warning is the only
+	/// signal that part of the request selected nothing.
+	/// </summary>
+	public static bool ReportsMissingSelectedPath(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		return plan.Diagnostics.Any(static diagnostic =>
+			diagnostic.Severity == ContextDiagnosticSeverity.Warning &&
+			string.Equals(diagnostic.Code, MissingSelectedPathCode, StringComparison.Ordinal));
+	}
+
 	internal static string? FormatWarnings(IReadOnlyList<ContextDiagnostic> diagnostics)
 	{
 		ArgumentNullException.ThrowIfNull(diagnostics);

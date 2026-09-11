@@ -692,7 +692,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			containingDeclaration,
 			importSyntax,
 			capturedNameStartIndex,
-			evidence);
+			evidence,
+			checked((int)node.EndPosition.Row + 1));
 
 	private static string? FindContainingDeclaration(
 		Node node,
