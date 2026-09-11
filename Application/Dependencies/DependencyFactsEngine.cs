@@ -1291,7 +1291,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			LanguageId.TypeScript or LanguageId.JavaScript or LanguageId.Tsx => ResolveTypeScriptImport(source, import),
 			LanguageId.Python => ResolvePythonImport(source, import),
-			LanguageId.Java or LanguageId.Kotlin => ResolveJavaImport(source, import),
+			LanguageId.Java or LanguageId.Kotlin or LanguageId.Php => ResolveJavaImport(source, import),
 			LanguageId.Rust => ResolveRustImport(source, import),
 			LanguageId.Ruby => ResolveRubyImport(source, import),
 			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
@@ -2238,7 +2238,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			var isSyntacticallyQualified = reference.IsGlobalQualified || reference.Name.Contains('.') ||
-				reference.Name.Contains("::", StringComparison.Ordinal);
+				reference.Name.Contains("::", StringComparison.Ordinal) || reference.Name.Contains('\\');
 			var typeParameterShadowsReference = !isSyntacticallyQualified && (source.TypeParameterScopes.Count > 0
 				? _typeParametersByFileAndName.GetValueOrDefault(source.Path)?
 					.GetValueOrDefault(simpleName)?.Any(parameter =>
@@ -2256,6 +2256,12 @@ public sealed class DependencyFactsEngine : IDisposable
 			    source.Aliases.TryGetValue(simpleName, out var javaImport))
 			{
 				expandedAlias = javaImport;
+				aliasExpanded = true;
+			}
+			if (!aliasExpanded && source.LanguageId == LanguageId.Php && !isSyntacticallyQualified &&
+			    source.Aliases.TryGetValue(simpleName, out var phpImport))
+			{
+				expandedAlias = phpImport;
 				aliasExpanded = true;
 			}
 			if (!aliasExpanded && source.LanguageId == LanguageId.Rust && !isSyntacticallyQualified &&
@@ -2308,6 +2314,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				candidates = SelectVisibleRustCandidates(source, reference, candidates);
 			else if (source.LanguageId == LanguageId.Ruby)
 				candidates = SelectVisibleRubyCandidates(reference, candidates);
+			else if (source.LanguageId == LanguageId.Php && !requiresQualifiedLookup)
+				candidates = candidates.Where(candidate =>
+					string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
@@ -2549,7 +2558,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				return false;
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
-			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby &&
+			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php &&
 			       VisibleScopeIds(source.ScopeId).Contains(
 			       declaration.Identity.ScopeId, StringComparer.Ordinal);
 		}
@@ -2741,6 +2750,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			var separator = Math.Max(qualified.LastIndexOf('.'), qualified.LastIndexOf('#'));
 			var rustSeparator = qualified.LastIndexOf("::", StringComparison.Ordinal);
 			if (rustSeparator >= 0) separator = Math.Max(separator, rustSeparator + 1);
+			separator = Math.Max(separator, qualified.LastIndexOf('\\'));
 			var value = qualified[(separator + 1)..];
 			var arity = value.IndexOf('`');
 			return arity < 0 ? value : value[..arity];
@@ -2808,7 +2818,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (pending.TryDequeue(out var scopeId))
 				{
 					if (!visited.Add(scopeId)) continue;
-					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby) ||
+					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php) ||
 					    !scopes.TryGetValue(scopeId, out var current)) continue;
 					foreach (var projectReference in current.ProjectReferences) pending.Enqueue(projectReference);
 				}

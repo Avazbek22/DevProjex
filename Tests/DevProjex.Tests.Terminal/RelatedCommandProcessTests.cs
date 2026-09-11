@@ -93,6 +93,19 @@ public sealed class RelatedCommandProcessTests
 	}
 
 	[Fact]
+	public void RealPublishedCommandReportsPhpManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Remote.php", "<?php namespace Library; class Remote {}");
+		workspace.WriteFile("project/src/App.php", "<?php namespace App; use Library\\Remote; class App { private Remote $value; }");
+		var result = Run(workspace, "related", "src/App.php", "--project", project, "--direction", "dependencies",
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("src/Remote.php", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RealPublishedCommandUsesPythonDottedImportBindingAndPackageBoundaries()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -12,6 +12,7 @@ public enum LanguageId
 	Rust,
 	Kotlin,
 	Ruby,
+	Php,
 	Unsupported
 }
 

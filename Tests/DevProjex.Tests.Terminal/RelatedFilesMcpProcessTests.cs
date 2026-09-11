@@ -109,6 +109,22 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessRelatedFilesReportsPhpManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("php-project");
+		workspace.WriteFile("php-project/src/Remote.php", "<?php namespace Library; class Remote {}");
+		workspace.WriteFile("php-project/src/App.php", "<?php namespace App; use Library\\Remote; class App { private Remote $value; }");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "src/App.php", ["direction"] = "dependencies"
+		});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.Contains("src/Remote.php", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesPreservesParsedImportSemantics()
 	{
 		using var workspace = new TemporaryDirectory();

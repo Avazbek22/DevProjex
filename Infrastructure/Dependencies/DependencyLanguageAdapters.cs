@@ -1190,6 +1190,66 @@ internal sealed class RubyDependencyLanguageAdapter : DependencyLanguageAdapter
 		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
 }
 
+internal sealed class PhpDependencyLanguageAdapter : DependencyLanguageAdapter
+{
+	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
+		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+		{
+			["declaration.class"] = SymbolKind.Class,
+			["declaration.interface"] = SymbolKind.Interface,
+			["declaration.enum"] = SymbolKind.Enum,
+			["declaration.function"] = SymbolKind.Function
+		};
+
+	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
+	{
+		if (context.HasSyntaxErrors) return Failed(context, "syntax tree contains errors");
+		var namespaceName = context.Declarations.Where(static capture => capture.Name == "context.namespace")
+			.Select(static capture => capture.CapturedName).FirstOrDefault(static name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty;
+		var declarationCaptures = context.Declarations
+			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName)).ToArray();
+		var declarations = declarationCaptures.Select(capture => new DeclarationFact(
+			new SymbolIdentity(context.ScopeId, context.LanguageId, Kinds[capture.Name],
+				namespaceName.Length == 0 ? capture.CapturedName! : $"{namespaceName}\\{capture.CapturedName}", 0),
+			[Site(context, capture)])
+		{
+			ContainingNamespace = namespaceName,
+			ContainingType = null
+		}).ToArray();
+		var imports = context.References.Where(static capture => capture.Name == "import.php" && capture.ImportSyntax is not null)
+			.Select(capture =>
+			{
+				var syntax = capture.ImportSyntax!;
+				var binding = syntax.Bindings.Single();
+				return new ImportFact(syntax.Specifier, binding.Name, binding.Alias, false, 0, Site(context, capture));
+			}).ToArray();
+		var importRanges = context.References.Where(static capture => capture.Name == "import.php")
+			.Select(static capture => (capture.StartIndex, capture.EndIndex)).ToArray();
+		var declarationNames = declarationCaptures.Where(static capture => capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex).ToHashSet();
+		var references = Distinct(context.References.Where(capture => capture.Name == "reference.type" &&
+			!declarationNames.Contains(capture.StartIndex) &&
+			!importRanges.Any(range => capture.StartIndex >= range.StartIndex && capture.EndIndex <= range.EndIndex))
+			.Select(capture => new ReferenceFact(
+				EvidenceLayer.TypeReference, capture.Text.TrimStart('\\'), 0, capture.NodeType, Site(context, capture))
+			{
+				ContainingNamespace = namespaceName,
+				SourceStartIndex = capture.StartIndex
+			}));
+		if (declarations.Length + imports.Length + references.Count > limits.MaximumFactsPerFile)
+			return Failed(context, "fact limit exceeded");
+		var aliases = imports.GroupBy(static import => import.Alias ?? import.ImportedName ?? string.Empty, StringComparer.Ordinal)
+			.Where(static group => group.Key.Length > 0 && group.Count() == 1)
+			.ToDictionary(static group => group.Key, static group => group.Single().Specifier, StringComparer.Ordinal);
+		return Complete(context, declarations, imports, references, [namespaceName], aliases, globalNamespaces: []);
+	}
+
+	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(
+		context.RelativePath, context.ScopeId, context.LanguageId, context.ContentFingerprint, context.Source.Length,
+		DependencyFileStatus.ExtractionFailed, reason, context.HasSyntaxErrors, context.ErrorNodeKinds,
+		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+}
+
 internal sealed class RustDependencyLanguageAdapter : DependencyLanguageAdapter
 {
 	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =

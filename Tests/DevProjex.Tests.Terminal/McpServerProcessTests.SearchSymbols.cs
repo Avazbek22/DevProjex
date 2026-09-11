@@ -60,6 +60,12 @@ public sealed partial class McpServerProcessTests
 			"module A\n def run\n  'member-marker-a'\n end\nend\nmodule B\n def run\n  'member-marker-b'\n end\nend\n# fallback-marker\n",
 			"A#run",
 			"B#run"
+		},
+		{
+			"Members.php",
+			"<?php\nnamespace Sample;\nclass A {\n function run() { return 'member-marker-a'; }\n}\nclass B {\n function run() { return 'member-marker-b'; }\n}\n// fallback-marker\n",
+			"Sample.A.run",
+			"Sample.B.run"
 		}
 	};
 

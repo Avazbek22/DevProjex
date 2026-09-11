@@ -87,6 +87,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var javaConfigFiles = new List<string>();
 		var rustConfigFiles = new List<string>();
 		var rubyConfigFiles = new List<string>();
+		var composerConfigFiles = new List<string>();
 		foreach (var path in manifest.Order(StringComparer.Ordinal))
 		{
 			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
@@ -97,6 +98,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			if (Path.GetFileName(path).Equals("Cargo.toml", StringComparison.OrdinalIgnoreCase)) rustConfigFiles.Add(path);
 			if (Path.GetFileName(path).Equals("Gemfile", StringComparison.OrdinalIgnoreCase) ||
 			    path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase)) rubyConfigFiles.Add(path);
+			if (Path.GetFileName(path).Equals("composer.json", StringComparison.OrdinalIgnoreCase)) composerConfigFiles.Add(path);
 		}
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
@@ -525,6 +527,38 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			scopes.Add(new DependencyScopeDescriptor(
 				project.ScopeId, project.Directory, LanguageId.Ruby, references, null, false,
 				new Dictionary<string, IReadOnlyList<string>>(), project.PackageName,
+				new HashSet<string>(), [], true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason
+			});
+		}
+
+		var composerProjects = new List<(string Path, string ScopeId, ComposerProjectConfiguration Configuration,
+			DependencyConfigurationState State, string? Reason)>();
+		foreach (var configPath in composerConfigFiles)
+		{
+			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+			AddFingerprint(configPath, snapshot);
+			var parsed = snapshot.State == DependencyConfigurationState.Valid
+				? ParseComposerProject(snapshot.Content)
+				: ConfigurationParseResult<ComposerProjectConfiguration>.Failure(
+					ComposerProjectConfiguration.Empty, snapshot.State, snapshot.Reason);
+			var scopeId = "php:" + PortableRelative(root, configPath);
+			composerProjects.Add((configPath, scopeId, parsed.Value, parsed.State, parsed.Reason));
+			AddDiagnostic(configPath, parsed.State, parsed.Reason, scopeId);
+		}
+		var composerScopeByName = composerProjects.Where(static project => project.Configuration.PackageName is not null)
+			.GroupBy(static project => project.Configuration.PackageName!, StringComparer.Ordinal)
+			.Where(static group => group.Count() == 1)
+			.ToDictionary(static group => group.Key, static group => group.Single().ScopeId, StringComparer.Ordinal);
+		foreach (var project in composerProjects)
+		{
+			var references = project.Configuration.Dependencies.Where(composerScopeByName.ContainsKey)
+				.Select(name => composerScopeByName[name]).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				project.ScopeId, Path.GetDirectoryName(project.Path)!, LanguageId.Php, references, null, false,
+				project.Configuration.AutoloadPaths, project.Configuration.PackageName,
 				new HashSet<string>(), [], true)
 			{
 				ConfigurationState = project.State,
@@ -1357,6 +1391,49 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		}
 		return new RubyProjectConfiguration(packageName, directories.Order(StringComparer.Ordinal).ToArray());
 	}
+
+	private static ConfigurationParseResult<ComposerProjectConfiguration> ParseComposerProject(string content)
+	{
+		try
+		{
+			using var document = JsonDocument.Parse(content);
+			var root = document.RootElement;
+			var name = root.TryGetProperty("name", out var nameElement) && nameElement.ValueKind == JsonValueKind.String
+				? nameElement.GetString()
+				: null;
+			var dependencies = root.TryGetProperty("require", out var require) && require.ValueKind == JsonValueKind.Object
+				? require.EnumerateObject().Select(static property => property.Name)
+					.Where(static dependency => !dependency.StartsWith("php", StringComparison.OrdinalIgnoreCase) &&
+						!dependency.StartsWith("ext-", StringComparison.OrdinalIgnoreCase))
+					.Order(StringComparer.Ordinal).ToArray()
+				: [];
+			var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+			if (root.TryGetProperty("autoload", out var autoload) && autoload.ValueKind == JsonValueKind.Object &&
+			    autoload.TryGetProperty("psr-4", out var psr4) && psr4.ValueKind == JsonValueKind.Object)
+			{
+				foreach (var mapping in psr4.EnumerateObject())
+				{
+					var values = mapping.Value.ValueKind switch
+					{
+						JsonValueKind.String => new[] { mapping.Value.GetString()! },
+						JsonValueKind.Array => mapping.Value.EnumerateArray()
+							.Where(static item => item.ValueKind == JsonValueKind.String)
+							.Select(static item => item.GetString()!).ToArray(),
+						_ => []
+					};
+					paths[mapping.Name] = values;
+				}
+			}
+			return ConfigurationParseResult<ComposerProjectConfiguration>.Valid(
+				new ComposerProjectConfiguration(name, dependencies, paths));
+		}
+		catch (JsonException)
+		{
+			return ConfigurationParseResult<ComposerProjectConfiguration>.Failure(
+				ComposerProjectConfiguration.Empty, DependencyConfigurationState.Corrupt,
+				"Composer project configuration is invalid");
+		}
+	}
 	private static readonly Lazy<IReadOnlySet<string>> DotNetCatalog = new(
 		() => LoadCatalog("dotnet-net10.0.json"),
 		LazyThreadSafetyMode.ExecutionAndPublication);
@@ -1481,6 +1558,14 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		public static RustProjectConfiguration Empty { get; } = new(null, []);
 	}
 	private sealed record RubyProjectConfiguration(string? PackageName, IReadOnlyList<string> ProjectDirectories);
+	private sealed record ComposerProjectConfiguration(
+		string? PackageName,
+		IReadOnlyList<string> Dependencies,
+		IReadOnlyDictionary<string, IReadOnlyList<string>> AutoloadPaths)
+	{
+		public static ComposerProjectConfiguration Empty { get; } = new(
+			null, [], new Dictionary<string, IReadOnlyList<string>>());
+	}
 	private sealed record TypeScriptConfiguration(
 		string ModuleResolution,
 		bool Legacy,

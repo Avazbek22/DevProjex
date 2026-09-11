@@ -236,6 +236,21 @@ a stable source-order suffix. Attribute macros, anonymous blocks, dynamically de
 metaprogrammed members fall back to the nearest supported named owner. A syntax tree containing an
 error publishes neither recovered declarations nor recovered edges.
 
+PHP source files contribute classes, interfaces, traits, enums, and top-level functions under their
+declared namespace. Simple namespace `use` statements and aliases resolve only to matching declarations
+in the allowed manifest; inheritance, implemented interfaces, property types, parameters, and return
+types supply type-reference evidence. Bounded `composer.json` files provide package names, repository
+package dependencies, and literal PSR-4 mappings as data. Composer plugins, generated autoload files,
+installed vendor packages, grouped imports, and runtime class aliases are not executed or guessed and
+remain unresolved.
+
+PHP navigation includes namespaces, types, functions, methods, properties, constants, and enum cases.
+Names use dots between the namespace, owning type, and member so the exact value printed inside a
+protected response can be passed unchanged as `get_file.symbol`. Repeated names receive a stable
+source-order suffix. Anonymous functions and dynamically declared members fall back to the nearest
+supported named owner. A syntax tree containing an error publishes neither recovered declarations nor
+recovered edges.
+
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
 makes resolvable. Top-level `func`, method and `type` declarations are importable names within
@@ -313,7 +328,7 @@ produces `External`.
 
 ## Extraction, limits, and diagnostics
 
-C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, Kotlin, and Ruby adapters use shipped Tree-sitter grammars and embedded
+C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, Kotlin, Ruby, and PHP adapters use shipped Tree-sitter grammars and embedded
 `declarations.scm` and `references.scm` query data. A separate `navigation.scm` projection records
 named types and members with their owner chain, exact line and character ranges, and content
 fingerprint. The owner chain starts with the language namespace, package, or module when one is
@@ -321,8 +336,8 @@ declared, so the exact name printed by search is also the exact `symbol` accepte
 Search annotations and named `get_file` reads use this compact projection; navigation
 members never enter dependency resolution, its fact limits, or the related-file graph. The projection
 currently covers named methods and fields in all supported languages, plus C# properties and events,
-TypeScript signatures, Go interface methods, and Java, Kotlin, and Ruby members. Anonymous functions, C# accessors and operators,
-Python lambdas, Go function literals, unnamed Kotlin lambdas, and Ruby metaprogramming fall back to the nearest supported named owner rather than
+TypeScript signatures, Go interface methods, and Java, Kotlin, Ruby, and PHP members. Anonymous functions, C# accessors and operators,
+Python lambdas, Go function literals, unnamed Kotlin lambdas, Ruby metaprogramming, and anonymous PHP functions fall back to the nearest supported named owner rather than
 claiming a false member.
 
 Each supported source file is parsed once per content fingerprint. Both fact and navigation queries

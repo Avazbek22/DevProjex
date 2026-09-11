@@ -11,6 +11,76 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyFactsEngineIntegrationTests
 {
 	[Fact]
+	public async Task PhpFactsResolveUsesInheritanceAndNamespacedTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var model = fixture.CreateFile("src/Models/User.php", "<?php namespace Models; class Base {} class User extends Base {}\n");
+		var service = fixture.CreateFile("src/App/Service.php", """
+			<?php
+			namespace App;
+			use Models\User as Person;
+			class Service {
+			    private Person $value;
+			    public function read(): Person { return $this->value; }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(fixture.Path, [model, service],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "src/App/Service.php");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "Models\\User");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/App/Service.php" &&
+			edge.Target == "src/Models/User.php" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "App.Service.read" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.EndsWith("read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task PhpNavigationDistinguishesEqualMembersAcrossOwners()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Members.php", "<?php namespace Sample; class A { function run() { return 1; } } class B { function run() { return 2; } }");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations.Where(static item => item.Kind == NavigationSymbolKind.Method)
+			.Select(static item => item.Name).ToArray();
+		Assert.Equal(["Sample.A.run", "Sample.B.run"], names);
+	}
+
+	[Fact]
+	public async Task PhpComposerDependenciesExposeDeclaredRepositoryScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var libraryConfig = fixture.CreateFile("library/composer.json", "{\"name\":\"sample/library\",\"autoload\":{\"psr-4\":{\"Library\\\\\":\"src/\"}}}");
+		var library = fixture.CreateFile("library/src/Remote.php", "<?php namespace Library; class Remote {}");
+		var appConfig = fixture.CreateFile("app/composer.json", "{\"name\":\"sample/app\",\"require\":{\"sample/library\":\"*\"}}");
+		var app = fixture.CreateFile("app/src/App.php", "<?php namespace App; use Library\\Remote; class App { private Remote $value; }");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [libraryConfig, library, appConfig, app],
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(index.Edges, static edge => edge.Source == "app/src/App.php" &&
+			edge.Target == "library/src/Remote.php" && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task PhpSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Broken.php", "<?php class Broken { function run(");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
 	public async Task RubyFactsResolveRelativeRequiresConstantsAndNestedOwners()
 	{
 		using var fixture = new TemporaryDirectory();
