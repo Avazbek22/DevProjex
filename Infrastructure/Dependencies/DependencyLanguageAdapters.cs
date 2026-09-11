@@ -14,6 +14,7 @@ internal sealed record DependencySyntaxCapture(
 	string? CapturedName = null,
 	int GenericArity = 0,
 	bool IsFileLocal = false,
+	bool IsStatic = false,
 	string? ContainingDeclaration = null,
 	DependencyImportSyntax? ImportSyntax = null,
 	int CapturedNameStartIndex = -1,
@@ -148,6 +149,27 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 {
 	private const string StaticUsingPrefix = "static::";
 	private const string ConditionalCompilationReason = "C# preprocessor configuration is not available";
+	/// <summary>File metadata marking a compilation unit that declares the program entry point.</summary>
+	internal const string EntryPointMarker = "$csharp-entry-point";
+
+	/// <summary>
+	/// Entry-point evidence from captures the extraction pass already produced: a static,
+	/// non-generic method declaration named <c>Main</c>, or a compilation unit made of top-level
+	/// statements. A local function cannot start a program, and the runtime rejects a generic
+	/// entry point, so both are excluded. No project file is read, so a library that declares a
+	/// static <c>Main</c> carries the same evidence.
+	/// </summary>
+	private static bool HasEntryPointEvidence(
+		DependencyExtractionContext context,
+		IReadOnlyList<DependencySyntaxCapture> typeParameterOwners) =>
+		context.Declarations.Any(static capture =>
+			capture.Name == "declaration.top_level_statement") ||
+		typeParameterOwners.Any(static capture =>
+			capture.NodeType == "method_declaration" &&
+			capture.CapturedName == "Main" &&
+			capture.GenericArity == 0 &&
+			capture.IsStatic);
+
 	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
 		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
 		{
@@ -240,6 +262,13 @@ internal sealed partial class CSharpDependencyLanguageAdapter : DependencyLangua
 		}
 		if (declarations.Count + references.Length > limits.MaximumFactsPerFile)
 			return Failure(context, "fact limit exceeded");
+		// The entry point is read from captures the adapter already holds: the type-parameter
+		// owners it collected above, and the compact top-level-statement capture.
+		if (HasEntryPointEvidence(context, typeParameterOwners))
+			aliases = new Dictionary<string, string>(aliases, StringComparer.Ordinal)
+			{
+				[EntryPointMarker] = "true"
+			};
 		return Complete(
 			context,
 			declarations,

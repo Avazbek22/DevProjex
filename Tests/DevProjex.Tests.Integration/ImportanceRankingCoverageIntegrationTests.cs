@@ -31,6 +31,192 @@ public sealed class ImportanceRankingCoverageIntegrationTests
 	}
 
 	[Fact]
+	public async Task AStaticMainMakesItsFileTheEntryPoint()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var program = fixture.CreateFile("Program.cs", """
+			namespace Fixture;
+			public static class Program
+			{
+				public static void Main(string[] args) { }
+			}
+			""");
+		var ordinary = fixture.CreateFile(
+			"Service.cs",
+			"namespace Fixture; public sealed class Service { }");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[project, program, ordinary],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			ImportanceFileRole.EntryPoint,
+			report.Entries.Single(entry => entry.Path == "Program.cs").Role);
+		Assert.Equal(
+			ImportanceFileRole.Source,
+			report.Entries.Single(entry => entry.Path == "Service.cs").Role);
+	}
+
+	[Fact]
+	public async Task TopLevelStatementsMakeTheirCompilationUnitTheEntryPoint()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var program = fixture.CreateFile("Program.cs", """
+			System.Console.WriteLine("started");
+			System.Console.WriteLine("finished");
+			""");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[project, program],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			ImportanceFileRole.EntryPoint,
+			report.Entries.Single(entry => entry.Path == "Program.cs").Role);
+	}
+
+	[Fact]
+	public async Task AClassNamedMainAndAnInstanceMainAreOrdinarySource()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var named = fixture.CreateFile(
+			"Main.cs",
+			"namespace Fixture; public sealed class Main { }");
+		var instance = fixture.CreateFile("Runner.cs", """
+			namespace Fixture;
+			public sealed class Runner
+			{
+				public void Main() { }
+			}
+			""");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[project, named, instance],
+			TestContext.Current.CancellationToken);
+
+		// A type named Main is not an entry point, and an instance method named Main is not one
+		// either, because the runtime only starts a static method.
+		Assert.Equal(
+			ImportanceFileRole.Source,
+			report.Entries.Single(entry => entry.Path == "Main.cs").Role);
+		Assert.Equal(
+			ImportanceFileRole.Source,
+			report.Entries.Single(entry => entry.Path == "Runner.cs").Role);
+	}
+
+	[Fact]
+	public async Task AnAttributedMainIsStillTheEntryPoint()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var program = fixture.CreateFile("Program.cs", """
+			using System;
+			namespace Fixture;
+			public static class Program
+			{
+				[Obsolete("kept for compatibility")]
+				public static void Main(string[] args) { }
+			}
+			""");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[project, program],
+			TestContext.Current.CancellationToken);
+
+		// The attribute's own parentheses must not hide the modifiers from the check.
+		Assert.Equal(
+			ImportanceFileRole.EntryPoint,
+			report.Entries.Single(entry => entry.Path == "Program.cs").Role);
+	}
+
+	[Fact]
+	public async Task AStaticLocalFunctionAGenericMainAndAnotherStaticMethodAreNotEntryPoints()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var local = fixture.CreateFile("Local.cs", """
+			namespace Fixture;
+			public sealed class Local
+			{
+				public void Run()
+				{
+					static void Main() { }
+					Main();
+				}
+			}
+			""");
+		var generic = fixture.CreateFile("Generic.cs", """
+			namespace Fixture;
+			public static class Generic
+			{
+				public static void Main<T>() { }
+			}
+			""");
+		var other = fixture.CreateFile("Other.cs", """
+			namespace Fixture;
+			public static class Other
+			{
+				public static void Start() { }
+			}
+			""");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[project, local, generic, other],
+			TestContext.Current.CancellationToken);
+
+		// A local function cannot start a program, the runtime rejects a generic entry point,
+		// and an ordinary static method is not one either.
+		Assert.All(
+			new[] { "Local.cs", "Generic.cs", "Other.cs" },
+			path => Assert.Equal(
+				ImportanceFileRole.Source,
+				report.Entries.Single(entry => entry.Path == path).Role));
+	}
+	[Fact]
+	public async Task ATestFileKeepsItsTestRoleEvenWithAStaticMain()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var test = fixture.CreateFile("tests/HarnessTests.cs", """
+			using Xunit;
+			namespace Fixture;
+			public static class HarnessTests
+			{
+				public static void Main() { }
+			}
+			""");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[project, test],
+			TestContext.Current.CancellationToken);
+
+		// Test evidence is checked before entry-point evidence and keeps precedence.
+		Assert.Equal(
+			ImportanceFileRole.TestSource,
+			report.Entries.Single(entry => entry.Path == "tests/HarnessTests.cs").Role);
+	}
+	[Fact]
 	public async Task PartialDeclarationFilesRemainOneResolvedLogicalReference()
 	{
 		using var fixture = new TemporaryDirectory();

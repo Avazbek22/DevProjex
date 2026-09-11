@@ -62,7 +62,14 @@ Extracted-facts coverage is `Supported / candidates`. `Supported`, `Unsupported`
 
 Git activity is commit count plus recency by position in a safe 200-commit LocalRead window. History is cached only after success, by repository identity, pinned HEAD, window, shallow state, and completeness. An incomplete shallow window has confidence `commits read / 200`; it is reported as, for example, `read 1/200 commits; shallow history`, and is not treated as evidence of low activity. Candidate repository boundaries are indexed once per operation. History paths are parsed as NUL-delimited fields; one Git-generated framing LF is removed from the first path field, while newline and `0x1e` bytes belonging to a filename are preserved.
 
-Manifests and explicit `Main` or executable-module evidence are entry points. A source with no dependents and at least three dependencies is only a `coordinator`, not an inferred entry point. Tests are deprioritized but never excluded. The final tie-break is the canonical relative path.
+Manifests and explicit `Main` or executable-module evidence are entry points. For C# the
+evidence is a static, non-generic method declaration named `Main`, or a compilation unit made of
+top-level statements,
+read from captures the extraction pass already visits; no project file is consulted, so a
+library that declares a static `Main` carries the same evidence, while a type named `Main`, an
+instance method named `Main`, a static local function named `Main`, and a generic `Main<T>`
+do not. Test evidence is still checked first and keeps
+precedence over entry-point evidence. A source with no dependents and at least three dependencies is only a `coordinator`, not an inferred entry point. Tests are deprioritized but never excluded. The final tie-break is the canonical relative path.
 
 Facts, preparation, cost, and emitted bytes are bound to one source identity. SHA-256 content plus length and last-write metadata are captured around fact indexing. For source-backed output, raw SHA-256 is then calculated from the same opened handle that supplies the decoded or direct UTF-8 payload; path metadata remains a second guard against replacement. Application-owned immutable prepared content needs no source check after ownership transfer. A mismatch fails closed with guidance to repeat the export. Ranking still never widens the effective selection. Without `rank`, it performs no fact indexing, Git work, or content hashing and preserves the existing bytes and metadata-coherence behavior.
 
@@ -266,3 +273,62 @@ The C# corpus ranges overlap, so the added capture does not show a slowdown outs
 spread. The non-C# changes are measurement variation: their syntax queries and projected facts are
 byte-identical in the pinned tests. The query content is part of the extractor identity, so changing
 `references.scm` invalidates cached C# facts without a manual cache-version change.
+
+### C# entry-point role
+
+Before this signal the `EntryPoint` role could not fire for C# at all: the predicate looks for a
+`Function` or `Module` declaration named `Main`, and the C# adapter emits only type declarations,
+so every `Program.cs` ranked as ordinary source. The evidence now comes from what the adapter
+already produces. `method_declaration` is captured as a type-parameter owner and is now a compact
+capture, so its body is no longer materialized and discarded, and the declared name, the generic
+arity and the `static` modifier fall out of the compact path that already reads modifier
+children. The compilation unit of a top-level-statement file is captured compactly too. A file
+that carries either signal gets one metadata entry, and role classification reads it with one
+dictionary lookup. No traversal and no second query pass are added on the ranking path.
+
+The timing criterion for this signal was registered before any measurement was taken: the warm
+figure is the median of five independent warm measurements per repository and order, compared
+against the same measurement on the unmodified base, with a ten per cent allowance. A single
+measurement is not grounds to accept or reject the signal. The registered evaluation criterion in
+`tools/RankingEval/registry.json` keeps its own seven-repetition median independently of this.
+
+The measurement was taken after the criterion was registered, on the state that merges the
+current `v5.2` into this work, against a base measured on that same `v5.2` tip. Warm
+`importance-v1` medians of five independent `measure-one` processes per repository, base and
+signal measured back to back in one quiet window:
+
+| Repository | Warm base | Warm with the signal | Change | Signal samples |
+|---|---:|---:|---:|---|
+| DevProjex | `943.29` | `817.01` | `-13.4%` | `814, 806, 819, 817, 833` |
+| Repomix | `376.17` | `380.35` | `+1.1%` | `406, 380, 390, 375, 377` |
+| Flask | `164.13` | `166.40` | `+1.4%` | `166, 164, 178, 168, 161` |
+
+All three are inside the ten per cent allowance. The two repositories that contain no C# moved
+`+1.1%` and `+1.4%`, which is the run-to-run floor for this window, so the DevProjex figure is
+outside the noise rather than inside it. Warm ranking reuses the cached index -
+`measure-index-one` reports `parsed=0, reused=2299` for the warm DevProjex cell - so the saving
+is not in the timed ranking itself; it comes from the untimed warm-up pass in the same process,
+which no longer materializes and discards every C# method body.
+
+The extraction path is measured directly with `measure-index-one`, medians of five isolated
+processes per cell:
+
+| Repository | Cold base | Cold with the signal | Change | Warm base | Warm with the signal | Change |
+|---|---:|---:|---:|---:|---:|---:|
+| DevProjex | `1774.63` | `1753.64` | `-1.2%` | `39.57` | `41.23` | `+4.2%` |
+| Repomix | `276.99` | `269.50` | `-2.7%` | `67.92` | `67.48` | `-0.6%` |
+| Flask | `181.01` | `183.68` | `+1.5%` | `4.13` | `4.13` | `+0.1%` |
+
+Indexing is unchanged within the measurement floor. An earlier pair of runs taken while the
+machine was busier read `-10.6%` on DevProjex cold, but Repomix and Flask moved the same way with
+byte-identical code paths, so that reading was drift; the quiet window above resolves it to
+`-1.2%`. The honest statement is that the signal costs nothing measurable on either path.
+
+The frozen evaluation was re-run on the merged state and compared cell by cell against a base run
+taken on the same `v5.2` tip: every cell is identical, and the registered release criterion
+passes. The signal is not inert on that corpus. `Apps/TerminalHost/Program.cs`,
+`Apps/Avalonia/Program.cs` and `tools/DependencyFactsSpike/Program.cs` declare
+`public static int Main(string[] args)`, and `Packaging/GrammarDeliveryProbe/Program.cs`,
+`tools/SegmentedRedactionBenchmark/Program.cs` and `tools/StoreMediaCapture/Program.cs` are
+top-level-statement files, so both branches of the evidence fire. The role weight of `0.05` does
+not move any registered task's admitted set at any registered budget.

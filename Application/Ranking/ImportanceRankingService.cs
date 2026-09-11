@@ -676,10 +676,15 @@ public sealed class ImportanceRankingService(
 		       facts.ContextNamespaces.Any(context => TestFrameworks.Contains(NormalizeFramework(context)));
 	}
 
+	/// <summary>File metadata a language adapter writes when a file declares the entry point.</summary>
+	private const string EntryPointMarker = "$csharp-entry-point";
+
 	private static bool HasExplicitEntryPointEvidence(FileFacts? facts) =>
-		facts?.Declarations.Any(static declaration =>
-			declaration.Identity.SymbolKind is SymbolKind.Function or SymbolKind.Module &&
-			IsEntryPointName(declaration.Identity.QualifiedName)) == true;
+		facts is not null &&
+		(facts.Aliases.ContainsKey(EntryPointMarker) ||
+		 facts.Declarations.Any(static declaration =>
+			 declaration.Identity.SymbolKind is SymbolKind.Function or SymbolKind.Module &&
+			 IsEntryPointName(declaration.Identity.QualifiedName)));
 
 	private static bool IsEntryPointName(string qualifiedName)
 	{
