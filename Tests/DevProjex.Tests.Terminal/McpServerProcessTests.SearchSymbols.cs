@@ -270,8 +270,8 @@ public sealed partial class McpServerProcessTests
 	{
 		var count = 0;
 		for (var index = text.IndexOf(value, StringComparison.Ordinal);
-		     index >= 0;
-		     index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
+			 index >= 0;
+			 index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
 		{
 			count++;
 		}
