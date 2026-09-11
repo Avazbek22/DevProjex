@@ -2,9 +2,15 @@ using System.Globalization;
 
 namespace DevProjex.Mcp;
 
+/// <param name="HasRootOnlyPattern">
+/// Whether an include pattern carries no <c>/</c>, so it can only match a file that sits directly
+/// in the project root. It is the shape a caller reaches for when all they know is a file name,
+/// and the one that silently returns nothing.
+/// </param>
 internal readonly record struct McpSelectionNoticeContext(
 	bool HasPaths,
-	bool HasPatterns);
+	bool HasPatterns,
+	bool HasRootOnlyPattern = false);
 
 /// <summary>
 /// The effective-filter footer and, when nothing survived, the explanation of the empty result.
@@ -21,14 +27,21 @@ internal static class McpEffectiveFilters
 {
 	public const string StartupFlags = "--exclude, --unrestricted, --allow-agent-exclusions";
 
+	// Each notice opens with the stage that emptied the selection, as a constant token, so a caller
+	// can tell "narrow your pattern" from "this server hides it" without a second call. The stage is
+	// the proximate one the server can name; overlapping narrowing is reported as the request
+	// argument that was applied, not as a claim about which one removed the last file.
 	private const string PatternSelectionEmptyNotice =
-		"[Empty selection] No file passed the effective filters and the request arguments. " +
-		"Patterns match the whole project-relative path: '*' stays inside one segment, '**/' spans any depth; " +
+		"[Empty selection] stage=patterns. No file matched the request patterns inside the effective " +
+		"filters. Patterns match the whole project-relative path: '*' stays inside one segment, '**/' spans any depth; " +
 		"paths the filters hide never match.";
+	private const string RootOnlyPatternSelectionEmptyNotice =
+		"[Empty selection] stage=patterns. A pattern without '/' matches only a file directly in the " +
+		"project root; prefix it with '**/' to match that name at any depth. Paths the filters hide never match.";
 	private const string PathSelectionEmptyNotice =
-		"[Empty selection] None of the requested paths is in the effective selection; paths the filters hide never match.";
+		"[Empty selection] stage=paths. None of the requested paths is in the effective selection; paths the filters hide never match.";
 	private const string ProjectSelectionEmptyNotice =
-		"[Empty selection] The effective filters leave no file in this project.";
+		"[Empty selection] stage=filters. The effective filters leave no file in this project.";
 
 	public static string Describe(ProjectContextPlan plan)
 	{
@@ -87,7 +100,11 @@ internal static class McpEffectiveFilters
 		McpSelectionNoticeContext request)
 	{
 		if (request.HasPatterns)
-			return PatternSelectionEmptyNotice;
+		{
+			return request.HasRootOnlyPattern
+				? RootOnlyPatternSelectionEmptyNotice
+				: PatternSelectionEmptyNotice;
+		}
 
 		var gitMode = plan.Selection.GitMode ?? GitFilteringMode.None;
 		var isGitNarrowing = gitMode is GitFilteringMode.TrackedFilesOnly or
@@ -98,7 +115,7 @@ internal static class McpEffectiveFilters
 			return PathSelectionEmptyNotice;
 		if (isGitNarrowing)
 		{
-			return $"[Empty selection] Git reports no files for this scope (git: {ProjectSelectionTokens.ToToken(plan.Selection)}).";
+			return $"[Empty selection] stage=git-scope. Git reports no files for this scope (git: {ProjectSelectionTokens.ToToken(plan.Selection)}).";
 		}
 
 		return ProjectSelectionEmptyNotice;
