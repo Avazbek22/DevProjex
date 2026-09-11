@@ -58,32 +58,32 @@ Assert-Plan -Name 'Root text note only' -Path 'release-note.txt' `
 	-Disabled ($allHeavyTargets + 'Documentation')
 
 Assert-Plan -Name 'Embedded help text runs only content-coupled suites' -Path 'Assets/HelpContent/help.de.txt' `
-	-Enabled @('Unit', 'Integration', 'Terminal', 'Documentation') `
-	-Disabled @('UI', 'TerminalCommand', 'IgnoreScanner', 'Release', 'Store', 'Full')
+	-Enabled @('Unit', 'Integration', 'Terminal', 'TerminalCommand', 'Documentation') `
+	-Disabled @('UI', 'IgnoreScanner', 'Release', 'Store', 'Full')
 
 Assert-Plan -Name 'Nested help text stays content-coupled' -Path 'Assets/HelpContent/en/overview.txt' `
-	-Enabled @('Unit', 'Integration', 'Terminal', 'Documentation') `
-	-Disabled @('UI', 'TerminalCommand', 'IgnoreScanner', 'Release', 'Store', 'Full')
+	-Enabled @('Unit', 'Integration', 'Terminal', 'TerminalCommand', 'Documentation') `
+	-Disabled @('UI', 'IgnoreScanner', 'Release', 'Store', 'Full')
 
 Assert-Plan -Name 'Non-text file under help content fails safe to production' -Path 'Assets/HelpContent/generate-help.ps1' `
 	-Enabled @('Unit', 'Integration', 'Terminal', 'UI', 'TerminalCommand', 'Release', 'Store') `
 	-Disabled @('Full')
 
 Assert-Plan -Name 'Desktop production change' -Path 'Apps/Avalonia/Views/MainWindow.axaml' `
-	-Enabled @('Unit', 'Integration', 'UI', 'Release', 'Store') `
-	-Disabled @('Terminal', 'TerminalCommand', 'IgnoreScanner', 'Full')
+	-Enabled @('Unit', 'Integration', 'Terminal', 'UI', 'TerminalCommand', 'Release', 'Store') `
+	-Disabled @('IgnoreScanner', 'Full')
 
 Assert-Plan -Name 'Terminal production change' -Path 'Apps/Terminal/Tui/TerminalWorkspace.cs' `
-	-Enabled @('Integration', 'Terminal', 'TerminalCommand', 'Release', 'Store') `
-	-Disabled @('Unit', 'UI', 'IgnoreScanner', 'Full')
+	-Enabled @('Unit', 'Integration', 'Terminal', 'TerminalCommand', 'Release', 'Store') `
+	-Disabled @('UI', 'IgnoreScanner', 'Full')
 
 Assert-Plan -Name 'Ignore production change' -Path 'Application/Services/IgnoreRulesService.cs' `
 	-Enabled @('Unit', 'Integration', 'Terminal', 'UI', 'TerminalCommand', 'IgnoreScanner', 'Release', 'Store') `
 	-Disabled @('Full')
 
-Assert-Plan -Name 'Unit test only' -Path 'Tests/DevProjex.Tests.Unit/FooTests.cs' `
-	-Enabled Unit `
-	-Disabled @('Integration', 'Terminal', 'UI', 'TerminalCommand', 'IgnoreScanner', 'Documentation', 'Release', 'Store', 'Full')
+Assert-Plan -Name 'Unit test carries the matrix that builds its project' -Path 'Tests/DevProjex.Tests.Unit/FooTests.cs' `
+	-Enabled @('Unit', 'TerminalCommand') `
+	-Disabled @('Integration', 'Terminal', 'UI', 'IgnoreScanner', 'Documentation', 'Release', 'Store', 'Full')
 
 Assert-Plan -Name 'Integration test covers excluded terminal category' -Path 'Tests/DevProjex.Tests.Integration/FooTests.cs' `
 	-Enabled @('Integration', 'TerminalCommand') `
@@ -92,6 +92,36 @@ Assert-Plan -Name 'Integration test covers excluded terminal category' -Path 'Te
 Assert-Plan -Name 'Ignore integration test' -Path 'Tests/DevProjex.Tests.Integration/IgnoreContractTests.cs' `
 	-Enabled @('Integration', 'TerminalCommand', 'IgnoreScanner') `
 	-Disabled @('Unit', 'Terminal', 'UI', 'Documentation', 'Release', 'Store', 'Full')
+
+Assert-Plan -Name 'Terminal test infrastructure reaches the unit tests too' `
+	-Path 'Tests/DevProjex.Tests.Terminal.ProgressHost/Program.cs' `
+	-Enabled @('Unit', 'Terminal') `
+	-Disabled @('Integration', 'UI', 'TerminalCommand', 'IgnoreScanner', 'Documentation', 'Release', 'Store', 'Full')
+
+foreach ($sharedTerminalPath in @('Tests/Shared/TerminalProgress/Expectations.cs', 'Tests/Shared/TerminalHost/Harness.cs')) {
+	Assert-Plan -Name "Shared terminal test source: $sharedTerminalPath" -Path $sharedTerminalPath `
+		-Enabled @('Unit', 'Terminal') `
+		-Disabled @('Integration', 'UI', 'TerminalCommand', 'IgnoreScanner', 'Documentation', 'Release', 'Store', 'Full')
+}
+
+Assert-Plan -Name 'Shared project-load source carries the excluded terminal category' `
+	-Path 'Tests/Shared/ProjectLoadWorkflow/Steps.cs' `
+	-Enabled @('Unit', 'Integration', 'UI', 'TerminalCommand') `
+	-Disabled @('Terminal', 'IgnoreScanner', 'Documentation', 'Release', 'Store', 'Full')
+
+Assert-Plan -Name 'Shared Store-listing source carries the excluded terminal category' `
+	-Path 'Tests/Shared/StoreListing/Facts.cs' `
+	-Enabled @('Unit', 'Integration', 'TerminalCommand') `
+	-Disabled @('Terminal', 'UI', 'IgnoreScanner', 'Documentation', 'Release', 'Store', 'Full')
+
+Assert-Plan -Name 'Packaging files are read by the documentation contracts' `
+	-Path 'Packaging/Windows/StoreListing/listingData.csv' `
+	-Enabled @('Unit', 'Integration', 'TerminalCommand', 'Documentation', 'Release', 'Store') `
+	-Disabled @('Terminal', 'UI', 'IgnoreScanner', 'Full')
+
+Assert-Plan -Name 'Release tooling is linked into the integration tests' -Path 'Scripts/Build-Release.ps1' `
+	-Enabled @('Unit', 'Integration', 'TerminalCommand', 'Release', 'Store') `
+	-Disabled @('Terminal', 'UI', 'IgnoreScanner', 'Documentation', 'Full')
 
 Assert-Plan -Name 'Windows path normalization' -Path 'Tests\DevProjex.Tests.UI\MainWindowTests.cs' `
 	-Enabled UI `

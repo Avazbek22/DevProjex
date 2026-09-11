@@ -52,6 +52,7 @@ jobs:
       run_ignore_scanner: ${{ steps.plan.outputs.run_ignore_scanner }}
       run_documentation: ${{ steps.plan.outputs.run_documentation }}
       changed_paths: ${{ steps.plan.outputs.changed_paths }}
+      planned_suites: ${{ steps.plan.outputs.planned_suites }}
 
     steps:
       - uses: actions/checkout@v7
@@ -671,6 +672,7 @@ jobs:
           IGNORE_SCANNER_RESULT: ${{ needs.ignore-scanner-cross-platform.result }}
           DOCUMENTATION_RESULT: ${{ needs.documentation-contracts.result }}
           PLANNER_PATHS: ${{ needs.prepare-matrix.outputs.changed_paths }}
+          PLANNER_SUITES: ${{ needs.prepare-matrix.outputs.planned_suites }}
           PLANNER_HAS_TESTS: ${{ needs.prepare-matrix.outputs.has_test_matrix }}
           PLANNER_TERMINAL_COMMAND: ${{ needs.prepare-matrix.outputs.run_terminal_command }}
           PLANNER_IGNORE_SCANNER: ${{ needs.prepare-matrix.outputs.run_ignore_scanner }}
@@ -721,9 +723,13 @@ jobs:
             throw "The changed paths could not be worked out from $base...$head, so the skips cannot be checked."
           }
 
+          $plannedSuites = @($env:PLANNER_SUITES -split ',' |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
           ./Scripts/ci/Test-CiGateSkip.ps1 `
             -ChangedPath $changed `
             -PlannerChangedPathJson $env:PLANNER_PATHS `
             -SkippedJob $skipped `
-            -PlannerWillRunJob $willRun
+            -PlannerWillRunJob $willRun `
+            -PlannerWillRunSuite $plannedSuites
 

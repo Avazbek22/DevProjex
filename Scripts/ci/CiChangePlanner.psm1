@@ -166,7 +166,9 @@ function Add-PathToCiPlan {
 	}
 
 	if (Test-PathStartsWith $normalized 'Tests/DevProjex.Tests.Unit/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit') -Reason "Unit tests: $normalized"
+		# The terminal command matrix builds and runs this same assembly under its own filter, so a
+		# change to any file in the project can break that job while leaving the Unit suite green.
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'TerminalCommand') -Reason "Unit tests: $normalized"
 		return
 	}
 
@@ -197,18 +199,21 @@ function Add-PathToCiPlan {
 	}
 
 	if ((Test-PathStartsWith $normalized 'Tests/DevProjex.Tests.Terminal.ProgressHost/') -or
-		(Test-PathStartsWith $normalized 'Tests/Shared/TerminalProgress/')) {
-		Enable-CiTargets -Plan $Plan -Targets @('Terminal') -Reason "Terminal test infrastructure: $normalized"
+		(Test-PathStartsWith $normalized 'Tests/Shared/TerminalProgress/') -or
+		(Test-PathStartsWith $normalized 'Tests/Shared/TerminalHost/')) {
+		# The Unit tests reference the progress host as well, and both shared folders are
+		# compiled into it, so a change here can break the Unit suite and not only the Terminal one.
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Terminal') -Reason "Terminal test infrastructure: $normalized"
 		return
 	}
 
 	if (Test-PathStartsWith $normalized 'Tests/Shared/ProjectLoadWorkflow/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'UI') -Reason "Shared project-load tests: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'UI', 'TerminalCommand') -Reason "Shared project-load tests: $normalized"
 		return
 	}
 
 	if (Test-PathStartsWith $normalized 'Tests/Shared/StoreListing/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration') -Reason "Shared Store-listing tests: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'TerminalCommand') -Reason "Shared Store-listing tests: $normalized"
 		return
 	}
 
@@ -218,12 +223,12 @@ function Add-PathToCiPlan {
 	}
 
 	if (Test-PathStartsWith $normalized 'Apps/Avalonia/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'UI', 'Release', 'Store') -Reason "Desktop production surface: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'UI', 'TerminalCommand', 'Release', 'Store') -Reason "Desktop production surface: $normalized"
 		return
 	}
 
 	if (Test-PathStartsWith $normalized 'Apps/Terminal/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Integration', 'Terminal', 'TerminalCommand', 'Release', 'Store') -Reason "Terminal production surface: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'TerminalCommand', 'Release', 'Store') -Reason "Terminal production surface: $normalized"
 		return
 	}
 
@@ -233,7 +238,7 @@ function Add-PathToCiPlan {
 		# read it: embedded-resource loading (Unit), per-language coverage (Integration)
 		# and the documentation contracts (Terminal, Documentation). Non-text files in the
 		# same directory stay on the shared production layer plan below.
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'Documentation') -Reason "Help content: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'TerminalCommand', 'Documentation') -Reason "Help content: $normalized"
 		return
 	}
 
@@ -249,12 +254,12 @@ function Add-PathToCiPlan {
 	}
 
 	if (Test-PathStartsWith $normalized 'Packaging/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Release', 'Store') -Reason "Packaging contract: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'TerminalCommand', 'Documentation', 'Release', 'Store') -Reason "Packaging contract: $normalized"
 		return
 	}
 
 	if (Test-PathStartsWith $normalized 'Scripts/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Release', 'Store') -Reason "Build/release tooling: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'TerminalCommand', 'Release', 'Store') -Reason "Build/release tooling: $normalized"
 		return
 	}
 

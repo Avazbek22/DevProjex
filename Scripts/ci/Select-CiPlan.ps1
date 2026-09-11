@@ -194,6 +194,11 @@ $recordedChangedPaths = @($ChangedPath |
 	ForEach-Object { $_.Trim() } |
 	Sort-Object -Unique)
 
+# The suites the matrix will run. Three of the gated jobs run tests a suite also runs, so the
+# gate needs to know which suites ran before it can say whether skipping those jobs left
+# anything uncovered.
+$plannedSuites = @('Unit', 'Integration', 'Terminal', 'UI' | Where-Object { $plan.$_ })
+
 $output = [ordered]@{
 	test_matrix = $plan.TestMatrix | ConvertTo-Json -Compress -Depth 5
 	has_test_matrix = $plan.HasTestMatrix.ToString().ToLowerInvariant()
@@ -204,6 +209,7 @@ $output = [ordered]@{
 	run_store = $plan.Store.ToString().ToLowerInvariant()
 	full = $plan.Full.ToString().ToLowerInvariant()
 	previous_gate_verified = $previousGateVerified.ToString().ToLowerInvariant()
+	planned_suites = ($plannedSuites -join ',')
 	summary = $safeSummary
 	# What the plan was decided from, so the gate can check the decision against the change
 	# rather than take the plan's word for it. Sorted and de-duplicated so the two sides can be
