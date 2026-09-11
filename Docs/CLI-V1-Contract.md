@@ -1337,6 +1337,16 @@ expansion stops at 400 files and reports the constant that stopped it. Every cal
 that expanded carries a trusted `[Expanded]` line of counts. Without the parameter,
 `pack_context` responses are byte-identical.
 
+MCP `search_project` names the declaration each shown hit sits inside. It takes no
+input: after the match lines, inside the same untrusted block, the response lists
+`path:line: Name` under `Enclosing declarations:`, and one trusted
+`[Symbols] annotated=N · files-without-declarations=K.` line reports coverage in
+counts. Names come from the dependency index over the files that produced hits, one
+bounded parse per such file. Naming shares the 16,000-character search cap rather
+than adding to it, and a response that cap already cut carries none, so no response
+grows past the bound it already had. Match lines, group separators, the match and
+file counters, and the additional-matches contract are unchanged.
+
 MCP `get_tree.format` is an additive input with `markdown` as its compact default.
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;
 structured output that cannot fit the 2,000-line response limit fails with an

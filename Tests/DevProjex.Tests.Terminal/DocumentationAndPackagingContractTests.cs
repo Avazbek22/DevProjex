@@ -214,6 +214,16 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("[Search truncated]", server, StringComparison.Ordinal);
 		Assert.Contains("16,000 characters", normalized, StringComparison.Ordinal);
 		Assert.Contains("### Finding a file by name", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"### Search hits name the declaration that contains them",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains("Enclosing declarations:", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Symbols] annotated=N · files-without-declarations=K.",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains("There is no parameter for it", normalized, StringComparison.Ordinal);
 		Assert.Contains("### `pack_context.expand_related`", server, StringComparison.Ordinal);
 		Assert.Contains("**Expansion only ever narrows.**", server, StringComparison.Ordinal);
 		Assert.Contains(

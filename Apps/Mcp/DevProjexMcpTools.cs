@@ -858,6 +858,7 @@ internal sealed class DevProjexMcpTools(
 			var responseLimitReached = false;
 			var resultGroupTruncated = false;
 			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
+			var writtenHits = new List<McpSearchHit>();
 			long inspectedBytes = 0;
 			foreach (var path in plan.IncludedFiles)
 			{
@@ -887,15 +888,20 @@ internal sealed class DevProjexMcpTools(
 					if (responseLimitReached)
 						return ValueTask.CompletedTask;
 
+					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
 					foreach (var match in scan.Matches)
 					{
 						var appended = AppendSearchResult(
 							output,
-							McpProjectService.ToRelative(plan.SourceRoot, file.Path),
+							relative,
 							file.Content,
 							match,
 							MaximumSearchContentCharacters);
 						shownMatches += appended.WrittenMatches;
+						// Only the lines that reached the caller are worth naming; a match the cap
+						// dropped is not in the response to be annotated.
+						foreach (var line in match.MatchLineNumbers.Take(appended.WrittenMatches))
+							writtenHits.Add(new McpSearchHit(relative, file.Path, line));
 						if (appended.Truncated)
 						{
 							responseLimitReached = true;
@@ -906,6 +912,14 @@ internal sealed class DevProjexMcpTools(
 					return ValueTask.CompletedTask;
 				},
 				cancellationToken).ConfigureAwait(false);
+			// A response the character cap already cut has no room to spend on naming, and the
+			// caller's next move there is to narrow the pattern rather than to read a symbol.
+			var symbols = resultGroupTruncated
+				? McpSearchSymbolResult.None
+				: await McpSearchSymbols
+					.ResolveAsync(Projects.DependencyFactsEngine, plan, writtenHits, cancellationToken)
+					.ConfigureAwait(false);
+			AppendEnclosingDeclarations(output, symbols);
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
 				: null;
@@ -926,6 +940,7 @@ internal sealed class DevProjexMcpTools(
 				FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				noMatches,
+				FormatSymbolCoverageNotice(symbols),
 				FormatNameSearchNotice(plan, paths, pattern, totalMatches),
 				additionalMatchesNotice,
 				searchTotalsNotice,
@@ -2284,6 +2299,45 @@ internal sealed class DevProjexMcpTools(
 					: $" seeds={item.Seeds.ToString(CultureInfo.InvariantCulture)}"))
 			.ToArray();
 		return notices.Length == 0 ? null : string.Join('\n', notices);
+	}
+
+	/// <summary>
+	/// Writes the declaration each shown hit sits inside, inside the untrusted block, because a
+	/// declaration name is text this project wrote.
+	/// </summary>
+	private static void AppendEnclosingDeclarations(StringBuilder output, McpSearchSymbolResult symbols)
+	{
+		if (symbols.Lines.Count == 0)
+			return;
+		if (output.Length > 0)
+			output.AppendLine();
+		output.AppendLine(McpSearchSymbols.SectionHeading);
+		foreach (var line in symbols.Lines)
+		{
+			// The naming shares the search character cap rather than adding to it, so turning it
+			// on cannot make any response larger than the published bound.
+			if (output.Length + line.Length >= MaximumSearchContentCharacters)
+				break;
+			output.AppendLine(line);
+		}
+	}
+
+	/// <summary>
+	/// Reports how far the naming reached, in counts alone, so a caller can tell "this hit is in no
+	/// declaration" from "this file was never parsed".
+	/// </summary>
+	private static string? FormatSymbolCoverageNotice(McpSearchSymbolResult symbols)
+	{
+		if (symbols.AnnotatedHits == 0 && symbols.FilesWithoutDeclarations == 0 && symbols.FilesBeyondTheLimit == 0)
+			return null;
+		var reported =
+			$"[Symbols] annotated={symbols.AnnotatedHits.ToString(CultureInfo.InvariantCulture)} · " +
+			$"files-without-declarations={symbols.FilesWithoutDeclarations.ToString(CultureInfo.InvariantCulture)}";
+		return symbols.FilesBeyondTheLimit > 0
+			? $"{reported} · files-past-the-" +
+			  $"{McpSearchSymbols.MaximumAnnotatedFiles.ToString(CultureInfo.InvariantCulture)}-file " +
+			  $"naming limit={symbols.FilesBeyondTheLimit.ToString(CultureInfo.InvariantCulture)}."
+			: $"{reported}.";
 	}
 
 	/// <summary>

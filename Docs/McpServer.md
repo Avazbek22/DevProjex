@@ -836,6 +836,39 @@ entry there is a `DPX-MCP-PATH-NOT-FOUND` error rather than a partial answer. A
 search that found matches, a search whose pattern reads as ordinary content, and a
 selection that was already empty are all unchanged.
 
+### Search hits name the declaration that contains them
+
+`search_project` names the declaration each shown hit sits inside. There is no
+parameter for it: a hit without the thing that contains it is what made callers
+guess a line range and read twice. After the match lines, inside the same
+untrusted block, the response carries:
+
+```text
+Enclosing declarations:
+src/App.cs:5: P.App
+```
+
+A declaration name is text this project wrote, so it stays inside the untrusted
+block with the match lines it describes. Only counts leave it, as one trusted
+line: `[Symbols] annotated=N · files-without-declarations=K.`, which
+distinguishes a hit that sits in no declaration from a file that was never
+parsed, plus a `files-past-the-64-file naming limit=` term when a search touched
+more files than the naming bound allows.
+
+The names come from the dependency index built over the files that actually
+produced hits: one bounded parse per such file, never one per hit, and never over
+the whole selection. Granularity is whatever that index declares, which for C# is
+the enclosing type rather than the enclosing member. Hit lines are lines of the
+transformed text the tool returns and the index parses the file on disk; redaction
+replaces a secret with a placeholder on the same line and adds no lines, so the
+two agree on the only coordinate this uses.
+
+Naming shares the 16,000-character search cap rather than adding to it, and a
+response the cap already cut carries no naming at all, so turning it on cannot make
+any response larger than the bound it already had. The match lines, the `--` group
+separators, the match and file counters, and the "N additional matches" contract are
+unchanged.
+
 ### Batch `get_file`
 
 Use `requests` when several source excerpts are already known; use `search_project`
