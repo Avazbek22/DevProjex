@@ -52,6 +52,17 @@ param(
 	[AllowEmptyCollection()]
 	[string[]] $PlannerWillRunJob,
 
+	# The delta of the push that triggered the run, when the event names a previous commit and that
+	# commit is still in the checkout. A plan is allowed to be decided from it instead of from the
+	# pull request whole -- that is what the incremental tier does, once the previous commit has a
+	# green gate of its own -- so the change the plan recorded has to match one of the two, and the
+	# one it matches is the change the skips are then judged against.
+	[AllowEmptyCollection()]
+	[string[]] $PushedChangedPath = @(),
+
+	# Whether there is such a delta at all, which an empty list of paths cannot say by itself.
+	[switch] $PushedChangeAvailable,
+
 	# Test suites the plan put in the matrix. Three of the jobs below run tests that a suite also
 	# runs, so which suites ran decides whether skipping those jobs leaves anything uncovered.
 	[AllowEmptyCollection()]
@@ -222,17 +233,41 @@ if (-not [string]::IsNullOrWhiteSpace($PlannerChangedPathJson)) {
 	}
 }
 
-$missing = @($actual | Where-Object { $recorded -notcontains $_ })
-$extra = @($recorded | Where-Object { $actual -notcontains $_ })
-if ($missing.Count -gt 0 -or $extra.Count -gt 0) {
-	throw "The plan was decided from a different change than the one being gated, so its skips " +
-	      "cannot be trusted." + [Environment]::NewLine +
+$candidates = [Collections.Generic.List[object]]::new()
+$candidates.Add([pscustomobject]@{ Name = 'the pull request'; Path = $actual })
+if ($PushedChangeAvailable) {
+	$candidates.Add([pscustomobject]@{
+		Name = 'the push that triggered this run'
+		Path = @(ConvertTo-TrimmedSet -Value $PushedChangedPath)
+	})
+}
+
+$matched = $null
+foreach ($candidate in $candidates) {
+	$candidateMissing = @($candidate.Path | Where-Object { $recorded -notcontains $_ })
+	$candidateExtra = @($recorded | Where-Object { $candidate.Path -notcontains $_ })
+	if ($candidateMissing.Count -eq 0 -and $candidateExtra.Count -eq 0) {
+		$matched = $candidate
+		break
+	}
+}
+
+if ($null -eq $matched) {
+	$missing = @($actual | Where-Object { $recorded -notcontains $_ })
+	$extra = @($recorded | Where-Object { $actual -notcontains $_ })
+	throw "The plan was decided from a change this event does not describe, so its skips cannot " +
+	      "be trusted. Against the pull request:" + [Environment]::NewLine +
 	      "  changed, and not seen by the plan: $(if ($missing.Count) { $missing -join ', ' } else { '(none)' })" +
 	      [Environment]::NewLine +
 	      "  seen by the plan, and not changed: $(if ($extra.Count) { $extra -join ', ' } else { '(none)' })" +
 	      [Environment]::NewLine +
-	      "  gate saw $($actual.Count) path(s); the plan recorded $($recorded.Count)."
+	      "  gate saw $($actual.Count) path(s) in the pull request" +
+	      $(if ($PushedChangeAvailable) { " and $($candidates[1].Path.Count) in the push" } else { '' }) +
+	      "; the plan recorded $($recorded.Count)."
 }
+
+# The skips are judged against the change the plan was actually decided from.
+$actual = $matched.Path
 
 $plannedSuites = @(ConvertTo-TrimmedSet -Value $PlannerWillRunSuite)
 $unknownJobs = @($skipped | Where-Object { $allJobs -notcontains $_ })
@@ -264,6 +299,6 @@ if ($unjustified.Count -gt 0) {
 }
 
 Write-Host ("Skipped " + ($skipped -join ', ') +
-	"; none of the $($actual.Count) changed path(s) reach them" +
+	"; none of the $($actual.Count) path(s) changed by $($matched.Name) reach them" +
 	$(if ($plannedSuites.Count) { " beyond the suites that ran ($($plannedSuites -join ', '))" } else { '' }) +
 	'.')

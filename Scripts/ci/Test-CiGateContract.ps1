@@ -55,7 +55,9 @@ function Invoke-Gate {
 		[string] $PlannerChangedPathJson,
 		[AllowEmptyCollection()][string[]] $SkippedJob,
 		[AllowEmptyCollection()][string[]] $PlannerWillRunJob,
-		[AllowEmptyCollection()][string[]] $PlannerWillRunSuite
+		[AllowEmptyCollection()][string[]] $PlannerWillRunSuite,
+		[AllowEmptyCollection()][string[]] $PushedChangedPath = @(),
+		[switch] $PushedChangeAvailable
 	)
 
 	$printed = [Collections.Generic.List[string]]::new()
@@ -70,7 +72,9 @@ function Invoke-Gate {
 			-PlannerChangedPathJson $PlannerChangedPathJson `
 			-SkippedJob $SkippedJob `
 			-PlannerWillRunJob $PlannerWillRunJob `
-			-PlannerWillRunSuite $PlannerWillRunSuite 6>&1 |
+			-PlannerWillRunSuite $PlannerWillRunSuite `
+			-PushedChangedPath $PushedChangedPath `
+			-PushedChangeAvailable:$PushedChangeAvailable 6>&1 |
 			ForEach-Object { $printed.Add([string] $_) }
 	}
 	catch {
@@ -93,6 +97,8 @@ function Test-Case {
 		[string[]] $SkippedJob,
 		[string[]] $PlannerWillRunJob = @(),
 		[string[]] $PlannerWillRunSuite = @(),
+		[string[]] $PushedChangedPath = @(),
+		[switch] $PushedChangeAvailable,
 		[switch] $ShouldPass,
 		[string] $ExpectMessage,
 		[string[]] $ExpectPrintedPath = @()
@@ -103,7 +109,9 @@ function Test-Case {
 		-PlannerChangedPathJson (ConvertTo-PlannerJson -Path $PlannerPath) `
 		-SkippedJob $SkippedJob `
 		-PlannerWillRunJob $PlannerWillRunJob `
-		-PlannerWillRunSuite $PlannerWillRunSuite
+		-PlannerWillRunSuite $PlannerWillRunSuite `
+		-PushedChangedPath $PushedChangedPath `
+		-PushedChangeAvailable:$PushedChangeAvailable
 
 	if ($ShouldPass -and -not $result.Accepted) {
 		$failures.Add("$Name should have been accepted but was rejected: $($result.Message)")
@@ -211,6 +219,48 @@ Test-Case -Name 'a job the gate cannot place is never vouched for' `
 	-PlannerPath @('Docs/McpServer.md') `
 	-SkippedJob @('releaseValidation') `
 	-ExpectMessage 'not ones this knows how to place'
+
+# --- a plan decided from the push rather than from the pull request ------------------------------
+# An incremental plan is decided from the delta of the push that triggered it, once the commit it
+# follows has a green gate of its own. The gate sees the pull request whole, so without knowing
+# about that delta it would call every incremental plan a plan for a different change.
+Test-Case -Name 'a plan decided from the push is a plan for a change this event describes' `
+	-ChangedPath @('Docs/McpServer.md', 'Tests/DevProjex.Tests.Unit/McpInfrastructureTests.cs') `
+	-PlannerPath @('Tests/DevProjex.Tests.Unit/McpInfrastructureTests.cs') `
+	-PushedChangedPath @('Tests/DevProjex.Tests.Unit/McpInfrastructureTests.cs') -PushedChangeAvailable `
+	-SkippedJob @('ignoreScanner', 'documentation') `
+	-PlannerWillRunJob @('tests', 'terminalCommand') `
+	-PlannerWillRunSuite @('Unit') -ShouldPass
+
+# And the skips are then judged against that delta, not against the pull request.
+Test-Case -Name 'the push delta is what the skips are judged against' `
+	-ChangedPath @('Docs/McpServer.md', 'Tests/DevProjex.Tests.Integration/IgnoreContractTests.cs') `
+	-PlannerPath @('Docs/McpServer.md') `
+	-PushedChangedPath @('Docs/McpServer.md') -PushedChangeAvailable `
+	-SkippedJob @('tests', 'terminalCommand', 'ignoreScanner') `
+	-PlannerWillRunJob @('documentation') -ShouldPass
+
+Test-Case -Name 'a job the push delta does reach stays refused' `
+	-ChangedPath @('Docs/McpServer.md', 'Tests/DevProjex.Tests.Integration/IgnoreContractTests.cs') `
+	-PlannerPath @('Tests/DevProjex.Tests.Integration/IgnoreContractTests.cs') `
+	-PushedChangedPath @('Tests/DevProjex.Tests.Integration/IgnoreContractTests.cs') -PushedChangeAvailable `
+	-SkippedJob @('terminalCommand') `
+	-PlannerWillRunJob @('tests') `
+	-PlannerWillRunSuite @('Integration') `
+	-ExpectMessage 'terminalCommand'
+
+Test-Case -Name 'a delta the event never described is refused' `
+	-ChangedPath @('Docs/McpServer.md', 'Tests/DevProjex.Tests.Unit/McpInfrastructureTests.cs') `
+	-PlannerPath @('Tests/DevProjex.Tests.Unit/McpInfrastructureTests.cs') `
+	-PushedChangedPath @('Docs/McpServer.md') -PushedChangeAvailable `
+	-SkippedJob @('ignoreScanner') `
+	-ExpectMessage 'a change this event does not describe'
+
+Test-Case -Name 'a push delta is not on offer when the event names none' `
+	-ChangedPath @('Docs/McpServer.md', 'Tests/DevProjex.Tests.Unit/McpInfrastructureTests.cs') `
+	-PlannerPath @('Tests/DevProjex.Tests.Unit/McpInfrastructureTests.cs') `
+	-SkippedJob @('ignoreScanner') `
+	-ExpectMessage 'a change this event does not describe'
 
 # --- the plan does not match the change ---------------------------------------------------------
 Test-Case -Name 'the plan saw a path that did not change' `

@@ -343,11 +343,33 @@ function Get-CiChangePlan {
 	}
 }
 
+# Whether a commit is in the checkout at all. A force-push leaves the event's `before` on no ref,
+# and fetch-depth 0 fetches refs, so the commit it names is simply absent. Asked before a range is
+# built from it, rather than found out by letting git fail on the range.
+function Test-CommitReachable {
+	param([Parameter(Mandatory)][AllowEmptyString()][string] $Sha)
+
+	if ($Sha -notmatch '^[0-9a-fA-F]{40}$' -or $Sha -match '^0{40}$') {
+		return $false
+	}
+
+	& git cat-file -e "$Sha^{commit}" 2>$null | Out-Null
+	$reachable = $LASTEXITCODE -eq 0
+	# A missing commit is an answer here, not a failure. The pwsh step wrapper ends the step with
+	# whatever the last native command left in $LASTEXITCODE, so this cannot be left set.
+	$global:LASTEXITCODE = 0
+	return $reachable
+}
+
 function Get-CiEventComparison {
 	[CmdletBinding()]
 	param(
 		[Parameter(Mandatory)][string] $EventName,
-		[Parameter(Mandatory)][psobject] $Event
+		[Parameter(Mandatory)][psobject] $Event,
+
+		# How a commit is looked for. Replaced in the contract tests, which work with commits that
+		# exist in no repository.
+		[scriptblock] $CommitReachable = { param([string] $Sha) Test-CommitReachable -Sha $Sha }
 	)
 
 	$validSha = '^[0-9a-fA-F]{40}$'
@@ -360,18 +382,25 @@ function Get-CiEventComparison {
 		return [pscustomobject]@{ Full = $true; BaseSha = ''; HeadSha = ''; MergeBase = $false }
 	}
 
-	# A synchronize event compares only the newly pushed delta. The previous HEAD already has CI evidence.
+	# A synchronize event compares only the newly pushed delta. The previous HEAD already has CI
+	# evidence -- but only while it still exists. A rebase or an amended push replaces it, and the
+	# event still names it, so the delta falls back to the same merge-base comparison an opened
+	# event uses. The previous gate is not consulted on that path, for the same reason it is not
+	# consulted for opened: the comparison already covers the pull request whole.
 	if ($EventName -eq 'pull_request' -and
 		$action -eq 'synchronize' -and
 		$eventBefore -match $validSha -and
-		$eventAfter -match $validSha) {
+		$eventAfter -match $validSha -and
+		(& $CommitReachable $eventBefore) -and
+		(& $CommitReachable $eventAfter)) {
 		return [pscustomobject]@{ Full = $false; BaseSha = $eventBefore; HeadSha = $eventAfter; MergeBase = $false }
 	}
 
 	if ($EventName -eq 'pull_request' -and $null -ne $pullRequest) {
 		$baseSha = [string]$pullRequest.base.sha
 		$headSha = [string]$pullRequest.head.sha
-		if ($baseSha -match $validSha -and $headSha -match $validSha) {
+		if ($baseSha -match $validSha -and $headSha -match $validSha -and
+			(& $CommitReachable $baseSha) -and (& $CommitReachable $headSha)) {
 			return [pscustomobject]@{ Full = $false; BaseSha = $baseSha; HeadSha = $headSha; MergeBase = $true }
 		}
 	}
@@ -379,7 +408,9 @@ function Get-CiEventComparison {
 	if ($EventName -eq 'push' -and
 		$eventBefore -match $validSha -and
 		$eventBefore -notmatch '^0{40}$' -and
-		$eventAfter -match $validSha) {
+		$eventAfter -match $validSha -and
+		(& $CommitReachable $eventBefore) -and
+		(& $CommitReachable $eventAfter)) {
 		return [pscustomobject]@{ Full = $false; BaseSha = $eventBefore; HeadSha = $eventAfter; MergeBase = $false }
 	}
 
