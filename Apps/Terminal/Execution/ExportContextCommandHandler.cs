@@ -135,6 +135,9 @@ public sealed class ExportContextCommandHandler(
 			ProjectContextWriteResult? budgetResult = null;
 			if (request.MaximumEstimatedTokens is { } maximumEstimatedTokens)
 			{
+				// The measured branch goes through the same admission service a real export and the
+				// MCP tools use, so there is one greedy pass in the product. Its narrowed plan is
+				// deliberately discarded here: a dry run reports the complete plan it forecast.
 				budgetResult = prepared is null
 					? await services.ContextDocumentService.EvaluateTokenBudgetAsync(
 							plan,
@@ -144,7 +147,8 @@ public sealed class ExportContextCommandHandler(
 							cancellationToken,
 							ranking)
 						.ConfigureAwait(false)
-					: await services.ContextDocumentService.EvaluateMeasuredTokenBudgetAsync(
+					: (await new ProjectContextTokenAdmissionService(services.ContextDocumentService)
+						.AdmitMeasuredAsync(
 							plan,
 							request.View,
 							request.Format,
@@ -152,7 +156,7 @@ public sealed class ExportContextCommandHandler(
 							prepared,
 							ranking,
 							cancellationToken)
-						.ConfigureAwait(false);
+						.ConfigureAwait(false)).WriteResult;
 			}
 			if (prepared is not null)
 				plan = ProjectContextDocumentService.ApplyMeasuredContentMetrics(plan, prepared);

@@ -656,6 +656,7 @@ devprojex export context|ctx [PROJECT|URL]
   --max-tokens <N>                    integer >= 1; default: unlimited
   --rank <importance>                 default: absent
   --focus <PATH>                      repeatable; at most 16; requires --rank importance
+  --detail-for <GLOB=LEVEL>           repeatable; at most 16; requires file content
   --branch <NAME>                     URL source only
   <shared selection options>
   <shared output options>
@@ -663,6 +664,13 @@ devprojex export context|ctx [PROJECT|URL]
 
 `--force` is valid only for a file destination and performs atomic replacement.
 It is a usage error with stdout.
+
+`--detail-for` takes `<glob>=<full|compact|signatures>`, splitting each value on its
+last `=` so a glob may contain that character. Values apply in order and the last
+matching value wins. Globs use the project-relative syntax of the machine glob
+vocabulary; an invalid value or an unknown level exits `2`, as does use with
+`--view tree`. The option layers per-file overrides on the command's own content
+transformation state and never widens the selection.
 
 For human-readable text and Markdown, `--view content` writes one `Root: ...`
 line and project-relative file headings. Remote sources use the safe repository
@@ -952,6 +960,7 @@ that prevents an accepted option from becoming a no-op.
 | `export context` | `--dry-run` | off | runs plan, destination preflight, and a non-materializing transformed-content budget measurement without document generation | creates no prepared file, parent, staging, or output and serializes zero document bytes | stdout empty; one readiness plan on stderr | handler, measurement, filesystem-effects, process |
 | `export context` | `--max-tokens` | unlimited | greedily limits included transformed file content by estimated tokens while preserving deterministic path order | integer `>= 1`; skipped files do not stop consideration of later files; document structure is outside the budget | document stays on stdout/file; localized budget report is written to stderr; JSON/XML add `tokenBudget` | parser, serializer, handler, process |
 | `export context` | `--rank importance` | absent | reorders only the effective content candidates by `importance-v1`; with a budget this is admission priority, without one it is serialization order | invalid with `--view tree`; unknown values exit `2`; no rank performs no ranking work | trusted stderr ranking report; context JSON adds `ranking` | parser, serializer, handler, process |
+| `export context` | `--detail-for GLOB=LEVEL` | absent | overrides the detail level for files a glob claims, layered on the command's content-transformation state | repeatable; at most 16 values; splits on the last `=`; order matters and the last match wins; invalid value, unknown level, or `--view tree` exits `2`; never widens the selection | dry run adds the mix to stderr; context JSON/XML add `detail` to file and skipped-file entries | parser, resolver, serializer, handler, process |
 | `export context` | `--focus PATH` | absent | with `--rank importance`, places caller-ordered seeds at hop 0, then orders the unchanged effective selection by minimum undirected resolved-graph hop and `importance-v1` within each hop | repeatable; 1..16 supplied non-empty values before deduplication; each is a relative path or absolute file inside the root and effective selection; without rank exits `2`; missing/filtered seed is `DPX-SELECTION-PATH-MISSING` and exit `3` | `focus-v1` stderr report; context JSON adds `ranking.focus` and per-entry hop provenance | parser, resolver, serializer, handler, process |
 | `export project` | `--as` | required | selects exact folder or ZIP export | missing/invalid value exits `2` | real absolute created destination on stdout | parser, handler, process |
 | `export project` | `-o`, `--output` | required | selects the exact destination | folder must be absent; ZIP path ends in `.zip`; destination outside source; `-` is valid only with `--as zip` | folder/file success returns its real absolute path; ZIP stdout is the raw archive byte stream | parser, destination, integration |
@@ -1403,6 +1412,12 @@ remain `DPX-CLI-PROFILE-INVALID`. An explicit conflicting kind is also rejected.
 Context XML uses `devprojexContext`, numeric text `schemaVersion="1"`, and
 `kind="devprojex-context"`. Its XML declaration reports UTF-8. Generated JSON and
 XML must parse with standard parsers.
+
+When `export context --detail-for` is present, context JSON and XML add a `detail`
+string to every file entry and to every `tokenBudget.largestSkippedFiles` entry,
+carrying that file's effective level. Both are additive and appear only for a call
+that supplies the option, so a call without it keeps its exact bytes and its existing
+`schemaVersion`.
 
 When `export context --max-tokens` is present, context JSON and XML add an
 optional `tokenBudget` sibling after `files`. It contains

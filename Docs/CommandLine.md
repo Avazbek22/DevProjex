@@ -671,6 +671,7 @@ Specific options:
 --max-tokens <N>
 --rank <importance>
 --focus <PATH>              repeatable; at most 16; requires --rank importance
+--detail-for <GLOB=LEVEL>   repeatable; at most 16; requires file content
 ```
 
 The format applies to the entire document. JSON and XML are parseable structured
@@ -698,6 +699,25 @@ Markdown payloads remain unchanged apart from omitted file sections.
 In JSON and XML, the existing `metrics` object and tree continue to describe the
 complete effective selection, while `files` and `tokenBudget` describe the
 content admitted by the budget.
+
+`--detail-for "<glob>=<full|compact|signatures>"` overrides the detail level for the
+files a glob claims. The option is repeatable and accepts at most 16 values. Each
+value splits on its **last** `=`, so a glob may itself contain that character while
+the level never does. Values apply in order and the **last** matching one wins, so
+list general globs before specific ones. Globs use the project-relative syntax with
+`/` separators; an invalid value is a usage error and exits `2`.
+
+There is no `--detail` flag: `--compress-code`, `--strip-comments`, and
+`--strip-blank-lines` are this command's own level, and `--detail-for` layers per-file
+overrides on top of them. An override to `full` therefore adds no reduction of its own
+for the files it claims, while still never removing one the selected profile requires.
+Selection is never widened; a glob matching nothing is reported. The option requires
+file content and is invalid with `--view tree`.
+
+With `--detail-for`, dry run adds `Detail mix: full N; compact N; signatures N` and,
+when some glob claimed nothing, `Detail patterns matching nothing: ...`. JSON and XML
+documents add `detail` to each file entry and to each skipped-file entry. Without the
+option nothing changes.
 
 `--rank importance` opts into the experimental `importance-v1` order described
 in [Ranking.md](Ranking.md). Selection, profiles, Git scope, globs, and exclusions
@@ -754,6 +774,7 @@ devprojex export context . --format markdown -o ../devprojex-context.md --force
 devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
 devprojex export context . --hide-private-data --format markdown -o ../devprojex-private.md
 devprojex export context . --compress-code --format markdown -o ../devprojex-compact.md
+devprojex export context . --view content --compress-code --detail-for docs/**=full -o -
 $ devprojex export context . --view content --rank importance --max-tokens 16000 -o ../devprojex-ranked.md
 $ devprojex export context . --view content --rank importance --focus Application/Context/ProjectContextDocumentService.cs --max-tokens 16000 -o -
 ```

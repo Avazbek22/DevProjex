@@ -26,6 +26,24 @@ internal static class DryRunRenderer
 			"Terminal.DryRun.Metrics",
 			CacheCommandHandler.FormatByteSize(plan.IncludedBytes),
 			plan.Analysis.Metrics.Content.Tokens));
+		// Only when the call actually asked for a mix, so an ordinary plan keeps its exact lines.
+		if (ContentDetailSelection.Resolve(plan.Selection) is { } detailPolicy)
+		{
+			var mix = ContentDetailMix.Create(detailPolicy, plan.SourceRoot, plan.IncludedFiles);
+			environment.Error.WriteLine(localization.Format(
+				"Terminal.DryRun.Detail",
+				mix.FullFileCount,
+				mix.CompactFileCount,
+				mix.SignaturesFileCount));
+			if (mix.UnmatchedPatterns.Count > 0)
+			{
+				environment.Error.WriteLine(localization.Format(
+					"Terminal.DryRun.DetailUnmatched",
+					string.Join(
+						", ",
+						mix.UnmatchedPatterns.Select(TerminalTextEscaping.EscapeSingleLine))));
+			}
+		}
 		environment.Error.WriteLine(localization.Format(
 			"Terminal.DryRun.Profile",
 			TerminalTextEscaping.EscapeSingleLine(FormatProfile(plan.Selection.ProfileSource))));

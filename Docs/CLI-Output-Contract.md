@@ -546,6 +546,11 @@ same safe output-path policy and captured local-user occurrence decision as
 `project.root`. With private-data masking enabled, an absolute seed masks its local
 user segment with the same placeholder as the document header.
 
+With `--detail-for`, every entry in `files` and every entry in
+`tokenBudget.largestSkippedFiles` additionally carries `detail`, a
+`full|compact|signatures` string naming that file's effective level. The field is
+additive and present only for a call that supplied the option.
+
 ## Context XML
 
 XML uses the root element `devprojexContext` with `schemaVersion="1"` and
@@ -593,6 +598,11 @@ export. The report always identifies included and skipped file counts and
 estimated tokens, lists at most 25 largest skipped files plus an `and X more`
 line, and recommends `--compress-code` or a larger budget. It belongs to stderr;
 the context document on stdout remains byte-clean.
+When `export context --detail-for` is present, the dry-run plan adds
+`Detail mix: full N; compact N; signatures N` after its size line, and
+`Detail patterns matching nothing: ...` when some supplied glob claimed nothing. Both
+lines go to stderr with the rest of the plan and appear only for a call that supplied
+the option.
 
 A project-copy dry run with Hide Secrets enabled also states that detected text
 will be changed, binary files will remain unchanged, and the result may not build
