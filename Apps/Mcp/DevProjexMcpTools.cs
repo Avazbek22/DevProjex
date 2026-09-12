@@ -21,8 +21,6 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumStoredTrustedNoticeCharacters = 2_000;
 	private const int MaximumPageLines = 1_000;
 	private const int MaximumPageCharacters = 50_000;
-	private const int MaximumDependencyPaths = 8;
-	private const int MaximumDependencyPathCharacters = 512;
 	private const int MaximumExclusionTokenLength = 32;
 	// A wide alternation with context lines used to spend a quarter of an agent's whole
 	// context budget in one unpredictable call. The cap bounds that, and the totals line
@@ -1290,7 +1288,7 @@ internal sealed class DevProjexMcpTools(
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
-				paths: null,
+				paths: [requestedPath],
 				includePatterns: null,
 				excludePatterns: null,
 				profile: arguments.OptionalString("profile"),
@@ -1326,8 +1324,6 @@ internal sealed class DevProjexMcpTools(
 					$"Select a file no larger than {SecretRedactionOutputPreparer.MaximumScannableFileBytes} bytes or narrow the project before retrying.");
 			}
 			var relativePath = McpProjectService.ToRelative(plan.SourceRoot, file);
-			var dependencyPaths = await FindResolvedDependencyPathsAsync(plan, [file], cancellationToken)
-				.ConfigureAwait(false);
 			if (symbol is not null)
 			{
 				var located = McpSearchSymbols.ResolveSymbol(
@@ -1350,10 +1346,7 @@ internal sealed class DevProjexMcpTools(
 			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
-			var addressedPage = FormatFileReadHeader(
-				relativePath,
-				page,
-				dependencyPaths.GetValueOrDefault(file)) + page.Text;
+			var addressedPage = FormatFileReadHeader(relativePath, page) + page.Text;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(addressedPage),
 				rangeNotice,
@@ -1415,8 +1408,6 @@ internal sealed class DevProjexMcpTools(
 				return ValueTask.CompletedTask;
 			},
 				cancellationToken).ConfigureAwait(false);
-		var dependencyPaths = await FindResolvedDependencyPathsAsync(plan, uniqueFiles, cancellationToken)
-			.ConfigureAwait(false);
 		for (var index = 0; index < resolvedRequests.Count; index++)
 		{
 			var resolved = resolvedRequests[index];
@@ -1439,7 +1430,7 @@ internal sealed class DevProjexMcpTools(
 			};
 		}
 
-		var rendered = RenderBatchFileReads(resolvedRequests, transformed, dependencyPaths, cancellationToken);
+		var rendered = RenderBatchFileReads(resolvedRequests, transformed, cancellationToken);
 		return McpToolResults.TextSuccess(AppendTrustedNotices(
 			McpSpotlight.Wrap(rendered.Text),
 			rendered.Summary,
@@ -1455,7 +1446,6 @@ internal sealed class DevProjexMcpTools(
 	private static McpBatchFileReadResult RenderBatchFileReads(
 		IReadOnlyList<McpResolvedFileReadRequest> requests,
 		IReadOnlyDictionary<string, TransformedTextFile> transformed,
-		IReadOnlyDictionary<string, string> dependencyPaths,
 		CancellationToken cancellationToken)
 	{
 		var status = requests
@@ -1497,13 +1487,11 @@ internal sealed class DevProjexMcpTools(
 			var requestIds = string.Join(", ", group.Ranges.Select(static range =>
 				$"{range.RequestIndex}.{range.RangeIndex}"));
 			var escapedPath = McpTextEscaping.EscapeSingleLine(group.DisplayPath);
-			var dependencyPathSuffix = dependencyPaths.GetValueOrDefault(group.PhysicalPath);
 			var headerPrefix = $"File: {escapedPath}\nRequests: {requestIds}\n";
 			var headerLines = 4;
 			var availableLines = sectionBudgetLines - usedLines - (sections.Length == 0 ? 0 : 1) - headerLines;
 			var availableCharacters = sectionBudgetCharacters - sections.Length - separator.Length -
-									  headerPrefix.Length - "Status: partial\nLines: 1-1 of 1\n".Length -
-									  (dependencyPathSuffix?.Length ?? 0);
+									  headerPrefix.Length - "Status: partial\nLines: 1-1 of 1\n".Length;
 			if (availableLines <= 0 || availableCharacters <= 0)
 			{
 				foreach (var range in group.Ranges)
@@ -1533,7 +1521,6 @@ internal sealed class DevProjexMcpTools(
 			var header = FormatFileReadHeader(
 				escapedPath,
 				page,
-				dependencyPathSuffix,
 				requestIds,
 				sectionStatus,
 				pathIsEscaped: true);
@@ -1645,7 +1632,6 @@ internal sealed class DevProjexMcpTools(
 	private static string FormatFileReadHeader(
 		string path,
 		McpTextPage page,
-		string? dependencyPathSuffix = null,
 		string? requestIds = null,
 		string? status = null,
 		bool pathIsEscaped = false)
@@ -1658,65 +1644,8 @@ internal sealed class DevProjexMcpTools(
 		if (status is not null)
 			header.Append("Status: ").Append(status).Append('\n');
 		header.Append("Lines: ").Append(page.StartLine).Append('-').Append(page.EndLine)
-			.Append(" of ").Append(page.TotalLines).Append(dependencyPathSuffix).Append('\n');
+			.Append(" of ").Append(page.TotalLines).Append('\n');
 		return header.ToString();
-	}
-
-	private async Task<IReadOnlyDictionary<string, string>> FindResolvedDependencyPathsAsync(
-		ProjectContextPlan plan,
-		IReadOnlyList<string> physicalFiles,
-		CancellationToken cancellationToken)
-	{
-		if (physicalFiles.Count == 0)
-			return new Dictionary<string, string>(PathComparer.Default);
-
-		var physicalByRelativePath = physicalFiles
-			.Distinct(PathComparer.Default)
-			.ToDictionary(
-				path => McpProjectService.ToRelative(plan.SourceRoot, path),
-				static path => path,
-				StringComparer.Ordinal);
-		var related = await Projects.DependencyFactsEngine.FindRelatedAsync(
-				plan.SourceRoot,
-				plan.IncludedFiles,
-				physicalByRelativePath.Keys.Order(StringComparer.Ordinal).ToArray(),
-				DependencyDirection.Dependencies,
-				cancellationToken: cancellationToken)
-			.ConfigureAwait(false);
-		var result = new Dictionary<string, string>(PathComparer.Default);
-		foreach (var seed in related.Seeds)
-		{
-			var paths = seed.Dependencies
-				.Where(static dependency => dependency.Status == ResolutionStatus.Resolved)
-				.Select(static dependency => dependency.Path)
-				.Distinct(StringComparer.Ordinal)
-				.Order(StringComparer.Ordinal)
-				.ToArray();
-			if (paths.Length == 0)
-				continue;
-			result[physicalByRelativePath[seed.Seed]] = FormatDependencyPathSuffix(paths);
-		}
-		return result;
-	}
-
-	private static string FormatDependencyPathSuffix(IReadOnlyList<string> paths)
-	{
-		const string prefix = " · Dependencies: [";
-		var serializedPaths = paths.Select(static path => JsonSerializer.Serialize(path)).ToArray();
-		var selected = new List<string>(Math.Min(paths.Count, MaximumDependencyPaths));
-		for (var index = 0; index < serializedPaths.Length && selected.Count < MaximumDependencyPaths; index++)
-		{
-			var omitted = paths.Count - selected.Count - 1;
-			var omission = omitted == 0 ? string.Empty : $"; omitted={omitted}";
-			var candidateLength = prefix.Length + selected.Sum(static path => path.Length) +
-				selected.Count * 2 + serializedPaths[index].Length + 1 + omission.Length;
-			if (candidateLength > MaximumDependencyPathCharacters)
-				break;
-			selected.Add(serializedPaths[index]);
-		}
-		var omittedCount = paths.Count - selected.Count;
-		return prefix + string.Join(", ", selected) + "]" +
-			(omittedCount == 0 ? string.Empty : $"; omitted={omittedCount}");
 	}
 
 	private static string? FormatLineRangeNotice(McpTextPage page, int? requestedEnd)

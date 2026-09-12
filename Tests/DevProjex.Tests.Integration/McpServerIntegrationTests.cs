@@ -6377,118 +6377,24 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task GetFileAddressHeadersNameOnlyResolvedOutgoingDependencies()
+	public async Task GetFileBatchPathOnlyRequestReadsTheWholeFile()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		File.WriteAllText(Path.Combine(project, "Fixture.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
-		File.WriteAllText(Path.Combine(project, "Target.cs"), "namespace Sample; sealed class Target { }\n");
-		File.WriteAllText(Path.Combine(project, "Source.cs"),
-			"namespace Sample; sealed class Source { Target target = new(); Missing missing = null!; }\n");
-		File.WriteAllText(Path.Combine(project, "Plain.cs"), "namespace Sample; sealed class Plain { }\n");
+		File.WriteAllText(Path.Combine(project, "Target.cs"), "first-line\nbatch-target-marker\nlast-line\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
-		var scalar = await server.CallAsync("get_file", new Dictionary<string, object?>
-		{
-			["path"] = "Source.cs"
-		});
 		var batch = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			["requests"] = new object[]
-			{
-				new { path = "Source.cs", ranges = new[] { new { start_line = 1, end_line = 1 } } }
-			}
-		});
-		var plain = await server.CallAsync("get_file", new Dictionary<string, object?>
-		{
-			["path"] = "Plain.cs"
-		});
-		var scalarBody = ExtractSpotlightBody(Text(scalar));
-		var batchBody = ExtractSpotlightBody(Text(batch));
-		var plainBody = ExtractSpotlightBody(Text(plain));
-
-		Assert.NotEqual(true, scalar.IsError);
-		Assert.NotEqual(true, batch.IsError);
-		Assert.Contains("Lines: 1-2 of 2 · Dependencies: [\"Target.cs\"]", scalarBody, StringComparison.Ordinal);
-		Assert.Contains("Lines: 1-1 of 2 · Dependencies: [\"Target.cs\"]", batchBody, StringComparison.Ordinal);
-		Assert.DoesNotContain("Missing", scalarBody.Split('\n').Single(static line =>
-			line.StartsWith("Lines:", StringComparison.Ordinal)), StringComparison.Ordinal);
-		Assert.DoesNotContain("Dependencies:", plainBody, StringComparison.Ordinal);
-	}
-
-	[Fact]
-	public async Task GetFileDependencyPathsCanBeReusedAsWholeFileBatchRequests()
-	{
-		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateDirectory("project");
-		File.WriteAllText(Path.Combine(project, "Fixture.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
-		File.WriteAllText(Path.Combine(project, "Target.cs"),
-			"namespace Sample; sealed class Target { const string Marker = \"batch-target-marker\"; }\n");
-		File.WriteAllText(Path.Combine(project, "Source.cs"),
-			"namespace Sample; sealed class Source { Target target = new(); }\n");
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
-
-		var source = await server.CallAsync("get_file", new Dictionary<string, object?>
-		{
-			["path"] = "Source.cs"
-		});
-		var header = ExtractSpotlightBody(Text(source)).Split('\n')
-			.Single(static line => line.StartsWith("Lines:", StringComparison.Ordinal));
-		var paths = JsonSerializer.Deserialize<string[]>(
-			Assert.Single(Regex.Matches(header, "Dependencies: (\\[[^]]+\\])").Cast<Match>()).Groups[1].Value)!;
-		var batch = await server.CallAsync("get_file", new Dictionary<string, object?>
-		{
-			["requests"] = paths.Select(static path => (object)new { path }).ToArray()
+			["requests"] = new object[] { new { path = "Target.cs" } }
 		});
 
 		Assert.NotEqual(true, batch.IsError);
 		Assert.Contains("File: Target.cs", Text(batch), StringComparison.Ordinal);
+		Assert.Contains("Lines: 1-4 of 4", Text(batch), StringComparison.Ordinal);
+		Assert.Contains("first-line", Text(batch), StringComparison.Ordinal);
 		Assert.Contains("batch-target-marker", Text(batch), StringComparison.Ordinal);
-	}
-
-	[Fact]
-	public async Task GetFileDependencyPathsReportCountAndCharacterOmissionsWithinTheirBounds()
-	{
-		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateDirectory("project");
-		File.WriteAllText(Path.Combine(project, "Fixture.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
-		var shortTypes = Enumerable.Range(0, 10).Select(index => $"Short{index:D2}").ToArray();
-		foreach (var type in shortTypes)
-			File.WriteAllText(Path.Combine(project, $"{type}.cs"), $"namespace Sample; sealed class {type} {{ }}\n");
-		File.WriteAllText(Path.Combine(project, "CountSource.cs"),
-			$"namespace Sample; sealed class CountSource {{ {string.Join(' ', shortTypes.Select(type => $"{type} value{type};"))} }}\n");
-
-		var longTypes = Enumerable.Range(0, 8).Select(index => $"Long{index:D2}").ToArray();
-		foreach (var type in longTypes)
-		{
-			var directory = Path.Combine(project, new string((char)('a' + Array.IndexOf(longTypes, type)), 90));
-			Directory.CreateDirectory(directory);
-			File.WriteAllText(Path.Combine(directory, $"{type}.cs"), $"namespace Sample; sealed class {type} {{ }}\n");
-		}
-		File.WriteAllText(Path.Combine(project, "CharacterSource.cs"),
-			$"namespace Sample; sealed class CharacterSource {{ {string.Join(' ', longTypes.Select(type => $"{type} value{type};"))} }}\n");
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
-
-		var countResult = await server.CallAsync("get_file", new Dictionary<string, object?>
-		{
-			["path"] = "CountSource.cs"
-		});
-		var characterResult = await server.CallAsync("get_file", new Dictionary<string, object?>
-		{
-			["path"] = "CharacterSource.cs"
-		});
-		var countLine = ExtractSpotlightBody(Text(countResult)).Split('\n')
-			.Single(static line => line.StartsWith("Lines:", StringComparison.Ordinal));
-		var characterLine = ExtractSpotlightBody(Text(characterResult)).Split('\n')
-			.Single(static line => line.StartsWith("Lines:", StringComparison.Ordinal));
-
-		Assert.NotEqual(true, countResult.IsError);
-		Assert.NotEqual(true, characterResult.IsError);
-		Assert.Contains("omitted=2", countLine, StringComparison.Ordinal);
-		Assert.Equal(8, Regex.Matches(countLine, "Short\\d{2}\\.cs").Count);
-		Assert.Contains("omitted=", characterLine, StringComparison.Ordinal);
-		Assert.True(characterLine[(characterLine.IndexOf("Dependencies:", StringComparison.Ordinal))..].Length <= 512,
-			characterLine);
+		Assert.Contains("last-line", Text(batch), StringComparison.Ordinal);
 	}
 
 	[Fact]
