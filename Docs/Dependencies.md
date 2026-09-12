@@ -202,7 +202,8 @@ restricted-visibility `use` trees, aliases, `crate`, `self`, and bounded `super`
 without executing code; `crate::`
 is resolved exclusively inside the nearest owning Cargo package. When a Cargo target uses a
 nonstandard source path, a crate-qualified item may match a unique declaration by its complete
-module suffix inside that package; equal suffixes remain ambiguous. Exact items otherwise resolve
+module suffix inside that explicit target; target boundaries and equal suffixes remain unresolved.
+Exact items otherwise resolve
 only to matching declarations in the allowed manifest, while glob imports provide
 visibility context without inventing a module edge. A bounded `Cargo.toml` supplies the crate name
 and literal local `path` dependencies, including dev and build dependencies. Referenced repository

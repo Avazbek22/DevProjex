@@ -814,25 +814,38 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
-	public async Task RustCrateQualifiedSuffixesRemainUnresolvedWhenTargetsAreNotUnique()
+	public async Task RustCrateQualifiedSuffixesDoNotCrossExplicitTargets()
 	{
 		using var fixture = new TemporaryDirectory();
-		var manifest = fixture.CreateFile("Cargo.toml", "[package]\nname = \"command\"\nversion = \"1.0.0\"\n");
-		var source = fixture.CreateFile("crates/core/flags/mod.rs", "pub(crate) use crate::flags::doc::help::generate;\n");
-		var first = fixture.CreateFile("crates/core/flags/doc/help.rs", "pub fn generate() {}\n");
-		var second = fixture.CreateFile("alternate/flags/doc/help.rs", "pub fn generate() {}\n");
+		var manifest = fixture.CreateFile("Cargo.toml", """
+			[package]
+			name = "command"
+			version = "1.0.0"
+
+			[[bin]]
+			name = "first"
+			path = "first/main.rs"
+
+			[[bin]]
+			name = "second"
+			path = "second/main.rs"
+			""");
+		var firstRoot = fixture.CreateFile("first/main.rs", "mod facade;\n");
+		var source = fixture.CreateFile("first/facade.rs", "pub(crate) use crate::secret::Hidden;\n");
+		var secondRoot = fixture.CreateFile("second/main.rs", "mod secret;\n");
+		var hidden = fixture.CreateFile("second/secret.rs", "pub struct Hidden;\n");
 		using var engine = CreateEngine();
 
 		var index = await engine.IndexAsync(
 			fixture.Path,
-			[manifest, source, first, second],
+			[manifest, firstRoot, source, secondRoot, hidden],
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		var edge = Assert.Single(index.Edges, static edge =>
-			edge.Source == "crates/core/flags/mod.rs" && edge.Reference == "flags::doc::help::generate");
-		Assert.Equal(ResolutionStatus.Ambiguous, edge.Status);
+			edge.Source == "first/facade.rs" && edge.Reference == "secret::Hidden");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
 		Assert.Null(edge.Target);
-		Assert.Equal(2, edge.Candidates.Count);
+		Assert.Empty(edge.Candidates);
 	}
 
 	[Fact]

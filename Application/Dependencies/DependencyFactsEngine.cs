@@ -1433,13 +1433,32 @@ public sealed class DependencyFactsEngine : IDisposable
 
 			var normalized = QualifiedLookupName(name);
 			var suffix = "::" + normalized;
+			var scope = FindScope(source.ScopeId);
+			var sourceTarget = FindUniqueRustTarget(scope, source.Path);
+			if (sourceTarget is null)
+				return [];
 			return _declarations.Where(declaration =>
 				declaration.Identity.ScopeId == source.ScopeId &&
 				declaration.Identity.LanguageId == LanguageId.Rust &&
 				declaration.Identity.GenericArity == 0 &&
 				QualifiedLookupName(declaration.Identity.QualifiedName)
 					.EndsWith(suffix, StringComparison.Ordinal) &&
+				declaration.DeclarationSites.All(site =>
+					PathComparer.Equals(FindUniqueRustTarget(scope, site.File), sourceTarget)) &&
 				IsVisible(source, declaration)).ToArray();
+		}
+
+		private string? FindUniqueRustTarget(DependencyScopeDescriptor? scope, string relativePath)
+		{
+			if (scope is null || scope.RustTargetRoots.Count == 0)
+				return null;
+			var fullPath = Path.GetFullPath(Path.Combine(_root, relativePath));
+			var matches = scope.RustTargetRoots
+				.Where(target => PathComparer.Equals(target, fullPath) ||
+					IsWithin(Path.GetDirectoryName(target)!, fullPath))
+				.Take(2)
+				.ToArray();
+			return matches.Length == 1 ? matches[0] : null;
 		}
 
 		private static bool IsConventionalRustTargetRoot(DependencyScopeDescriptor? scope, string sourcePath)
@@ -1448,7 +1467,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				return false;
 			var relative = Path.GetRelativePath(scope.Root, sourcePath).Replace('\\', '/');
 			var separator = relative.IndexOf('/');
-			return separator > 0 && relative.IndexOf('/', separator + 1) < 0 &&
+			return scope.RustTargetRoots.Any(target => PathComparer.Equals(target, sourcePath)) ||
+			       separator > 0 && relative.IndexOf('/', separator + 1) < 0 &&
 			       relative[..separator] is "tests" or "examples" or "benches";
 		}
 

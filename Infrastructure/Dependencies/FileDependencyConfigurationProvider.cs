@@ -483,7 +483,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				true)
 			{
 				ConfigurationState = project.State,
-				ConfigurationDiagnostic = project.Reason
+				ConfigurationDiagnostic = project.Reason,
+				RustTargetRoots = project.Configuration.TargetPaths
 			});
 		}
 
@@ -1355,6 +1356,18 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			    package.TryGetValue("name", out var nameValue) && nameValue is string name)
 				packageName = name.Replace('-', '_');
 			var directories = new HashSet<string>(PathComparer);
+			var targetPaths = new HashSet<string>(PathComparer);
+			if (TryGetTable(model, "lib", out var library) &&
+			    library.TryGetValue("path", out var libraryPathValue) && libraryPathValue is string libraryPath)
+				AddRustTargetPath(path, libraryPath, targetPaths);
+			foreach (var targetSection in new[] { "bin", "test", "bench", "example" })
+			{
+				if (!model.TryGetValue(targetSection, out var targetsValue) || targetsValue is not TomlTableArray targets)
+					continue;
+				foreach (var target in targets)
+					if (target.TryGetValue("path", out var targetPathValue) && targetPathValue is string targetPath)
+						AddRustTargetPath(path, targetPath, targetPaths);
+			}
 			foreach (var section in new[] { "dependencies", "dev-dependencies", "build-dependencies" })
 			{
 				if (!TryGetTable(model, section, out var dependencies)) continue;
@@ -1371,7 +1384,10 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				}
 			}
 			return ConfigurationParseResult<RustProjectConfiguration>.Valid(
-				new RustProjectConfiguration(packageName, directories.Order(StringComparer.Ordinal).ToArray()));
+				new RustProjectConfiguration(
+					packageName,
+					directories.Order(StringComparer.Ordinal).ToArray(),
+					targetPaths.Order(StringComparer.Ordinal).ToArray()));
 		}
 		catch (Exception exception) when (exception is InvalidDataException or TomlException or InvalidOperationException)
 		{
@@ -1424,6 +1440,17 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			directories.Order(StringComparer.Ordinal).ToArray(),
 			externalPackages,
 			localPackages);
+	}
+
+	private static void AddRustTargetPath(string manifestPath, string relativePath, ISet<string> targetPaths)
+	{
+		if (Path.IsPathFullyQualified(relativePath))
+			throw new InvalidDataException("Cargo target path must be relative.");
+		var root = Path.GetDirectoryName(manifestPath)!;
+		var target = Path.GetFullPath(Path.Combine(root, relativePath));
+		if (!IsWithin(root, target))
+			throw new InvalidDataException("Cargo target path must stay inside the package.");
+		targetPaths.Add(target);
 	}
 
 	private static string? ReadRubyPackageName(string content)
@@ -1608,9 +1635,12 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	{
 		public static JavaProjectConfiguration Empty { get; } = new(string.Empty, []);
 	}
-	private sealed record RustProjectConfiguration(string? PackageName, IReadOnlyList<string> ProjectDirectories)
+	private sealed record RustProjectConfiguration(
+		string? PackageName,
+		IReadOnlyList<string> ProjectDirectories,
+		IReadOnlyList<string> TargetPaths)
 	{
-		public static RustProjectConfiguration Empty { get; } = new(null, []);
+		public static RustProjectConfiguration Empty { get; } = new(null, [], []);
 	}
 	private sealed record RubyProjectConfiguration(
 		string? PackageName,
