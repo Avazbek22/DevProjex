@@ -3,7 +3,7 @@ import test from 'node:test';
 import { recordEvents } from '../lib/recorder.mjs';
 import { validateSeriesConfiguration } from '../lib/series-preflight.mjs';
 import { recordStreamJson } from '../lib/stream-json.mjs';
-import { evaluateTaskAnswer } from '../lib/task-oracle.mjs';
+import { compareTaskAnswers, evaluateTaskAnswer } from '../lib/task-oracle.mjs';
 import { reconcileOrderedAssessments, summarizeOrderedAssessments } from '../lib/order-consistency.mjs';
 
 test('parallel tool calls share one model turn and one usage snapshot', () => {
@@ -253,6 +253,22 @@ test('task oracle reports an empty answer separately', () => {
 
   assert.equal(result.classification, 'empty');
   assert.equal(result.supported, false);
+});
+
+test('task oracle comparison favors the answer covering more required criteria', () => {
+  const complete = evaluateTaskAnswer(oracleFixture,
+    '`RetryAsync` in `src/core.cs` retries three times; `tests/core.test.cs` verifies it.');
+  const incomplete = evaluateTaskAnswer(oracleFixture,
+    '`RetryAsync` in `src/core.cs` retries three times.');
+
+  assert.deepEqual(compareTaskAnswers(complete, incomplete), {
+    choice: 'A',
+    basis: 'classification',
+  });
+  assert.deepEqual(compareTaskAnswers(incomplete, incomplete), {
+    choice: 'tie',
+    basis: 'equal-criteria',
+  });
 });
 
 test('order-dependent assessment is reported as disagreement instead of a verdict', () => {

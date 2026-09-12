@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { loadTaskOracleRegistry, evaluateTaskAnswer, splitComparedAnswers } from './lib/task-oracle.mjs';
+import {
+  loadTaskOracleRegistry,
+  evaluateTaskAnswer,
+  compareTaskAnswers,
+  splitComparedAnswers,
+} from './lib/task-oracle.mjs';
 import { summarizeOrderedAssessments } from './lib/order-consistency.mjs';
 
 const argumentsList = process.argv.slice(2);
@@ -27,14 +32,17 @@ function evaluateSummary(path, registry) {
   if (!task)
     throw new Error(`No task oracle is registered for '${summary.task}'.`);
   const answers = splitComparedAnswers(summary.answer ?? '');
+  const evaluatedA = evaluateTaskAnswer(task, answers.A);
+  const evaluatedB = evaluateTaskAnswer(task, answers.B);
   return {
     id: summary.id,
     task: summary.task,
     server: summary.server,
     answers: {
-      A: evaluateTaskAnswer(task, answers.A),
-      B: evaluateTaskAnswer(task, answers.B),
+      A: evaluatedA,
+      B: evaluatedB,
     },
+    oracleComparison: compareTaskAnswers(evaluatedA, evaluatedB),
   };
 }
 

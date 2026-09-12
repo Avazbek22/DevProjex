@@ -52,6 +52,28 @@ export function evaluateTaskAnswer(task, answer) {
     contradictedClaims);
 }
 
+export function compareTaskAnswers(left, right) {
+  const leftRank = classificationRank(left.classification);
+  const rightRank = classificationRank(right.classification);
+  if (leftRank !== rightRank) {
+    return {
+      choice: leftRank > rightRank ? 'A' : 'B',
+      basis: 'classification',
+    };
+  }
+  if (left.classification === 'incomplete') {
+    const leftGaps = gapCount(left);
+    const rightGaps = gapCount(right);
+    if (leftGaps !== rightGaps) {
+      return {
+        choice: leftGaps < rightGaps ? 'A' : 'B',
+        basis: 'covered-criteria',
+      };
+    }
+  }
+  return { choice: 'tie', basis: 'equal-criteria' };
+}
+
 export function splitComparedAnswers(text) {
   if (typeof text !== 'string')
     return { A: '', B: '' };
@@ -116,4 +138,13 @@ function normalizePath(path) {
 
 function includesText(text, term) {
   return text.toLocaleLowerCase('en-US').includes(term.toLocaleLowerCase('en-US'));
+}
+
+function classificationRank(classification) {
+  return { incorrect: 0, empty: 1, incomplete: 2, complete: 3 }[classification] ?? -1;
+}
+
+function gapCount(evaluation) {
+  return evaluation.missingPaths.length + evaluation.missingClaims.length +
+    evaluation.missingSymbols.length;
 }
