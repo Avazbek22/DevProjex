@@ -1402,7 +1402,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".java" => LanguageId.Java,
 		".rs" => LanguageId.Rust,
 		".kt" or ".kts" => LanguageId.Kotlin,
-		".rb" or ".rake" or ".gemspec" => LanguageId.Ruby,
+		".rb" or ".rake" or ".gemspec" or ".ru" => LanguageId.Ruby,
 		".php" or ".phtml" => LanguageId.Php,
 		_ => LanguageId.Unsupported
 	};

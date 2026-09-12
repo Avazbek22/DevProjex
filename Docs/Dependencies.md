@@ -236,7 +236,7 @@ name fall back to the nearest supported owner. A syntax tree containing an error
 recovered declarations nor recovered edges. Related-file coverage lists the bounded set of paths for
 which extraction failed, in addition to the aggregate count, so callers can inspect the omitted files.
 
-Ruby source files contribute classes and modules under their complete lexical owner chain. Literal
+Ruby source files (`.rb`, `.rake`, `.gemspec`, and Rack `.ru` entry files) contribute classes and modules under their complete lexical owner chain. Literal
 `require_relative` resolves only the corresponding `.rb` file beside the source, while literal
 `require` probes the repository root, its `lib` directory, and `lib` directories of repository gems
 made visible by a literal `path:` entry in `Gemfile`. Gem specifications are read as bounded data for

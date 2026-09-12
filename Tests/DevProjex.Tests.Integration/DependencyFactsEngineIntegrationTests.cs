@@ -141,6 +141,26 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RubyRackEntryFilesUseRubyFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var framework = fixture.CreateFile("lib/sinatra/base.rb", "module Sinatra\n  class Base\n  end\nend\n");
+		var entry = fixture.CreateFile("examples/stream.ru", "require 'sinatra/base'\nclass Stream < Sinatra::Base\nend\nrun Stream\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[framework, entry],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = index.Files.Single(static file => file.Path == "examples/stream.ru");
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(facts.Declarations, static declaration => declaration.Identity.QualifiedName == "Stream");
+		Assert.Contains(index.Edges, static edge => edge.Source == "examples/stream.ru" &&
+			edge.Target == "lib/sinatra/base.rb" && edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
 	public async Task RubyReopenedContainersDoNotCreateEdgesToEveryDeclarationFile()
 	{
 		using var fixture = new TemporaryDirectory();
