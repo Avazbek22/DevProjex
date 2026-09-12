@@ -285,7 +285,8 @@ in two directories stays two declarations, so a reference never reaches
 across packages; it resolves to the one in its own directory or to nothing.
 
 Everything else in Go is outside this capability and produces no resolved edge rather than a guessed
-one. Literal import paths remain explicit `Unresolved` evidence: `go.mod` is not read, a module path is not mapped to a directory,
+one. Import paths are not resolved; literal paths remain explicit `Unresolved` evidence: `go.mod` is
+not read, a module path is not mapped to a directory,
 and vendor directories, build tags, import aliases, dot imports and `internal` visibility are not
 interpreted. Package-level `const` and `var` declarations are not yet importable names, and a
 named type is recorded as one declaration without distinguishing struct, interface and alias.
