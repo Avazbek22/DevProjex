@@ -172,7 +172,9 @@ declared package and complete nesting chain. Exact imports resolve only to match
 the allowed manifest; static imports walk back to the nearest declaring type. Same-package types and
 types admitted by an exact or wildcard import are visible to type references. Two visible declarations
 remain ambiguous, and a name elsewhere in the repository is never selected merely because it is the
-only match. Bounded `pom.xml`, `build.gradle`, and `build.gradle.kts` files divide a repository into
+only match. Class, method, constructor, and nested-type parameters shadow declarations only inside
+their lexical owner; qualified names and types used by bounds remain ordinary references. Bounded
+`pom.xml`, `build.gradle`, and `build.gradle.kts` files divide a repository into
 source scopes. Package-qualified declarations inside a source scope remain resolvable when Maven
 coordinates are unavailable; the configuration diagnostic then limits only relationships that need
 manifest evidence. Literal Maven `groupId`/`artifactId` dependencies and literal Gradle `project(...)`
@@ -216,7 +218,9 @@ in the repository manifest even when a build manifest cannot prove a module rela
 imports provide package visibility without guessing a target. Same-package declarations are visible
 to type references. Conventional multiplatform source-set paths constrain declaration sites: common
 declarations are visible to platform source sets, while JVM sources exclude non-JVM, native, JS, and
-Wasm declaration sites. Bounded `pom.xml`, `build.gradle`,
+Wasm declaration sites. Class, function, and nested-class parameters shadow same-name declarations
+only inside their lexical owner; qualified names and types used by bounds remain ordinary references.
+Bounded `pom.xml`, `build.gradle`,
 and `build.gradle.kts` files define source scopes using the same literal repository-only Maven and
 Gradle project relationships described for Java. External artifacts, generated sources, compiler
 plugins, build-script-computed source sets, and runtime class paths are not inferred and remain

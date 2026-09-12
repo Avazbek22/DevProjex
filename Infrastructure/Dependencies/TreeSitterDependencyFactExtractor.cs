@@ -877,6 +877,24 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				checked((int)(owner?.EndIndex ?? node.EndIndex)),
 				Evidence: OneLineEvidence(text));
 		}
+		if (captureName == "context.type_parameter")
+		{
+			var owner = node.Parent;
+			while (owner is not null && !IsTypeParameterOwner(owner.Type))
+				owner = owner.Parent;
+			var parameterNameNode = node.GetChildForField("name") ?? FindFirstIdentifier(node);
+			var name = parameterNameNode is null ? string.Empty : materialization.Read(parameterNameNode);
+			return new DependencySyntaxCapture(
+				captureName,
+				node.Type,
+				name,
+				checked((int)node.StartPosition.Row + 1),
+				checked((int)(owner?.StartIndex ?? node.StartIndex)),
+				checked((int)(owner?.EndIndex ?? node.EndIndex)),
+				CapturedName: name,
+				CapturedNameStartIndex: checked((int)(parameterNameNode?.StartIndex ?? node.StartIndex)),
+				Evidence: OneLineEvidence(name));
+		}
 		string? moduleCallName = null;
 		if (captureName == "import.call" &&
 		    !TryReadSupportedModuleCall(node, materialization, out moduleCallName))
@@ -998,6 +1016,17 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		if (node.Type == "identifier" && materialization.Read(node) == identifier)
 			return true;
 		return node.NamedChildren.Any(child => ContainsIdentifier(child, identifier, materialization));
+	}
+
+	private static Node? FindFirstIdentifier(Node node)
+	{
+		if (node.Type.EndsWith("identifier", StringComparison.Ordinal)) return node;
+		foreach (var child in node.NamedChildren)
+		{
+			var identifier = FindFirstIdentifier(child);
+			if (identifier is not null) return identifier;
+		}
+		return null;
 	}
 
 	private static string CreateCompactImportEvidence(
@@ -1430,7 +1459,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private static bool IsTypeParameterOwner(string nodeType) => nodeType is
 		"class_declaration" or "struct_declaration" or "interface_declaration" or
 		"record_declaration" or "delegate_declaration" or "method_declaration" or
-		"local_function_statement";
+		"local_function_statement" or "constructor_declaration" or "function_declaration";
 
 	internal readonly record struct PreparedSourceCacheState(
 		int Entries,

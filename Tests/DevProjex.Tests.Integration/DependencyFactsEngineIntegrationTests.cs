@@ -271,6 +271,40 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task KotlinTypeParametersShadowOnlyTheirLexicalScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var namedT = fixture.CreateFile("src/sample/T.kt", "package sample\nclass T");
+		var bound = fixture.CreateFile("src/sample/Bound.kt", "package sample\nopen class Bound");
+		var payload = fixture.CreateFile("src/sample/Payload.kt", "package sample\nclass Payload<X>");
+		var source = fixture.CreateFile("src/sample/Box.kt", """
+			package sample
+			class Box<T : Bound>(val value: T, val explicit: sample.T, val payload: Payload<Bound>) {
+			    fun <R : Bound> map(value: R): R = value
+			    class Nested<T>(val nested: T, val explicitNested: sample.T)
+			}
+			class Consumer(val external: T)
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[namedT, bound, payload, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var references = index.Files.Single(static file => file.Path == "src/sample/Box.kt").References;
+		Assert.DoesNotContain(references, static reference => reference.Name == "T" &&
+			reference.Site.Line is 2 or 4 && reference.Status == ResolutionStatus.Resolved);
+		Assert.DoesNotContain(references, static reference => reference.Name == "R" &&
+			reference.Site.Line == 3 && reference.Status == ResolutionStatus.Resolved);
+		Assert.True(references.Count(static reference => reference.Name == "Bound" &&
+			reference.Status == ResolutionStatus.Resolved) >= 2);
+		Assert.Contains(references, static reference => reference.Name == "sample.T" && reference.Status == ResolutionStatus.Resolved);
+		Assert.Contains(references, static reference => reference.Name == "T" &&
+			reference.Site.Line == 6 && reference.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
 	public async Task KotlinNavigationDistinguishesOwnersAndRepeatedMembers()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -582,6 +616,43 @@ public sealed class DependencyFactsEngineIntegrationTests
 			declaration.Name == "sample.Consumer.read" && declaration.Kind == NavigationSymbolKind.Method);
 		Assert.DoesNotContain(index.Declarations, static declaration =>
 			declaration.Identity.QualifiedName.EndsWith(".read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task JavaTypeParametersShadowOnlyTheirLexicalScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var namedT = fixture.CreateFile("src/sample/T.java", "package sample; public class T { }");
+		var bound = fixture.CreateFile("src/sample/Bound.java", "package sample; public class Bound { }");
+		var payload = fixture.CreateFile("src/sample/Payload.java", "package sample; public class Payload<X> { }");
+		var source = fixture.CreateFile("src/sample/Box.java", """
+			package sample;
+			public class Box<T extends Bound> {
+			    T value;
+			    sample.T explicit;
+			    Payload<Bound> payload;
+			    public <R extends Bound> R map(R value) { return value; }
+			    class Nested<T> { T nested; sample.T explicitNested; }
+			}
+			class Consumer { T external; }
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[namedT, bound, payload, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var references = index.Files.Single(static file => file.Path == "src/sample/Box.java").References;
+		Assert.DoesNotContain(references, static reference => reference.Name == "T" &&
+			reference.Site.Line is 3 or 7 && reference.Status == ResolutionStatus.Resolved);
+		Assert.DoesNotContain(references, static reference => reference.Name == "R" &&
+			reference.Site.Line == 6 && reference.Status == ResolutionStatus.Resolved);
+		Assert.True(references.Count(static reference => reference.Name == "Bound" &&
+			reference.Status == ResolutionStatus.Resolved) >= 2);
+		Assert.Contains(references, static reference => reference.Name == "sample.T" && reference.Status == ResolutionStatus.Resolved);
+		Assert.Contains(references, static reference => reference.Name == "T" &&
+			reference.Site.Line == 9 && reference.Status == ResolutionStatus.Resolved);
 	}
 
 	[Fact]

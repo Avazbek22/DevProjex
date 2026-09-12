@@ -111,6 +111,17 @@ internal abstract partial class DependencyLanguageAdapter : IDependencyLanguageA
 			.ThenBy(static fact => fact.Name, StringComparer.Ordinal)
 			.ToArray();
 
+	protected static TypeParameterScope[] ExtractTypeParameterScopes(DependencyExtractionContext context) =>
+		context.References
+			.Where(static capture => capture.Name == "context.type_parameter" &&
+				!string.IsNullOrWhiteSpace(capture.CapturedName))
+			.Select(static capture => new TypeParameterScope(
+				capture.CapturedName!, capture.StartIndex, capture.EndIndex))
+			.Distinct()
+			.OrderBy(static scope => scope.StartIndex)
+			.ThenBy(static scope => scope.Name, StringComparer.Ordinal)
+			.ToArray();
+
 	protected static FileFacts Complete(
 		DependencyExtractionContext context,
 		IReadOnlyList<DeclarationFact> declarations,
@@ -907,6 +918,7 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 		var declarationCaptures = context.Declarations
 			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName))
 			.ToArray();
+		var typeParameterScopes = ExtractTypeParameterScopes(context);
 		var declarations = declarationCaptures.Select(capture =>
 		{
 			var owners = declarationCaptures
@@ -941,14 +953,25 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 			.Where(static capture => capture.CapturedNameStartIndex >= 0)
 			.Select(static capture => capture.CapturedNameStartIndex)
 			.ToHashSet();
+		var typeParameterNames = context.References
+			.Where(static capture => capture.Name == "context.type_parameter" && capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex)
+			.ToHashSet();
 		var importRanges = context.References
 			.Where(static capture => capture.Name == "import.java")
 			.Select(static capture => (capture.StartIndex, capture.EndIndex))
 			.ToArray();
-		var references = Distinct(context.References
-			.Where(capture => capture.Name == "reference.type" &&
+		var referenceCaptures = context.References
+			.Where(static capture => capture.Name == "reference.type")
+			.ToArray();
+		var references = Distinct(referenceCaptures
+			.Where(capture =>
 				!declarationNames.Contains(capture.StartIndex) &&
+				!typeParameterNames.Contains(capture.StartIndex) &&
 				!PrimitiveTypes.Contains(capture.Text) &&
+				!referenceCaptures.Any(owner => owner.NodeType == "scoped_type_identifier" &&
+					owner.StartIndex <= capture.StartIndex && owner.EndIndex >= capture.EndIndex &&
+					(owner.StartIndex < capture.StartIndex || owner.EndIndex > capture.EndIndex)) &&
 				!importRanges.Any(range => capture.StartIndex >= range.StartIndex && capture.EndIndex <= range.EndIndex))
 			.Select(capture =>
 			{
@@ -985,7 +1008,12 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 				static group => group.First().Specifier,
 				StringComparer.Ordinal);
 		return Complete(context, declarations, imports, references, [packageName], aliases,
-			globalNamespaces: importedPackages);
+			globalNamespaces: importedPackages,
+			typeParameters: typeParameterScopes.Select(static scope => scope.Name)
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()) with
+		{
+			TypeParameterScopes = typeParameterScopes
+		};
 	}
 
 	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(
@@ -1020,6 +1048,7 @@ internal sealed partial class KotlinDependencyLanguageAdapter : DependencyLangua
 		var declarationCaptures = context.Declarations
 			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName))
 			.ToArray();
+		var typeParameterScopes = ExtractTypeParameterScopes(context);
 		var declarations = declarationCaptures.Select(capture =>
 		{
 			var owners = declarationCaptures
@@ -1053,8 +1082,13 @@ internal sealed partial class KotlinDependencyLanguageAdapter : DependencyLangua
 			}).ToArray();
 		var importRanges = context.References.Where(static capture => capture.Name == "import.kotlin")
 			.Select(static capture => (capture.StartIndex, capture.EndIndex)).ToArray();
+		var typeParameterNames = context.References
+			.Where(static capture => capture.Name == "context.type_parameter" && capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex)
+			.ToHashSet();
 		var references = Distinct(context.References
 			.Where(capture => capture.Name == "reference.type" &&
+				!typeParameterNames.Contains(capture.StartIndex) &&
 				!importRanges.Any(range => capture.StartIndex >= range.StartIndex && capture.EndIndex <= range.EndIndex))
 			.SelectMany(capture => TypeNameRegex().Matches(capture.Text)
 				.Select(static match => match.Value)
@@ -1088,7 +1122,12 @@ internal sealed partial class KotlinDependencyLanguageAdapter : DependencyLangua
 				.Distinct(StringComparer.Ordinal).Take(2).Count() == 1)
 			.ToDictionary(static group => group.Key, static group => group.First().Specifier, StringComparer.Ordinal);
 		return Complete(context, declarations, imports, references, [packageName], aliases,
-			globalNamespaces: importedPackages);
+			globalNamespaces: importedPackages,
+			typeParameters: typeParameterScopes.Select(static scope => scope.Name)
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()) with
+		{
+			TypeParameterScopes = typeParameterScopes
+		};
 	}
 
 	private static bool Contains(DependencySyntaxCapture owner, DependencySyntaxCapture capture) =>
