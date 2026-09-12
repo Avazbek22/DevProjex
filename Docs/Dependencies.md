@@ -221,6 +221,8 @@ to type references. Conventional multiplatform source-set paths constrain declar
 declarations are visible to platform source sets, while JVM sources exclude non-JVM, native, JS, and
 Wasm declaration sites. Class, function, and nested-class parameters shadow same-name declarations
 only inside their lexical owner; qualified names and types used by bounds remain ordinary references.
+Generic type references retain their declared arity while their type arguments are resolved or kept
+local independently, so `TypedOptions<T>` can resolve `TypedOptions` without turning `T` into a project edge.
 Capitalized receivers in qualified calls are type-reference evidence when no parameter or property
 with that name is declared in the file. This covers object and companion-style calls while keeping a
 same-named value as a local expression instead of inventing a type edge.

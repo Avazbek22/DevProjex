@@ -1099,17 +1099,17 @@ internal sealed partial class KotlinDependencyLanguageAdapter : DependencyLangua
 					 scope.StartIndex <= capture.StartIndex && scope.EndIndex >= capture.EndIndex)) &&
 				!importRanges.Any(range => capture.StartIndex >= range.StartIndex && capture.EndIndex <= range.EndIndex))
 			.SelectMany(capture => TypeNameRegex().Matches(capture.Text)
-				.Select(static match => match.Value)
-				.Where(static name => !PrimitiveTypes.Contains(name))
-				.Select(name =>
+				.Select(static match => (Name: match.Value, match.Index))
+				.Where(static item => !PrimitiveTypes.Contains(item.Name))
+				.Select(item =>
 				{
 					var owners = declarationCaptures
 						.Where(owner => owner.Name != "declaration.function" && Contains(owner, capture))
 						.OrderBy(static owner => owner.StartIndex).Select(static owner => owner.CapturedName!).ToArray();
 					return new ReferenceFact(
 						EvidenceLayer.TypeReference,
-						name,
-						0,
+						item.Name,
+						GenericArityAt(capture.Text, item.Index + item.Name.Length),
 						capture.NodeType,
 						Site(context, capture))
 					{

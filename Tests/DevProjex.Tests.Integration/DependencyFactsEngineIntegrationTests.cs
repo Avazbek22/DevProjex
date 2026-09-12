@@ -469,6 +469,39 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task KotlinGenericReferencesPreserveDeclaredArityWithoutResolvingTypeParameters()
+	{
+		using var fixture = new TemporaryDirectory();
+		var namedT = fixture.CreateFile("src/sample/T.kt", "package sample\nclass T\n");
+		var options = fixture.CreateFile("src/sample/TypedOptions.kt", "package sample\nclass TypedOptions<T>\n");
+		var source = fixture.CreateFile("src/sample/Consumer.kt", """
+			package sample
+			class Consumer {
+			  fun <T : Any> select(options: TypedOptions<T>): T? = null
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[namedT, options, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var typedOptions = Assert.Single(index.Edges, static edge => edge.Source == "src/sample/Consumer.kt" &&
+			edge.Reference == "TypedOptions");
+		Assert.Equal(ResolutionStatus.Resolved, typedOptions.Status);
+		Assert.Equal("src/sample/TypedOptions.kt", typedOptions.Target);
+		Assert.All(index.Edges.Where(static edge => edge.Source == "src/sample/Consumer.kt" && edge.Reference == "T"),
+			static edge =>
+			{
+				Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+				Assert.Contains("type parameter shadows declarations", edge.Reasons);
+			});
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "src/sample/Consumer.kt" &&
+			edge.Target == "src/sample/T.kt");
+	}
+
+	[Fact]
 	public async Task KotlinNavigationDistinguishesOwnersAndRepeatedMembers()
 	{
 		using var fixture = new TemporaryDirectory();
