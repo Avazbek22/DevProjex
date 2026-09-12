@@ -2267,6 +2267,39 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task TypeScriptTypeSyntax_RemainsUnresolvedWithoutAProvenBindingRule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var unrelated = fixture.CreateFile("unrelated.ts", "export type schema = { value: string };\n");
+		var model = fixture.CreateFile("model.ts", "export interface Model { value: string }\n");
+		var consumer = fixture.CreateFile("consumer.ts", """
+			import type { Model } from "./model.js";
+			export const parse: (schema: Model) => Model = (schema) => schema;
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, unrelated, model, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "consumer.ts" &&
+			edge.Layer == EvidenceLayer.ExplicitImport && edge.Status == ResolutionStatus.Resolved &&
+			edge.Target == "model.ts");
+		Assert.DoesNotContain(result.Edges, edge => edge.Source == "consumer.ts" &&
+			edge.Reference == "schema" && edge.Target is not null);
+		Assert.All(result.Edges.Where(edge => edge.Source == "consumer.ts" &&
+			edge.Layer == EvidenceLayer.TypeReference), edge =>
+		{
+			Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+			Assert.Null(edge.Target);
+			Assert.Empty(edge.Candidates);
+			Assert.Equal("TypeScript type binding is not available", Assert.Single(edge.Reasons));
+		});
+	}
+
+	[Fact]
 	public async Task GoFacts_KeepSingleAndGroupedImportPathsAsUnresolvedEvidence()
 	{
 		using var fixture = new TemporaryDirectory();

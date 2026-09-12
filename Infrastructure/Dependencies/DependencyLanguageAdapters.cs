@@ -804,7 +804,8 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 			var value = match.Value;
 			if (!Keywords.Contains(value))
 				yield return new ReferenceFact(EvidenceLayer.TypeReference, value.Split('.').Last(),
-					GenericArityAt(candidate, match.Index + match.Length), capture.NodeType, Site(context, capture));
+					GenericArityAt(candidate, match.Index + match.Length), capture.NodeType, Site(context, capture),
+					Reason: "TypeScript type binding is not available");
 		}
 	}
 

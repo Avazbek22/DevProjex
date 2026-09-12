@@ -91,6 +91,9 @@ existing probe wins, so multiple files found later in the same probe sequence ar
 Module specifiers are read from parsed `import`, `export`, dynamic `import(...)`, and supported
 literal `require(...)` syntax, including side-effect imports. A variable or template expression in
 place of a string literal remains `Unresolved`; it is never treated as a guessed path.
+Type syntax is retained as `Unresolved` evidence because the current resolver does not prove
+TypeScript binding from lexical and imported scopes; it never falls back to an unrelated same-named
+declaration elsewhere in the configured project.
 `.js`, `.jsx`, `.mjs`, and `.cjs` specifiers probe their TypeScript and declaration counterparts before the
 literal JavaScript file; `.jsx` probes `.tsx` first. Query and fragment suffixes on a relative module
 URL remain part of the evidence while its physical path is probed without the suffix. Extensionless imports and directory indexes always probe `.js` and `.jsx`
