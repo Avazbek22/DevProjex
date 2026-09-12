@@ -33,6 +33,7 @@ export function validateSeriesConfiguration(configuration, knownSessionIds = new
     limitsSha256: digest(JSON.stringify(limits)),
     model: configuration.model,
     clientVersion: configuration.clientVersion,
+    toolLoadingMode: configuration.toolLoadingMode,
   });
 }
 

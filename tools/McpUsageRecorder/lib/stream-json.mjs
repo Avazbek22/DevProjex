@@ -10,6 +10,8 @@ export function recordStreamJson(lines, pinnedSession) {
   let observedSessionId = null;
   let observedModel = null;
   let observedClientVersion = null;
+  let activeTurnId = null;
+  const completedUsageTurns = new Set();
 
   for (const line of lines) {
     const sourceEvent = typeof line === 'string' ? parseLine(line) : line;
@@ -58,6 +60,20 @@ export function recordStreamJson(lines, pinnedSession) {
       continue;
     }
 
+    if (sourceEvent.type === 'stream_event' && sourceEvent.event) {
+      const streamEvent = sourceEvent.event;
+      if (streamEvent.type === 'message_start') {
+        activeTurnId = streamEvent.message?.id ?? null;
+        if (activeTurnId && streamEvent.message?.usage) {
+          events.push({ type: 'model.usage', turnId: activeTurnId, usage: streamEvent.message.usage });
+        }
+      } else if (streamEvent.type === 'message_delta' && activeTurnId && streamEvent.usage) {
+        events.push({ type: 'model.usage', turnId: activeTurnId, usage: streamEvent.usage });
+        completedUsageTurns.add(activeTurnId);
+      }
+      continue;
+    }
+
     if (sourceEvent.type === 'user') {
       for (const block of sourceEvent.message?.content ?? []) {
         if (block.type !== 'tool_result' || !block.tool_use_id)
@@ -92,6 +108,8 @@ export function recordStreamJson(lines, pinnedSession) {
     ...report,
     capture: {
       actualUsageObserved: report.turns.length > 0 && report.turns.every(turn => turn.usageRecords > 0),
+      completeOutputUsageObserved: report.turns.length > 0 &&
+        report.turns.every(turn => completedUsageTurns.has(turn.turnId)),
       completedEventObserved: ended,
     },
   };

@@ -109,6 +109,10 @@ test('stream-json keeps parallel calls in one model turn', () => {
       { type: 'tool_use', id: 'call-1', name: 'get_file' },
       { type: 'tool_use', id: 'call-2', name: 'get_tree' },
     ] } },
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'message-1', usage: {
+      input_tokens: 11, cache_creation_input_tokens: 12, cache_read_input_tokens: 13, output_tokens: 0,
+    } } } },
+    { type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 140 } } },
     { type: `${'assi'}stant`, message: { id: 'message-1', usage: {
       input_tokens: 11, cache_creation_input_tokens: 12, cache_read_input_tokens: 13, output_tokens: 14,
     }, content: [] } },
@@ -121,9 +125,10 @@ test('stream-json keeps parallel calls in one model turn', () => {
     inputTokens: 11,
     cacheWriteTokens: 12,
     cacheReadTokens: 13,
-    outputTokens: 14,
+    outputTokens: 140,
   });
   assert.equal(report.capture.actualUsageObserved, true);
+  assert.equal(report.capture.completeOutputUsageObserved, true);
 });
 
 test('stream-json retains usage when the session is interrupted', () => {
@@ -139,6 +144,7 @@ test('stream-json retains usage when the session is interrupted', () => {
   assert.equal(report.totals.usage.inputTokens, 23);
   assert.equal(report.totals.toolCalls, 1);
   assert.equal(report.capture.completedEventObserved, false);
+  assert.equal(report.capture.completeOutputUsageObserved, false);
 });
 
 test('series preflight rejects each unsafe boundary', () => {
