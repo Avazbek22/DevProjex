@@ -1325,7 +1325,7 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolveJavaImport(FileFacts source, ImportFact import)
 		{
-			if (source.LanguageId != LanguageId.Kotlin &&
+			if (source.LanguageId == LanguageId.Php &&
 			    FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			if (import.IsWildcard)
@@ -2266,7 +2266,8 @@ public sealed class DependencyFactsEngine : IDisposable
 						? "no owning .csproj in the manifest"
 						: MissingTypeScriptConfigurationReason, []);
 			}
-			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
+			if (source.LanguageId is not (LanguageId.Java or LanguageId.Kotlin) &&
+			    scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			var isSyntacticallyQualified = reference.IsGlobalQualified || reference.Name.Contains('.') ||
 				reference.Name.Contains("::", StringComparison.Ordinal) || reference.Name.Contains('\\');

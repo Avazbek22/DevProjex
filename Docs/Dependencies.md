@@ -173,7 +173,9 @@ the allowed manifest; static imports walk back to the nearest declaring type. Sa
 types admitted by an exact or wildcard import are visible to type references. Two visible declarations
 remain ambiguous, and a name elsewhere in the repository is never selected merely because it is the
 only match. Bounded `pom.xml`, `build.gradle`, and `build.gradle.kts` files divide a repository into
-source scopes. Literal Maven `groupId`/`artifactId` dependencies and literal Gradle `project(...)`
+source scopes. Package-qualified declarations inside a source scope remain resolvable when Maven
+coordinates are unavailable; the configuration diagnostic then limits only relationships that need
+manifest evidence. Literal Maven `groupId`/`artifactId` dependencies and literal Gradle `project(...)`
 dependencies expose referenced repository scopes transitively. Parent coordinates and Maven dependency
 coordinates are read as data; Gradle scripts are never executed. External artifacts, generated sources,
 annotation-processor output, the JDK class path, interpolated coordinates, and build-script-computed

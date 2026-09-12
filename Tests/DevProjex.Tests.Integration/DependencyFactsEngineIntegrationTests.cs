@@ -573,6 +573,37 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task JavaPackageResolutionSurvivesUnavailableMavenCoordinates()
+	{
+		using var fixture = new TemporaryDirectory();
+		var pom = fixture.CreateFile("pom.xml", "<project><modelVersion>4.0.0</modelVersion></project>");
+		var owner = fixture.CreateFile(
+			"src/main/java/org/example/owner/Owner.java",
+			"package org.example.owner; public class Owner { }");
+		var repository = fixture.CreateFile(
+			"src/main/java/org/example/owner/OwnerRepository.java",
+			"package org.example.owner; public interface OwnerRepository { }");
+		var controller = fixture.CreateFile(
+			"src/main/java/org/example/owner/PetController.java",
+			"package org.example.owner; public class PetController { private final Owner owner; private final OwnerRepository repository; }");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[pom, owner, repository, controller],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Coverage.ConfigurationDiagnostics, static diagnostic =>
+			diagnostic.State == DependencyConfigurationState.UnsupportedSemantics);
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("PetController.java", StringComparison.Ordinal) &&
+			edge.Target is not null && edge.Target.EndsWith("Owner.java", StringComparison.Ordinal) &&
+			edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("PetController.java", StringComparison.Ordinal) &&
+			edge.Target is not null && edge.Target.EndsWith("OwnerRepository.java", StringComparison.Ordinal) &&
+			edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
 	public async Task JavaNavigationDistinguishesNestedOwnersAndOverloads()
 	{
 		using var fixture = new TemporaryDirectory();
