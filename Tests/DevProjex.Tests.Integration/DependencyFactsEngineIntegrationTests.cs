@@ -275,7 +275,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	{
 		using var fixture = new TemporaryDirectory();
 		var gemfile = fixture.CreateFile("Gemfile", "source 'https://example.invalid'\ngem 'ext'\n");
-		var consumer = fixture.CreateFile("lib/consumer.rb", "require 'ext'\nVALUE = Ext::Thing\n");
+		var consumer = fixture.CreateFile("lib/consumer.rb", "VALUE = Ext::Thing\n");
 		var extension = fixture.CreateFile("test/extension.rb", "module Ext::Thing\n  def helper; end\nend\n");
 		using var engine = CreateEngine();
 
