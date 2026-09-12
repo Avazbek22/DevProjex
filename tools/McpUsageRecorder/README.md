@@ -43,3 +43,8 @@ Run the parser tests with:
 ```text
 node --test tools/McpUsageRecorder/tests/recorder.test.mjs
 ```
+
+`series-preflight.mjs` rejects a comparison unless one server, a fresh empty session, the recorder,
+the full build SHA, pinned limits, model, and client version are all present. `stream-json.mjs`
+converts streamed client events into the same report while grouping repeated usage snapshots and
+parallel tool calls by the model response identifier.
