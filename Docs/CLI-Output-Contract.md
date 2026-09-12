@@ -272,7 +272,8 @@ stay on stderr. The shape is:
     "unsupported": 0,
     "extractionFailed": 0,
     "unsupportedLanguages": {},
-    "cSharpErrorNodeKinds": {}
+    "cSharpErrorNodeKinds": {},
+    "partialParseDiagnostics": []
   },
   "searchScope": {
     "files": 3
@@ -289,6 +290,10 @@ has no adapter has empty relationship arrays and a non-null `noFactsReason`.
 
 `coverage` describes the complete effective manifest, not only the seeds. Its
 unsupported-language and C# error-node dictionaries use stable ordinal keys.
+`partialParseDiagnostics` lists files where damaged constructions were discarded while independent
+facts remained usable. Each item contains `path`, `droppedConstructs`, bounded `ranges` with
+one-based `startLine`/`endLine`, and `rangesTruncated`. Text output reports the same data as
+`[Dependency partial parse] path=... · dropped=N · lines=...`.
 `searchScope.files` is the manifest file count after the profile, selected paths,
 Git mode, exclusions, and file-size limit. No field can contain a file or candidate
 outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and

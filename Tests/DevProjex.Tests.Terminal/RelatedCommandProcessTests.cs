@@ -5,6 +5,32 @@ namespace DevProjex.Tests.Terminal;
 public sealed class RelatedCommandProcessTests
 {
 	[Fact]
+	public void RealPublishedCommandReportsCHeaderDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/include/model.h", "typedef struct Model { int value; } Model;\n");
+		workspace.WriteFile("project/src/app.c", "#include \"../include/model.h\"\nModel read_model(void);\n");
+		var result = Run(workspace, "related", "src/app.c", "--project", project, "--direction", "dependencies",
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("include/model.h", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RealPublishedCommandReportsCppHeaderDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/include/model.hpp", "namespace Models { class Model {}; }\n");
+		workspace.WriteFile("project/src/app.cpp", "#include \"../include/model.hpp\"\nModels::Model read_model();\n");
+		var result = Run(workspace, "related", "src/app.cpp", "--project", project, "--direction", "dependencies",
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("include/model.hpp", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RealPublishedCommandReportsJavaManifestDependencies()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -196,6 +222,45 @@ public sealed class RelatedCommandProcessTests
 		AssertRelatedOverlap(dependencies.GetProperty("dependencies"), "Relations/A.cs");
 		var dependents = RunRelatedJson(workspace, project, "Relations/A.cs", "dependents");
 		AssertRelatedOverlap(dependents.GetProperty("dependents"), "Relations/Seed.cs");
+	}
+
+	[Fact]
+	public void PartiallyParsedSourceReportsDroppedConstructionLinesInTextAndJson()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Target.cs", "public sealed class Target { }\n");
+		workspace.WriteFile("project/Consumer.cs", """
+			public sealed class Consumer { Target value; }
+			public static class Broken
+			{
+				public static void Run(
+				{
+					Missing value;
+				}
+			}
+			""");
+
+		var text = Run(workspace, "related", "Consumer.cs", "--project", project,
+			"--format", "text", "--git-mode", "none", "--exclude", "none");
+		var json = Run(workspace, "related", "Consumer.cs", "--project", project,
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, text.ExitCode);
+		Assert.Equal(0, json.ExitCode);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var diagnostic = Assert.Single(document.RootElement.GetProperty("coverage")
+			.GetProperty("partialParseDiagnostics").EnumerateArray());
+		Assert.Equal("Consumer.cs", diagnostic.GetProperty("path").GetString());
+		Assert.Equal(1, diagnostic.GetProperty("droppedConstructs").GetInt32());
+		var range = Assert.Single(diagnostic.GetProperty("ranges").EnumerateArray());
+		var startLine = range.GetProperty("startLine").GetInt32();
+		var endLine = range.GetProperty("endLine").GetInt32();
+		Assert.True(startLine <= 5 && endLine >= 5);
+		var renderedRange = startLine == endLine ? startLine.ToString() : $"{startLine}-{endLine}";
+		Assert.Contains($"[Dependency partial parse] path=Consumer.cs · dropped=1 · lines={renderedRange}",
+			text.StandardOutput, StringComparison.Ordinal);
 	}
 
 	[Fact]

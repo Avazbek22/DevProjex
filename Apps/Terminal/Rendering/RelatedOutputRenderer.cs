@@ -39,6 +39,7 @@ internal static class RelatedOutputRenderer
 					jsonCoverage.UnsupportedLanguages,
 					jsonCoverage.CSharpErrorNodeKinds,
 					jsonCoverage.ExtractionFailedFiles,
+					jsonCoverage.PartialParseDiagnostics,
 					configurationDiagnostics = jsonCoverage.ConfigurationDiagnostics.Select(ProjectConfigurationDiagnostic)
 				},
 				searchScope = new { files = result.Index.Files.Count }
@@ -82,6 +83,15 @@ internal static class RelatedOutputRenderer
 		foreach (var path in coverage.ExtractionFailedFiles.Take(8))
 			await writer.WriteLineAsync($"[Dependency extraction failed] path={TerminalTextEscaping.EscapeSingleLine(path)}")
 				.ConfigureAwait(false);
+		foreach (var diagnostic in coverage.PartialParseDiagnostics.Take(8))
+		{
+			var ranges = string.Join(',', diagnostic.Ranges.Select(static range =>
+				range.StartLine == range.EndLine ? range.StartLine.ToString() : $"{range.StartLine}-{range.EndLine}"));
+			if (diagnostic.RangesTruncated) ranges += ",...";
+			await writer.WriteLineAsync(
+				$"[Dependency partial parse] path={TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)} · " +
+				$"dropped={diagnostic.DroppedConstructs} · lines={ranges}").ConfigureAwait(false);
+		}
 	}
 
 	private static async Task WriteSection(

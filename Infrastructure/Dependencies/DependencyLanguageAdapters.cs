@@ -39,7 +39,8 @@ internal sealed record DependencyExtractionContext(
 	bool HasSyntaxErrors,
 	IReadOnlyDictionary<string, int> ErrorNodeKinds,
 	IReadOnlyList<DependencySyntaxCapture> Declarations,
-	IReadOnlyList<DependencySyntaxCapture> References)
+	IReadOnlyList<DependencySyntaxCapture> References,
+	DependencyPartialParseDiagnostic? PartialParse = null)
 {
 	public DependencyAdapterWorkCounter Work { get; } = new();
 }
@@ -908,9 +909,6 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(limits);
-		if (context.HasSyntaxErrors)
-			return Failed(context, "syntax tree contains errors");
-
 		var packageName = context.Declarations
 			.Where(static capture => capture.Name == "context.namespace")
 			.Select(static capture => capture.CapturedName)
@@ -1039,8 +1037,6 @@ internal sealed partial class KotlinDependencyLanguageAdapter : DependencyLangua
 
 	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
 	{
-		if (context.HasSyntaxErrors)
-			return Failed(context, "syntax tree contains errors");
 		var packageName = context.Declarations
 			.Where(static capture => capture.Name == "context.namespace")
 			.Select(static capture => capture.CapturedName)
@@ -1154,8 +1150,6 @@ internal sealed class RubyDependencyLanguageAdapter : DependencyLanguageAdapter
 
 	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
 	{
-		if (context.HasSyntaxErrors)
-			return Failed(context, "syntax tree contains errors");
 		var declarationCaptures = context.Declarations
 			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName))
 			.ToArray();
@@ -1242,7 +1236,6 @@ internal sealed class PhpDependencyLanguageAdapter : DependencyLanguageAdapter
 
 	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
 	{
-		if (context.HasSyntaxErrors) return Failed(context, "syntax tree contains errors");
 		var namespaceName = context.Declarations.Where(static capture => capture.Name == "context.namespace")
 			.Select(static capture => capture.CapturedName).FirstOrDefault(static name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty;
 		var declarationCaptures = context.Declarations
@@ -1289,6 +1282,131 @@ internal sealed class PhpDependencyLanguageAdapter : DependencyLanguageAdapter
 		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
 }
 
+internal sealed class CDependencyLanguageAdapter : DependencyLanguageAdapter
+{
+	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
+		new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+		{
+			["declaration.c_function"] = SymbolKind.Function,
+			["declaration.c_struct"] = SymbolKind.Struct,
+			["declaration.c_union"] = SymbolKind.Struct,
+			["declaration.c_enum"] = SymbolKind.Enum,
+			["declaration.c_typedef"] = SymbolKind.Class
+		};
+
+	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(limits);
+		var declarations = context.Declarations
+			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName))
+			.Select(capture => new DeclarationFact(
+				new SymbolIdentity(
+					context.ScopeId,
+					context.LanguageId,
+					Kinds[capture.Name],
+					$"{context.RelativePath}#{capture.CapturedName}",
+					0,
+					capture.IsFileLocal ? context.RelativePath : null),
+				[Site(context, capture)]))
+			.ToArray();
+		var imports = context.References
+			.Where(static capture => capture.Name == "import.c" && capture.ImportSyntax is not null)
+			.Select(capture => new ImportFact(
+				capture.ImportSyntax!.Specifier,
+				capture.ImportSyntax.Bindings.Single().Name,
+				null,
+				false,
+				0,
+				Site(context, capture)))
+			.ToArray();
+		var declaredAt = context.Declarations
+			.Where(static capture => capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex)
+			.ToHashSet();
+		var references = Distinct(context.References
+			.Where(capture => capture.Name == "reference.type" &&
+				!declaredAt.Contains(capture.StartIndex) &&
+				!PrimitiveTypes.Contains(capture.Text))
+			.Select(capture => new ReferenceFact(
+				EvidenceLayer.TypeReference,
+				capture.Text,
+				0,
+				capture.NodeType,
+				Site(context, capture))
+			{
+				SourceStartIndex = capture.StartIndex
+			}));
+		if (declarations.Length + imports.Length + references.Count > limits.MaximumFactsPerFile)
+			return Failed(context, "fact limit exceeded");
+		return Complete(context, declarations, imports, references);
+	}
+
+	private static readonly HashSet<string> PrimitiveTypes = new(StringComparer.Ordinal)
+	{
+		"void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "_Bool"
+	};
+
+	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(
+		context.RelativePath, context.ScopeId, context.LanguageId, context.ContentFingerprint, context.Source.Length,
+		DependencyFileStatus.ExtractionFailed, reason, context.HasSyntaxErrors, context.ErrorNodeKinds,
+		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+}
+
+internal sealed class CppDependencyLanguageAdapter : DependencyLanguageAdapter
+{
+	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds = new Dictionary<string, SymbolKind>(StringComparer.Ordinal)
+	{
+		["declaration.cpp_class"] = SymbolKind.Class,
+		["declaration.cpp_struct"] = SymbolKind.Struct,
+		["declaration.cpp_union"] = SymbolKind.Struct,
+		["declaration.cpp_enum"] = SymbolKind.Enum,
+		["declaration.cpp_function"] = SymbolKind.Function
+	};
+
+	public override FileFacts Extract(DependencyExtractionContext context, DependencyFactsLimits limits)
+	{
+		var namespaceCaptures = context.Declarations.Where(static capture =>
+			capture.Name == "context.namespace" && !string.IsNullOrWhiteSpace(capture.CapturedName)).ToArray();
+		var declarationCaptures = context.Declarations.Where(capture =>
+			Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName)).ToArray();
+		var declarations = declarationCaptures.Select(capture =>
+		{
+			var owners = namespaceCaptures.Concat(declarationCaptures)
+				.Where(candidate => candidate.StartIndex < capture.StartIndex && candidate.EndIndex >= capture.EndIndex)
+				.OrderBy(static candidate => candidate.StartIndex).Select(static candidate => candidate.CapturedName!).ToArray();
+			var qualified = string.Join("::", owners.Append(capture.CapturedName!));
+			return new DeclarationFact(new SymbolIdentity(context.ScopeId, context.LanguageId, Kinds[capture.Name],
+				qualified, 0, capture.IsFileLocal ? context.RelativePath : null), [Site(context, capture)])
+			{
+				ContainingNamespace = string.Join("::", namespaceCaptures.Where(candidate =>
+					candidate.StartIndex < capture.StartIndex && candidate.EndIndex >= capture.EndIndex)
+					.OrderBy(static candidate => candidate.StartIndex).Select(static candidate => candidate.CapturedName!)),
+				ContainingType = owners.Length == 0 ? null : string.Join("::", owners)
+			};
+		}).ToArray();
+		var imports = context.References.Where(static capture => capture.Name == "import.cpp" && capture.ImportSyntax is not null)
+			.Select(capture => new ImportFact(capture.ImportSyntax!.Specifier, capture.ImportSyntax.Bindings.Single().Name,
+				null, false, 0, Site(context, capture))).ToArray();
+		var declaredAt = declarationCaptures.Where(static capture => capture.CapturedNameStartIndex >= 0)
+			.Select(static capture => capture.CapturedNameStartIndex).ToHashSet();
+		var references = Distinct(context.References.Where(capture => capture.Name == "reference.type" &&
+			!declaredAt.Contains(capture.StartIndex)).Select(capture => new ReferenceFact(
+			EvidenceLayer.TypeReference, capture.Text, 0, capture.NodeType, Site(context, capture))
+		{
+			SourceStartIndex = capture.StartIndex
+		}));
+		if (declarations.Length + imports.Length + references.Count > limits.MaximumFactsPerFile)
+			return Failed(context, "fact limit exceeded");
+		return Complete(context, declarations, imports, references);
+	}
+
+	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(
+		context.RelativePath, context.ScopeId, context.LanguageId, context.ContentFingerprint, context.Source.Length,
+		DependencyFileStatus.ExtractionFailed, reason, context.HasSyntaxErrors, context.ErrorNodeKinds,
+		[], [], [], [], new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+}
+
 internal sealed class RustDependencyLanguageAdapter : DependencyLanguageAdapter
 {
 	private static readonly IReadOnlyDictionary<string, SymbolKind> Kinds =
@@ -1306,9 +1424,6 @@ internal sealed class RustDependencyLanguageAdapter : DependencyLanguageAdapter
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(limits);
-		if (context.HasSyntaxErrors)
-			return Failed(context, "syntax tree contains errors");
-
 		var fileModule = ModulePath(context.RelativePath);
 		var allDeclarations = context.Declarations
 			.Where(capture => Kinds.ContainsKey(capture.Name) && !string.IsNullOrWhiteSpace(capture.CapturedName))

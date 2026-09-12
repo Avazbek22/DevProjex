@@ -11,6 +11,150 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyFactsEngineIntegrationTests
 {
 	[Fact]
+	public async Task CFactsResolveRepositoryHeadersAndNamedTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var header = fixture.CreateFile("include/model.h", "typedef struct Model { int value; } Model;\n");
+		var source = fixture.CreateFile("src/app.c", "#include \"../include/model.h\"\nstatic Model make(Model value) { return value; }\n");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [header, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "src/app.c");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/app.c" &&
+			edge.Target == "include/model.h" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName == "src/app.c#make" && declaration.Identity.FileScope == "src/app.c");
+		Assert.Contains(facts.References, static reference => reference.Name == "Model");
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.EndsWith("#value", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task CNavigationDistinguishesEqualFieldsAcrossOwners()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("members.c", "struct A { int value; }; struct B { int value; }; int run(void) { return 1; }");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations.Select(static item => item.Name).ToArray();
+		Assert.Contains("members.c#A#value", names);
+		Assert.Contains("members.c#B#value", names);
+		Assert.Contains("members.c#run", names);
+	}
+
+	[Fact]
+	public async Task CCMakeIncludeDirectoriesResolveOnlyManifestHeaders()
+	{
+		using var fixture = new TemporaryDirectory();
+		var configuration = fixture.CreateFile("CMakeLists.txt", "add_executable(app src/app.c)\ntarget_include_directories(app PRIVATE libs/include)\n");
+		var header = fixture.CreateFile("libs/include/model.h", "typedef struct Model { int value; } Model;\n");
+		var source = fixture.CreateFile("src/app.c", "#include <model.h>\nModel read_model(void);\n");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [configuration, header, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/app.c" &&
+			edge.Target == "libs/include/model.h" && edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task CDamagedDeclarationDoesNotHideIndependentFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("partial.c", "int before(void) { return 1; }\nUNITTEST void parse(void);\nint after(void) { return before(); }\n");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var facts = Assert.Single(index.Files);
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.True(facts.HasSyntaxErrors);
+		Assert.Contains(facts.Declarations, static declaration => declaration.Identity.QualifiedName.EndsWith("#before", StringComparison.Ordinal));
+		Assert.Contains(facts.Declarations, static declaration => declaration.Identity.QualifiedName.EndsWith("#after", StringComparison.Ordinal));
+		Assert.DoesNotContain(facts.Declarations, static declaration => declaration.Identity.QualifiedName.EndsWith("#parse", StringComparison.Ordinal));
+		Assert.NotNull(facts.PartialParse);
+	}
+
+	[Fact]
+	public async Task CppFactsResolveHeadersInheritanceAndQualifiedTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var header = fixture.CreateFile("include/model.hpp", "namespace Models { class Base {}; class Model : public Base {}; }\n");
+		var source = fixture.CreateFile("src/app.cpp", "#include \"../include/model.hpp\"\nModels::Model make(Models::Model value) { return value; }\n");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [header, source], cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/app.cpp" && edge.Target == "include/model.hpp");
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "Models::Model");
+		Assert.Contains(index.Files.Single(static file => file.Path == "src/app.cpp").References,
+			static reference => reference.Name.Contains("Model", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task CppNavigationDistinguishesOwnersAndOverloads()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("members.cpp", "namespace Sample { class A { int run(int value) { return value; } int run() { return 0; } }; class B { int run() { return 1; } }; }");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations.Where(static item => item.Kind == NavigationSymbolKind.Method)
+			.Select(static item => item.Name).ToArray();
+		Assert.Contains("Sample::A::run", names);
+		Assert.Contains("Sample::A::run#2", names);
+		Assert.Contains("Sample::B::run", names);
+	}
+
+	[Fact]
+	public async Task CppNavigationNamesQualifiedDefinitionsOperatorsAndLocalLambdasPrecisely()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("members.cpp", """
+			namespace Sample {
+			class Buffer { public: void close(); Buffer& operator|=(Buffer); };
+			void Buffer::close() { auto local = [] { return 1; }; }
+			Buffer& Buffer::operator|=(Buffer other) { return *this; }
+			}
+			""");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations.Select(static item => item.Name).ToArray();
+
+		Assert.Contains("Sample::Buffer::close", names);
+		Assert.Contains("Sample::Buffer::operator|=", names);
+		Assert.DoesNotContain(names, static name => name.EndsWith("::local", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task CNavigationDoesNotPromoteFunctionLocalsToFileMembers()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("members.c", "int extract(void) { int rc = 0; return rc; }\n");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations.Select(static item => item.Name).ToArray();
+
+		Assert.Contains("members.c#extract", names);
+		Assert.DoesNotContain("members.c#extract#rc", names);
+	}
+
+	[Fact]
+	public async Task CppHeaderDetectionUsesCppGrammarAndKeepsIndependentFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var valid = fixture.CreateFile("valid.h", "namespace Sample { class Model { public: int value; }; }\n");
+		var partial = fixture.CreateFile("partial.hpp", "FMT_BEGIN_EXPORT class Parsed {};\nclass Stable {};\n");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [valid, partial], cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Equal(LanguageId.Cpp, index.Files.Single(static file => file.Path == "valid.h").LanguageId);
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "Sample::Model");
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "Stable");
+		var partialFacts = index.Files.Single(static file => file.Path == "partial.hpp");
+		Assert.Equal(DependencyFileStatus.Supported, partialFacts.Status);
+		Assert.True(partialFacts.HasSyntaxErrors);
+		Assert.NotNull(partialFacts.PartialParse);
+	}
+
+	[Fact]
 	public async Task PhpFactsResolveUsesInheritanceAndNamespacedTypes()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -218,7 +362,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
-	public async Task RubySyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	public async Task RubySyntaxDamageWithoutIndependentFactsRemainsAnExtractionFailure()
 	{
 		using var fixture = new TemporaryDirectory();
 		var source = fixture.CreateFile("broken.rb", "class Broken\n  def run(\nend\n");
@@ -231,6 +375,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		var facts = Assert.Single(index.Files);
 		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.True(facts.HasSyntaxErrors);
+		Assert.NotNull(facts.PartialParse);
 		Assert.Empty(index.Declarations);
 		Assert.Empty(index.Edges);
 	}
@@ -543,7 +689,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
-	public async Task KotlinSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	public async Task KotlinSyntaxDamageWithoutIndependentFactsRemainsAnExtractionFailure()
 	{
 		using var fixture = new TemporaryDirectory();
 		var source = fixture.CreateFile("Broken.kt", "package sample\nclass Broken(val value: Missing");
@@ -557,6 +703,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var facts = Assert.Single(index.Files);
 		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
 		Assert.Equal("syntax tree contains errors", facts.StatusReason);
+		Assert.True(facts.HasSyntaxErrors);
+		Assert.NotNull(facts.PartialParse);
 		Assert.Empty(index.Declarations);
 		Assert.Empty(index.Edges);
 	}
@@ -710,7 +858,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
-	public async Task RustSyntaxErrorsFailClosedWithoutRecoveredEdges()
+	public async Task RustSyntaxDamageKeepsOnlyIndependentModuleEvidence()
 	{
 		using var fixture = new TemporaryDirectory();
 		var source = fixture.CreateFile("src/lib.rs", "mod missing; struct Broken {");
@@ -722,9 +870,13 @@ public sealed class DependencyFactsEngineIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		var facts = Assert.Single(index.Files);
-		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.True(facts.HasSyntaxErrors);
+		Assert.NotNull(facts.PartialParse);
 		Assert.Empty(index.Declarations);
-		Assert.Empty(index.Edges);
+		var edge = Assert.Single(index.Edges);
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
 	}
 
 	[Fact]
@@ -884,7 +1036,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
-	public async Task JavaSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	public async Task JavaSyntaxDamageWithoutIndependentFactsRemainsAnExtractionFailure()
 	{
 		using var fixture = new TemporaryDirectory();
 		var source = fixture.CreateFile("Broken.java", "package sample; class Broken { Missing value");
@@ -898,6 +1050,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var facts = Assert.Single(index.Files);
 		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
 		Assert.Equal("syntax tree contains errors", facts.StatusReason);
+		Assert.True(facts.HasSyntaxErrors);
+		Assert.NotNull(facts.PartialParse);
 		Assert.Empty(index.Declarations);
 		Assert.Empty(index.Edges);
 	}

@@ -11,7 +11,7 @@ using Tomlyn.Model;
 
 namespace DevProjex.Infrastructure.Dependencies;
 
-public sealed class FileDependencyConfigurationProvider : IDependencyConfigurationProvider
+public sealed partial class FileDependencyConfigurationProvider : IDependencyConfigurationProvider
 {
 	internal const int MaximumConfigurationBytes = 4 * 1024 * 1024;
 	internal const int MaximumTypeScriptExtendsDepth = 8;
@@ -88,6 +88,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var rustConfigFiles = new List<string>();
 		var rubyConfigFiles = new List<string>();
 		var composerConfigFiles = new List<string>();
+		var cConfigFiles = new List<string>();
 		foreach (var path in manifest.Order(StringComparer.Ordinal))
 		{
 			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
@@ -99,6 +100,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			if (Path.GetFileName(path).Equals("Gemfile", StringComparison.OrdinalIgnoreCase) ||
 			    path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase)) rubyConfigFiles.Add(path);
 			if (Path.GetFileName(path).Equals("composer.json", StringComparison.OrdinalIgnoreCase)) composerConfigFiles.Add(path);
+			if (Path.GetFileName(path).Equals("CMakeLists.txt", StringComparison.OrdinalIgnoreCase)) cConfigFiles.Add(path);
 		}
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
@@ -573,11 +575,43 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			});
 		}
 
+		foreach (var configPath in cConfigFiles)
+		{
+			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+			AddFingerprint(configPath, snapshot);
+			var directory = Path.GetDirectoryName(configPath)!;
+			var scopeId = "c:" + PortableRelative(root, configPath);
+			var includeDirectories = snapshot.State == DependencyConfigurationState.Valid
+				? ParseCIncludeDirectories(root, directory, snapshot.Content)
+				: [];
+			AddDiagnostic(configPath, snapshot.State, snapshot.Reason, scopeId);
+			scopes.Add(new DependencyScopeDescriptor(
+				scopeId, directory, LanguageId.C, [], null, false,
+				new Dictionary<string, IReadOnlyList<string>>(), null,
+				new HashSet<string>(), [], true)
+			{
+				ConfigurationState = snapshot.State,
+				ConfigurationDiagnostic = snapshot.Reason,
+				CIncludeDirectories = includeDirectories
+			});
+			scopes.Add(new DependencyScopeDescriptor(
+				"cpp:" + PortableRelative(root, configPath), directory, LanguageId.Cpp, [], null, false,
+				new Dictionary<string, IReadOnlyList<string>>(), null,
+				new HashSet<string>(), [], true)
+			{
+				ConfigurationState = snapshot.State,
+				ConfigurationDiagnostic = snapshot.Reason,
+				CIncludeDirectories = includeDirectories
+			});
+		}
+
 		MarkAmbiguousScopeOwnership(scopes, diagnostics, root);
 
 		AddFallbackScope(scopes, root, LanguageId.CSharp);
 		AddFallbackScope(scopes, root, LanguageId.TypeScript);
 		AddFallbackScope(scopes, root, LanguageId.Python);
+		AddFallbackScope(scopes, root, LanguageId.C);
+		AddFallbackScope(scopes, root, LanguageId.Cpp);
 		var packageMaps = new Dictionary<string, PackageMapDescriptor>(StringComparer.Ordinal);
 		foreach (var packagePath in packageFiles)
 		{
@@ -1576,6 +1610,31 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	{
 		public static PythonConfiguration Default { get; } = new(new HashSet<string>(), null);
 	}
+
+	private static IReadOnlyList<string> ParseCIncludeDirectories(string root, string directory, string content)
+	{
+		var results = new HashSet<string>(PathComparer);
+		foreach (Match command in CIncludeDirectoriesRegex().Matches(content))
+		{
+			var body = command.Groups["body"].Value;
+			foreach (Match tokenMatch in CMakeTokenRegex().Matches(body))
+			{
+				var token = tokenMatch.Groups["quoted"].Success
+					? tokenMatch.Groups["quoted"].Value
+					: tokenMatch.Groups["plain"].Value;
+				if (token.Length == 0 || token is "PUBLIC" or "PRIVATE" or "INTERFACE" || token.Contains('$')) continue;
+				var candidate = Path.GetFullPath(Path.Combine(directory, token.Replace('/', Path.DirectorySeparatorChar)));
+				if (IsWithin(root, candidate)) results.Add(candidate);
+			}
+		}
+		return results.Order(StringComparer.Ordinal).ToArray();
+	}
+
+	[GeneratedRegex(@"target_include_directories\s*\([^\s\)]+(?<body>[^\)]*)\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+	private static partial Regex CIncludeDirectoriesRegex();
+
+	[GeneratedRegex("\\\"(?<quoted>[^\\\"]+)\\\"|(?<plain>[^\\s]+)", RegexOptions.CultureInvariant)]
+	private static partial Regex CMakeTokenRegex();
 	private sealed record JavaProjectConfiguration(string ProjectKey, IReadOnlyList<string> ProjectReferences)
 	{
 		public static JavaProjectConfiguration Empty { get; } = new(string.Empty, []);
