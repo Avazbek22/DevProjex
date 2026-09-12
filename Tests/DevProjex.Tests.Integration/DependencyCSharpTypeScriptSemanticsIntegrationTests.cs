@@ -124,7 +124,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task UnterminatedConditionalRegionDegradesOnlyTheFileTail()
+	public async Task UnterminatedConditionalRegionDropsFactsFromTheDamagedContainingType()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -147,13 +147,9 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 			[project, before, tail, source],
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Contains(result.Edges, edge =>
-			edge.Source == "Consumer.cs" && edge.Reference == "BeforeValue" &&
-			edge.Status == ResolutionStatus.Resolved && edge.Target == "BeforeValue.cs");
-		var conditional = Assert.Single(result.Edges, edge =>
-			edge.Source == "Consumer.cs" && edge.Reference == "TailValue");
-		Assert.Equal(ResolutionStatus.Unresolved, conditional.Status);
-		Assert.Equal("C# preprocessor configuration is not available", Assert.Single(conditional.Reasons));
+		Assert.DoesNotContain(result.Edges, edge => edge.Source == "Consumer.cs");
+		Assert.Contains(result.Coverage.PartialParseDiagnostics,
+			diagnostic => diagnostic.Path == "Consumer.cs" && diagnostic.DroppedConstructs > 0);
 	}
 
 	[Fact]

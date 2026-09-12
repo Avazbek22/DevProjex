@@ -193,7 +193,7 @@ public sealed class RelatedCommandProcessTests
 
 		Assert.True(result.ExitCode == 0, result.StandardError + result.StandardOutput);
 		Assert.Contains("pkg/sub.py", result.StandardOutput, StringComparison.Ordinal);
-		Assert.DoesNotContain("unresolved", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("\"unresolved\": 0", result.StandardOutput, StringComparison.Ordinal);
 	}
 
 	[Theory]
