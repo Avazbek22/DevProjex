@@ -238,6 +238,40 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RubyGemspecReceiversExposeDeclaredRepositoryDependencies()
+	{
+		using var fixture = new TemporaryDirectory();
+		var rootGemspec = fixture.CreateFile("sinatra.gemspec", "Gem::Specification.new 'sinatra', '1.0' do |s|\nend\n");
+		var indifferentHash = fixture.CreateFile("lib/sinatra/indifferent_hash.rb", "module Sinatra\n  class IndifferentHash\n  end\nend\n");
+		var contribGemspec = fixture.CreateFile("sinatra-contrib/sinatra-contrib.gemspec", """
+			Gem::Specification.new do |s|
+			  metadata.name = 'not-the-package'
+			  s.name = 'sinatra-contrib'
+			  s.add_dependency 'sinatra'
+			end
+			""");
+		var consumer = fixture.CreateFile("sinatra-contrib/lib/sinatra/config_file.rb", """
+			module Sinatra
+			  module ConfigFile
+			    VALUE = IndifferentHash.new
+			  end
+			end
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[rootGemspec, indifferentHash, contribGemspec, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge =>
+			edge.Source == "sinatra-contrib/lib/sinatra/config_file.rb" &&
+			edge.Target == "lib/sinatra/indifferent_hash.rb" &&
+			edge.Status == ResolutionStatus.Resolved &&
+			edge.CrossScope);
+	}
+
+	[Fact]
 	public async Task RubySyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
 	{
 		using var fixture = new TemporaryDirectory();

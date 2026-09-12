@@ -252,9 +252,13 @@ owned class or module does not define the referenced entity inside the project. 
 `require` with no repository target provides the same evidence for its matching constant root. Ruby code in Gemfiles
 or gemspecs is never executed. Installed gems without a literal declaration, generated
 load paths, interpolated require strings, autoload hooks, and runtime constant mutation are not
-inferred and remain unresolved. Because Ruby containers can be reopened, a class or module identity
-declared in more than one repository file remains unresolved rather than creating a dependency on
-every file that reopens it. References to a uniquely declared nested entity still resolve normally.
+inferred and remain unresolved. Literal gem names supplied to `Gem::Specification.new` or assigned
+to that block's receiver identify repository gem scopes. Literal `add_dependency` and
+`add_runtime_dependency` calls expose a uniquely matching repository gem to that scope; assignments
+to unrelated receivers are not package-name evidence. Because Ruby containers can be reopened, a
+class or module identity declared in more than one repository file remains unresolved rather than
+creating a dependency on every file that reopens it. References to a uniquely declared nested entity
+still resolve normally.
 
 Ruby navigation includes nested modules and classes, ordinary methods, singleton methods, instance
 variable assignments, and lambdas bound by assignment. Names use `::` for nesting, `#` for ordinary
