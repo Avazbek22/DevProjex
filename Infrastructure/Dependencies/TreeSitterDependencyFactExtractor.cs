@@ -1145,9 +1145,10 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		}
 		if (captureName == "import.rust")
 		{
-			var text = materialization.Read(node).Trim();
-			if (!text.StartsWith("use ", StringComparison.Ordinal) || !text.EndsWith(';')) return null;
-			return new DependencyImportSyntax(text["use ".Length..^1].Trim(), 0, []);
+			var argument = node.GetChildForField("argument");
+			return argument is null
+				? new DependencyImportSyntax(string.Empty, 0, [], HasLiteralSpecifier: false)
+				: new DependencyImportSyntax(materialization.Read(argument), 0, []);
 		}
 		if (captureName == "import.rust_module")
 		{

@@ -1361,6 +1361,18 @@ internal sealed class RustDependencyLanguageAdapter : DependencyLanguageAdapter
 		string fileModule)
 	{
 		if (capture.ImportSyntax is not { } syntax) yield break;
+		if (!syntax.HasLiteralSpecifier)
+		{
+			yield return new ImportFact(
+				string.Empty,
+				null,
+				null,
+				false,
+				0,
+				Site(context, capture),
+				Reason: "Rust use declaration is unsupported");
+			yield break;
+		}
 		if (capture.Name == "import.rust_module")
 		{
 			yield return new ImportFact("./" + syntax.Specifier, "$module", null, false, 0, Site(context, capture));

@@ -1294,16 +1294,21 @@ public sealed class DependencyFactsEngine : IDisposable
 					StringComparer.Ordinal);
 		}
 
-		public DependencyEdge ResolveImport(FileFacts source, ImportFact import) => source.LanguageId switch
+		public DependencyEdge ResolveImport(FileFacts source, ImportFact import)
 		{
-			LanguageId.TypeScript or LanguageId.JavaScript or LanguageId.Tsx => ResolveTypeScriptImport(source, import),
-			LanguageId.Python => ResolvePythonImport(source, import),
-			LanguageId.Java or LanguageId.Kotlin or LanguageId.Php => ResolveJavaImport(source, import),
-			LanguageId.Rust => ResolveRustImport(source, import),
-			LanguageId.Ruby => ResolveRubyImport(source, import),
-			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
-				"explicit imports are context, not dependency edges, for this language", [])
-		};
+			if (!string.Equals(import.Reason, "not resolved yet", StringComparison.Ordinal))
+				return Edge(source, import, ResolutionStatus.Unresolved, null, import.Reason, []);
+			return source.LanguageId switch
+			{
+				LanguageId.TypeScript or LanguageId.JavaScript or LanguageId.Tsx => ResolveTypeScriptImport(source, import),
+				LanguageId.Python => ResolvePythonImport(source, import),
+				LanguageId.Java or LanguageId.Kotlin or LanguageId.Php => ResolveJavaImport(source, import),
+				LanguageId.Rust => ResolveRustImport(source, import),
+				LanguageId.Ruby => ResolveRubyImport(source, import),
+				_ => Edge(source, import, ResolutionStatus.Unresolved, null,
+					"explicit imports are context, not dependency edges, for this language", [])
+			};
+		}
 
 		private DependencyEdge ResolveJavaImport(FileFacts source, ImportFact import)
 		{

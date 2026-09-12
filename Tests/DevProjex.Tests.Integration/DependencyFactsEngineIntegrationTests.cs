@@ -414,6 +414,39 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RustUseVisibilityAndLayoutDoNotHideRepositoryImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var root = fixture.CreateFile("src/lib.rs", "mod model; mod facade;");
+		var model = fixture.CreateFile("src/model.rs", "pub struct Plain; pub struct Public; pub struct CratePublic; pub struct Alias; pub struct Grouped; pub struct Commented;");
+		var facade = fixture.CreateFile("src/facade.rs", """
+			use crate::model::Plain;
+			pub use crate::model::Public;
+			pub(crate) use crate::model::CratePublic;
+			pub use crate::model::Alias as Renamed;
+			pub use crate::model::{Grouped, Plain as GroupAlias};
+			pub /* visibility and declaration may be separated */ use crate::model::Commented;
+			pub struct Facade(Plain, Public, CratePublic, Renamed, Grouped, GroupAlias, Commented);
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[root, model, facade],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var imports = index.Files.Single(static file => file.Path == "src/facade.rs").Imports;
+		Assert.Contains(imports, static import => import.Specifier == "model::Plain" && import.Alias is null);
+		Assert.Contains(imports, static import => import.Specifier == "model::Public" && import.Alias is null);
+		Assert.Contains(imports, static import => import.Specifier == "model::CratePublic" && import.Alias is null);
+		Assert.Contains(imports, static import => import.Specifier == "model::Alias" && import.Alias == "Renamed");
+		Assert.Contains(imports, static import => import.Specifier == "model::Grouped" && import.Alias is null);
+		Assert.Contains(imports, static import => import.Specifier == "model::Plain" && import.Alias == "GroupAlias");
+		Assert.Contains(imports, static import => import.Specifier == "model::Commented" && import.Alias is null);
+		Assert.All(imports, static import => Assert.Equal(ResolutionStatus.Resolved, import.Status));
+	}
+
+	[Fact]
 	public async Task RustCargoPathDependenciesExposeOnlyDeclaredRepositoryScopes()
 	{
 		using var fixture = new TemporaryDirectory();

@@ -190,8 +190,9 @@ edges.
 
 Rust source files contribute modules, structs, enums, unions, traits, type aliases, and free
 functions under the module path implied by their repository path and inline `mod` nesting. A
-literal `mod name;` resolves to `name.rs` or `name/mod.rs` in the same directory. `use` trees,
-aliases, `crate`, `self`, and bounded `super` prefixes are expanded without executing code; `crate::`
+literal `mod name;` resolves to `name.rs` or `name/mod.rs` in the same directory. Private, `pub`, and
+restricted-visibility `use` trees, aliases, `crate`, `self`, and bounded `super` prefixes are expanded
+without executing code; `crate::`
 is resolved exclusively inside the nearest owning Cargo package, while exact
 items resolve only to matching declarations in the allowed manifest, while glob imports provide
 visibility context without inventing a module edge. A bounded `Cargo.toml` supplies the crate name
