@@ -721,6 +721,35 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RustLocalDeclarationWinsOverSameNameInReferencedCrate()
+	{
+		using var fixture = new TemporaryDirectory();
+		var workspace = fixture.CreateFile("Cargo.toml", "[workspace]\nmembers = [\"crates/first\", \"crates/second\"]\n");
+		var firstManifest = fixture.CreateFile(
+			"crates/first/Cargo.toml",
+			"[package]\nname = \"first\"\nversion = \"1.0.0\"\n[dependencies]\nsecond = { path = \"../second\" }\n");
+		var firstRoot = fixture.CreateFile(
+			"crates/first/src/lib.rs",
+			"pub struct Error; pub struct ResultValue { error: Error }");
+		var secondManifest = fixture.CreateFile(
+			"crates/second/Cargo.toml",
+			"[package]\nname = \"second\"\nversion = \"1.0.0\"\n");
+		var secondRoot = fixture.CreateFile("crates/second/src/lib.rs", "pub struct Error;");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[workspace, firstManifest, firstRoot, secondManifest, secondRoot],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "crates/first/src/lib.rs" && edge.Reference == "Error");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("crates/first/src/lib.rs", edge.Target);
+		Assert.DoesNotContain("crates/second/src/lib.rs", edge.Candidates);
+	}
+
+	[Fact]
 	public async Task JavaTypeParametersShadowOnlyTheirLexicalScopes()
 	{
 		using var fixture = new TemporaryDirectory();

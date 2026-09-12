@@ -201,7 +201,8 @@ is resolved exclusively inside the nearest owning Cargo package, while exact
 items resolve only to matching declarations in the allowed manifest, while glob imports provide
 visibility context without inventing a module edge. A bounded `Cargo.toml` supplies the crate name
 and literal local `path` dependencies, including dev and build dependencies. Referenced repository
-crates are visible transitively. Registry crates, build-script output, generated modules, target-
+crates are visible transitively, but an unqualified declaration in the source file's own module and
+Cargo package takes precedence over an equal name in a referenced package. Registry crates, build-script output, generated modules, target-
 specific dependency tables, macro expansion, custom source roots, and absolute dependency paths are
 not inferred and remain unresolved.
 

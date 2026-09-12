@@ -2609,6 +2609,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			DeclarationFact[] candidates)
 		{
 			var sameModule = candidates.Where(candidate =>
+				string.Equals(candidate.Identity.ScopeId, source.ScopeId, StringComparison.Ordinal) &&
 				string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();
 			if (sameModule.Length > 0) return sameModule;
 			return candidates.Where(candidate => source.GlobalContextNamespaces.Contains(
