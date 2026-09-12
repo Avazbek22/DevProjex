@@ -443,7 +443,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	{
 		using var fixture = new TemporaryDirectory();
 		var workspace = fixture.CreateFile("Cargo.toml", "[workspace]\nmembers = [\"crates/ignore\", \"crates/globset\"]\n");
-		var ignoreManifest = fixture.CreateFile("crates/ignore/Cargo.toml", "[package]\nname = \"ignore\"\nversion = \"1.0.0\"\n");
+		var ignoreManifest = fixture.CreateFile("crates/ignore/Cargo.toml", "[package]\nname = \"ignore\"\nversion = \"1.0.0\"\n[dependencies]\nglobset = { path = \"../globset\" }\n");
 		var ignoreRoot = fixture.CreateFile("crates/ignore/src/lib.rs", "pub struct Error; pub struct Match; mod overrides;");
 		var overrides = fixture.CreateFile(
 			"crates/ignore/src/overrides.rs",

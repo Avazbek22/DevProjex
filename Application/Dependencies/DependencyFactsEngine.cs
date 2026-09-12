@@ -2284,6 +2284,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (typeParameterShadowsReference)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
 			string? expandedAlias = null;
+			var rustCrateAliasExpanded = false;
 			var aliasExpanded = source.LanguageId == LanguageId.CSharp &&
 			                    !reference.IsGlobalQualified &&
 			                    TryExpandCSharpAlias(source, reference, out expandedAlias);
@@ -2304,13 +2305,18 @@ public sealed class DependencyFactsEngine : IDisposable
 			{
 				expandedAlias = rustImport;
 				aliasExpanded = true;
+				rustCrateAliasExpanded = source.Imports.Any(import => import.IsCrateQualified &&
+					string.Equals(import.Specifier, rustImport, StringComparison.Ordinal) &&
+					string.Equals(import.Alias ?? SimpleName(import.Specifier), simpleName, StringComparison.Ordinal));
 			}
 			var expandedName = aliasExpanded ? expandedAlias! : reference.Name;
 			var requiresQualifiedLookup = isSyntacticallyQualified || aliasExpanded;
 			var expandedArity = aliasExpanded ? GenericArityFromQualifiedName(expandedName) : 0;
 			var lookupArity = expandedArity > 0 ? expandedArity : reference.GenericArity;
 			var candidates = requiresQualifiedLookup
-				? source.LanguageId == LanguageId.Kotlin
+				? rustCrateAliasExpanded
+					? LookupQualifiedInScope(source, expandedName, lookupArity)
+					: source.LanguageId == LanguageId.Kotlin
 					? LookupQualifiedAcrossRepository(source, expandedName, lookupArity)
 					: LookupQualified(source, expandedName, lookupArity)
 				: LookupSimple(source, simpleName, reference.GenericArity);
