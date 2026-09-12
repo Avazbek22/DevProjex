@@ -495,7 +495,12 @@ public sealed class DependencyFactsEngine : IDisposable
 				.GroupBy(static pair => pair.Key)
 				.ToDictionary(static group => group.Key, static group => group.Sum(static pair => pair.Value), StringComparer.Ordinal))
 		{
-			ConfigurationDiagnostics = configurationDiagnostics
+			ConfigurationDiagnostics = configurationDiagnostics,
+			ExtractionFailedFiles = files
+				.Where(static file => file.Status == DependencyFileStatus.ExtractionFailed)
+				.Select(static file => file.Path)
+				.Order(StringComparer.Ordinal)
+				.ToArray()
 		};
 
 	private void RegisterFileCacheWeight(
@@ -1181,6 +1186,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		private readonly string _root;
 		private readonly IReadOnlyDictionary<string, FileFacts> _files;
 		private readonly IReadOnlyDictionary<string, FileFacts> _manifestFiles;
+		private readonly IReadOnlyList<DeclarationFact> _declarations;
 		private readonly IReadOnlyDictionary<SymbolLookupKey, DeclarationFact[]> _symbolsBySimpleName;
 		private readonly IReadOnlyDictionary<QualifiedSymbolLookupKey, DeclarationFact[]> _symbolsByQualifiedName;
 		private readonly DependencyResolverConfiguration _configuration;
@@ -1208,6 +1214,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			_diagnosticsEnabled = DependencyEngineDiagnostics.IsEnabled;
 			_files = files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
 			_manifestFiles = files.ToDictionary(static file => file.Path, PathComparer);
+			_declarations = declarations;
 			DependencyEngineDiagnostics.RecordDictionaryBuild();
 			_symbolsBySimpleName = declarations
 				.GroupBy(static declaration => new SymbolLookupKey(
@@ -1318,7 +1325,8 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolveJavaImport(FileFacts source, ImportFact import)
 		{
-			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+			if (source.LanguageId != LanguageId.Kotlin &&
+			    FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			if (import.IsWildcard)
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
@@ -1326,12 +1334,17 @@ public sealed class DependencyFactsEngine : IDisposable
 			var qualifiedName = import.Specifier;
 			while (qualifiedName.Length > 0)
 			{
-				var declarations = LookupQualified(source, qualifiedName, 0);
+				var declarations = source.LanguageId == LanguageId.Kotlin
+					? LookupQualifiedAcrossRepository(source, qualifiedName, 0)
+					: LookupQualified(source, qualifiedName, 0);
 				var files = declarations.SelectMany(static declaration => declaration.DeclarationSites)
 					.Select(static site => site.File).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 				if (files.Length > 0)
-					return files.Length == 1
-						? Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files)
+					return declarations.Length == 1
+						? Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files) with
+						{
+							DeclarationFiles = files
+						}
 						: Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple imported declarations", files);
 				var separator = qualifiedName.LastIndexOf('.');
 				if (separator < 0) break;
@@ -2293,7 +2306,9 @@ public sealed class DependencyFactsEngine : IDisposable
 			var expandedArity = aliasExpanded ? GenericArityFromQualifiedName(expandedName) : 0;
 			var lookupArity = expandedArity > 0 ? expandedArity : reference.GenericArity;
 			var candidates = requiresQualifiedLookup
-				? LookupQualified(source, expandedName, lookupArity)
+				? source.LanguageId == LanguageId.Kotlin
+					? LookupQualifiedAcrossRepository(source, expandedName, lookupArity)
+					: LookupQualified(source, expandedName, lookupArity)
 				: LookupSimple(source, simpleName, reference.GenericArity);
 			var attributeName = reference.SyntaxKind == "attribute"
 				? expandedName + "Attribute"
@@ -2327,6 +2342,8 @@ public sealed class DependencyFactsEngine : IDisposable
 							reference.GenericArity);
 				if (!requiresQualifiedLookup)
 					candidates = SelectVisibleJavaCandidates(source, reference, candidates);
+				if (source.LanguageId == LanguageId.Kotlin)
+					candidates = FilterKotlinSourceSetCandidates(source, candidates);
 			}
 			else if (source.LanguageId == LanguageId.Rust && !requiresQualifiedLookup)
 				candidates = SelectVisibleRustCandidates(source, reference, candidates);
@@ -2409,6 +2426,56 @@ public sealed class DependencyFactsEngine : IDisposable
 						(matches ??= []).Add(candidate);
 			}
 			return matches?.ToArray() ?? [];
+		}
+
+		private DeclarationFact[] LookupQualifiedAcrossRepository(FileFacts source, string name, int arity) =>
+			FilterKotlinSourceSetCandidates(
+				source,
+				_declarations.Where(declaration => declaration.Identity.LanguageId == source.LanguageId &&
+					declaration.Identity.GenericArity == arity &&
+					string.Equals(
+						QualifiedLookupName(declaration.Identity.QualifiedName),
+						QualifiedLookupName(name),
+						StringComparison.Ordinal)).ToArray());
+
+		private static DeclarationFact[] FilterKotlinSourceSetCandidates(
+			FileFacts source,
+			IEnumerable<DeclarationFact> candidates)
+		{
+			var sourceSet = KotlinSourceSet(source.Path);
+			return candidates.Select(candidate => candidate with
+				{
+					DeclarationSites = candidate.DeclarationSites
+						.Where(site => AreKotlinSourceSetsCompatible(sourceSet, KotlinSourceSet(site.File)))
+						.ToArray()
+				})
+				.Where(static candidate => candidate.DeclarationSites.Count > 0)
+				.ToArray();
+		}
+
+		private static string? KotlinSourceSet(string path)
+		{
+			var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+			for (var index = 0; index + 1 < parts.Length; index++)
+				if (parts[index] == "src")
+					return parts[index + 1];
+			return null;
+		}
+
+		private static bool AreKotlinSourceSetsCompatible(string? source, string? target)
+		{
+			if (source is null || target is null || string.Equals(source, target, StringComparison.Ordinal))
+				return true;
+			if (target.StartsWith("common", StringComparison.OrdinalIgnoreCase))
+				return true;
+			if (source.StartsWith("common", StringComparison.OrdinalIgnoreCase))
+				return false;
+			var sourceIsJvm = source.StartsWith("jvm", StringComparison.OrdinalIgnoreCase) || source is "main" or "test";
+			var targetIsNonJvm = target.StartsWith("nonJvm", StringComparison.OrdinalIgnoreCase) ||
+				target.StartsWith("native", StringComparison.OrdinalIgnoreCase) ||
+				target.StartsWith("js", StringComparison.OrdinalIgnoreCase) ||
+				target.StartsWith("wasm", StringComparison.OrdinalIgnoreCase);
+			return !(sourceIsJvm && targetIsNonJvm);
 		}
 
 		private static bool IsPythonPackageInitializer(string path) =>

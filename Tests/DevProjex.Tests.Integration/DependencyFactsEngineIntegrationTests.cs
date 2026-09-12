@@ -417,6 +417,35 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task KotlinResolutionExcludesIncompatibleSourceSetsAndUsesExactRepositoryImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var libraryConfig = fixture.CreateFile("okio/build.gradle.kts", "plugins { kotlin(\"multiplatform\") }");
+		var common = fixture.CreateFile("okio/src/commonMain/kotlin/okio/Buffer.kt", "package okio\nexpect class Buffer");
+		var nonJvm = fixture.CreateFile("okio/src/nonJvmMain/kotlin/okio/Buffer.kt", "package okio\nactual class Buffer");
+		var jvm = fixture.CreateFile("okio/src/jvmMain/kotlin/okio/Buffer.kt", "package okio\nactual class Buffer");
+		var jvmConsumer = fixture.CreateFile("okio/src/jvmMain/kotlin/okio/Consumer.kt", "package okio\nclass Consumer(val buffer: Buffer)");
+		var appConfig = fixture.CreateFile("asset/build.gradle.kts", "plugins { kotlin(\"jvm\") }");
+		var app = fixture.CreateFile("asset/src/main/kotlin/app/App.kt", "package app\nimport okio.Buffer\nclass App(val buffer: Buffer)");
+		var broken = fixture.CreateFile("asset/src/main/kotlin/app/Broken.kt", "package app\nclass Broken(");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[libraryConfig, common, nonJvm, jvm, jvmConsumer, appConfig, app, broken],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var jvmEdges = index.Edges.Where(static edge => edge.Source.EndsWith("Consumer.kt", StringComparison.Ordinal)).ToArray();
+		Assert.DoesNotContain(jvmEdges, static edge => edge.Target is not null && edge.Target.Contains("nonJvmMain", StringComparison.Ordinal));
+		Assert.DoesNotContain(jvmEdges.SelectMany(static edge => edge.Candidates), static path => path.Contains("nonJvmMain", StringComparison.Ordinal));
+		Assert.Contains(jvmEdges, static edge => edge.Status == ResolutionStatus.Resolved &&
+			edge.DeclarationFiles.Any(static path => path.Contains("commonMain", StringComparison.Ordinal)));
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("asset/src/main/kotlin/app/App.kt", StringComparison.Ordinal) &&
+			edge.Reference == "okio.Buffer" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains("asset/src/main/kotlin/app/Broken.kt", index.Coverage.ExtractionFailedFiles);
+	}
+
+	[Fact]
 	public async Task KotlinSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
 	{
 		using var fixture = new TemporaryDirectory();

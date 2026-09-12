@@ -38,6 +38,7 @@ internal static class RelatedOutputRenderer
 					jsonCoverage.ExtractionFailed,
 					jsonCoverage.UnsupportedLanguages,
 					jsonCoverage.CSharpErrorNodeKinds,
+					jsonCoverage.ExtractionFailedFiles,
 					configurationDiagnostics = jsonCoverage.ConfigurationDiagnostics.Select(ProjectConfigurationDiagnostic)
 				},
 				searchScope = new { files = result.Index.Files.Count }
@@ -78,6 +79,9 @@ internal static class RelatedOutputRenderer
 				$"problem={projected.Problem} · path={TerminalTextEscaping.EscapeSingleLine(projected.Path)}")
 				.ConfigureAwait(false);
 		}
+		foreach (var path in coverage.ExtractionFailedFiles.Take(8))
+			await writer.WriteLineAsync($"[Dependency extraction failed] path={TerminalTextEscaping.EscapeSingleLine(path)}")
+				.ConfigureAwait(false);
 	}
 
 	private static async Task WriteSection(

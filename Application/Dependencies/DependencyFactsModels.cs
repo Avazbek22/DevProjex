@@ -202,6 +202,7 @@ public sealed record DependencyFactsCoverage(
 	IReadOnlyDictionary<string, int> CSharpErrorNodeKinds)
 {
 	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
+	public IReadOnlyList<string> ExtractionFailedFiles { get; init; } = [];
 }
 
 public sealed record DependencyIndexMetrics(

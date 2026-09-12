@@ -1181,7 +1181,7 @@ internal sealed class DevProjexMcpTools(
 				FormatSafeNoFactsNotice(related.Seeds),
 				noRelatedNotice);
 			using var relatedBody = new StringWriter(CultureInfo.InvariantCulture);
-			WriteRelatedFiles(relatedBody, related, direction, configurationData, cancellationToken);
+			WriteRelatedFiles(relatedBody, related, direction, configurationData, coverage.ExtractionFailedFiles, cancellationToken);
 			var protectedBody = Projects.RedactSyntheticText(
 				plan,
 				resolvedSeeds[0],
@@ -1916,6 +1916,7 @@ internal sealed class DevProjexMcpTools(
 		DependencyRelatedResult result,
 		DependencyDirection direction,
 		string? configurationData,
+		IReadOnlyList<string> extractionFailedFiles,
 		CancellationToken cancellationToken)
 	{
 		var hasLine = false;
@@ -1954,6 +1955,12 @@ internal sealed class DevProjexMcpTools(
 		{
 			StartLine();
 			output.Write(configurationData);
+		}
+		foreach (var path in extractionFailedFiles.Take(8))
+		{
+			StartLine();
+			output.Write("[Dependency extraction failed] ");
+			output.Write(McpTextEscaping.EscapeSingleLine(path));
 		}
 	}
 

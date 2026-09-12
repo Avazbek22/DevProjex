@@ -205,9 +205,12 @@ named owner. A syntax tree containing an error publishes neither recovered decla
 edges.
 
 Kotlin source files contribute classes, objects, type aliases, and top-level functions under their
-declared package and complete nesting chain. Exact imports and aliases resolve only to matching
-declarations in the allowed manifest; wildcard imports provide package visibility without guessing a
-target. Same-package declarations are visible to type references. Bounded `pom.xml`, `build.gradle`,
+declared package and complete nesting chain. Exact imports and aliases resolve to matching declarations
+in the repository manifest even when a build manifest cannot prove a module relationship; wildcard
+imports provide package visibility without guessing a target. Same-package declarations are visible
+to type references. Conventional multiplatform source-set paths constrain declaration sites: common
+declarations are visible to platform source sets, while JVM sources exclude non-JVM, native, JS, and
+Wasm declaration sites. Bounded `pom.xml`, `build.gradle`,
 and `build.gradle.kts` files define source scopes using the same literal repository-only Maven and
 Gradle project relationships described for Java. External artifacts, generated sources, compiler
 plugins, build-script-computed source sets, and runtime class paths are not inferred and remain
@@ -219,7 +222,8 @@ Names start with the package and carry every owning declaration; an extension fu
 receiver in brackets. Repeated names receive a stable source-order suffix, so every navigation name
 in a file is unique. Anonymous functions and local values that do not provide a stable declaration
 name fall back to the nearest supported owner. A syntax tree containing an error publishes neither
-recovered declarations nor recovered edges.
+recovered declarations nor recovered edges. Related-file coverage lists the bounded set of paths for
+which extraction failed, in addition to the aggregate count, so callers can inspect the omitted files.
 
 Ruby source files contribute classes and modules under their complete lexical owner chain. Literal
 `require_relative` resolves only the corresponding `.rb` file beside the source, while literal
