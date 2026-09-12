@@ -31,13 +31,13 @@ public sealed partial class McpServerProcessTests
 
 		// The order in force is named, in a constant that carries nothing from the project.
 		Assert.Contains(
-			"[Search order] hits inside a declaration first, then the rest; selection order breaks ties.",
+			"[Search order] bounded evidence priority; canonical path and line break ties.",
 			slice,
 			StringComparison.Ordinal);
 
 		// What was not shown is still counted and still reachable.
-		Assert.Contains("[Search totals] matches=5 · files=4", slice, StringComparison.Ordinal);
-		Assert.Contains("[3 additional matches not shown", slice, StringComparison.Ordinal);
+		Assert.Contains("[Search observed] matches=5 · matching-files=4 within inspected sources", slice, StringComparison.Ordinal);
+		Assert.Contains("[3 additional observed matches not shown", slice, StringComparison.Ordinal);
 		Assert.Contains("[Search stored] pack_id=", slice, StringComparison.Ordinal);
 	}
 
@@ -66,7 +66,7 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
-	public async Task RealProcessLeavesASearchThatShowedEverythingInSelectionOrder()
+	public async Task RealProcessUsesStableEvidenceOrderEvenWhenEveryMatchFits()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = await StartOrderProjectAsync(workspace);
@@ -81,12 +81,14 @@ public sealed partial class McpServerProcessTests
 				["context_lines"] = 0
 			})));
 
-		// Nothing was withheld, so there was no slice to choose: the generated report keeps its
-		// place at the front, exactly where selection order puts it, and no order is announced.
+		// Arrival order is not evidence: the same stable rule applies even when every match fits,
+		// otherwise raising max_results would silently put an early repeated report first again.
 		var declaration = complete.IndexOf("src/Core/LevelOverrideMap.cs", StringComparison.Ordinal);
 		var report = complete.IndexOf("results/report.md", StringComparison.Ordinal);
-		Assert.True(report >= 0 && declaration > report, complete);
-		Assert.DoesNotContain("[Search order]", complete, StringComparison.Ordinal);
+		Assert.True(declaration >= 0 && report > declaration, complete);
+		Assert.Contains("[Search order] bounded evidence priority", complete, StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] complete · sources inspected=4/4 · matches retained=5/5 · " +
+		                "matches written=5", complete, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Search stored]", complete, StringComparison.Ordinal);
 		Assert.DoesNotContain("additional matches", complete, StringComparison.Ordinal);
 	}

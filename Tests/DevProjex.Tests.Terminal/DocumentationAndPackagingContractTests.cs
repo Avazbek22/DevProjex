@@ -211,7 +211,8 @@ public sealed class DocumentationAndPackagingContractTests
 			"`search_project` matches file content only and never matches paths",
 			normalized,
 			StringComparison.Ordinal);
-		Assert.Contains("[Search totals] matches=N · files=M", server, StringComparison.Ordinal);
+		Assert.Contains("[Search observed] matches=N · matching-files=M within inspected sources", server, StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] complete · sources inspected=X/Y · matches retained=R/T · matches written=W · declaration files named=N.", server, StringComparison.Ordinal);
 		Assert.Contains("[Search truncated]", server, StringComparison.Ordinal);
 		Assert.Contains("16,000 characters", normalized, StringComparison.Ordinal);
 		Assert.Contains("### Finding a file by name", server, StringComparison.Ordinal);
@@ -236,19 +237,19 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("### The search result carries the selector", server, StringComparison.Ordinal);
 		Assert.Contains("Declarations found (path, symbol, line):", server, StringComparison.Ordinal);
 		Assert.Contains("[Read declarations]", server, StringComparison.Ordinal);
-		Assert.Contains("**A cut listing keeps its breadth.**", server, StringComparison.Ordinal);
 		Assert.Contains(
-			"### What a slice shows when matches are withheld",
+			"### What a bounded result retains",
 			server,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"[Search order] hits inside a declaration first, then the rest; selection order breaks ties.",
+			"[Search order] bounded evidence priority; canonical path and line break ties.",
 			server,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"applies no order and announces none rather than claiming an order it did not apply",
+			"No test, generated, snapshot, or unsupported-language category is excluded or categorically demoted",
 			normalized,
 			StringComparison.Ordinal);
+		Assert.Contains("A stronger late record can evict a weaker early record", normalized, StringComparison.Ordinal);
 		Assert.Contains("### A withheld search stays in the session", server, StringComparison.Ordinal);
 		Assert.Contains("Withheld matches by file:", server, StringComparison.Ordinal);
 		Assert.Contains("Counts, not line numbers", normalized, StringComparison.Ordinal);

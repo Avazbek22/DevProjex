@@ -398,7 +398,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{MaxFileBytesProperty}},
 	    "context_lines": { "description": "Lines before and after each match, 0..20, default 2; overlapping windows are merged. Accepts an integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
 	    "ignore_case": { "description": "Case-insensitive matching; accepts a boolean or the string 'true' or 'false'.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
-	    "max_results": { "description": "Maximum displayed matching lines, 1..200, default 50; all selected text is still scanned so additional matches are counted. Accepts an integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "max_results": { "description": "Maximum displayed matching lines, 1..200, default 50; matching continues through the inspected source budget, and the complete or partial boundary distinguishes encountered, retained, and written counts. Accepts an integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
 	  "required": ["pattern"],
 	  "additionalProperties": false

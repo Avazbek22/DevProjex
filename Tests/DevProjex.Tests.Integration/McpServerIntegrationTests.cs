@@ -245,7 +245,9 @@ public sealed partial class McpServerIntegrationTests
 		var noMatches = Text(await server.CallAsync(
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "absent-marker" }));
-		Assert.Contains("[No matches] The pattern matched nothing in 1 selected file(s) (git: gitignore; exclusions: smart-ignore, empty-folders).", noMatches, StringComparison.Ordinal);
+		Assert.Contains("[No matches] The pattern matched nothing in 1 inspected selected file(s); " +
+		                "the search boundary below states whether inspection was complete " +
+		                "(git: gitignore; exclusions: smart-ignore, empty-folders).", noMatches, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Empty selection]", noMatches, StringComparison.Ordinal);
 
 		var matched = Text(await server.CallAsync(
@@ -3255,11 +3257,11 @@ public sealed partial class McpServerIntegrationTests
 
 		var text = Text(result);
 		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
-		Assert.Contains("\n[1 additional matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
+		Assert.Contains("\n[1 additional observed matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
 		Assert.Contains("narrow the pattern or filters", text, StringComparison.Ordinal);
 		AssertTrustedTrailerOutsideSpotlight(
 			result,
-			"[1 additional matches not shown; narrow the pattern or filters.]");
+			"[1 additional observed matches not shown; narrow the pattern or filters.]");
 	}
 
 	[Fact]
@@ -6629,9 +6631,8 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.NotEqual(true, result.IsError);
 		McpSearchOutputAssertions.DoesNotContainMatch(text, "Large4.txt", 1);
-		Assert.Contains("[Search incomplete] The inspected-text byte budget was reached; " +
-		                "additional selected files were not searched and match counts are partial.", text,
-			StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] partial · sources inspected=4/5", text, StringComparison.Ordinal);
+		Assert.Contains("limits=inspection-bytes", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
