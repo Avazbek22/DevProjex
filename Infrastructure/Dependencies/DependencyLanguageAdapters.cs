@@ -972,8 +972,7 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 			.Where(capture =>
 				(capture.Name != "reference.expression_receiver" ||
 				 IsJavaTypeReceiver(capture.Text) &&
-				 !valueScopes.Any(scope => scope.CapturedName == capture.Text &&
-					 scope.StartIndex <= capture.StartIndex && scope.EndIndex >= capture.EndIndex)) &&
+				 !valueScopes.Any(scope => IsJavaReceiverShadowed(capture, scope))) &&
 				!declarationNames.Contains(capture.StartIndex) &&
 				!typeParameterNames.Contains(capture.StartIndex) &&
 				!PrimitiveTypes.Contains(capture.Text) &&
@@ -1029,6 +1028,17 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 		var separator = value.LastIndexOf('.');
 		var name = separator < 0 ? value : value[(separator + 1)..];
 		return name.Length > 0 && char.IsUpper(name[0]);
+	}
+
+	private static bool IsJavaReceiverShadowed(
+		DependencySyntaxCapture receiver,
+		DependencySyntaxCapture value)
+	{
+		if (value.StartIndex > receiver.StartIndex || value.EndIndex < receiver.EndIndex)
+			return false;
+		var separator = receiver.Text.IndexOf('.');
+		var root = separator < 0 ? receiver.Text : receiver.Text[..separator];
+		return string.Equals(value.CapturedName, root, StringComparison.Ordinal);
 	}
 
 	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(

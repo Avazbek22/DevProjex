@@ -1006,6 +1006,9 @@ public sealed class DependencyFactsEngineIntegrationTests
 			    void call(Service Helper) {
 			        Helper.run();
 			    }
+			    void qualified(Service sample) {
+			        sample.Helper.run();
+			    }
 			}
 			""");
 		using var engine = CreateEngine();
