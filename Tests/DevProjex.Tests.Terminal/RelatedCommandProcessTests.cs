@@ -1,9 +1,33 @@
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class RelatedCommandProcessTests
 {
+	[Fact]
+	public void UnresolvedEvidenceIsExplicitInTextAndJsonOutput()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/package.json", "{\"name\":\"sample\"}\n");
+		workspace.WriteFile("project/index.js", "module.exports = require('./lib/express');\n");
+		workspace.WriteFile("project/lib/express.js", "module.exports = {};\n");
+
+		var text = Run(workspace, "related", "index.js", "--project", project, "--format", "text",
+			"--git-mode", "none", "--exclude", "none");
+		Assert.Equal(0, text.ExitCode);
+		Assert.Contains("[Resolution] resolved=0 · ambiguous=0 · unresolved=1 · external=0", text.StandardOutput,
+			StringComparison.Ordinal);
+		var json = Run(workspace, "related", "index.js", "--project", project, "--format", "json",
+			"--git-mode", "none", "--exclude", "none");
+		Assert.Equal(0, json.ExitCode);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var resolution = document.RootElement.GetProperty("resolution");
+		Assert.Equal(0, resolution.GetProperty("resolved").GetInt32());
+		Assert.Equal(1, resolution.GetProperty("unresolved").GetInt32());
+	}
+
 	[Fact]
 	public void RealPublishedCommandReportsCHeaderDependencies()
 	{

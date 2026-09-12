@@ -266,16 +266,22 @@ stay on stderr. The shape is:
       "noFactsReason": null
     }
   ],
-  "coverage": {
+	  "coverage": {
     "files": 3,
     "supported": 3,
     "unsupported": 0,
     "extractionFailed": 0,
     "unsupportedLanguages": {},
     "cSharpErrorNodeKinds": {},
-    "partialParseDiagnostics": []
-  },
-  "searchScope": {
+	    "partialParseDiagnostics": []
+	  },
+	  "resolution": {
+	    "resolved": 1,
+	    "ambiguous": 0,
+	    "unresolved": 0,
+	    "external": 0
+	  },
+	  "searchScope": {
     "files": 3
   }
 }
@@ -294,6 +300,9 @@ unsupported-language and C# error-node dictionaries use stable ordinal keys.
 facts remained usable. Each item contains `path`, `droppedConstructs`, bounded `ranges` with
 one-based `startLine`/`endLine`, and `rangesTruncated`. Text output reports the same data as
 `[Dependency partial parse] path=... · dropped=N · lines=...`.
+`resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for the
+requested seeds and direction. Text output carries the same values in `[Resolution]`; consequently an
+empty related-file list does not imply that every observed reference was resolved.
 `searchScope.files` is the manifest file count after the profile, selected paths,
 Git mode, exclusions, and file-size limit. No field can contain a file or candidate
 outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and
