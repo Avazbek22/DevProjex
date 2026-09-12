@@ -229,9 +229,10 @@ Wasm declaration sites. Class, function, and nested-class parameters shadow same
 only inside their lexical owner; qualified names and types used by bounds remain ordinary references.
 Generic type references retain their declared arity while their type arguments are resolved or kept
 local independently, so `TypedOptions<T>` can resolve `TypedOptions` without turning `T` into a project edge.
-Capitalized receivers in qualified calls are type-reference evidence when no parameter or property
-with that name is declared in the file. This covers object and companion-style calls while keeping a
-same-named value as a local expression instead of inventing a type edge.
+Capitalized receivers in qualified calls are type-reference evidence for a declared object when no
+parameter or property with that name is declared in the file. Class companion dispatch remains
+unresolved rather than inferred, and a same-named value remains a local expression instead of
+creating a type edge.
 Bounded `pom.xml`, `build.gradle`,
 and `build.gradle.kts` files define source scopes using the same literal repository-only Maven and
 Gradle project relationships described for Java. External artifacts, generated sources, compiler

@@ -661,11 +661,20 @@ public sealed class DependencyFactsEngineIntegrationTests
 			  fun recycle(value: Any) = Unit
 			}
 			""");
+		var classPool = fixture.CreateFile("src/commonMain/kotlin/okio/ClassPool.kt", """
+			package okio
+			class ClassPool {
+			  companion object {
+			    fun take() = Unit
+			  }
+			}
+			""");
 		var consumer = fixture.CreateFile("src/commonMain/kotlin/okio/Segment.kt", """
 			package okio
 			fun use(value: Any) {
 			  SegmentPool.take()
 			  SegmentPool.recycle(value)
+			  ClassPool.take()
 			}
 			fun shadow(Local: Any) {
 			  val SegmentPool = Local
@@ -676,12 +685,15 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		var index = await engine.IndexAsync(
 			fixture.Path,
-			[pool, consumer],
+			[pool, classPool, consumer],
 			cancellationToken: TestContext.Current.CancellationToken);
 		var edge = Assert.Single(index.Edges, static edge => edge.Source.EndsWith("Segment.kt", StringComparison.Ordinal) &&
 			edge.Reference == "SegmentPool" && edge.Status == ResolutionStatus.Resolved);
 		Assert.Equal("src/commonMain/kotlin/okio/SegmentPool.kt", edge.Target);
 		Assert.Equal(2, edge.Evidence.Count);
+		Assert.DoesNotContain(index.Edges, static candidate =>
+			candidate.Source.EndsWith("Segment.kt", StringComparison.Ordinal) &&
+			candidate.Target == "src/commonMain/kotlin/okio/ClassPool.kt");
 	}
 
 	[Fact]

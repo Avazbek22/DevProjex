@@ -2436,7 +2436,12 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (!requiresQualifiedLookup)
 					candidates = SelectVisibleJavaCandidates(source, reference, candidates);
 				if (source.LanguageId == LanguageId.Kotlin)
+				{
 					candidates = FilterKotlinSourceSetCandidates(source, candidates);
+					if (reference.SyntaxKind == "identifier")
+						candidates = candidates.Where(static candidate =>
+							candidate.Identity.SymbolKind == SymbolKind.Module).ToArray();
+				}
 			}
 			else if (source.LanguageId == LanguageId.Rust && !requiresQualifiedLookup)
 				candidates = SelectVisibleRustCandidates(source, reference, candidates);
