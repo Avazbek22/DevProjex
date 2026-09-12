@@ -623,6 +623,28 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
+	public async Task TsxSourceUsesTheOwningTypeScriptConfigurationForRelativeImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"app/tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"jsx\":\"react\"},\"include\":[\"./src\"]}");
+		var widget = fixture.CreateFile("app/src/widget.tsx", "export default function Widget() { return <span />; }");
+		var source = fixture.CreateFile("app/src/main.tsx", "import Widget from './widget';\nexport const app = <Widget />;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, widget, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "app/src/main.tsx" && candidate.Reference == "./widget");
+		Assert.True(edge.Status == ResolutionStatus.Resolved, string.Join(" | ", edge.Reasons));
+		Assert.Equal("app/src/widget.tsx", edge.Target);
+	}
+
+	[Fact]
 	public async Task GlobalNamespaceTypePrecedesImportedTypeAtTopLevel()
 	{
 		using var fixture = new TemporaryDirectory();

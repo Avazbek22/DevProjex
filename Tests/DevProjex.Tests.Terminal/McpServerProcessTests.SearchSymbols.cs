@@ -26,6 +26,12 @@ public sealed partial class McpServerProcessTests
 			"B.run"
 		},
 		{
+			"members.tsx",
+			"class A { run(): JSX.Element { return <span>member-marker-a</span>; } }\nclass B { run(): JSX.Element { return <span>member-marker-b</span>; } }\nconst fallback = <span>fallback-marker</span>;\n",
+			"A.run",
+			"B.run"
+		},
+		{
 			"members.go",
 			"package sample\ntype A struct{}\ntype B struct{}\nfunc (a A) Run() string { return \"member-marker-a\" }\nfunc (b B) Run() string { return \"member-marker-b\" }\nvar fallback = func() string { return \"fallback-marker\" }\n",
 			"A.Run",
