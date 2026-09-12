@@ -52,8 +52,8 @@ public sealed partial class McpServerProcessTests
 		// this file was shown, so nine of its ten are withheld.
 		Assert.Contains("9 src/File01.cs", searched, StringComparison.Ordinal);
 		Assert.Contains("10 src/File05.cs", searched, StringComparison.Ordinal);
-		Assert.Contains("[55 additional matches not shown", searched, StringComparison.Ordinal);
-		Assert.Contains("[Search totals] matches=60 · files=6", searched, StringComparison.Ordinal);
+		Assert.Contains("[55 additional observed matches not shown", searched, StringComparison.Ordinal);
+		Assert.Contains("[Search observed] matches=60 · matching-files=6 within inspected sources", searched, StringComparison.Ordinal);
 
 		var stored = Regex.Match(searched, @"\[Search stored\] pack_id=([0-9a-f]+) · matches=(\d+) · files=(\d+);");
 		Assert.True(stored.Success, searched);
@@ -110,12 +110,13 @@ public sealed partial class McpServerProcessTests
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "=> 1", ["context_lines"] = 0 })));
 
-		// Nothing was withheld, so nothing is stored and nothing new is said.
+		// Nothing was withheld, so nothing is stored; the boundary still proves completeness.
 		Assert.Contains("src/App.cs\nin P.App.Run\n5:", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Search stored]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("Withheld matches by file:", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("additional matches", text, StringComparison.Ordinal);
-		Assert.DoesNotContain("[Search totals]", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Search observed]", text, StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] complete", text, StringComparison.Ordinal);
 	}
 
 }

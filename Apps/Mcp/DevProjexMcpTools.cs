@@ -28,7 +28,8 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumSearchContentCharacters = 16_000;
 	// A search that withholds matches keeps the rest of what it already scanned, so the caller can
 	// page it instead of running the same scan again. These bound what one session will hold for
-	// that: matches beyond the first are counted but not kept, and the response says so.
+	// that: weaker matches are displaced as stronger evidence arrives, and the response says when
+	// either bound withheld observed matches.
 	private const int MaximumStoredSearchMatches = 5_000;
 	private const int MaximumStoredSearchCharacters = 2_000_000;
 	private const int MaximumWithheldFilesReported = 20;
@@ -43,7 +44,7 @@ internal sealed class DevProjexMcpTools(
 	// Named because a caller that sees part of a result is entitled to know what decided which part.
 	// A constant: the order is a rule, not a property of this project's files.
 	private const string SearchOrderNotice =
-		"[Search order] hits inside a declaration first, then the rest; selection order breaks ties.";
+		"[Search order] bounded evidence priority; canonical path and line break ties.";
 	// Closes a run of named hits when the next one belongs to nothing. A constant, not a name.
 	private static readonly string OutsideDeclarationHeader = $"in (no declaration){Environment.NewLine}";
 	// Asking for a file by name is the one request the selection vocabulary answers in a form a
@@ -197,9 +198,9 @@ internal sealed class DevProjexMcpTools(
 				MaximumTreeLines,
 				cancellationToken);
 			int? automaticDepth = depth is null &&
-			                     format is TreeTextFormat.Ascii or TreeTextFormat.Markdown &&
-			                     !depthFit.FullTreeFits &&
-			                     depthFit.DeepestCompleteDepth >= 1
+								 format is TreeTextFormat.Ascii or TreeTextFormat.Markdown &&
+								 !depthFit.FullTreeFits &&
+								 depthFit.DeepestCompleteDepth >= 1
 				? depthFit.DeepestCompleteDepth
 				: null;
 			var effectiveDepth = depth ?? automaticDepth;
@@ -461,7 +462,7 @@ internal sealed class DevProjexMcpTools(
 				};
 			}
 			if (prepared.CompressionSnapshot?.Availability is
-			    { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason } availability)
+				{ IsUnavailable: true, PrimaryReason: { Length: > 0 } reason } availability)
 			{
 				envelope["compressionUnavailable"] = new
 				{
@@ -842,7 +843,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regular expression. It matches file content, never paths; find files by name with get_tree include_patterns. Use it to locate symbols or phrases; use related_files instead for dependency links. Returns matches under each path as number:text, context number-text, -- between groups, exact match and file counts, and additional matches beyond max_results; line numbers refer to that text, and generated redaction replacements never match. Key parameters: pattern; paths narrows to literal files or directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
+		"Searches safe transformed project text with a timed .NET regex and retains useful bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped number:text matches, number-text context, merged groups, and a complete|partial boundary with inspected/retained/written counts plus continuation; line numbers refer to returned text, and generated redaction replacements never match. Parameters: pattern; paths=literal files/directories; context_lines=0..20; ignore_case=true|false; max_results=1..200; git_scope=staged|changes|diff:<ref>..<ref>; patterns and max_file_bytes narrow further. Read several hits with one batched get_file requests call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -887,10 +888,11 @@ internal sealed class DevProjexMcpTools(
 			var storeHitMatchBound = false;
 			var storeHitCharacterBound = false;
 			long inspectedBytes = 0;
+			var inspectedSourceCount = 0;
 			foreach (var path in plan.IncludedFiles)
 			{
 				if (plan.EffectiveFileSizes?.TryGetValue(path, out var fileBytes) != true ||
-				    fileBytes < 0 || fileBytes > MaximumSearchInspectedBytes - inspectedBytes)
+					fileBytes < 0 || fileBytes > MaximumSearchInspectedBytes - inspectedBytes)
 				{
 					break;
 				}
@@ -898,66 +900,72 @@ internal sealed class DevProjexMcpTools(
 				inspectedBytes += fileBytes;
 			}
 			var inspectionBudgetReached = inspectedFiles.Count < plan.IncludedFiles.Count;
-			var materialisedMatches = 0;
-			var groups = new List<McpSearchRenderedGroup>();
+			var candidates = new McpSearchCandidateCollector(
+				MaximumStoredSearchMatches,
+				MaximumStoredSearchCharacters);
 			var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
 			await using var searched = await Projects.ConsumeSearchTextAsync(
 				plan with { IncludedFiles = inspectedFiles },
 				(file, token) =>
 				{
-					// Matching runs to the stored bound rather than to what the response can show,
-					// because a match the response withholds is exactly the one the caller would
-					// otherwise ask a second search to find. Groups are rendered and set aside here
-					// because this is the only point at which the file's text exists; which of them
-					// the response carries is decided once the whole result is known.
-					var scan = McpSearchTextScanner.Scan(
+					inspectedSourceCount++;
+					// Every match in the inspected source reaches the bounded collector while this is
+					// the only point at which the transformed text exists. Only compact rendered windows
+					// survive the callback, and stronger late evidence can displace an earlier window.
+					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
+					IReadOnlyList<NavigationDeclaration>? navigation = null;
+					var priorityState = new McpSearchFilePriorityState();
+					var scan = McpSearchTextScanner.ScanEach(
 						file.Content,
 						regex,
 						contextLines,
-						Math.Max(0, MaximumStoredSearchMatches - materialisedMatches),
 						file.ReplacementRanges,
+						match =>
+						{
+							navigation ??= McpSearchSymbols.CaptureNavigation(
+								Projects.DependencyFactsEngine,
+								relative,
+								file.Content,
+								token);
+							AddSearchCandidates(
+								candidates,
+								relative,
+								file.Path,
+								file.Content,
+								[match],
+								navigation,
+								regex,
+								contextLines,
+								explicitScope: HasItems(paths),
+								priorityState);
+						},
 						token);
 					totalMatches += scan.TotalMatches;
-					var found = scan.Matches.Sum(static group => group.MatchLineNumbers.Count);
-					materialisedMatches += found;
 					if (scan.TotalMatches > 0)
+					{
 						matchingFiles++;
-					if (found < scan.TotalMatches)
-						storeHitMatchBound = true;
-
-					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
-					if (found > 0 && navigationByFile.Count < McpSearchSymbols.MaximumAnnotatedFiles &&
-					    !navigationByFile.ContainsKey(relative))
-					{
-						navigationByFile[relative] = McpSearchSymbols.CaptureNavigation(
-							Projects.DependencyFactsEngine,
-							relative,
-							file.Content,
-							token);
-					}
-					foreach (var match in scan.Matches)
-					{
-						var rendered = RenderGroupLines(relative, file.Content, match);
-						if (rendered.Count > 0)
-							groups.Add(new McpSearchRenderedGroup(relative, file.Path, match.MatchLineNumbers, rendered));
+						McpSearchExecutionHooks.AfterScan?.Invoke(relative);
+						var annotatedFiles = candidates.SelectFilesForAnnotation(McpSearchSymbols.MaximumAnnotatedFiles);
+						foreach (var stale in navigationByFile.Keys.Where(path => !annotatedFiles.Contains(path)).ToArray())
+							navigationByFile.Remove(stale);
+						if (navigation is not null && annotatedFiles.Contains(relative))
+							navigationByFile[relative] = navigation;
 					}
 
 					return ValueTask.CompletedTask;
 				},
 				cancellationToken).ConfigureAwait(false);
 
-			// A declaration of the searched term is worth more than a mention of it, and the only
-			// case where that choice exists is a slice: when max_results withholds, the response
-			// carries some of what was found and the rest is paged. A search that shows everything
-			// it found has nothing to choose between and is left exactly as it was.
-			var withholdsByCount = totalMatches > maximumResults;
-			var ordering = withholdsByCount && groups.Count > 0
-				? OrderDeclarationsFirst(
-						groups,
-						navigationByFile,
-						cancellationToken)
-				: null;
-			var ordered = ordering ?? groups;
+			// Candidate priority is applied before response sizing, so the retained set and the
+			// displayed slice are both independent of directory traversal order.
+			var ordered = BuildOrderedSearchGroups(candidates.Snapshot());
+			storeHitMatchBound = candidates.MatchCapacityReached;
+			var retentionCharacterBoundReached = candidates.CharacterCapacityReached;
+			var retainedMatches = candidates.Count;
+			var retainedMatchingFiles = ordered
+				.Select(static group => group.RelativePath)
+				.Distinct(StringComparer.Ordinal)
+				.Count();
 
 			// Which groups are shown is decided one file at a time, so every matched file gets a
 			// hit before any file gets a second. A listing cut alphabetically never reached the file
@@ -1019,25 +1027,36 @@ internal sealed class DevProjexMcpTools(
 			{
 				if (!withheldByFile.ContainsKey(group.RelativePath))
 					continue;
-				if (withheld.Length >= MaximumStoredSearchCharacters)
+				var heading = !string.Equals(group.RelativePath, storedFile, StringComparison.Ordinal)
+					? EscapeSingleLine(group.RelativePath) + Environment.NewLine
+					: "--" + Environment.NewLine;
+				var firstEvidenceCharacters = group.Lines
+					.TakeWhile(static line => !line.IsMatch)
+					.Append(group.Lines.First(static line => line.IsMatch))
+					.Sum(static line => line.Text.Length + Environment.NewLine.Length);
+				if (withheld.Length + heading.Length + firstEvidenceCharacters > MaximumStoredSearchCharacters)
 				{
 					storeHitCharacterBound = true;
 					break;
 				}
 
-				if (!string.Equals(group.RelativePath, storedFile, StringComparison.Ordinal))
-				{
-					withheld.Append(EscapeSingleLine(group.RelativePath)).Append(Environment.NewLine);
-					storedFile = group.RelativePath;
-				}
-				else
-				{
-					withheld.Append("--").Append(Environment.NewLine);
-				}
+				withheld.Append(heading);
+				storedFile = group.RelativePath;
 
 				foreach (var line in group.Lines)
+				{
+					var lineCharacters = line.Text.Length + Environment.NewLine.Length;
+					if (withheld.Length + lineCharacters > MaximumStoredSearchCharacters)
+					{
+						storeHitCharacterBound = true;
+						break;
+					}
 					withheld.Append(line.Text).Append(Environment.NewLine);
-				withheldStored += group.MatchLines.Count;
+					if (line.IsMatch)
+						withheldStored++;
+				}
+				if (storeHitCharacterBound)
+					break;
 			}
 
 			// Resolved on every search that showed a hit, including one the cap cut: the selector
@@ -1049,6 +1068,7 @@ internal sealed class DevProjexMcpTools(
 			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols);
 			if (namesRefused)
 				symbols = symbols with { AnnotatedHits = 0 };
+			var responseCharacterLimitReached = resultGroupTruncated || namesRefused;
 			var declarationsListed = AppendDeclarationSelectors(output, symbols.Declarations);
 			// What the response could not carry is kept in the session, so the way forward is to
 			// page what this scan already found rather than to run the same scan again.
@@ -1058,20 +1078,41 @@ internal sealed class DevProjexMcpTools(
 					.ConfigureAwait(false);
 			AppendWithheldDistribution(output, withheldByFile);
 			var additionalMatchesNotice = totalMatches > shownMatches
-				? $"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]"
+				? $"[{totalMatches - shownMatches} additional observed matches not shown; narrow the pattern or filters.]"
 				: null;
 			// Sizing information is only worth its characters when the caller did not
 			// receive every match the pattern found. A group cut in its trailing context
 			// lines withheld no match and gets the cap notice alone.
 			var searchTotalsNotice = totalMatches > shownMatches
-				? $"[Search totals] matches={totalMatches.ToString(CultureInfo.InvariantCulture)} · " +
-				  $"files={matchingFiles.ToString(CultureInfo.InvariantCulture)}"
+				? $"[Search observed] matches={totalMatches.ToString(CultureInfo.InvariantCulture)} · " +
+				  $"matching-files={matchingFiles.ToString(CultureInfo.InvariantCulture)} within inspected sources"
 				: null;
 			// An empty search result must say whether nothing matched or nothing was searched;
 			// the count is trusted data, the file names never are.
-			var noMatches = totalMatches == 0 && plan.IncludedFiles.Count > 0
-				? $"[No matches] The pattern matched nothing in {plan.IncludedFiles.Count} selected file(s) ({McpEffectiveFilters.Describe(plan)})."
+			var noMatches = totalMatches == 0 && inspectedSourceCount > 0
+				? $"[No matches] The pattern matched nothing in {inspectedSourceCount} inspected selected file(s); " +
+				  $"the search boundary below states whether inspection was complete ({McpEffectiveFilters.Describe(plan)})."
 				: null;
+			var namedDeclarationFiles = namesRefused
+				? 0
+				: symbols.Names.Keys.Select(static key => key.RelativePath).Distinct(StringComparer.Ordinal).Count();
+			var requestResultLimitReached = shownMatches < retainedMatches && shownMatches >= maximumResults;
+			var annotationLimitReached = retainedMatchingFiles > McpSearchSymbols.MaximumAnnotatedFiles;
+			var boundary = new McpSearchBoundary(
+				plan.IncludedFiles.Count,
+				inspectedSourceCount,
+				totalMatches,
+				retainedMatches,
+				shownMatches,
+				namedDeclarationFiles,
+				inspectionBudgetReached,
+				storeHitMatchBound,
+				annotationLimitReached,
+				responseCharacterLimitReached,
+				requestResultLimitReached,
+				retentionCharacterBoundReached,
+				storeHitCharacterBound,
+				searched.UnscannableFiles.Count);
 			// A stored result whose id never reaches the caller is a file nobody can page and
 			// nobody will remove, so it is dropped unless this response carries its id out.
 			var retained = false;
@@ -1082,7 +1123,7 @@ internal sealed class DevProjexMcpTools(
 					FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					noMatches,
-					ordering is null ? null : SearchOrderNotice,
+					ordered.Count == 0 ? null : SearchOrderNotice,
 				declarationsListed ? ReadDeclarationsNotice : null,
 					FormatStoredSearchNotice(
 						storedSearch,
@@ -1094,9 +1135,7 @@ internal sealed class DevProjexMcpTools(
 					FormatNameSearchNotice(plan, paths, pattern, totalMatches),
 					additionalMatchesNotice,
 					searchTotalsNotice,
-					inspectionBudgetReached
-						? "[Search incomplete] The inspected-text byte budget was reached; additional selected files were not searched and match counts are partial."
-						: null,
+					FormatSearchBoundaryNotice(boundary, storedSearch is not null),
 					resultGroupTruncated ? SearchContentCapNotice : null,
 					SelectionNotices(
 						plan,
@@ -1348,7 +1387,7 @@ internal sealed class DevProjexMcpTools(
 				resolvedRequests.Add(new McpResolvedFileReadRequest(item, physicalPath));
 			}
 			catch (McpToolException exception) when (exception.Code is
-			       McpErrorCodes.PathNotFound or McpErrorCodes.RootViolation)
+				   McpErrorCodes.PathNotFound or McpErrorCodes.RootViolation)
 			{
 				resolvedRequests.Add(new McpResolvedFileReadRequest(item, PhysicalPath: null));
 			}
@@ -1373,7 +1412,7 @@ internal sealed class DevProjexMcpTools(
 		{
 			var resolved = resolvedRequests[index];
 			if (resolved.Request.Symbol is null || resolved.PhysicalPath is null ||
-			    !transformed.TryGetValue(resolved.PhysicalPath, out var file))
+				!transformed.TryGetValue(resolved.PhysicalPath, out var file))
 				continue;
 			var located = McpSearchSymbols.ResolveSymbol(
 				Projects.DependencyFactsEngine,
@@ -1452,7 +1491,7 @@ internal sealed class DevProjexMcpTools(
 			var headerLines = 4;
 			var availableLines = sectionBudgetLines - usedLines - (sections.Length == 0 ? 0 : 1) - headerLines;
 			var availableCharacters = sectionBudgetCharacters - sections.Length - separator.Length -
-			                          headerPrefix.Length - "Status: partial\nLines: 1-1 of 1\n".Length;
+									  headerPrefix.Length - "Status: partial\nLines: 1-1 of 1\n".Length;
 			if (availableLines <= 0 || availableCharacters <= 0)
 			{
 				foreach (var range in group.Ranges)
@@ -1512,7 +1551,7 @@ internal sealed class DevProjexMcpTools(
 		var counts = status.Values.GroupBy(static value => value, StringComparer.Ordinal)
 			.ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.Ordinal);
 		var summary = $"[Batch read] ok={GetCount("ok")} · partial={GetCount("partial")} · " +
-		              $"not-returned={GetCount("not-returned")} · unavailable={GetCount("unavailable")}.";
+					  $"not-returned={GetCount("not-returned")} · unavailable={GetCount("unavailable")}.";
 		return new McpBatchFileReadResult(
 			body,
 			summary,
@@ -1542,7 +1581,7 @@ internal sealed class DevProjexMcpTools(
 			{
 				var matching = groups
 					.Where(group => SameRequestedFile(group, request) &&
-					                group.StartLine <= range.EndLine && range.StartLine <= group.EndLine)
+									group.StartLine <= range.EndLine && range.StartLine <= group.EndLine)
 					.ToArray();
 				if (matching.Length == 0)
 				{
@@ -1609,8 +1648,8 @@ internal sealed class DevProjexMcpTools(
 		if (page.IsTruncated)
 		{
 			return $"[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; " +
-			       $"continue with start_line={page.NextLine ?? page.EndLine + 1}" +
-			       (page.NextColumn is > 1 ? $" start_column={page.NextColumn}" : string.Empty) + ".]";
+				   $"continue with start_line={page.NextLine ?? page.EndLine + 1}" +
+				   (page.NextColumn is > 1 ? $" start_column={page.NextColumn}" : string.Empty) + ".]";
 		}
 
 		return requestedEnd > page.TotalLines
@@ -1766,7 +1805,7 @@ internal sealed class DevProjexMcpTools(
 		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
 		{
 			if (string.Equals(descriptor.Token, token, StringComparison.OrdinalIgnoreCase) &&
-			    descriptor.Id is { } exclusion)
+				descriptor.Id is { } exclusion)
 			{
 				return exclusion;
 			}
@@ -2004,7 +2043,7 @@ internal sealed class DevProjexMcpTools(
 			return McpSpotlight.Wrap(content);
 
 		return McpSpotlight.Wrap(content) + "\n\n" +
-		       McpSpotlight.Wrap(formattedBudgetReport);
+			   McpSpotlight.Wrap(formattedBudgetReport);
 	}
 
 	private static string BuildStoredPackResponse(
@@ -2017,7 +2056,7 @@ internal sealed class DevProjexMcpTools(
 		string? planWarnings)
 	{
 		var header = $"Pack stored as '{pack.Id}' ({pack.Characters} characters, {pack.Lines} lines). " +
-		             "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n";
+					 "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n";
 		var treePreview = TakeCompleteScalarPrefix(tree, MaximumStoredTreePreviewCharacters);
 		var treePreviewWasTruncated = treeWasTruncated || treePreview.Length < tree.Length;
 		var budgetReport = formattedBudgetReport is null
@@ -2149,9 +2188,9 @@ internal sealed class DevProjexMcpTools(
 		var prefixLimit = maximumCharacters - marker.Length - 1;
 		var prefixLength = Math.Min(prefixLimit, content.Length);
 		if (prefixLength > 0 &&
-		    prefixLength < content.Length &&
-		    char.IsHighSurrogate(content[prefixLength - 1]) &&
-		    char.IsLowSurrogate(content[prefixLength]))
+			prefixLength < content.Length &&
+			char.IsHighSurrogate(content[prefixLength - 1]) &&
+			char.IsLowSurrogate(content[prefixLength]))
 		{
 			prefixLength--;
 		}
@@ -2166,9 +2205,9 @@ internal sealed class DevProjexMcpTools(
 	{
 		var length = Math.Min(content.Length, maximumCharacters);
 		if (length > 0 &&
-		    length < content.Length &&
-		    char.IsHighSurrogate(content[length - 1]) &&
-		    char.IsLowSurrogate(content[length]))
+			length < content.Length &&
+			char.IsHighSurrogate(content[length - 1]) &&
+			char.IsLowSurrogate(content[length]))
 		{
 			length--;
 		}
@@ -2211,8 +2250,8 @@ internal sealed class DevProjexMcpTools(
 			_ => throw new ArgumentOutOfRangeException(nameof(resultKind), resultKind, null)
 		};
 		return $"[Warning {McpErrorCodes.PayloadTruncated}] Mandatory redaction could not fully inspect {subject}. " +
-		       $"{consequence} Results are partial. Set max_file_bytes={SecretRedactionOutputPreparer.MaximumScannableFileBytes} " +
-		       "or lower, exclude oversized or unsupported files, and retry.";
+			   $"{consequence} Results are partial. Set max_file_bytes={SecretRedactionOutputPreparer.MaximumScannableFileBytes} " +
+			   "or lower, exclude oversized or unsupported files, and retry.";
 	}
 
 	private static string? FormatCompressionUnavailable(CodeCompressionSnapshot? snapshot)
@@ -2225,13 +2264,13 @@ internal sealed class DevProjexMcpTools(
 			.Distinct(StringComparer.Ordinal)
 			.Count();
 		return $"[Compression unavailable] failures={availability.Failures.Count.ToString(CultureInfo.InvariantCulture)} · " +
-		       $"languages={languages.ToString(CultureInfo.InvariantCulture)}";
+			   $"languages={languages.ToString(CultureInfo.InvariantCulture)}";
 	}
 
 	private static ProjectContextPlan WithoutWarningDiagnostics(ProjectContextPlan plan)
 	{
 		if (!plan.Diagnostics.Any(static diagnostic =>
-			    diagnostic.Severity == ContextDiagnosticSeverity.Warning))
+				diagnostic.Severity == ContextDiagnosticSeverity.Warning))
 			return plan;
 		return plan with
 		{
@@ -2380,10 +2419,10 @@ internal sealed class DevProjexMcpTools(
 			listed.Select(pattern => McpTextEscaping.EscapeSingleLine(Truncate(pattern))));
 		var remaining = mix.UnmatchedPatterns.Count - listed.Length;
 		return summary +
-		       $"\n[Detail] unmatched: {names}" +
-		       (remaining > 0
-			       ? $" and {remaining.ToString(CultureInfo.InvariantCulture)} more"
-			       : string.Empty);
+			   $"\n[Detail] unmatched: {names}" +
+			   (remaining > 0
+				   ? $" and {remaining.ToString(CultureInfo.InvariantCulture)} more"
+				   : string.Empty);
 	}
 
 	private static string Truncate(string pattern) =>
@@ -2433,7 +2472,7 @@ internal sealed class DevProjexMcpTools(
 		if (report.SkippedFileCount > 0)
 		{
 			output.Append(report.RankedSkippedFiles is { Count: > 0 } &&
-			              report.LargestSkippedFiles.Any(file => file.EstimatedTokens > report.MaximumEstimatedTokens)
+						  report.LargestSkippedFiles.Any(file => file.EstimatedTokens > report.MaximumEstimatedTokens)
 				? "Tip: increase max_tokens or lower detail for a file that is larger than the entire budget."
 				: "Tip: use detail=compact or detail=signatures, narrow the selection, or increase max_tokens.");
 		}
@@ -2454,12 +2493,12 @@ internal sealed class DevProjexMcpTools(
 		for (var attempt = 0; attempt < 8; attempt++)
 		{
 			var accounting = $"[Budget accounting] content ≈ {report.IncludedEstimatedTokens.ToString(CultureInfo.InvariantCulture)} of " +
-			                 $"{report.MaximumEstimatedTokens.ToString(CultureInfo.InvariantCulture)} tokens · budget report ≈ " +
-			                 $"{reportTokens.ToString(CultureInfo.InvariantCulture)}" +
-			                 (storedDocumentCharacters is { } storedCharacters
-				                 ? $" · stored document ≈ {CodeCompressionSnapshot.EstimateTokens(storedCharacters).ToString(CultureInfo.InvariantCulture)}"
-				                 : string.Empty) +
-			                 $" · reply ≈ {replyTokens.ToString(CultureInfo.InvariantCulture)}";
+							 $"{report.MaximumEstimatedTokens.ToString(CultureInfo.InvariantCulture)} tokens · budget report ≈ " +
+							 $"{reportTokens.ToString(CultureInfo.InvariantCulture)}" +
+							 (storedDocumentCharacters is { } storedCharacters
+								 ? $" · stored document ≈ {CodeCompressionSnapshot.EstimateTokens(storedCharacters).ToString(CultureInfo.InvariantCulture)}"
+								 : string.Empty) +
+							 $" · reply ≈ {replyTokens.ToString(CultureInfo.InvariantCulture)}";
 			result = AppendTrustedNotices(responseWithoutAccounting, accounting);
 			var next = CodeCompressionSnapshot.EstimateTokens(result.Length + additionalReplyCharacters);
 			if (next == replyTokens)
@@ -2479,10 +2518,10 @@ internal sealed class DevProjexMcpTools(
 			.Distinct(StringComparer.Ordinal)
 			.Count();
 		return $"[Dependency configuration] problems={diagnostics.Count.ToString(CultureInfo.InvariantCulture)} · " +
-		       $"missing={diagnostics.Count(static diagnostic => diagnostic.State == DependencyConfigurationState.Missing).ToString(CultureInfo.InvariantCulture)} · " +
-		       $"corrupt={diagnostics.Count(static diagnostic => diagnostic.State == DependencyConfigurationState.Corrupt).ToString(CultureInfo.InvariantCulture)} · " +
-		       $"unsupported-semantics={diagnostics.Count(static diagnostic => diagnostic.State == DependencyConfigurationState.UnsupportedSemantics).ToString(CultureInfo.InvariantCulture)} · " +
-		       $"affected-scopes={affectedScopes.ToString(CultureInfo.InvariantCulture)}";
+			   $"missing={diagnostics.Count(static diagnostic => diagnostic.State == DependencyConfigurationState.Missing).ToString(CultureInfo.InvariantCulture)} · " +
+			   $"corrupt={diagnostics.Count(static diagnostic => diagnostic.State == DependencyConfigurationState.Corrupt).ToString(CultureInfo.InvariantCulture)} · " +
+			   $"unsupported-semantics={diagnostics.Count(static diagnostic => diagnostic.State == DependencyConfigurationState.UnsupportedSemantics).ToString(CultureInfo.InvariantCulture)} · " +
+			   $"affected-scopes={affectedScopes.ToString(CultureInfo.InvariantCulture)}";
 	}
 
 	private static string? FormatDependencyConfigurationData(
@@ -2581,6 +2620,169 @@ internal sealed class DevProjexMcpTools(
 		}
 
 		return lines;
+	}
+
+	internal static void AddSearchCandidates(
+		McpSearchCandidateCollector collector,
+		string relativePath,
+		string fullPath,
+		string content,
+		IReadOnlyList<McpSearchMatchContext> matches,
+		IReadOnlyList<NavigationDeclaration> declarations,
+		McpSearchRegex regex,
+		int contextLines,
+		bool explicitScope,
+		McpSearchFilePriorityState? priorityState = null)
+	{
+		priorityState ??= new McpSearchFilePriorityState();
+		foreach (var match in matches)
+		{
+			foreach (var matchLine in match.MatchLineNumbers)
+			{
+				var line = match.Lines.First(item => item.LineNumber == matchLine);
+				var firstContextLine = Math.Max(1, matchLine - contextLines);
+				var lastContextLine = checked(matchLine + contextLines);
+				var candidateContext = new McpSearchMatchContext(
+					[matchLine],
+					match.Lines
+						.Where(item => item.LineNumber >= firstContextLine && item.LineNumber <= lastContextLine)
+						.ToArray(),
+					StartsNewGroup: false);
+				var rendered = RenderGroupLines(relativePath, content, candidateContext);
+				if (rendered.Count == 0)
+					continue;
+
+				var declaration = FindContainingDeclaration(declarations, matchLine);
+				var quality = declaration is null
+					? McpDeclarationMatchQuality.None
+					: regex.DeclarationMatchQuality(declaration.Name);
+				var owner = declaration?.Owner ?? declaration?.Name ?? relativePath;
+				var ownerOccurrence = priorityState.TakeOwnerOccurrence(owner);
+				var sourceLineIdentity = ContentFingerprint
+					.Compute(content.AsSpan(line.Offset, line.Length))
+					.ToHexString();
+				var repeated = priorityState.TakeRepeatedLineOccurrence(sourceLineIdentity);
+				var hint = regex.HasDeclarationHint(content, line.Offset, line.Length);
+				var group = new McpSearchRenderedGroup(
+					relativePath,
+					fullPath,
+					[matchLine],
+					rendered);
+				var stableText = rendered.First(item => item.IsMatch).Text;
+				collector.Consider(new McpSearchCandidate(
+					group,
+					matchLine,
+					McpSearchCandidateCollector.Score(
+						explicitScope,
+						priorityState.TakeFileOccurrence(),
+						quality,
+						hint,
+						ownerOccurrence,
+						repeated),
+					stableText,
+					checked(rendered.Sum(static item => item.Text.Length + Environment.NewLine.Length) +
+							relativePath.Length + Environment.NewLine.Length)));
+			}
+		}
+	}
+
+	private static NavigationDeclaration? FindContainingDeclaration(
+		IReadOnlyList<NavigationDeclaration> declarations,
+		int line)
+	{
+		NavigationDeclaration? best = null;
+		foreach (var declaration in declarations)
+		{
+			if (line < declaration.StartLine || line > declaration.EndLine)
+				continue;
+			if (best is null ||
+				declaration.EndLine - declaration.StartLine < best.EndLine - best.StartLine ||
+				declaration.EndLine - declaration.StartLine == best.EndLine - best.StartLine &&
+				declaration.EndIndex - declaration.StartIndex < best.EndIndex - best.StartIndex)
+			{
+				best = declaration;
+			}
+		}
+		return best;
+	}
+
+	internal static IReadOnlyList<McpSearchRenderedGroup> BuildOrderedSearchGroups(
+		IReadOnlyList<McpSearchCandidate> candidates)
+	{
+		if (candidates.Count == 0)
+			return [];
+
+		var fileOrder = new List<string>();
+		var byFile = new Dictionary<string, List<McpSearchCandidate>>(StringComparer.Ordinal);
+		foreach (var candidate in candidates)
+		{
+			if (!byFile.TryGetValue(candidate.Group.RelativePath, out var fileCandidates))
+			{
+				fileCandidates = [];
+				byFile[candidate.Group.RelativePath] = fileCandidates;
+				fileOrder.Add(candidate.Group.RelativePath);
+			}
+			fileCandidates.Add(candidate);
+		}
+
+		var result = new List<McpSearchRenderedGroup>(candidates.Count);
+		foreach (var path in fileOrder)
+		{
+			var ordered = byFile[path].OrderBy(static item => item.MatchLine).ToArray();
+			var currentMatches = new List<int>();
+			var currentLines = new SortedDictionary<int, McpSearchGroupLine>();
+			foreach (var candidate in ordered)
+			{
+				var firstLine = candidate.Group.Lines[0].LineNumber;
+				var adjacent = currentLines.Count == 0 || firstLine <= currentLines.Keys.Last() + 1;
+				if (!adjacent)
+				{
+					result.Add(new McpSearchRenderedGroup(
+						path,
+						ordered[0].Group.FullPath,
+						currentMatches.ToArray(),
+						currentLines.Values.ToArray()));
+					currentMatches.Clear();
+					currentLines.Clear();
+				}
+
+				currentMatches.Add(candidate.MatchLine);
+				foreach (var line in candidate.Group.Lines)
+				{
+					if (currentLines.TryGetValue(line.LineNumber, out var existing))
+					{
+						var isMatch = existing.IsMatch || line.IsMatch;
+						currentLines[line.LineNumber] = existing with
+						{
+							IsMatch = isMatch,
+							Text = isMatch && !existing.IsMatch
+								? MarkRenderedLineAsMatch(existing)
+								: existing.Text
+						};
+					}
+					else
+						currentLines[line.LineNumber] = line;
+				}
+			}
+
+			if (currentLines.Count > 0)
+			{
+				result.Add(new McpSearchRenderedGroup(
+					path,
+					ordered[0].Group.FullPath,
+					currentMatches.ToArray(),
+					currentLines.Values.ToArray()));
+			}
+		}
+		return result;
+	}
+
+	private static string MarkRenderedLineAsMatch(McpSearchGroupLine line)
+	{
+		var marker = line.LineNumber.ToString(CultureInfo.InvariantCulture).Length;
+		return marker < line.Text.Length && line.Text[marker] == '-'
+			? string.Concat(line.Text.AsSpan(0, marker), ":", line.Text.AsSpan(marker + 1))
+			: line.Text;
 	}
 
 	/// <summary>
@@ -2750,56 +2952,6 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	/// <summary>
-	/// Puts the groups whose matches sit inside a declaration ahead of those whose do not, keeping
-	/// the order the selection produced within each. A generated report that declares nothing
-	/// therefore stops crowding out the declaration of the term that was searched for.
-	/// </summary>
-	/// <remarks>
-	/// The signal is the one the naming already computes, so this is a comparison rather than a
-	/// mechanism: no directory list, no ranking graph, no index a search does not already build.
-	/// Both sides keep their existing relative order, so the same query on the same tree always
-	/// produces the same answer.
-	/// </remarks>
-	private static IReadOnlyList<McpSearchRenderedGroup>? OrderDeclarationsFirst(
-		IReadOnlyList<McpSearchRenderedGroup> groups,
-		IReadOnlyDictionary<string, IReadOnlyList<NavigationDeclaration>> navigationByFile,
-		CancellationToken cancellationToken)
-	{
-		var hits = groups
-			.SelectMany(group => group.MatchLines.Select(line =>
-				new McpSearchHit(group.RelativePath, group.FullPath, line)))
-			.ToArray();
-		var declarations = McpSearchSymbols.Resolve(hits, navigationByFile, cancellationToken);
-		// A search that touched more files than the naming can reach knows nothing about the ones
-		// past that bound, and ordering on a signal it does not have would claim an order it did
-		// not apply. It keeps selection order instead, and says nothing.
-		if (declarations.Names.Count == 0 || declarations.FilesBeyondTheLimit > 0)
-			return null;
-
-		// Files, not groups: a file's groups must stay one block, in their own order, or the same
-		// path is written twice and its line numbers stop climbing.
-		var declaringFiles = new HashSet<string>(StringComparer.Ordinal);
-		foreach (var group in groups)
-		{
-			if (group.MatchLines.Any(line =>
-				    declarations.Names.ContainsKey(new McpSearchHitKey(group.RelativePath, line))))
-			{
-				declaringFiles.Add(group.RelativePath);
-			}
-		}
-
-		if (declaringFiles.Count == 0)
-			return null;
-
-		var declaring = new List<McpSearchRenderedGroup>(groups.Count);
-		var mentioning = new List<McpSearchRenderedGroup>(groups.Count);
-		foreach (var group in groups)
-			(declaringFiles.Contains(group.RelativePath) ? declaring : mentioning).Add(group);
-
-		return [.. declaring, .. mentioning];
-	}
-
-	/// <summary>
 	/// Keeps what the response could not carry, under an id the caller can page, so the matches
 	/// this scan already found are not scanned for a second time.
 	/// </summary>
@@ -2929,7 +3081,7 @@ internal sealed class DevProjexMcpTools(
 		var bound = hitMatchBound
 			? $"{MaximumStoredSearchMatches.ToString("N0", CultureInfo.InvariantCulture)}-match"
 			: $"{MaximumStoredSearchCharacters.ToString("N0", CultureInfo.InvariantCulture)}-character";
-		return $"{reported}, and stopped at the {bound} store limit, so it holds only the first of them.";
+		return $"{reported}, and stopped at the {bound} store limit, so it holds only the retained subset that fit.";
 	}
 
 	/// <summary>
@@ -3029,9 +3181,9 @@ internal sealed class DevProjexMcpTools(
 	private static string? FormatSymbolCoverageNotice(McpSearchSymbolResult symbols, bool namesRefused)
 	{
 		if (!namesRefused &&
-		    symbols.AnnotatedHits == 0 &&
-		    symbols.FilesWithoutDeclarations == 0 &&
-		    symbols.FilesBeyondTheLimit == 0)
+			symbols.AnnotatedHits == 0 &&
+			symbols.FilesWithoutDeclarations == 0 &&
+			symbols.FilesBeyondTheLimit == 0)
 		{
 			return null;
 		}
@@ -3052,6 +3204,42 @@ internal sealed class DevProjexMcpTools(
 			  $"{MaximumSearchContentCharacters.ToString(CultureInfo.InvariantCulture)}-character " +
 			  "search cap, so none were written."
 			: $"{reported}.";
+	}
+
+	internal static string FormatSearchBoundaryNotice(McpSearchBoundary boundary, bool hasStoredContinuation)
+	{
+		var prefix = boundary.IsComplete ? "[Search boundary] complete" : "[Search boundary] partial";
+		var counts =
+			$"sources inspected={boundary.InspectedSources.ToString(CultureInfo.InvariantCulture)}/" +
+			$"{boundary.EligibleSources.ToString(CultureInfo.InvariantCulture)} · " +
+			$"matches retained={boundary.RetainedMatches.ToString(CultureInfo.InvariantCulture)}/" +
+			$"{boundary.EncounteredMatches.ToString(CultureInfo.InvariantCulture)} · " +
+			$"matches written={boundary.WrittenMatches.ToString(CultureInfo.InvariantCulture)} · " +
+			$"declaration files named={boundary.NamedDeclarationFiles.ToString(CultureInfo.InvariantCulture)}";
+		if (boundary.IsComplete)
+			return $"{prefix} · {counts}.";
+
+		var limits = new List<string>(7);
+		if (boundary.InspectionByteLimitReached)
+			limits.Add("inspection-bytes");
+		if (boundary.RetainedMatchLimitReached)
+			limits.Add("retained-matches");
+		if (boundary.AnnotationFileLimitReached)
+			limits.Add("annotation-files");
+		if (boundary.ResponseCharacterLimitReached)
+			limits.Add("response-characters");
+		if (boundary.RequestResultLimitReached)
+			limits.Add("max-results");
+		if (boundary.RetainedCharacterLimitReached)
+			limits.Add("retained-characters");
+		if (boundary.StoredCharacterLimitReached)
+			limits.Add("stored-characters");
+		if (boundary.UnscannableSources > 0)
+			limits.Add("unscannable-sources");
+		var continuation = hasStoredContinuation
+			? "continue with read_pack for retained matches; narrow pattern, paths, or include_patterns and rerun for omitted evidence"
+			: "narrow pattern, paths, or include_patterns and continue the search";
+		return $"{prefix} · {counts} · limits={string.Join(',', limits)}; {continuation}.";
 	}
 
 	/// <summary>
@@ -3257,7 +3445,7 @@ internal sealed class DevProjexMcpTools(
 				.Append(entry.Dependencies.ToString(CultureInfo.InvariantCulture))
 				.Append(" · commits ")
 				.Append(entry.Commits?.ToString(CultureInfo.InvariantCulture) ??
-				        $"unavailable: {entry.GitUnavailableReason}")
+						$"unavailable: {entry.GitUnavailableReason}")
 				.Append('/')
 				.Append(report.GitWindow.ToString(CultureInfo.InvariantCulture));
 			if (entry.Role == ImportanceFileRole.TestSource)
@@ -3457,7 +3645,7 @@ internal sealed class DevProjexMcpTools(
 			else
 			{
 				jsonDeltas[childDepth] += 1L + directoryCount + fileCount +
-				                          (directoryCount > 0 && fileCount > 0 ? 2 : 0);
+										  (directoryCount > 0 && fileCount > 0 ? 2 : 0);
 				xmlDeltas[childDepth] += 1L + directoryCount + fileCount;
 			}
 		}
@@ -3651,9 +3839,9 @@ internal sealed class DevProjexMcpTools(
 	{
 		var length = Math.Min(value.Length, maximumCharacters);
 		if (length > 0 &&
-		    length < value.Length &&
-		    char.IsHighSurrogate(value[length - 1]) &&
-		    char.IsLowSurrogate(value[length]))
+			length < value.Length &&
+			char.IsHighSurrogate(value[length - 1]) &&
+			char.IsLowSurrogate(value[length]))
 		{
 			length--;
 		}

@@ -1,7 +1,13 @@
+using System.Buffers;
+
 namespace DevProjex.Mcp;
 
 internal sealed class McpSearchRegex
 {
+	private static readonly SearchValues<string> DeclarationKeywords = SearchValues.Create(
+		["class", "interface", "struct", "record", "enum", "delegate", "type", "trait", "def", "function", "func", "fn"],
+		StringComparison.Ordinal);
+	private static readonly SearchValues<char> DeclarationSeparators = SearchValues.Create(" \t({;:");
 	internal const int MaximumPatternLength = 4096;
 	private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(2);
 	private readonly Regex _regex;
@@ -40,6 +46,56 @@ internal sealed class McpSearchRegex
 	{
 		ArgumentNullException.ThrowIfNull(input);
 		return IsMatch(input.AsSpan(start, length));
+	}
+
+	public McpDeclarationMatchQuality DeclarationMatchQuality(string declaredName)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(declaredName);
+		var separator = declaredName.AsSpan().LastIndexOfAny('.', '#', '/');
+		var simpleName = separator < 0 ? declaredName : declaredName[(separator + 1)..];
+		if (MatchesWhole(declaredName))
+			return McpDeclarationMatchQuality.FullyQualified;
+		return MatchesWhole(simpleName)
+			? McpDeclarationMatchQuality.SimpleName
+			: McpDeclarationMatchQuality.None;
+	}
+
+	public bool HasDeclarationHint(string input, int start, int length)
+	{
+		ArgumentNullException.ThrowIfNull(input);
+		try
+		{
+			foreach (var match in _regex.EnumerateMatches(input.AsSpan(start, length)))
+			{
+				var prefix = input.AsSpan(start, match.Index).TrimEnd();
+				var wordStart = prefix.LastIndexOfAny(DeclarationSeparators);
+				var word = prefix[(wordStart + 1)..];
+				if (DeclarationKeywords.Contains(word.ToString()))
+					return true;
+			}
+			return false;
+		}
+		catch (RegexMatchTimeoutException)
+		{
+			throw InvalidPatternTimeout();
+		}
+	}
+
+	private bool MatchesWhole(string input)
+	{
+		try
+		{
+			foreach (var match in _regex.EnumerateMatches(input))
+			{
+				if (match.Index == 0 && match.Length == input.Length)
+					return true;
+			}
+			return false;
+		}
+		catch (RegexMatchTimeoutException)
+		{
+			throw InvalidPatternTimeout();
+		}
 	}
 
 	public bool IsMatch(
