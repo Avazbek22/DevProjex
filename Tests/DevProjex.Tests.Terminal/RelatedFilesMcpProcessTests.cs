@@ -109,6 +109,27 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessRelatedFilesDoesNotExpandReopenedRubyContainersToEveryFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("ruby-project");
+		workspace.WriteFile("ruby-project/lib/sinatra/indifferent_hash.rb", "module Sinatra\n class IndifferentHash\n end\nend\n");
+		workspace.WriteFile("ruby-project/lib/sinatra/base.rb", "module Sinatra\n class Base\n end\nend\n");
+		workspace.WriteFile("ruby-project/test/consumer.rb", "class Consumer\n include Sinatra\n VALUE = Sinatra::Base\nend\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "test/consumer.rb",
+			["direction"] = "dependencies"
+		});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("lib/sinatra/base.rb", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("lib/sinatra/indifferent_hash.rb", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesReportsPhpManifestDependencies()
 	{
 		using var workspace = new TemporaryDirectory();

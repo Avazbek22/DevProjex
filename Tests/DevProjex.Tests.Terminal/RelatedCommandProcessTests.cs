@@ -93,6 +93,23 @@ public sealed class RelatedCommandProcessTests
 	}
 
 	[Fact]
+	public void RealPublishedCommandDoesNotExpandReopenedRubyContainersToEveryFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/lib/sinatra/indifferent_hash.rb", "module Sinatra\n class IndifferentHash\n end\nend\n");
+		workspace.WriteFile("project/lib/sinatra/base.rb", "module Sinatra\n class Base\n end\nend\n");
+		workspace.WriteFile("project/test/consumer.rb", "class Consumer\n include Sinatra\n VALUE = Sinatra::Base\nend\n");
+
+		var result = Run(workspace, "related", "test/consumer.rb", "--project", project,
+			"--direction", "dependencies", "--format", "json", "--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("lib/sinatra/base.rb", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("lib/sinatra/indifferent_hash.rb", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RealPublishedCommandReportsPhpManifestDependencies()
 	{
 		using var workspace = new TemporaryDirectory();
