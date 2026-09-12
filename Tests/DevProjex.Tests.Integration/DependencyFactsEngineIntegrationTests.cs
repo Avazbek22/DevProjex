@@ -48,7 +48,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var middleware = fixture.CreateFile("src/Middleware.php", "<?php namespace GuzzleHttp; final class Middleware { public const NAME = 'value'; }");
 		var handler = fixture.CreateFile(
 			"src/HandlerStack.php",
-			"<?php namespace GuzzleHttp; final class HandlerStack { public function resolve() { Utils::choose(); return Middleware::NAME; } }");
+			"<?php namespace GuzzleHttp; final class HandlerStack { public function resolve() { Utils::choose(); \\GuzzleHttp\\Utils::choose(); return Middleware::NAME; } }");
 		using var engine = CreateEngine();
 
 		var index = await engine.IndexAsync(
@@ -58,6 +58,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
 			edge.Reference == "Utils" && edge.Target == "src/Utils.php" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
+			edge.Reference == "GuzzleHttp\\Utils" && edge.Target == "src/Utils.php" && edge.Status == ResolutionStatus.Resolved);
 		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
 			edge.Reference == "Middleware" && edge.Target == "src/Middleware.php" && edge.Status == ResolutionStatus.Resolved);
 	}
@@ -969,6 +971,42 @@ public sealed class DependencyFactsEngineIntegrationTests
 			declaration.Name == "sample.Consumer.read" && declaration.Kind == NavigationSymbolKind.Method);
 		Assert.DoesNotContain(index.Declarations, static declaration =>
 			declaration.Identity.QualifiedName.EndsWith(".read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task JavaTypeReceiversResolveWithoutTreatingValuesAsTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var helper = fixture.CreateFile("src/sample/Helper.java", "package sample; public final class Helper { public static void run() {} }");
+		var consumer = fixture.CreateFile("src/sample/Consumer.java", """
+			package sample;
+			public class Consumer {
+			    void call() {
+			        Helper.run();
+			        sample.Helper.run();
+			    }
+			}
+			""");
+		var shadow = fixture.CreateFile("src/sample/Shadow.java", """
+			package sample;
+			public class Shadow {
+			    void call(Service Helper) {
+			        Helper.run();
+			    }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[helper, consumer, shadow],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edges = index.Edges.Where(static edge => edge.Source == "src/sample/Consumer.java" &&
+			edge.Target == "src/sample/Helper.java" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Equal(["Helper", "sample.Helper"], edges.Select(static edge => edge.Reference).Order().ToArray());
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "src/sample/Shadow.java" &&
+			edge.Target == "src/sample/Helper.java");
 	}
 
 	[Fact]

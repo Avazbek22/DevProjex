@@ -172,7 +172,9 @@ declared package and complete nesting chain. Exact imports resolve only to match
 the allowed manifest; static imports walk back to the nearest declaring type. Same-package types and
 types admitted by an exact or wildcard import are visible to type references. Two visible declarations
 remain ambiguous, and a name elsewhere in the repository is never selected merely because it is the
-only match. Class, method, constructor, and nested-type parameters shadow declarations only inside
+only match. Capitalized receivers of method and field access provide type-reference evidence, while
+lexically visible value declarations with the same name suppress that evidence. Class, method,
+constructor, and nested-type parameters shadow declarations only inside
 their lexical owner; qualified names and types used by bounds remain ordinary references. Bounded
 `pom.xml`, `build.gradle`, and `build.gradle.kts` files divide a repository into
 source scopes. Package-qualified declarations inside a source scope remain resolvable when Maven
@@ -273,7 +275,8 @@ error publishes neither recovered declarations nor recovered edges.
 PHP source files contribute classes, interfaces, traits, enums, and top-level functions under their
 declared namespace. Simple namespace `use` statements and aliases resolve only to matching declarations
 in the allowed manifest; inheritance, implemented interfaces, property types, parameters, return
-types, and unqualified static access inside the current namespace supply type-reference evidence.
+types, unqualified static access inside the current namespace, and fully qualified static access
+supply type-reference evidence.
 Bounded `composer.json` files provide package names, repository
 package dependencies, and literal PSR-4 mappings as data. Composer plugins, generated autoload files,
 installed vendor packages, grouped imports, and runtime class aliases are not executed or guessed and

@@ -961,11 +961,19 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 			.Where(static capture => capture.Name == "import.java")
 			.Select(static capture => (capture.StartIndex, capture.EndIndex))
 			.ToArray();
+		var valueScopes = context.References
+			.Where(static capture => capture.Name == "context.value_name" &&
+				!string.IsNullOrWhiteSpace(capture.CapturedName))
+			.ToArray();
 		var referenceCaptures = context.References
-			.Where(static capture => capture.Name == "reference.type")
+			.Where(static capture => capture.Name is "reference.type" or "reference.expression_receiver")
 			.ToArray();
 		var references = Distinct(referenceCaptures
 			.Where(capture =>
+				(capture.Name != "reference.expression_receiver" ||
+				 IsJavaTypeReceiver(capture.Text) &&
+				 !valueScopes.Any(scope => scope.CapturedName == capture.Text &&
+					 scope.StartIndex <= capture.StartIndex && scope.EndIndex >= capture.EndIndex)) &&
 				!declarationNames.Contains(capture.StartIndex) &&
 				!typeParameterNames.Contains(capture.StartIndex) &&
 				!PrimitiveTypes.Contains(capture.Text) &&
@@ -1014,6 +1022,13 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 		{
 			TypeParameterScopes = typeParameterScopes
 		};
+	}
+
+	private static bool IsJavaTypeReceiver(string value)
+	{
+		var separator = value.LastIndexOf('.');
+		var name = separator < 0 ? value : value[(separator + 1)..];
+		return name.Length > 0 && char.IsUpper(name[0]);
 	}
 
 	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(
