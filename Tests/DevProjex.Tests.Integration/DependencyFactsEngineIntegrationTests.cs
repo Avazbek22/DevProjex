@@ -271,6 +271,108 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RubyExternalGemContainerReopeningDoesNotBecomeAProjectTarget()
+	{
+		using var fixture = new TemporaryDirectory();
+		var gemfile = fixture.CreateFile("Gemfile", "source 'https://example.invalid'\ngem 'ext'\n");
+		var consumer = fixture.CreateFile("lib/consumer.rb", "require 'ext'\nVALUE = Ext::Thing\n");
+		var extension = fixture.CreateFile("test/extension.rb", "module Ext::Thing\n  def helper; end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[gemfile, consumer, extension],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "Ext::Thing");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Empty(edge.Candidates);
+	}
+
+	[Fact]
+	public async Task RubyProjectConstantDefinitionRemainsResolvable()
+	{
+		using var fixture = new TemporaryDirectory();
+		var consumer = fixture.CreateFile("lib/consumer.rb", "VALUE = App::Thing\n");
+		var definition = fixture.CreateFile("lib/thing.rb", "module App\n  class Thing\n  end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[consumer, definition],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "App::Thing" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "lib/thing.rb");
+	}
+
+	[Fact]
+	public async Task RubyInternalReopenedContainerStillResolvesItsDefinedMember()
+	{
+		using var fixture = new TemporaryDirectory();
+		var container = fixture.CreateFile("lib/app.rb", "module App\nend\n");
+		var member = fixture.CreateFile("lib/thing.rb", "module App\n  class Thing\n  end\nend\n");
+		var consumer = fixture.CreateFile("lib/consumer.rb", "VALUE = App::Thing\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[container, member, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "App::Thing" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "lib/thing.rb");
+		Assert.DoesNotContain(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Target == "lib/app.rb");
+	}
+
+	[Fact]
+	public async Task RubyRuntimeClassReopeningDoesNotBecomeAProjectTarget()
+	{
+		using var fixture = new TemporaryDirectory();
+		var consumer = fixture.CreateFile("lib/consumer.rb", "VALUE = Hash\n");
+		var extension = fixture.CreateFile("lib/hash_extension.rb", "class Hash\n  def helper; end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[consumer, extension],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "Hash");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Empty(edge.Candidates);
+	}
+
+	[Fact]
+	public async Task RubyExternalContainerReopenedInTwoFilesDoesNotBecomeAmbiguous()
+	{
+		using var fixture = new TemporaryDirectory();
+		var gemfile = fixture.CreateFile("Gemfile", "source 'https://example.invalid'\ngem 'ext'\n");
+		var consumer = fixture.CreateFile("lib/consumer.rb", "require 'ext'\nVALUE = Ext::Thing\n");
+		var first = fixture.CreateFile("test/first_extension.rb", "module Ext::Thing\n  def first; end\nend\n");
+		var second = fixture.CreateFile("test/second_extension.rb", "module Ext::Thing\n  def second; end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[gemfile, consumer, first, second],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "Ext::Thing");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Empty(edge.Candidates);
+	}
+
+	[Fact]
 	public async Task KotlinTypeParametersShadowOnlyTheirLexicalScopes()
 	{
 		using var fixture = new TemporaryDirectory();

@@ -488,7 +488,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		}
 
 		var rubyProjects = new List<(string Directory, string ScopeId, string? PackageName,
-			IReadOnlyList<string> ProjectDirectories, DependencyConfigurationState State, string? Reason)>();
+			IReadOnlyList<string> ProjectDirectories, IReadOnlySet<string> ExternalPackages,
+			DependencyConfigurationState State, string? Reason)>();
 		foreach (var group in rubyConfigFiles.GroupBy(static path => Path.GetDirectoryName(path)!, PathComparer)
 			.OrderBy(static group => group.Key, StringComparer.Ordinal))
 		{
@@ -496,6 +497,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			string? reason = null;
 			string? packageName = null;
 			var projectDirectories = new HashSet<string>(PathComparer);
+			var externalPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var localPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 			foreach (var configPath in group.Order(StringComparer.Ordinal))
 			{
 				var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
@@ -510,12 +513,15 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 					var parsed = ParseRubyProject(root, configPath, snapshot.Content);
 					packageName ??= parsed.PackageName;
 					foreach (var directory in parsed.ProjectDirectories) projectDirectories.Add(directory);
+					foreach (var dependency in parsed.ExternalPackages) externalPackages.Add(dependency);
+					foreach (var dependency in parsed.LocalPackages) localPackages.Add(dependency);
 				}
 				AddDiagnostic(configPath, snapshot.State, snapshot.Reason,
 					"ruby:" + PortableRelative(root, group.Key));
 			}
+			externalPackages.ExceptWith(localPackages);
 			rubyProjects.Add((group.Key, "ruby:" + PortableRelative(root, group.Key), packageName,
-				projectDirectories.Order(StringComparer.Ordinal).ToArray(), state, reason));
+				projectDirectories.Order(StringComparer.Ordinal).ToArray(), externalPackages, state, reason));
 		}
 		var rubyScopeByDirectory = rubyProjects.ToDictionary(
 			static project => Path.GetFullPath(project.Directory), static project => project.ScopeId, PathComparer);
@@ -530,7 +536,8 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				new HashSet<string>(), [], true)
 			{
 				ConfigurationState = project.State,
-				ConfigurationDiagnostic = project.Reason
+				ConfigurationDiagnostic = project.Reason,
+				RubyExternalPackages = project.ExternalPackages
 			});
 		}
 
@@ -1369,16 +1376,32 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	{
 		var directory = Path.GetDirectoryName(path)!;
 		string? packageName = null;
+		var externalPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var localPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		if (path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase))
 		{
 			var name = Regex.Match(content,
 				"""\b(?:name|spec\.name)\s*=\s*['\"](?<name>[^'\"]+)['\"]""",
 				RegexOptions.CultureInvariant);
 			if (name.Success) packageName = name.Groups["name"].Value;
+			foreach (Match dependency in Regex.Matches(content,
+				"""\b(?:add_dependency|add_runtime_dependency)\s*\(?\s*['\"](?<name>[^'\"]+)['\"]""",
+				RegexOptions.CultureInvariant))
+				externalPackages.Add(dependency.Groups["name"].Value);
 		}
 		var directories = new HashSet<string>(PathComparer);
 		if (Path.GetFileName(path).Equals("Gemfile", StringComparison.OrdinalIgnoreCase))
 		{
+			foreach (Match dependency in Regex.Matches(content,
+				"""(?m)^\s*gem\s*\(?\s*['\"](?<name>[^'\"]+)['\"](?<options>[^\r\n]*)""",
+				RegexOptions.CultureInvariant))
+			{
+				var name = dependency.Groups["name"].Value;
+				if (Regex.IsMatch(dependency.Groups["options"].Value, """\bpath\s*:""", RegexOptions.CultureInvariant))
+					localPackages.Add(name);
+				else
+					externalPackages.Add(name);
+			}
 			foreach (Match match in Regex.Matches(content,
 				"""\bgem\s*\(?\s*['\"][^'\"]+['\"]\s*,[^\r\n]*?\bpath\s*:\s*['\"](?<path>[^'\"]+)['\"]""",
 				RegexOptions.CultureInvariant))
@@ -1389,7 +1412,11 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 				if (IsWithin(root, candidate)) directories.Add(candidate);
 			}
 		}
-		return new RubyProjectConfiguration(packageName, directories.Order(StringComparer.Ordinal).ToArray());
+		return new RubyProjectConfiguration(
+			packageName,
+			directories.Order(StringComparer.Ordinal).ToArray(),
+			externalPackages,
+			localPackages);
 	}
 
 	private static ConfigurationParseResult<ComposerProjectConfiguration> ParseComposerProject(string content)
@@ -1557,7 +1584,11 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	{
 		public static RustProjectConfiguration Empty { get; } = new(null, []);
 	}
-	private sealed record RubyProjectConfiguration(string? PackageName, IReadOnlyList<string> ProjectDirectories);
+	private sealed record RubyProjectConfiguration(
+		string? PackageName,
+		IReadOnlyList<string> ProjectDirectories,
+		IReadOnlySet<string> ExternalPackages,
+		IReadOnlySet<string> LocalPackages);
 	private sealed record ComposerProjectConfiguration(
 		string? PackageName,
 		IReadOnlyList<string> Dependencies,

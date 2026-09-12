@@ -239,7 +239,11 @@ Ruby source files contribute classes and modules under their complete lexical ow
 `require_relative` resolves only the corresponding `.rb` file beside the source, while literal
 `require` probes the repository root, its `lib` directory, and `lib` directories of repository gems
 made visible by a literal `path:` entry in `Gemfile`. Gem specifications are read as bounded data for
-their literal name; Ruby code in Gemfiles or gemspecs is never executed. Installed gems, generated
+their literal name and dependency declarations; literal non-path gems in `Gemfile` are recorded as
+external dependencies. A reference rooted in a declared external gem or a Ruby runtime class remains
+unresolved even when repository code reopens the same container, because reopening an externally
+owned class or module does not define the referenced entity inside the project. Ruby code in Gemfiles
+or gemspecs is never executed. Installed gems without a literal declaration, generated
 load paths, interpolated require strings, autoload hooks, and runtime constant mutation are not
 inferred and remain unresolved. Because Ruby containers can be reopened, a class or module identity
 declared in more than one repository file remains unresolved rather than creating a dependency on

@@ -1182,6 +1182,14 @@ public sealed class DependencyFactsEngine : IDisposable
 	{
 		private const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
 		private const string StaticUsingPrefix = "static::";
+		private const string RubyExternalConstantReason = "Ruby constant is provided outside the project";
+		private static readonly IReadOnlySet<string> RubyRuntimeConstants = new HashSet<string>(StringComparer.Ordinal)
+		{
+			"Array", "BasicObject", "Class", "Dir", "Encoding", "Enumerator", "Exception", "FalseClass",
+			"File", "Float", "Hash", "Integer", "IO", "Kernel", "MatchData", "Method", "Module", "NilClass",
+			"Numeric", "Object", "Proc", "Range", "Regexp", "String", "Struct", "Symbol", "Thread", "Time",
+			"TrueClass"
+		};
 		private static readonly ConditionalWeakTable<IReadOnlySet<string>, IReadOnlySet<string>> DotNetSimpleNames = new();
 		private readonly string _root;
 		private readonly IReadOnlyDictionary<string, FileFacts> _files;
@@ -2298,6 +2306,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				: source.TypeParameters.Contains(simpleName, StringComparer.Ordinal));
 			if (typeParameterShadowsReference)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
+			if (source.LanguageId == LanguageId.Ruby && IsRubyExternalConstant(source, reference.Name))
+				return Edge(source, reference, ResolutionStatus.Unresolved, null, RubyExternalConstantReason, []);
 			string? expandedAlias = null;
 			var rustCrateAliasExpanded = false;
 			var aliasExpanded = source.LanguageId == LanguageId.CSharp &&
@@ -2623,6 +2633,26 @@ public sealed class DependencyFactsEngine : IDisposable
 				owner = owner[..separator];
 			}
 			return candidates.Where(static candidate => candidate.ContainingType is null).ToArray();
+		}
+
+		private bool IsRubyExternalConstant(FileFacts source, string reference)
+		{
+			var rootSeparator = reference.IndexOf("::", StringComparison.Ordinal);
+			var root = rootSeparator < 0 ? reference : reference[..rootSeparator];
+			if (RubyRuntimeConstants.Contains(root)) return true;
+			var scope = FindScope(source.ScopeId);
+			return scope is not null && scope.RubyExternalPackages.Any(package =>
+				string.Equals(NormalizeRubyPackageName(package), NormalizeRubyPackageName(root), StringComparison.Ordinal));
+		}
+
+		private static string NormalizeRubyPackageName(string value)
+		{
+			var buffer = new char[value.Length];
+			var length = 0;
+			foreach (var character in value)
+				if (char.IsAsciiLetterOrDigit(character))
+					buffer[length++] = char.ToLowerInvariant(character);
+			return new string(buffer, 0, length);
 		}
 
 		private DeclarationFact[] LookupContextualCSharpQualified(
