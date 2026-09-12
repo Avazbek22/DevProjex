@@ -1502,7 +1502,10 @@ internal sealed class RustDependencyLanguageAdapter : DependencyLanguageAdapter
 				item.Alias,
 				item.IsWildcard,
 				0,
-				Site(context, capture));
+				Site(context, capture))
+			{
+				IsCrateQualified = item.Path == "crate" || item.Path.StartsWith("crate::", StringComparison.Ordinal)
+			};
 	}
 
 	private static IEnumerable<RustUsePath> ExpandUse(string expression, string prefix)

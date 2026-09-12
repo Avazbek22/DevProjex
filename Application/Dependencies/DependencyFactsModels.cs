@@ -135,6 +135,7 @@ public sealed record ImportFact(
 {
 	public string? ContainingDeclaration { get; init; }
 	public ModuleImportKind ImportKind { get; init; }
+	public bool IsCrateQualified { get; init; }
 }
 
 public sealed record ReferenceFact(

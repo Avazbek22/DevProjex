@@ -520,6 +520,33 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RustCrateQualifiedUsesStayInsideTheOwningWorkspaceMember()
+	{
+		using var fixture = new TemporaryDirectory();
+		var workspace = fixture.CreateFile("Cargo.toml", "[workspace]\nmembers = [\"crates/ignore\", \"crates/globset\"]\n");
+		var ignoreManifest = fixture.CreateFile("crates/ignore/Cargo.toml", "[package]\nname = \"ignore\"\nversion = \"1.0.0\"\n");
+		var ignoreRoot = fixture.CreateFile("crates/ignore/src/lib.rs", "pub struct Error; pub struct Match; mod overrides;");
+		var overrides = fixture.CreateFile(
+			"crates/ignore/src/overrides.rs",
+			"use crate::{Error, Match}; pub struct Override { error: Error, matched: Match }");
+		var globsetManifest = fixture.CreateFile("crates/globset/Cargo.toml", "[package]\nname = \"globset\"\nversion = \"1.0.0\"\n");
+		var globsetRoot = fixture.CreateFile("crates/globset/src/lib.rs", "pub struct Error; pub struct Match;");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[workspace, ignoreManifest, ignoreRoot, overrides, globsetManifest, globsetRoot],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edges = index.Edges.Where(static edge => edge.Source == "crates/ignore/src/overrides.rs").ToArray();
+		Assert.Contains(edges, static edge => edge.Reference == "Error" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "crates/ignore/src/lib.rs");
+		Assert.Contains(edges, static edge => edge.Reference == "Match" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "crates/ignore/src/lib.rs");
+		Assert.DoesNotContain(edges.SelectMany(static edge => edge.Candidates), static path => path.Contains("globset", StringComparison.Ordinal));
+	}
+
+	[Fact]
 	public async Task RustSyntaxErrorsFailClosedWithoutRecoveredEdges()
 	{
 		using var fixture = new TemporaryDirectory();

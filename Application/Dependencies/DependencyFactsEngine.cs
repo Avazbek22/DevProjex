@@ -1374,6 +1374,27 @@ public sealed class DependencyFactsEngine : IDisposable
 			if (import.IsWildcard)
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"wildcard import is resolution context, not a dependency target", []);
+			if (import.IsCrateQualified)
+			{
+				var localDeclarations = LookupQualifiedInScope(source, import.Specifier, 0);
+				var localFiles = localDeclarations.SelectMany(static declaration => declaration.DeclarationSites)
+					.Select(static site => site.File)
+					.Distinct(StringComparer.Ordinal)
+					.Order(StringComparer.Ordinal)
+					.ToArray();
+				return localDeclarations.Length switch
+				{
+					0 => Edge(source, import, ResolutionStatus.Unresolved, null,
+						"no imported declaration in the owning Rust crate", []),
+					1 => Edge(source, import, ResolutionStatus.Resolved, localFiles[0],
+						"one imported declaration in the owning Rust crate", localFiles) with
+					{
+						DeclarationFiles = localFiles
+					},
+					_ => Edge(source, import, ResolutionStatus.Ambiguous, null,
+						"multiple imported declarations in the owning Rust crate", localFiles)
+				};
+			}
 
 			var names = new List<string> { import.Specifier };
 			var firstSeparator = import.Specifier.IndexOf("::", StringComparison.Ordinal);
@@ -2427,6 +2448,15 @@ public sealed class DependencyFactsEngine : IDisposable
 						(matches ??= []).Add(candidate);
 			}
 			return matches?.ToArray() ?? [];
+		}
+
+		private DeclarationFact[] LookupQualifiedInScope(FileFacts source, string name, int arity)
+		{
+			if (!_symbolsByQualifiedName.TryGetValue(
+				    new QualifiedSymbolLookupKey(source.ScopeId, source.LanguageId, QualifiedLookupName(name), arity),
+				    out var candidates))
+				return [];
+			return candidates.Where(candidate => IsVisible(source, candidate)).ToArray();
 		}
 
 		private DeclarationFact[] LookupQualifiedAcrossRepository(FileFacts source, string name, int arity) =>
