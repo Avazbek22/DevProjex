@@ -2331,7 +2331,13 @@ public sealed class DependencyFactsEngine : IDisposable
 			else if (source.LanguageId == LanguageId.Rust && !requiresQualifiedLookup)
 				candidates = SelectVisibleRustCandidates(source, reference, candidates);
 			else if (source.LanguageId == LanguageId.Ruby)
-				candidates = SelectVisibleRubyCandidates(reference, candidates);
+				candidates = SelectVisibleRubyCandidates(reference, candidates)
+					.Where(static candidate => candidate.DeclarationSites
+						.Select(static site => site.File)
+						.Distinct(StringComparer.Ordinal)
+						.Take(2)
+						.Count() == 1)
+					.ToArray();
 			else if (source.LanguageId == LanguageId.Php && !requiresQualifiedLookup)
 				candidates = candidates.Where(candidate =>
 					string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();

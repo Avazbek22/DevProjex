@@ -222,6 +222,29 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RubyReopenedContainersDoNotCreateEdgesToEveryDeclarationFile()
+	{
+		using var fixture = new TemporaryDirectory();
+		var indifferentHash = fixture.CreateFile("lib/sinatra/indifferent_hash.rb", "module Sinatra\n  class IndifferentHash\n  end\nend\n");
+		var baseType = fixture.CreateFile("lib/sinatra/base.rb", "module Sinatra\n  class Base\n  end\nend\n");
+		var consumer = fixture.CreateFile("test/consumer.rb", "class Consumer\n  include Sinatra\n  VALUE = Sinatra::Base\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[indifferentHash, baseType, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "test/consumer.rb" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "lib/sinatra/indifferent_hash.rb");
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "test/consumer.rb" &&
+			edge.Reference == "Sinatra" && edge.Candidates.Count > 0);
+		Assert.Contains(index.Edges, static edge => edge.Source == "test/consumer.rb" &&
+			edge.Reference == "Sinatra::Base" && edge.Status == ResolutionStatus.Resolved &&
+			edge.Target == "lib/sinatra/base.rb");
+	}
+
+	[Fact]
 	public async Task RubyNavigationDistinguishesOrdinarySingletonAndNestedMethods()
 	{
 		using var fixture = new TemporaryDirectory();
