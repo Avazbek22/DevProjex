@@ -214,9 +214,10 @@ public sealed partial class McpServerProcessTests
 			var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 			Assert.NotEqual(true, result.IsError);
 			Assert.DoesNotContain("Large4.txt", text, StringComparison.Ordinal);
-			Assert.Contains("[Search incomplete] The inspected-text byte budget was reached; " +
-			                "additional selected files were not searched and match counts are partial.", text,
-				StringComparison.Ordinal);
+			Assert.Contains("[No matches] The pattern matched nothing in 4 inspected selected file(s)", text, StringComparison.Ordinal);
+			Assert.Contains("[Search boundary] partial", text, StringComparison.Ordinal);
+			Assert.Contains("limits=inspection-bytes", text, StringComparison.Ordinal);
+			Assert.Contains("continue the search", text, StringComparison.Ordinal);
 		}
 		finally
 		{

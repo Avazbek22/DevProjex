@@ -603,6 +603,9 @@ jobs:
           dotnet build tools/RankingEval/RankingEval.csproj -c Release
           dotnet test tools/RankingEval/Tests/RankingEval.Tests.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~EvaluationMetricsTests" --logger "trx;LogFileName=ranking-eval.trx" --results-directory "TestResults/ranking-eval"
 
+      - name: Test MCP usage recorder
+        run: node --test tools/McpUsageRecorder/tests/recorder.test.mjs
+
       - name: Confirm the ranking evaluator tests executed
         if: ${{ success() }}
         shell: pwsh

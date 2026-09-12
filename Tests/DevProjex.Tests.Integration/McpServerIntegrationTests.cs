@@ -245,7 +245,11 @@ public sealed partial class McpServerIntegrationTests
 		var noMatches = Text(await server.CallAsync(
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "absent-marker" }));
-		Assert.Contains("[No matches] The pattern matched nothing in 1 selected file(s) (git: gitignore; exclusions: smart-ignore, empty-folders).", noMatches, StringComparison.Ordinal);
+		Assert.Contains("[No matches] The pattern matched nothing in 1 inspected selected file(s); " +
+						"the search boundary below states whether inspection was complete " +
+						"(git: gitignore; exclusions: smart-ignore, empty-folders).", noMatches, StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] complete · sources inspected=1/1 · matches retained=0/0 · " +
+						"matches written=0 · declaration files named=0.", noMatches, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Empty selection]", noMatches, StringComparison.Ordinal);
 
 		var matched = Text(await server.CallAsync(
@@ -295,11 +299,11 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("Notes.txt", braces, StringComparison.Ordinal);
 
 		foreach (var (pattern, reason) in new[]
-		         {
-			         ("!src/**", "negation ('!') is not supported"),
-			         ("[Ss]rc/**", "character classes ('[...]') are not supported"),
-			         ("**/*.{cs,md", "unbalanced '{'")
-		         })
+				 {
+					 ("!src/**", "negation ('!') is not supported"),
+					 ("[Ss]rc/**", "character classes ('[...]') are not supported"),
+					 ("**/*.{cs,md", "unbalanced '{'")
+				 })
 		{
 			var rejected = await server.CallAsync(
 				"get_tree",
@@ -1506,7 +1510,7 @@ public sealed partial class McpServerIntegrationTests
 			return false;
 		process.WaitForExit();
 		return process.ExitCode == 0 &&
-		       File.GetAttributes(path).HasFlag(FileAttributes.Hidden);
+			   File.GetAttributes(path).HasFlag(FileAttributes.Hidden);
 	}
 
 
@@ -3255,11 +3259,11 @@ public sealed partial class McpServerIntegrationTests
 
 		var text = Text(result);
 		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
-		Assert.Contains("\n[1 additional matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
+		Assert.Contains("\n[1 additional observed matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
 		Assert.Contains("narrow the pattern or filters", text, StringComparison.Ordinal);
 		AssertTrustedTrailerOutsideSpotlight(
 			result,
-			"[1 additional matches not shown; narrow the pattern or filters.]");
+			"[1 additional observed matches not shown; narrow the pattern or filters.]");
 	}
 
 	[Fact]
@@ -4018,7 +4022,7 @@ public sealed partial class McpServerIntegrationTests
 				(notification, _) =>
 				{
 					if (notification.Params?.Deserialize<ProgressNotificationParams>() is { } value &&
-					    value.ProgressToken == progressToken)
+						value.ProgressToken == progressToken)
 						progress.Report(value.Progress);
 					return ValueTask.CompletedTask;
 				});
@@ -4035,7 +4039,7 @@ public sealed partial class McpServerIntegrationTests
 			var request = Assert.Single(
 				server.GetInputWireMessages(firstInputMessage),
 				static message => message.TryGetProperty("method", out var method) &&
-				                  method.GetString() == RequestMethods.ToolsCall);
+								  method.GetString() == RequestMethods.ToolsCall);
 			var requestToken = request.GetProperty("params")
 				.GetProperty("_meta")
 				.GetProperty("progressToken");
@@ -4050,7 +4054,7 @@ public sealed partial class McpServerIntegrationTests
 			var resultIndex = Array.FindIndex(
 				messages,
 				static message => message.TryGetProperty("result", out var wireResult) &&
-				                  wireResult.TryGetProperty("content", out _));
+								  wireResult.TryGetProperty("content", out _));
 			Assert.True(resultIndex >= 0, "The tool result was not recorded on the wire.");
 			Assert.All(progressMessages, item => Assert.True(item.Index < resultIndex));
 
@@ -4092,7 +4096,7 @@ public sealed partial class McpServerIntegrationTests
 			request = Assert.Single(
 				server.GetInputWireMessages(firstInputMessage),
 				static message => message.TryGetProperty("method", out var method) &&
-				                  method.GetString() == RequestMethods.ToolsCall);
+								  method.GetString() == RequestMethods.ToolsCall);
 			if (request.GetProperty("params").TryGetProperty("_meta", out var requestMeta))
 				Assert.False(requestMeta.TryGetProperty("progressToken", out _));
 			Assert.DoesNotContain(
@@ -6266,7 +6270,7 @@ public sealed partial class McpServerIntegrationTests
 			(notification, _) =>
 			{
 				if (notification.Params?.Deserialize<ProgressNotificationParams>() is { } value &&
-				    value.ProgressToken == token)
+					value.ProgressToken == token)
 					progress.Report(value.Progress);
 				return ValueTask.CompletedTask;
 			});
@@ -6647,9 +6651,8 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.NotEqual(true, result.IsError);
 		McpSearchOutputAssertions.DoesNotContainMatch(text, "Large4.txt", 1);
-		Assert.Contains("[Search incomplete] The inspected-text byte budget was reached; " +
-		                "additional selected files were not searched and match counts are partial.", text,
-			StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] partial · sources inspected=4/5", text, StringComparison.Ordinal);
+		Assert.Contains("limits=inspection-bytes", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -7266,7 +7269,7 @@ public sealed partial class McpServerIntegrationTests
 	private static int CountOccurrences(string value, string fragment)
 	{
 		var count = 0;
-		for (var offset = 0;;)
+		for (var offset = 0; ;)
 		{
 			var index = value.IndexOf(fragment, offset, StringComparison.Ordinal);
 			if (index < 0)
@@ -7623,9 +7626,9 @@ public sealed partial class McpServerIntegrationTests
 			RedirectStandardError = true
 		});
 		if (process is null ||
-		    !process.WaitForExit(TimeSpan.FromSeconds(5)) ||
-		    process.ExitCode != 0 ||
-		    !Directory.Exists(linkPath))
+			!process.WaitForExit(TimeSpan.FromSeconds(5)) ||
+			process.ExitCode != 0 ||
+			!Directory.Exists(linkPath))
 		{
 			try
 			{
@@ -7683,9 +7686,9 @@ public sealed partial class McpServerIntegrationTests
 				Assert.Skip("Windows per-directory case sensitivity is unavailable.");
 		}
 		catch (Exception exception) when (exception is
-			       InvalidOperationException or
-			       IOException or
-			       System.ComponentModel.Win32Exception)
+				   InvalidOperationException or
+				   IOException or
+				   System.ComponentModel.Win32Exception)
 		{
 			Assert.Skip($"Windows per-directory case sensitivity is unavailable: {exception.GetType().Name}.");
 		}
@@ -7704,8 +7707,8 @@ public sealed partial class McpServerIntegrationTests
 				ArgumentList = { "--version" }
 			});
 			return process is not null &&
-			       process.WaitForExit(TimeSpan.FromSeconds(5)) &&
-			       process.ExitCode == 0;
+				   process.WaitForExit(TimeSpan.FromSeconds(5)) &&
+				   process.ExitCode == 0;
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
@@ -7790,14 +7793,14 @@ public sealed partial class McpServerIntegrationTests
 		{
 			CloneCallCount++;
 			return inner?.CloneAsync(url, targetDirectory, progress, cancellationToken) ??
-			       Task.FromResult(new GitCloneResult(
-				       Success: false,
-				       LocalPath: targetDirectory,
-				       ProjectSourceType.GitClone,
-				       DefaultBranch: null,
-				       RepositoryName: null,
-				       RepositoryUrl: url,
-				       ErrorMessage: "simulated clone failure"));
+				   Task.FromResult(new GitCloneResult(
+					   Success: false,
+					   LocalPath: targetDirectory,
+					   ProjectSourceType.GitClone,
+					   DefaultBranch: null,
+					   RepositoryName: null,
+					   RepositoryUrl: url,
+					   ErrorMessage: "simulated clone failure"));
 		}
 
 		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
@@ -7968,8 +7971,8 @@ public sealed partial class McpServerIntegrationTests
 			{
 				using var document = JsonDocument.Parse(messages[index].TrimEnd('\r'));
 				if (document.RootElement.TryGetProperty("result", out var result) &&
-				    result.ValueKind == JsonValueKind.Object &&
-				    result.TryGetProperty("content", out _))
+					result.ValueKind == JsonValueKind.Object &&
+					result.TryGetProperty("content", out _))
 				{
 					return result.Clone();
 				}

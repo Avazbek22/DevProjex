@@ -320,7 +320,7 @@ description has to fit a budget rather than grow one silently.
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
-| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
+| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
 | `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen ranges or named declarations. Every returned section starts with its path and returned line interval. Batch items contain `path` and exactly one of `ranges` or `symbol`; ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every item reports `ok`, `partial`, `not-returned`, or `unavailable`. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
 
@@ -598,7 +598,7 @@ filters]` line.
 
 Only the repetition of unchanged trusted lines changes. Lines that state a fact
 about one call — `[Remote] commit=`, `[Resolution]`, `[Facts coverage]`,
-`[Search scope]`, `[Budget accounting]`, `[Search totals]`, `[Name search]`,
+`[Search scope]`, `[Budget accounting]`, `[Search observed]`, `[Search boundary]`, `[Name search]`,
 search and tree truncation notices, and every `[Warning ...]` — are computed and sent for every
 call as before, and the untrusted-data wrapper around project text is never
 affected.
@@ -629,14 +629,25 @@ context lines could otherwise spend a large share of an agent's context in one
 unpredictable call. When the cap stops the output, the response adds the constant
 `[Search truncated] The returned text reached the 16000-character search cap. Narrow
 the pattern, add paths or include_patterns, or lower context_lines.` Whenever a call
-does not return every match it found — because `max_results`, the cap, or both
-withheld some — it also reports `[Search totals] matches=N · files=M`, the exact
-number of matches and the exact number of files containing at least one match inside
-the inspected selection. A group cut only in its trailing context lines withheld no
-match, so it receives the cap notice without the totals line. Both lines are trusted
-counts and constants; no path enters them. A call whose output was not cut and that
-returned every match it found keeps its previous response unchanged. The
-`[N additional matches not shown]` count keeps its existing meaning and precision.
+does not return every match it encountered, it also reports
+`[Search observed] matches=N · matching-files=M within inspected sources` and
+`[N additional observed matches not shown]`. These counts are exact for sources that were actually inspected,
+not a claim about an uninspected suffix. A group cut only in its trailing context
+lines withheld no match, so it receives the cap notice without an additional-match
+line. Trusted counts and constants remain outside the untrusted block; no path enters
+them.
+
+Every search ends with a trusted boundary line. A complete search says:
+
+```text
+[Search boundary] complete · sources inspected=X/Y · matches retained=R/T · matches written=W · declaration files named=N.
+```
+
+A partial search uses the same counters, names the exact bound or bounds that applied,
+and tells the caller to page a stored retained result when available or to narrow and
+rerun for omitted evidence. Consequently, a complete zero-match response is evidence
+that the whole effective selection was searched, while a partial zero-match response
+is only evidence about its inspected sources.
 
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append
@@ -915,9 +926,10 @@ distinguishes a hit that sits in no declaration from a file that was never
 parsed, plus a `files-past-the-64-file naming limit=` term when a search touched
 more files than the naming bound allows.
 
-The names come from the dependency index built over the files that actually
-produced hits: one bounded parse per such file, never one per hit, and never over
-the whole selection. Granularity is whatever that index declares, which for C# is
+The names come from bounded navigation extraction over files that actually produced
+hits: one parse per matching file as it passes, never one per hit, and never over
+the whole selection. Only navigation for the best 64 candidate files remains resident,
+and that set can evict an earlier weaker file. Granularity is whatever the index declares, which for C# is
 the enclosing type rather than the enclosing member. Hit lines are lines of the
 transformed text the tool returns and the index parses the file on disk; redaction
 replaces a secret with a placeholder on the same line and adds no lines, so the
@@ -931,15 +943,16 @@ that are already present, so no header can be left as the last line of a respons
 with no hit under it. Placement is all or nothing: a header skipped for want of room
 would leave the hits beneath it reading as part of the declaration named above them,
 so when the headers do not fit, none are written and the coverage line reports that
-nothing was named, rather than going silent about naming it did compute. The match lines, the `--` group separators, the match and file
-counters, and the "N additional matches" contract are unchanged.
+nothing was named, rather than going silent about naming it did compute. The match
+lines, the `--` group separators, and all boundary counters describe the same finished
+render.
 
 ### A withheld search stays in the session
 
-A search that has to withhold matches keeps the rest of what it already found, so
-the way forward is to page that result rather than to run the same search again.
-Nothing changes for a search that returns everything it found: it stores nothing,
-says nothing new, and is byte-identical.
+A search that has to withhold retained matches keeps the rest of those matches, so
+the way forward is to page that result rather than to repeat the same scan. A search
+that returns every retained match stores nothing. Its boundary still says explicitly
+whether all eligible sources and all encountered matches were covered.
 
 When matches are withheld the response carries three things beyond what it carried
 before. Inside the untrusted block, after the matches, the distribution of what was
@@ -986,45 +999,40 @@ heading with nothing under it would report a search that found something and the
 show none of it. A trusted line that points at one of those lists is written only
 when the list was.
 
-### What a slice shows when matches are withheld
+### What a bounded result retains
 
-When `max_results` withholds, the response chooses which matches to carry rather than
-taking whatever the file order happened to reach first. Two rules decide it, and a
-constant names them:
+The search chooses which compact match records to retain while transformed files
+stream past. A stronger late record can evict a weaker early record; the server does
+not keep an unbounded list and sort it afterward. The constant naming this rule is:
 
 ```text
-[Search order] hits inside a declaration first, then the rest; selection order breaks ties.
+[Search order] bounded evidence priority; canonical path and line break ties.
 ```
 
-A hit that sits inside a declaration comes before one that does not, so a committed
-generated report stops crowding out the declaration of the term that was searched
-for. The signal is the one the naming already computes; there is no directory list,
-which this project does not keep on principle, and no ranking graph, which needs an
-index a search does not build. Files are ordered, not groups, so each file's matches
-stay one block with its line numbers climbing.
+Priority is the sum of soft signals: exact agreement between the pattern and an
+enclosing declaration name, an explicitly requested `paths` scope, breadth across
+files and declaration owners, and a bounded penalty for repeated line content.
+These weights are 160 for a qualified declaration, 128 for a simple declaration,
+64 for declaration syntax, 1,024 for explicit scope, 512 divided by the occurrence
+within one file, 32 divided by the occurrence within one owner, and at most 31 points
+of repetition penalty. No test, generated, snapshot, or unsupported-language category
+is excluded or categorically demoted. Project-wide importance ranking is not used.
+Equal priorities use canonical relative path and line number, both ordinal, so
+filesystem traversal order cannot decide the answer.
 
-Whichever bound cuts the listing, every matched file gets a hit before any file gets
-a second. An alphabetical cut that never reached the file a caller wanted was the
-largest single class of whole-file reads in the recorded sessions.
-
-Ordering rests on the naming, and the naming reaches a bounded number of files. A
-search that matched more files than it can name knows nothing about the ones past
-that bound, so it applies no order and announces none rather than claiming an order
-it did not apply. A search that showed everything it found has nothing to choose
-between: it keeps selection order, says nothing, and is byte-identical.
-
-Two bounds apply, and the response says when either decided the answer. Matching
-runs to 5,000 matches per search, and the stored text stops at 2,000,000 characters;
-beyond either, the id holds only the first of the withheld matches and the trusted
-line says so. A stored search result is subject to the same session quota and
+The collector retains at most 5,000 matches and 2,000,000 characters of bounded
+fragments. It never retains whole transformed files after their pipeline callback.
+Declaration extraction is attempted for matched files as they pass, while navigation
+data remains resident only for the same best 64 files selected by candidate priority.
+Thus a late useful file can displace an early repetitive file in both match storage
+and the declaration-naming budget. A stored search result is subject to the same session quota and
 least-recently-read eviction as any other stored result, and expiry or eviction of
 one is reported in search terms: it names the search result and tells the caller to
 call `search_project` again, not `pack_context`.
 
-The counting contract is untouched. The match and matching-file totals, the withheld
-count in `[N additional matches not shown]`, `[Search totals]` and the truncation
-notice all report exactly what they reported before, and `max_results` still bounds
-the matches a response displays.
+`max_results` still bounds the matches a response displays. Encountered, retained,
+written, and declaration-named counts are deliberately separate; none is presented
+as the count for the whole project unless the boundary says `complete`.
 
 ### The search result carries the selector
 
