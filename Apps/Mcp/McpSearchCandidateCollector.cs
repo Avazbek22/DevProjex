@@ -88,8 +88,8 @@ internal sealed class McpSearchCandidateCollector(int capacity, int characterCap
 		};
 		var repetitionPenalty = Math.Min(MaximumRepetitionPenalty, repeatedContentOccurrence);
 		return (explicitScope ? ExplicitScopeWeight : 0) +
-		       fileDiversity + declaration + (declarationHint ? DeclarationHintWeight : 0) +
-		       ownerDiversity - repetitionPenalty;
+			   fileDiversity + declaration + (declarationHint ? DeclarationHintWeight : 0) +
+			   ownerDiversity - repetitionPenalty;
 	}
 
 	private sealed class McpSearchCandidateComparer : IComparer<McpSearchCandidate>
@@ -116,6 +116,33 @@ internal sealed class McpSearchCandidateCollector(int capacity, int characterCap
 				return line;
 			return StringComparer.Ordinal.Compare(left.StableText, right.StableText);
 		}
+	}
+}
+
+internal sealed class McpSearchFilePriorityState
+{
+	private const int MaximumTrackedIdentities = 5_000;
+	private readonly Dictionary<string, int> repeatedLines = new(StringComparer.Ordinal);
+	private readonly Dictionary<string, int> ownerOccurrences = new(StringComparer.Ordinal);
+	private int fileOccurrence;
+
+	public int TakeFileOccurrence() => fileOccurrence++;
+
+	public int TakeOwnerOccurrence(string owner) => TakeOccurrence(ownerOccurrences, owner);
+
+	public int TakeRepeatedLineOccurrence(string identity) => TakeOccurrence(repeatedLines, identity);
+
+	private static int TakeOccurrence(Dictionary<string, int> occurrences, string key)
+	{
+		if (occurrences.TryGetValue(key, out var occurrence))
+		{
+			occurrences[key] = occurrence + 1;
+			return occurrence;
+		}
+
+		if (occurrences.Count < MaximumTrackedIdentities)
+			occurrences[key] = 1;
+		return 0;
 	}
 }
 

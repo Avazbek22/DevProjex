@@ -156,7 +156,7 @@ public sealed partial class McpServerIntegrationTests
 		});
 
 		Assert.Contains("[Search boundary] complete · sources inspected=2/2 · matches retained=1/1 · " +
-		                "matches written=1 · declaration files named=0.", Text(result), StringComparison.Ordinal);
+						"matches written=1 · declaration files named=0.", Text(result), StringComparison.Ordinal);
 	}
 
 	[Fact]

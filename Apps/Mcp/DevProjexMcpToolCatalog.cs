@@ -54,7 +54,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		var method = typeof(DevProjexMcpTools).GetMethod(
 			methodName,
 			BindingFlags.Instance | BindingFlags.Public) ??
-		             throw new MissingMethodException(typeof(DevProjexMcpTools).FullName, methodName);
+					 throw new MissingMethodException(typeof(DevProjexMcpTools).FullName, methodName);
 		var description = method.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()?.Description;
 		var options = new McpServerToolCreateOptions
 		{

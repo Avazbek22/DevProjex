@@ -88,7 +88,7 @@ public sealed partial class McpServerProcessTests
 		Assert.True(declaration >= 0 && report > declaration, complete);
 		Assert.Contains("[Search order] bounded evidence priority", complete, StringComparison.Ordinal);
 		Assert.Contains("[Search boundary] complete · sources inspected=4/4 · matches retained=5/5 · " +
-		                "matches written=5", complete, StringComparison.Ordinal);
+						"matches written=5", complete, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Search stored]", complete, StringComparison.Ordinal);
 		Assert.DoesNotContain("additional matches", complete, StringComparison.Ordinal);
 	}

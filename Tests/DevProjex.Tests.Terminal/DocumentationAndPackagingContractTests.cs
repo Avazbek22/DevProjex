@@ -755,11 +755,11 @@ public sealed class DocumentationAndPackagingContractTests
 
 		var corePathPatterns = new[] { "'Apps/Mcp/**'", "'Application/**'", "'Kernel/**'", "'Infrastructure/**'" };
 		foreach (var workflowName in new[]
-		         {
-			         "publish-packages.yml",
-			         "package-headless.yml",
-			         "publish-container.yml"
-		         })
+				 {
+					 "publish-packages.yml",
+					 "package-headless.yml",
+					 "publish-container.yml"
+				 })
 		{
 			var workflow = File.ReadAllText(Path.Combine(
 				rootPath,
@@ -840,11 +840,11 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("uses: ./.github/workflows/store-package-smoke.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("Release candidate report", releaseCandidate, StringComparison.Ordinal);
 		foreach (var gate in new[]
-		         {
-			         "'AppImage dry-run' = $env:APPIMAGE_RESULT",
-			         "'Grammar Delivery' = $env:GRAMMAR_RESULT",
-			         "'Store Package Smoke' = $env:STORE_RESULT"
-		         })
+				 {
+					 "'AppImage dry-run' = $env:APPIMAGE_RESULT",
+					 "'Grammar Delivery' = $env:GRAMMAR_RESULT",
+					 "'Store Package Smoke' = $env:STORE_RESULT"
+				 })
 		{
 			Assert.Contains(gate, releaseCandidate, StringComparison.Ordinal);
 		}
@@ -1061,7 +1061,7 @@ public sealed class DocumentationAndPackagingContractTests
 			RegexOptions.CultureInvariant);
 		Assert.True(readinessRow.Success, "Desktop Control Git-readiness state contract is missing.");
 		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering.Where(static item =>
-			         DesktopOpenReadiness.RequiresGitReadiness(item.Id)))
+					 DesktopOpenReadiness.RequiresGitReadiness(item.Id)))
 		{
 			Assert.Contains($"`{descriptor.Token}`", readinessRow.Value, StringComparison.Ordinal);
 		}
@@ -1254,8 +1254,7 @@ public sealed class DocumentationAndPackagingContractTests
 			completionStepIndex + completionStepName.Length,
 			StringComparison.Ordinal);
 		var completionStep = workflow[
-			completionStepIndex..
-			(completionStepEndIndex >= 0 ? completionStepEndIndex : workflow.Length)];
+			completionStepIndex..(completionStepEndIndex >= 0 ? completionStepEndIndex : workflow.Length)];
 		Assert.Contains(
 			"artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}",
 			completionStep,
@@ -1565,7 +1564,7 @@ public sealed class DocumentationAndPackagingContractTests
 		};
 
 		foreach (var file in productRoots.SelectMany(path =>
-			         Directory.EnumerateFiles(path, "*.cs", SearchOption.AllDirectories)))
+					 Directory.EnumerateFiles(path, "*.cs", SearchOption.AllDirectories)))
 		{
 			var source = File.ReadAllText(file);
 			Assert.DoesNotContain(
@@ -1595,9 +1594,9 @@ public sealed class DocumentationAndPackagingContractTests
 		};
 
 		foreach (var sourcePath in Directory.EnumerateFiles(
-			         testsRoot,
-			         "*.cs",
-			         SearchOption.AllDirectories))
+					 testsRoot,
+					 "*.cs",
+					 SearchOption.AllDirectories))
 		{
 			var source = File.ReadAllText(sourcePath);
 			foreach (var obsoletePathPattern in obsoletePathPatterns)
@@ -1748,8 +1747,8 @@ public sealed class DocumentationAndPackagingContractTests
 		{
 			var line = lines[index].TrimEnd('\r');
 			if (line.Length > 0 &&
-			    !line.StartsWith("    ", StringComparison.Ordinal) &&
-			    !line.StartsWith("  #", StringComparison.Ordinal))
+				!line.StartsWith("    ", StringComparison.Ordinal) &&
+				!line.StartsWith("  #", StringComparison.Ordinal))
 			{
 				break;
 			}

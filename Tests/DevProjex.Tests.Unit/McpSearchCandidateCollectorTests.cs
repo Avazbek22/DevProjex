@@ -1,4 +1,5 @@
 using DevProjex.Mcp;
+using DevProjex.Application.Dependencies;
 
 namespace DevProjex.Tests.Unit;
 
@@ -24,6 +25,43 @@ public sealed class McpSearchCandidateCollectorTests
 		Assert.Equal(5_000, retained.Count);
 		Assert.Contains(retained, item => item.Group.RelativePath == "src/PublicApi.cs");
 		Assert.Equal(4_999, retained.Count(item => item.Group.RelativePath == "generated/repetitions.txt"));
+		Assert.True(collector.MatchCapacityReached);
+	}
+
+	[Fact]
+	public void StreamingScanLetsALateDeclarationDisplaceAnEarlierMatchInTheSameFile()
+	{
+		var content = string.Concat(Enumerable.Repeat("Needle repeated mention\n", 5_000)) +
+					  "public sealed class Needle { }\n";
+		var regex = new McpSearchRegex("Needle", ignoreCase: false);
+		var collector = new McpSearchCandidateCollector(5_000, 2_000_000);
+		var state = new McpSearchFilePriorityState();
+		var declarations = new[]
+		{
+			new NavigationDeclaration("Needle", NavigationSymbolKind.Type, null, 5_001, 5_001, "fixture")
+		};
+
+		var scan = McpSearchTextScanner.ScanEach(
+			content,
+			regex,
+			0,
+			[],
+			match => DevProjexMcpTools.AddSearchCandidates(
+				collector,
+				"File.cs",
+				"File.cs",
+				content,
+				[match],
+				declarations,
+				regex,
+				0,
+				explicitScope: false,
+				state),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(5_001, scan.TotalMatches);
+		Assert.Equal(5_000, collector.Count);
+		Assert.Contains(collector.Snapshot(), candidate => candidate.MatchLine == 5_001);
 		Assert.True(collector.MatchCapacityReached);
 	}
 
@@ -65,6 +103,29 @@ public sealed class McpSearchCandidateCollectorTests
 			false, 1, McpDeclarationMatchQuality.FullyQualified, true, 1, 0);
 
 		Assert.True(unsupportedFirst > supportedRepeated);
+	}
+
+	[Fact]
+	public void DeclarationPrecisionAddsSoftOrderedWeights()
+	{
+		var plain = McpSearchCandidateCollector.Score(false, 0, McpDeclarationMatchQuality.None, false, 0, 0);
+		var hint = McpSearchCandidateCollector.Score(false, 0, McpDeclarationMatchQuality.None, true, 0, 0);
+		var simple = McpSearchCandidateCollector.Score(false, 0, McpDeclarationMatchQuality.SimpleName, false, 0, 0);
+		var qualified = McpSearchCandidateCollector.Score(false, 0, McpDeclarationMatchQuality.FullyQualified, false, 0, 0);
+
+		Assert.True(plain < hint);
+		Assert.True(hint < simple);
+		Assert.True(simple < qualified);
+	}
+
+	[Fact]
+	public void RepetitionLowersButNeverEliminatesAMatch()
+	{
+		var first = McpSearchCandidateCollector.Score(false, 0, McpDeclarationMatchQuality.None, false, 0, 0);
+		var repeated = McpSearchCandidateCollector.Score(false, 0, McpDeclarationMatchQuality.None, false, 0, 10_000);
+
+		Assert.True(repeated < first);
+		Assert.True(repeated > 0);
 	}
 
 	[Fact]
@@ -140,7 +201,7 @@ public sealed class McpSearchCandidateCollectorTests
 		var notice = DevProjexMcpTools.FormatSearchBoundaryNotice(Boundary(), false);
 
 		Assert.Equal("[Search boundary] complete · sources inspected=10/10 · matches retained=3/3 · " +
-		             "matches written=3 · declaration files named=2.", notice);
+					 "matches written=3 · declaration files named=2.", notice);
 	}
 
 	[Theory]

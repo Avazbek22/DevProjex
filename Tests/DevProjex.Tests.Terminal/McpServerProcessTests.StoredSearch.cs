@@ -110,12 +110,13 @@ public sealed partial class McpServerProcessTests
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "=> 1", ["context_lines"] = 0 })));
 
-		// Nothing was withheld, so nothing is stored and nothing new is said.
+		// Nothing was withheld, so nothing is stored; the boundary still proves completeness.
 		Assert.Contains("src/App.cs\nin P.App.Run\n5:", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Search stored]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("Withheld matches by file:", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("additional matches", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Search observed]", text, StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] complete", text, StringComparison.Ordinal);
 	}
 
 }
