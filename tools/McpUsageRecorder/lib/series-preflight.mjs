@@ -22,6 +22,14 @@ export function validateSeriesConfiguration(configuration, knownSessionIds = new
     'the model must match the pinned model');
   rejectUnless(nonEmpty(configuration.clientVersion) && configuration.clientVersion === configuration.expectedClientVersion,
     'the client version must match the pinned version');
+  const evaluator = configuration.evaluator;
+  if (evaluator?.enabled === true) {
+    rejectUnless(Number.isInteger(evaluator.evaluatedPairs) && evaluator.evaluatedPairs > 0,
+      'the evaluator order sample size must be recorded');
+    rejectUnless(Number.isFinite(evaluator.orderDisagreementRate) && evaluator.orderDisagreementRate >= 0 &&
+      evaluator.orderDisagreementRate <= 1,
+    'the evaluator order disagreement rate must be measured');
+  }
 
   knownSessionIds.add(sessionId);
   const limits = canonicalize(configuration.limits);
@@ -34,6 +42,12 @@ export function validateSeriesConfiguration(configuration, knownSessionIds = new
     model: configuration.model,
     clientVersion: configuration.clientVersion,
     toolLoadingMode: configuration.toolLoadingMode,
+    evaluator: evaluator?.enabled === true
+      ? Object.freeze({
+        evaluatedPairs: evaluator.evaluatedPairs,
+        orderDisagreementRate: evaluator.orderDisagreementRate,
+      })
+      : null,
   });
 }
 

@@ -3,6 +3,8 @@ import test from 'node:test';
 import { recordEvents } from '../lib/recorder.mjs';
 import { validateSeriesConfiguration } from '../lib/series-preflight.mjs';
 import { recordStreamJson } from '../lib/stream-json.mjs';
+import { evaluateTaskAnswer } from '../lib/task-oracle.mjs';
+import { reconcileOrderedAssessments, summarizeOrderedAssessments } from '../lib/order-consistency.mjs';
 
 test('parallel tool calls share one model turn and one usage snapshot', () => {
   const report = recordEvents([
@@ -154,6 +156,7 @@ test('series preflight rejects each unsafe boundary', () => {
     configuration => { configuration.sessionState.previousTurns = 1; },
     configuration => { configuration.limits = {}; },
     configuration => { configuration.clientVersion = 'different'; },
+    configuration => { delete configuration.evaluator.orderDisagreementRate; },
   ];
 
   for (const mutate of cases) {
@@ -171,6 +174,7 @@ test('series preflight rejects a reused session identifier and records pinned in
   assert.equal(snapshot.buildSha, configuration.buildSha);
   assert.equal(snapshot.model, configuration.model);
   assert.equal(snapshot.clientVersion, configuration.clientVersion);
+  assert.equal(snapshot.evaluator.orderDisagreementRate, 1 / 3);
   assert.match(snapshot.limitsSha256, /^[0-9a-f]{64}$/);
   assert.throws(() => validateSeriesConfiguration(configuration, known), /session identifier was already used/);
 });
@@ -192,5 +196,82 @@ function validConfiguration() {
     clientVersion: '2.1.261',
     expectedClientVersion: '2.1.261',
     toolLoadingMode: 'dynamic',
+    evaluator: { enabled: true, evaluatedPairs: 18, orderDisagreementRate: 1 / 3 },
   };
 }
+
+const oracleFixture = {
+  id: 'sample',
+  oracleCoverage: 'complete',
+  requiredPaths: ['src/core.cs', 'tests/core.test.cs'],
+  optionalPaths: ['docs/guide.md'],
+  forbiddenPaths: ['src/unrelated.cs'],
+  requiredClaims: [
+    { id: 'behavior', terms: [['retries'], ['three times', '3 times']] },
+  ],
+  requiredSymbols: [
+    { id: 'retry-method', terms: ['RetryAsync'] },
+  ],
+  forbiddenClaims: [
+    { id: 'wrong-limit', terms: [['five times', '5 times']] },
+  ],
+};
+
+test('task oracle accepts a complete correct answer', () => {
+  const result = evaluateTaskAnswer(oracleFixture,
+    'The `RetryAsync` implementation in `src/core.cs` retries three times; `tests/core.test.cs` verifies it.');
+
+  assert.equal(result.classification, 'complete');
+  assert.equal(result.complete, true);
+});
+
+test('task oracle rejects a contradicted answer', () => {
+  const result = evaluateTaskAnswer(oracleFixture,
+    '`RetryAsync` in `src/core.cs` retries five times and `tests/core.test.cs` verifies it.');
+
+  assert.equal(result.classification, 'incorrect');
+  assert.deepEqual(result.contradictedClaims, ['wrong-limit']);
+});
+
+test('task oracle distinguishes a correct but incomplete answer', () => {
+  const result = evaluateTaskAnswer(oracleFixture, '`RetryAsync` in `src/core.cs` retries three times.');
+
+  assert.equal(result.classification, 'incomplete');
+  assert.deepEqual(result.missingPaths, ['tests/core.test.cs']);
+});
+
+test('task oracle rejects an answer that names an unrelated file', () => {
+  const result = evaluateTaskAnswer(oracleFixture,
+    '`RetryAsync` in `src/core.cs` retries three times; `tests/core.test.cs` and `src/unrelated.cs` verify it.');
+
+  assert.equal(result.classification, 'incorrect');
+  assert.deepEqual(result.unexpectedPaths, ['src/unrelated.cs']);
+});
+
+test('task oracle reports an empty answer separately', () => {
+  const result = evaluateTaskAnswer(oracleFixture, '');
+
+  assert.equal(result.classification, 'empty');
+  assert.equal(result.supported, false);
+});
+
+test('order-dependent assessment is reported as disagreement instead of a verdict', () => {
+  const result = reconcileOrderedAssessments(
+    { order: ['left', 'right'], correctness: 'A', preference: 'A' },
+    { order: ['right', 'left'], correctness: 'B', preference: 'A' });
+
+  assert.deepEqual(result.correctness, { status: 'verdict', choice: 'left' });
+  assert.deepEqual(result.preference, {
+    status: 'disagreement',
+    forward: 'left',
+    reverse: 'right',
+  });
+
+  const report = summarizeOrderedAssessments([{
+    forward: { order: ['left', 'right'], correctness: 'A', preference: 'A' },
+    reverse: { order: ['right', 'left'], correctness: 'B', preference: 'A' },
+  }]);
+  assert.equal(report.summary.correctness.disagreementRate, 0);
+  assert.equal(report.summary.preference.disagreementRate, 1);
+  assert.equal(report.summary.anyDisagreement.disagreementRate, 1);
+});
