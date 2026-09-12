@@ -447,6 +447,39 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RustModuleDeclarationsFollowTheOwningModuleDirectory()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = fixture.CreateFile("Cargo.toml", "[package]\nname = \"module-layout\"\nversion = \"1.0.0\"\n");
+		var root = fixture.CreateFile("src/lib.rs", "mod root_child; mod outer; mod folder; mod inline_parent { mod nested; } #[path = \"custom.rs\"] mod redirected;");
+		var rootChild = fixture.CreateFile("src/root_child.rs", "pub struct RootChild;");
+		var outer = fixture.CreateFile("src/outer.rs", "mod inner;");
+		var outerChild = fixture.CreateFile("src/outer/inner.rs", "pub struct Nested;");
+		var misleadingRootChild = fixture.CreateFile("src/inner.rs", "pub struct Unrelated;");
+		var folder = fixture.CreateFile("src/folder/mod.rs", "mod child;");
+		var folderChild = fixture.CreateFile("src/folder/child.rs", "pub struct FolderChild;");
+		var inlineChild = fixture.CreateFile("src/inline_parent/nested.rs", "pub struct InlineChild;");
+		var redirected = fixture.CreateFile("src/custom.rs", "pub struct Redirected;");
+		var misleadingRedirect = fixture.CreateFile("src/redirected.rs", "pub struct Wrong;");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[manifest, root, rootChild, outer, outerChild, misleadingRootChild, folder, folderChild, inlineChild, redirected, misleadingRedirect],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/lib.rs" && edge.Target == "src/root_child.rs" && edge.Reference == "./root_child");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/outer.rs" && edge.Target == "src/outer/inner.rs" && edge.Reference == "./inner");
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "src/outer.rs" && edge.Target == "src/inner.rs");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/folder/mod.rs" && edge.Target == "src/folder/child.rs" && edge.Reference == "./child");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/lib.rs" && edge.Target == "src/inline_parent/nested.rs" && edge.Reference == "./nested");
+		var redirectedImport = index.Files.Single(static file => file.Path == "src/lib.rs").Imports
+			.Single(static import => import.Specifier == "./redirected");
+		Assert.Equal(ResolutionStatus.Unresolved, redirectedImport.Status);
+		Assert.DoesNotContain("src/redirected.rs", redirectedImport.Candidates ?? []);
+	}
+
+	[Fact]
 	public async Task RustCargoPathDependenciesExposeOnlyDeclaredRepositoryScopes()
 	{
 		using var fixture = new TemporaryDirectory();

@@ -1347,7 +1347,17 @@ public sealed class DependencyFactsEngine : IDisposable
 				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			if (import.ImportedName == "$module")
 			{
-				var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
+				var sourcePath = Path.Combine(_root, source.Path);
+				var sourceDirectory = Path.GetDirectoryName(sourcePath)!;
+				var sourceStem = Path.GetFileNameWithoutExtension(sourcePath);
+				var directory = sourceStem is "lib" or "main" or "mod"
+					? sourceDirectory
+					: Path.Combine(sourceDirectory, sourceStem);
+				if (!string.IsNullOrEmpty(import.ContainingDeclaration))
+				{
+					foreach (var module in import.ContainingDeclaration.Split("::", StringSplitOptions.RemoveEmptyEntries))
+						directory = Path.Combine(directory, module);
+				}
 				var stem = import.Specifier["./".Length..];
 				var candidates = new[]
 				{

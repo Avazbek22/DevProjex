@@ -1030,6 +1030,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		Node node,
 		NodeTextMaterializationCounter materialization)
 	{
+		if (captureName == "import.rust_module")
+			return FindContainingRustInlineModule(node, materialization);
 		if (captureName is not ("import.direct" or "import.from")) return null;
 		var declaration = FindContainingDeclaration(node, materialization);
 		if (declaration is not null) return declaration;
@@ -1038,6 +1040,33 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			    "try_statement" or "with_statement" or "match_statement")
 				return "$conditional-import";
 		return null;
+	}
+
+	private static string? FindContainingRustInlineModule(
+		Node node,
+		NodeTextMaterializationCounter materialization)
+	{
+		var names = new Stack<string>();
+		for (var parent = node.Parent; parent is not null; parent = parent.Parent)
+		{
+			if (parent.Type != "mod_item" || parent.GetChildForField("body") is null) continue;
+			var name = parent.GetChildForField("name");
+			if (name is not null) names.Push(materialization.Read(name));
+		}
+		return names.Count == 0 ? null : string.Join("::", names);
+	}
+
+	private static bool HasRustPathAttribute(
+		Node node,
+		NodeTextMaterializationCounter materialization)
+	{
+		for (var sibling = node.PreviousNamedSibling;
+		     sibling is not null && sibling.Type == "attribute_item";
+		     sibling = sibling.PreviousNamedSibling)
+		{
+			if (ContainsIdentifier(sibling, "path", materialization)) return true;
+		}
+		return false;
 	}
 
 	private static DependencySyntaxCapture CreateCapture(
@@ -1154,7 +1183,13 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		{
 			if (node.GetChildForField("body") is not null) return null;
 			var name = node.GetChildForField("name");
-			return name is null ? null : new DependencyImportSyntax(materialization.Read(name), 0, []);
+			return name is null
+				? null
+				: new DependencyImportSyntax(
+					materialization.Read(name),
+					0,
+					[],
+					HasLiteralSpecifier: !HasRustPathAttribute(node, materialization));
 		}
 		if (captureName == "import.kotlin")
 		{
