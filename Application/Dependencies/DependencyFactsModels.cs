@@ -14,6 +14,7 @@ public enum LanguageId
 	Ruby,
 	Php,
 	C,
+	Cpp,
 	Unsupported
 }
 

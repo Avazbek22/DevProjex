@@ -72,6 +72,12 @@ public sealed partial class McpServerProcessTests
 			"struct A { char member_marker_a[sizeof(\"member-marker-a\")]; };\nstruct B { char member_marker_b[sizeof(\"member-marker-b\")]; };\n// fallback-marker\n",
 			"members.c#A#member_marker_a",
 			"members.c#B#member_marker_b"
+		},
+		{
+			"members.cpp",
+			"namespace Sample {\nclass A {\n const char *run() { return \"member-marker-a\"; }\n};\nclass B {\n const char *run() { return \"member-marker-b\"; }\n};\n}\n// fallback-marker\n",
+			"Sample::A::run",
+			"Sample::B::run"
 		}
 	};
 

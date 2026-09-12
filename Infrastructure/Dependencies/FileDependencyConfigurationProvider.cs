@@ -587,6 +587,15 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				ConfigurationDiagnostic = snapshot.Reason,
 				CIncludeDirectories = includeDirectories
 			});
+			scopes.Add(new DependencyScopeDescriptor(
+				"cpp:" + PortableRelative(root, configPath), directory, LanguageId.Cpp, [], null, false,
+				new Dictionary<string, IReadOnlyList<string>>(), null,
+				new HashSet<string>(), [], true)
+			{
+				ConfigurationState = snapshot.State,
+				ConfigurationDiagnostic = snapshot.Reason,
+				CIncludeDirectories = includeDirectories
+			});
 		}
 
 		MarkAmbiguousScopeOwnership(scopes, diagnostics, root);
@@ -595,6 +604,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		AddFallbackScope(scopes, root, LanguageId.TypeScript);
 		AddFallbackScope(scopes, root, LanguageId.Python);
 		AddFallbackScope(scopes, root, LanguageId.C);
+		AddFallbackScope(scopes, root, LanguageId.Cpp);
 		var packageMaps = new Dictionary<string, PackageMapDescriptor>(StringComparer.Ordinal);
 		foreach (var packagePath in packageFiles)
 		{

@@ -1294,7 +1294,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			LanguageId.Java or LanguageId.Kotlin or LanguageId.Php => ResolveJavaImport(source, import),
 			LanguageId.Rust => ResolveRustImport(source, import),
 			LanguageId.Ruby => ResolveRubyImport(source, import),
-			LanguageId.C => ResolveCImport(source, import),
+			LanguageId.C or LanguageId.Cpp => ResolveCImport(source, import),
 			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
 				"explicit imports are context, not dependency edges, for this language", [])
 		};
@@ -2335,7 +2335,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			else if (source.LanguageId == LanguageId.Php && !requiresQualifiedLookup)
 				candidates = candidates.Where(candidate =>
 					string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();
-			else if (source.LanguageId == LanguageId.C)
+			else if (source.LanguageId is LanguageId.C or LanguageId.Cpp)
 				candidates = SelectVisibleCCandidates(source, candidates);
 			if (candidates.Length == 0 && attributeName is not null)
 			{
@@ -2590,7 +2590,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				return false;
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
-			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php or LanguageId.C &&
+			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php or LanguageId.C or LanguageId.Cpp &&
 			       VisibleScopeIds(source.ScopeId).Contains(
 			       declaration.Identity.ScopeId, StringComparer.Ordinal);
 		}
@@ -2850,7 +2850,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (pending.TryDequeue(out var scopeId))
 				{
 					if (!visited.Add(scopeId)) continue;
-					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php or LanguageId.C) ||
+					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php or LanguageId.C or LanguageId.Cpp) ||
 					    !scopes.TryGetValue(scopeId, out var current)) continue;
 					foreach (var projectReference in current.ProjectReferences) pending.Enqueue(projectReference);
 				}

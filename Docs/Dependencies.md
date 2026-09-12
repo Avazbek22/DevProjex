@@ -264,6 +264,19 @@ fields. Its names start with the portable file path and use `#` for every owner,
 Function-like macros and anonymous types fall back to the nearest supported named owner. A syntax tree
 containing an error publishes neither recovered declarations nor recovered edges.
 
+C++ source files contribute namespaces, classes, structures, unions, enums, free functions, and
+member functions. Literal includes use the same repository-only CMake include-directory evidence as
+C; a target outside the allowed manifest is never returned. Namespace aliases, compiler command-line
+include paths, generated headers, package managers, and conditional preprocessor state are not guessed.
+Headers with the ambiguous `.h` extension use the C++ grammar only when their source contains direct
+C++ language evidence; otherwise they retain C behavior.
+
+C++ navigation includes namespaces, types, functions, methods, and fields. Names join namespace and
+type owners with `::`; overloads with the same textual owner and name receive a stable source-order
+suffix, so the exact search annotation remains a unique `get_file.symbol`. Lambdas, operator spellings
+that do not expose a stable identifier, and macro-generated members fall back to the nearest supported
+named owner. Syntax errors fail closed.
+
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
 makes resolvable. Top-level `func`, method and `type` declarations are importable names within
@@ -341,7 +354,7 @@ produces `External`.
 
 ## Extraction, limits, and diagnostics
 
-C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, Kotlin, Ruby, PHP, and C adapters use shipped Tree-sitter grammars and embedded
+C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, Kotlin, Ruby, PHP, C, and C++ adapters use shipped Tree-sitter grammars and embedded
 `declarations.scm` and `references.scm` query data. A separate `navigation.scm` projection records
 named types and members with their owner chain, exact line and character ranges, and content
 fingerprint. The owner chain starts with the language namespace, package, or module when one is
@@ -349,7 +362,7 @@ declared, so the exact name printed by search is also the exact `symbol` accepte
 Search annotations and named `get_file` reads use this compact projection; navigation
 members never enter dependency resolution, its fact limits, or the related-file graph. The projection
 currently covers named methods and fields in all supported languages, plus C# properties and events,
-TypeScript signatures, Go interface methods, and Java, Kotlin, Ruby, PHP, and C members. Anonymous functions, C# accessors and operators,
+TypeScript signatures, Go interface methods, and Java, Kotlin, Ruby, PHP, C, and C++ members. Anonymous functions, C# accessors and operators,
 Python lambdas, Go function literals, unnamed Kotlin lambdas, Ruby metaprogramming, anonymous PHP functions, and C macros fall back to the nearest supported named owner rather than
 claiming a false member.
 
