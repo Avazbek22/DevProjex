@@ -363,6 +363,13 @@ TypeScript signatures, Go interface methods, and Java, Kotlin, Ruby, and PHP mem
 Python lambdas, Go function literals, unnamed Kotlin lambdas, Ruby metaprogramming, and anonymous PHP functions fall back to the nearest supported named owner rather than
 claiming a false member.
 
+C and C++ dependency facts remain unsupported. Their source grammars parse ordinary declarations,
+but project-defined prefix macros can change declaration syntax before the compiler sees it. Minimal
+valid inputs such as `UNITTEST void parse(void);` and `FMT_BEGIN_EXPORT class parsed_type {};` produce
+error nodes before preprocessing; the resulting tree can misclassify the macro as a type. DevProjex
+does not execute a project preprocessor or recover links from that ambiguous tree, because doing so
+could invent dependencies. C and C++ compression remains independent of dependency extraction.
+
 Each supported source file is parsed once per content fingerprint. Both fact and navigation queries
 run against that same live tree before it is disposed; only compact facts remain. Files
 without an adapter are counted as unsupported instead of disappearing. Read, grammar, and query
