@@ -2343,6 +2343,33 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.DoesNotContain(result.Edges, edge => edge.Source == "beta/use.go" &&
 			edge.Reference == "Shared");
 	}
+
+	[Fact]
+	public async Task GoTypeReferences_DoNotResolveToSameNamedFunctionsOrMethods()
+	{
+		using var fixture = new TemporaryDirectory();
+		var model = fixture.CreateFile("pkg/model.go", "package pkg\n\ntype Desc struct{}\n");
+		var methods = fixture.CreateFile("pkg/methods.go", """
+			package pkg
+
+			type Collector struct{}
+
+			func (Collector) Desc() *Desc { return nil }
+			""");
+		var consumer = fixture.CreateFile("pkg/consumer.go", "package pkg\n\ntype Consumer struct { Value *Desc }\n");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[model, methods, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item =>
+			item.Source == "pkg/consumer.go" && item.Reference == "Desc");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("pkg/model.go", edge.Target);
+		Assert.Equal(["pkg/model.go"], edge.Candidates);
+	}
 	[Fact]
 	public async Task PythonFacts_ResolveRelativeImportsAndClassifyKnownStdlibOnly()
 	{

@@ -2951,7 +2951,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			var package = GoPackageDirectory(source.Path);
 			return candidates
-				.Where(candidate => candidate.DeclarationSites.Any(site =>
+				.Where(candidate => candidate.Identity.SymbolKind == SymbolKind.Class &&
+					candidate.DeclarationSites.Any(site =>
 					string.Equals(GoPackageDirectory(site.File), package, StringComparison.Ordinal)))
 				.ToArray();
 		}

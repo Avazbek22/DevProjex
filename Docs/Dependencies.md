@@ -276,9 +276,9 @@ the same file remain available.
 
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
-makes resolvable. Top-level `func`, method and `type` declarations are importable names within
-their directory, and a type reference resolves to the file in the same directory that declares
-it. A name declared in two directories stays two declarations, so a reference never reaches
+makes resolvable. Top-level functions, methods, and types remain available to navigation, while
+dependency type references resolve only to type declarations in the same directory. A name declared
+in two directories stays two declarations, so a reference never reaches
 across packages; it resolves to the one in its own directory or to nothing.
 
 Everything else in Go is outside this capability and produces no resolved edge rather than a guessed
