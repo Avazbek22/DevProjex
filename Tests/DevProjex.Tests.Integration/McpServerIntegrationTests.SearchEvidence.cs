@@ -209,10 +209,7 @@ public sealed partial class McpServerIntegrationTests
 		var changed = false;
 		McpSearchExecutionHooks.AfterScan = scannedPath =>
 		{
-			if (changed || !string.Equals(
-				Path.GetFullPath(scannedPath),
-				Path.GetFullPath(path),
-				OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+			if (changed || !string.Equals(scannedPath, "Mutable.txt", StringComparison.Ordinal))
 				return;
 			changed = true;
 			File.WriteAllText(path, "inserted\nalpha\nneedle new\nomega\n");

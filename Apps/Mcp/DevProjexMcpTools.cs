@@ -944,7 +944,7 @@ internal sealed class DevProjexMcpTools(
 					if (scan.TotalMatches > 0)
 					{
 						matchingFiles++;
-						McpSearchExecutionHooks.AfterScan?.Invoke(file.Path);
+						McpSearchExecutionHooks.AfterScan?.Invoke(relative);
 						var annotatedFiles = candidates.SelectFilesForAnnotation(McpSearchSymbols.MaximumAnnotatedFiles);
 						foreach (var stale in navigationByFile.Keys.Where(path => !annotatedFiles.Contains(path)).ToArray())
 							navigationByFile.Remove(stale);
