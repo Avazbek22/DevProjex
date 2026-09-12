@@ -289,6 +289,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
 		Assert.Null(edge.Target);
 		Assert.Empty(edge.Candidates);
+		Assert.Contains("Ruby constant is provided outside the project", edge.Reasons);
 	}
 
 	[Fact]
@@ -309,6 +310,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
 		Assert.Null(edge.Target);
 		Assert.Empty(edge.Candidates);
+		Assert.Contains("Ruby constant is provided outside the project", edge.Reasons);
 	}
 
 	[Fact]
@@ -368,6 +370,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
 		Assert.Null(edge.Target);
 		Assert.Empty(edge.Candidates);
+		Assert.Contains("Ruby constant is provided outside the project", edge.Reasons);
 	}
 
 	[Fact]
@@ -390,6 +393,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
 		Assert.Null(edge.Target);
 		Assert.Empty(edge.Candidates);
+		Assert.Contains("Ruby constant is provided outside the project", edge.Reasons);
 	}
 
 	[Fact]
