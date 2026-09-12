@@ -1068,6 +1068,7 @@ internal sealed class DevProjexMcpTools(
 			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols);
 			if (namesRefused)
 				symbols = symbols with { AnnotatedHits = 0 };
+			var responseCharacterLimitReached = resultGroupTruncated || namesRefused;
 			var declarationsListed = AppendDeclarationSelectors(output, symbols.Declarations);
 			// What the response could not carry is kept in the session, so the way forward is to
 			// page what this scan already found rather than to run the same scan again.
@@ -1107,7 +1108,7 @@ internal sealed class DevProjexMcpTools(
 				inspectionBudgetReached,
 				storeHitMatchBound,
 				annotationLimitReached,
-				resultGroupTruncated,
+				responseCharacterLimitReached,
 				requestResultLimitReached,
 				retentionCharacterBoundReached,
 				storeHitCharacterBound,
