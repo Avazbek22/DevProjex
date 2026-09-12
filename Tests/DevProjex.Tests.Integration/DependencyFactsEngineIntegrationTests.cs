@@ -582,6 +582,40 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task KotlinObjectReceiversResolveWithoutTreatingValuesAsTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var pool = fixture.CreateFile("src/commonMain/kotlin/okio/SegmentPool.kt", """
+			package okio
+			object SegmentPool {
+			  fun take() = Unit
+			  fun recycle(value: Any) = Unit
+			}
+			""");
+		var consumer = fixture.CreateFile("src/commonMain/kotlin/okio/Segment.kt", """
+			package okio
+			fun use(value: Any) {
+			  SegmentPool.take()
+			  SegmentPool.recycle(value)
+			}
+			fun shadow(Local: Any) {
+			  val SegmentPool = Local
+			  SegmentPool.take()
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[pool, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var edge = Assert.Single(index.Edges, static edge => edge.Source.EndsWith("Segment.kt", StringComparison.Ordinal) &&
+			edge.Reference == "SegmentPool" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Equal("src/commonMain/kotlin/okio/SegmentPool.kt", edge.Target);
+		Assert.Equal(2, edge.Evidence.Count);
+	}
+
+	[Fact]
 	public async Task RustFactsResolveModulesUsesAndTypesFromTheManifest()
 	{
 		using var fixture = new TemporaryDirectory();

@@ -1086,9 +1086,17 @@ internal sealed partial class KotlinDependencyLanguageAdapter : DependencyLangua
 			.Where(static capture => capture.Name == "context.type_parameter" && capture.CapturedNameStartIndex >= 0)
 			.Select(static capture => capture.CapturedNameStartIndex)
 			.ToHashSet();
+		var valueScopes = context.References
+			.Where(static capture => capture.Name == "context.value_name" &&
+				!string.IsNullOrWhiteSpace(capture.CapturedName))
+			.ToArray();
 		var references = Distinct(context.References
-			.Where(capture => capture.Name == "reference.type" &&
+			.Where(capture => capture.Name is "reference.type" or "reference.expression_receiver" &&
 				!typeParameterNames.Contains(capture.StartIndex) &&
+				(capture.Name != "reference.expression_receiver" ||
+				 capture.Text.Length > 0 && char.IsUpper(capture.Text[0]) &&
+				 !valueScopes.Any(scope => scope.CapturedName == capture.Text &&
+					 scope.StartIndex <= capture.StartIndex && scope.EndIndex >= capture.EndIndex)) &&
 				!importRanges.Any(range => capture.StartIndex >= range.StartIndex && capture.EndIndex <= range.EndIndex))
 			.SelectMany(capture => TypeNameRegex().Matches(capture.Text)
 				.Select(static match => match.Value)
