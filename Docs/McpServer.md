@@ -1038,7 +1038,7 @@ src/Core/LevelOverrideMap.cs Core.LevelOverrideMap 17
 
 One line per declaration, not per hit: a declaration ten matches landed in is still
 one thing to open. The name is the innermost named declaration the navigation projection
-reports. C#, JavaScript, TypeScript, Go, Python, Java, Rust, Kotlin, Ruby, PHP, C, and C++ include supported members and functions,
+reports. C#, JavaScript, TypeScript, Go, Python, Java, Rust, Kotlin, Ruby, and PHP include supported members and functions,
 with their owner chain when names repeat within a file.
 At most 20 are listed.
 

@@ -5,32 +5,6 @@ namespace DevProjex.Tests.Terminal;
 public sealed class RelatedCommandProcessTests
 {
 	[Fact]
-	public void RealPublishedCommandReportsCppHeaderDependencies()
-	{
-		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateDirectory("project");
-		workspace.WriteFile("project/include/model.hpp", "namespace Models { class Model {}; }\n");
-		workspace.WriteFile("project/src/app.cpp", "#include \"../include/model.hpp\"\nModels::Model read_model();\n");
-		var result = Run(workspace, "related", "src/app.cpp", "--project", project, "--direction", "dependencies",
-			"--format", "json", "--git-mode", "none", "--exclude", "none");
-		Assert.Equal(0, result.ExitCode);
-		Assert.Contains("include/model.hpp", result.StandardOutput, StringComparison.Ordinal);
-	}
-
-	[Fact]
-	public void RealPublishedCommandReportsCHeaderDependencies()
-	{
-		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateDirectory("project");
-		workspace.WriteFile("project/include/model.h", "typedef struct Model { int value; } Model;\n");
-		workspace.WriteFile("project/src/app.c", "#include \"../include/model.h\"\nModel read_model(void);\n");
-		var result = Run(workspace, "related", "src/app.c", "--project", project, "--direction", "dependencies",
-			"--format", "json", "--git-mode", "none", "--exclude", "none");
-		Assert.Equal(0, result.ExitCode);
-		Assert.Contains("include/model.h", result.StandardOutput, StringComparison.Ordinal);
-	}
-
-	[Fact]
 	public void RealPublishedCommandReportsJavaManifestDependencies()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using DevProjex.Application.Dependencies;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Compression;
@@ -159,20 +158,13 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				: content.ObservedContentDigest is { } observedDigest
 					? new DependencySourceObservation(DependencySourceObservationKind.Read, observedDigest)
 					: default;
-			if (Path.GetExtension(fullPath).Equals(".h", StringComparison.OrdinalIgnoreCase) &&
-			    LooksLikeCppHeader(content.Source))
-			{
-				language = LanguageId.Cpp;
-				scope = ScopeOwners.GetValue(configuration, static value => new ScopeOwnerIndex(value.Scopes))
-					.Resolve(language, fullPath);
-			}
 			return new PreparedDependencySource(
 				fullPath,
 				relative,
 				scope,
 				language,
 				content.Fingerprint,
-				language == LanguageId.Cpp ? GetExtractorIdentity(language) : content.ExtractorIdentity,
+				content.ExtractorIdentity,
 				content.Source,
 				content.Status,
 				content.StatusReason,
@@ -594,16 +586,11 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		using var cursor = query.Execute(root);
 		var declarations = new List<NavigationDeclaration>();
 		var seen = new HashSet<(int Start, int End, NavigationSymbolKind Kind, string Name)>();
-		var javaNames = language is LanguageId.Java or LanguageId.Kotlin or LanguageId.Ruby or LanguageId.Php or LanguageId.Cpp
+		var javaNames = language is LanguageId.Java or LanguageId.Kotlin or LanguageId.Ruby or LanguageId.Php
 			? new Dictionary<string, int>(StringComparer.Ordinal)
 			: null;
 		var visited = 0;
-		string? fileScopedNamespace = language switch
-		{
-			LanguageId.Rust => RustModulePath(relativePath),
-			LanguageId.C => relativePath,
-			_ => null
-		};
+		string? fileScopedNamespace = language == LanguageId.Rust ? RustModulePath(relativePath) : null;
 		foreach (var capture in cursor.Captures)
 		{
 			if ((visited++ & 255) == 0)
@@ -625,12 +612,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			{
 				owners.Insert(0, fileScopedNamespace);
 			}
-			var separator = language switch
-			{
-				LanguageId.Rust or LanguageId.Ruby or LanguageId.Cpp => "::",
-				LanguageId.C => "#",
-				_ => "."
-			};
+			var separator = language is LanguageId.Rust or LanguageId.Ruby ? "::" : ".";
 			var owner = owners.Count == 0 ? null : string.Join(separator, owners);
 			var qualifiedName = language == LanguageId.Ruby && owner is not null
 				? capture.Node.Type switch
@@ -703,15 +685,6 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return NormalizeNavigationName(node.GetChildForField("left")?.Text ?? string.Empty);
 		if (language == LanguageId.Php && node.Type is "property_element" or "const_element")
 			return NormalizeNavigationName(node.GetChildForField("name")?.Text ?? node.NamedChildren.FirstOrDefault()?.Text ?? string.Empty);
-		if (language is LanguageId.C or LanguageId.Cpp)
-		{
-			if (node.Type is "function_definition" or "declaration")
-				return NormalizeNavigationName(FindCDeclarationName(node)?.Text ?? string.Empty);
-			if (node.Type == "field_declaration")
-				return FirstNodeOrDescendantText(node.GetChildForField("declarator") ?? node, "field_identifier");
-			if (node.Type is "struct_specifier" or "union_specifier" or "enum_specifier")
-				return FirstNodeOrDescendantText(node.GetChildForField("name") ?? node, "type_identifier");
-		}
 		if (language == LanguageId.Rust && node.Type == "impl_item")
 		{
 			var implementedType = node.GetChildForField("type")?.Text;
@@ -778,10 +751,6 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		LanguageId.Php => nodeType is "namespace_definition" or "class_declaration" or
 			"interface_declaration" or "trait_declaration" or "enum_declaration" or
 			"function_definition" or "method_declaration",
-		LanguageId.C => nodeType is "function_definition" or "struct_specifier" or
-			"union_specifier" or "enum_specifier",
-		LanguageId.Cpp => nodeType is "namespace_definition" or "class_specifier" or
-			"struct_specifier" or "union_specifier" or "enum_specifier" or "function_definition",
 		_ => false
 	};
 
@@ -884,9 +853,6 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		return null;
 	}
 
-	private static string? FirstNodeOrDescendantText(Node node, string nodeType) =>
-		node.Type == nodeType ? NormalizeNavigationName(node.Text) : FirstDescendantText(node, nodeType);
-
 	private static bool IsDeclarationCapture(string captureName) =>
 		captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 		captureName is "context.namespace" or "context.using";
@@ -957,17 +923,6 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var value = name is null ? string.Empty : materialization.Read(name).TrimStart('\\');
 			return CreateCapture(captureName, node, value, value, 0, false, false,
 				capturedNameStartIndex: name is null ? -1 : checked((int)name.StartIndex), evidence: value);
-		}
-		if (captureName.StartsWith("declaration.c_", StringComparison.Ordinal) ||
-		    captureName.StartsWith("declaration.cpp_", StringComparison.Ordinal))
-		{
-			var cNameNode = FindCDeclarationName(node);
-			var cCapturedName = cNameNode is null ? null : materialization.Read(cNameNode);
-			var cIsStatic = node.Children.Any(child =>
-				child.Type == "storage_class_specifier" && materialization.Read(child) == "static");
-			return CreateCapture(captureName, node, cCapturedName ?? string.Empty, cCapturedName, 0,
-				cIsStatic, cIsStatic, capturedNameStartIndex: cNameNode is null ? -1 : checked((int)cNameNode.StartIndex),
-				evidence: cCapturedName ?? string.Empty);
 		}
 
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
@@ -1245,29 +1200,6 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return specifier.Length == 0 ? null : new DependencyImportSyntax(
 				specifier, 0, [new DependencyImportBinding(specifier.Split('\\').Last(), alias, false)]);
 		}
-		if (captureName is "import.c" or "import.cpp")
-		{
-			var path = node.GetChildForField("path") ?? node.NamedChildren.LastOrDefault();
-			if (path is null) return null;
-			var text = materialization.Read(path).Trim();
-			if (text.Length < 3 || text[0] is not ('\"' or '<')) return null;
-			var closing = text[0] == '<' ? '>' : text[0];
-			if (text[^1] != closing) return null;
-			var specifier = text[1..^1];
-			return specifier.Length == 0 ? null : new DependencyImportSyntax(
-				specifier, 0, [new DependencyImportBinding(text[0] == '"' ? "$quoted" : "$system", null)]);
-		}
-		return null;
-	}
-
-	private static Node? FindCDeclarationName(Node node)
-	{
-		var current = node.GetChildForField("declarator") ?? node.GetChildForField("name");
-		while (current is not null)
-		{
-			if (current.Type is "identifier" or "type_identifier" or "field_identifier") return current;
-			current = current.GetChildForField("declarator") ?? current.NamedChildren.FirstOrDefault();
-		}
 		return null;
 	}
 
@@ -1407,17 +1339,12 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".kt" or ".kts" => LanguageId.Kotlin,
 		".rb" or ".rake" or ".gemspec" => LanguageId.Ruby,
 		".php" or ".phtml" => LanguageId.Php,
-		".c" or ".h" => LanguageId.C,
-		".cc" or ".cpp" or ".cxx" or ".hh" or ".hpp" or ".hxx" => LanguageId.Cpp,
 		_ => LanguageId.Unsupported
 	};
 
 	private static LanguageId LanguageFamily(LanguageId language) => language is LanguageId.JavaScript or LanguageId.Tsx
 		? LanguageId.TypeScript
 		: language;
-	private static bool LooksLikeCppHeader(string source) =>
-		Regex.IsMatch(source, @"\b(namespace|template|class|public|private|protected|constexpr|using)\b",
-			RegexOptions.CultureInvariant);
 	private static string Normalize(string path) => path.Replace('\\', '/');
 	private static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 	private static string OneLine(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
@@ -1752,9 +1679,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.Rust] = new("tree-sitter-rust", "tree_sitter_rust", "rust", new RustDependencyLanguageAdapter()),
 				[LanguageId.Kotlin] = new("tree-sitter-kotlin", "tree_sitter_kotlin", "kotlin", new KotlinDependencyLanguageAdapter()),
 				[LanguageId.Ruby] = new("tree-sitter-ruby", "tree_sitter_ruby", "ruby", new RubyDependencyLanguageAdapter()),
-				[LanguageId.Php] = new("tree-sitter-php", "tree_sitter_php", "php", new PhpDependencyLanguageAdapter()),
-				[LanguageId.C] = new("tree-sitter-c", "tree_sitter_c", "c", new CDependencyLanguageAdapter()),
-				[LanguageId.Cpp] = new("tree-sitter-cpp", "tree_sitter_cpp", "cpp", new CppDependencyLanguageAdapter())
+				[LanguageId.Php] = new("tree-sitter-php", "tree_sitter_php", "php", new PhpDependencyLanguageAdapter())
 			};
 	}
 
