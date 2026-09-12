@@ -6417,6 +6417,36 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetFileDependencyPathsCanBeReusedAsWholeFileBatchRequests()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Fixture.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		File.WriteAllText(Path.Combine(project, "Target.cs"),
+			"namespace Sample; sealed class Target { const string Marker = \"batch-target-marker\"; }\n");
+		File.WriteAllText(Path.Combine(project, "Source.cs"),
+			"namespace Sample; sealed class Source { Target target = new(); }\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var source = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["path"] = "Source.cs"
+		});
+		var header = ExtractSpotlightBody(Text(source)).Split('\n')
+			.Single(static line => line.StartsWith("Lines:", StringComparison.Ordinal));
+		var paths = JsonSerializer.Deserialize<string[]>(
+			Assert.Single(Regex.Matches(header, "Dependencies: (\\[[^]]+\\])").Cast<Match>()).Groups[1].Value)!;
+		var batch = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = paths.Select(static path => (object)new { path }).ToArray()
+		});
+
+		Assert.NotEqual(true, batch.IsError);
+		Assert.Contains("File: Target.cs", Text(batch), StringComparison.Ordinal);
+		Assert.Contains("batch-target-marker", Text(batch), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetFileDependencyPathsReportCountAndCharacterOmissionsWithinTheirBounds()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -6568,7 +6598,6 @@ public sealed partial class McpServerIntegrationTests
 	[InlineData("missing-path")]
 	[InlineData("too-many-requests")]
 	[InlineData("too-many-ranges")]
-	[InlineData("missing-selector")]
 	[InlineData("both-selectors")]
 	public async Task GetFileBatchRejectsInvalidShapesBeforeReading(string shape)
 	{
@@ -6593,7 +6622,6 @@ public sealed partial class McpServerIntegrationTests
 							.Select(static _ => new { start_line = 1, end_line = 1 }).ToArray()
 					}
 				},
-				"missing-selector" => new object[] { new { path = "A.txt" } },
 				"both-selectors" => new object[]
 				{
 					new
@@ -6613,7 +6641,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.True(result.IsError);
 		Assert.StartsWith(McpErrorCodes.InvalidArguments, Text(result), StringComparison.Ordinal);
-		if (shape is "missing-path" or "missing-selector" or "both-selectors")
+		if (shape is "missing-path" or "both-selectors")
 			Assert.Contains("requests[0]", Text(result), StringComparison.Ordinal);
 	}
 

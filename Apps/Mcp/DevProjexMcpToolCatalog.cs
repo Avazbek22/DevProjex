@@ -417,7 +417,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "type": "array",
 	      "minItems": 1,
 	      "maxItems": 8,
-	      "description": "Batch form: up to eight file requests and sixteen ranges or symbols total. Exactly one of requests or path is required; supplying both is rejected before file access. Single-file range arguments cannot be combined with requests.",
+	      "description": "Batch form: up to eight file requests and sixteen file selections total. A path alone reads the whole file; ranges or symbol narrow it. Exactly one of requests or path is required; supplying both is rejected before file access. Single-file range arguments cannot be combined with requests.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
@@ -437,7 +437,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	              "additionalProperties": false
 	            }
 	          },
-	          "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Named declaration to read from this file instead of ranges. Exactly one of ranges or symbol is required for each request." }
+	          "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Named declaration to read from this file instead of ranges or the whole file. Ranges and symbol cannot be combined." }
 	        },
 	        "required": ["path"],
 	        "additionalProperties": false
