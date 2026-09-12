@@ -1383,7 +1383,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					"wildcard import is resolution context, not a dependency target", []);
 			if (import.IsCrateQualified)
 			{
-				var localDeclarations = LookupQualifiedInScope(source, import.Specifier, 0);
+				var localDeclarations = LookupRustCrateQualifiedInScope(source, import.Specifier);
 				var localFiles = localDeclarations.SelectMany(static declaration => declaration.DeclarationSites)
 					.Select(static site => site.File)
 					.Distinct(StringComparer.Ordinal)
@@ -1423,6 +1423,23 @@ public sealed class DependencyFactsEngine : IDisposable
 				1 => Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files),
 				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple imported declarations", files)
 			};
+		}
+
+		private DeclarationFact[] LookupRustCrateQualifiedInScope(FileFacts source, string name)
+		{
+			var exact = LookupQualifiedInScope(source, name, 0);
+			if (exact.Length > 0)
+				return exact;
+
+			var normalized = QualifiedLookupName(name);
+			var suffix = "::" + normalized;
+			return _declarations.Where(declaration =>
+				declaration.Identity.ScopeId == source.ScopeId &&
+				declaration.Identity.LanguageId == LanguageId.Rust &&
+				declaration.Identity.GenericArity == 0 &&
+				QualifiedLookupName(declaration.Identity.QualifiedName)
+					.EndsWith(suffix, StringComparison.Ordinal) &&
+				IsVisible(source, declaration)).ToArray();
 		}
 
 		private static bool IsConventionalRustTargetRoot(DependencyScopeDescriptor? scope, string sourcePath)

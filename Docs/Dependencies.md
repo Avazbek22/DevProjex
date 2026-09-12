@@ -198,8 +198,10 @@ stem directory of an ordinary source file, and under every enclosing inline modu
 `#[path]` overrides stay unresolved because arbitrary module paths are not modeled. Private, `pub`, and
 restricted-visibility `use` trees, aliases, `crate`, `self`, and bounded `super` prefixes are expanded
 without executing code; `crate::`
-is resolved exclusively inside the nearest owning Cargo package, while exact
-items resolve only to matching declarations in the allowed manifest, while glob imports provide
+is resolved exclusively inside the nearest owning Cargo package. When a Cargo target uses a
+nonstandard source path, a crate-qualified item may match a unique declaration by its complete
+module suffix inside that package; equal suffixes remain ambiguous. Exact items otherwise resolve
+only to matching declarations in the allowed manifest, while glob imports provide
 visibility context without inventing a module edge. A bounded `Cargo.toml` supplies the crate name
 and literal local `path` dependencies, including dev and build dependencies. Referenced repository
 crates are visible transitively, but an unqualified declaration in the source file's own module and

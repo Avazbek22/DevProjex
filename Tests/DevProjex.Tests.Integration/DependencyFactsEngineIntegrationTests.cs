@@ -771,6 +771,69 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RustRestrictedReexportsResolveFromANonstandardCrateRoot()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = fixture.CreateFile("Cargo.toml", """
+			[package]
+			name = "command"
+			version = "1.0.0"
+
+			[[bin]]
+			name = "command"
+			path = "crates/core/main.rs"
+			""");
+		var root = fixture.CreateFile("crates/core/main.rs", "mod flags;\n");
+		var facade = fixture.CreateFile("crates/core/flags/mod.rs", """
+			pub(crate) use crate::flags::{
+			    complete::bash::generate as generate_complete_bash,
+			    doc::help::generate as generate_help,
+			};
+			mod complete;
+			mod doc;
+			""");
+		var complete = fixture.CreateFile("crates/core/flags/complete/mod.rs", "pub mod bash;\n");
+		var bash = fixture.CreateFile("crates/core/flags/complete/bash.rs", "pub fn generate() {}\n");
+		var doc = fixture.CreateFile("crates/core/flags/doc/mod.rs", "pub mod help;\n");
+		var help = fixture.CreateFile("crates/core/flags/doc/help.rs", "pub fn generate() {}\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[manifest, root, facade, complete, bash, doc, help],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "crates/core/flags/mod.rs" &&
+			edge.Target == "crates/core/flags/complete/bash.rs" && edge.Reference == "flags::complete::bash::generate" &&
+			edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "crates/core/flags/mod.rs" &&
+			edge.Target == "crates/core/flags/doc/help.rs" && edge.Reference == "flags::doc::help::generate" &&
+			edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task RustCrateQualifiedSuffixesRemainUnresolvedWhenTargetsAreNotUnique()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = fixture.CreateFile("Cargo.toml", "[package]\nname = \"command\"\nversion = \"1.0.0\"\n");
+		var source = fixture.CreateFile("crates/core/flags/mod.rs", "pub(crate) use crate::flags::doc::help::generate;\n");
+		var first = fixture.CreateFile("crates/core/flags/doc/help.rs", "pub fn generate() {}\n");
+		var second = fixture.CreateFile("alternate/flags/doc/help.rs", "pub fn generate() {}\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[manifest, source, first, second],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "crates/core/flags/mod.rs" && edge.Reference == "flags::doc::help::generate");
+		Assert.Equal(ResolutionStatus.Ambiguous, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Equal(2, edge.Candidates.Count);
+	}
+
+	[Fact]
 	public async Task RustModuleDeclarationsFollowTheOwningModuleDirectory()
 	{
 		using var fixture = new TemporaryDirectory();
