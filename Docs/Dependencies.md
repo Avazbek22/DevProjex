@@ -247,8 +247,9 @@ error publishes neither recovered declarations nor recovered edges.
 
 PHP source files contribute classes, interfaces, traits, enums, and top-level functions under their
 declared namespace. Simple namespace `use` statements and aliases resolve only to matching declarations
-in the allowed manifest; inheritance, implemented interfaces, property types, parameters, and return
-types supply type-reference evidence. Bounded `composer.json` files provide package names, repository
+in the allowed manifest; inheritance, implemented interfaces, property types, parameters, return
+types, and unqualified static access inside the current namespace supply type-reference evidence.
+Bounded `composer.json` files provide package names, repository
 package dependencies, and literal PSR-4 mappings as data. Composer plugins, generated autoload files,
 installed vendor packages, grouped imports, and runtime class aliases are not executed or guessed and
 remain unresolved.

@@ -144,6 +144,28 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task PhpUnqualifiedStaticAccessResolvesInsideTheCurrentNamespace()
+	{
+		using var fixture = new TemporaryDirectory();
+		var utils = fixture.CreateFile("src/Utils.php", "<?php namespace GuzzleHttp; final class Utils { public static function choose() {} }");
+		var middleware = fixture.CreateFile("src/Middleware.php", "<?php namespace GuzzleHttp; final class Middleware { public const NAME = 'value'; }");
+		var handler = fixture.CreateFile(
+			"src/HandlerStack.php",
+			"<?php namespace GuzzleHttp; final class HandlerStack { public function resolve() { Utils::choose(); return Middleware::NAME; } }");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[utils, middleware, handler],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
+			edge.Reference == "Utils" && edge.Target == "src/Utils.php" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
+			edge.Reference == "Middleware" && edge.Target == "src/Middleware.php" && edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
 	public async Task PhpNavigationDistinguishesEqualMembersAcrossOwners()
 	{
 		using var fixture = new TemporaryDirectory();
