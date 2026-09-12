@@ -5,14 +5,10 @@ namespace DevProjex.Mcp;
 /// that contains it without guessing a line range and reading twice.
 /// </summary>
 /// <remarks>
-/// Declarations come from the dependency index built over the files that actually produced hits:
-/// one bounded parse per such file, never one per hit, and never over the whole selection. A
+/// Declarations come from the transformed snapshots that actually produced hits: one bounded parse
+/// per such file, never one per hit, and never over the whole selection. A
 /// declaration name is project text, so it is written inside the untrusted block together with the
 /// match lines it describes; only the counts leave that block.
-///
-/// Hit lines are lines of the transformed text the tool returns, and the index parses the file on
-/// disk. Redaction replaces a secret with a placeholder on the same line and adds no lines, so the
-/// two agree on line numbers, which is the only coordinate this needs.
 /// </remarks>
 internal static class McpSearchSymbols
 {
@@ -22,15 +18,13 @@ internal static class McpSearchSymbols
 	/// </summary>
 	public const int MaximumAnnotatedFiles = 64;
 
-	public static async Task<McpSearchSymbolResult> ResolveAsync(
-		DependencyFactsEngine engine,
-		ProjectContextPlan plan,
+	public static McpSearchSymbolResult Resolve(
 		IReadOnlyList<McpSearchHit> hits,
+		IReadOnlyDictionary<string, IReadOnlyList<NavigationDeclaration>> navigationByFile,
 		CancellationToken cancellationToken)
 	{
-		ArgumentNullException.ThrowIfNull(engine);
-		ArgumentNullException.ThrowIfNull(plan);
 		ArgumentNullException.ThrowIfNull(hits);
+		ArgumentNullException.ThrowIfNull(navigationByFile);
 		if (hits.Count == 0)
 			return McpSearchSymbolResult.None;
 
@@ -50,34 +44,20 @@ internal static class McpSearchSymbols
 			files.Add(hit);
 		}
 
-		var index = await engine.IndexAsync(
-				plan.SourceRoot,
-				files.Select(static file => file.FullPath).ToArray(),
-				progress: null,
-				cancellationToken)
-			.ConfigureAwait(false);
-
 		var spansByFile = new Dictionary<string, List<DeclarationSpan>>(StringComparer.Ordinal);
 		foreach (var file in files)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (!index.FileByPath.TryGetValue(file.RelativePath, out var facts))
+			if (!navigationByFile.TryGetValue(file.RelativePath, out var fileDeclarations))
 				continue;
 
-			var spans = new List<DeclarationSpan>();
-			foreach (var declaration in facts.Declarations)
-			{
-				foreach (var site in declaration.DeclarationSites)
-				{
-					// A site without an end line comes from an extractor that reports none, and a
-					// one-line guess would claim containment it cannot know.
-					if (site.EndLine >= site.Line &&
-					    string.Equals(site.File, file.RelativePath, StringComparison.Ordinal))
-					{
-						spans.Add(new DeclarationSpan(site.Line, site.EndLine, declaration.Identity.QualifiedName));
-					}
-				}
-			}
+			var spans = fileDeclarations
+				.Select(static declaration => new DeclarationSpan(
+					declaration.StartLine,
+					declaration.EndLine,
+					declaration.Name,
+					declaration.EndIndex - declaration.StartIndex))
+				.ToList();
 
 			if (spans.Count > 0)
 				spansByFile[file.RelativePath] = spans;
@@ -103,7 +83,8 @@ internal static class McpSearchSymbols
 			{
 				if (hit.Line < span.Start || hit.Line > span.End)
 					continue;
-				if (best is null || span.End - span.Start < best.End - best.Start)
+				if (best is null || span.End - span.Start < best.End - best.Start ||
+				    span.End - span.Start == best.End - best.Start && span.CharacterLength < best.CharacterLength)
 					best = span;
 			}
 
@@ -129,6 +110,19 @@ internal static class McpSearchSymbols
 			skippedFiles);
 	}
 
+	public static IReadOnlyList<NavigationDeclaration> CaptureNavigation(
+		DependencyFactsEngine engine,
+		string relativePath,
+		string transformedText,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(engine);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentNullException.ThrowIfNull(transformedText);
+		var fingerprint = ContentFingerprint.Compute(transformedText.AsSpan()).ToHexString().ToLowerInvariant();
+		return engine.ExtractNavigation(relativePath, transformedText, fingerprint, cancellationToken);
+	}
+
 	/// <summary>
 	/// Turns a declaration name into the lines that declare it, so a caller can read a symbol
 	/// without first learning where it lives.
@@ -139,39 +133,23 @@ internal static class McpSearchSymbols
 	/// than resolved to whichever came first: choosing silently would return the wrong code with
 	/// nothing in the response to say so.
 	/// </remarks>
-	public static async Task<McpSymbolLookup> ResolveSymbolAsync(
+	public static McpSymbolLookup ResolveSymbol(
 		DependencyFactsEngine engine,
-		ProjectContextPlan plan,
 		string relativePath,
-		string fullPath,
+		string transformedText,
 		string symbol,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(engine);
-		ArgumentNullException.ThrowIfNull(plan);
 		ArgumentException.ThrowIfNullOrWhiteSpace(symbol);
-
-		var index = await engine
-			.IndexAsync(plan.SourceRoot, [fullPath], progress: null, cancellationToken)
-			.ConfigureAwait(false);
-		if (!index.FileByPath.TryGetValue(relativePath, out var facts) ||
-		    facts.Status != DependencyFileStatus.Supported)
-		{
-			return McpSymbolLookup.Unsupported;
-		}
-
-		var spans = new List<DeclarationSpan>();
-		foreach (var declaration in facts.Declarations)
-		{
-			foreach (var site in declaration.DeclarationSites)
-			{
-				if (site.EndLine >= site.Line &&
-				    string.Equals(site.File, relativePath, StringComparison.Ordinal))
-				{
-					spans.Add(new DeclarationSpan(site.Line, site.EndLine, declaration.Identity.QualifiedName));
-				}
-			}
-		}
+		ArgumentNullException.ThrowIfNull(transformedText);
+		var spans = CaptureNavigation(engine, relativePath, transformedText, cancellationToken)
+			.Select(static declaration => new DeclarationSpan(
+				declaration.StartLine,
+				declaration.EndLine,
+				declaration.Name,
+				declaration.EndIndex - declaration.StartIndex))
+			.ToList();
 
 		if (spans.Count == 0)
 			return McpSymbolLookup.Unsupported;
@@ -183,6 +161,14 @@ internal static class McpSearchSymbols
 			return McpSymbolLookup.Found(qualified[0].Start, qualified[0].End);
 		if (qualified.Length > 1)
 			return McpSymbolLookup.Ambiguous(qualified.Length);
+
+		var ownerQualified = spans
+			.Where(span => span.Name.EndsWith('.' + symbol, StringComparison.Ordinal))
+			.ToArray();
+		if (ownerQualified.Length == 1)
+			return McpSymbolLookup.Found(ownerQualified[0].Start, ownerQualified[0].End);
+		if (ownerQualified.Length > 1)
+			return McpSymbolLookup.Ambiguous(ownerQualified.Length);
 
 		var simple = spans.Where(span => LastSegment(span.Name).Equals(symbol, StringComparison.Ordinal)).ToArray();
 		return simple.Length switch
@@ -199,7 +185,7 @@ internal static class McpSearchSymbols
 		return separator >= 0 ? name.AsSpan(separator + 1) : name.AsSpan();
 	}
 
-	private sealed record DeclarationSpan(int Start, int End, string Name);
+	private sealed record DeclarationSpan(int Start, int End, string Name, int CharacterLength);
 }
 
 internal enum McpSymbolLookupStatus

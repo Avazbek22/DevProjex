@@ -283,6 +283,15 @@ non-idempotent because either may create a stored result with a new session id. 
 closed-world; with it, the six tools that accept `project` Git URLs are annotated
 open-world.
 
+Discovery is conditional rather than a mandatory sequence. Use `list_projects` only
+when the project is unknown, `get_tree` or `search_project` when its location is
+unknown, scalar `get_file` for one known location, and batch `get_file` for several
+independent known locations. `pack_context` is for a multi-file document, while
+`analyze` is useful when sizing or admission must be known before producing one.
+Every tool publishes one short `anthropic/searchHint` in `_meta` as optional discovery
+help. No tool publishes `anthropic/alwaysLoad`; clients that do not recognize the hint
+can ignore it without changing any route or result.
+
 ### What a connection costs
 
 Before a client asks anything about a project it has already paid for the tool schemas and the
@@ -290,11 +299,15 @@ server instructions. Measured on 2026-09-11 from the characters a client receive
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` result, default server | 43,323 |
-| `tools/list` result, `--allow-agent-exclusions` | 47,241 |
-| `instructions` | 1,044 |
+| `tools/list` normalized result, default server | 33,333 |
+| `tools/list` wire JSON result, default server | 34,439 |
+| `tools/list` wire JSON result with per-call exclusions | 38,357 |
+| `instructions` | 1,128 |
 
-`analyze` is the largest single tool at 13,604 characters, most of it schema. The `exclusions`
+Removing the two output schemas reduced the default catalog from 42,370 characters at the
+base revision to 32,516 before the named batch-read selector and discovery hints were added.
+Those additions make the final catalog 33,333 characters. `pack_context` is the largest single
+tool at 7,238 characters, most of it input schema. The `exclusions`
 parameter costs a flat 3,918 characters, 653 on each of the six tools that take it. A process
 test holds the default `tools/list` result and the instructions under ceilings with deliberate
 headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
@@ -309,7 +322,7 @@ description has to fit a budget rather than grow one silently.
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
 | `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, while all additional matches inside the inspected prefix are counted. A request inspects at most 64 MiB of selected source bytes and reports `[Search incomplete]` when later files were not searched. Actual text inserted by redaction never matches. Withheld files are counted in the partial-result warning. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
-| `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen ranges. Batch ranges use inclusive `start_line`/`end_line`, read and redact each physical file once, merge overlaps, and report `ok`, `partial`, `not-returned`, or `unavailable` for every range. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
+| `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen ranges or named declarations. Every returned section starts with its path and returned line interval. Batch items contain `path` and exactly one of `ranges` or `symbol`; ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every item reports `ok`, `partial`, `not-returned`, or `unavailable`. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, `related_files`, and `get_file` additionally accept the
@@ -430,17 +443,19 @@ response is byte-identical to a server without it.
 
 ## Result Contract
 
-Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
-authoritative result is the complete object in `structuredContent`; the first
-text block in `content` is a spotlighted JSON serialization of that same object.
-Every field in these two output schemas has a short description. `analyze`
-results include an `exclusions` array that echoes the exclusion
+`list_projects` and `analyze` return their JSON object only as spotlighted text
+inside `content`; they deliberately omit `structuredContent` and `outputSchema`.
+Some clients discard all text whenever `structuredContent` exists, which would
+also discard the untrusted-data boundary around repository-controlled names and
+paths. The protected text is therefore the authoritative representation.
+`analyze` results include an `exclusions` array that echoes the exclusion
 tokens effective for the call, so the agent and a human reading the transcript
 always see which toggles shaped the measurement. `list_projects` results
 include a `baseline` object with the server `git` mode token, the baseline
 `exclusions` tokens, and an `agentExclusions` flag. Both fields are new in v5.2
 and required on every server, including servers started without the exclusion
-flags; consumers that pinned an earlier output schema must refresh it.
+flags; consumers must parse the spotlighted JSON text rather than expect a
+structured MCP result.
 `analyze.topFiles[].estimated` is required and marks whether an entry came from
 size-based rather than inspected transformed-content metrics.
 `analyze.topFiles[].uninspected` is an optional v5.2 addition: it is present and
@@ -501,8 +516,7 @@ effective detail, while `related_files` reports `EstimatedTokens` from the sourc
 character count. The two can differ for the same file.
 
 The budget report and `[Budget accounting]` for `analyze` are appended as trusted text
-after the structured block, never inside it, because the first text block stays a
-byte-identical serialization of `structuredContent`.
+after the spotlighted JSON block, never inside it.
 
 When requested compression cannot inspect its delivery source or load a language
 grammar, `analyze` adds optional `compressionUnavailable` with a one-line `reason`
@@ -632,9 +646,10 @@ contains counts only; structured analysis data remains inside its untrusted repr
 Unsupported languages and files rejected by parse or structural safety checks are
 separate unchanged-file outcomes and do not produce this trailer.
 
-`get_tree`, `pack_context`, `read_pack`, `search_project`, `related_files`, and `get_file` are
-text tools. They do not declare `outputSchema`, omit `structuredContent`, and
-return the useful payload directly in the first text block in `content`. This
+All eight tools omit `outputSchema` and `structuredContent` and return the useful
+payload in text blocks under `content`. `list_projects` and `analyze` place their
+JSON object inside the standard spotlighted untrusted-data block; the other tools
+return their existing text or document shape there. This
 avoids JSON escaping and unnecessary token overhead for trees, source text,
 search context, dependency facts, and packs. Truncation and continuation metadata is appended as
 trusted plain-text trailers outside every project spotlight block, such as
@@ -782,9 +797,9 @@ indexing, Git history work, nor ranking content hashes. See
 [Ranking.md](Ranking.md) for the algorithm, fixed weights, evaluation protocol,
 and measured limitations.
 
-Future tools must declare `outputSchema` only when their useful result is
-genuinely structured and can be returned completely in `structuredContent`.
-Metadata about a text payload is not sufficient reason to add a schema.
+Future tools must not add `structuredContent` when doing so can cause a client to
+discard the protected text representation. Metadata about a text payload is not
+sufficient reason to add an output schema.
 
 ## Progress Notifications
 
@@ -1022,8 +1037,9 @@ src/Core/LevelOverrideMap.cs Core.LevelOverrideMap 17
 ```
 
 One line per declaration, not per hit: a declaration ten matches landed in is still
-one thing to open. The name is the innermost declaration the index reports, which is
-method level in the languages whose extractors declare members and type level in C#.
+one thing to open. The name is the innermost named declaration the navigation projection
+reports. C#, JavaScript, TypeScript, Go, and Python include supported members and functions,
+with their owner chain when names repeat within a file.
 At most 20 are listed.
 
 One trusted constant closes it:
@@ -1054,21 +1070,24 @@ matching none; and a file no declarations were extracted from, which is how an
 unsupported language answers. None of these echoes a declaration name, because the
 error text sits outside the untrusted block and a declaration name is project text.
 
-The range is the declaration the index reports, so its granularity is the same as
-the naming on search hits: for C# that is the enclosing type rather than the
-enclosing member. Without `symbol`, every `get_file` response is byte-identical,
-and the batch `requests` form is untouched.
+The range is the declaration the navigation projection reports, so its granularity is
+the same as the naming on search hits. Every successful scalar read starts with
+`File: <path>` and `Lines: <start>-<end> of <total>` inside the untrusted block.
+The navigation query runs on the same transformed snapshot as the returned text. Multi-line
+replacement, compression, and a source edit between calls therefore cannot mix disk coordinates
+from one version with response lines from another.
 
 ### Batch `get_file`
 
 Use `requests` when several source excerpts are already known; use `search_project`
 when their locations are not known. Exactly one of `path` or `requests` is required;
 supplying both or neither returns `DPX-MCP-INVALID-ARGUMENTS` before any file is read.
-The batch contains one to eight records, each shaped as
-`{"path":"src/App.cs","ranges":[{"start_line":10,"end_line":30}]}`. A call
-contains at most sixteen ranges in total. Each range is inclusive, starts at line
-one, and may omit `end_line` to read through EOF. Unknown properties, empty ranges,
-and invalid indexed records fail before project access with
+The batch contains one to eight records. Each has a path and exactly one selector:
+`{"path":"src/App.cs","ranges":[{"start_line":10,"end_line":30}]}` or
+`{"path":"src/App.cs","symbol":"Example.App.Run"}`. A call contains at most sixteen
+ranges or symbols in total. Each range is inclusive, starts at line
+one, and requires both `start_line` and `end_line`. Unknown properties, empty ranges,
+missing selectors, combined `ranges` and `symbol`, and invalid indexed records fail before project access with
 `DPX-MCP-INVALID-ARGUMENTS`.
 
 The server resolves every requested path through the effective selection, then

@@ -29,7 +29,7 @@ public sealed partial class McpServerProcessTests
 			options: null,
 			TestContext.Current.CancellationToken);
 		Assert.NotEqual(true, listed.IsError);
-		var projects = listed.StructuredContent!.Value.GetProperty("projects");
+		var projects = Structured(listed).GetProperty("projects");
 		Assert.Contains(projects.EnumerateArray(), item => item.GetProperty("name").GetString() == "beta-project");
 
 		var byName = await server.Client.CallToolAsync(
@@ -239,7 +239,7 @@ public sealed partial class McpServerProcessTests
 			progress: null,
 			options: null,
 			TestContext.Current.CancellationToken);
-		var initialList = Assert.IsType<JsonElement>(initial.StructuredContent);
+		var initialList = Structured(initial);
 		var canonicalProject = Assert.Single(initialList.GetProperty("projects").EnumerateArray())
 			.GetProperty("path")
 			.GetString()!;
@@ -268,7 +268,7 @@ public sealed partial class McpServerProcessTests
 			progress: null,
 			options: null,
 			TestContext.Current.CancellationToken);
-		var list = Assert.IsType<JsonElement>(listed.StructuredContent);
+		var list = Structured(listed);
 		Assert.Equal(
 			["empty-files"],
 			list.GetProperty("baseline").GetProperty("exclusions").EnumerateArray()

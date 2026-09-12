@@ -42,7 +42,7 @@ public sealed partial class McpServerProcessTests
 			var response = await client.CallToolAsync("analyze", new Dictionary<string, object?>(),
 				progress: null, options: null, timeout.Token);
 			Assert.NotEqual(true, response.IsError);
-			Assert.Equal(expected.Length, response.StructuredContent!.Value.GetProperty("files").GetInt32());
+			Assert.Equal(expected.Length, Structured(response).GetProperty("files").GetInt32());
 		}
 		process.StandardInput.Close();
 		await process.WaitForExitAsync(timeout.Token);

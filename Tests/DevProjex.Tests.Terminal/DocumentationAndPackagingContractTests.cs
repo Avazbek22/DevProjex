@@ -153,7 +153,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("unique `name` from `list_projects`", normalizedServer, StringComparison.Ordinal);
 		Assert.DoesNotContain("dependency-index warm-up", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("[Dependency configuration]", server, StringComparison.Ordinal);
-		Assert.Contains("spotlighted JSON serialization", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("JSON object only as spotlighted text", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("reply ≈ E", server, StringComparison.Ordinal);
 		Assert.Contains("For `get_tree`, `analyze`, `pack_context`, and `search_project`, `paths` accepts", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("The entries name literal files or directories", normalizedServer, StringComparison.Ordinal);

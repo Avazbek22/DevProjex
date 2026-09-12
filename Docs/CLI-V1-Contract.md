@@ -1400,9 +1400,10 @@ incompatible, or invalid grammar prevents a requested transformation. Analysis
 and context machine output carry the same diagnostic. Safe complete output and
 all exit codes are unchanged, including `analyze --strict`. MCP `analyze`, `pack_context`, and `get_file` append
 trusted `[Compression unavailable] ...` text outside project data when compression
-is effective; `analyze` additionally exposes optional structured
-`compressionUnavailable` with `reason` and affected `languages`. Consumers that
-cache the `analyze` output schema must refresh it.
+is effective; MCP `analyze` includes `compressionUnavailable` with `reason` and
+affected `languages` in its spotlighted JSON text. MCP `list_projects` and
+`analyze` deliberately omit `structuredContent` and `outputSchema` so clients
+cannot discard the protective text boundary around repository-controlled data.
 
 Before the v5.1 output freeze, human-readable content and text-tree presentation
 was aligned across Desktop, Terminal Workspace, CLI, and MCP. Content-only text

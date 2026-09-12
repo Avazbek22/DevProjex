@@ -4,7 +4,11 @@ namespace DevProjex.Mcp;
 
 internal sealed record McpGetFileRange(int RequestIndex, int RangeIndex, int StartLine, int EndLine);
 
-internal sealed record McpGetFileRequest(int Index, string Path, IReadOnlyList<McpGetFileRange> Ranges);
+internal sealed record McpGetFileRequest(
+	int Index,
+	string Path,
+	IReadOnlyList<McpGetFileRange> Ranges,
+	string? Symbol = null);
 
 internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFileRequest> Requests)
 {
@@ -48,7 +52,7 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 			requestIndex++;
 			if (requestElement.ValueKind != JsonValueKind.Object)
 				throw InvalidEntry(requestIndex, "must be an object");
-			ValidatePropertyNames(requestElement, requestIndex, "path", "ranges");
+			ValidatePropertyNames(requestElement, requestIndex, "path", "ranges", "symbol");
 			if (!requestElement.TryGetProperty("path", out var pathElement) ||
 			    pathElement.ValueKind != JsonValueKind.String ||
 			    string.IsNullOrWhiteSpace(pathElement.GetString()))
@@ -58,16 +62,33 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 			var path = pathElement.GetString()!;
 			if (McpUnicodeLength.ExceedsScalarValueCount(path, McpProjectService.MaximumRequestedPathLength))
 				throw InvalidEntry(requestIndex, $"path must contain at most {McpProjectService.MaximumRequestedPathLength} characters");
-			if (!requestElement.TryGetProperty("ranges", out var rangesElement) ||
-			    rangesElement.ValueKind != JsonValueKind.Array ||
-			    rangesElement.GetArrayLength() == 0)
+			var hasRanges = requestElement.TryGetProperty("ranges", out var rangesElement);
+			var hasSymbol = requestElement.TryGetProperty("symbol", out var symbolElement);
+			if (hasRanges == hasSymbol)
+				throw InvalidEntry(requestIndex, "exactly one of ranges or symbol is required");
+			string? symbol = null;
+			if (hasSymbol)
+			{
+				if (symbolElement.ValueKind != JsonValueKind.String ||
+				    string.IsNullOrWhiteSpace(symbolElement.GetString()))
+					throw InvalidEntry(requestIndex, "symbol must be a non-whitespace string");
+				symbol = symbolElement.GetString()!;
+				if (McpUnicodeLength.ExceedsScalarValueCount(symbol, 512))
+					throw InvalidEntry(requestIndex, "symbol must contain at most 512 characters");
+				totalRanges++;
+				if (totalRanges > MaximumRanges)
+					throw InvalidEntry(requestIndex, $"the call must contain at most {MaximumRanges} ranges or symbols");
+			}
+			else if (rangesElement.ValueKind != JsonValueKind.Array || rangesElement.GetArrayLength() == 0)
 			{
 				throw InvalidEntry(requestIndex, "ranges must be a non-empty array");
 			}
 
-			var ranges = new List<McpGetFileRange>(rangesElement.GetArrayLength());
+			var ranges = new List<McpGetFileRange>(hasRanges ? rangesElement.GetArrayLength() : 1);
 			var rangeIndex = 0;
-			foreach (var rangeElement in rangesElement.EnumerateArray())
+			foreach (var rangeElement in hasRanges
+			         ? rangesElement.EnumerateArray().ToArray()
+			         : Array.Empty<JsonElement>())
 			{
 				rangeIndex++;
 				totalRanges++;
@@ -75,14 +96,21 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 					throw InvalidEntry(requestIndex, $"the call must contain at most {MaximumRanges} ranges");
 				if (rangeElement.ValueKind != JsonValueKind.Object)
 					throw InvalidRange(requestIndex, rangeIndex, "must be an object");
-				ValidatePropertyNames(rangeElement, requestIndex, "start_line", "end_line", rangeIndex);
+				ValidatePropertyNames(
+					rangeElement,
+					requestIndex,
+					"start_line",
+					"end_line",
+					rangeIndex: rangeIndex);
 				var start = ReadPositiveInteger(rangeElement, requestIndex, rangeIndex, "start_line");
 				var end = ReadPositiveInteger(rangeElement, requestIndex, rangeIndex, "end_line");
 				if (start > end)
 					throw InvalidRange(requestIndex, rangeIndex, "start_line must not exceed end_line");
 				ranges.Add(new McpGetFileRange(requestIndex, rangeIndex, start, end));
 			}
-			requests.Add(new McpGetFileRequest(requestIndex, path, ranges));
+			if (symbol is not null)
+				ranges.Add(new McpGetFileRange(requestIndex, 1, 1, int.MaxValue));
+			requests.Add(new McpGetFileRequest(requestIndex, path, ranges, symbol));
 		}
 
 		return new McpGetFileRequestSet(true, requests);
@@ -112,11 +140,13 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 		int requestIndex,
 		string first,
 		string second,
+		string? third = null,
 		int? rangeIndex = null)
 	{
 		foreach (var property in element.EnumerateObject())
 		{
-			if (property.NameEquals(first) || property.NameEquals(second))
+			if (property.NameEquals(first) || property.NameEquals(second) ||
+			    third is not null && property.NameEquals(third))
 				continue;
 			throw rangeIndex is null
 				? InvalidEntry(requestIndex, $"contains unknown property '{property.Name}'")

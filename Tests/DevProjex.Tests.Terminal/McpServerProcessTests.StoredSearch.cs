@@ -111,7 +111,7 @@ public sealed partial class McpServerProcessTests
 			new Dictionary<string, object?> { ["pattern"] = "=> 1", ["context_lines"] = 0 })));
 
 		// Nothing was withheld, so nothing is stored and nothing new is said.
-		Assert.Contains("src/App.cs\nin P.App\n5:", text, StringComparison.Ordinal);
+		Assert.Contains("src/App.cs\nin P.App.Run\n5:", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Search stored]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("Withheld matches by file:", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("additional matches", text, StringComparison.Ordinal);

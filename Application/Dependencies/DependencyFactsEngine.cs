@@ -39,6 +39,27 @@ public sealed class DependencyFactsEngine : IDisposable
 
 	public int ParseCount => _extractor.ParseCount;
 	public int CompiledQuerySetCount => _extractor.CompiledQuerySetCount;
+
+	public IReadOnlyList<NavigationDeclaration> ExtractNavigation(
+		string relativePath,
+		string source,
+		string contentFingerprint,
+		CancellationToken cancellationToken = default)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (source.Length > _limits.MaximumCharactersPerFile ||
+		    _extractor is not IDependencyNavigationExtractor navigationExtractor)
+			return [];
+		return navigationExtractor.ExtractNavigation(
+			relativePath,
+			source,
+			contentFingerprint,
+			cancellationToken);
+	}
 	internal DependencyFactsCacheState CacheState
 	{
 		get
@@ -635,6 +656,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			strings.Add(declaration.Identity.QualifiedName) + strings.Add(declaration.Identity.FileScope) +
 			strings.Add(declaration.ContainingNamespace) +
 			declaration.DeclarationSites.Sum(site => SiteBytes(site, strings))) +
+		facts.NavigationDeclarations.Sum(declaration => 96 + strings.Add(declaration.Name) +
+			strings.Add(declaration.Owner) + strings.Add(declaration.ContentFingerprint)) +
 		facts.Imports.Sum(import => 128 + strings.Add(import.Specifier) + strings.Add(import.ImportedName) +
 			strings.Add(import.Alias) + strings.Add(import.ContainingDeclaration) + SiteBytes(import.Site, strings)) +
 		facts.References.Sum(reference => 160 + strings.Add(reference.Name) + strings.Add(reference.SyntaxKind) +
