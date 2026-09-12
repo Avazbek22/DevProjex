@@ -332,6 +332,24 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RubyRepositoryRequireKeepsMatchingProjectConstantResolvable()
+	{
+		using var fixture = new TemporaryDirectory();
+		var definition = fixture.CreateFile("lib/app.rb", "module App\n  class Thing\n  end\nend\n");
+		var consumer = fixture.CreateFile("lib/consumer.rb", "require 'app'\nVALUE = App::Thing\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[definition, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "App::Thing" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "lib/app.rb");
+	}
+
+	[Fact]
 	public async Task RubyInternalReopenedContainerStillResolvesItsDefinedMember()
 	{
 		using var fixture = new TemporaryDirectory();
