@@ -20,6 +20,12 @@ public sealed partial class McpServerProcessTests
 			"B.run"
 		},
 		{
+			"assigned-members.js",
+			"const first = {};\nfirst.run = function run() { return 'member-marker-a'; };\nconst second = {};\nsecond.run = function run() { return 'member-marker-b'; };\n(function () { return 'fallback-marker'; })();\n",
+			"first.run",
+			"second.run"
+		},
+		{
 			"members.ts",
 			"class A { run(): string { return 'member-marker-a'; } }\nclass B { run(): string { return 'member-marker-b'; } }\n(function (): string { return 'fallback-marker'; })();\n",
 			"A.run",

@@ -830,6 +830,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		if (language == LanguageId.Kotlin && node.Type == "anonymous_initializer") return "init";
 		if (language == LanguageId.Ruby && node.Type == "assignment")
 			return NormalizeNavigationName(node.GetChildForField("left")?.Text ?? string.Empty);
+		if (language is LanguageId.JavaScript or LanguageId.TypeScript or LanguageId.Tsx &&
+		    node.Type == "assignment_expression")
+			return NormalizeNavigationName(node.GetChildForField("left")?.Text ?? string.Empty);
 		if (language == LanguageId.Php && node.Type is "property_element" or "const_element")
 			return NormalizeNavigationName(node.GetChildForField("name")?.Text ?? node.NamedChildren.FirstOrDefault()?.Text ?? string.Empty);
 		if (language is LanguageId.C or LanguageId.Cpp)
