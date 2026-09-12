@@ -292,6 +292,26 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RubyUnresolvedRequireKeepsMatchingExternalConstantOutsideTheProject()
+	{
+		using var fixture = new TemporaryDirectory();
+		var consumer = fixture.CreateFile("lib/consumer.rb", "require 'ext'\nVALUE = Ext::Thing\n");
+		var extension = fixture.CreateFile("test/extension.rb", "module Ext::Thing\n  def helper; end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[consumer, extension],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "Ext::Thing");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Empty(edge.Candidates);
+	}
+
+	[Fact]
 	public async Task RubyProjectConstantDefinitionRemainsResolvable()
 	{
 		using var fixture = new TemporaryDirectory();

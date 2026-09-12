@@ -1425,6 +1425,15 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolveRubyImport(FileFacts source, ImportFact import)
 		{
+			return FinishImport(
+				source,
+				import,
+				RubyImportCandidatePaths(source, import).Where(_files.ContainsKey),
+				"one repository Ruby source");
+		}
+
+		private IEnumerable<string> RubyImportCandidatePaths(FileFacts source, ImportFact import)
+		{
 			var sourceDirectory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
 			var roots = new List<string>();
 			if (import.ImportedName == "$relative")
@@ -1449,7 +1458,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				var fullPath = Path.GetFullPath(Path.Combine(root, requested.Replace('/', Path.DirectorySeparatorChar)));
 				if (IsWithin(_root, fullPath)) paths.Add(PortableRelative(_root, fullPath));
 			}
-			return FinishImport(source, import, paths.Where(_files.ContainsKey), "one repository Ruby source");
+			return paths;
 		}
 
 		public long EstimateResolutionWork(FileFacts source, int maximumWork)
@@ -2641,9 +2650,18 @@ public sealed class DependencyFactsEngine : IDisposable
 			var rootSeparator = reference.IndexOf("::", StringComparison.Ordinal);
 			var root = rootSeparator < 0 ? reference : reference[..rootSeparator];
 			if (RubyRuntimeConstants.Contains(root)) return true;
+			var normalizedRoot = NormalizeRubyPackageName(root);
 			var scope = FindScope(source.ScopeId);
-			return scope is not null && scope.RubyExternalPackages.Any(package =>
-				string.Equals(NormalizeRubyPackageName(package), NormalizeRubyPackageName(root), StringComparison.Ordinal));
+			if (scope is not null && scope.RubyExternalPackages.Any(package =>
+				    string.Equals(NormalizeRubyPackageName(package), normalizedRoot, StringComparison.Ordinal)))
+				return true;
+			return source.Imports.Any(import =>
+				import.ImportedName != "$relative" &&
+				string.Equals(
+					NormalizeRubyPackageName(import.Specifier.Split('/')[0]),
+					normalizedRoot,
+					StringComparison.Ordinal) &&
+				!RubyImportCandidatePaths(source, import).Any(_files.ContainsKey));
 		}
 
 		private static string NormalizeRubyPackageName(string value)

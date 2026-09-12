@@ -243,7 +243,8 @@ made visible by a literal `path:` entry in `Gemfile`. Gem specifications are rea
 their literal name and dependency declarations; literal non-path gems in `Gemfile` are recorded as
 external dependencies. A reference rooted in a declared external gem or a Ruby runtime class remains
 unresolved even when repository code reopens the same container, because reopening an externally
-owned class or module does not define the referenced entity inside the project. Ruby code in Gemfiles
+owned class or module does not define the referenced entity inside the project. A literal non-relative
+`require` with no repository target provides the same evidence for its matching constant root. Ruby code in Gemfiles
 or gemspecs is never executed. Installed gems without a literal declaration, generated
 load paths, interpolated require strings, autoload hooks, and runtime constant mutation are not
 inferred and remain unresolved. Because Ruby containers can be reopened, a class or module identity
