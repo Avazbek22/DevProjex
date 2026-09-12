@@ -820,9 +820,10 @@ internal sealed partial class TypeScriptDependencyLanguageAdapter : DependencyLa
 
 /// <summary>
 /// Go facts for one narrow capability: the package-level declarations a file contributes and
-/// the type names it mentions. A Go package is a directory, so a name declared in a sibling
-/// file needs no import; that is the relationship this adapter makes visible. Import paths are
-/// not resolved, and package-level constants and variables are not importable names yet.
+/// the type names and import paths it mentions. A Go package is a directory, so a name declared
+/// in a sibling file needs no import; that is the relationship this adapter makes visible. Import
+/// paths remain explicit unresolved evidence, and package-level constants and variables are not
+/// importable names yet.
 /// </summary>
 internal sealed class GoDependencyLanguageAdapter : DependencyLanguageAdapter
 {
@@ -868,9 +869,20 @@ internal sealed class GoDependencyLanguageAdapter : DependencyLanguageAdapter
 				0,
 				capture.NodeType,
 				Site(context, capture))));
-		if (declarations.Length + references.Count > limits.MaximumFactsPerFile)
+		var imports = context.References
+			.Where(static capture => capture.Name == "import.go" && capture.ImportSyntax is not null)
+			.Select(capture => new ImportFact(
+				capture.ImportSyntax!.Specifier,
+				ImportedName: null,
+				Alias: null,
+				IsWildcard: false,
+				RelativeLevel: 0,
+				Site(context, capture),
+				Reason: "Go import-path resolution is not available"))
+			.ToArray();
+		if (declarations.Length + imports.Length + references.Count > limits.MaximumFactsPerFile)
 			return Failed(context);
-		return Complete(context, declarations, [], references);
+		return Complete(context, declarations, imports, references);
 	}
 
 	/// <summary>Go predeclared type names, which name no file in the manifest.</summary>

@@ -2219,7 +2219,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
-	public async Task GoFacts_DoNotReachAcrossPackagesOrResolveImportPaths()
+	public async Task GoFacts_KeepUnresolvedImportPathEvidenceWithoutReachingAcrossPackages()
 	{
 		using var fixture = new TemporaryDirectory();
 		var first = fixture.CreateFile("alpha/kind.go", """
@@ -2256,9 +2256,47 @@ public sealed class DependencyFactsEngineIntegrationTests
 			edge.Target == "beta/kind.go");
 		Assert.DoesNotContain(result.Edges, edge => edge.Source == "beta/use.go" &&
 			edge.Target == "alpha/kind.go");
-		// Import paths are outside this capability and produce no edge at all.
-		Assert.DoesNotContain(result.Edges, edge => edge.Source == "beta/use.go" &&
-			edge.Reference.Contains("example.com", StringComparison.Ordinal));
+		// Import-path mapping is outside this capability, but the syntactic evidence must remain
+		// explicit rather than silently disappearing or becoming a guessed cross-package edge.
+		var import = Assert.Single(result.Edges, edge => edge.Source == "beta/use.go" &&
+			edge.Reference == "example.com/module/alpha");
+		Assert.Equal(ResolutionStatus.Unresolved, import.Status);
+		Assert.Null(import.Target);
+		Assert.Empty(import.Candidates);
+		Assert.Equal("Go import-path resolution is not available", Assert.Single(import.Reasons));
+	}
+
+	[Fact]
+	public async Task GoFacts_KeepSingleAndGroupedImportPathsAsUnresolvedEvidence()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("consumer.go", """
+			package fixture
+
+			import "example.com/one"
+			import (
+				alias "example.com/two"
+				_ `example.com/side-effect`
+			)
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Collection(
+			result.Edges.Where(static edge => edge.Layer == EvidenceLayer.ExplicitImport)
+				.OrderBy(static edge => edge.Reference, StringComparer.Ordinal),
+			edge => Assert.Equal("example.com/one", edge.Reference),
+			edge => Assert.Equal("example.com/side-effect", edge.Reference),
+			edge => Assert.Equal("example.com/two", edge.Reference));
+		Assert.All(result.Edges, edge =>
+		{
+			Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+			Assert.Null(edge.Target);
+		});
 	}
 	[Fact]
 	public async Task GoFacts_IgnorePredeclaredTypesDeclarationNamesAndOtherPackages()

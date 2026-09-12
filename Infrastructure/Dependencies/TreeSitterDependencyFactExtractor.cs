@@ -1377,6 +1377,18 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					0,
 					[new DependencyImportBinding(specifier.Split('.').Last(), null, wildcard)]);
 		}
+		if (captureName == "import.go")
+		{
+			var path = node.GetChildForField("path") ?? node.NamedChildren
+				.FirstOrDefault(static child => child.Type is "interpreted_string_literal" or "raw_string_literal");
+			if (path is null) return null;
+			var text = materialization.Read(path);
+			if (text.Length < 2 || text[0] is not ('\"' or '`') || text[^1] != text[0]) return null;
+			var specifier = text[1..^1];
+			return specifier.Length == 0
+				? null
+				: new DependencyImportSyntax(specifier, 0, []);
+		}
 		if (captureName == "import.rust")
 		{
 			var argument = node.GetChildForField("argument");
