@@ -9,6 +9,143 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
+	public async Task RealProcessRelatedFilesReportsJavaManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("java-project");
+		workspace.WriteFile("java-project/library/Remote.java", "package library; public class Remote { }");
+		workspace.WriteFile(
+			"java-project/app/Consumer.java",
+			"package app; import library.Remote; public class Consumer { Remote value; }");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "app/Consumer.java",
+				["direction"] = "dependencies"
+			});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("library/Remote.java", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" — unresolved — ", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessRelatedFilesReportsRustManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("rust-project");
+		workspace.WriteFile("rust-project/src/lib.rs", "mod model; mod service;");
+		workspace.WriteFile("rust-project/src/model.rs", "pub struct User;");
+		workspace.WriteFile("rust-project/src/service.rs", "use crate::model::User; pub struct Service(User);");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "src/service.rs",
+				["direction"] = "dependencies"
+			});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("src/model.rs", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" — unresolved — ", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessRelatedFilesReportsKotlinManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("kotlin-project");
+		workspace.WriteFile("kotlin-project/library/Remote.kt", "package library\nclass Remote");
+		workspace.WriteFile(
+			"kotlin-project/app/Consumer.kt",
+			"package app\nimport library.Remote\nclass Consumer(val value: Remote)");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "app/Consumer.kt",
+				["direction"] = "dependencies"
+			});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("library/Remote.kt", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" — unresolved — ", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessRelatedFilesReportsRubyManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("ruby-project");
+		workspace.WriteFile("ruby-project/lib/model.rb", "module Models\n class User\n end\nend\n");
+		workspace.WriteFile("ruby-project/lib/service.rb", "require_relative 'model'\nclass Service\n VALUE = Models::User\nend\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "lib/service.rb",
+			["direction"] = "dependencies"
+		});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("lib/model.rb", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" — unresolved — ", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessRelatedFilesDoesNotExpandReopenedRubyContainersToEveryFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("ruby-project");
+		workspace.WriteFile("ruby-project/lib/sinatra/indifferent_hash.rb", "module Sinatra\n class IndifferentHash\n end\nend\n");
+		workspace.WriteFile("ruby-project/lib/sinatra/base.rb", "module Sinatra\n class Base\n end\nend\n");
+		workspace.WriteFile("ruby-project/test/consumer.rb", "class Consumer\n include Sinatra\n VALUE = Sinatra::Base\nend\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "test/consumer.rb",
+			["direction"] = "dependencies"
+		});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("lib/sinatra/base.rb", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("lib/sinatra/indifferent_hash.rb", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessRelatedFilesReportsPhpManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("php-project");
+		workspace.WriteFile("php-project/src/Remote.php", "<?php namespace Library; class Remote {}");
+		workspace.WriteFile("php-project/src/App.php", "<?php namespace App; use Library\\Remote; class App { private Remote $value; }");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "src/App.php", ["direction"] = "dependencies"
+		});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.Contains("src/Remote.php", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesPreservesParsedImportSemantics()
 	{
 		using var workspace = new TemporaryDirectory();

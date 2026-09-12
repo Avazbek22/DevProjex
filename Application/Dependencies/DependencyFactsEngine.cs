@@ -495,7 +495,12 @@ public sealed class DependencyFactsEngine : IDisposable
 				.GroupBy(static pair => pair.Key)
 				.ToDictionary(static group => group.Key, static group => group.Sum(static pair => pair.Value), StringComparer.Ordinal))
 		{
-			ConfigurationDiagnostics = configurationDiagnostics
+			ConfigurationDiagnostics = configurationDiagnostics,
+			ExtractionFailedFiles = files
+				.Where(static file => file.Status == DependencyFileStatus.ExtractionFailed)
+				.Select(static file => file.Path)
+				.Order(StringComparer.Ordinal)
+				.ToArray()
 		};
 
 	private void RegisterFileCacheWeight(
@@ -1177,10 +1182,19 @@ public sealed class DependencyFactsEngine : IDisposable
 	{
 		private const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
 		private const string StaticUsingPrefix = "static::";
+		private const string RubyExternalConstantReason = "Ruby constant is provided outside the project";
+		private static readonly IReadOnlySet<string> RubyRuntimeConstants = new HashSet<string>(StringComparer.Ordinal)
+		{
+			"Array", "BasicObject", "Class", "Dir", "Encoding", "Enumerator", "Exception", "FalseClass",
+			"File", "Float", "Hash", "Integer", "IO", "Kernel", "MatchData", "Method", "Module", "NilClass",
+			"Numeric", "Object", "Proc", "Range", "Regexp", "String", "Struct", "Symbol", "Thread", "Time",
+			"TrueClass"
+		};
 		private static readonly ConditionalWeakTable<IReadOnlySet<string>, IReadOnlySet<string>> DotNetSimpleNames = new();
 		private readonly string _root;
 		private readonly IReadOnlyDictionary<string, FileFacts> _files;
 		private readonly IReadOnlyDictionary<string, FileFacts> _manifestFiles;
+		private readonly IReadOnlyList<DeclarationFact> _declarations;
 		private readonly IReadOnlyDictionary<SymbolLookupKey, DeclarationFact[]> _symbolsBySimpleName;
 		private readonly IReadOnlyDictionary<QualifiedSymbolLookupKey, DeclarationFact[]> _symbolsByQualifiedName;
 		private readonly DependencyResolverConfiguration _configuration;
@@ -1208,6 +1222,7 @@ public sealed class DependencyFactsEngine : IDisposable
 			_diagnosticsEnabled = DependencyEngineDiagnostics.IsEnabled;
 			_files = files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
 			_manifestFiles = files.ToDictionary(static file => file.Path, PathComparer);
+			_declarations = declarations;
 			DependencyEngineDiagnostics.RecordDictionaryBuild();
 			_symbolsBySimpleName = declarations
 				.GroupBy(static declaration => new SymbolLookupKey(
@@ -1287,13 +1302,164 @@ public sealed class DependencyFactsEngine : IDisposable
 					StringComparer.Ordinal);
 		}
 
-		public DependencyEdge ResolveImport(FileFacts source, ImportFact import) => source.LanguageId switch
+		public DependencyEdge ResolveImport(FileFacts source, ImportFact import)
 		{
-			LanguageId.TypeScript or LanguageId.JavaScript or LanguageId.Tsx => ResolveTypeScriptImport(source, import),
-			LanguageId.Python => ResolvePythonImport(source, import),
-			_ => Edge(source, import, ResolutionStatus.Unresolved, null,
-				"explicit imports are context, not dependency edges, for this language", [])
-		};
+			if (!string.Equals(import.Reason, "not resolved yet", StringComparison.Ordinal))
+				return Edge(source, import, ResolutionStatus.Unresolved, null, import.Reason, []);
+			return source.LanguageId switch
+			{
+				LanguageId.TypeScript or LanguageId.JavaScript or LanguageId.Tsx => ResolveTypeScriptImport(source, import),
+				LanguageId.Python => ResolvePythonImport(source, import),
+				LanguageId.Java or LanguageId.Kotlin or LanguageId.Php => ResolveJavaImport(source, import),
+				LanguageId.Rust => ResolveRustImport(source, import),
+				LanguageId.Ruby => ResolveRubyImport(source, import),
+				_ => Edge(source, import, ResolutionStatus.Unresolved, null,
+					"explicit imports are context, not dependency edges, for this language", [])
+			};
+		}
+
+		private DependencyEdge ResolveJavaImport(FileFacts source, ImportFact import)
+		{
+			if (source.LanguageId == LanguageId.Php &&
+			    FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
+			if (import.IsWildcard)
+				return Edge(source, import, ResolutionStatus.Unresolved, null,
+					"wildcard import is resolution context, not a dependency target", []);
+			var qualifiedName = import.Specifier;
+			while (qualifiedName.Length > 0)
+			{
+				var declarations = source.LanguageId == LanguageId.Kotlin
+					? LookupQualifiedAcrossRepository(source, qualifiedName, 0)
+					: LookupQualified(source, qualifiedName, 0);
+				var files = declarations.SelectMany(static declaration => declaration.DeclarationSites)
+					.Select(static site => site.File).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+				if (files.Length > 0)
+					return declarations.Length == 1
+						? Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files) with
+						{
+							DeclarationFiles = files
+						}
+						: Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple imported declarations", files);
+				var separator = qualifiedName.LastIndexOf('.');
+				if (separator < 0) break;
+				qualifiedName = qualifiedName[..separator];
+			}
+			return Edge(source, import, ResolutionStatus.Unresolved, null,
+				"no imported declaration in the manifest", []);
+		}
+
+		private DependencyEdge ResolveRustImport(FileFacts source, ImportFact import)
+		{
+			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
+			if (import.ImportedName == "$module")
+			{
+				var sourcePath = Path.Combine(_root, source.Path);
+				var sourceDirectory = Path.GetDirectoryName(sourcePath)!;
+				var sourceStem = Path.GetFileNameWithoutExtension(sourcePath);
+				var directory = sourceStem is "lib" or "main" or "mod"
+					? sourceDirectory
+					: Path.Combine(sourceDirectory, sourceStem);
+				if (!string.IsNullOrEmpty(import.ContainingDeclaration))
+				{
+					foreach (var module in import.ContainingDeclaration.Split("::", StringSplitOptions.RemoveEmptyEntries))
+						directory = Path.Combine(directory, module);
+				}
+				var stem = import.Specifier["./".Length..];
+				var candidates = new[]
+				{
+					Path.Combine(directory, stem + ".rs"),
+					Path.Combine(directory, stem, "mod.rs")
+				}.Where(path => IsWithin(_root, path))
+					.Select(path => PortableRelative(_root, path))
+					.Where(_files.ContainsKey);
+				return FinishImport(source, import, candidates, "one declared Rust module");
+			}
+			if (import.IsWildcard)
+				return Edge(source, import, ResolutionStatus.Unresolved, null,
+					"wildcard import is resolution context, not a dependency target", []);
+			if (import.IsCrateQualified)
+			{
+				var localDeclarations = LookupQualifiedInScope(source, import.Specifier, 0);
+				var localFiles = localDeclarations.SelectMany(static declaration => declaration.DeclarationSites)
+					.Select(static site => site.File)
+					.Distinct(StringComparer.Ordinal)
+					.Order(StringComparer.Ordinal)
+					.ToArray();
+				return localDeclarations.Length switch
+				{
+					0 => Edge(source, import, ResolutionStatus.Unresolved, null,
+						"no imported declaration in the owning Rust crate", []),
+					1 => Edge(source, import, ResolutionStatus.Resolved, localFiles[0],
+						"one imported declaration in the owning Rust crate", localFiles) with
+					{
+						DeclarationFiles = localFiles
+					},
+					_ => Edge(source, import, ResolutionStatus.Ambiguous, null,
+						"multiple imported declarations in the owning Rust crate", localFiles)
+				};
+			}
+
+			var names = new List<string> { import.Specifier };
+			var firstSeparator = import.Specifier.IndexOf("::", StringComparison.Ordinal);
+			var first = firstSeparator < 0 ? import.Specifier : import.Specifier[..firstSeparator];
+			foreach (var scopeId in VisibleScopeIds(source.ScopeId))
+			{
+				var visibleScope = FindScope(scopeId);
+				if (visibleScope?.PackageName == first && firstSeparator >= 0)
+					names.Add(import.Specifier[(firstSeparator + 2)..]);
+			}
+			var files = names.Distinct(StringComparer.Ordinal)
+				.SelectMany(name => LookupQualified(source, name, 0))
+				.SelectMany(static declaration => declaration.DeclarationSites)
+				.Select(static site => site.File).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			return files.Length switch
+			{
+				0 => Edge(source, import, ResolutionStatus.Unresolved, null,
+					"no imported declaration in the manifest", []),
+				1 => Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files),
+				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple imported declarations", files)
+			};
+		}
+
+		private DependencyEdge ResolveRubyImport(FileFacts source, ImportFact import)
+		{
+			return FinishImport(
+				source,
+				import,
+				RubyImportCandidatePaths(source, import).Where(_files.ContainsKey),
+				"one repository Ruby source");
+		}
+
+		private IEnumerable<string> RubyImportCandidatePaths(FileFacts source, ImportFact import)
+		{
+			var sourceDirectory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
+			var roots = new List<string>();
+			if (import.ImportedName == "$relative")
+				roots.Add(sourceDirectory);
+			else
+			{
+				roots.Add(_root);
+				roots.Add(Path.Combine(_root, "lib"));
+				foreach (var scopeId in VisibleScopeIds(source.ScopeId))
+				{
+					if (FindScope(scopeId) is not { } scope) continue;
+					roots.Add(scope.Root);
+					roots.Add(Path.Combine(scope.Root, "lib"));
+				}
+			}
+			var paths = new List<string>();
+			foreach (var root in roots)
+			{
+				var requested = import.Specifier.EndsWith(".rb", StringComparison.OrdinalIgnoreCase)
+					? import.Specifier
+					: import.Specifier + ".rb";
+				var fullPath = Path.GetFullPath(Path.Combine(root, requested.Replace('/', Path.DirectorySeparatorChar)));
+				if (IsWithin(_root, fullPath)) paths.Add(PortableRelative(_root, fullPath));
+			}
+			return paths;
+		}
 
 		public long EstimateResolutionWork(FileFacts source, int maximumWork)
 		{
@@ -2135,9 +2301,11 @@ public sealed class DependencyFactsEngine : IDisposable
 						? "no owning .csproj in the manifest"
 						: MissingTypeScriptConfigurationReason, []);
 			}
-			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
+			if (source.LanguageId is not (LanguageId.Java or LanguageId.Kotlin) &&
+			    scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, configurationFailure, []);
-			var isSyntacticallyQualified = reference.IsGlobalQualified || reference.Name.Contains('.');
+			var isSyntacticallyQualified = reference.IsGlobalQualified || reference.Name.Contains('.') ||
+				reference.Name.Contains("::", StringComparison.Ordinal) || reference.Name.Contains('\\');
 			var typeParameterShadowsReference = !isSyntacticallyQualified && (source.TypeParameterScopes.Count > 0
 				? _typeParametersByFileAndName.GetValueOrDefault(source.Path)?
 					.GetValueOrDefault(simpleName)?.Any(parameter =>
@@ -2147,16 +2315,44 @@ public sealed class DependencyFactsEngine : IDisposable
 				: source.TypeParameters.Contains(simpleName, StringComparer.Ordinal));
 			if (typeParameterShadowsReference)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
+			if (source.LanguageId == LanguageId.Ruby && IsRubyExternalConstant(source, reference.Name))
+				return Edge(source, reference, ResolutionStatus.Unresolved, null, RubyExternalConstantReason, []);
 			string? expandedAlias = null;
+			var rustCrateAliasExpanded = false;
 			var aliasExpanded = source.LanguageId == LanguageId.CSharp &&
 			                    !reference.IsGlobalQualified &&
 			                    TryExpandCSharpAlias(source, reference, out expandedAlias);
+			if (!aliasExpanded && source.LanguageId is LanguageId.Java or LanguageId.Kotlin && !isSyntacticallyQualified &&
+			    source.Aliases.TryGetValue(simpleName, out var javaImport))
+			{
+				expandedAlias = javaImport;
+				aliasExpanded = true;
+			}
+			if (!aliasExpanded && source.LanguageId == LanguageId.Php && !isSyntacticallyQualified &&
+			    source.Aliases.TryGetValue(simpleName, out var phpImport))
+			{
+				expandedAlias = phpImport;
+				aliasExpanded = true;
+			}
+			if (!aliasExpanded && source.LanguageId == LanguageId.Rust && !isSyntacticallyQualified &&
+			    source.Aliases.TryGetValue(simpleName, out var rustImport))
+			{
+				expandedAlias = rustImport;
+				aliasExpanded = true;
+				rustCrateAliasExpanded = source.Imports.Any(import => import.IsCrateQualified &&
+					string.Equals(import.Specifier, rustImport, StringComparison.Ordinal) &&
+					string.Equals(import.Alias ?? SimpleName(import.Specifier), simpleName, StringComparison.Ordinal));
+			}
 			var expandedName = aliasExpanded ? expandedAlias! : reference.Name;
 			var requiresQualifiedLookup = isSyntacticallyQualified || aliasExpanded;
 			var expandedArity = aliasExpanded ? GenericArityFromQualifiedName(expandedName) : 0;
 			var lookupArity = expandedArity > 0 ? expandedArity : reference.GenericArity;
 			var candidates = requiresQualifiedLookup
-				? LookupQualified(source, expandedName, lookupArity)
+				? rustCrateAliasExpanded
+					? LookupQualifiedInScope(source, expandedName, lookupArity)
+					: source.LanguageId == LanguageId.Kotlin
+					? LookupQualifiedAcrossRepository(source, expandedName, lookupArity)
+					: LookupQualified(source, expandedName, lookupArity)
 				: LookupSimple(source, simpleName, reference.GenericArity);
 			var attributeName = reference.SyntaxKind == "attribute"
 				? expandedName + "Attribute"
@@ -2180,6 +2376,32 @@ public sealed class DependencyFactsEngine : IDisposable
 			}
 			else if (source.LanguageId == LanguageId.Go)
 				candidates = SelectSamePackageGoCandidates(source, candidates);
+			else if (source.LanguageId is LanguageId.Java or LanguageId.Kotlin)
+			{
+				if (reference.Name.Contains('.') && candidates.Length == 0)
+					candidates = LookupQualified(source,
+						reference.ContainingNamespace.Length == 0
+							? reference.Name
+							: reference.ContainingNamespace + "." + reference.Name,
+							reference.GenericArity);
+				if (!requiresQualifiedLookup)
+					candidates = SelectVisibleJavaCandidates(source, reference, candidates);
+				if (source.LanguageId == LanguageId.Kotlin)
+					candidates = FilterKotlinSourceSetCandidates(source, candidates);
+			}
+			else if (source.LanguageId == LanguageId.Rust && !requiresQualifiedLookup)
+				candidates = SelectVisibleRustCandidates(source, reference, candidates);
+			else if (source.LanguageId == LanguageId.Ruby)
+				candidates = SelectVisibleRubyCandidates(reference, candidates)
+					.Where(static candidate => candidate.DeclarationSites
+						.Select(static site => site.File)
+						.Distinct(StringComparer.Ordinal)
+						.Take(2)
+						.Count() == 1)
+					.ToArray();
+			else if (source.LanguageId == LanguageId.Php && !requiresQualifiedLookup)
+				candidates = candidates.Where(candidate =>
+					string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
@@ -2248,6 +2470,65 @@ public sealed class DependencyFactsEngine : IDisposable
 			return matches?.ToArray() ?? [];
 		}
 
+		private DeclarationFact[] LookupQualifiedInScope(FileFacts source, string name, int arity)
+		{
+			if (!_symbolsByQualifiedName.TryGetValue(
+				    new QualifiedSymbolLookupKey(source.ScopeId, source.LanguageId, QualifiedLookupName(name), arity),
+				    out var candidates))
+				return [];
+			return candidates.Where(candidate => IsVisible(source, candidate)).ToArray();
+		}
+
+		private DeclarationFact[] LookupQualifiedAcrossRepository(FileFacts source, string name, int arity) =>
+			FilterKotlinSourceSetCandidates(
+				source,
+				_declarations.Where(declaration => declaration.Identity.LanguageId == source.LanguageId &&
+					declaration.Identity.GenericArity == arity &&
+					string.Equals(
+						QualifiedLookupName(declaration.Identity.QualifiedName),
+						QualifiedLookupName(name),
+						StringComparison.Ordinal)).ToArray());
+
+		private static DeclarationFact[] FilterKotlinSourceSetCandidates(
+			FileFacts source,
+			IEnumerable<DeclarationFact> candidates)
+		{
+			var sourceSet = KotlinSourceSet(source.Path);
+			return candidates.Select(candidate => candidate with
+				{
+					DeclarationSites = candidate.DeclarationSites
+						.Where(site => AreKotlinSourceSetsCompatible(sourceSet, KotlinSourceSet(site.File)))
+						.ToArray()
+				})
+				.Where(static candidate => candidate.DeclarationSites.Count > 0)
+				.ToArray();
+		}
+
+		private static string? KotlinSourceSet(string path)
+		{
+			var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+			for (var index = 0; index + 1 < parts.Length; index++)
+				if (parts[index] == "src")
+					return parts[index + 1];
+			return null;
+		}
+
+		private static bool AreKotlinSourceSetsCompatible(string? source, string? target)
+		{
+			if (source is null || target is null || string.Equals(source, target, StringComparison.Ordinal))
+				return true;
+			if (target.StartsWith("common", StringComparison.OrdinalIgnoreCase))
+				return true;
+			if (source.StartsWith("common", StringComparison.OrdinalIgnoreCase))
+				return false;
+			var sourceIsJvm = source.StartsWith("jvm", StringComparison.OrdinalIgnoreCase) || source is "main" or "test";
+			var targetIsNonJvm = target.StartsWith("nonJvm", StringComparison.OrdinalIgnoreCase) ||
+				target.StartsWith("native", StringComparison.OrdinalIgnoreCase) ||
+				target.StartsWith("js", StringComparison.OrdinalIgnoreCase) ||
+				target.StartsWith("wasm", StringComparison.OrdinalIgnoreCase);
+			return !(sourceIsJvm && targetIsNonJvm);
+		}
+
 		private static bool IsPythonPackageInitializer(string path) =>
 			Path.GetFileName(path).StartsWith("__init__.", StringComparison.Ordinal);
 
@@ -2304,6 +2585,93 @@ public sealed class DependencyFactsEngine : IDisposable
 
 			return candidates.Where(static candidate =>
 				candidate.ContainingType is null && candidate.ContainingNamespace.Length == 0).ToArray();
+		}
+
+		private static DeclarationFact[] SelectVisibleJavaCandidates(
+			FileFacts source,
+			ReferenceFact reference,
+			DeclarationFact[] candidates)
+		{
+			if (reference.ContainingType is not null)
+			{
+				var containingType = reference.ContainingType;
+				while (containingType.Length > 0)
+				{
+					var nested = candidates.Where(candidate =>
+						string.Equals(candidate.ContainingType, containingType, StringComparison.Ordinal)).ToArray();
+					if (nested.Length > 0) return nested;
+					var separator = containingType.LastIndexOf('.');
+					if (separator < 0) break;
+					containingType = containingType[..separator];
+				}
+			}
+			var samePackage = candidates.Where(candidate => candidate.ContainingType is null &&
+				string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();
+			if (samePackage.Length > 0) return samePackage;
+			return candidates.Where(candidate => candidate.ContainingType is null &&
+				source.GlobalContextNamespaces.Contains(candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
+		}
+
+		private static DeclarationFact[] SelectVisibleRustCandidates(
+			FileFacts source,
+			ReferenceFact reference,
+			DeclarationFact[] candidates)
+		{
+			var sameModule = candidates.Where(candidate =>
+				string.Equals(candidate.Identity.ScopeId, source.ScopeId, StringComparison.Ordinal) &&
+				string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();
+			if (sameModule.Length > 0) return sameModule;
+			return candidates.Where(candidate => source.GlobalContextNamespaces.Contains(
+				candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
+		}
+
+		private static DeclarationFact[] SelectVisibleRubyCandidates(
+			ReferenceFact reference,
+			DeclarationFact[] candidates)
+		{
+			if (reference.Name.Contains("::", StringComparison.Ordinal)) return candidates;
+			if (reference.ContainingType is null)
+				return candidates.Where(static candidate => candidate.ContainingType is null).ToArray();
+			var owner = reference.ContainingType;
+			while (owner.Length > 0)
+			{
+				var nested = candidates.Where(candidate =>
+					string.Equals(candidate.ContainingType, owner, StringComparison.Ordinal)).ToArray();
+				if (nested.Length > 0) return nested;
+				var separator = owner.LastIndexOf("::", StringComparison.Ordinal);
+				if (separator < 0) break;
+				owner = owner[..separator];
+			}
+			return candidates.Where(static candidate => candidate.ContainingType is null).ToArray();
+		}
+
+		private bool IsRubyExternalConstant(FileFacts source, string reference)
+		{
+			var rootSeparator = reference.IndexOf("::", StringComparison.Ordinal);
+			var root = rootSeparator < 0 ? reference : reference[..rootSeparator];
+			if (RubyRuntimeConstants.Contains(root)) return true;
+			var normalizedRoot = NormalizeRubyPackageName(root);
+			var scope = FindScope(source.ScopeId);
+			if (scope is not null && scope.RubyExternalPackages.Any(package =>
+				    string.Equals(NormalizeRubyPackageName(package), normalizedRoot, StringComparison.Ordinal)))
+				return true;
+			return source.Imports.Any(import =>
+				import.ImportedName != "$relative" &&
+				string.Equals(
+					NormalizeRubyPackageName(import.Specifier.Split('/')[0]),
+					normalizedRoot,
+					StringComparison.Ordinal) &&
+				!RubyImportCandidatePaths(source, import).Any(_files.ContainsKey));
+		}
+
+		private static string NormalizeRubyPackageName(string value)
+		{
+			var buffer = new char[value.Length];
+			var length = 0;
+			foreach (var character in value)
+				if (char.IsAsciiLetterOrDigit(character))
+					buffer[length++] = char.ToLowerInvariant(character);
+			return new string(buffer, 0, length);
 		}
 
 		private DeclarationFact[] LookupContextualCSharpQualified(
@@ -2364,7 +2732,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				return false;
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
-			return source.LanguageId == LanguageId.CSharp &&
+			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php &&
 			       VisibleScopeIds(source.ScopeId).Contains(
 			       declaration.Identity.ScopeId, StringComparer.Ordinal);
 		}
@@ -2553,7 +2921,11 @@ public sealed class DependencyFactsEngine : IDisposable
 		}
 		private static string SimpleName(string qualified)
 		{
-			var value = qualified[(Math.Max(qualified.LastIndexOf('.'), qualified.LastIndexOf('#')) + 1)..];
+			var separator = Math.Max(qualified.LastIndexOf('.'), qualified.LastIndexOf('#'));
+			var rustSeparator = qualified.LastIndexOf("::", StringComparison.Ordinal);
+			if (rustSeparator >= 0) separator = Math.Max(separator, rustSeparator + 1);
+			separator = Math.Max(separator, qualified.LastIndexOf('\\'));
+			var value = qualified[(separator + 1)..];
 			var arity = value.IndexOf('`');
 			return arity < 0 ? value : value[..arity];
 		}
@@ -2620,7 +2992,8 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (pending.TryDequeue(out var scopeId))
 				{
 					if (!visited.Add(scopeId)) continue;
-					if (scope.LanguageId != LanguageId.CSharp || !scopes.TryGetValue(scopeId, out var current)) continue;
+					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php) ||
+					    !scopes.TryGetValue(scopeId, out var current)) continue;
 					foreach (var projectReference in current.ProjectReferences) pending.Enqueue(projectReference);
 				}
 				result[scope.ScopeId] = visited.Order(StringComparer.Ordinal).ToArray();

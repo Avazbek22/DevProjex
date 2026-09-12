@@ -36,6 +36,36 @@ public sealed partial class McpServerProcessTests
 			"class A:\n    def run(self):\n        return 'member-marker-a'\nclass B:\n    def run(self):\n        return 'member-marker-b'\n(lambda: 'fallback-marker')()\n",
 			"A.run",
 			"B.run"
+		},
+		{
+			"Members.java",
+			"package sample;\nclass A { String run() { return \"member-marker-a\"; } }\nclass B { String run() { return \"member-marker-b\"; } }\n// fallback-marker\n",
+			"sample.A.run",
+			"sample.B.run"
+		},
+		{
+			"members.rs",
+			"struct A;\nstruct B;\nimpl A { fn run(&self) -> &'static str { \"member-marker-a\" } }\nimpl B { fn run(&self) -> &'static str { \"member-marker-b\" } }\n// fallback-marker\n",
+			"members::impl<A>::run",
+			"members::impl<B>::run"
+		},
+		{
+			"Members.kt",
+			"package sample\nclass A {\n fun run(): String { return \"member-marker-a\" }\n}\nclass B {\n fun run(): String { return \"member-marker-b\" }\n}\n// fallback-marker\n",
+			"sample.A.run",
+			"sample.B.run"
+		},
+		{
+			"members.rb",
+			"module A\n def run\n  'member-marker-a'\n end\nend\nmodule B\n def run\n  'member-marker-b'\n end\nend\n# fallback-marker\n",
+			"A#run",
+			"B#run"
+		},
+		{
+			"Members.php",
+			"<?php\nnamespace Sample;\nclass A {\n function run() { return 'member-marker-a'; }\n}\nclass B {\n function run() { return 'member-marker-b'; }\n}\n// fallback-marker\n",
+			"Sample.A.run",
+			"Sample.B.run"
 		}
 	};
 

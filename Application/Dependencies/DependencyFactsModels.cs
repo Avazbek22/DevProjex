@@ -8,6 +8,11 @@ public enum LanguageId
 	Tsx,
 	Python,
 	Go,
+	Java,
+	Rust,
+	Kotlin,
+	Ruby,
+	Php,
 	Unsupported
 }
 
@@ -128,6 +133,7 @@ public sealed record ImportFact(
 {
 	public string? ContainingDeclaration { get; init; }
 	public ModuleImportKind ImportKind { get; init; }
+	public bool IsCrateQualified { get; init; }
 }
 
 public sealed record ReferenceFact(
@@ -195,6 +201,7 @@ public sealed record DependencyFactsCoverage(
 	IReadOnlyDictionary<string, int> CSharpErrorNodeKinds)
 {
 	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
+	public IReadOnlyList<string> ExtractionFailedFiles { get; init; } = [];
 }
 
 public sealed record DependencyIndexMetrics(

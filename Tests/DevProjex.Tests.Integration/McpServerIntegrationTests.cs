@@ -6322,6 +6322,24 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task RelatedFilesListsFilesWhoseDependencyExtractionFailed()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Good.kt"), "package sample\nclass Good");
+		File.WriteAllText(Path.Combine(project, "Broken.kt"), "package sample\nclass Broken(");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = "Good.kt" });
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("[Dependency extraction failed] Broken.kt", ExtractSpotlightBody(text), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetFileScalarAndBatchSymbolReadsShareAddressHeaders()
 	{
 		using var workspace = new TemporaryDirectory();

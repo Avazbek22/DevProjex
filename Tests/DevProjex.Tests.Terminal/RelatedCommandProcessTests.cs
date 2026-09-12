@@ -5,6 +5,124 @@ namespace DevProjex.Tests.Terminal;
 public sealed class RelatedCommandProcessTests
 {
 	[Fact]
+	public void RealPublishedCommandReportsJavaManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/library/Remote.java", "package library; public class Remote { }");
+		workspace.WriteFile(
+			"project/app/Consumer.java",
+			"package app; import library.Remote; public class Consumer { Remote value; }");
+
+		var result = Run(
+			workspace,
+			"related", "app/Consumer.java",
+			"--project", project,
+			"--direction", "dependencies",
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("library/Remote.java", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"status\": \"unresolved\"", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RealPublishedCommandReportsRustManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/lib.rs", "mod model; mod service;");
+		workspace.WriteFile("project/src/model.rs", "pub struct User;");
+		workspace.WriteFile("project/src/service.rs", "use crate::model::User; pub struct Service(User);");
+
+		var result = Run(
+			workspace,
+			"related", "src/service.rs",
+			"--project", project,
+			"--direction", "dependencies",
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("src/model.rs", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"status\": \"unresolved\"", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RealPublishedCommandReportsKotlinManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/library/Remote.kt", "package library\nclass Remote");
+		workspace.WriteFile(
+			"project/app/Consumer.kt",
+			"package app\nimport library.Remote\nclass Consumer(val value: Remote)");
+
+		var result = Run(
+			workspace,
+			"related", "app/Consumer.kt",
+			"--project", project,
+			"--direction", "dependencies",
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("library/Remote.kt", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"status\": \"unresolved\"", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RealPublishedCommandReportsRubyManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/lib/model.rb", "module Models\n class User\n end\nend\n");
+		workspace.WriteFile("project/lib/service.rb", "require_relative 'model'\nclass Service\n VALUE = Models::User\nend\n");
+
+		var result = Run(
+			workspace, "related", "lib/service.rb", "--project", project,
+			"--direction", "dependencies", "--format", "json", "--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("lib/model.rb", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"status\": \"unresolved\"", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RealPublishedCommandDoesNotExpandReopenedRubyContainersToEveryFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/lib/sinatra/indifferent_hash.rb", "module Sinatra\n class IndifferentHash\n end\nend\n");
+		workspace.WriteFile("project/lib/sinatra/base.rb", "module Sinatra\n class Base\n end\nend\n");
+		workspace.WriteFile("project/test/consumer.rb", "class Consumer\n include Sinatra\n VALUE = Sinatra::Base\nend\n");
+
+		var result = Run(workspace, "related", "test/consumer.rb", "--project", project,
+			"--direction", "dependencies", "--format", "json", "--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("lib/sinatra/base.rb", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("lib/sinatra/indifferent_hash.rb", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RealPublishedCommandReportsPhpManifestDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Remote.php", "<?php namespace Library; class Remote {}");
+		workspace.WriteFile("project/src/App.php", "<?php namespace App; use Library\\Remote; class App { private Remote $value; }");
+		var result = Run(workspace, "related", "src/App.php", "--project", project, "--direction", "dependencies",
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("src/Remote.php", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RealPublishedCommandUsesPythonDottedImportBindingAndPackageBoundaries()
 	{
 		using var workspace = new TemporaryDirectory();

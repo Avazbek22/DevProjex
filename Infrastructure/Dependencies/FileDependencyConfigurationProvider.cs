@@ -84,12 +84,21 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 		var typeScriptConfigFiles = new List<string>();
 		var pythonConfigFiles = new List<string>();
 		var packageFiles = new List<string>();
+		var javaConfigFiles = new List<string>();
+		var rustConfigFiles = new List<string>();
+		var rubyConfigFiles = new List<string>();
+		var composerConfigFiles = new List<string>();
 		foreach (var path in manifest.Order(StringComparer.Ordinal))
 		{
 			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
 			if (IsTypeScriptConfig(path)) typeScriptConfigFiles.Add(path);
 			if (IsPythonConfig(path)) pythonConfigFiles.Add(path);
 			if (Path.GetFileName(path).Equals("package.json", StringComparison.OrdinalIgnoreCase)) packageFiles.Add(path);
+			if (IsJavaConfig(path)) javaConfigFiles.Add(path);
+			if (Path.GetFileName(path).Equals("Cargo.toml", StringComparison.OrdinalIgnoreCase)) rustConfigFiles.Add(path);
+			if (Path.GetFileName(path).Equals("Gemfile", StringComparison.OrdinalIgnoreCase) ||
+			    path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase)) rubyConfigFiles.Add(path);
+			if (Path.GetFileName(path).Equals("composer.json", StringComparison.OrdinalIgnoreCase)) composerConfigFiles.Add(path);
 		}
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
@@ -358,6 +367,209 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			{
 				ConfigurationState = python.State,
 				ConfigurationDiagnostic = python.Reason
+			});
+		}
+
+		var javaProjects = new List<(string Path, string ScopeId, string ProjectKey,
+			IReadOnlyList<string> ReferenceKeys, DependencyConfigurationState State, string? Reason)>();
+		foreach (var configPath in javaConfigFiles)
+		{
+			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+			AddFingerprint(configPath, snapshot);
+			var parsed = snapshot.State == DependencyConfigurationState.Valid
+				? ParseJavaProject(root, configPath, snapshot.Content)
+				: ConfigurationParseResult<JavaProjectConfiguration>.Failure(
+					JavaProjectConfiguration.Empty, snapshot.State, snapshot.Reason);
+			var scopeId = "java:" + PortableRelative(root, configPath);
+			javaProjects.Add((configPath, scopeId, parsed.Value.ProjectKey,
+				parsed.Value.ProjectReferences, parsed.State, parsed.Reason));
+			AddDiagnostic(configPath, parsed.State, parsed.Reason, scopeId);
+		}
+		var javaScopeByKey = javaProjects
+			.Where(static project => project.ProjectKey.Length > 0)
+			.GroupBy(static project => project.ProjectKey, StringComparer.Ordinal)
+			.Where(static group => group.Count() == 1)
+			.ToDictionary(static group => group.Key, static group => group.Single().ScopeId, StringComparer.Ordinal);
+		foreach (var project in javaProjects.OrderBy(static project => project.Path, StringComparer.Ordinal))
+		{
+			var references = project.ReferenceKeys
+				.Where(javaScopeByKey.ContainsKey)
+				.Select(key => javaScopeByKey[key])
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				project.ScopeId,
+				Path.GetDirectoryName(project.Path)!,
+				LanguageId.Java,
+				references,
+				null,
+				false,
+				new Dictionary<string, IReadOnlyList<string>>(),
+				null,
+				new HashSet<string>(),
+				[],
+				true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason
+			});
+		}
+		var kotlinScopeByKey = javaProjects
+			.Where(static project => project.ProjectKey.Length > 0)
+			.GroupBy(static project => project.ProjectKey, StringComparer.Ordinal)
+			.Where(static group => group.Count() == 1)
+			.ToDictionary(
+				static group => group.Key,
+				group => "kotlin:" + PortableRelative(root, group.Single().Path),
+				StringComparer.Ordinal);
+		foreach (var project in javaProjects.OrderBy(static project => project.Path, StringComparer.Ordinal))
+		{
+			var references = project.ReferenceKeys
+				.Where(kotlinScopeByKey.ContainsKey)
+				.Select(key => kotlinScopeByKey[key])
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				"kotlin:" + PortableRelative(root, project.Path),
+				Path.GetDirectoryName(project.Path)!,
+				LanguageId.Kotlin,
+				references,
+				null,
+				false,
+				new Dictionary<string, IReadOnlyList<string>>(),
+				null,
+				new HashSet<string>(),
+				[],
+				true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason
+			});
+		}
+
+		var rustProjects = new List<(string Path, string ScopeId, RustProjectConfiguration Configuration,
+			DependencyConfigurationState State, string? Reason)>();
+		foreach (var configPath in rustConfigFiles)
+		{
+			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+			AddFingerprint(configPath, snapshot);
+			var parsed = snapshot.State == DependencyConfigurationState.Valid
+				? ParseRustProject(configPath, snapshot.Content)
+				: ConfigurationParseResult<RustProjectConfiguration>.Failure(
+					RustProjectConfiguration.Empty, snapshot.State, snapshot.Reason);
+			var scopeId = "rust:" + PortableRelative(root, configPath);
+			rustProjects.Add((configPath, scopeId, parsed.Value, parsed.State, parsed.Reason));
+			AddDiagnostic(configPath, parsed.State, parsed.Reason, scopeId);
+		}
+		var rustScopeByDirectory = rustProjects
+			.GroupBy(static project => Path.GetDirectoryName(project.Path)!, PathComparer)
+			.Where(static group => group.Count() == 1)
+			.ToDictionary(static group => group.Key, static group => group.Single().ScopeId, PathComparer);
+		foreach (var project in rustProjects.OrderBy(static project => project.Path, StringComparer.Ordinal))
+		{
+			var references = project.Configuration.ProjectDirectories
+				.Where(rustScopeByDirectory.ContainsKey)
+				.Select(directory => rustScopeByDirectory[directory])
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				project.ScopeId,
+				Path.GetDirectoryName(project.Path)!,
+				LanguageId.Rust,
+				references,
+				null,
+				false,
+				new Dictionary<string, IReadOnlyList<string>>(),
+				project.Configuration.PackageName,
+				new HashSet<string>(),
+				[],
+				true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason
+			});
+		}
+
+		var rubyProjects = new List<(string Directory, string ScopeId, string? PackageName,
+			IReadOnlyList<string> ProjectDirectories, IReadOnlySet<string> ExternalPackages,
+			DependencyConfigurationState State, string? Reason)>();
+		foreach (var group in rubyConfigFiles.GroupBy(static path => Path.GetDirectoryName(path)!, PathComparer)
+			.OrderBy(static group => group.Key, StringComparer.Ordinal))
+		{
+			var state = DependencyConfigurationState.Valid;
+			string? reason = null;
+			string? packageName = null;
+			var projectDirectories = new HashSet<string>(PathComparer);
+			var externalPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var localPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var configPath in group.Order(StringComparer.Ordinal))
+			{
+				var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+				AddFingerprint(configPath, snapshot);
+				if (snapshot.State != DependencyConfigurationState.Valid)
+				{
+					state = snapshot.State;
+					reason = snapshot.Reason;
+				}
+				else
+				{
+					var parsed = ParseRubyProject(root, configPath, snapshot.Content);
+					packageName ??= parsed.PackageName;
+					foreach (var directory in parsed.ProjectDirectories) projectDirectories.Add(directory);
+					foreach (var dependency in parsed.ExternalPackages) externalPackages.Add(dependency);
+					foreach (var dependency in parsed.LocalPackages) localPackages.Add(dependency);
+				}
+				AddDiagnostic(configPath, snapshot.State, snapshot.Reason,
+					"ruby:" + PortableRelative(root, group.Key));
+			}
+			externalPackages.ExceptWith(localPackages);
+			rubyProjects.Add((group.Key, "ruby:" + PortableRelative(root, group.Key), packageName,
+				projectDirectories.Order(StringComparer.Ordinal).ToArray(), externalPackages, state, reason));
+		}
+		var rubyScopeByDirectory = rubyProjects.ToDictionary(
+			static project => Path.GetFullPath(project.Directory), static project => project.ScopeId, PathComparer);
+		foreach (var project in rubyProjects)
+		{
+			var references = project.ProjectDirectories.Where(rubyScopeByDirectory.ContainsKey)
+				.Select(directory => rubyScopeByDirectory[directory])
+				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				project.ScopeId, project.Directory, LanguageId.Ruby, references, null, false,
+				new Dictionary<string, IReadOnlyList<string>>(), project.PackageName,
+				new HashSet<string>(), [], true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason,
+				RubyExternalPackages = project.ExternalPackages
+			});
+		}
+
+		var composerProjects = new List<(string Path, string ScopeId, ComposerProjectConfiguration Configuration,
+			DependencyConfigurationState State, string? Reason)>();
+		foreach (var configPath in composerConfigFiles)
+		{
+			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+			AddFingerprint(configPath, snapshot);
+			var parsed = snapshot.State == DependencyConfigurationState.Valid
+				? ParseComposerProject(snapshot.Content)
+				: ConfigurationParseResult<ComposerProjectConfiguration>.Failure(
+					ComposerProjectConfiguration.Empty, snapshot.State, snapshot.Reason);
+			var scopeId = "php:" + PortableRelative(root, configPath);
+			composerProjects.Add((configPath, scopeId, parsed.Value, parsed.State, parsed.Reason));
+			AddDiagnostic(configPath, parsed.State, parsed.Reason, scopeId);
+		}
+		var composerScopeByName = composerProjects.Where(static project => project.Configuration.PackageName is not null)
+			.GroupBy(static project => project.Configuration.PackageName!, StringComparer.Ordinal)
+			.Where(static group => group.Count() == 1)
+			.ToDictionary(static group => group.Key, static group => group.Single().ScopeId, StringComparer.Ordinal);
+		foreach (var project in composerProjects)
+		{
+			var references = project.Configuration.Dependencies.Where(composerScopeByName.ContainsKey)
+				.Select(name => composerScopeByName[name]).Order(StringComparer.Ordinal).ToArray();
+			scopes.Add(new DependencyScopeDescriptor(
+				project.ScopeId, Path.GetDirectoryName(project.Path)!, LanguageId.Php, references, null, false,
+				project.Configuration.AutoloadPaths, project.Configuration.PackageName,
+				new HashSet<string>(), [], true)
+			{
+				ConfigurationState = project.State,
+				ConfigurationDiagnostic = project.Reason
 			});
 		}
 
@@ -1052,6 +1264,203 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 			static pair => (IReadOnlySet<string>)pair.Value.ToFrozenSet(StringComparer.Ordinal),
 			StringComparer.Ordinal);
 	}
+
+	private static ConfigurationParseResult<JavaProjectConfiguration> ParseJavaProject(
+		string root,
+		string path,
+		string content)
+	{
+		if (Path.GetFileName(path).Equals("pom.xml", StringComparison.OrdinalIgnoreCase))
+		{
+			try
+			{
+				var document = XDocument.Parse(content, LoadOptions.None);
+				var project = document.Root;
+				if (project is null || project.Name.LocalName != "project")
+					return ConfigurationParseResult<JavaProjectConfiguration>.Failure(
+						JavaProjectConfiguration.Empty,
+						DependencyConfigurationState.Corrupt,
+						"Maven project configuration is invalid");
+				string? DirectValue(XElement element, string name) => element.Elements()
+					.FirstOrDefault(candidate => candidate.Name.LocalName == name)?.Value.Trim();
+				var artifact = DirectValue(project, "artifactId");
+				var group = DirectValue(project, "groupId");
+				if (group is null && project.Elements()
+				    .FirstOrDefault(static element => element.Name.LocalName == "parent") is { } parent)
+					group = DirectValue(parent, "groupId");
+				if (string.IsNullOrWhiteSpace(artifact) || string.IsNullOrWhiteSpace(group))
+					return ConfigurationParseResult<JavaProjectConfiguration>.Failure(
+						JavaProjectConfiguration.Empty,
+						DependencyConfigurationState.UnsupportedSemantics,
+						"Maven project coordinates are unavailable");
+				var mavenReferences = project.Elements()
+					.Where(static element => element.Name.LocalName == "dependencies")
+					.SelectMany(static element => element.Elements()
+						.Where(static candidate => candidate.Name.LocalName == "dependency"))
+					.Select(element =>
+					{
+						var dependencyGroup = DirectValue(element, "groupId");
+						var dependencyArtifact = DirectValue(element, "artifactId");
+						return string.IsNullOrWhiteSpace(dependencyGroup) || string.IsNullOrWhiteSpace(dependencyArtifact)
+							? null
+							: $"{dependencyGroup}:{dependencyArtifact}";
+					})
+					.Where(static value => value is not null).Cast<string>()
+					.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+				return ConfigurationParseResult<JavaProjectConfiguration>.Valid(
+					new JavaProjectConfiguration($"{group}:{artifact}", mavenReferences));
+			}
+			catch (Exception exception) when (exception is System.Xml.XmlException or InvalidOperationException)
+			{
+				return ConfigurationParseResult<JavaProjectConfiguration>.Failure(
+					JavaProjectConfiguration.Empty,
+					DependencyConfigurationState.Corrupt,
+					"Maven project configuration is invalid");
+			}
+		}
+
+		var directory = Path.GetDirectoryName(path)!;
+		var relative = PortableRelative(root, directory);
+		var projectKey = relative == "." ? ":" : ":" + relative.Replace('/', ':');
+		var gradleReferences = Regex.Matches(
+			content,
+			"""\bproject\s*\(\s*(?:path\s*=\s*)?['"](?<path>:[^'"]+)['"]\s*\)""",
+			RegexOptions.CultureInvariant)
+			.Select(static match => match.Groups["path"].Value)
+			.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+		return ConfigurationParseResult<JavaProjectConfiguration>.Valid(
+			new JavaProjectConfiguration(projectKey, gradleReferences));
+	}
+
+	private static ConfigurationParseResult<RustProjectConfiguration> ParseRustProject(
+		string path,
+		string content)
+	{
+		try
+		{
+			var model = TomlSerializer.Deserialize<TomlTable>(content) ??
+				throw new InvalidDataException("Cargo configuration is empty.");
+			string? packageName = null;
+			if (TryGetTable(model, "package", out var package) &&
+			    package.TryGetValue("name", out var nameValue) && nameValue is string name)
+				packageName = name.Replace('-', '_');
+			var directories = new HashSet<string>(PathComparer);
+			foreach (var section in new[] { "dependencies", "dev-dependencies", "build-dependencies" })
+			{
+				if (!TryGetTable(model, section, out var dependencies)) continue;
+				foreach (var dependency in dependencies.Values.OfType<TomlTable>())
+				{
+					if (!dependency.TryGetValue("path", out var pathValue) || pathValue is not string relativePath)
+						continue;
+					if (Path.IsPathFullyQualified(relativePath))
+						return ConfigurationParseResult<RustProjectConfiguration>.Failure(
+							RustProjectConfiguration.Empty,
+							DependencyConfigurationState.UnsupportedSemantics,
+							"Cargo dependency path must be relative");
+					directories.Add(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path)!, relativePath)));
+				}
+			}
+			return ConfigurationParseResult<RustProjectConfiguration>.Valid(
+				new RustProjectConfiguration(packageName, directories.Order(StringComparer.Ordinal).ToArray()));
+		}
+		catch (Exception exception) when (exception is InvalidDataException or TomlException or InvalidOperationException)
+		{
+			return ConfigurationParseResult<RustProjectConfiguration>.Failure(
+				RustProjectConfiguration.Empty,
+				DependencyConfigurationState.Corrupt,
+				"Cargo project configuration is invalid");
+		}
+	}
+
+	private static RubyProjectConfiguration ParseRubyProject(string root, string path, string content)
+	{
+		var directory = Path.GetDirectoryName(path)!;
+		string? packageName = null;
+		var externalPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var localPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		if (path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase))
+		{
+			var name = Regex.Match(content,
+				"""\b(?:name|spec\.name)\s*=\s*['\"](?<name>[^'\"]+)['\"]""",
+				RegexOptions.CultureInvariant);
+			if (name.Success) packageName = name.Groups["name"].Value;
+			foreach (Match dependency in Regex.Matches(content,
+				"""\b(?:add_dependency|add_runtime_dependency)\s*\(?\s*['\"](?<name>[^'\"]+)['\"]""",
+				RegexOptions.CultureInvariant))
+				externalPackages.Add(dependency.Groups["name"].Value);
+		}
+		var directories = new HashSet<string>(PathComparer);
+		if (Path.GetFileName(path).Equals("Gemfile", StringComparison.OrdinalIgnoreCase))
+		{
+			foreach (Match dependency in Regex.Matches(content,
+				"""(?m)^\s*gem\s*\(?\s*['\"](?<name>[^'\"]+)['\"](?<options>[^\r\n]*)""",
+				RegexOptions.CultureInvariant))
+			{
+				var name = dependency.Groups["name"].Value;
+				if (Regex.IsMatch(dependency.Groups["options"].Value, """\bpath\s*:""", RegexOptions.CultureInvariant))
+					localPackages.Add(name);
+				else
+					externalPackages.Add(name);
+			}
+			foreach (Match match in Regex.Matches(content,
+				"""\bgem\s*\(?\s*['\"][^'\"]+['\"]\s*,[^\r\n]*?\bpath\s*:\s*['\"](?<path>[^'\"]+)['\"]""",
+				RegexOptions.CultureInvariant))
+			{
+				var relative = match.Groups["path"].Value;
+				if (Path.IsPathFullyQualified(relative)) continue;
+				var candidate = Path.GetFullPath(Path.Combine(directory, relative));
+				if (IsWithin(root, candidate)) directories.Add(candidate);
+			}
+		}
+		return new RubyProjectConfiguration(
+			packageName,
+			directories.Order(StringComparer.Ordinal).ToArray(),
+			externalPackages,
+			localPackages);
+	}
+
+	private static ConfigurationParseResult<ComposerProjectConfiguration> ParseComposerProject(string content)
+	{
+		try
+		{
+			using var document = JsonDocument.Parse(content);
+			var root = document.RootElement;
+			var name = root.TryGetProperty("name", out var nameElement) && nameElement.ValueKind == JsonValueKind.String
+				? nameElement.GetString()
+				: null;
+			var dependencies = root.TryGetProperty("require", out var require) && require.ValueKind == JsonValueKind.Object
+				? require.EnumerateObject().Select(static property => property.Name)
+					.Where(static dependency => !dependency.StartsWith("php", StringComparison.OrdinalIgnoreCase) &&
+						!dependency.StartsWith("ext-", StringComparison.OrdinalIgnoreCase))
+					.Order(StringComparer.Ordinal).ToArray()
+				: [];
+			var paths = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+			if (root.TryGetProperty("autoload", out var autoload) && autoload.ValueKind == JsonValueKind.Object &&
+			    autoload.TryGetProperty("psr-4", out var psr4) && psr4.ValueKind == JsonValueKind.Object)
+			{
+				foreach (var mapping in psr4.EnumerateObject())
+				{
+					var values = mapping.Value.ValueKind switch
+					{
+						JsonValueKind.String => new[] { mapping.Value.GetString()! },
+						JsonValueKind.Array => mapping.Value.EnumerateArray()
+							.Where(static item => item.ValueKind == JsonValueKind.String)
+							.Select(static item => item.GetString()!).ToArray(),
+						_ => []
+					};
+					paths[mapping.Name] = values;
+				}
+			}
+			return ConfigurationParseResult<ComposerProjectConfiguration>.Valid(
+				new ComposerProjectConfiguration(name, dependencies, paths));
+		}
+		catch (JsonException)
+		{
+			return ConfigurationParseResult<ComposerProjectConfiguration>.Failure(
+				ComposerProjectConfiguration.Empty, DependencyConfigurationState.Corrupt,
+				"Composer project configuration is invalid");
+		}
+	}
 	private static readonly Lazy<IReadOnlySet<string>> DotNetCatalog = new(
 		() => LoadCatalog("dotnet-net10.0.json"),
 		LazyThreadSafetyMode.ExecutionAndPublication);
@@ -1064,6 +1473,7 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 
 	private static bool IsTypeScriptConfig(string path) => Path.GetFileName(path) is "tsconfig.json" or "jsconfig.json";
 	private static bool IsPythonConfig(string path) => Path.GetFileName(path) is "pyproject.toml" or "setup.cfg";
+	private static bool IsJavaConfig(string path) => Path.GetFileName(path) is "pom.xml" or "build.gradle" or "build.gradle.kts";
 	private static void MarkAmbiguousScopeOwnership(
 		IList<DependencyScopeDescriptor> scopes,
 		ICollection<DependencyConfigurationDiagnostic> diagnostics,
@@ -1165,6 +1575,27 @@ public sealed class FileDependencyConfigurationProvider : IDependencyConfigurati
 	private sealed record PythonConfiguration(IReadOnlySet<string> Dependencies, string? Version)
 	{
 		public static PythonConfiguration Default { get; } = new(new HashSet<string>(), null);
+	}
+	private sealed record JavaProjectConfiguration(string ProjectKey, IReadOnlyList<string> ProjectReferences)
+	{
+		public static JavaProjectConfiguration Empty { get; } = new(string.Empty, []);
+	}
+	private sealed record RustProjectConfiguration(string? PackageName, IReadOnlyList<string> ProjectDirectories)
+	{
+		public static RustProjectConfiguration Empty { get; } = new(null, []);
+	}
+	private sealed record RubyProjectConfiguration(
+		string? PackageName,
+		IReadOnlyList<string> ProjectDirectories,
+		IReadOnlySet<string> ExternalPackages,
+		IReadOnlySet<string> LocalPackages);
+	private sealed record ComposerProjectConfiguration(
+		string? PackageName,
+		IReadOnlyList<string> Dependencies,
+		IReadOnlyDictionary<string, IReadOnlyList<string>> AutoloadPaths)
+	{
+		public static ComposerProjectConfiguration Empty { get; } = new(
+			null, [], new Dictionary<string, IReadOnlyList<string>>());
 	}
 	private sealed record TypeScriptConfiguration(
 		string ModuleResolution,

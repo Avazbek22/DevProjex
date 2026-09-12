@@ -11,6 +11,939 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyFactsEngineIntegrationTests
 {
 	[Fact]
+	public async Task PhpFactsResolveUsesInheritanceAndNamespacedTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var model = fixture.CreateFile("src/Models/User.php", "<?php namespace Models; class Base {} class User extends Base {}\n");
+		var service = fixture.CreateFile("src/App/Service.php", """
+			<?php
+			namespace App;
+			use Models\User as Person;
+			class Service {
+			    private Person $value;
+			    public function read(): Person { return $this->value; }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(fixture.Path, [model, service],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "src/App/Service.php");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "Models\\User");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/App/Service.php" &&
+			edge.Target == "src/Models/User.php" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "App.Service.read" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.EndsWith("read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task PhpUnqualifiedStaticAccessResolvesInsideTheCurrentNamespace()
+	{
+		using var fixture = new TemporaryDirectory();
+		var utils = fixture.CreateFile("src/Utils.php", "<?php namespace GuzzleHttp; final class Utils { public static function choose() {} }");
+		var middleware = fixture.CreateFile("src/Middleware.php", "<?php namespace GuzzleHttp; final class Middleware { public const NAME = 'value'; }");
+		var handler = fixture.CreateFile(
+			"src/HandlerStack.php",
+			"<?php namespace GuzzleHttp; final class HandlerStack { public function resolve() { Utils::choose(); return Middleware::NAME; } }");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[utils, middleware, handler],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
+			edge.Reference == "Utils" && edge.Target == "src/Utils.php" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
+			edge.Reference == "Middleware" && edge.Target == "src/Middleware.php" && edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task PhpNavigationDistinguishesEqualMembersAcrossOwners()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Members.php", "<?php namespace Sample; class A { function run() { return 1; } } class B { function run() { return 2; } }");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations.Where(static item => item.Kind == NavigationSymbolKind.Method)
+			.Select(static item => item.Name).ToArray();
+		Assert.Equal(["Sample.A.run", "Sample.B.run"], names);
+	}
+
+	[Fact]
+	public async Task PhpComposerDependenciesExposeDeclaredRepositoryScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var libraryConfig = fixture.CreateFile("library/composer.json", "{\"name\":\"sample/library\",\"autoload\":{\"psr-4\":{\"Library\\\\\":\"src/\"}}}");
+		var library = fixture.CreateFile("library/src/Remote.php", "<?php namespace Library; class Remote {}");
+		var appConfig = fixture.CreateFile("app/composer.json", "{\"name\":\"sample/app\",\"require\":{\"sample/library\":\"*\"}}");
+		var app = fixture.CreateFile("app/src/App.php", "<?php namespace App; use Library\\Remote; class App { private Remote $value; }");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [libraryConfig, library, appConfig, app],
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(index.Edges, static edge => edge.Source == "app/src/App.php" &&
+			edge.Target == "library/src/Remote.php" && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task PhpSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Broken.php", "<?php class Broken { function run(");
+		using var engine = CreateEngine();
+		var index = await engine.IndexAsync(fixture.Path, [source], cancellationToken: TestContext.Current.CancellationToken);
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
+	public async Task RubyFactsResolveRelativeRequiresConstantsAndNestedOwners()
+	{
+		using var fixture = new TemporaryDirectory();
+		var model = fixture.CreateFile("lib/model.rb", "module Models\n class Base\n end\n class User\n end\nend\n");
+		var service = fixture.CreateFile("lib/service.rb", """
+			require_relative "model"
+			module App
+			  class Service < Models::Base
+			    def read
+			      Models::User.new
+			    end
+			    def self.build
+			      new
+			    end
+			  end
+			end
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[model, service],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "lib/service.rb");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "Models::User");
+		Assert.Contains(index.Edges, static edge => edge.Source == "lib/service.rb" &&
+			edge.Target == "lib/model.rb" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "App::Service#read" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "App::Service.build" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.Contains("read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task RubyReopenedContainersDoNotCreateEdgesToEveryDeclarationFile()
+	{
+		using var fixture = new TemporaryDirectory();
+		var indifferentHash = fixture.CreateFile("lib/sinatra/indifferent_hash.rb", "module Sinatra\n  class IndifferentHash\n  end\nend\n");
+		var baseType = fixture.CreateFile("lib/sinatra/base.rb", "module Sinatra\n  class Base\n  end\nend\n");
+		var consumer = fixture.CreateFile("test/consumer.rb", "class Consumer\n  include Sinatra\n  VALUE = Sinatra::Base\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[indifferentHash, baseType, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "test/consumer.rb" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "lib/sinatra/indifferent_hash.rb");
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "test/consumer.rb" &&
+			edge.Reference == "Sinatra" && edge.Candidates.Count > 0);
+		Assert.Contains(index.Edges, static edge => edge.Source == "test/consumer.rb" &&
+			edge.Reference == "Sinatra::Base" && edge.Status == ResolutionStatus.Resolved &&
+			edge.Target == "lib/sinatra/base.rb");
+	}
+
+	[Fact]
+	public async Task RubyNavigationDistinguishesOrdinarySingletonAndNestedMethods()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("members.rb", """
+			module First
+			  def run
+			    @value = 1
+			  end
+			  def self.run
+			    2
+			  end
+			end
+			module Second
+			  def run
+			    3
+			  end
+			end
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var declarations = Assert.Single(index.Files).NavigationDeclarations;
+
+		Assert.Contains(declarations, static item => item.Name == "First#run");
+		Assert.Contains(declarations, static item => item.Name == "First.run");
+		Assert.Contains(declarations, static item => item.Name == "Second#run");
+		Assert.Contains(declarations, static item => item.Name == "First::run::@value" &&
+			item.Kind == NavigationSymbolKind.Field);
+		Assert.Equal(declarations.Count, declarations.Select(static item => item.Name).Distinct(StringComparer.Ordinal).Count());
+	}
+
+	[Fact]
+	public async Task RubyGemfilePathDependenciesExposeDeclaredRepositoryScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var gemspec = fixture.CreateFile("shared/shared.gemspec", "Gem::Specification.new { |spec| spec.name = 'shared' }");
+		var shared = fixture.CreateFile("shared/lib/shared.rb", "module Shared\n class Item\n end\nend\n");
+		var gemfile = fixture.CreateFile("app/Gemfile", "source 'https://example.invalid'\ngem 'shared', path: '../shared'\n");
+		var app = fixture.CreateFile("app/lib/app.rb", "require 'shared'\nclass App\n VALUE = Shared::Item\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[gemspec, shared, gemfile, app],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "app/lib/app.rb" &&
+			edge.Target == "shared/lib/shared.rb" && edge.Status == ResolutionStatus.Resolved && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task RubySyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("broken.rb", "class Broken\n  def run(\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
+	public async Task KotlinFactsResolveImportsAliasesAndRepositoryTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var model = fixture.CreateFile("models/User.kt", "package models\nopen class User");
+		var consumer = fixture.CreateFile("app/Consumer.kt", """
+			package app
+			import models.User as Person
+			class Consumer(val value: Person) : Person() {
+			    fun String.render(): Person = value
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[model, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "app/Consumer.kt");
+
+		Assert.True(facts.Status == DependencyFileStatus.Supported,
+			$"{facts.StatusReason}; {string.Join(", ", facts.ErrorNodeKinds.Keys)}");
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "app.Consumer");
+		Assert.Contains(index.Edges, static edge => edge.Source == "app/Consumer.kt" &&
+			edge.Target == "models/User.kt" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "app.Consumer.render[String]" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "app.Consumer.value" && declaration.Kind == NavigationSymbolKind.Property);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "app.Consumer.constructor" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.Contains("render", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task RubyExternalGemContainerReopeningDoesNotBecomeAProjectTarget()
+	{
+		using var fixture = new TemporaryDirectory();
+		var gemfile = fixture.CreateFile("Gemfile", "source 'https://example.invalid'\ngem 'ext'\n");
+		var consumer = fixture.CreateFile("lib/consumer.rb", "VALUE = Ext::Thing\n");
+		var extension = fixture.CreateFile("test/extension.rb", "module Ext::Thing\n  def helper; end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[gemfile, consumer, extension],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "Ext::Thing");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Empty(edge.Candidates);
+		Assert.Contains("Ruby constant is provided outside the project", edge.Reasons);
+	}
+
+	[Fact]
+	public async Task RubyUnresolvedRequireKeepsMatchingExternalConstantOutsideTheProject()
+	{
+		using var fixture = new TemporaryDirectory();
+		var consumer = fixture.CreateFile("lib/consumer.rb", "require 'ext'\nVALUE = Ext::Thing\n");
+		var extension = fixture.CreateFile("test/extension.rb", "module Ext::Thing\n  def helper; end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[consumer, extension],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "Ext::Thing");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Empty(edge.Candidates);
+		Assert.Contains("Ruby constant is provided outside the project", edge.Reasons);
+	}
+
+	[Fact]
+	public async Task RubyProjectConstantDefinitionRemainsResolvable()
+	{
+		using var fixture = new TemporaryDirectory();
+		var consumer = fixture.CreateFile("lib/consumer.rb", "VALUE = App::Thing\n");
+		var definition = fixture.CreateFile("lib/thing.rb", "module App\n  class Thing\n  end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[consumer, definition],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "App::Thing" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "lib/thing.rb");
+	}
+
+	[Fact]
+	public async Task RubyRepositoryRequireKeepsMatchingProjectConstantResolvable()
+	{
+		using var fixture = new TemporaryDirectory();
+		var definition = fixture.CreateFile("lib/app.rb", "module App\n  class Thing\n  end\nend\n");
+		var consumer = fixture.CreateFile("lib/consumer.rb", "require 'app'\nVALUE = App::Thing\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[definition, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "App::Thing" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "lib/app.rb");
+	}
+
+	[Fact]
+	public async Task RubyInternalReopenedContainerStillResolvesItsDefinedMember()
+	{
+		using var fixture = new TemporaryDirectory();
+		var container = fixture.CreateFile("lib/app.rb", "module App\nend\n");
+		var member = fixture.CreateFile("lib/thing.rb", "module App\n  class Thing\n  end\nend\n");
+		var consumer = fixture.CreateFile("lib/consumer.rb", "VALUE = App::Thing\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[container, member, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "App::Thing" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "lib/thing.rb");
+		Assert.DoesNotContain(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Target == "lib/app.rb");
+	}
+
+	[Fact]
+	public async Task RubyRuntimeClassReopeningDoesNotBecomeAProjectTarget()
+	{
+		using var fixture = new TemporaryDirectory();
+		var consumer = fixture.CreateFile("lib/consumer.rb", "VALUE = Hash\n");
+		var extension = fixture.CreateFile("lib/hash_extension.rb", "class Hash\n  def helper; end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[consumer, extension],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "Hash");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Empty(edge.Candidates);
+		Assert.Contains("Ruby constant is provided outside the project", edge.Reasons);
+	}
+
+	[Fact]
+	public async Task RubyExternalContainerReopenedInTwoFilesDoesNotBecomeAmbiguous()
+	{
+		using var fixture = new TemporaryDirectory();
+		var gemfile = fixture.CreateFile("Gemfile", "source 'https://example.invalid'\ngem 'ext'\n");
+		var consumer = fixture.CreateFile("lib/consumer.rb", "require 'ext'\nVALUE = Ext::Thing\n");
+		var first = fixture.CreateFile("test/first_extension.rb", "module Ext::Thing\n  def first; end\nend\n");
+		var second = fixture.CreateFile("test/second_extension.rb", "module Ext::Thing\n  def second; end\nend\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[gemfile, consumer, first, second],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "lib/consumer.rb" && edge.Reference == "Ext::Thing");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Empty(edge.Candidates);
+		Assert.Contains("Ruby constant is provided outside the project", edge.Reasons);
+	}
+
+	[Fact]
+	public async Task KotlinTypeParametersShadowOnlyTheirLexicalScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var namedT = fixture.CreateFile("src/sample/T.kt", "package sample\nclass T");
+		var bound = fixture.CreateFile("src/sample/Bound.kt", "package sample\nopen class Bound");
+		var payload = fixture.CreateFile("src/sample/Payload.kt", "package sample\nclass Payload<X>");
+		var source = fixture.CreateFile("src/sample/Box.kt", """
+			package sample
+			class Box<T : Bound>(val value: T, val explicit: sample.T, val payload: Payload<Bound>) {
+			    fun <R : Bound> map(value: R): R = value
+			    class Nested<T>(val nested: T, val explicitNested: sample.T)
+			}
+			class Consumer(val external: T)
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[namedT, bound, payload, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var references = index.Files.Single(static file => file.Path == "src/sample/Box.kt").References;
+		Assert.DoesNotContain(references, static reference => reference.Name == "T" &&
+			reference.Site.Line is 2 or 4 && reference.Status == ResolutionStatus.Resolved);
+		Assert.DoesNotContain(references, static reference => reference.Name == "R" &&
+			reference.Site.Line == 3 && reference.Status == ResolutionStatus.Resolved);
+		Assert.True(references.Count(static reference => reference.Name == "Bound" &&
+			reference.Status == ResolutionStatus.Resolved) >= 2);
+		Assert.Contains(references, static reference => reference.Name == "sample.T" && reference.Status == ResolutionStatus.Resolved);
+		Assert.Contains(references, static reference => reference.Name == "T" &&
+			reference.Site.Line == 6 && reference.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task KotlinNavigationDistinguishesOwnersAndRepeatedMembers()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Members.kt", """
+			package sample
+			class First {
+			    fun run() = 1
+			    fun run(value: Int) = value
+			}
+			class Second {
+			    fun run() = 2
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations
+			.Where(static declaration => declaration.Kind == NavigationSymbolKind.Method)
+			.Select(static declaration => declaration.Name)
+			.ToArray();
+
+		Assert.Equal(["sample.First.run", "sample.First.run#2", "sample.Second.run"], names);
+		Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+	}
+
+	[Fact]
+	public async Task KotlinMavenAndGradleProjectReferencesBoundCrossScopeImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var mavenLibrary = fixture.CreateFile("maven-lib/pom.xml", """
+			<project><modelVersion>4.0.0</modelVersion><groupId>sample</groupId><artifactId>library</artifactId></project>
+			""");
+		var mavenLibrarySource = fixture.CreateFile(
+			"maven-lib/src/main/kotlin/library/Remote.kt", "package library\nclass Remote");
+		var mavenApp = fixture.CreateFile("maven-app/pom.xml", """
+			<project><modelVersion>4.0.0</modelVersion><groupId>sample</groupId><artifactId>app</artifactId>
+			<dependencies><dependency><groupId>sample</groupId><artifactId>library</artifactId></dependency></dependencies></project>
+			""");
+		var mavenAppSource = fixture.CreateFile(
+			"maven-app/src/main/kotlin/app/App.kt", "package app\nimport library.Remote\nclass App(val value: Remote)");
+		var gradleLibrary = fixture.CreateFile("gradle/lib/build.gradle.kts", "plugins { kotlin(\"jvm\") }");
+		var gradleLibrarySource = fixture.CreateFile(
+			"gradle/lib/src/main/kotlin/shared/Service.kt", "package shared\nclass Service");
+		var gradleApp = fixture.CreateFile(
+			"gradle/app/build.gradle.kts", "dependencies { implementation(project(\":gradle:lib\")) }");
+		var gradleAppSource = fixture.CreateFile(
+			"gradle/app/src/main/kotlin/client/Client.kt", "package client\nimport shared.Service\nclass Client(val value: Service)");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[mavenLibrary, mavenLibrarySource, mavenApp, mavenAppSource,
+				gradleLibrary, gradleLibrarySource, gradleApp, gradleAppSource],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("maven-app/src/main/kotlin/app/App.kt", StringComparison.Ordinal) &&
+			edge.Target == "maven-lib/src/main/kotlin/library/Remote.kt" && edge.CrossScope);
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("gradle/app/src/main/kotlin/client/Client.kt", StringComparison.Ordinal) &&
+			edge.Target == "gradle/lib/src/main/kotlin/shared/Service.kt" && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task KotlinResolutionExcludesIncompatibleSourceSetsAndUsesExactRepositoryImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var libraryConfig = fixture.CreateFile("okio/build.gradle.kts", "plugins { kotlin(\"multiplatform\") }");
+		var common = fixture.CreateFile("okio/src/commonMain/kotlin/okio/Buffer.kt", "package okio\nexpect class Buffer");
+		var nonJvm = fixture.CreateFile("okio/src/nonJvmMain/kotlin/okio/Buffer.kt", "package okio\nactual class Buffer");
+		var jvm = fixture.CreateFile("okio/src/jvmMain/kotlin/okio/Buffer.kt", "package okio\nactual class Buffer");
+		var jvmConsumer = fixture.CreateFile("okio/src/jvmMain/kotlin/okio/Consumer.kt", "package okio\nclass Consumer(val buffer: Buffer)");
+		var appConfig = fixture.CreateFile("asset/build.gradle.kts", "plugins { kotlin(\"jvm\") }");
+		var app = fixture.CreateFile("asset/src/main/kotlin/app/App.kt", "package app\nimport okio.Buffer\nclass App(val buffer: Buffer)");
+		var broken = fixture.CreateFile("asset/src/main/kotlin/app/Broken.kt", "package app\nclass Broken(");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[libraryConfig, common, nonJvm, jvm, jvmConsumer, appConfig, app, broken],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var jvmEdges = index.Edges.Where(static edge => edge.Source.EndsWith("Consumer.kt", StringComparison.Ordinal)).ToArray();
+		Assert.DoesNotContain(jvmEdges, static edge => edge.Target is not null && edge.Target.Contains("nonJvmMain", StringComparison.Ordinal));
+		Assert.DoesNotContain(jvmEdges.SelectMany(static edge => edge.Candidates), static path => path.Contains("nonJvmMain", StringComparison.Ordinal));
+		Assert.Contains(jvmEdges, static edge => edge.Status == ResolutionStatus.Resolved &&
+			edge.DeclarationFiles.Any(static path => path.Contains("commonMain", StringComparison.Ordinal)));
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("asset/src/main/kotlin/app/App.kt", StringComparison.Ordinal) &&
+			edge.Reference == "okio.Buffer" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains("asset/src/main/kotlin/app/Broken.kt", index.Coverage.ExtractionFailedFiles);
+	}
+
+	[Fact]
+	public async Task KotlinSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Broken.kt", "package sample\nclass Broken(val value: Missing");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Equal("syntax tree contains errors", facts.StatusReason);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
+	public async Task RustFactsResolveModulesUsesAndTypesFromTheManifest()
+	{
+		using var fixture = new TemporaryDirectory();
+		var root = fixture.CreateFile("src/lib.rs", "mod models; mod service;");
+		var model = fixture.CreateFile("src/models.rs", "pub struct User { pub id: u64 }");
+		var service = fixture.CreateFile("src/service.rs", """
+			use crate::models::User;
+			pub struct Service { value: User }
+			impl Service { pub fn read(&self) -> &User { &self.value } }
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[root, model, service],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "src/service.rs");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Declarations, static declaration => declaration.Identity.QualifiedName == "models::User");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/service.rs" &&
+			edge.Target == "src/models.rs" && edge.Reference == "models::User");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/lib.rs" && edge.Target == "src/models.rs");
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "service::impl<Service>::read" && declaration.Kind == NavigationSymbolKind.Function);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.Contains("::read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task RustUseVisibilityAndLayoutDoNotHideRepositoryImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var root = fixture.CreateFile("src/lib.rs", "mod model; mod facade;");
+		var model = fixture.CreateFile("src/model.rs", "pub struct Plain; pub struct Public; pub struct CratePublic; pub struct Alias; pub struct Grouped; pub struct Commented;");
+		var facade = fixture.CreateFile("src/facade.rs", """
+			use crate::model::Plain;
+			pub use crate::model::Public;
+			pub(crate) use crate::model::CratePublic;
+			pub use crate::model::Alias as Renamed;
+			pub use crate::model::{Grouped, Plain as GroupAlias};
+			pub /* visibility and declaration may be separated */ use crate::model::Commented;
+			pub struct Facade(Plain, Public, CratePublic, Renamed, Grouped, GroupAlias, Commented);
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[root, model, facade],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var imports = index.Files.Single(static file => file.Path == "src/facade.rs").Imports;
+		Assert.Contains(imports, static import => import.Specifier == "model::Plain" && import.Alias is null);
+		Assert.Contains(imports, static import => import.Specifier == "model::Public" && import.Alias is null);
+		Assert.Contains(imports, static import => import.Specifier == "model::CratePublic" && import.Alias is null);
+		Assert.Contains(imports, static import => import.Specifier == "model::Alias" && import.Alias == "Renamed");
+		Assert.Contains(imports, static import => import.Specifier == "model::Grouped" && import.Alias is null);
+		Assert.Contains(imports, static import => import.Specifier == "model::Plain" && import.Alias == "GroupAlias");
+		Assert.Contains(imports, static import => import.Specifier == "model::Commented" && import.Alias is null);
+		Assert.All(imports, static import => Assert.Equal(ResolutionStatus.Resolved, import.Status));
+	}
+
+	[Fact]
+	public async Task RustModuleDeclarationsFollowTheOwningModuleDirectory()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = fixture.CreateFile("Cargo.toml", "[package]\nname = \"module-layout\"\nversion = \"1.0.0\"\n");
+		var root = fixture.CreateFile("src/lib.rs", "mod root_child; mod outer; mod folder; mod inline_parent { mod nested; } #[path = \"custom.rs\"] mod redirected;");
+		var rootChild = fixture.CreateFile("src/root_child.rs", "pub struct RootChild;");
+		var outer = fixture.CreateFile("src/outer.rs", "mod inner;");
+		var outerChild = fixture.CreateFile("src/outer/inner.rs", "pub struct Nested;");
+		var misleadingRootChild = fixture.CreateFile("src/inner.rs", "pub struct Unrelated;");
+		var folder = fixture.CreateFile("src/folder/mod.rs", "mod child;");
+		var folderChild = fixture.CreateFile("src/folder/child.rs", "pub struct FolderChild;");
+		var inlineChild = fixture.CreateFile("src/inline_parent/nested.rs", "pub struct InlineChild;");
+		var redirected = fixture.CreateFile("src/custom.rs", "pub struct Redirected;");
+		var misleadingRedirect = fixture.CreateFile("src/redirected.rs", "pub struct Wrong;");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[manifest, root, rootChild, outer, outerChild, misleadingRootChild, folder, folderChild, inlineChild, redirected, misleadingRedirect],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/lib.rs" && edge.Target == "src/root_child.rs" && edge.Reference == "./root_child");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/outer.rs" && edge.Target == "src/outer/inner.rs" && edge.Reference == "./inner");
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "src/outer.rs" && edge.Target == "src/inner.rs");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/folder/mod.rs" && edge.Target == "src/folder/child.rs" && edge.Reference == "./child");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/lib.rs" && edge.Target == "src/inline_parent/nested.rs" && edge.Reference == "./nested");
+		var redirectedImport = index.Files.Single(static file => file.Path == "src/lib.rs").Imports
+			.Single(static import => import.Specifier == "./redirected");
+		Assert.Equal(ResolutionStatus.Unresolved, redirectedImport.Status);
+		Assert.DoesNotContain("src/redirected.rs", redirectedImport.Candidates ?? []);
+	}
+
+	[Fact]
+	public async Task RustCargoPathDependenciesExposeOnlyDeclaredRepositoryScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var libraryManifest = fixture.CreateFile("library/Cargo.toml", "[package]\nname = \"shared-lib\"\nversion = \"1.0.0\"\n");
+		var librarySource = fixture.CreateFile("library/src/lib.rs", "pub struct Remote;");
+		var appManifest = fixture.CreateFile("app/Cargo.toml", """
+			[package]
+			name = "app"
+			version = "1.0.0"
+			[dependencies]
+			shared-lib = { path = "../library" }
+			""");
+		var appSource = fixture.CreateFile("app/src/lib.rs", "use shared_lib::Remote; pub struct App(Remote);");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[libraryManifest, librarySource, appManifest, appSource],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "app/src/lib.rs" &&
+			edge.Target == "library/src/lib.rs" && edge.Status == ResolutionStatus.Resolved && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task RustCrateQualifiedUsesStayInsideTheOwningWorkspaceMember()
+	{
+		using var fixture = new TemporaryDirectory();
+		var workspace = fixture.CreateFile("Cargo.toml", "[workspace]\nmembers = [\"crates/ignore\", \"crates/globset\"]\n");
+		var ignoreManifest = fixture.CreateFile("crates/ignore/Cargo.toml", "[package]\nname = \"ignore\"\nversion = \"1.0.0\"\n[dependencies]\nglobset = { path = \"../globset\" }\n");
+		var ignoreRoot = fixture.CreateFile("crates/ignore/src/lib.rs", "pub struct Error; pub struct Match; mod overrides;");
+		var overrides = fixture.CreateFile(
+			"crates/ignore/src/overrides.rs",
+			"use crate::{Error, Match}; pub struct Override { error: Error, matched: Match }");
+		var globsetManifest = fixture.CreateFile("crates/globset/Cargo.toml", "[package]\nname = \"globset\"\nversion = \"1.0.0\"\n");
+		var globsetRoot = fixture.CreateFile("crates/globset/src/lib.rs", "pub struct Error; pub struct Match;");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[workspace, ignoreManifest, ignoreRoot, overrides, globsetManifest, globsetRoot],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edges = index.Edges.Where(static edge => edge.Source == "crates/ignore/src/overrides.rs").ToArray();
+		Assert.Contains(edges, static edge => edge.Reference == "Error" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "crates/ignore/src/lib.rs");
+		Assert.Contains(edges, static edge => edge.Reference == "Match" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "crates/ignore/src/lib.rs");
+		Assert.DoesNotContain(edges.SelectMany(static edge => edge.Candidates), static path => path.Contains("globset", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task RustSyntaxErrorsFailClosedWithoutRecoveredEdges()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("src/lib.rs", "mod missing; struct Broken {");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
+	public async Task JavaFactsResolveManifestTypesAndKeepMembersInNavigationOnly()
+	{
+		using var fixture = new TemporaryDirectory();
+		var dependency = fixture.CreateFile("src/sample/Dependency.java", "package sample; public class Dependency { }");
+		var remote = fixture.CreateFile("src/library/Remote.java", "package library; public interface Remote { }");
+		var consumer = fixture.CreateFile("src/sample/Consumer.java", """
+			package sample;
+			import library.Remote;
+			public class Consumer extends Dependency implements Remote {
+			    private Dependency value;
+			    public Dependency read() { return value; }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[dependency, remote, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var facts = index.Files.Single(static file => file.Path == "src/sample/Consumer.java");
+
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName == "sample.Consumer");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/sample/Consumer.java" &&
+			edge.Target == "src/sample/Dependency.java" && edge.Reference == "Dependency");
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/sample/Consumer.java" &&
+			edge.Target == "src/library/Remote.java" && edge.Layer == EvidenceLayer.ExplicitImport);
+		Assert.Contains(facts.NavigationDeclarations, static declaration =>
+			declaration.Name == "sample.Consumer.read" && declaration.Kind == NavigationSymbolKind.Method);
+		Assert.DoesNotContain(index.Declarations, static declaration =>
+			declaration.Identity.QualifiedName.EndsWith(".read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task RustLocalDeclarationWinsOverSameNameInReferencedCrate()
+	{
+		using var fixture = new TemporaryDirectory();
+		var workspace = fixture.CreateFile("Cargo.toml", "[workspace]\nmembers = [\"crates/first\", \"crates/second\"]\n");
+		var firstManifest = fixture.CreateFile(
+			"crates/first/Cargo.toml",
+			"[package]\nname = \"first\"\nversion = \"1.0.0\"\n[dependencies]\nsecond = { path = \"../second\" }\n");
+		var firstRoot = fixture.CreateFile(
+			"crates/first/src/lib.rs",
+			"pub struct Error; pub struct ResultValue { error: Error }");
+		var secondManifest = fixture.CreateFile(
+			"crates/second/Cargo.toml",
+			"[package]\nname = \"second\"\nversion = \"1.0.0\"\n");
+		var secondRoot = fixture.CreateFile("crates/second/src/lib.rs", "pub struct Error;");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[workspace, firstManifest, firstRoot, secondManifest, secondRoot],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "crates/first/src/lib.rs" && edge.Reference == "Error");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("crates/first/src/lib.rs", edge.Target);
+		Assert.DoesNotContain("crates/second/src/lib.rs", edge.Candidates);
+	}
+
+	[Fact]
+	public async Task JavaTypeParametersShadowOnlyTheirLexicalScopes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var namedT = fixture.CreateFile("src/sample/T.java", "package sample; public class T { }");
+		var bound = fixture.CreateFile("src/sample/Bound.java", "package sample; public class Bound { }");
+		var payload = fixture.CreateFile("src/sample/Payload.java", "package sample; public class Payload<X> { }");
+		var source = fixture.CreateFile("src/sample/Box.java", """
+			package sample;
+			public class Box<T extends Bound> {
+			    T value;
+			    sample.T explicit;
+			    Payload<Bound> payload;
+			    public <R extends Bound> R map(R value) { return value; }
+			    class Nested<T> { T nested; sample.T explicitNested; }
+			}
+			class Consumer { T external; }
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[namedT, bound, payload, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var references = index.Files.Single(static file => file.Path == "src/sample/Box.java").References;
+		Assert.DoesNotContain(references, static reference => reference.Name == "T" &&
+			reference.Site.Line is 3 or 7 && reference.Status == ResolutionStatus.Resolved);
+		Assert.DoesNotContain(references, static reference => reference.Name == "R" &&
+			reference.Site.Line == 6 && reference.Status == ResolutionStatus.Resolved);
+		Assert.True(references.Count(static reference => reference.Name == "Bound" &&
+			reference.Status == ResolutionStatus.Resolved) >= 2);
+		Assert.Contains(references, static reference => reference.Name == "sample.T" && reference.Status == ResolutionStatus.Resolved);
+		Assert.Contains(references, static reference => reference.Name == "T" &&
+			reference.Site.Line == 9 && reference.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task JavaPackageResolutionSurvivesUnavailableMavenCoordinates()
+	{
+		using var fixture = new TemporaryDirectory();
+		var pom = fixture.CreateFile("pom.xml", "<project><modelVersion>4.0.0</modelVersion></project>");
+		var owner = fixture.CreateFile(
+			"src/main/java/org/example/owner/Owner.java",
+			"package org.example.owner; public class Owner { }");
+		var repository = fixture.CreateFile(
+			"src/main/java/org/example/owner/OwnerRepository.java",
+			"package org.example.owner; public interface OwnerRepository { }");
+		var controller = fixture.CreateFile(
+			"src/main/java/org/example/owner/PetController.java",
+			"package org.example.owner; public class PetController { private final Owner owner; private final OwnerRepository repository; }");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[pom, owner, repository, controller],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Coverage.ConfigurationDiagnostics, static diagnostic =>
+			diagnostic.State == DependencyConfigurationState.UnsupportedSemantics);
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("PetController.java", StringComparison.Ordinal) &&
+			edge.Target is not null && edge.Target.EndsWith("Owner.java", StringComparison.Ordinal) &&
+			edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("PetController.java", StringComparison.Ordinal) &&
+			edge.Target is not null && edge.Target.EndsWith("OwnerRepository.java", StringComparison.Ordinal) &&
+			edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task JavaNavigationDistinguishesNestedOwnersAndOverloads()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Members.java", """
+			package sample;
+			class First { void run() { } void run(int value) { } }
+			class Second { void run() { } }
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var names = Assert.Single(index.Files).NavigationDeclarations
+			.Where(static declaration => declaration.Kind == NavigationSymbolKind.Method)
+			.Select(static declaration => declaration.Name)
+			.ToArray();
+
+		Assert.Equal(["sample.First.run", "sample.First.run#2", "sample.Second.run"], names);
+		Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+	}
+
+	[Fact]
+	public async Task JavaSyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Broken.java", "package sample; class Broken { Missing value");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(index.Files);
+		Assert.Equal(DependencyFileStatus.ExtractionFailed, facts.Status);
+		Assert.Equal("syntax tree contains errors", facts.StatusReason);
+		Assert.Empty(index.Declarations);
+		Assert.Empty(index.Edges);
+	}
+
+	[Fact]
+	public async Task JavaMavenAndGradleProjectReferencesBoundCrossScopeImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var mavenLibrary = fixture.CreateFile("maven-lib/pom.xml", """
+			<project><modelVersion>4.0.0</modelVersion><groupId>sample</groupId><artifactId>library</artifactId></project>
+			""");
+		var mavenLibrarySource = fixture.CreateFile(
+			"maven-lib/src/main/java/library/Remote.java",
+			"package library; public class Remote { }");
+		var mavenApp = fixture.CreateFile("maven-app/pom.xml", """
+			<project><modelVersion>4.0.0</modelVersion><groupId>sample</groupId><artifactId>app</artifactId>
+			<dependencies><dependency><groupId>sample</groupId><artifactId>library</artifactId></dependency></dependencies></project>
+			""");
+		var mavenAppSource = fixture.CreateFile(
+			"maven-app/src/main/java/app/App.java",
+			"package app; import library.Remote; public class App { Remote value; }");
+		var gradleLibrary = fixture.CreateFile("gradle/lib/build.gradle", "plugins { id 'java' }");
+		var gradleLibrarySource = fixture.CreateFile(
+			"gradle/lib/src/main/java/shared/Service.java",
+			"package shared; public class Service { }");
+		var gradleApp = fixture.CreateFile(
+			"gradle/app/build.gradle",
+			"dependencies { implementation(project(\":gradle:lib\")) }");
+		var gradleAppSource = fixture.CreateFile(
+			"gradle/app/src/main/java/client/Client.java",
+			"package client; import shared.Service; public class Client { Service value; }");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[mavenLibrary, mavenLibrarySource, mavenApp, mavenAppSource,
+				gradleLibrary, gradleLibrarySource, gradleApp, gradleAppSource],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("maven-app/src/main/java/app/App.java", StringComparison.Ordinal) &&
+			edge.Target == "maven-lib/src/main/java/library/Remote.java" && edge.CrossScope);
+		Assert.Contains(index.Edges, static edge => edge.Source.EndsWith("gradle/app/src/main/java/client/Client.java", StringComparison.Ordinal) &&
+			edge.Target == "gradle/lib/src/main/java/shared/Service.java" && edge.CrossScope);
+	}
+
+	[Fact]
 	public async Task NavigationMembersRemainSeparateFromResolutionDeclarations()
 	{
 		using var fixture = new TemporaryDirectory();

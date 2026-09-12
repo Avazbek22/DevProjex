@@ -407,6 +407,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			runtime.Navigation,
 			tree.RootNode,
 			language,
+			relativePath,
 			contentFingerprint,
 			cancellationToken);
 	}
@@ -453,6 +454,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				runtime.Navigation,
 				tree.RootNode,
 				source.LanguageId,
+				source.RelativePath,
 				source.ContentFingerprint,
 				cancellationToken);
 			Interlocked.Add(ref _adapterVisitedRanges, context.Work.VisitedRanges);
@@ -577,14 +579,18 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		Query query,
 		Node root,
 		LanguageId language,
+		string relativePath,
 		string contentFingerprint,
 		CancellationToken cancellationToken)
 	{
 		using var cursor = query.Execute(root);
 		var declarations = new List<NavigationDeclaration>();
 		var seen = new HashSet<(int Start, int End, NavigationSymbolKind Kind, string Name)>();
+		var javaNames = language is LanguageId.Java or LanguageId.Kotlin or LanguageId.Ruby or LanguageId.Php
+			? new Dictionary<string, int>(StringComparer.Ordinal)
+			: null;
 		var visited = 0;
-		string? fileScopedNamespace = null;
+		string? fileScopedNamespace = language == LanguageId.Rust ? RustModulePath(relativePath) : null;
 		foreach (var capture in cursor.Captures)
 		{
 			if ((visited++ & 255) == 0)
@@ -594,13 +600,34 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				continue;
 			if (language == LanguageId.CSharp && capture.Node.Type == "file_scoped_namespace_declaration")
 				fileScopedNamespace = name;
+			else if (language == LanguageId.Java && capture.Node.Type == "package_declaration")
+				fileScopedNamespace = name;
+			else if (language == LanguageId.Kotlin && capture.Node.Type == "package_header")
+				fileScopedNamespace = name;
+			else if (language == LanguageId.Php && capture.Node.Type == "namespace_definition")
+				fileScopedNamespace = name;
 			var owners = ReadNavigationOwners(capture.Node, language).ToList();
-			if (fileScopedNamespace is not null && capture.Node.Type != "file_scoped_namespace_declaration")
+			if (fileScopedNamespace is not null &&
+			    capture.Node.Type is not ("file_scoped_namespace_declaration" or "package_declaration" or "package_header" or "namespace_definition"))
 			{
 				owners.Insert(0, fileScopedNamespace);
 			}
-			var owner = owners.Count == 0 ? null : string.Join('.', owners);
-			var qualifiedName = owner is null ? name : $"{owner}.{name}";
+			var separator = language is LanguageId.Rust or LanguageId.Ruby ? "::" : ".";
+			var owner = owners.Count == 0 ? null : string.Join(separator, owners);
+			var qualifiedName = language == LanguageId.Ruby && owner is not null
+				? capture.Node.Type switch
+				{
+					"method" => $"{owner}#{name}",
+					"singleton_method" => $"{owner}.{name}",
+					_ => $"{owner}::{name}"
+				}
+				: owner is null ? name : $"{owner}{separator}{name}";
+			if (javaNames is not null && capture.Node.Type is not ("package_declaration" or "package_header" or "namespace_definition"))
+			{
+				var ordinal = javaNames.GetValueOrDefault(qualifiedName) + 1;
+				javaNames[qualifiedName] = ordinal;
+				if (ordinal > 1) qualifiedName += $"#{ordinal}";
+			}
 			var kind = capture.Name switch
 			{
 				"navigation.method" => NavigationSymbolKind.Method,
@@ -636,9 +663,39 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	private static string? ReadNavigationName(Node node, LanguageId language)
 	{
+		if (language == LanguageId.Kotlin && node.Type == "function_declaration")
+			return KotlinFunctionName(node);
 		var named = node.GetChildForField("name") ?? node.GetChildForField("key");
+		if (named is null && node.Type == "type_alias") named = node.GetChildForField("type");
 		if (named is not null)
 			return NormalizeNavigationName(named.Text);
+		if (language == LanguageId.Java && node.Type == "package_declaration")
+			return NormalizeNavigationName(node.NamedChildren.LastOrDefault()?.Text ?? string.Empty);
+		if (language == LanguageId.Kotlin && node.Type == "package_header")
+			return KotlinPackageName(node.Text);
+		if (language == LanguageId.Kotlin && node.Type == "property_declaration")
+			return FirstDescendantText(node, "identifier");
+		if (language == LanguageId.Kotlin && node.Type == "class_parameter")
+			return FirstDescendantText(node, "identifier");
+		if (language == LanguageId.Kotlin && node.Type == "enum_entry")
+			return NormalizeNavigationName(node.NamedChildren.FirstOrDefault()?.Text ?? string.Empty);
+		if (language == LanguageId.Kotlin && node.Type is "primary_constructor" or "secondary_constructor") return "constructor";
+		if (language == LanguageId.Kotlin && node.Type == "anonymous_initializer") return "init";
+		if (language == LanguageId.Ruby && node.Type == "assignment")
+			return NormalizeNavigationName(node.GetChildForField("left")?.Text ?? string.Empty);
+		if (language == LanguageId.Php && node.Type is "property_element" or "const_element")
+			return NormalizeNavigationName(node.GetChildForField("name")?.Text ?? node.NamedChildren.FirstOrDefault()?.Text ?? string.Empty);
+		if (language == LanguageId.Rust && node.Type == "impl_item")
+		{
+			var implementedType = node.GetChildForField("type")?.Text;
+			var implementedTrait = node.GetChildForField("trait")?.Text;
+			if (!string.IsNullOrWhiteSpace(implementedType))
+				return string.IsNullOrWhiteSpace(implementedTrait)
+					? $"impl<{implementedType}>"
+					: $"impl<{implementedTrait} for {implementedType}>";
+		}
+		if (language == LanguageId.Rust && node.Type == "let_declaration")
+			return NormalizeNavigationName(node.GetChildForField("pattern")?.Text ?? string.Empty);
 
 		if (language == LanguageId.Go)
 		{
@@ -682,6 +739,18 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			"internal_module" or "function_declaration" or "generator_function_declaration" or
 			"method_definition" or "variable_declarator" or "pair",
 		LanguageId.Go => nodeType is "type_spec" or "function_declaration" or "method_declaration",
+		LanguageId.Java => nodeType is "class_declaration" or "interface_declaration" or
+			"enum_declaration" or "record_declaration" or "annotation_type_declaration" or
+			"method_declaration" or "constructor_declaration" or "compact_constructor_declaration",
+		LanguageId.Rust => nodeType is "mod_item" or "struct_item" or "enum_item" or "trait_item" or
+			"union_item" or "impl_item" or "function_item",
+		LanguageId.Kotlin => nodeType is "class_declaration" or "object_declaration" or
+			"function_declaration" or "property_declaration" or "secondary_constructor" or
+			"anonymous_initializer",
+		LanguageId.Ruby => nodeType is "class" or "module" or "method" or "singleton_method",
+		LanguageId.Php => nodeType is "namespace_definition" or "class_declaration" or
+			"interface_declaration" or "trait_declaration" or "enum_declaration" or
+			"function_definition" or "method_declaration",
 		_ => false
 	};
 
@@ -730,6 +799,60 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		return result;
 	}
 
+	private static string RustModulePath(string relativePath)
+	{
+		var portable = Normalize(relativePath);
+		var sourceMarker = portable.LastIndexOf("/src/", StringComparison.Ordinal);
+		if (sourceMarker >= 0) portable = portable[(sourceMarker + "/src/".Length)..];
+		else if (portable.StartsWith("src/", StringComparison.Ordinal)) portable = portable["src/".Length..];
+		portable = Path.ChangeExtension(portable, null) ?? portable;
+		if (portable is "lib" or "main" or "mod") return string.Empty;
+		if (portable.EndsWith("/mod", StringComparison.Ordinal)) portable = portable[..^"/mod".Length];
+		return string.Join("::", portable.Split('/', StringSplitOptions.RemoveEmptyEntries));
+	}
+
+	private static string? KotlinPackageName(string text)
+	{
+		var value = text.Trim();
+		return value.StartsWith("package ", StringComparison.Ordinal)
+			? NormalizeNavigationName(value["package ".Length..].Trim().TrimEnd(';'))
+			: null;
+	}
+
+	private static string? KotlinFunctionName(Node node)
+	{
+		var nameNode = node.GetChildForField("name");
+		if (nameNode is null) return null;
+		var name = NormalizeNavigationName(nameNode.Text);
+		if (name is null) return null;
+		var header = node.Text.AsSpan(0, checked((int)(nameNode.EndIndex - node.StartIndex)));
+		var dot = header.LastIndexOf('.');
+		if (dot < 0) return name;
+		var receiverStart = dot - 1;
+		var genericDepth = 0;
+		while (receiverStart >= 0)
+		{
+			var character = header[receiverStart];
+			if (character == '>') genericDepth++;
+			else if (character == '<' && genericDepth > 0) genericDepth--;
+			else if (genericDepth == 0 && char.IsWhiteSpace(character)) break;
+			receiverStart--;
+		}
+		var receiver = header[(receiverStart + 1)..dot].Trim().ToString();
+		return receiver.Length == 0 ? name : $"{name}[{receiver}]";
+	}
+
+	private static string? FirstDescendantText(Node node, string nodeType)
+	{
+		foreach (var child in node.NamedChildren)
+		{
+			if (child.Type == nodeType) return NormalizeNavigationName(child.Text);
+			var nested = FirstDescendantText(child, nodeType);
+			if (nested is not null) return nested;
+		}
+		return null;
+	}
+
 	private static bool IsDeclarationCapture(string captureName) =>
 		captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
 		captureName is "context.namespace" or "context.using";
@@ -754,6 +877,24 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				checked((int)(owner?.EndIndex ?? node.EndIndex)),
 				Evidence: OneLineEvidence(text));
 		}
+		if (captureName == "context.type_parameter")
+		{
+			var owner = node.Parent;
+			while (owner is not null && !IsTypeParameterOwner(owner.Type))
+				owner = owner.Parent;
+			var parameterNameNode = node.GetChildForField("name") ?? FindFirstIdentifier(node);
+			var name = parameterNameNode is null ? string.Empty : materialization.Read(parameterNameNode);
+			return new DependencySyntaxCapture(
+				captureName,
+				node.Type,
+				name,
+				checked((int)node.StartPosition.Row + 1),
+				checked((int)(owner?.StartIndex ?? node.StartIndex)),
+				checked((int)(owner?.EndIndex ?? node.EndIndex)),
+				CapturedName: name,
+				CapturedNameStartIndex: checked((int)(parameterNameNode?.StartIndex ?? node.StartIndex)),
+				Evidence: OneLineEvidence(name));
+		}
 		string? moduleCallName = null;
 		if (captureName == "import.call" &&
 		    !TryReadSupportedModuleCall(node, materialization, out moduleCallName))
@@ -765,6 +906,41 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var importEvidence = CreateCompactImportEvidence(captureName, importSyntax);
 			return CreateCapture(captureName, node, importEvidence, null, 0, false, false,
 				FindImportOwner(captureName, node, materialization), importSyntax, evidence: importEvidence);
+		}
+		if (captureName == "context.namespace" && node.Type == "package_declaration")
+		{
+			var packageNameNode = node.NamedChildren.LastOrDefault();
+			var packageName = packageNameNode is null ? null : materialization.Read(packageNameNode);
+			return CreateCapture(
+				captureName,
+				node,
+				packageName ?? string.Empty,
+				packageName,
+				0,
+				false,
+				false,
+				capturedNameStartIndex: packageNameNode is null ? -1 : checked((int)packageNameNode.StartIndex),
+				evidence: packageName ?? string.Empty);
+		}
+		if (captureName == "context.namespace" && node.Type == "package_header")
+		{
+			var packageName = KotlinPackageName(materialization.Read(node));
+			return CreateCapture(
+				captureName,
+				node,
+				packageName ?? string.Empty,
+				packageName,
+				0,
+				false,
+				false,
+				evidence: packageName ?? string.Empty);
+		}
+		if (captureName == "context.namespace" && node.Type == "namespace_definition")
+		{
+			var name = node.GetChildForField("name");
+			var value = name is null ? string.Empty : materialization.Read(name).TrimStart('\\');
+			return CreateCapture(captureName, node, value, value, 0, false, false,
+				capturedNameStartIndex: name is null ? -1 : checked((int)name.StartIndex), evidence: value);
 		}
 
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
@@ -779,7 +955,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				evidence: OneLineEvidence(text));
 		}
 
-		var nameNode = node.GetChildForField("name");
+		var nameNode = node.GetChildForField("name") ??
+			(node.Type == "type_alias" ? node.GetChildForField("type") : null);
 		var capturedName = nameNode is null ? null : materialization.Read(nameNode);
 		var capturedNameStartIndex = nameNode is null ? -1 : checked((int)nameNode.StartIndex);
 		var typeParameters = node.Children.FirstOrDefault(static child =>
@@ -841,6 +1018,17 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		return node.NamedChildren.Any(child => ContainsIdentifier(child, identifier, materialization));
 	}
 
+	private static Node? FindFirstIdentifier(Node node)
+	{
+		if (node.Type.EndsWith("identifier", StringComparison.Ordinal)) return node;
+		foreach (var child in node.NamedChildren)
+		{
+			var identifier = FindFirstIdentifier(child);
+			if (identifier is not null) return identifier;
+		}
+		return null;
+	}
+
 	private static string CreateCompactImportEvidence(
 		string captureName,
 		DependencyImportSyntax? syntax)
@@ -871,6 +1059,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		Node node,
 		NodeTextMaterializationCounter materialization)
 	{
+		if (captureName == "import.rust_module")
+			return FindContainingRustInlineModule(node, materialization);
 		if (captureName is not ("import.direct" or "import.from")) return null;
 		var declaration = FindContainingDeclaration(node, materialization);
 		if (declaration is not null) return declaration;
@@ -879,6 +1069,33 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			    "try_statement" or "with_statement" or "match_statement")
 				return "$conditional-import";
 		return null;
+	}
+
+	private static string? FindContainingRustInlineModule(
+		Node node,
+		NodeTextMaterializationCounter materialization)
+	{
+		var names = new Stack<string>();
+		for (var parent = node.Parent; parent is not null; parent = parent.Parent)
+		{
+			if (parent.Type != "mod_item" || parent.GetChildForField("body") is null) continue;
+			var name = parent.GetChildForField("name");
+			if (name is not null) names.Push(materialization.Read(name));
+		}
+		return names.Count == 0 ? null : string.Join("::", names);
+	}
+
+	private static bool HasRustPathAttribute(
+		Node node,
+		NodeTextMaterializationCounter materialization)
+	{
+		for (var sibling = node.PreviousNamedSibling;
+		     sibling is not null && sibling.Type == "attribute_item";
+		     sibling = sibling.PreviousNamedSibling)
+		{
+			if (ContainsIdentifier(sibling, "path", materialization)) return true;
+		}
+		return false;
 	}
 
 	private static DependencySyntaxCapture CreateCapture(
@@ -965,6 +1182,88 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			if (node.NamedChildren.Any(static child => child.Type == "wildcard_import"))
 				bindings = [new DependencyImportBinding("*", null, true)];
 			return new DependencyImportSyntax(moduleText[relativeLevel..], relativeLevel, bindings);
+		}
+		if (captureName == "import.java")
+		{
+			var text = materialization.Read(node).Trim();
+			if (!text.StartsWith("import ", StringComparison.Ordinal) || !text.EndsWith(';'))
+				return null;
+			var specifier = text["import ".Length..^1].Trim();
+			if (specifier.StartsWith("static ", StringComparison.Ordinal))
+				specifier = specifier["static ".Length..].Trim();
+			var wildcard = specifier.EndsWith(".*", StringComparison.Ordinal);
+			if (wildcard)
+				specifier = specifier[..^2];
+			return specifier.Length == 0
+				? null
+				: new DependencyImportSyntax(
+					specifier,
+					0,
+					[new DependencyImportBinding(specifier.Split('.').Last(), null, wildcard)]);
+		}
+		if (captureName == "import.rust")
+		{
+			var argument = node.GetChildForField("argument");
+			return argument is null
+				? new DependencyImportSyntax(string.Empty, 0, [], HasLiteralSpecifier: false)
+				: new DependencyImportSyntax(materialization.Read(argument), 0, []);
+		}
+		if (captureName == "import.rust_module")
+		{
+			if (node.GetChildForField("body") is not null) return null;
+			var name = node.GetChildForField("name");
+			return name is null
+				? null
+				: new DependencyImportSyntax(
+					materialization.Read(name),
+					0,
+					[],
+					HasLiteralSpecifier: !HasRustPathAttribute(node, materialization));
+		}
+		if (captureName == "import.kotlin")
+		{
+			var text = materialization.Read(node).Trim().TrimEnd(';');
+			if (!text.StartsWith("import ", StringComparison.Ordinal)) return null;
+			var specifier = text["import ".Length..].Trim();
+			var aliasMarker = specifier.LastIndexOf(" as ", StringComparison.Ordinal);
+			var alias = aliasMarker < 0 ? null : specifier[(aliasMarker + " as ".Length)..].Trim();
+			if (aliasMarker >= 0) specifier = specifier[..aliasMarker].Trim();
+			var wildcard = specifier.EndsWith(".*", StringComparison.Ordinal);
+			if (wildcard) specifier = specifier[..^2];
+			return specifier.Length == 0 ? null : new DependencyImportSyntax(
+				specifier,
+				0,
+				[new DependencyImportBinding(specifier.Split('.').Last(), alias, wildcard)]);
+		}
+		if (captureName == "import.ruby")
+		{
+			var text = materialization.Read(node).Trim();
+			var relative = text.StartsWith("require_relative", StringComparison.Ordinal);
+			var keyword = relative ? "require_relative" : "require";
+			if (!text.StartsWith(keyword, StringComparison.Ordinal)) return null;
+			var remainder = text[keyword.Length..].Trim();
+			if (remainder.StartsWith('(') && remainder.EndsWith(')'))
+				remainder = remainder[1..^1].Trim();
+			if (remainder.Length < 2 || remainder[0] is not ('\'' or '"') || remainder[^1] != remainder[0])
+				return null;
+			var specifier = remainder[1..^1];
+			if (specifier.Length == 0 || specifier.Contains('\\')) return null;
+			return new DependencyImportSyntax(
+				specifier,
+				0,
+				[new DependencyImportBinding(relative ? "$relative" : "$require", null, false)]);
+		}
+		if (captureName == "import.php")
+		{
+			var text = materialization.Read(node).Trim();
+			if (!text.StartsWith("use ", StringComparison.Ordinal) || !text.EndsWith(';') || text.Contains('{')) return null;
+			var specifier = text["use ".Length..^1].Trim();
+			var aliasMarker = specifier.LastIndexOf(" as ", StringComparison.OrdinalIgnoreCase);
+			var alias = aliasMarker < 0 ? null : specifier[(aliasMarker + 4)..].Trim();
+			if (aliasMarker >= 0) specifier = specifier[..aliasMarker].Trim();
+			specifier = specifier.TrimStart('\\');
+			return specifier.Length == 0 ? null : new DependencyImportSyntax(
+				specifier, 0, [new DependencyImportBinding(specifier.Split('\\').Last(), alias, false)]);
 		}
 		return null;
 	}
@@ -1100,6 +1399,11 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".js" or ".mjs" or ".cjs" => LanguageId.JavaScript,
 		".py" or ".pyi" => LanguageId.Python,
 		".go" => LanguageId.Go,
+		".java" => LanguageId.Java,
+		".rs" => LanguageId.Rust,
+		".kt" or ".kts" => LanguageId.Kotlin,
+		".rb" or ".rake" or ".gemspec" => LanguageId.Ruby,
+		".php" or ".phtml" => LanguageId.Php,
 		_ => LanguageId.Unsupported
 	};
 
@@ -1155,7 +1459,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private static bool IsTypeParameterOwner(string nodeType) => nodeType is
 		"class_declaration" or "struct_declaration" or "interface_declaration" or
 		"record_declaration" or "delegate_declaration" or "method_declaration" or
-		"local_function_statement";
+		"local_function_statement" or "constructor_declaration" or "function_declaration";
 
 	internal readonly record struct PreparedSourceCacheState(
 		int Entries,
@@ -1435,7 +1739,12 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.Tsx] = new("tree-sitter-tsx", "tree_sitter_tsx", "typescript", new TypeScriptDependencyLanguageAdapter()),
 				[LanguageId.JavaScript] = new("tree-sitter-javascript", "tree_sitter_javascript", "javascript", new TypeScriptDependencyLanguageAdapter()),
 				[LanguageId.Python] = new("tree-sitter-python", "tree_sitter_python", "python", new PythonDependencyLanguageAdapter()),
-				[LanguageId.Go] = new("tree-sitter-go", "tree_sitter_go", "go", new GoDependencyLanguageAdapter())
+				[LanguageId.Go] = new("tree-sitter-go", "tree_sitter_go", "go", new GoDependencyLanguageAdapter()),
+				[LanguageId.Java] = new("tree-sitter-java", "tree_sitter_java", "java", new JavaDependencyLanguageAdapter()),
+				[LanguageId.Rust] = new("tree-sitter-rust", "tree_sitter_rust", "rust", new RustDependencyLanguageAdapter()),
+				[LanguageId.Kotlin] = new("tree-sitter-kotlin", "tree_sitter_kotlin", "kotlin", new KotlinDependencyLanguageAdapter()),
+				[LanguageId.Ruby] = new("tree-sitter-ruby", "tree_sitter_ruby", "ruby", new RubyDependencyLanguageAdapter()),
+				[LanguageId.Php] = new("tree-sitter-php", "tree_sitter_php", "php", new PhpDependencyLanguageAdapter())
 			};
 	}
 

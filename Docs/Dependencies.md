@@ -167,6 +167,113 @@ an absent control file, so its later appearance invalidates a cached dependency 
 existing base is outside the effective manifest, the manifest-snapshot shortcut is bypassed; this
 keeps later edits observable without widening the selected dependency manifest.
 
+Java source files contribute classes, interfaces, enums, records, and annotation types under their
+declared package and complete nesting chain. Exact imports resolve only to matching declarations in
+the allowed manifest; static imports walk back to the nearest declaring type. Same-package types and
+types admitted by an exact or wildcard import are visible to type references. Two visible declarations
+remain ambiguous, and a name elsewhere in the repository is never selected merely because it is the
+only match. Class, method, constructor, and nested-type parameters shadow declarations only inside
+their lexical owner; qualified names and types used by bounds remain ordinary references. Bounded
+`pom.xml`, `build.gradle`, and `build.gradle.kts` files divide a repository into
+source scopes. Package-qualified declarations inside a source scope remain resolvable when Maven
+coordinates are unavailable; the configuration diagnostic then limits only relationships that need
+manifest evidence. Literal Maven `groupId`/`artifactId` dependencies and literal Gradle `project(...)`
+dependencies expose referenced repository scopes transitively. Parent coordinates and Maven dependency
+coordinates are read as data; Gradle scripts are never executed. External artifacts, generated sources,
+annotation-processor output, the JDK class path, interpolated coordinates, and build-script-computed
+source sets are not inferred and remain unresolved.
+
+Java navigation is independent of dependency declarations. It includes packages, nested types,
+methods, constructors, fields, and record compact constructors. Names start with the package and carry
+every owning type. Repeated member names in one owner receive a stable source-order suffix, so every
+navigation name in a file is unique and the exact name printed by search can be passed unchanged to
+`get_file`. A syntax tree containing an error publishes neither recovered declarations nor recovered
+edges.
+
+Rust source files contribute modules, structs, enums, unions, traits, type aliases, and free
+functions under the module path implied by their repository path and inline `mod` nesting. A
+literal `mod name;` resolves from the declaring module directory: beside a crate root or `mod.rs`,
+under the stem directory of an ordinary source file, and under every enclosing inline module.
+`#[path]` overrides stay unresolved because arbitrary module paths are not modeled. Private, `pub`, and
+restricted-visibility `use` trees, aliases, `crate`, `self`, and bounded `super` prefixes are expanded
+without executing code; `crate::`
+is resolved exclusively inside the nearest owning Cargo package, while exact
+items resolve only to matching declarations in the allowed manifest, while glob imports provide
+visibility context without inventing a module edge. A bounded `Cargo.toml` supplies the crate name
+and literal local `path` dependencies, including dev and build dependencies. Referenced repository
+crates are visible transitively, but an unqualified declaration in the source file's own module and
+Cargo package takes precedence over an equal name in a referenced package. Registry crates, build-script output, generated modules, target-
+specific dependency tables, macro expansion, custom source roots, and absolute dependency paths are
+not inferred and remain unresolved.
+
+Rust navigation includes modules, types, traits, impl blocks, functions, methods, fields, constants,
+statics, and closures bound directly by `let`. Names use `::`, start with the file module, and carry
+inline-module, type, impl, and function owners. Thus equal method names in `impl<A>` and `impl<B>`
+remain distinct. Anonymous closures and macro-produced members fall back to their nearest supported
+named owner. A syntax tree containing an error publishes neither recovered declarations nor recovered
+edges.
+
+Kotlin source files contribute classes, objects, type aliases, and top-level functions under their
+declared package and complete nesting chain. Exact imports and aliases resolve to matching declarations
+in the repository manifest even when a build manifest cannot prove a module relationship; wildcard
+imports provide package visibility without guessing a target. Same-package declarations are visible
+to type references. Conventional multiplatform source-set paths constrain declaration sites: common
+declarations are visible to platform source sets, while JVM sources exclude non-JVM, native, JS, and
+Wasm declaration sites. Class, function, and nested-class parameters shadow same-name declarations
+only inside their lexical owner; qualified names and types used by bounds remain ordinary references.
+Bounded `pom.xml`, `build.gradle`,
+and `build.gradle.kts` files define source scopes using the same literal repository-only Maven and
+Gradle project relationships described for Java. External artifacts, generated sources, compiler
+plugins, build-script-computed source sets, and runtime class paths are not inferred and remain
+unresolved.
+
+Kotlin navigation includes packages, nested classes and objects, type aliases, top-level and member
+functions, extension functions, properties, secondary constructors, initializers, and enum entries.
+Names start with the package and carry every owning declaration; an extension function appends its
+receiver in brackets. Repeated names receive a stable source-order suffix, so every navigation name
+in a file is unique. Anonymous functions and local values that do not provide a stable declaration
+name fall back to the nearest supported owner. A syntax tree containing an error publishes neither
+recovered declarations nor recovered edges. Related-file coverage lists the bounded set of paths for
+which extraction failed, in addition to the aggregate count, so callers can inspect the omitted files.
+
+Ruby source files contribute classes and modules under their complete lexical owner chain. Literal
+`require_relative` resolves only the corresponding `.rb` file beside the source, while literal
+`require` probes the repository root, its `lib` directory, and `lib` directories of repository gems
+made visible by a literal `path:` entry in `Gemfile`. Gem specifications are read as bounded data for
+their literal name and dependency declarations; literal non-path gems in `Gemfile` are recorded as
+external dependencies. A reference rooted in a declared external gem or a Ruby runtime class remains
+unresolved even when repository code reopens the same container, because reopening an externally
+owned class or module does not define the referenced entity inside the project. A literal non-relative
+`require` with no repository target provides the same evidence for its matching constant root. Ruby code in Gemfiles
+or gemspecs is never executed. Installed gems without a literal declaration, generated
+load paths, interpolated require strings, autoload hooks, and runtime constant mutation are not
+inferred and remain unresolved. Because Ruby containers can be reopened, a class or module identity
+declared in more than one repository file remains unresolved rather than creating a dependency on
+every file that reopens it. References to a uniquely declared nested entity still resolve normally.
+
+Ruby navigation includes nested modules and classes, ordinary methods, singleton methods, instance
+variable assignments, and lambdas bound by assignment. Names use `::` for nesting, `#` for ordinary
+methods, and `.` for singleton methods, so equal member names remain distinct. Repeated names receive
+a stable source-order suffix. Attribute macros, anonymous blocks, dynamically defined methods, and
+metaprogrammed members fall back to the nearest supported named owner. A syntax tree containing an
+error publishes neither recovered declarations nor recovered edges.
+
+PHP source files contribute classes, interfaces, traits, enums, and top-level functions under their
+declared namespace. Simple namespace `use` statements and aliases resolve only to matching declarations
+in the allowed manifest; inheritance, implemented interfaces, property types, parameters, return
+types, and unqualified static access inside the current namespace supply type-reference evidence.
+Bounded `composer.json` files provide package names, repository
+package dependencies, and literal PSR-4 mappings as data. Composer plugins, generated autoload files,
+installed vendor packages, grouped imports, and runtime class aliases are not executed or guessed and
+remain unresolved.
+
+PHP navigation includes namespaces, types, functions, methods, properties, constants, and enum cases.
+Names use dots between the namespace, owning type, and member so the exact value printed inside a
+protected response can be passed unchanged as `get_file.symbol`. Repeated names receive a stable
+source-order suffix. Anonymous functions and dynamically declared members fall back to the nearest
+supported named owner. A syntax tree containing an error publishes neither recovered declarations nor
+recovered edges.
+
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
 makes resolvable. Top-level `func`, method and `type` declarations are importable names within
@@ -190,7 +297,7 @@ One consequence is worth stating because it is not visible in the edges. A Go fi
 containing Go reports higher coverage and gives the graph signal more weight in importance
 ranking than it did while Go was unsupported. That is the intended effect of adding an adapter,
 but Go's graph is package-local by construction, so its coverage is not comparable with the
-cross-file graphs the other four languages build.
+cross-file graphs built by adapters that resolve repository imports.
 
 Configuration reads have four explicit outcomes: valid, missing, corrupt, and unsupported semantics.
 A malformed JSON document, a `null` or non-object `compilerOptions`, or an unsupported value shape is
@@ -244,16 +351,16 @@ produces `External`.
 
 ## Extraction, limits, and diagnostics
 
-C#, TypeScript/TSX/JavaScript, Python, and Go adapters use shipped Tree-sitter grammars and embedded
+C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, Kotlin, Ruby, and PHP adapters use shipped Tree-sitter grammars and embedded
 `declarations.scm` and `references.scm` query data. A separate `navigation.scm` projection records
 named types and members with their owner chain, exact line and character ranges, and content
 fingerprint. The owner chain starts with the language namespace, package, or module when one is
 declared, so the exact name printed by search is also the exact `symbol` accepted by `get_file`.
 Search annotations and named `get_file` reads use this compact projection; navigation
 members never enter dependency resolution, its fact limits, or the related-file graph. The projection
-currently covers named methods and fields in all five languages, plus C# properties and events,
-TypeScript signatures, and Go interface methods. Anonymous functions, C# accessors and operators,
-Python lambdas, and Go function literals fall back to the nearest supported named owner rather than
+currently covers named methods and fields in all supported languages, plus C# properties and events,
+TypeScript signatures, Go interface methods, and Java, Kotlin, Ruby, and PHP members. Anonymous functions, C# accessors and operators,
+Python lambdas, Go function literals, unnamed Kotlin lambdas, Ruby metaprogramming, and anonymous PHP functions fall back to the nearest supported named owner rather than
 claiming a false member.
 
 Each supported source file is parsed once per content fingerprint. Both fact and navigation queries

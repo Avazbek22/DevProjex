@@ -7,6 +7,171 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyLanguageAdapterPerformanceIntegrationTests(ITestOutputHelper output)
 {
 	[Fact]
+	[Trait("Category", "LocalPerformance")]
+	public void JavaExtractionReportsStableIsolatedCost()
+	{
+		var source = string.Join('\n', Enumerable.Range(0, 1_000)
+			.Select(static index => $"class Type{index} {{ Type{(index + 1) % 1000} value; void run() {{ }} }}"));
+		var prepared = new PreparedDependencySource(
+			"Generated.java",
+			"Generated.java",
+			"root:java",
+			LanguageId.Java,
+			"fixture",
+			"fixture",
+			source);
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		_ = extractor.Extract(prepared, new DependencyFactsLimits(), TestContext.Current.CancellationToken);
+		var samples = new List<(double Milliseconds, long Bytes)>();
+		for (var iteration = 0; iteration < 5; iteration++)
+		{
+			var before = GC.GetTotalAllocatedBytes(precise: false);
+			var started = Stopwatch.StartNew();
+			var facts = extractor.Extract(
+				prepared,
+				new DependencyFactsLimits(),
+				TestContext.Current.CancellationToken);
+			started.Stop();
+			var bytes = GC.GetTotalAllocatedBytes(precise: false) - before;
+			Assert.Equal(1_000, facts.Declarations.Count);
+			Assert.Equal(1_000, facts.References.Count);
+			samples.Add((started.Elapsed.TotalMilliseconds, bytes));
+		}
+		var ordered = samples.OrderBy(static sample => sample.Milliseconds).ToArray();
+		var median = ordered[ordered.Length / 2];
+		output.WriteLine(
+			$"Java extraction: median={median.Milliseconds:F3} ms, allocated={median.Bytes} bytes, " +
+			$"range={ordered[0].Milliseconds:F3}-{ordered[^1].Milliseconds:F3} ms");
+	}
+
+	[Fact]
+	[Trait("Category", "LocalPerformance")]
+	public void RustExtractionReportsStableIsolatedCost()
+	{
+		var source = string.Join('\n', Enumerable.Range(0, 1_000)
+			.Select(static index => $"struct Type{index} {{ value: Type{(index + 1) % 1000} }}"));
+		var prepared = new PreparedDependencySource(
+			"src/generated.rs",
+			"src/generated.rs",
+			"root:rust",
+			LanguageId.Rust,
+			"fixture",
+			"fixture",
+			source);
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		_ = extractor.Extract(prepared, new DependencyFactsLimits(), TestContext.Current.CancellationToken);
+		var samples = new List<(double Milliseconds, long Bytes)>();
+		for (var iteration = 0; iteration < 5; iteration++)
+		{
+			var before = GC.GetTotalAllocatedBytes(precise: false);
+			var started = Stopwatch.StartNew();
+			var facts = extractor.Extract(
+				prepared,
+				new DependencyFactsLimits(),
+				TestContext.Current.CancellationToken);
+			started.Stop();
+			var bytes = GC.GetTotalAllocatedBytes(precise: false) - before;
+			Assert.Equal(1_000, facts.Declarations.Count);
+			Assert.Equal(1_000, facts.References.Count);
+			samples.Add((started.Elapsed.TotalMilliseconds, bytes));
+		}
+		var ordered = samples.OrderBy(static sample => sample.Milliseconds).ToArray();
+		var median = ordered[ordered.Length / 2];
+		output.WriteLine(
+			$"Rust extraction: median={median.Milliseconds:F3} ms, allocated={median.Bytes} bytes, " +
+			$"range={ordered[0].Milliseconds:F3}-{ordered[^1].Milliseconds:F3} ms");
+	}
+
+	[Fact]
+	[Trait("Category", "LocalPerformance")]
+	public void KotlinExtractionReportsStableIsolatedCost()
+	{
+		var source = "package generated\n" + string.Join('\n', Enumerable.Range(0, 1_000)
+			.Select(static index => $"class Type{index}(val value: Type{(index + 1) % 1000})"));
+		var prepared = new PreparedDependencySource(
+			"Generated.kt",
+			"Generated.kt",
+			"root:kotlin",
+			LanguageId.Kotlin,
+			"fixture",
+			"fixture",
+			source);
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		_ = extractor.Extract(prepared, new DependencyFactsLimits(), TestContext.Current.CancellationToken);
+		var samples = new List<(double Milliseconds, long Bytes)>();
+		for (var iteration = 0; iteration < 5; iteration++)
+		{
+			var before = GC.GetTotalAllocatedBytes(precise: false);
+			var started = Stopwatch.StartNew();
+			var facts = extractor.Extract(
+				prepared,
+				new DependencyFactsLimits(),
+				TestContext.Current.CancellationToken);
+			started.Stop();
+			var bytes = GC.GetTotalAllocatedBytes(precise: false) - before;
+			Assert.Equal(1_000, facts.Declarations.Count);
+			Assert.Equal(1_000, facts.References.Count);
+			samples.Add((started.Elapsed.TotalMilliseconds, bytes));
+		}
+		var ordered = samples.OrderBy(static sample => sample.Milliseconds).ToArray();
+		var median = ordered[ordered.Length / 2];
+		output.WriteLine(
+			$"Kotlin extraction: median={median.Milliseconds:F3} ms, allocated={median.Bytes} bytes, " +
+			$"range={ordered[0].Milliseconds:F3}-{ordered[^1].Milliseconds:F3} ms");
+	}
+
+	[Fact]
+	[Trait("Category", "LocalPerformance")]
+	public void RubyExtractionReportsStableIsolatedCost()
+	{
+		var source = string.Join('\n', Enumerable.Range(0, 1_000)
+			.Select(static index => $"class Type{index}\n VALUE = Type{(index + 1) % 1000}\nend"));
+		var prepared = new PreparedDependencySource(
+			"generated.rb", "generated.rb", "root:ruby", LanguageId.Ruby,
+			"fixture", "fixture", source);
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		_ = extractor.Extract(prepared, new DependencyFactsLimits(), TestContext.Current.CancellationToken);
+		var samples = new List<(double Milliseconds, long Bytes)>();
+		for (var iteration = 0; iteration < 5; iteration++)
+		{
+			var before = GC.GetTotalAllocatedBytes(precise: false);
+			var started = Stopwatch.StartNew();
+			var facts = extractor.Extract(prepared, new DependencyFactsLimits(), TestContext.Current.CancellationToken);
+			started.Stop();
+			var bytes = GC.GetTotalAllocatedBytes(precise: false) - before;
+			Assert.Equal(1_000, facts.Declarations.Count);
+			Assert.Equal(1_000, facts.References.Count);
+			samples.Add((started.Elapsed.TotalMilliseconds, bytes));
+		}
+		var ordered = samples.OrderBy(static sample => sample.Milliseconds).ToArray();
+		var median = ordered[ordered.Length / 2];
+		output.WriteLine($"Ruby extraction: median={median.Milliseconds:F3} ms, allocated={median.Bytes} bytes, " +
+		                 $"range={ordered[0].Milliseconds:F3}-{ordered[^1].Milliseconds:F3} ms");
+	}
+
+	[Fact]
+	[Trait("Category", "LocalPerformance")]
+	public void PhpExtractionReportsStableIsolatedCost()
+	{
+		var source = "<?php\nnamespace Generated;\n" + string.Join('\n', Enumerable.Range(0, 1_000)
+			.Select(static index => $"class Type{index} {{ private Type{(index + 1) % 1000} $value; }}"));
+		var prepared = new PreparedDependencySource("Generated.php", "Generated.php", "root:php", LanguageId.Php,
+			"fixture", "fixture", source);
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		_ = extractor.Extract(prepared, new DependencyFactsLimits(), TestContext.Current.CancellationToken);
+		var samples = new List<(double Milliseconds, long Bytes)>();
+		for (var iteration = 0; iteration < 5; iteration++)
+		{
+			var before = GC.GetTotalAllocatedBytes(false); var started = Stopwatch.StartNew();
+			var facts = extractor.Extract(prepared, new DependencyFactsLimits(), TestContext.Current.CancellationToken);
+			started.Stop(); samples.Add((started.Elapsed.TotalMilliseconds, GC.GetTotalAllocatedBytes(false) - before));
+			Assert.Equal(1_000, facts.Declarations.Count); Assert.Equal(1_000, facts.References.Count);
+		}
+		var ordered = samples.OrderBy(static sample => sample.Milliseconds).ToArray(); var median = ordered[2];
+		output.WriteLine($"PHP extraction: median={median.Milliseconds:F3} ms, allocated={median.Bytes} bytes, range={ordered[0].Milliseconds:F3}-{ordered[^1].Milliseconds:F3} ms");
+	}
+
+	[Fact]
 	public void CSharpExtraction_WorkCountersRemainLinear()
 	{
 		var small = MeasureWork(2_000);

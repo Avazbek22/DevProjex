@@ -21,6 +21,14 @@ public sealed class DependencyFactsDocumentationContractTests
 			"Go has one narrow capability: a package is a directory",
 			dependencies,
 			StringComparison.Ordinal);
+		Assert.Contains(
+			"Java source files contribute classes, interfaces, enums, records, and annotation types",
+			dependencies,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Rust source files contribute modules, structs, enums, unions, traits, type aliases",
+			dependencies,
+			StringComparison.Ordinal);
 		Assert.Contains("Import paths are not resolved", dependencies, StringComparison.Ordinal);
 		Assert.Contains(
 			"Without an owning `tsconfig.json` or `jsconfig.json`, one narrow capability applies",
