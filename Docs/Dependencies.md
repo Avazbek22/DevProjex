@@ -193,7 +193,8 @@ edges.
 Rust source files contribute modules, structs, enums, unions, traits, type aliases, and free
 functions under the module path implied by their repository path and inline `mod` nesting. A
 literal `mod name;` resolves from the declaring module directory: beside a crate root or `mod.rs`,
-under the stem directory of an ordinary source file, and under every enclosing inline module.
+beside a conventional top-level Cargo integration-test, example, or benchmark target, under the
+stem directory of an ordinary source file, and under every enclosing inline module.
 `#[path]` overrides stay unresolved because arbitrary module paths are not modeled. Private, `pub`, and
 restricted-visibility `use` trees, aliases, `crate`, `self`, and bounded `super` prefixes are expanded
 without executing code; `crate::`

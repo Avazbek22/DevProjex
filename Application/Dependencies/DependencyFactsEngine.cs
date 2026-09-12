@@ -1351,14 +1351,16 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolveRustImport(FileFacts source, ImportFact import)
 		{
-			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+			var scope = FindScope(source.ScopeId);
+			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			if (import.ImportedName == "$module")
 			{
 				var sourcePath = Path.Combine(_root, source.Path);
 				var sourceDirectory = Path.GetDirectoryName(sourcePath)!;
 				var sourceStem = Path.GetFileNameWithoutExtension(sourcePath);
-				var directory = sourceStem is "lib" or "main" or "mod"
+				var directory = sourceStem is "lib" or "main" or "mod" ||
+				                IsConventionalRustTargetRoot(scope, sourcePath)
 					? sourceDirectory
 					: Path.Combine(sourceDirectory, sourceStem);
 				if (!string.IsNullOrEmpty(import.ContainingDeclaration))
@@ -1421,6 +1423,16 @@ public sealed class DependencyFactsEngine : IDisposable
 				1 => Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files),
 				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple imported declarations", files)
 			};
+		}
+
+		private static bool IsConventionalRustTargetRoot(DependencyScopeDescriptor? scope, string sourcePath)
+		{
+			if (scope is null)
+				return false;
+			var relative = Path.GetRelativePath(scope.Root, sourcePath).Replace('\\', '/');
+			var separator = relative.IndexOf('/');
+			return separator > 0 && relative.IndexOf('/', separator + 1) < 0 &&
+			       relative[..separator] is "tests" or "examples" or "benches";
 		}
 
 		private DependencyEdge ResolveRubyImport(FileFacts source, ImportFact import)

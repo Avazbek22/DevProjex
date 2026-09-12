@@ -746,6 +746,31 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RustIntegrationTestRootsResolveSiblingModules()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = fixture.CreateFile("Cargo.toml", "[package]\nname = \"matcher\"\nversion = \"1.0.0\"\n");
+		var root = fixture.CreateFile("tests/tests.rs", "mod util; mod test_matcher;\n");
+		var util = fixture.CreateFile("tests/util.rs", "pub fn setup() {}\n");
+		var matcher = fixture.CreateFile("tests/test_matcher.rs", "pub fn runs() {}\n");
+		var nested = fixture.CreateFile("src/tests.rs", "mod hidden;\n");
+		var nestedChild = fixture.CreateFile("src/tests/hidden.rs", "pub struct Hidden;\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[manifest, root, util, matcher, nested, nestedChild],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "tests/tests.rs" &&
+			edge.Target == "tests/util.rs" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "tests/tests.rs" &&
+			edge.Target == "tests/test_matcher.rs" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/tests.rs" &&
+			edge.Target == "src/tests/hidden.rs" && edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
 	public async Task RustModuleDeclarationsFollowTheOwningModuleDirectory()
 	{
 		using var fixture = new TemporaryDirectory();
