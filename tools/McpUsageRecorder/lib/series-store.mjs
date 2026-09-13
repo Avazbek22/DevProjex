@@ -157,8 +157,11 @@ export function createRunRecord(manifest, slot, report) {
       decodedResponseBytes: nullableNonNegativeInteger(report.totals.decodedResponseBytes, 'decoded response bytes'),
       modelInputBytes: nullableNonNegativeInteger(report.totals.modelInputBytes, 'model input bytes'),
       turns,
+      responseBoundaries: normalizeMeasuredArray(report.responses, 'response boundaries'),
+      modelInputs: normalizeMeasuredArray(report.modelInputs, 'model inputs'),
       toolInteractions: normalizeToolInteractions(report.toolInteractions),
       finalAnswer: normalizeOptionalText(report.finalAnswer, 'final answer'),
+      capture: report.capture === undefined ? null : canonicalize(report.capture),
     },
   };
 }
@@ -432,6 +435,8 @@ function validateRecord(record) {
     throw new Error('Raw run record model turn count does not match the distinct turns.');
   normalizeToolInteractions(record.measurement.toolInteractions);
   normalizeOptionalText(record.measurement.finalAnswer, 'final answer');
+  normalizeMeasuredArray(record.measurement.responseBoundaries, 'response boundaries');
+  normalizeMeasuredArray(record.measurement.modelInputs, 'model inputs');
 
 }
 
@@ -616,6 +621,17 @@ function normalizeToolInteractions(interactions) {
       responseTokens,
       success: interaction.success !== false,
     };
+  });
+}
+
+function normalizeMeasuredArray(values, label) {
+  if (values === undefined)
+    return [];
+  if (!Array.isArray(values))
+    throw new Error(`${label} must be an array.`);
+  return values.map((value, index) => {
+    requireObject(value, `${label} entry ${index + 1}`);
+    return canonicalize(value);
   });
 }
 

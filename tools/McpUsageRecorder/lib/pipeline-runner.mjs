@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { recordEvents } from './recorder.mjs';
 import { probeMcpServer } from './mcp-probe.mjs';
@@ -31,8 +32,15 @@ export async function preparePipelineSeries(definition, baseDirectory, probe = p
       version: definition.clientVersion,
       protocolVersion: definition.protocolVersion,
     }, definition.limits.probeTimeoutMs);
+    validateObservation(observed, arm.id);
     observations.push({ arm: arm.id, ...observed });
   }
+  const oracleRegistry = definition.evaluation?.oracleRegistry
+    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.oracleRegistry), 'task oracle registry')
+    : null;
+  const savedAssessments = definition.evaluation?.savedAssessments
+    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.savedAssessments), 'saved assessments')
+    : null;
   return {
     seriesId: definition.seriesId,
     productBuildSha: definition.productBuildSha,
@@ -52,7 +60,7 @@ export async function preparePipelineSeries(definition, baseDirectory, probe = p
     },
     limits: definition.limits,
     pricing: definition.pricing,
-    seriesDefinition: definition,
+    seriesDefinition: { definition, oracleRegistry, savedAssessments },
   };
 }
 
@@ -123,10 +131,40 @@ export async function runPipeline(options) {
   return { directory, manifest: series.manifest, results };
 }
 
+export async function validateSavedPipeline(seriesDirectory, definition, baseDirectory) {
+  validateDefinition(definition);
+  const observedPath = join(resolve(seriesDirectory), 'observed.json');
+  let observed;
+  try {
+    observed = JSON.parse(await readFile(observedPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Unable to validate saved observations: ${error.message}`);
+  }
+  const oracleRegistry = definition.evaluation?.oracleRegistry
+    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.oracleRegistry), 'task oracle registry')
+    : null;
+  const savedAssessments = definition.evaluation?.savedAssessments
+    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.savedAssessments), 'saved assessments')
+    : null;
+  return resumeSeries(seriesDirectory, {
+    seriesId: definition.seriesId,
+    productBuildSha: definition.productBuildSha,
+    model: definition.model,
+    clientVersion: definition.clientVersion,
+    toolLoadingMode: definition.toolLoadingMode,
+    serverInstructions: observed.serverInstructions,
+    toolsList: observed.toolsList,
+    toolConfiguration: observed.toolConfiguration,
+    limits: observed.limits,
+    pricing: observed.pricing,
+    seriesDefinition: { definition, oracleRegistry, savedAssessments },
+  });
+}
+
 async function executeSession(context) {
   if (context.execute)
     return context.execute(context);
-  const mcpConfigurationPath = await writeSessionConfiguration(context);
+  const mcpConfiguration = await writeSessionConfiguration(context);
   const pinned = {
     sessionId: context.sessionId,
     model: context.definition.model,
@@ -146,14 +184,15 @@ async function executeSession(context) {
     prompt: context.task.prompt,
     sessionId: context.sessionId,
     model: context.definition.model,
-    mcpConfigPath: mcpConfigurationPath,
+    mcpConfigPath: mcpConfiguration.path,
     arm: context.arm.id,
   };
-  const result = await runProcess({
-    ...command,
-    args: (command.args ?? []).map(argument => replacePlaceholders(argument, replacements)),
-  }, context.definition.limits.sessionTimeoutMs);
+  let result = { timedOut: false, durationMs: 0 };
   try {
+    result = await runProcess({
+      ...command,
+      args: (command.args ?? []).map(argument => replacePlaceholders(argument, replacements)),
+    }, context.definition.limits.sessionTimeoutMs);
     const lines = result.stdout.split(/\r?\n/).filter(line => line.trim().length > 0);
     const report = recordStreamJson(lines, pinned);
     if (result.exitCode !== 0 && report.session.status === 'success') {
@@ -165,6 +204,8 @@ async function executeSession(context) {
     return report;
   } catch (error) {
     return failedSessionReport(pinned, result, error.message);
+  } finally {
+    await rm(mcpConfiguration.directory, { recursive: true, force: true });
   }
 }
 
@@ -187,9 +228,8 @@ function failedSessionReport(pinned, result, reason) {
 }
 
 async function writeSessionConfiguration(context) {
-  const root = join(context.seriesDirectory, 'session-configurations');
-  await mkdir(root, { recursive: true });
-  const path = join(root, `${context.sessionId}.json`);
+  const directory = await mkdtemp(join(tmpdir(), 'mcp-usage-session-'));
+  const path = join(directory, 'mcp.json');
   const server = resolveCommand(context.arm.server, context.baseDirectory);
   const value = {
     mcpServers: {
@@ -201,7 +241,7 @@ async function writeSessionConfiguration(context) {
     },
   };
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
-  return path;
+  return { path, directory };
 }
 
 async function persistObservedConfiguration(directory, configuration) {
@@ -253,6 +293,13 @@ function validateDefinition(definition) {
     throw new Error('pricing is required.');
 }
 
+function validateObservation(observed, arm) {
+  if (!observed || typeof observed.instructions !== 'string' || observed.instructions.length === 0)
+    throw new Error(`arm '${arm}' did not expose server instructions; no session was started.`);
+  if (!observed.toolsList || !Array.isArray(observed.toolsList.tools))
+    throw new Error(`arm '${arm}' did not expose a complete tools/list response; no session was started.`);
+}
+
 function resolveCommand(command, baseDirectory) {
   validateCommand(command, 'process');
   return {
@@ -274,6 +321,14 @@ function requireText(value, label) {
   return value;
 }
 
+async function readPinnedJson(path, label) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'));
+  } catch (error) {
+    throw new Error(`Unable to pin ${label}: ${error.message}`);
+  }
+}
+
 function ensureUnique(values, label) {
   if (new Set(values).size !== values.length)
     throw new Error(`${label} values must be unique.`);
@@ -291,6 +346,7 @@ function runProcess(command, timeoutMs) {
       env: { ...process.env, ...(command.env ?? {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      detached: process.platform !== 'win32',
     });
     let stdout = '';
     let stderr = '';
@@ -302,11 +358,31 @@ function runProcess(command, timeoutMs) {
     child.on('error', rejectRun);
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      terminateProcessTree(child);
     }, timeoutMs);
     child.on('exit', (exitCode, signal) => {
       clearTimeout(timer);
       resolveRun({ stdout, stderr, exitCode, signal, timedOut, durationMs: Date.now() - started });
     });
   });
+}
+
+function terminateProcessTree(child) {
+  if (!child.pid)
+    return;
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    }).unref();
+  } else {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+    }
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {
+  }
 }

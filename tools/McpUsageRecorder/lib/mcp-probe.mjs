@@ -38,15 +38,10 @@ export async function probeMcpServer(server, client, timeoutMs = 30_000) {
       throw new Error('Server probe rejected: initialize did not return server instructions.');
 
     writeMessage(child, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
-    writeMessage(child, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
-    const listed = await nextResponse(messages, 2, timeoutMs);
-    if (listed.error)
-      throw new Error(`Server tools/list failed: ${safeError(listed.error)}.`);
-    if (!Array.isArray(listed.result?.tools))
-      throw new Error('Server probe rejected: tools/list did not return a tools array.');
+    const toolsList = await readAllTools(child, messages, timeoutMs);
     return {
       instructions,
-      toolsList: listed.result,
+      toolsList,
       protocolVersion: initialized.result?.protocolVersion ?? null,
       serverInfo: initialized.result?.serverInfo ?? null,
     };
@@ -61,6 +56,32 @@ export async function probeMcpServer(server, client, timeoutMs = 30_000) {
       child.kill();
     await waitForExit(child);
   }
+}
+
+async function readAllTools(child, messages, timeoutMs) {
+  const pages = [];
+  const tools = [];
+  const cursors = new Set();
+  let cursor = null;
+  for (let page = 0; page < 100; page++) {
+    const id = page + 2;
+    const params = cursor === null ? {} : { cursor };
+    writeMessage(child, { jsonrpc: '2.0', id, method: 'tools/list', params });
+    const listed = await nextResponse(messages, id, timeoutMs);
+    if (listed.error)
+      throw new Error(`Server tools/list failed: ${safeError(listed.error)}.`);
+    if (!Array.isArray(listed.result?.tools))
+      throw new Error('Server probe rejected: tools/list did not return a tools array.');
+    pages.push(listed.result);
+    tools.push(...listed.result.tools);
+    cursor = listed.result.nextCursor ?? null;
+    if (cursor === null)
+      return { tools, pages };
+    if (typeof cursor !== 'string' || cursor.length === 0 || cursors.has(cursor))
+      throw new Error('Server probe rejected: tools/list pagination cursor is invalid or repeated.');
+    cursors.add(cursor);
+  }
+  throw new Error('Server probe rejected: tools/list exceeded 100 pages.');
 }
 
 function validateCommand(value, label) {
@@ -139,15 +160,21 @@ async function nextResponse(reader, id, timeoutMs) {
     const remaining = deadline - Date.now();
     if (remaining <= 0)
       throw new Error(`Server probe timed out waiting for response ${id}.`);
-    const message = await Promise.race([
+    const message = await withTimeout(
       reader.next(),
-      new Promise((_, reject) => setTimeout(
-        () => reject(new Error(`Server probe timed out waiting for response ${id}.`)),
-        remaining)),
-    ]);
+      remaining,
+      `Server probe timed out waiting for response ${id}.`);
     if (message?.id === id)
       return message;
   }
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function safeError(error) {

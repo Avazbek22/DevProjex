@@ -25,13 +25,10 @@ export function recordStreamJson(lines, pinnedSession) {
 
     if (sourceEvent.type === 'mcp.response') {
       events.push(sourceEvent);
-      const interaction = interactions.get(sourceEvent.requestId);
-      if (interaction) {
-        interaction.responseSequence = sequence;
-        interaction.responseText = sourceEvent.decodedText ?? null;
-        interaction.responseTokens = exactTokenCount(sourceEvent);
-        interaction.success = sourceEvent.success !== false;
-      }
+      continue;
+    }
+    if (sourceEvent.type === 'model.input') {
+      events.push(sourceEvent);
       continue;
     }
 
