@@ -190,7 +190,9 @@ async function analyzeTask(spec, oracle, repository, repositoryRoot, repositoryF
     treeRuns,
     related: {
       seedsUsed: discoveredSeeds,
-      calls: related.calls,
+      calls: related.calls.length,
+      callsByHop: countValues(related.calls.map(call => String(call.hop))),
+      failedCalls: related.calls.filter(call => call.error).length,
       unresolvedEvidenceCount: related.unresolvedEvidence.length,
       unresolvedStatuses: countValues(related.unresolvedEvidence.map(item => item.status)),
     },
