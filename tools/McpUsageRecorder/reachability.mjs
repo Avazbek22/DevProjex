@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
@@ -17,8 +19,10 @@ const externalWorkspace = options.workspace ? resolve(options.workspace) : null;
 const workspace = externalWorkspace ?? await mkdtemp(join(tmpdir(), 'devprojex-reachability-'));
 
 try {
-  const registry = JSON.parse(await readFile(registryPath, 'utf8'));
-  const oracles = JSON.parse(await readFile(oraclePath, 'utf8'));
+  const registryText = await readFile(registryPath, 'utf8');
+  const oracleText = await readFile(oraclePath, 'utf8');
+  const registry = JSON.parse(registryText);
+  const oracles = JSON.parse(oracleText);
   const repositories = await prepareRepositories(registry.repositories, workspace, options.repositories);
   const serverPath = options.server
     ? resolve(options.server)
@@ -29,6 +33,11 @@ try {
     repositories,
     (repository, root) => startMcpReachabilityClient(serverCommand(serverPath, root, workspace, repository.id)));
   result.productSha = (await capture('git', ['rev-parse', 'HEAD'], repositoryRoot)).trim();
+  result.inputs = {
+    registrySha256: sha256Text(registryText),
+    oraclesSha256: sha256Text(oracleText),
+    serverSha256: await sha256File(serverPath),
+  };
   const json = `${JSON.stringify(result, null, 2)}\n`;
   if (outputPath) {
     await mkdir(dirname(outputPath), { recursive: true });
@@ -125,4 +134,15 @@ async function capture(command, args, cwd) {
       ? resolvePromise(stdout)
       : reject(new Error(`${basename(command)} exited with code ${code}: ${stderr.trim()}`)));
   });
+}
+
+function sha256Text(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+async function sha256File(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path))
+    hash.update(chunk);
+  return hash.digest('hex');
 }

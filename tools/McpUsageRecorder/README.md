@@ -20,7 +20,9 @@ file is classified as `one-call`, `two-or-three-call-chain`,
 `requires-knowledge-absent-from-task`, or `unreachable`. Exact-path `get_file` is used only as the
 control that distinguishes the last two classes; it is never evidence that the task itself supplied
 the path. Search boundaries retain inspected, encountered, retained, written, and declaration-named
-counts separately, including the exact active limits.
+counts separately, including the exact active limits. The result pins SHA-256 fingerprints of the
+registry, task oracles, and executable that produced it, in addition to every repository commit and
+the source revision reported for the product build.
 
 This tool converts a client-observed NDJSON capture into one session report without estimating
 model tokens from characters. It records MCP response bytes on the wire, decoded response size,
