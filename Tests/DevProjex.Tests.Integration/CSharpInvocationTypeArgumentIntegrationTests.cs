@@ -140,9 +140,8 @@ public sealed class CSharpInvocationTypeArgumentIntegrationTests
 			fixture.Path,
 			[pyConfig, pyTarget, pySource],
 			cancellationToken: TestContext.Current.CancellationToken);
-
 		Assert.Equal(
-			"c9ca0cc3f9168eefb472a7157d5803924a18ff249f7bdfdba462e9dd924211c5",
+			"e11922bb5ea9cd87b232b4088bb98ea201a1967bcb9b04e41a4f53235295c737",
 			ProjectionHash(typescript));
 		Assert.Equal(
 			"4b2b829a31926f53c38f8d57c1d364355efd823b5c7a3f265fa2d50ed7a13b43",

@@ -13,6 +13,8 @@ public enum LanguageId
 	Kotlin,
 	Ruby,
 	Php,
+	C,
+	Cpp,
 	Unsupported
 }
 
@@ -87,6 +89,14 @@ public sealed record SourceSite(string File, int Line, string Evidence)
 	/// </summary>
 	public int EndLine { get; init; } = -1;
 }
+
+public readonly record struct DependencySourceLineRange(int StartLine, int EndLine);
+
+public sealed record DependencyPartialParseDiagnostic(
+	string Path,
+	int DroppedConstructs,
+	IReadOnlyList<DependencySourceLineRange> Ranges,
+	bool RangesTruncated = false);
 
 public sealed record TypeParameterScope(string Name, int StartIndex, int EndIndex);
 
@@ -176,6 +186,7 @@ public sealed record FileFacts(
 	public IReadOnlyList<NavigationDeclaration> NavigationDeclarations { get; init; } = [];
 	public IReadOnlyList<TypeParameterScope> TypeParameterScopes { get; init; } = [];
 	public IReadOnlyList<CSharpUsingDirective> CSharpUsingDirectives { get; init; } = [];
+	public DependencyPartialParseDiagnostic? PartialParse { get; init; }
 }
 
 public sealed record DependencyEdge(
@@ -202,6 +213,7 @@ public sealed record DependencyFactsCoverage(
 {
 	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
 	public IReadOnlyList<string> ExtractionFailedFiles { get; init; } = [];
+	public IReadOnlyList<DependencyPartialParseDiagnostic> PartialParseDiagnostics { get; init; } = [];
 }
 
 public sealed record DependencyIndexMetrics(

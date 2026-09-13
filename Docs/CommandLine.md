@@ -592,6 +592,12 @@ and a cross-scope marker where applicable; ambiguous references stay grouped wit
 candidate paths. JSON is the deterministic `devprojex-related-files` document described in
 [CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no content-transformation
 flags and does not return source content.
+When a grammar rejects one construction but independent facts survive, text output adds
+`[Dependency partial parse]` with the dropped-construction count and bounded line ranges; JSON uses
+`coverage.partialParseDiagnostics`. No fact from a damaged construction is published.
+`[Resolution] resolved=N · ambiguous=N · unresolved=N · external=N` counts evidence for the requested
+seed and direction. JSON exposes the same additive `resolution` object, so an empty related-file list
+can still distinguish unresolved evidence from a complete absence of references.
 
 An unsupported seed language is a successful empty result plus
 `warning[DPX-DEPENDENCY-UNSUPPORTED]` on stderr. A supported seed with no projected edges

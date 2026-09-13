@@ -124,7 +124,7 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task UnterminatedConditionalRegionDegradesOnlyTheFileTail()
+	public async Task UnterminatedConditionalRegionDropsFactsFromTheDamagedContainingType()
 	{
 		using var fixture = new TemporaryDirectory();
 		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
@@ -147,13 +147,9 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 			[project, before, tail, source],
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Contains(result.Edges, edge =>
-			edge.Source == "Consumer.cs" && edge.Reference == "BeforeValue" &&
-			edge.Status == ResolutionStatus.Resolved && edge.Target == "BeforeValue.cs");
-		var conditional = Assert.Single(result.Edges, edge =>
-			edge.Source == "Consumer.cs" && edge.Reference == "TailValue");
-		Assert.Equal(ResolutionStatus.Unresolved, conditional.Status);
-		Assert.Equal("C# preprocessor configuration is not available", Assert.Single(conditional.Reasons));
+		Assert.DoesNotContain(result.Edges, edge => edge.Source == "Consumer.cs");
+		Assert.Contains(result.Coverage.PartialParseDiagnostics,
+			diagnostic => diagnostic.Path == "Consumer.cs" && diagnostic.DroppedConstructs > 0);
 	}
 
 	[Fact]
@@ -624,6 +620,28 @@ public sealed class DependencyCSharpTypeScriptSemanticsIntegrationTests
 			candidate.Source == "main.ts" && candidate.Reference == "./View.jsx");
 		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
 		Assert.Equal("View.tsx", edge.Target);
+	}
+
+	[Fact]
+	public async Task TsxSourceUsesTheOwningTypeScriptConfigurationForRelativeImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"app/tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"jsx\":\"react\"},\"include\":[\"./src\"]}");
+		var widget = fixture.CreateFile("app/src/widget.tsx", "export default function Widget() { return <span />; }");
+		var source = fixture.CreateFile("app/src/main.tsx", "import Widget from './widget';\nexport const app = <Widget />;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, widget, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, candidate =>
+			candidate.Source == "app/src/main.tsx" && candidate.Reference == "./widget");
+		Assert.True(edge.Status == ResolutionStatus.Resolved, string.Join(" | ", edge.Reasons));
+		Assert.Equal("app/src/widget.tsx", edge.Target);
 	}
 
 	[Fact]

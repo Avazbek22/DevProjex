@@ -91,6 +91,9 @@ existing probe wins, so multiple files found later in the same probe sequence ar
 Module specifiers are read from parsed `import`, `export`, dynamic `import(...)`, and supported
 literal `require(...)` syntax, including side-effect imports. A variable or template expression in
 place of a string literal remains `Unresolved`; it is never treated as a guessed path.
+Type syntax is retained as `Unresolved` evidence because the current resolver does not prove
+TypeScript binding from lexical and imported scopes; it never falls back to an unrelated same-named
+declaration elsewhere in the configured project.
 `.js`, `.jsx`, `.mjs`, and `.cjs` specifiers probe their TypeScript and declaration counterparts before the
 literal JavaScript file; `.jsx` probes `.tsx` first. Query and fragment suffixes on a relative module
 URL remain part of the evidence while its physical path is probed without the suffix. Extensionless imports and directory indexes always probe `.js` and `.jsx`
@@ -189,8 +192,8 @@ Java navigation is independent of dependency declarations. It includes packages,
 methods, constructors, fields, and record compact constructors. Names start with the package and carry
 every owning type. Repeated member names in one owner receive a stable source-order suffix, so every
 navigation name in a file is unique and the exact name printed by search can be passed unchanged to
-`get_file`. A syntax tree containing an error publishes neither recovered declarations nor recovered
-edges.
+`get_file`. Damaged syntax constructions publish no declarations, references, or navigation names;
+independent constructions in the same file remain available with an explicit partial-parse diagnostic.
 
 Rust source files contribute modules, structs, enums, unions, traits, type aliases, and free
 functions under the module path implied by their repository path and inline `mod` nesting. A
@@ -216,8 +219,8 @@ Rust navigation includes modules, types, traits, impl blocks, functions, methods
 statics, and closures bound directly by `let`. Names use `::`, start with the file module, and carry
 inline-module, type, impl, and function owners. Thus equal method names in `impl<A>` and `impl<B>`
 remain distinct. Anonymous closures and macro-produced members fall back to their nearest supported
-named owner. A syntax tree containing an error publishes neither recovered declarations nor recovered
-edges.
+named owner. Damaged syntax constructions publish no facts; independent constructions in the same
+file remain available with an explicit partial-parse diagnostic.
 
 Kotlin source files contribute classes, objects, type aliases, and top-level functions under their
 declared package and complete nesting chain. Exact imports and aliases resolve to matching declarations
@@ -244,8 +247,8 @@ functions, extension functions, properties, secondary constructors, initializers
 Names start with the package and carry every owning declaration; an extension function appends its
 receiver in brackets. Repeated names receive a stable source-order suffix, so every navigation name
 in a file is unique. Anonymous functions and local values that do not provide a stable declaration
-name fall back to the nearest supported owner. A syntax tree containing an error publishes neither
-recovered declarations nor recovered edges. Related-file coverage lists the bounded set of paths for
+name fall back to the nearest supported owner. Damaged syntax constructions publish no facts;
+independent constructions in the same file remain available. Related-file coverage lists the bounded set of paths for
 which extraction failed, in addition to the aggregate count, so callers can inspect the omitted files.
 
 Ruby source files (`.rb`, `.rake`, `.gemspec`, and Rack `.ru` entry files) contribute classes and modules under their complete lexical owner chain. Literal
@@ -271,8 +274,8 @@ Ruby navigation includes nested modules and classes, ordinary methods, singleton
 variable assignments, and lambdas bound by assignment. Names use `::` for nesting, `#` for ordinary
 methods, and `.` for singleton methods, so equal member names remain distinct. Repeated names receive
 a stable source-order suffix. Attribute macros, anonymous blocks, dynamically defined methods, and
-metaprogrammed members fall back to the nearest supported named owner. A syntax tree containing an
-error publishes neither recovered declarations nor recovered edges.
+metaprogrammed members fall back to the nearest supported named owner. Damaged syntax constructions
+publish no facts; independent constructions in the same file remain available.
 
 PHP source files contribute classes, interfaces, traits, enums, and top-level functions under their
 declared namespace. Simple namespace `use` statements and aliases resolve only to matching declarations
@@ -288,18 +291,19 @@ PHP navigation includes namespaces, types, functions, methods, properties, const
 Names use dots between the namespace, owning type, and member so the exact value printed inside a
 protected response can be passed unchanged as `get_file.symbol`. Repeated names receive a stable
 source-order suffix. Anonymous functions and dynamically declared members fall back to the nearest
-supported named owner. A syntax tree containing an error publishes neither recovered declarations nor
-recovered edges.
+supported named owner. Damaged syntax constructions publish no facts; independent constructions in
+the same file remain available.
 
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
-makes resolvable. Top-level `func`, method and `type` declarations are importable names within
-their directory, and a type reference resolves to the file in the same directory that declares
-it. A name declared in two directories stays two declarations, so a reference never reaches
+makes resolvable. Top-level functions, methods, and types remain available to navigation, while
+dependency type references resolve only to type declarations in the same directory. A name declared
+in two directories stays two declarations, so a reference never reaches
 across packages; it resolves to the one in its own directory or to nothing.
 
-Everything else in Go is outside this capability and produces no edge rather than a guessed one.
-Import paths are not resolved: `go.mod` is not read, a module path is not mapped to a directory,
+Everything else in Go is outside this capability and produces no resolved edge rather than a guessed
+one. Import paths are not resolved; literal paths remain explicit `Unresolved` evidence: `go.mod` is
+not read, a module path is not mapped to a directory,
 and vendor directories, build tags, import aliases, dot imports and `internal` visibility are not
 interpreted. Package-level `const` and `var` declarations are not yet importable names, and a
 named type is recorded as one declaration without distinguishing struct, interface and alias.
@@ -361,6 +365,23 @@ complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;
 otherwise only names found in both snapshots are classified as external.
 
+C source files contribute named structures, unions, enums, typedefs, function definitions, and
+function declarations. Literal `#include` directives resolve first beside the including file for
+quoted paths, then through literal repository-local directories from `target_include_directories`
+in the owning `CMakeLists.txt`, and finally from the selection root. Only a header present in the
+allowed manifest can become a target. Generator expressions, variables, generated headers, compiler
+defaults, system headers, macro expansion, and transitive build-system state are not evaluated or
+guessed. C navigation names start with the portable file path and use `#` for each owner; static
+functions retain file-local dependency identity.
+
+C++ source files contribute namespaces, classes, structures, unions, enums, free functions, and
+member functions. Literal includes use the same repository-only CMake evidence as C. Namespace
+aliases, compiler command-line include paths, generated headers, package managers, conditional
+preprocessor state, and macro expansion are not guessed. Ambiguous `.h` files use the C++ grammar
+only when their text contains direct C++ syntax evidence; otherwise they retain C behavior. C++
+navigation names join namespace and type owners with `::`, and equal overload names receive a stable
+source-order suffix so the printed name remains a unique named-read selector.
+
 External classification uses shipped, versioned evidence data: .NET `net10.0` reference-assembly
 types, Python 3.12/3.13 standard-library module names, and Node 24 built-in modules. Declared Python
 and Node package dependencies are additional external evidence. Merely failing to find a name in the manifest never
@@ -368,7 +389,7 @@ produces `External`.
 
 ## Extraction, limits, and diagnostics
 
-C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, Kotlin, Ruby, and PHP adapters use shipped Tree-sitter grammars and embedded
+C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, Kotlin, Ruby, PHP, C, and C++ adapters use shipped Tree-sitter grammars and embedded
 `declarations.scm` and `references.scm` query data. A separate `navigation.scm` projection records
 named types and members with their owner chain, exact line and character ranges, and content
 fingerprint. The owner chain starts with the language namespace, package, or module when one is
@@ -376,16 +397,19 @@ declared, so the exact name printed by search is also the exact `symbol` accepte
 Search annotations and named `get_file` reads use this compact projection; navigation
 members never enter dependency resolution, its fact limits, or the related-file graph. The projection
 currently covers named methods and fields in all supported languages, plus C# properties and events,
-TypeScript signatures, Go interface methods, and Java, Kotlin, Ruby, and PHP members. Anonymous functions, C# accessors and operators,
-Python lambdas, Go function literals, unnamed Kotlin lambdas, Ruby metaprogramming, and anonymous PHP functions fall back to the nearest supported named owner rather than
+TypeScript signatures, Go interface methods, and Java, Kotlin, Ruby, PHP, C, and C++ members. Anonymous functions, C# accessors and operators,
+Python lambdas, Go function literals, unnamed Kotlin lambdas, Ruby metaprogramming, anonymous PHP functions, and macro-produced C/C++ members fall back to the nearest supported named owner rather than
 claiming a false member.
 
-C and C++ dependency facts remain unsupported. Their source grammars parse ordinary declarations,
-but project-defined prefix macros can change declaration syntax before the compiler sees it. Minimal
-valid inputs such as `UNITTEST void parse(void);` and `FMT_BEGIN_EXPORT class parsed_type {};` produce
-error nodes before preprocessing; the resulting tree can misclassify the macro as a type. DevProjex
-does not execute a project preprocessor or recover links from that ambiguous tree, because doing so
-could invent dependencies. C and C++ compression remains independent of dependency extraction.
+C and C++ source grammars parse ordinary declarations, but project-defined prefix macros can change
+declaration syntax before the compiler sees it. Minimal valid inputs such as
+`UNITTEST void parse(void);` and `FMT_BEGIN_EXPORT class parsed_type {};` produce error nodes before
+preprocessing; the resulting tree can misclassify the macro as a type. DevProjex does not execute a
+project preprocessor or recover links from that ambiguous construction. It drops every fact owned by
+the damaged construction while publishing proven facts from independent constructions in the same
+file. The partial-parse diagnostic reports how many constructions were dropped and their source-line
+ranges; no fact from a damaged region is published or guessed. C and C++ compression remains
+independent of dependency extraction.
 
 Each supported source file is parsed once per content fingerprint. Both fact and navigation queries
 run against that same live tree before it is disposed; only compact facts remain. Files
@@ -427,11 +451,13 @@ declarations. For example, with a limit of 10 and file costs 8, 4, and
 1, the first file is resolved, the second is marked `Unresolved` with `index work limit exceeded`,
 and the third is resolved from the two remaining units. Rejected work is never executed.
 
-The pinned C# grammar can report `ERROR` nodes for syntax it only partially recognizes. The engine
-counts affected files and the named child-node kinds found below each `ERROR`. An error node is not
-itself an extraction failure: facts outside the unsupported construct remain usable. In particular,
-modern or incomplete constructs inside an error region may be missing or unresolved; DevProjex does
-not repair the grammar or guess the relationship.
+Any shipped grammar can report `ERROR` or missing nodes for syntax it only partially recognizes. The
+engine drops every fact and navigation capture whose node or nearest named owner is damaged. It never
+repairs that construction or guesses a relationship from it. Independent constructions in the same
+file remain usable. Coverage reports the number of dropped constructions and up to 32 exact source
+line ranges per file; `[Dependency partial parse]` carries the same count and ranges in CLI text, and
+`coverage.partialParseDiagnostics` carries them in JSON. A file from which no substantive fact or
+navigation name survives remains an extraction failure rather than an empty successful analysis.
 
 ## Caches and determinism
 
