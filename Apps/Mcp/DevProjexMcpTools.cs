@@ -3143,7 +3143,7 @@ internal sealed class DevProjexMcpTools(
 		if (section.FirstSymbolAmbiguous)
 		{
 			return "[Declaration body] omitted because the first symbol is not unique in its file; " +
-			       "use its listed range.";
+				   "use its listed range.";
 		}
 		if (!section.BodyWritten)
 			return null;
