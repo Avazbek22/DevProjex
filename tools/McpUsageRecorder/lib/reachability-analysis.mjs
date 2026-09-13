@@ -126,7 +126,11 @@ async function analyzeTask(spec, oracle, repository, repositoryRoot, repositoryF
       evidence.surface === seed.discoveredBy.surface && evidence.input === seed.discoveredBy.input &&
       (evidence.calls ?? 1) === 1))
     .map(seed => normalizePath(seed.path));
-  const related = await traverseRelated(client, discoveredSeeds, spec.maximumRelatedHops ?? 2);
+  const related = await traverseRelated(
+    client,
+    discoveredSeeds,
+    spec.maximumRelatedHops ?? 2,
+    new Set(requiredPaths));
   const results = [];
 
   for (const requiredPath of requiredPaths) {
@@ -178,12 +182,17 @@ async function analyzeTask(spec, oracle, repository, repositoryRoot, repositoryF
     queries: spec.queries,
     treePatterns: spec.treePatterns,
     seeds: spec.seeds,
-    searchRuns,
+    searchRuns: searchRuns.map(({ visibleFiles, continuedFiles, ...run }) => ({
+      ...run,
+      visibleFileCount: visibleFiles.length,
+      continuedFileCounts: continuedFiles.map(files => files.length),
+    })),
     treeRuns,
     related: {
       seedsUsed: discoveredSeeds,
       calls: related.calls,
-      unresolvedEvidence: related.unresolvedEvidence,
+      unresolvedEvidenceCount: related.unresolvedEvidence.length,
+      unresolvedStatuses: countValues(related.unresolvedEvidence.map(item => item.status)),
     },
     requiredFiles: results,
   };
@@ -205,7 +214,7 @@ function buildLimitEvidence(path, matchingQueries, searchRuns, treeRuns) {
   return { search, tree };
 }
 
-async function traverseRelated(client, seeds, maximumHops) {
+async function traverseRelated(client, seeds, maximumHops, requiredPaths) {
   const hops = new Map(seeds.map(seed => [seed, 0]));
   const parents = new Map();
   const calls = [];
@@ -216,7 +225,15 @@ async function traverseRelated(client, seeds, maximumHops) {
     for (const seed of frontier) {
       const result = await client.callAndPage('related_files', { path: seed, direction: 'both' });
       const parsed = parseRelatedPaths(result.allText);
-      calls.push({ seed, hop, resolved: parsed.resolved, unresolved: parsed.unresolved, error: result.isError ? result.text : null });
+      calls.push({
+        seed,
+        hop,
+        resolvedCount: parsed.resolved.length,
+        requiredResolved: parsed.resolved.filter(path => requiredPaths.has(path)),
+        unresolvedCount: parsed.unresolved.length,
+        unresolvedStatuses: countValues(parsed.unresolved.map(item => item.status)),
+        error: result.isError,
+      });
       unresolvedEvidence.push(...parsed.unresolved.map(item => ({ seed, ...item })));
       for (const path of parsed.resolved.sort(compareOrdinal)) {
         if (hops.has(path))
@@ -383,6 +400,13 @@ function summarize(tasks) {
 function countClasses(values) {
   return Object.fromEntries(Object.values(ReachabilityClass).map(value =>
     [value, values.filter(item => item.classification === value).length]));
+}
+
+function countValues(values) {
+  const counts = {};
+  for (const value of values)
+    counts[value] = (counts[value] ?? 0) + 1;
+  return counts;
 }
 
 function betterClass(left, right) {

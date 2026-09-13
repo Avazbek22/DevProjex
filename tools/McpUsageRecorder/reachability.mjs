@@ -39,6 +39,7 @@ try {
     repositories,
     (repository, root) => startMcpReachabilityClient(serverCommand(serverPath, root, workspace, repository.id)));
   result.productSha = productSha.toLowerCase();
+  result.analysisSourceSha = currentSourceSha.toLowerCase();
   result.inputs = {
     registrySha256: sha256Text(registryText),
     oraclesSha256: sha256Text(oracleText),

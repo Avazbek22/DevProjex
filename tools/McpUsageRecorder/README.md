@@ -24,7 +24,7 @@ control that distinguishes the last two classes; it is never evidence that the t
 the path. Search boundaries retain inspected, encountered, retained, written, and declaration-named
 counts separately, including the exact active limits. The result pins SHA-256 fingerprints of the
 registry, task oracles, and executable that produced it, in addition to every repository commit and
-the source revision reported for the product build.
+the separate source revisions reported for the product build and the analysis program.
 
 This tool converts a client-observed NDJSON capture into one session report without estimating
 model tokens from characters. It records MCP response bytes on the wire, decoded response size,
