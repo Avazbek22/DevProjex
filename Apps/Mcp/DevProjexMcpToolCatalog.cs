@@ -291,7 +291,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "string",
 	  "enum": ["markdown", "text", "json", "xml"],
 	  "default": "markdown",
-	  "description": "Tree representation. Markdown is the compact default; text uses drawing characters, while JSON and XML are structured."
+	  "description": "Selects the tree representation; markdown is the compact default."
 	}
 	""";
 
@@ -452,16 +452,16 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
-	    {{PathsProperty}},
-	    {{IncludeProperty}},
-	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{TrackedOnlyProperty}},
-	    {{GitScopeProperty}},
-	    {{MaxFileBytesProperty}},
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    {{CompactPathsProperty}},
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactGitScopeProperty}},
+	    {{CompactMaxFileBytesProperty}},
 	    "max_depth": {
-	      "description": "Maximum tree depth from 0 to 1000, counted in levels below the project root and never below a paths entry: 0 returns the root alone, 1 adds its direct children, and a file inside src/router needs 3. Omit it to let a large tree pick the deepest complete depth that fits. Accepts an integer or numeric string.",
+	      "description": "Limits levels below the project root without descending below a paths entry; omit it for the deepest complete tree that fits.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
 	    },
 	    {{TreeFormatProperty}}

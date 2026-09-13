@@ -165,7 +165,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Returns the filtered project structure without file contents. Use it to orient or find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML within 2,000 lines and 50,000 characters. project accepts a listed name or path, or an allowed remote Git URL. paths selects literal files or directories; include_patterns finds names across several directories in one call, for example include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]. format=markdown|text|json|xml; max_depth=0..1000 counts levels below the project root; git_scope=staged|changes|diff:<ref>..<ref>; exclude_patterns and max_file_bytes narrow further.")]
+		"Returns the filtered project structure without file contents. Use it to orient or find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML within 2,000 lines and 50,000 characters. paths selects literal locations; include_patterns selects names or several directories in one call, for example include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]. format=markdown|text|json|xml; max_depth=0..1000 counts levels below the project root; git_scope and other filters only narrow.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
