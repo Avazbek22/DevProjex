@@ -1,11 +1,12 @@
-import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { recordEvents } from './recorder.mjs';
 import { probeMcpServer } from './mcp-probe.mjs';
+import { loadSavedAssessments } from './saved-evaluation.mjs';
 import { recordStreamJson } from './stream-json.mjs';
+import { loadTaskOracleRegistry } from './task-oracle.mjs';
 import {
   createRunRecord,
   createSeries,
@@ -25,6 +26,15 @@ export async function loadPipelineDefinition(path) {
 
 export async function preparePipelineSeries(definition, baseDirectory, probe = probeMcpServer) {
   validateDefinition(definition);
+  const oraclePath = resolve(baseDirectory, definition.evaluation.oracleRegistry);
+  const assessmentPath = resolve(baseDirectory, definition.evaluation.savedAssessments);
+  const oracleRegistry = await readPinnedJson(oraclePath, 'task oracle registry');
+  const taskOracles = loadTaskOracleRegistry(oraclePath);
+  for (const task of definition.tasks) {
+    if (!taskOracles.has(task.oracle ?? task.id))
+      throw new Error(`Task '${task.id}' has no pinned oracle; no session was started.`);
+  }
+  const savedAssessments = await loadSavedAssessments(assessmentPath);
   const observations = [];
   for (const arm of definition.arms) {
     const observed = await probe(resolveCommand(arm.server, baseDirectory), {
@@ -35,12 +45,6 @@ export async function preparePipelineSeries(definition, baseDirectory, probe = p
     validateObservation(observed, arm.id);
     observations.push({ arm: arm.id, ...observed });
   }
-  const oracleRegistry = definition.evaluation?.oracleRegistry
-    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.oracleRegistry), 'task oracle registry')
-    : null;
-  const savedAssessments = definition.evaluation?.savedAssessments
-    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.savedAssessments), 'saved assessments')
-    : null;
   return {
     seriesId: definition.seriesId,
     productBuildSha: definition.productBuildSha,
@@ -140,12 +144,11 @@ export async function validateSavedPipeline(seriesDirectory, definition, baseDir
   } catch (error) {
     throw new Error(`Unable to validate saved observations: ${error.message}`);
   }
-  const oracleRegistry = definition.evaluation?.oracleRegistry
-    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.oracleRegistry), 'task oracle registry')
-    : null;
-  const savedAssessments = definition.evaluation?.savedAssessments
-    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.savedAssessments), 'saved assessments')
-    : null;
+  const oracleRegistry = await readPinnedJson(
+    resolve(baseDirectory, definition.evaluation.oracleRegistry),
+    'task oracle registry');
+  const savedAssessments = await loadSavedAssessments(
+    resolve(baseDirectory, definition.evaluation.savedAssessments));
   return resumeSeries(seriesDirectory, {
     seriesId: definition.seriesId,
     productBuildSha: definition.productBuildSha,
@@ -154,9 +157,11 @@ export async function validateSavedPipeline(seriesDirectory, definition, baseDir
     toolLoadingMode: definition.toolLoadingMode,
     serverInstructions: observed.serverInstructions,
     toolsList: observed.toolsList,
-    toolConfiguration: observed.toolConfiguration,
-    limits: observed.limits,
-    pricing: observed.pricing,
+    toolConfiguration: {
+      arms: definition.arms.map(arm => ({ arm: arm.id, configuration: arm.toolConfiguration })),
+    },
+    limits: definition.limits,
+    pricing: definition.pricing,
     seriesDefinition: { definition, oracleRegistry, savedAssessments },
   });
 }
@@ -187,44 +192,36 @@ async function executeSession(context) {
     mcpConfigPath: mcpConfiguration.path,
     arm: context.arm.id,
   };
-  let result = { timedOut: false, durationMs: 0 };
+  let result;
   try {
     result = await runProcess({
       ...command,
       args: (command.args ?? []).map(argument => replacePlaceholders(argument, replacements)),
     }, context.definition.limits.sessionTimeoutMs);
-    const lines = result.stdout.split(/\r?\n/).filter(line => line.trim().length > 0);
-    const report = recordStreamJson(lines, pinned);
-    if (result.exitCode !== 0 && report.session.status === 'success') {
-      return {
+    const capture = await storeRawCapture(context.seriesDirectory, context.sessionId, result);
+    const parsed = parseCapturedLines(result.stdout);
+    let report = recordStreamJson(parsed.lines, pinned);
+    const failed = result.exitCode !== 0 || result.timedOut || parsed.invalidLines > 0;
+    if (failed && report.session.status === 'success') {
+      report = {
         ...report,
-        session: { ...report.session, status: 'error', successful: false },
+        session: { ...report.session, status: result.timedOut ? 'aborted' : 'error', successful: false },
       };
     }
-    return report;
-  } catch (error) {
-    return failedSessionReport(pinned, result, error.message);
+    return {
+      ...report,
+      capture: {
+        ...report.capture,
+        rawCaptureSha256: capture.sha256,
+        invalidLines: parsed.invalidLines,
+        processExitCode: result.exitCode,
+        processSignal: result.signal,
+        timedOut: result.timedOut,
+      },
+    };
   } finally {
     await rm(mcpConfiguration.directory, { recursive: true, force: true });
   }
-}
-
-function failedSessionReport(pinned, result, reason) {
-  const report = recordEvents([
-    { type: 'session', ...pinned },
-    { type: 'session.end', status: result.timedOut ? 'aborted' : 'error', durationMs: result.durationMs },
-  ], pinned);
-  return {
-    ...report,
-    finalAnswer: null,
-    toolInteractions: [],
-    capture: {
-      actualUsageObserved: false,
-      completeOutputUsageObserved: false,
-      completedEventObserved: false,
-      failure: reason,
-    },
-  };
 }
 
 async function writeSessionConfiguration(context) {
@@ -249,9 +246,6 @@ async function persistObservedConfiguration(directory, configuration) {
   const value = {
     serverInstructions: configuration.serverInstructions,
     toolsList: configuration.toolsList,
-    toolConfiguration: configuration.toolConfiguration,
-    limits: configuration.limits,
-    pricing: configuration.pricing,
   };
   try {
     await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
@@ -259,6 +253,39 @@ async function persistObservedConfiguration(directory, configuration) {
     if (error?.code !== 'EEXIST')
       throw error;
   }
+}
+
+async function storeRawCapture(seriesDirectory, sessionId, result) {
+  const directory = join(seriesDirectory, 'captures');
+  await mkdir(directory, { recursive: true });
+  const value = {
+    schemaVersion: 1,
+    sessionId,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    timedOut: result.timedOut,
+    durationMs: result.durationMs,
+  };
+  const json = `${JSON.stringify(value, null, 2)}\n`;
+  await writeFile(join(directory, `${sessionId}.json`), json, { encoding: 'utf8', flag: 'wx' });
+  return { sha256: createHash('sha256').update(json).digest('hex') };
+}
+
+function parseCapturedLines(stdout) {
+  const lines = [];
+  let invalidLines = 0;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.trim().length === 0)
+      continue;
+    try {
+      lines.push(JSON.parse(line));
+    } catch {
+      invalidLines++;
+    }
+  }
+  return { lines, invalidLines };
 }
 
 function validateDefinition(definition) {
@@ -291,6 +318,10 @@ function validateDefinition(definition) {
     throw new Error('limits must pin positive attempt, probe, and session bounds.');
   if (!definition.pricing || typeof definition.pricing !== 'object')
     throw new Error('pricing is required.');
+  if (!definition.evaluation || typeof definition.evaluation !== 'object')
+    throw new Error('evaluation configuration is required.');
+  requireText(definition.evaluation.oracleRegistry, 'evaluation.oracleRegistry');
+  requireText(definition.evaluation.savedAssessments, 'evaluation.savedAssessments');
 }
 
 function validateObservation(observed, arm) {

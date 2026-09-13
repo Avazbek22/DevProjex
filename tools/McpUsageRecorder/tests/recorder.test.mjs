@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -566,6 +566,16 @@ test('one pipeline command probes runs stores evaluates and analyzes saved sessi
     ], { encoding: 'utf8', timeout: 20_000 });
     assert.equal(rebuilt.status, 0, rebuilt.stderr);
     assert.deepEqual(JSON.parse(readFileSync(rebuiltPath, 'utf8')).report, output.report);
+
+    const captureDirectory = join(directory, definition.seriesId, 'captures');
+    const capturePath = join(captureDirectory, readdirSync(captureDirectory)[0]);
+    writeFileSync(capturePath, `${readFileSync(capturePath, 'utf8')} `);
+    const tampered = spawnSync(process.execPath, [pipelineScript,
+      '--mode', 'report', '--definition', definitionPath,
+      '--series', join(directory, definition.seriesId), '--output', rebuiltPath,
+    ], { encoding: 'utf8', timeout: 20_000 });
+    assert.equal(tampered.status, 2);
+    assert.match(tampered.stderr, /raw capture.*does not match its session record/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -696,7 +706,7 @@ function validPipelineDefinition(seriesId) {
     repetitions: 1,
     protocolVersion: '2025-06-18',
     client: { command: process.execPath, args: ['client.mjs'] },
-    tasks: [{ id: 'task-one', prompt: 'Inspect the selected project.' }],
+    tasks: [{ id: 'sample', prompt: 'Inspect the selected project.' }],
     arms: [
       {
         id: 'baseline',
@@ -723,6 +733,10 @@ function validPipelineDefinition(seriesId) {
         cacheReadTokens: 0.3,
         outputTokens: 15,
       },
+    },
+    evaluation: {
+      oracleRegistry: fileURLToPath(new URL('./fixtures/task-oracles.json', import.meta.url)),
+      savedAssessments: fileURLToPath(new URL('./fixtures/saved-assessments.json', import.meta.url)),
     },
   };
 }

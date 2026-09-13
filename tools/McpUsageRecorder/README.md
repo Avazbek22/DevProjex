@@ -91,6 +91,11 @@ refuses any identity difference. A stored assignment is skipped only when the st
 successful raw record; failed or aborted work receives a new attempt number and remains in usage and
 cost totals.
 
+Every process capture is written with create-only semantics before it is adapted. Its SHA-256 is
+stored in the session record, and report generation requires a one-to-one, fingerprint-matched
+mapping between captures and records. A malformed stream retains every parseable usage event; a
+capture that cannot be assigned safely blocks the report instead of becoming a zero-cost session.
+
 The stream adapter retains model turns, tool calls and inputs, model-visible tool results, exact
 per-result token counts supplied by the client, wire and decoded response boundaries, observable
 model-input boundaries, duration, outcome, and final answer. The carry-cost report requires an exact
