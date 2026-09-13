@@ -2202,7 +2202,10 @@ public sealed partial class McpServerIntegrationTests
 
 		// Agents reached for content search to find files, and got a silent empty answer.
 		Assert.Contains("find files by name", tree, StringComparison.Ordinal);
-		Assert.Contains("include_patterns=[\"**/*router*.ts\"]", tree, StringComparison.Ordinal);
+		Assert.Contains(
+			"include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]",
+			tree,
+			StringComparison.Ordinal);
 		Assert.Contains("matches file content, never paths", search, StringComparison.Ordinal);
 		Assert.Contains("get_tree include_patterns", search, StringComparison.Ordinal);
 		Assert.Contains("counts levels below the project root", tree, StringComparison.Ordinal);
@@ -2215,12 +2218,14 @@ public sealed partial class McpServerIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		const string pattern = "src/middleware/{powered-by,body-limit,bearer-auth}/**";
-		foreach (var directory in new[] { "powered-by", "body-limit", "bearer-auth", "other" })
+		const string instructionPattern = "src/{middleware,routes}/**";
+		const string descriptionPattern =
+			"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts";
+		foreach (var directory in new[] { "middleware", "routes", "other" })
 		{
-			var path = Path.Combine(project, "src", "middleware", directory);
+			var path = Path.Combine(project, "src", directory);
 			Directory.CreateDirectory(path);
-			File.WriteAllText(Path.Combine(path, "index.ts"), $"export const name = '{directory}';\n");
+			File.WriteAllText(Path.Combine(path, "request-handler.ts"), $"export const name = '{directory}';\n");
 		}
 
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
@@ -2230,8 +2235,8 @@ public sealed partial class McpServerIntegrationTests
 		var description = tools.Single(static tool => tool.Name == "get_tree").ProtocolTool.Description!;
 		var instructions = Assert.IsType<string>(server.Client.ServerInstructions);
 
-		Assert.Contains($"include_patterns=[\"{pattern}\"]", description, StringComparison.Ordinal);
-		Assert.Contains($"include_patterns=[\"{pattern}\"]", instructions, StringComparison.Ordinal);
+		Assert.Contains($"include_patterns=[\"{descriptionPattern}\"]", description, StringComparison.Ordinal);
+		Assert.Contains($"include_patterns=[\"{instructionPattern}\"]", instructions, StringComparison.Ordinal);
 		Assert.Contains("in one call", description, StringComparison.Ordinal);
 		Assert.Contains("instead of walking them separately", instructions, StringComparison.Ordinal);
 
@@ -2240,11 +2245,10 @@ public sealed partial class McpServerIntegrationTests
 			new Dictionary<string, object?>
 			{
 				["format"] = "text",
-				["include_patterns"] = new[] { pattern }
+				["include_patterns"] = new[] { instructionPattern }
 			}));
-		Assert.Contains("powered-by", tree, StringComparison.Ordinal);
-		Assert.Contains("body-limit", tree, StringComparison.Ordinal);
-		Assert.Contains("bearer-auth", tree, StringComparison.Ordinal);
+		Assert.Contains("middleware", tree, StringComparison.Ordinal);
+		Assert.Contains("routes", tree, StringComparison.Ordinal);
 		Assert.DoesNotContain("other", tree, StringComparison.Ordinal);
 	}
 
@@ -6424,11 +6428,11 @@ public sealed partial class McpServerIntegrationTests
 
 		var instructions = Assert.IsType<string>(server.Client.ServerInstructions);
 		Assert.StartsWith(
-			"One local root is configured: omit project in local calls and use project-relative paths; " +
-			"skip list_projects unless you need profiles or the active policy. ",
+			"One local root is configured: omit project, use project-relative paths, and " +
+			"skip list_projects unless you need profiles or active policy. ",
 			instructions,
 			StringComparison.Ordinal);
-		Assert.InRange(instructions.Length, 1, 1_799);
+		Assert.InRange(instructions.Length, 1, 1_200);
 		Assert.DoesNotContain("private-root-name-48291", instructions, StringComparison.Ordinal);
 
 		var tree = AllText(await server.CallAsync(
@@ -6450,11 +6454,21 @@ public sealed partial class McpServerIntegrationTests
 
 		var instructions = Assert.IsType<string>(server.Client.ServerInstructions);
 		Assert.StartsWith(
-			"When the project is unknown, use list_projects; when a location is unknown",
+			"When the project is unknown, use list_projects. When a location is unknown",
 			instructions,
 			StringComparison.Ordinal);
-		Assert.InRange(instructions.Length, 1, 1_799);
+		Assert.InRange(instructions.Length, 1, 1_200);
 		Assert.DoesNotContain("omit project in local calls", instructions, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(1)]
+	[InlineData(2)]
+	public void ServerInstructionSentencesDoNotStartWithLowercaseLetters(int rootCount)
+	{
+		var instructions = McpServerHost.BuildInstructions(rootCount);
+
+		Assert.DoesNotMatch("(?:^|[.!?]\\s+)[a-z]", instructions);
 	}
 
 	[Fact]
