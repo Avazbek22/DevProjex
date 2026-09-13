@@ -1,5 +1,27 @@
 # MCP usage recorder
 
+## Deterministic oracle reachability
+
+`reachability.mjs` checks whether the files declared by `oracles/tasks.json` can be surfaced by the
+real MCP tools without model calls. The disputable inputs live in `oracles/reachability.json`: pinned
+repository commits, task-language search expressions, filename patterns, and starting files that a
+declared search or tree input must actually expose before dependency traversal may use them.
+
+From a clean checkout, one command publishes the current server, clones the three pinned repositories,
+runs every call sequentially, writes the JSON result, and removes its temporary workspace:
+
+```sh
+node tools/McpUsageRecorder/reachability.mjs --output reachability.json
+```
+
+For an already prepared server and repository directory, pass `--server FILE --repositories DIR`.
+The runner verifies every repository HEAD against the registry before calling the server. A required
+file is classified as `one-call`, `two-or-three-call-chain`,
+`requires-knowledge-absent-from-task`, or `unreachable`. Exact-path `get_file` is used only as the
+control that distinguishes the last two classes; it is never evidence that the task itself supplied
+the path. Search boundaries retain inspected, encountered, retained, written, and declaration-named
+counts separately, including the exact active limits.
+
 This tool converts a client-observed NDJSON capture into one session report without estimating
 model tokens from characters. It records MCP response bytes on the wire, decoded response size,
 the exact model-input size when the client exposes it, each API usage counter, model turns, tool
