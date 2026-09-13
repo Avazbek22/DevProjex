@@ -47,6 +47,8 @@ function createState(defaults) {
       buildSha: defaults.buildSha ?? null,
       limits: defaults.limits ?? null,
       limitsSha256: defaults.limitsSha256 ?? null,
+      serverInstructionsSha256: defaults.serverInstructionsSha256 ?? null,
+      toolConfigurationSha256: defaults.toolConfigurationSha256 ?? null,
     },
     startedAt: defaults.startedAt ?? null,
     endedAt: null,
@@ -72,6 +74,12 @@ function applyEvent(state, event, lineNumber) {
       state.metadata.buildSha = scalar(event.buildSha, state.metadata.buildSha);
       state.metadata.limits = scalar(event.limits, state.metadata.limits);
       state.metadata.limitsSha256 = scalar(event.limitsSha256, state.metadata.limitsSha256);
+      state.metadata.serverInstructionsSha256 = scalar(
+        event.serverInstructionsSha256,
+        state.metadata.serverInstructionsSha256);
+      state.metadata.toolConfigurationSha256 = scalar(
+        event.toolConfigurationSha256,
+        state.metadata.toolConfigurationSha256);
       state.startedAt = scalar(event.startedAt, state.startedAt);
       break;
     case 'mcp.response':

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { recordEvents } from '../lib/recorder.mjs';
 import { validateSeriesConfiguration } from '../lib/series-preflight.mjs';
@@ -13,6 +15,15 @@ import {
   loadTaskOracleRegistry,
 } from '../lib/task-oracle.mjs';
 import { reconcileOrderedAssessments, summarizeOrderedAssessments } from '../lib/order-consistency.mjs';
+import {
+  buildSeriesManifest,
+  createRunRecord,
+  createSeries,
+  resumeSeries,
+  storeRunRecord,
+  summarizeSeriesRecords,
+  validateArmAccounting,
+} from '../lib/series-store.mjs';
 
 test('parallel tool calls share one model turn and one usage snapshot', () => {
   const report = recordEvents([
@@ -162,7 +173,13 @@ test('series preflight rejects each unsafe boundary', () => {
     configuration => { configuration.mcpConfig.mcpServers.second = {}; },
     configuration => { configuration.recorderConnected = false; },
     configuration => { configuration.sessionState.previousTurns = 1; },
+    configuration => { configuration.seriesId = ''; },
+    configuration => { configuration.task = ''; },
+    configuration => { configuration.repetition = 0; },
+    configuration => { configuration.arm = ''; },
     configuration => { configuration.limits = {}; },
+    configuration => { configuration.serverInstructions = ''; },
+    configuration => { configuration.toolConfiguration = {}; },
     configuration => { configuration.clientVersion = 'different'; },
     configuration => { delete configuration.evaluator.orderDisagreementRate; },
   ];
@@ -184,7 +201,153 @@ test('series preflight rejects a reused session identifier and records pinned in
   assert.equal(snapshot.clientVersion, configuration.clientVersion);
   assert.equal(snapshot.evaluator.orderDisagreementRate, 1 / 3);
   assert.match(snapshot.limitsSha256, /^[0-9a-f]{64}$/);
+  assert.match(snapshot.serverInstructionsSha256, /^[0-9a-f]{64}$/);
+  assert.match(snapshot.toolConfigurationSha256, /^[0-9a-f]{64}$/);
   assert.throws(() => validateSeriesConfiguration(configuration, known), /session identifier was already used/);
+});
+
+test('series creation and continuation are explicit and validate every pinned input', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-series-'));
+  try {
+    const configuration = validSeriesConfiguration('series-one');
+    const created = await createSeries(directory, configuration);
+    assert.equal(created.manifest.identity.seriesId, 'series-one');
+    await assert.rejects(() => createSeries(directory, configuration), /already exists/);
+    await resumeSeries(created.directory, configuration);
+
+    for (const mutate of [
+      value => { value.productBuildSha = 'b'.repeat(40); },
+      value => { value.model = 'model-2'; },
+      value => { value.clientVersion = '2.1.999'; },
+      value => { value.toolLoadingMode = 'eager'; },
+      value => { value.serverInstructions = 'different instructions'; },
+      value => { value.toolConfiguration = { allowedTools: ['get_tree'] }; },
+      value => { value.limits = { maxTurns: 41, timeoutMs: 900000 }; },
+    ]) {
+      const changed = structuredClone(configuration);
+      mutate(changed);
+      await assert.rejects(() => resumeSeries(created.directory, changed), /Series identity mismatch:/);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('saved run reuse requires the complete identity accounting cost and outcome', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-series-'));
+  try {
+    const created = await createSeries(directory, validSeriesConfiguration('series-two'));
+    const record = validRunRecord(created.manifest, {
+      task: 'task-one',
+      repetition: 1,
+      arm: 'focused',
+      sessionId: '7d444840-9dc0-11d1-b245-5ffdce74fad2',
+    });
+    assert.equal((await storeRunRecord(created.directory, record)).status, 'stored');
+    assert.equal((await storeRunRecord(created.directory, structuredClone(record))).status, 'reused');
+
+    const mutations = [
+      ['series identifier', value => { value.identity.seriesId = 'another-series'; }],
+      ['task', value => { value.identity.task = 'task-two'; }],
+      ['repetition', value => { value.identity.repetition = 2; }],
+      ['arm', value => { value.identity.arm = 'baseline'; }],
+      ['session identifier', value => { value.identity.sessionId = '8d444840-9dc0-11d1-b245-5ffdce74fad2'; }],
+      ['product SHA', value => { value.identity.productBuildSha = 'b'.repeat(40); }],
+      ['model', value => { value.identity.model = 'model-2'; }],
+      ['client version', value => { value.identity.clientVersion = '2.1.999'; }],
+      ['server instructions fingerprint', value => { value.identity.serverInstructionsSha256 = 'b'.repeat(64); }],
+      ['tool configuration fingerprint', value => { value.identity.toolConfigurationSha256 = 'b'.repeat(64); }],
+      ['limits fingerprint', value => { value.identity.limitsSha256 = 'b'.repeat(64); }],
+      ['input usage', value => { value.measurement.usage.inputTokens++; }],
+      ['cache-write usage', value => { value.measurement.usage.cacheWriteTokens++; }],
+      ['cache-read usage', value => { value.measurement.usage.cacheReadTokens++; }],
+      ['output usage', value => { value.measurement.usage.outputTokens++; }],
+      ['cost', value => { value.measurement.cost.amount += 0.01; }],
+      ['outcome', value => { value.measurement.outcome = 'error'; }],
+    ];
+    for (const [name, mutate] of mutations) {
+      const changed = structuredClone(record);
+      mutate(changed);
+      await assert.rejects(
+        () => storeRunRecord(created.directory, changed, record.storageKey),
+        error => error.message.includes(name));
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('series summary derives totals from raw turns and checks every accounting boundary', () => {
+  const manifest = buildSeriesManifest(validSeriesConfiguration('series-three'));
+  const first = validRunRecord(manifest, {
+    task: 'task-one', repetition: 1, arm: 'baseline',
+    sessionId: '7d444840-9dc0-11d1-b245-5ffdce74fad2',
+  });
+  const second = validRunRecord(manifest, {
+    task: 'task-one', repetition: 2, arm: 'baseline',
+    sessionId: '8d444840-9dc0-11d1-b245-5ffdce74fad2',
+    status: 'error',
+  });
+  second.measurement.turns[0].usage.outputTokens = 7;
+  second.measurement.usage.outputTokens = 7;
+  second.measurement.cost.amount = 0.25;
+
+  const summary = summarizeSeriesRecords(manifest, [first, second]);
+  assert.deepEqual(summary.arms[0].usage, {
+    inputTokens: 20,
+    cacheWriteTokens: 4,
+    cacheReadTokens: 6,
+    outputTokens: 12,
+  });
+  assert.deepEqual(summary.arms[0].outcomes, { success: 1, error: 1, aborted: 0 });
+  assert.equal(summary.arms[0].cost.amount, 0.5);
+
+  const badSession = structuredClone(first);
+  badSession.measurement.usage.inputTokens++;
+  assert.throws(
+    () => summarizeSeriesRecords(manifest, [badSession]),
+    /sum of turns does not equal the session total/);
+
+  const foreign = structuredClone(first);
+  foreign.identity.seriesId = 'foreign-series';
+  assert.throws(
+    () => summarizeSeriesRecords(manifest, [first, foreign]),
+    /belongs to series 'foreign-series'/);
+
+  const badArm = structuredClone(summary.arms[0]);
+  badArm.usage.outputTokens++;
+  assert.throws(
+    () => validateArmAccounting([first, second], [badArm]),
+    /sum of sessions does not equal the arm total/);
+});
+
+test('series command builds its summary directly from stored session reports', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-series-command-'));
+  const configurationPath = join(directory, 'configuration.json');
+  const reportPath = join(directory, 'session.json');
+  const summaryPath = join(directory, 'summary.json');
+  const script = fileURLToPath(new URL('../series.mjs', import.meta.url));
+  try {
+    const configuration = validSeriesConfiguration('command-series');
+    writeFileSync(configurationPath, JSON.stringify(configuration));
+    const created = runSeriesCommand(script,
+      ['new', '--root', directory, '--configuration', configurationPath]);
+    const manifest = JSON.parse(created.stdout).manifest;
+    const report = createSessionReport(manifest, '9d444840-9dc0-11d1-b245-5ffdce74fad2');
+    writeFileSync(reportPath, JSON.stringify(report));
+    runSeriesCommand(script, [
+      'append', '--series', join(directory, 'command-series'), '--report', reportPath,
+      '--task', 'task-one', '--repetition', '1', '--arm', 'baseline', '--cost', '0.25', '--currency', 'USD',
+    ]);
+    runSeriesCommand(script, [
+      'summarize', '--series', join(directory, 'command-series'), '--output', summaryPath,
+    ]);
+    const summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
+    assert.equal(summary.sessions, 1);
+    assert.deepEqual(summary.arms[0].usage, report.totals.usage);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 function validPreflight() {
@@ -195,10 +358,16 @@ function validConfiguration() {
   return {
     mcpConfig: { mcpServers: { compared: {} } },
     recorderConnected: true,
+    seriesId: 'series-one',
+    task: 'task-one',
+    repetition: 1,
+    arm: 'baseline',
     sessionId: '7d444840-9dc0-11d1-b245-5ffdce74fad2',
     sessionState: { previousTurns: 0, storedPacks: 0 },
     buildSha: '35a8f7a9b660a96074aa6d7ececf38cf95a7f3aa',
     limits: { maxTurns: 40, timeoutMs: 900000, tasks: ['T1'] },
+    serverInstructions: 'Use one local DevProjex server.',
+    toolConfiguration: { allowedTools: ['get_file', 'search_project'] },
     model: 'model-1',
     expectedModel: 'model-1',
     clientVersion: '2.1.261',
@@ -206,6 +375,57 @@ function validConfiguration() {
     toolLoadingMode: 'dynamic',
     evaluator: { enabled: true, evaluatedPairs: 18, orderDisagreementRate: 1 / 3 },
   };
+}
+
+function validSeriesConfiguration(seriesId) {
+  return {
+    seriesId,
+    productBuildSha: '5f6b905210fd05025658d009cac066b0ab4ca43b',
+    model: 'model-1',
+    clientVersion: '2.1.261',
+    toolLoadingMode: 'dynamic',
+    serverInstructions: 'Use one local DevProjex server.',
+    toolConfiguration: { allowedTools: ['get_file', 'search_project'] },
+    limits: { maxTurns: 40, timeoutMs: 900000 },
+  };
+}
+
+function validRunRecord(manifest, options) {
+  const report = createSessionReport(manifest, options.sessionId, options.status);
+  return createRunRecord(manifest, {
+    task: options.task,
+    repetition: options.repetition,
+    arm: options.arm,
+  }, report, { amount: 0.25, currency: 'USD' });
+}
+
+function createSessionReport(manifest, sessionId, status = 'success') {
+  return recordEvents([
+    {
+      type: 'session',
+      sessionId,
+      clientVersion: manifest.identity.clientVersion,
+      model: manifest.identity.model,
+      toolLoadingMode: manifest.identity.toolLoadingMode,
+      buildSha: manifest.identity.productBuildSha,
+      serverInstructionsSha256: manifest.identity.serverInstructionsSha256,
+      toolConfigurationSha256: manifest.identity.toolConfigurationSha256,
+      limitsSha256: manifest.identity.limitsSha256,
+    },
+    { type: 'model.usage', turnId: 'turn-1', usage: {
+      input_tokens: 10,
+      cache_creation_input_tokens: 2,
+      cache_read_input_tokens: 3,
+      output_tokens: 5,
+    } },
+    { type: 'session.end', status, durationMs: 25 },
+  ]);
+}
+
+function runSeriesCommand(script, argumentsList) {
+  const result = spawnSync(process.execPath, [script, ...argumentsList], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  return result;
 }
 
 const oracleFixture = {

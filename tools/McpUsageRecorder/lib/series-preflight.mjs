@@ -15,8 +15,15 @@ export function validateSeriesConfiguration(configuration, knownSessionIds = new
   const state = configuration.sessionState;
   rejectUnless(state && Object.values(state).every(value => value === 0), 'session state must be empty');
 
+  rejectUnless(nonEmpty(configuration.seriesId), 'the series identifier is required');
+  rejectUnless(nonEmpty(configuration.task), 'the task identifier is required');
+  rejectUnless(Number.isSafeInteger(configuration.repetition) && configuration.repetition > 0,
+    'the repetition number must be a positive integer');
+  rejectUnless(nonEmpty(configuration.arm), 'the arm identifier is required');
   rejectUnless(/^[0-9a-f]{40}$/.test(configuration.buildSha ?? ''), 'a full lowercase build SHA is required');
   rejectUnless(isPinnedLimits(configuration.limits), 'all series limits must be pinned');
+  rejectUnless(nonEmpty(configuration.serverInstructions), 'the server instructions must be pinned');
+  rejectUnless(isPinnedValue(configuration.toolConfiguration), 'the tool configuration must be pinned');
 
   rejectUnless(nonEmpty(configuration.model) && configuration.model === configuration.expectedModel,
     'the model must match the pinned model');
@@ -33,12 +40,19 @@ export function validateSeriesConfiguration(configuration, knownSessionIds = new
 
   knownSessionIds.add(sessionId);
   const limits = canonicalize(configuration.limits);
+  const toolConfiguration = canonicalize(configuration.toolConfiguration);
   return Object.freeze({
+    seriesId: configuration.seriesId,
+    task: configuration.task,
+    repetition: configuration.repetition,
+    arm: configuration.arm,
     sessionId,
     server: servers[0],
     buildSha: configuration.buildSha,
     limits,
     limitsSha256: digest(JSON.stringify(limits)),
+    serverInstructionsSha256: digest(configuration.serverInstructions),
+    toolConfigurationSha256: digest(JSON.stringify(toolConfiguration)),
     model: configuration.model,
     clientVersion: configuration.clientVersion,
     toolLoadingMode: configuration.toolLoadingMode,
