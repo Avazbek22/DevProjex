@@ -45,6 +45,84 @@ public sealed class DependencyExtractionAndBindingIntegrationTests(ITestOutputHe
 	}
 
 	[Fact]
+	public async Task MissingTokenDropsItsDamagedConstructionAndKeepsIndependentFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var target = fixture.CreateFile("Target.cs", "public sealed class Target { }");
+		var source = fixture.CreateFile("Consumers.cs", """
+			public sealed class Before { Target value; }
+			public sealed class Broken { Target value }
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(result.Files, file => file.Path == "Consumers.cs");
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.True(facts.HasSyntaxErrors);
+		Assert.Contains(facts.Declarations, declaration => declaration.Identity.QualifiedName == "Before");
+		Assert.DoesNotContain(facts.Declarations, declaration => declaration.Identity.QualifiedName == "Broken");
+		var edge = Assert.Single(result.Edges, edge =>
+			edge.Source == "Consumers.cs" && edge.Target == "Target.cs");
+		Assert.Single(edge.Evidence);
+		var partial = Assert.IsType<DependencyPartialParseDiagnostic>(facts.PartialParse);
+		Assert.Equal(1, partial.DroppedConstructs);
+		Assert.Contains(partial.Ranges, range => range.StartLine == 2 && range.EndLine == 2);
+	}
+
+	[Fact]
+	public async Task DamagedUsingDirectiveDoesNotGrantVisibilityToLaterReferences()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var target = fixture.CreateFile("Target.cs", "namespace Models; public sealed class Target { }");
+		var source = fixture.CreateFile("Consumer.cs", """
+			using Models
+			public sealed class Consumer { Target value; }
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var reference = Assert.Single(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Reference == "Target");
+		Assert.Equal(ResolutionStatus.Unresolved, reference.Status);
+		Assert.Null(reference.Target);
+		Assert.NotNull(result.Files.Single(file => file.Path == "Consumer.cs").PartialParse);
+	}
+
+	[Fact]
+	public async Task DamagedGenericParameterScopeCannotResolveARecoveredTypeReference()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var misleading = fixture.CreateFile("T.cs", "public sealed class T { }");
+		var source = fixture.CreateFile("Consumer.cs", """
+			public sealed class Consumer<T
+			{
+			    T value;
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, misleading, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Target == "T.cs" && edge.Status == ResolutionStatus.Resolved);
+		Assert.NotNull(result.Files.Single(file => file.Path == "Consumer.cs").PartialParse);
+	}
+
+	[Fact]
 	public async Task ValidSyntaxKeepsFactsAndReportsByteIdenticalResultsWithoutPartialDiagnostics()
 	{
 		using var fixture = new TemporaryDirectory();
