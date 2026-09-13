@@ -119,13 +119,43 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains($"in {firstSymbol}\n", search, StringComparison.Ordinal);
 		Assert.Contains($"in {secondSymbol}\n", search, StringComparison.Ordinal);
 		Assert.Contains("in (no declaration)\n", search, StringComparison.Ordinal);
+		var firstSelector = Regex.Match(
+			search,
+			$"^{Regex.Escape(fileName)} {Regex.Escape(firstSymbol)} (?<start>[0-9]+)-(?<end>[0-9]+)$",
+			RegexOptions.Multiline,
+			TimeSpan.FromSeconds(2));
+		var secondSelector = Regex.Match(
+			search,
+			$"^{Regex.Escape(fileName)} {Regex.Escape(secondSymbol)} (?<start>[0-9]+)-(?<end>[0-9]+)$",
+			RegexOptions.Multiline,
+			TimeSpan.FromSeconds(2));
+		Assert.True(firstSelector.Success, search);
+		Assert.True(secondSelector.Success, search);
 
 		var first = Normalize(AllProcessText(await CallAsync(
 			server,
 			"get_file",
 			new Dictionary<string, object?> { ["path"] = fileName, ["symbol"] = firstSymbol })));
+		Assert.Contains(
+			$"Lines: {firstSelector.Groups["start"].Value}-{firstSelector.Groups["end"].Value} of ",
+			first,
+			StringComparison.Ordinal);
 		Assert.Contains("member-marker-a", first, StringComparison.Ordinal);
 		Assert.DoesNotContain("member-marker-b", first, StringComparison.Ordinal);
+
+		var batch = Normalize(AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["requests"] = new object[]
+				{
+					new { path = fileName, symbol = firstSymbol },
+					new { path = fileName, symbol = secondSymbol }
+				}
+			})));
+		Assert.Contains("member-marker-a", batch, StringComparison.Ordinal);
+		Assert.Contains("member-marker-b", batch, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -215,7 +245,7 @@ public sealed partial class McpServerProcessTests
 			new Dictionary<string, object?> { ["pattern"] = "coordinate-marker", ["context_lines"] = 0 })));
 		Assert.Contains("in Multi.Locate\n", searched, StringComparison.Ordinal);
 		Assert.Contains("9:        return \"coordinate-marker\";", searched, StringComparison.Ordinal);
-		Assert.Contains("Multi.cs Multi.Locate 7", searched, StringComparison.Ordinal);
+		Assert.Contains("Multi.cs Multi.Locate 7-10", searched, StringComparison.Ordinal);
 
 		var named = Normalize(AllProcessText(await CallAsync(
 			server,
@@ -335,7 +365,7 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain("\nin P.Wide", wide, StringComparison.Ordinal);
 		// The selector list still ships on a cut response: that is exactly when a caller would
 		// otherwise open a whole file to find a declaration it is already holding.
-		Assert.Contains("Declarations found (path, symbol, line):", wide, StringComparison.Ordinal);
+		Assert.Contains("Declarations found (path, symbol, lines):", wide, StringComparison.Ordinal);
 		Assert.Contains("[Symbols] annotated=0", wide, StringComparison.Ordinal);
 		Assert.True(wide.Length <= 18_000, $"Capped search returned {wide.Length} characters.");
 	}
@@ -483,14 +513,14 @@ public sealed partial class McpServerProcessTests
 
 		// Two hits share one declaration, so the list carries it once: this is what a caller reads
 		// back, and a declaration touched twice is still one thing to open.
-		Assert.Contains("Declarations found (path, symbol, line):", text, StringComparison.Ordinal);
-		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.One 5"));
-		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.Two 7"));
+		Assert.Contains("Declarations found (path, symbol, lines):", text, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.One 5-5"));
+		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.Two 7-7"));
 
 		// The sentence that turns the list into a call is a constant and sits outside the block,
 		// while the paths and names inside it are project text and stay in.
 		var untrustedEnd = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
-		Assert.True(text.IndexOf("src/App.cs P.App.One 5", StringComparison.Ordinal) < untrustedEnd);
+		Assert.True(text.IndexOf("src/App.cs P.App.One 5-5", StringComparison.Ordinal) < untrustedEnd);
 		Assert.True(
 			text.IndexOf("[Read declarations]", StringComparison.Ordinal) > untrustedEnd,
 			"The instruction must be trusted text, outside the untrusted block.");
@@ -534,7 +564,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("[Read declarations]", searched, StringComparison.Ordinal);
 		var selectors = Regex.Matches(
 			SpotlightBody(searched),
-			@"^(?<path>src/[^ ]+\.cs) (?<symbol>[^ ]+) (?<line>[0-9]+)$",
+			@"^(?<path>src/[^ ]+\.cs) (?<symbol>[^ ]+) (?<start>[0-9]+)-(?<end>[0-9]+)$",
 			RegexOptions.Multiline,
 			TimeSpan.FromSeconds(2));
 		Assert.Equal(2, selectors.Count);

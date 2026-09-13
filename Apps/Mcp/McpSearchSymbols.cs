@@ -98,7 +98,13 @@ internal static class McpSearchSymbols
 			// One entry per declaration, not per hit: this is the list a caller reads back, and a
 			// declaration touched by ten matches is still one thing to open.
 			if (declared.Add($"{hit.RelativePath}\u0000{best.Name}"))
-				declarations.Add(new McpSearchDeclaration(hit.RelativePath, best.Name, best.Start));
+			{
+				declarations.Add(new McpSearchDeclaration(
+					hit.RelativePath,
+					best.Name,
+					best.Start,
+					best.End));
+			}
 			annotated++;
 		}
 
@@ -247,9 +253,13 @@ internal readonly record struct McpSearchRenderedLine(
 
 /// <summary>
 /// One declaration a search touched, in the shape a caller passes back: the file to open, the name
-/// to ask for, and the line it starts on.
+/// to ask for, and its inclusive line range.
 /// </summary>
-internal readonly record struct McpSearchDeclaration(string RelativePath, string Name, int Line);
+internal readonly record struct McpSearchDeclaration(
+	string RelativePath,
+	string Name,
+	int StartLine,
+	int EndLine);
 
 internal sealed record McpSearchSymbolResult(
 	IReadOnlyDictionary<McpSearchHitKey, string> Names,

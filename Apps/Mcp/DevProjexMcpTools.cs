@@ -34,7 +34,7 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumStoredSearchCharacters = 2_000_000;
 	private const int MaximumWithheldFilesReported = 20;
 	private const string WithheldHeading = "Withheld matches by file:";
-	private const string DeclarationsHeading = "Declarations found (path, symbol, line):";
+	private const string DeclarationsHeading = "Declarations found (path, symbol, lines):";
 	// The one sentence that turns the list above into a call. Seven of twelve whole-file reads in
 	// the recorded sessions were issued with the declaration's name already on screen.
 	private const string ReadDeclarationsNotice =
@@ -3004,7 +3004,8 @@ internal sealed class DevProjexMcpTools(
 		{
 			var line =
 				$"{EscapeSingleLine(declaration.RelativePath)} {EscapeSingleLine(declaration.Name)} " +
-				$"{declaration.Line.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
+				$"{declaration.StartLine.ToString(CultureInfo.InvariantCulture)}-" +
+				$"{declaration.EndLine.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
 			if (rows.Length + line.Length > room)
 				break;
 			rows.Append(line);
