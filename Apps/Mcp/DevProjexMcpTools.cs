@@ -503,7 +503,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview when output exceeds 50,000 characters; page that result with read_pack. Values: detail=full|compact|signatures; view=tree|content|tree-content; format=markdown|text|json|xml; rank=importance; git_scope=staged|changes|diff:<ref>..<ref>. expand_related also packs the resolved dependency neighbours of its seeds and only narrows. focus requires rank=importance; max_tokens applies greedy content admission and reports heuristic token estimates, not tokenizer counts. detail_by_pattern overrides detail per file; the last matching entry wins, so list general globs first.")]
+		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview above 50,000 characters for read_pack. Key parameters: detail, view=tree|content|tree-content, format, rank, focus, max_tokens, git_scope, and detail_by_pattern. expand_related adds only resolved neighbours within selection. focus requires rank=importance; max_tokens uses greedy admission and heuristic estimates. Pattern overrides use the last match.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>

@@ -295,6 +295,157 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string CompactProjectProperty = """
+	"project": {
+	  "type": "string",
+	  "description": "Project name, listed absolute path, or allowed remote Git URL; omit only with one local root."
+	}
+	""";
+
+	private const string CompactBranchProperty = """
+	"branch": {
+	  "type": "string",
+	  "minLength": 1,
+	  "description": "Remote Git branch; invalid for local projects."
+	}
+	""";
+
+	private const string CompactIncludeProperty = """
+	"include_patterns": {
+	  "description": "Narrows with project-relative '/' globs: '*' and '?' stay in one segment, '**/' spans depths, and '{a,b}' alternates; matching is case-sensitive, while '!' and '[...]' are rejected.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 512 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	  ]
+	}
+	""";
+
+	private const string CompactExcludeProperty = """
+	"exclude_patterns": {
+	  "description": "Removes paths with the same project-relative glob syntax as include_patterns.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 512 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	  ]
+	}
+	""";
+
+	private const string CompactPathsProperty = """
+	"paths": {
+	  "description": "Narrows selection to literal paths for existing project-relative files or directories; glob characters are ordinary.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 4096 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	  ]
+	}
+	""";
+
+	private const string CompactProfileProperty = """
+	"profile": {
+	  "type": "string",
+	  "minLength": 1,
+	  "description": "Selection profile: standard uses all eight exclusion toggles plus gitignore; local uses the desktop profile listed by list_projects.profiles; otherwise give a portable profile path inside the project."
+	}
+	""";
+
+	private const string CompactDetailProperty = """
+	"detail": {
+	  "type": "string",
+	  "enum": ["full", "compact", "signatures"],
+	  "default": "full",
+	  "description": "Content transform: full keeps text, compact removes comments and blank lines, and signatures keeps supported code signatures; other languages remain unchanged."
+	}
+	""";
+
+	private const string CompactDetailByPatternProperty = """
+	"detail_by_pattern": {
+	  "type": "array",
+	  "maxItems": 16,
+	  "items": {
+	    "type": "object",
+	    "properties": {
+	      "patterns": {
+	        "type": "array",
+	        "minItems": 1,
+	        "maxItems": 32,
+	        "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+	        "description": "Uses the include_patterns glob syntax."
+	      },
+	      "detail": { "type": "string", "enum": ["full", "compact", "signatures"] }
+	    },
+	    "required": ["patterns", "detail"],
+	    "additionalProperties": false
+	  },
+	  "description": "Overrides detail by file in array order; the last match wins, never widens selection, and unmatched or invalid entries are reported."
+	}
+	""";
+
+	private const string CompactTrackedOnlyProperty = """
+	"tracked_only": {
+	  "description": "Restricts results to Git-tracked files; accepts a boolean or its string form.",
+	  "default": false,
+	  "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ]
+	}
+	""";
+
+	private const string CompactMaximumTokensProperty = """
+	"max_tokens": {
+	  "description": "Sets greedy content admission; document structure and its report are outside this heuristic token budget.",
+	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
+	}
+	""";
+
+	private const string CompactRankProperty = """
+	"rank": {
+	  "type": "string",
+	  "enum": ["importance"],
+	  "description": "Orders the selection with importance-v1 and controls max_tokens admission; omission keeps ordinary order and avoids dependency or Git-history work."
+	}
+	""";
+
+	private const string CompactFocusProperty = """
+	"focus": {
+	  "description": "Seeds focus-v1 order from 1..16 selected paths; requires rank=importance and never widens selection.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 4096 },
+	    { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	  ]
+	}
+	""";
+
+	private const string CompactGitScopeProperty = """
+	"git_scope": {
+	  "description": "Narrows to staged, changed (including untracked files), or diff:<ref>..<ref> paths; content stays from the current working tree.",
+	  "maxLength": 4096,
+	  "oneOf": [
+	    { "type": "string", "enum": ["staged", "changes"] },
+	    { "type": "string", "pattern": "^diff:(?!.*\\.\\.\\.)(?!.*\\.\\..*\\.\\.)[^\\s-]\\S*\\.\\.[^\\s-]\\S*$" }
+	  ]
+	}
+	""";
+
+	private const string CompactMaxFileBytesProperty = """
+	"max_file_bytes": {
+	  "description": "Excludes selected files larger than this byte count; accepts an integer or numeric string.",
+	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
+	}
+	""";
+
+	private static string CompactExpandRelatedProperty =>
+		$$"""
+	"expand_related": {
+	  "description": "Adds resolved neighbours of seed files without widening filters or Git scope; stops at {{McpRelatedExpansion.MaximumExpandedFiles}} files and reports the limit.",
+	  "type": "object",
+	  "properties": {
+	    "seeds": { "type": "array", "minItems": 1, "maxItems": {{McpRelatedExpansion.MaximumSeeds}}, "items": { "type": "string" }, "description": "Selected project-relative seed files; directories and globs are invalid." },
+	    "hops": { "type": "integer", "minimum": {{McpRelatedExpansion.MinimumHops}}, "maximum": {{McpRelatedExpansion.MaximumHops}}, "default": {{McpRelatedExpansion.MinimumHops}}, "description": "Number of edges to follow from each seed." },
+	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Traversal direction, matching related_files." }
+	  },
+	  "required": ["seeds"],
+	  "additionalProperties": false
+	}
+	""";
+
 	private static readonly string ListProjectsInput = EmptyInput;
 
 	private static string GetTreeInput(bool agentExclusions) => $$"""
@@ -347,23 +498,23 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
-	    {{PathsProperty}},
-	    {{IncludeProperty}},
-	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{ProfileProperty}},
-	    {{DetailProperty}},
-	    {{DetailByPatternProperty}},
-	    {{TrackedOnlyProperty}},
-	    {{GitScopeProperty}},
-	    {{RankProperty}},
-	    {{FocusProperty}},
-	    {{MaximumTokensProperty}},
-	    {{MaxFileBytesProperty}},
-	    {{ExpandRelatedProperty}},
-	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Pack view: tree includes structure only, content includes files only, tree-content includes both." },
-	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown", "description": "Pack format: markdown or text for readable output; json or xml for structured output." }
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    {{CompactPathsProperty}},
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactProfileProperty}},
+	    {{CompactDetailProperty}},
+	    {{CompactDetailByPatternProperty}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactGitScopeProperty}},
+	    {{CompactRankProperty}},
+	    {{CompactFocusProperty}},
+	    {{CompactMaximumTokensProperty}},
+	    {{CompactMaxFileBytesProperty}},
+	    {{CompactExpandRelatedProperty}},
+	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Chooses tree, file content, or both for the pack." },
+	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown", "description": "Chooses readable markdown/text or structured JSON/XML output." }
 	  },
 	  "additionalProperties": false
 	}
