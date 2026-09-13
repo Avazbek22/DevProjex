@@ -579,7 +579,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 						errorKinds[kind] = errorKinds.GetValueOrDefault(kind) + 1;
 					continue;
 				}
-				if (IsCaptureAffectedBySyntaxDamage(capture.Node, root, syntaxDamage))
+				if (syntaxDamage is not null && IsCaptureAffectedBySyntaxDamage(capture.Node, root, syntaxDamage))
 					continue;
 				var created = TryCreateCapture(capture.Name, capture.Node, materialization);
 				if (created is null)
@@ -630,7 +630,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		{
 			if ((visited++ & 255) == 0)
 				cancellationToken.ThrowIfCancellationRequested();
-			if (IsCaptureAffectedBySyntaxDamage(capture.Node, root, syntaxDamage))
+			if (syntaxDamage is not null && IsCaptureAffectedBySyntaxDamage(capture.Node, root, syntaxDamage))
 				continue;
 			var name = ReadNavigationName(capture.Node, language);
 			if (string.IsNullOrWhiteSpace(name))
@@ -761,23 +761,20 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private static bool IsCaptureAffectedBySyntaxDamage(
 		Node node,
 		Node root,
-		SyntaxDamageAnalysis? syntaxDamage)
+		SyntaxDamageAnalysis syntaxDamage)
 	{
 		if (node.HasError || node.IsError || node.IsMissing)
 			return true;
-		if (syntaxDamage is not null)
-		{
-			var start = checked((int)node.StartIndex);
-			var end = checked((int)node.EndIndex);
-			if (syntaxDamage.Spans.Any(span => start >= span.StartIndex && end <= span.EndIndex))
-				return true;
-		}
+		var start = checked((int)node.StartIndex);
+		var end = checked((int)node.EndIndex);
+		if (syntaxDamage.Spans.Any(span => start >= span.StartIndex && end <= span.EndIndex))
+			return true;
 		for (var current = node.Parent; current is not null && current != root; current = current.Parent)
 		{
 			if (current.IsError || current.IsMissing)
 				return true;
 			if (IsFactOwner(current.Type))
-				return current.HasError || syntaxDamage is not null && syntaxDamage.Spans.Any(span =>
+				return current.HasError || syntaxDamage.Spans.Any(span =>
 					checked((int)current.StartIndex) == span.StartIndex && checked((int)current.EndIndex) == span.EndIndex);
 		}
 		return false;
