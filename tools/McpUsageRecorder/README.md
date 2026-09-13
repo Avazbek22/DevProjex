@@ -100,7 +100,7 @@ The stream adapter retains model turns, tool calls and inputs, model-visible too
 per-result token counts supplied by the client, wire and decoded response boundaries, observable
 model-input boundaries, duration, outcome, and final answer. The carry-cost report requires an exact
 client-observed token count for every analyzed tool result and refuses to substitute a character
-estimate.
+estimate. Client-reported duration and measured wall-clock duration remain separate.
 
 Evaluation uses the deterministic task oracle first. A tied pair is eligible only for saved
 assessments recorded in both candidate orders. Each assessment pins the SHA-256 of both candidate

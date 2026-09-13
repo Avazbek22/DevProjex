@@ -546,6 +546,8 @@ test('one pipeline command probes runs stores evaluates and analyzes saved sessi
     assert.equal(result.status, 0, result.stderr);
     const output = JSON.parse(readFileSync(outputPath, 'utf8'));
     assert.equal(output.report.accounting.sessions, 2);
+    assert.equal(output.report.evaluation.rows[0].answers.left.classification, 'complete');
+    assert.equal(output.report.evaluation.rows[0].answers.right.classification, 'complete');
     assert.equal(output.report.evaluation.rows[0].ordered.correctness.status, 'verdict');
     assert.equal(output.report.evaluation.rows[0].ordered.preference.status, 'disagreement');
     assert.equal(output.report.analysis.readingGroups[0].classification, 'known-section-unused');
@@ -559,6 +561,12 @@ test('one pipeline command probes runs stores evaluates and analyzes saved sessi
       join(directory, definition.seriesId, 'observed.json'), 'utf8'));
     assert.equal(observed.toolsList[0].response.pages.length, 2);
     assert.equal(observed.toolsList[0].response.tools.length, 2);
+    const recordDirectory = join(directory, definition.seriesId, 'records');
+    const rawRecord = JSON.parse(readFileSync(join(recordDirectory, readdirSync(recordDirectory)[0]), 'utf8'));
+    assert.equal(rawRecord.measurement.wallDurationMs >= 0, true);
+    assert.equal(rawRecord.measurement.responseBoundaries.length, 10);
+    assert.equal(rawRecord.measurement.modelInputs.length, 11);
+    assert.equal(rawRecord.measurement.toolInteractions.length, 10);
 
     const rebuilt = spawnSync(process.execPath, [pipelineScript,
       '--mode', 'report', '--definition', definitionPath,

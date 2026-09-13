@@ -151,6 +151,7 @@ export function createRunRecord(manifest, slot, report) {
       cost: normalizedCost,
       outcome,
       durationMs: nullableNonNegativeInteger(report.session.durationMs, 'duration'),
+      wallDurationMs: nullableNonNegativeInteger(report.session.wallDurationMs, 'wall duration'),
       modelTurns,
       toolCalls: requireNonNegativeInteger(report.totals.toolCalls, 'tool call count'),
       wireResponseBytes: nullableNonNegativeInteger(report.totals.wireResponseBytes, 'wire response bytes'),

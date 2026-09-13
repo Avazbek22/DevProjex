@@ -24,6 +24,7 @@ emitTool(7, 'get_tree', {}, 'tree complete', 3);
 emitTool(8, 'get_file', { path: 'src/one.cs' }, 'one', 2);
 emitTool(9, 'get_file', { path: 'src/two.cs' }, 'two', 2);
 emitTool(10, 'get_file', { path: 'src/three.cs' }, 'three', 2);
+emit({ type: 'model.input', turnId: 'turn-11', text: 'final request boundary' });
 emit({
   type: responseType,
   message: {
@@ -37,6 +38,7 @@ emit({ type: 'result', is_error: false, duration_ms: 25, result: `${finalAnswer}
 function emitTool(turn, name, input, text, tokenCount) {
   const turnId = `turn-${turn}`;
   const callId = `call-${turn}`;
+  emit({ type: 'model.input', turnId, text: `request boundary ${turn}` });
   emit({
     type: responseType,
     message: {

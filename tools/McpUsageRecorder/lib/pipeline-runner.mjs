@@ -210,6 +210,7 @@ async function executeSession(context) {
     }
     return {
       ...report,
+      session: { ...report.session, wallDurationMs: result.durationMs },
       capture: {
         ...report.capture,
         rawCaptureSha256: capture.sha256,
