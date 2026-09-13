@@ -109,41 +109,6 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private const string ProjectProperty = """
-	"project": {
-	  "type": "string",
-	  "description": "Unique project name or absolute path returned by list_projects, or a Git URL when the server allows remote sources. Optional only when one local root is configured."
-	}
-	""";
-
-	private const string BranchProperty = """
-	"branch": {
-	  "type": "string",
-	  "minLength": 1,
-	  "description": "Optional Git branch for a remote project URL; invalid for local project paths."
-	}
-	""";
-
-	private const string IncludeProperty = """
-	"include_patterns": {
-	  "description": "One project-relative glob pattern using '/', or an array of up to 256 of them, that only narrow the effective filters. A pattern matches the whole relative path: '*' and '?' stay inside one path segment, '**/' spans any depth ('**/*.cs' is every C# file, 'src/**' a subtree), '{a,b}' lists alternatives. Matching is case-sensitive on every platform; '!' negation and '[...]' classes are rejected.",
-	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 512 },
-	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
-	  ]
-	}
-	""";
-
-	private const string ExcludeProperty = """
-	"exclude_patterns": {
-	  "description": "One project-relative glob pattern using '/', or an array of up to 256 of them, that remove further paths; same syntax as include_patterns.",
-	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 512 },
-	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
-	  ]
-	}
-	""";
-
 	// Published only when the server was started with --allow-agent-exclusions. Content redaction
 	// toggles are never part of this vocabulary; the enum is the shared exclusion catalog.
 	private static string ExclusionsPropertyFragment()
@@ -162,127 +127,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		""";
 	}
 
-	private const string PathsProperty = """
-	"paths": {
-	  "description": "One existing project-relative file or directory, or an array of up to 256 of them, that narrow the selection. Values are literal paths: *, ?, {, and [ are ordinary filename characters here, not glob syntax.",
-	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 4096 },
-	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
-	  ]
-	}
-	""";
-
-	private const string ProfileProperty = """
-	"profile": {
-	  "type": "string",
-	  "minLength": 1,
-	  "description": "Selection profile. 'standard' uses the desktop set of all eight exclusion toggles with gitignore and is stricter than the server default. 'local' uses the profile saved by the desktop app for this project and listed by list_projects.profiles. Otherwise use a portable profile JSON path inside the project root."
-	}
-	""";
-
-	private const string DetailProperty = """
-	"detail": {
-	  "type": "string",
-	  "enum": ["full", "compact", "signatures"],
-	  "default": "full",
-	  "description": "Content detail: full keeps text, compact strips comments and blank lines, signatures keeps code signatures where supported; unsupported languages remain unchanged."
-	}
-	""";
-
-	private const string DetailByPatternProperty = """
-	"detail_by_pattern": {
-	  "type": "array",
-	  "maxItems": 16,
-	  "items": {
-	    "type": "object",
-	    "properties": {
-	      "patterns": {
-	        "type": "array",
-	        "minItems": 1,
-	        "maxItems": 32,
-	        "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-	        "description": "Same syntax and matcher as include_patterns."
-	      },
-	      "detail": { "type": "string", "enum": ["full", "compact", "signatures"] }
-	    },
-	    "required": ["patterns", "detail"],
-	    "additionalProperties": false
-	  },
-	  "description": "Per-file overrides on detail. Entries apply in order and the LAST match wins - last-match, not first-match - so list general globs first. Never widens the selection; a glob matching nothing is reported in the trailer. An invalid entry names its index."
-	}
-	""";
-
-	private const string TrackedOnlyProperty = """
-	"tracked_only": {
-	  "description": "Restrict results to files tracked by Git; accepts a boolean or the string 'true' or 'false'.",
-	  "default": false,
-	  "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ]
-	}
-	""";
-
-	private const string MaximumTokensProperty = """
-	"max_tokens": {
-	  "description": "Maximum estimated content tokens admitted by the greedy file pass; accepts an integer or numeric string. Document structure and the budget report are outside this content budget. All token figures use a character heuristic, not a tokenizer.",
-	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
-	}
-	""";
-
-	private const string RankProperty = """
-	"rank": {
-	  "type": "string",
-	  "enum": ["importance"],
-	  "description": "Ranking mode; the only value is importance. It orders the effective selection by importance-v1, controls greedy admission with max_tokens, and otherwise controls document order. Omit it to preserve ordinary order and avoid dependency or Git-history work."
-	}
-	""";
-
-	private const string FocusProperty = """
-	"focus": {
-	  "description": "One selected path or an array of 1..16 selected paths that seed focus-v1 ordering. Requires rank=importance. Seeds are considered first; graph hops order the remaining effective selection without widening it.",
-	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 4096 },
-	    { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
-	  ]
-	}
-	""";
-
-	private const string GitScopeProperty = """
-	"git_scope": {
-	  "description": "Git path scope: staged, changes (including untracked files), or diff:<ref>..<ref>. It only narrows selected paths; content always comes from the current working tree.",
-	  "maxLength": 4096,
-	  "oneOf": [
-	    { "type": "string", "enum": ["staged", "changes"] },
-	    { "type": "string", "pattern": "^diff:(?!.*\\.\\.\\.)(?!.*\\.\\..*\\.\\.)[^\\s-]\\S*\\.\\.[^\\s-]\\S*$" }
-	  ]
-	}
-	""";
-
 	private const string TopFilesProperty = """
 	"top_files": {
 	  "description": "Returns this many largest text files by estimated tokens.",
 	  "default": 10,
 	  "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 1000 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
-	}
-	""";
-
-	private static string ExpandRelatedProperty =>
-		$$"""
-	"expand_related": {
-	  "description": "Also pack the statically resolved neighbours of the given seed files, in one call instead of a related_files round trip. Expansion only narrows: a neighbour outside the effective filters, the Git scope, or paths never enters. Only resolved edges travel. Stops at {{McpRelatedExpansion.MaximumExpandedFiles}} files and says so.",
-	  "type": "object",
-	  "properties": {
-	    "seeds": { "type": "array", "minItems": 1, "maxItems": {{McpRelatedExpansion.MaximumSeeds}}, "items": { "type": "string" }, "description": "Project-relative files already inside the effective selection; directories and globs are rejected." },
-	    "hops": { "type": "integer", "minimum": {{McpRelatedExpansion.MinimumHops}}, "maximum": {{McpRelatedExpansion.MaximumHops}}, "default": {{McpRelatedExpansion.MinimumHops}}, "description": "How many edges out from each seed to follow." },
-	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Which way to follow edges; same meaning as related_files.direction." }
-	  },
-	  "required": ["seeds"],
-	  "additionalProperties": false
-	}
-	""";
-
-	private const string MaxFileBytesProperty = """
-	"max_file_bytes": {
-	  "description": "Exclude otherwise selected files strictly larger than this byte count; integer or numeric string.",
-	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
 	}
 	""";
 
@@ -607,22 +456,22 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
 	    "path": {
-	      "description": "One seed path, or up to 16 seed paths, inside the effective project selection.",
+	      "description": "Seed file, or up to 16 seed files, within the effective selection.",
 	      "oneOf": [
 	        { "type": "string", "minLength": 1, "maxLength": 4096 },
 	        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
 	      ]
 	    },
-	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Static relationship direction: dependencies are files the seed references, dependents are files that reference the seed, both returns both sections." },
-	    {{IncludeProperty}},
-	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{ProfileProperty}},
-	    {{TrackedOnlyProperty}},
-	    {{GitScopeProperty}},
-	    {{MaxFileBytesProperty}}
+	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Chooses outward dependencies, inward dependents, or both." },
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactProfileProperty}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactGitScopeProperty}},
+	    {{CompactMaxFileBytesProperty}}
 	  },
 	  "required": ["path"],
 	  "additionalProperties": false

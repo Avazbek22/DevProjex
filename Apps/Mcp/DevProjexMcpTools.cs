@@ -1155,7 +1155,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Finds statically evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project instead for textual references, or get_file for content. Returns paths, evidence, resolution status, token estimates, language-limited coverage, configuration diagnostics, and scope; results over 50,000 characters use read_pack. Key parameters: path=string|array, direction=dependencies|dependents|both, profile, git_scope=staged|changes|diff:<ref>..<ref>, patterns, and max_file_bytes.")]
+		"Finds statically evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project instead for text references, or get_file for content. Returns paths, evidence, resolution status, token estimates, language-limited coverage, configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, patterns, and max_file_bytes.")]
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
