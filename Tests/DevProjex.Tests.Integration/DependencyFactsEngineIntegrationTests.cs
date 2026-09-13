@@ -48,7 +48,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		var middleware = fixture.CreateFile("src/Middleware.php", "<?php namespace GuzzleHttp; final class Middleware { public const NAME = 'value'; }");
 		var handler = fixture.CreateFile(
 			"src/HandlerStack.php",
-			"<?php namespace GuzzleHttp; final class HandlerStack { public function resolve() { Utils::choose(); return Middleware::NAME; } }");
+			"<?php namespace GuzzleHttp; final class HandlerStack { public function resolve() { Utils::choose(); \\GuzzleHttp\\Utils::choose(); return Middleware::NAME; } }");
 		using var engine = CreateEngine();
 
 		var index = await engine.IndexAsync(
@@ -58,6 +58,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
 			edge.Reference == "Utils" && edge.Target == "src/Utils.php" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
+			edge.Reference == "GuzzleHttp\\Utils" && edge.Target == "src/Utils.php" && edge.Status == ResolutionStatus.Resolved);
 		Assert.Contains(index.Edges, static edge => edge.Source == "src/HandlerStack.php" &&
 			edge.Reference == "Middleware" && edge.Target == "src/Middleware.php" && edge.Status == ResolutionStatus.Resolved);
 	}
@@ -141,6 +143,26 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task RubyRackEntryFilesUseRubyFacts()
+	{
+		using var fixture = new TemporaryDirectory();
+		var framework = fixture.CreateFile("lib/sinatra/base.rb", "module Sinatra\n  class Base\n  end\nend\n");
+		var entry = fixture.CreateFile("examples/stream.ru", "require 'sinatra/base'\nclass Stream < Sinatra::Base\nend\nrun Stream\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[framework, entry],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = index.Files.Single(static file => file.Path == "examples/stream.ru");
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.Contains(facts.Declarations, static declaration => declaration.Identity.QualifiedName == "Stream");
+		Assert.Contains(index.Edges, static edge => edge.Source == "examples/stream.ru" &&
+			edge.Target == "lib/sinatra/base.rb" && edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
 	public async Task RubyReopenedContainersDoNotCreateEdgesToEveryDeclarationFile()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -215,6 +237,40 @@ public sealed class DependencyFactsEngineIntegrationTests
 
 		Assert.Contains(index.Edges, static edge => edge.Source == "app/lib/app.rb" &&
 			edge.Target == "shared/lib/shared.rb" && edge.Status == ResolutionStatus.Resolved && edge.CrossScope);
+	}
+
+	[Fact]
+	public async Task RubyGemspecReceiversExposeDeclaredRepositoryDependencies()
+	{
+		using var fixture = new TemporaryDirectory();
+		var rootGemspec = fixture.CreateFile("sinatra.gemspec", "Gem::Specification.new 'sinatra', '1.0' do |s|\nend\n");
+		var indifferentHash = fixture.CreateFile("lib/sinatra/indifferent_hash.rb", "module Sinatra\n  class IndifferentHash\n  end\nend\n");
+		var contribGemspec = fixture.CreateFile("sinatra-contrib/sinatra-contrib.gemspec", """
+			Gem::Specification.new do |s|
+			  metadata.name = 'not-the-package'
+			  s.name = 'sinatra-contrib'
+			  s.add_dependency 'sinatra'
+			end
+			""");
+		var consumer = fixture.CreateFile("sinatra-contrib/lib/sinatra/config_file.rb", """
+			module Sinatra
+			  module ConfigFile
+			    VALUE = IndifferentHash.new
+			  end
+			end
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[rootGemspec, indifferentHash, contribGemspec, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge =>
+			edge.Source == "sinatra-contrib/lib/sinatra/config_file.rb" &&
+			edge.Target == "lib/sinatra/indifferent_hash.rb" &&
+			edge.Status == ResolutionStatus.Resolved &&
+			edge.CrossScope);
 	}
 
 	[Fact]
@@ -449,6 +505,39 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task KotlinGenericReferencesPreserveDeclaredArityWithoutResolvingTypeParameters()
+	{
+		using var fixture = new TemporaryDirectory();
+		var namedT = fixture.CreateFile("src/sample/T.kt", "package sample\nclass T\n");
+		var options = fixture.CreateFile("src/sample/TypedOptions.kt", "package sample\nclass TypedOptions<T>\n");
+		var source = fixture.CreateFile("src/sample/Consumer.kt", """
+			package sample
+			class Consumer {
+			  fun <T : Any> select(options: TypedOptions<T>): T? = null
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[namedT, options, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var typedOptions = Assert.Single(index.Edges, static edge => edge.Source == "src/sample/Consumer.kt" &&
+			edge.Reference == "TypedOptions");
+		Assert.Equal(ResolutionStatus.Resolved, typedOptions.Status);
+		Assert.Equal("src/sample/TypedOptions.kt", typedOptions.Target);
+		Assert.All(index.Edges.Where(static edge => edge.Source == "src/sample/Consumer.kt" && edge.Reference == "T"),
+			static edge =>
+			{
+				Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+				Assert.Contains("type parameter shadows declarations", edge.Reasons);
+			});
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "src/sample/Consumer.kt" &&
+			edge.Target == "src/sample/T.kt");
+	}
+
+	[Fact]
 	public async Task KotlinNavigationDistinguishesOwnersAndRepeatedMembers()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -562,6 +651,52 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task KotlinObjectReceiversResolveWithoutTreatingValuesAsTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var pool = fixture.CreateFile("src/commonMain/kotlin/okio/SegmentPool.kt", """
+			package okio
+			object SegmentPool {
+			  fun take() = Unit
+			  fun recycle(value: Any) = Unit
+			}
+			""");
+		var classPool = fixture.CreateFile("src/commonMain/kotlin/okio/ClassPool.kt", """
+			package okio
+			class ClassPool {
+			  companion object {
+			    fun take() = Unit
+			  }
+			}
+			""");
+		var consumer = fixture.CreateFile("src/commonMain/kotlin/okio/Segment.kt", """
+			package okio
+			fun use(value: Any) {
+			  SegmentPool.take()
+			  SegmentPool.recycle(value)
+			  ClassPool.take()
+			}
+			fun shadow(Local: Any) {
+			  val SegmentPool = Local
+			  SegmentPool.take()
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[pool, classPool, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var edge = Assert.Single(index.Edges, static edge => edge.Source.EndsWith("Segment.kt", StringComparison.Ordinal) &&
+			edge.Reference == "SegmentPool" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Equal("src/commonMain/kotlin/okio/SegmentPool.kt", edge.Target);
+		Assert.Equal(2, edge.Evidence.Count);
+		Assert.DoesNotContain(index.Edges, static candidate =>
+			candidate.Source.EndsWith("Segment.kt", StringComparison.Ordinal) &&
+			candidate.Target == "src/commonMain/kotlin/okio/ClassPool.kt");
+	}
+
+	[Fact]
 	public async Task RustFactsResolveModulesUsesAndTypesFromTheManifest()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -622,6 +757,107 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Contains(imports, static import => import.Specifier == "model::Plain" && import.Alias == "GroupAlias");
 		Assert.Contains(imports, static import => import.Specifier == "model::Commented" && import.Alias is null);
 		Assert.All(imports, static import => Assert.Equal(ResolutionStatus.Resolved, import.Status));
+	}
+
+	[Fact]
+	public async Task RustIntegrationTestRootsResolveSiblingModules()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = fixture.CreateFile("Cargo.toml", "[package]\nname = \"matcher\"\nversion = \"1.0.0\"\n");
+		var root = fixture.CreateFile("tests/tests.rs", "mod util; mod test_matcher;\n");
+		var util = fixture.CreateFile("tests/util.rs", "pub fn setup() {}\n");
+		var matcher = fixture.CreateFile("tests/test_matcher.rs", "pub fn runs() {}\n");
+		var nested = fixture.CreateFile("src/tests.rs", "mod hidden;\n");
+		var nestedChild = fixture.CreateFile("src/tests/hidden.rs", "pub struct Hidden;\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[manifest, root, util, matcher, nested, nestedChild],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "tests/tests.rs" &&
+			edge.Target == "tests/util.rs" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "tests/tests.rs" &&
+			edge.Target == "tests/test_matcher.rs" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "src/tests.rs" &&
+			edge.Target == "src/tests/hidden.rs" && edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task RustRestrictedReexportsResolveFromANonstandardCrateRoot()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = fixture.CreateFile("Cargo.toml", """
+			[package]
+			name = "command"
+			version = "1.0.0"
+
+			[[bin]]
+			name = "command"
+			path = "crates/core/main.rs"
+			""");
+		var root = fixture.CreateFile("crates/core/main.rs", "mod flags;\n");
+		var facade = fixture.CreateFile("crates/core/flags/mod.rs", """
+			pub(crate) use crate::flags::{
+			    complete::bash::generate as generate_complete_bash,
+			    doc::help::generate as generate_help,
+			};
+			mod complete;
+			mod doc;
+			""");
+		var complete = fixture.CreateFile("crates/core/flags/complete/mod.rs", "pub mod bash;\n");
+		var bash = fixture.CreateFile("crates/core/flags/complete/bash.rs", "pub fn generate() {}\n");
+		var doc = fixture.CreateFile("crates/core/flags/doc/mod.rs", "pub mod help;\n");
+		var help = fixture.CreateFile("crates/core/flags/doc/help.rs", "pub fn generate() {}\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[manifest, root, facade, complete, bash, doc, help],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, static edge => edge.Source == "crates/core/flags/mod.rs" &&
+			edge.Target == "crates/core/flags/complete/bash.rs" && edge.Reference == "flags::complete::bash::generate" &&
+			edge.Status == ResolutionStatus.Resolved);
+		Assert.Contains(index.Edges, static edge => edge.Source == "crates/core/flags/mod.rs" &&
+			edge.Target == "crates/core/flags/doc/help.rs" && edge.Reference == "flags::doc::help::generate" &&
+			edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task RustCrateQualifiedSuffixesDoNotCrossExplicitTargets()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = fixture.CreateFile("Cargo.toml", """
+			[package]
+			name = "command"
+			version = "1.0.0"
+
+			[[bin]]
+			name = "first"
+			path = "first/main.rs"
+
+			[[bin]]
+			name = "second"
+			path = "second/main.rs"
+			""");
+		var firstRoot = fixture.CreateFile("first/main.rs", "mod facade;\n");
+		var source = fixture.CreateFile("first/facade.rs", "pub(crate) use crate::secret::Hidden;\n");
+		var secondRoot = fixture.CreateFile("second/main.rs", "mod secret;\n");
+		var hidden = fixture.CreateFile("second/secret.rs", "pub struct Hidden;\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[manifest, firstRoot, source, secondRoot, hidden],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(index.Edges, static edge =>
+			edge.Source == "first/facade.rs" && edge.Reference == "secret::Hidden");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Empty(edge.Candidates);
 	}
 
 	[Fact]
@@ -760,6 +996,45 @@ public sealed class DependencyFactsEngineIntegrationTests
 			declaration.Name == "sample.Consumer.read" && declaration.Kind == NavigationSymbolKind.Method);
 		Assert.DoesNotContain(index.Declarations, static declaration =>
 			declaration.Identity.QualifiedName.EndsWith(".read", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task JavaTypeReceiversResolveWithoutTreatingValuesAsTypes()
+	{
+		using var fixture = new TemporaryDirectory();
+		var helper = fixture.CreateFile("src/sample/Helper.java", "package sample; public final class Helper { public static void run() {} }");
+		var consumer = fixture.CreateFile("src/sample/Consumer.java", """
+			package sample;
+			public class Consumer {
+			    void call() {
+			        Helper.run();
+			        sample.Helper.run();
+			    }
+			}
+			""");
+		var shadow = fixture.CreateFile("src/sample/Shadow.java", """
+			package sample;
+			public class Shadow {
+			    void call(Service Helper) {
+			        Helper.run();
+			    }
+			    void qualified(Service sample) {
+			        sample.Helper.run();
+			    }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[helper, consumer, shadow],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edges = index.Edges.Where(static edge => edge.Source == "src/sample/Consumer.java" &&
+			edge.Target == "src/sample/Helper.java" && edge.Status == ResolutionStatus.Resolved);
+		Assert.Equal(["Helper", "sample.Helper"], edges.Select(static edge => edge.Reference).Order().ToArray());
+		Assert.DoesNotContain(index.Edges, static edge => edge.Source == "src/sample/Shadow.java" &&
+			edge.Target == "src/sample/Helper.java");
 	}
 
 	[Fact]

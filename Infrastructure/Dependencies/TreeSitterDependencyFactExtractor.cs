@@ -895,6 +895,28 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				CapturedNameStartIndex: checked((int)(parameterNameNode?.StartIndex ?? node.StartIndex)),
 				Evidence: OneLineEvidence(name));
 		}
+		if (captureName == "context.value_name")
+		{
+			var name = materialization.Read(node);
+			var scope = node.Parent;
+			while (scope?.Parent is not null && scope.Type is not (
+			       "block" or "lambda_literal" or "function_declaration" or
+			       "class_body" or "source_file"))
+				scope = scope.Parent;
+			return new DependencySyntaxCapture(
+				captureName,
+				node.Type,
+				name,
+				checked((int)node.StartPosition.Row + 1),
+				checked((int)(scope?.StartIndex ?? node.StartIndex)),
+				checked((int)(scope?.EndIndex ?? node.EndIndex)),
+				name,
+				0,
+				false,
+				false,
+				CapturedNameStartIndex: checked((int)node.StartIndex),
+				Evidence: name);
+		}
 		string? moduleCallName = null;
 		if (captureName == "import.call" &&
 		    !TryReadSupportedModuleCall(node, materialization, out moduleCallName))
@@ -1402,7 +1424,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".java" => LanguageId.Java,
 		".rs" => LanguageId.Rust,
 		".kt" or ".kts" => LanguageId.Kotlin,
-		".rb" or ".rake" or ".gemspec" => LanguageId.Ruby,
+		".rb" or ".rake" or ".gemspec" or ".ru" => LanguageId.Ruby,
 		".php" or ".phtml" => LanguageId.Php,
 		_ => LanguageId.Unsupported
 	};

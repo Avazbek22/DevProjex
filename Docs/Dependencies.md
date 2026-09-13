@@ -172,7 +172,9 @@ declared package and complete nesting chain. Exact imports resolve only to match
 the allowed manifest; static imports walk back to the nearest declaring type. Same-package types and
 types admitted by an exact or wildcard import are visible to type references. Two visible declarations
 remain ambiguous, and a name elsewhere in the repository is never selected merely because it is the
-only match. Class, method, constructor, and nested-type parameters shadow declarations only inside
+only match. Capitalized receivers of method and field access provide type-reference evidence, while
+lexically visible value declarations with the same name suppress that evidence. Class, method,
+constructor, and nested-type parameters shadow declarations only inside
 their lexical owner; qualified names and types used by bounds remain ordinary references. Bounded
 `pom.xml`, `build.gradle`, and `build.gradle.kts` files divide a repository into
 source scopes. Package-qualified declarations inside a source scope remain resolvable when Maven
@@ -193,12 +195,16 @@ edges.
 Rust source files contribute modules, structs, enums, unions, traits, type aliases, and free
 functions under the module path implied by their repository path and inline `mod` nesting. A
 literal `mod name;` resolves from the declaring module directory: beside a crate root or `mod.rs`,
-under the stem directory of an ordinary source file, and under every enclosing inline module.
+beside a conventional top-level Cargo integration-test, example, or benchmark target, under the
+stem directory of an ordinary source file, and under every enclosing inline module.
 `#[path]` overrides stay unresolved because arbitrary module paths are not modeled. Private, `pub`, and
 restricted-visibility `use` trees, aliases, `crate`, `self`, and bounded `super` prefixes are expanded
 without executing code; `crate::`
-is resolved exclusively inside the nearest owning Cargo package, while exact
-items resolve only to matching declarations in the allowed manifest, while glob imports provide
+is resolved exclusively inside the nearest owning Cargo package. When a Cargo target uses a
+nonstandard source path, a crate-qualified item may match a unique declaration by its complete
+module suffix inside that explicit target; target boundaries and equal suffixes remain unresolved.
+Exact items otherwise resolve
+only to matching declarations in the allowed manifest, while glob imports provide
 visibility context without inventing a module edge. A bounded `Cargo.toml` supplies the crate name
 and literal local `path` dependencies, including dev and build dependencies. Referenced repository
 crates are visible transitively, but an unqualified declaration in the source file's own module and
@@ -221,6 +227,12 @@ to type references. Conventional multiplatform source-set paths constrain declar
 declarations are visible to platform source sets, while JVM sources exclude non-JVM, native, JS, and
 Wasm declaration sites. Class, function, and nested-class parameters shadow same-name declarations
 only inside their lexical owner; qualified names and types used by bounds remain ordinary references.
+Generic type references retain their declared arity while their type arguments are resolved or kept
+local independently, so `TypedOptions<T>` can resolve `TypedOptions` without turning `T` into a project edge.
+Capitalized receivers in qualified calls are type-reference evidence for a declared object when no
+parameter or property with that name is declared in the file. Class companion dispatch remains
+unresolved rather than inferred, and a same-named value remains a local expression instead of
+creating a type edge.
 Bounded `pom.xml`, `build.gradle`,
 and `build.gradle.kts` files define source scopes using the same literal repository-only Maven and
 Gradle project relationships described for Java. External artifacts, generated sources, compiler
@@ -236,7 +248,7 @@ name fall back to the nearest supported owner. A syntax tree containing an error
 recovered declarations nor recovered edges. Related-file coverage lists the bounded set of paths for
 which extraction failed, in addition to the aggregate count, so callers can inspect the omitted files.
 
-Ruby source files contribute classes and modules under their complete lexical owner chain. Literal
+Ruby source files (`.rb`, `.rake`, `.gemspec`, and Rack `.ru` entry files) contribute classes and modules under their complete lexical owner chain. Literal
 `require_relative` resolves only the corresponding `.rb` file beside the source, while literal
 `require` probes the repository root, its `lib` directory, and `lib` directories of repository gems
 made visible by a literal `path:` entry in `Gemfile`. Gem specifications are read as bounded data for
@@ -247,9 +259,13 @@ owned class or module does not define the referenced entity inside the project. 
 `require` with no repository target provides the same evidence for its matching constant root. Ruby code in Gemfiles
 or gemspecs is never executed. Installed gems without a literal declaration, generated
 load paths, interpolated require strings, autoload hooks, and runtime constant mutation are not
-inferred and remain unresolved. Because Ruby containers can be reopened, a class or module identity
-declared in more than one repository file remains unresolved rather than creating a dependency on
-every file that reopens it. References to a uniquely declared nested entity still resolve normally.
+inferred and remain unresolved. Literal gem names supplied to `Gem::Specification.new` or assigned
+to that block's receiver identify repository gem scopes. Literal `add_dependency` and
+`add_runtime_dependency` calls expose a uniquely matching repository gem to that scope; assignments
+to unrelated receivers are not package-name evidence. Because Ruby containers can be reopened, a
+class or module identity declared in more than one repository file remains unresolved rather than
+creating a dependency on every file that reopens it. References to a uniquely declared nested entity
+still resolve normally.
 
 Ruby navigation includes nested modules and classes, ordinary methods, singleton methods, instance
 variable assignments, and lambdas bound by assignment. Names use `::` for nesting, `#` for ordinary
@@ -261,7 +277,8 @@ error publishes neither recovered declarations nor recovered edges.
 PHP source files contribute classes, interfaces, traits, enums, and top-level functions under their
 declared namespace. Simple namespace `use` statements and aliases resolve only to matching declarations
 in the allowed manifest; inheritance, implemented interfaces, property types, parameters, return
-types, and unqualified static access inside the current namespace supply type-reference evidence.
+types, unqualified static access inside the current namespace, and fully qualified static access
+supply type-reference evidence.
 Bounded `composer.json` files provide package names, repository
 package dependencies, and literal PSR-4 mappings as data. Composer plugins, generated autoload files,
 installed vendor packages, grouped imports, and runtime class aliases are not executed or guessed and
@@ -362,6 +379,13 @@ currently covers named methods and fields in all supported languages, plus C# pr
 TypeScript signatures, Go interface methods, and Java, Kotlin, Ruby, and PHP members. Anonymous functions, C# accessors and operators,
 Python lambdas, Go function literals, unnamed Kotlin lambdas, Ruby metaprogramming, and anonymous PHP functions fall back to the nearest supported named owner rather than
 claiming a false member.
+
+C and C++ dependency facts remain unsupported. Their source grammars parse ordinary declarations,
+but project-defined prefix macros can change declaration syntax before the compiler sees it. Minimal
+valid inputs such as `UNITTEST void parse(void);` and `FMT_BEGIN_EXPORT class parsed_type {};` produce
+error nodes before preprocessing; the resulting tree can misclassify the macro as a type. DevProjex
+does not execute a project preprocessor or recover links from that ambiguous tree, because doing so
+could invent dependencies. C and C++ compression remains independent of dependency extraction.
 
 Each supported source file is parsed once per content fingerprint. Both fact and navigation queries
 run against that same live tree before it is disposed; only compact facts remain. Files
