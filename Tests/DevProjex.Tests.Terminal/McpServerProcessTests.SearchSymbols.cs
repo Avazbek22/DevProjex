@@ -652,7 +652,8 @@ public sealed partial class McpServerProcessTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("bounded-search-project");
-		var source = new StringBuilder("sealed class Bounded\n{\n    string Read()\n    {\n");
+		var ownerName = $"Bounded{new string('A', 500)}";
+		var source = new StringBuilder($"sealed class {ownerName}\n{{\n    string Read()\n    {{\n");
 		for (var line = 0; line < 200; line++)
 			source.Append("        var marker").Append(line.ToString("D3", CultureInfo.InvariantCulture))
 				.Append(" = \"").Append(new string('y', 100)).Append("\";\n");
@@ -673,6 +674,7 @@ public sealed partial class McpServerProcessTests
 			})));
 
 		Assert.Contains("Best declaration body (1 of 1):", text, StringComparison.Ordinal);
+		Assert.DoesNotContain($"in {ownerName}.Read", text, StringComparison.Ordinal);
 		Assert.Contains("[Search truncated]", text, StringComparison.Ordinal);
 		Assert.InRange(SpotlightBody(text).Length, 1, 16_000);
 	}

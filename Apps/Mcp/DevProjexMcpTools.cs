@@ -844,7 +844,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, patterns, and max_file_bytes. The first uniquely addressed declaration includes up to 1,800 protected body characters within the same cap; batch get_file reads the rest.")]
+		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, patterns, and max_file_bytes. First unique declaration includes up to 1,800 protected body characters within the same cap; read the rest with one batched get_file requests call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1072,7 +1072,7 @@ internal sealed class DevProjexMcpTools(
 			var declarationSection = AppendDeclarationSelectors(
 				output,
 				symbols.Declarations,
-				namesRefused ? null : declarationPreview);
+				declarationPreview);
 			var declarationsListed = declarationSection.DeclarationsListed;
 			// What the response could not carry is kept in the session, so the way forward is to
 			// page what this scan already found rather than to run the same scan again.
