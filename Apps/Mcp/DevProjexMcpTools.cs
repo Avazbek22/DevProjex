@@ -811,7 +811,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads one page of a stored result created by pack_context, search_project, or related_files in this server process. Use it for a returned pack_id; use pack_context instead, or related_files for dependency results, when an id is absent or expired. Returns untrusted result data up to 1,000 lines or 50,000 characters plus trusted continuation or range-clamp notes. Required: pack_id. Optional start_line and end_line are inclusive 1-based integers or numeric strings; start_column continues within start_line using 1-based Unicode characters.")]
+		"Reads one page of a stored result created by pack_context, search_project, or related_files in this server process. Use it with a returned pack_id; use pack_context instead, or related_files for dependencies, when none is valid. Returns untrusted data up to 1,000 lines or 50,000 characters with trusted continuation or range notes. pack_id is required; start_line and end_line are inclusive, and start_column continues within a long line, all 1-based.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
