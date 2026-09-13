@@ -2177,7 +2177,7 @@ public sealed partial class McpServerIntegrationTests
 			StringComparison.Ordinal);
 		Assert.Contains("one batched get_file requests call", search, StringComparison.Ordinal);
 		Assert.Contains("one batched get_file call", instructions, StringComparison.Ordinal);
-		Assert.Contains("When the project is unknown", instructions, StringComparison.Ordinal);
+		Assert.Contains("One local root is configured", instructions, StringComparison.Ordinal);
 		Assert.Contains("When one location is known", instructions, StringComparison.Ordinal);
 		Assert.Contains("only when a multi-file document is needed", instructions, StringComparison.Ordinal);
 		Assert.Single(
@@ -2202,12 +2202,54 @@ public sealed partial class McpServerIntegrationTests
 
 		// Agents reached for content search to find files, and got a silent empty answer.
 		Assert.Contains("find files by name", tree, StringComparison.Ordinal);
-		Assert.Contains("include_patterns=[\"**/*router*.ts\"]", tree, StringComparison.Ordinal);
+		Assert.Contains(
+			"include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]",
+			tree,
+			StringComparison.Ordinal);
 		Assert.Contains("matches file content, never paths", search, StringComparison.Ordinal);
 		Assert.Contains("get_tree include_patterns", search, StringComparison.Ordinal);
 		Assert.Contains("counts levels below the project root", tree, StringComparison.Ordinal);
 		Assert.Contains("below the project root", depth, StringComparison.Ordinal);
 		Assert.Contains("paths", depth, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task TreeGuidanceUsesOneExecutablePatternForSeveralDirectories()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		const string instructionPattern = "src/{middleware,routes}/**";
+		const string descriptionPattern =
+			"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts";
+		foreach (var directory in new[] { "middleware", "routes", "other" })
+		{
+			var path = Path.Combine(project, "src", directory);
+			Directory.CreateDirectory(path);
+			File.WriteAllText(Path.Combine(path, "request-handler.ts"), $"export const name = '{directory}';\n");
+		}
+
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+		var description = tools.Single(static tool => tool.Name == "get_tree").ProtocolTool.Description!;
+		var instructions = Assert.IsType<string>(server.Client.ServerInstructions);
+
+		Assert.Contains($"include_patterns=[\"{descriptionPattern}\"]", description, StringComparison.Ordinal);
+		Assert.Contains($"include_patterns=[\"{instructionPattern}\"]", instructions, StringComparison.Ordinal);
+		Assert.Contains("in one call", description, StringComparison.Ordinal);
+		Assert.Contains("instead of walking them separately", instructions, StringComparison.Ordinal);
+
+		var tree = AllText(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["format"] = "text",
+				["include_patterns"] = new[] { instructionPattern }
+			}));
+		Assert.Contains("middleware", tree, StringComparison.Ordinal);
+		Assert.Contains("routes", tree, StringComparison.Ordinal);
+		Assert.DoesNotContain("other", tree, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -6377,6 +6419,59 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SingleRootInstructionsPermitAProjectCallBeforeDiscoveryAndPreservePolicyNotices()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("private-root-name-48291");
+		File.WriteAllText(Path.Combine(project, "App.cs"), "internal sealed class App;\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var instructions = Assert.IsType<string>(server.Client.ServerInstructions);
+		Assert.StartsWith(
+			"One local root is configured: omit project, use project-relative paths, and " +
+			"skip list_projects unless you need profiles or active policy. ",
+			instructions,
+			StringComparison.Ordinal);
+		Assert.InRange(instructions.Length, 1, 1_200);
+		Assert.DoesNotContain("private-root-name-48291", instructions, StringComparison.Ordinal);
+
+		var tree = AllText(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" }));
+
+		Assert.Contains("App.cs", tree, StringComparison.Ordinal);
+		Assert.Contains("[Effective filters]", tree, StringComparison.Ordinal);
+		Assert.Contains("[Protection] secrets=always", tree, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task MultipleRootInstructionsKeepProjectDiscovery()
+	{
+		using var workspace = new TemporaryDirectory();
+		var first = workspace.CreateDirectory("first-project");
+		var second = workspace.CreateDirectory("second-project");
+		await using var server = await McpTestServer.StartAsync([first, second], workspace.Path);
+
+		var instructions = Assert.IsType<string>(server.Client.ServerInstructions);
+		Assert.StartsWith(
+			"When the project is unknown, use list_projects. When a location is unknown",
+			instructions,
+			StringComparison.Ordinal);
+		Assert.InRange(instructions.Length, 1, 1_200);
+		Assert.DoesNotContain("omit project in local calls", instructions, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(1)]
+	[InlineData(2)]
+	public void ServerInstructionSentencesDoNotStartWithLowercaseLetters(int rootCount)
+	{
+		var instructions = McpServerHost.BuildInstructions(rootCount);
+
+		Assert.DoesNotMatch("(?:^|[.!?]\\s+)[a-z]", instructions);
+	}
+
+	[Fact]
 	public async Task GetFileBatchPathOnlyRequestReadsTheWholeFile()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -7903,10 +7998,37 @@ public sealed partial class McpServerIntegrationTests
 			DependencyFactsEngine? dependencyFactsEngine = null,
 			IReadOnlySet<string>? remoteHosts = null)
 		{
+			return await StartAsync(
+				[project],
+				sandbox,
+				hidePrivateData,
+				servicesCreated,
+				allowRemote,
+				remoteServicesFactory,
+				gitMode,
+				exclusions,
+				agentExclusions,
+				dependencyFactsEngine,
+				remoteHosts);
+		}
+
+		public static async Task<McpTestServer> StartAsync(
+			IReadOnlyList<string> projects,
+			string sandbox,
+			bool hidePrivateData = false,
+			Action? servicesCreated = null,
+			bool allowRemote = false,
+			Func<McpRemoteProjectServices>? remoteServicesFactory = null,
+			GitFilteringMode? gitMode = null,
+			IReadOnlyCollection<ProjectExclusion>? exclusions = null,
+			bool agentExclusions = false,
+			DependencyFactsEngine? dependencyFactsEngine = null,
+			IReadOnlySet<string>? remoteHosts = null)
+		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
 			var serverTask = McpServerHost.RunWithStreamsAsync(
-				[project],
+				projects,
 				clientToServer.Reader.AsStream(),
 				serverToClient.Writer.AsStream(),
 				hidePrivateData,
