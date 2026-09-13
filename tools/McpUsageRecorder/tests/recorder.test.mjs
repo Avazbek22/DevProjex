@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { recordEvents } from '../lib/recorder.mjs';
 import { validateSeriesConfiguration } from '../lib/series-preflight.mjs';
 import { recordStreamJson } from '../lib/stream-json.mjs';
-import { compareTaskAnswers, evaluateTaskAnswer } from '../lib/task-oracle.mjs';
+import {
+  compareTaskAnswers,
+  evaluateTaskAnswer,
+  extractNamedPaths,
+  loadTaskOracleRegistry,
+} from '../lib/task-oracle.mjs';
 import { reconcileOrderedAssessments, summarizeOrderedAssessments } from '../lib/order-consistency.mjs';
 
 test('parallel tool calls share one model turn and one usage snapshot', () => {
@@ -203,6 +211,7 @@ function validConfiguration() {
 const oracleFixture = {
   id: 'sample',
   oracleCoverage: 'complete',
+  pathExtensions: ['cs', 'md'],
   requiredPaths: ['src/core.cs', 'tests/core.test.cs'],
   optionalPaths: ['docs/guide.md'],
   forbiddenPaths: ['src/unrelated.cs'],
@@ -270,6 +279,82 @@ test('task oracle comparison favors the answer covering more required criteria',
     basis: 'equal-criteria',
   });
 });
+
+for (const extension of ['go', 'js', 'jsx', 'tsx', 'rs', 'java', 'kt', 'rb', 'php', 'c', 'h', 'cpp', 'hpp']) {
+  test(`task oracle evaluates declared ${extension} paths`, () => {
+    const task = pathOracleFixture(extension);
+    const complete = evaluateTaskAnswer(task,
+      `The implementation is in \`src/main.${extension}\` and satisfies the expected behavior.`);
+    const incorrect = evaluateTaskAnswer(task,
+      `Use src/main.${extension}; src/forbidden.${extension} also satisfies the expected behavior.`);
+    const incomplete = evaluateTaskAnswer(task, 'The expected behavior is implemented.');
+
+    assert.equal(complete.classification, 'complete');
+    assert.deepEqual(complete.namedPaths, [`src/main.${extension}`]);
+    assert.equal(incorrect.classification, 'incorrect');
+    assert.deepEqual(incorrect.unexpectedPaths, [`src/forbidden.${extension}`]);
+    assert.equal(incomplete.classification, 'incomplete');
+    assert.deepEqual(incomplete.missingPaths, [`src/main.${extension}`]);
+  });
+}
+
+test('task oracle registry rejects a path whose extension is not declared', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-oracle-'));
+  const registryPath = join(directory, 'tasks.json');
+  try {
+    writeFileSync(registryPath, JSON.stringify({
+      schemaVersion: 2,
+      tasks: [{ ...pathOracleFixture('go'), requiredPaths: ['src/main.zig'] }],
+    }));
+
+    assert.throws(
+      () => loadTaskOracleRegistry(registryPath),
+      /path 'src\/main\.zig' uses an extension not listed in pathExtensions/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('task oracle ignores undeclared filenames and sample paths', () => {
+  const task = pathOracleFixture('go');
+  const answer = [
+    'The prose mentions package.json and main.go without declaring either path.',
+    'Sample code: `load("examples/demo.go")`.',
+    'The expected behavior is implemented.',
+  ].join('\n');
+
+  const result = evaluateTaskAnswer(task, answer);
+
+  assert.equal(result.classification, 'incomplete');
+  assert.deepEqual(result.namedPaths, []);
+  assert.deepEqual(extractNamedPaths(answer, task), []);
+});
+
+test('task oracle accepts a declared filename at the repository root', () => {
+  const task = {
+    ...pathOracleFixture('json'),
+    requiredPaths: ['package.json'],
+    forbiddenPaths: [],
+  };
+
+  const result = evaluateTaskAnswer(task, 'The expected behavior is configured in package.json.');
+
+  assert.equal(result.classification, 'complete');
+  assert.deepEqual(result.namedPaths, ['package.json']);
+});
+
+function pathOracleFixture(extension) {
+  return {
+    id: `path-${extension}`,
+    oracleCoverage: 'complete',
+    pathExtensions: [extension],
+    requiredPaths: [`src/main.${extension}`],
+    optionalPaths: [],
+    forbiddenPaths: [`src/forbidden.${extension}`],
+    requiredClaims: [{ id: 'behavior', terms: [['expected behavior']] }],
+    requiredSymbols: [],
+  };
+}
 
 test('order-dependent assessment is reported as disagreement instead of a verdict', () => {
   const result = reconcileOrderedAssessments(

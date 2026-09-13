@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "tasks": [
     {
       "id": "T1",
       "oracleCoverage": "partial",
+      "pathExtensions": ["py"],
       "requiredPaths": ["httpx/_client.py", "tests/client/test_redirects.py"],
       "optionalPaths": [],
       "requiredSymbols": [{ "id": "redirect-headers", "terms": ["_redirect_headers"] }],
@@ -18,6 +19,7 @@
     {
       "id": "T2",
       "oracleCoverage": "complete",
+      "pathExtensions": ["py", "md"],
       "requiredPaths": ["httpx/_transports/default.py", "httpx/_client.py", "httpx/_transports/base.py", "docs/advanced/transports.md", "docs/advanced/proxies.md", "tests/client/test_proxies.py"],
       "optionalPaths": [],
       "requiredSymbols": [{ "id": "transport-types", "terms": ["HTTPTransport", "AsyncHTTPTransport"] }],
@@ -30,6 +32,7 @@
     {
       "id": "T3",
       "oracleCoverage": "partial",
+      "pathExtensions": ["py", "md"],
       "requiredPaths": ["httpx/_client.py", "httpx/_models.py", "docs/advanced/extensions.md", "httpx/_types.py", "tests/client/test_client.py"],
       "optionalPaths": [],
       "requiredSymbols": [{ "id": "build-request", "terms": ["build_request"] }],
@@ -43,6 +46,7 @@
     {
       "id": "T4",
       "oracleCoverage": "partial",
+      "pathExtensions": ["ts"],
       "requiredPaths": ["src/request.ts", "src/utils/url.ts", "src/hono-base.ts", "src/request.test.ts", "src/utils/url.test.ts"],
       "optionalPaths": [],
       "requiredSymbols": [{ "id": "decode-functions", "terms": ["tryDecodeURIComponent", "getPath"] }],
@@ -56,6 +60,7 @@
     {
       "id": "T5",
       "oracleCoverage": "complete",
+      "pathExtensions": ["ts"],
       "requiredPaths": ["src/context.ts", "src/types.ts", "src/client/types.ts", "src/middleware/bearer-auth/index.ts", "src/middleware/cors/index.ts", "src/context.test.ts"],
       "optionalPaths": ["src/middleware/bearer-auth/index.test.ts", "src/middleware/cors/index.test.ts"],
       "requiredSymbols": [{ "id": "json-method", "terms": ["json"] }],
@@ -68,6 +73,7 @@
     {
       "id": "T6",
       "oracleCoverage": "partial",
+      "pathExtensions": ["json", "ts"],
       "strictPaths": false,
       "requiredPaths": ["package.json", "jsr.json"],
       "optionalPaths": ["src/middleware/method-not-allowed/index.ts", "src/middleware/body-limit/index.ts", "src/middleware/powered-by/index.ts", "src/middleware/method-not-allowed/index.test.ts", "src/middleware/body-limit/index.test.ts", "src/middleware/powered-by/index.test.ts"],
@@ -82,6 +88,7 @@
     {
       "id": "T7",
       "oracleCoverage": "partial",
+      "pathExtensions": ["cs"],
       "requiredPaths": ["src/Serilog/Core/LevelOverrideMap.cs", "src/Serilog/Core/Logger.cs", "src/Serilog/LoggerConfiguration.cs", "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs", "test/Serilog.Tests/Core/LevelOverrideMapTests.cs", "test/Serilog.Tests/Core/ChildLoggerTests.cs"],
       "optionalPaths": [],
       "requiredSymbols": [{ "id": "effective-level", "terms": ["GetEffectiveLevel"] }],
@@ -96,6 +103,7 @@
     {
       "id": "T8",
       "oracleCoverage": "complete",
+      "pathExtensions": ["cs"],
       "requiredPaths": ["src/Serilog/Core/ILogEventEnricher.cs", "src/Serilog/Core/Logger.cs", "src/Serilog/Core/Enrichers/PropertyEnricher.cs", "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs", "src/Serilog/Core/Enrichers/ConditionalEnricher.cs", "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs", "src/Serilog/Core/Enrichers/EmptyEnricher.cs", "src/Serilog/Context/LogContextEnricher.cs", "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs", "test/Serilog.Tests/Core/LoggerTests.cs", "test/Serilog.Tests/Context/LogContextTests.cs"],
       "optionalPaths": [],
       "requiredSymbols": [{ "id": "enrich-method", "terms": ["Enrich"] }],
@@ -109,6 +117,7 @@
     {
       "id": "N1",
       "oracleCoverage": "partial",
+      "pathExtensions": ["cs", "csproj"],
       "requiredPaths": ["src/Serilog/Core/IScalarConversionPolicy.cs", "src/Serilog/Capturing/PropertyValueConverter.cs", "src/Serilog/Policies/PrimitiveScalarConversionPolicy.cs", "src/Serilog/Policies/SimpleScalarConversionPolicy.cs", "src/Serilog/Policies/EnumScalarConversionPolicy.cs", "src/Serilog/Policies/ByteArrayScalarConversionPolicy.cs", "src/Serilog/Policies/ByteMemoryScalarConversionPolicy.cs"],
       "optionalPaths": ["src/Serilog/Serilog.csproj"],
       "requiredSymbols": [{ "id": "conversion-interface", "terms": ["IScalarConversionPolicy"] }],
@@ -123,6 +132,7 @@
     {
       "id": "N2",
       "oracleCoverage": "complete",
+      "pathExtensions": ["py"],
       "requiredPaths": ["httpx/_urlparse.py", "httpx/_urls.py", "httpx/_exceptions.py", "tests/models/test_url.py"],
       "optionalPaths": [],
       "requiredSymbols": [{ "id": "url-exception", "terms": ["InvalidURL"] }],
@@ -137,6 +147,7 @@
     {
       "id": "N3",
       "oracleCoverage": "partial",
+      "pathExtensions": ["ts"],
       "strictPaths": false,
       "requiredPaths": ["src/hono-base.ts", "src/context.ts", "src/request.ts", "src/compose.ts", "src/request/constants.ts"],
       "optionalPaths": ["src/helper/route/index.ts", "src/router.ts", "src/types.ts"],
@@ -152,6 +163,7 @@
     {
       "id": "N4",
       "oracleCoverage": "partial",
+      "pathExtensions": ["cs"],
       "requiredPaths": ["src/Serilog/Configuration/BatchingOptions.cs", "src/Serilog/Core/Sinks/Batching/BatchingSink.cs", "src/Serilog/Configuration/LoggerSinkConfiguration.cs", "src/Serilog/Core/LoggingFailureKind.cs", "src/Serilog/Core/ILoggingFailureListener.cs", "src/Serilog/Debugging/SelfLog.cs"],
       "optionalPaths": [],
       "requiredSymbols": [{ "id": "failure-listener", "terms": ["ILoggingFailureListener"] }],

@@ -1,11 +1,9 @@
 import { readFileSync } from 'node:fs';
 
-const pathPattern = /(?:^|[\s`"'(\[])(((?:[A-Za-z0-9_.@+\-]+\/)*[A-Za-z0-9_.@+\-]+\.(?:cs|csproj|py|ts|md|json))(?::\d+(?:-\d+)?)?)/gim;
-
 export function loadTaskOracleRegistry(path) {
   const source = JSON.parse(readFileSync(path, 'utf8'));
-  if (source.schemaVersion !== 1 || !Array.isArray(source.tasks))
-    throw new Error('Task oracle registry must use schema version 1 and contain a tasks array.');
+  if (source.schemaVersion !== 2 || !Array.isArray(source.tasks))
+    throw new Error('Task oracle registry must use schema version 2 and contain a tasks array.');
   return new Map(source.tasks.map(task => [task.id, validateTask(task)]));
 }
 
@@ -18,12 +16,7 @@ export function evaluateTaskAnswer(task, answer) {
   }
 
   const required = new Set(task.requiredPaths.map(normalizePath));
-  const recognizedRootPaths = new Set([
-    ...task.requiredPaths,
-    ...(task.optionalPaths ?? []),
-    ...(task.forbiddenPaths ?? []),
-  ].map(normalizePath));
-  const namedPaths = extractNamedPaths(text).filter(path => path.includes('/') || recognizedRootPaths.has(path));
+  const namedPaths = extractDeclaredPaths(text, task);
   const missingPaths = [...required].filter(path => !namedPaths.includes(path));
   const forbiddenPaths = new Set((task.forbiddenPaths ?? []).map(normalizePath));
   const unexpectedPaths = namedPaths.filter(path => forbiddenPaths.has(path));
@@ -88,7 +81,27 @@ export function splitComparedAnswers(text) {
   };
 }
 
-export function extractNamedPaths(text) {
+export function extractNamedPaths(text, task) {
+  validateTask(task);
+  return extractDeclaredPaths(text, task);
+}
+
+function extractDeclaredPaths(text, task) {
+  const declaredPaths = [...new Set([
+    ...task.requiredPaths,
+    ...(task.optionalPaths ?? []),
+    ...(task.forbiddenPaths ?? []),
+  ].map(normalizePath))];
+  if (declaredPaths.length === 0)
+    return [];
+
+  const alternatives = declaredPaths
+    .sort((left, right) => right.length - left.length || left.localeCompare(right, 'en'))
+    .map(pathPatternFor)
+    .join('|');
+  const pathPattern = new RegExp(
+    `(?:^|[\\s\x60"'(\\[])(${alternatives})(?::\\d+(?:-\\d+)?)?(?=$|[\\s\x60"',.;!?)}\\]])`,
+    'gm');
   const paths = new Set();
   for (const match of text.matchAll(pathPattern))
     paths.add(normalizePath(match[1]));
@@ -100,6 +113,23 @@ function validateTask(task) {
     throw new Error('Every task oracle requires an id.');
   if (!Array.isArray(task.requiredPaths) || !Array.isArray(task.requiredClaims))
     throw new Error(`Task oracle '${task.id}' requires path and claim arrays.`);
+  if (!Array.isArray(task.pathExtensions) || task.pathExtensions.length === 0 ||
+      task.pathExtensions.some(extension => typeof extension !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9+_-]*$/.test(extension)))
+    throw new Error(`Task oracle '${task.id}' requires valid pathExtensions without leading dots.`);
+  const pathExtensions = new Set(task.pathExtensions.map(extension => extension.toLocaleLowerCase('en-US')));
+  if (pathExtensions.size !== task.pathExtensions.length)
+    throw new Error(`Task oracle '${task.id}' has duplicate pathExtensions.`);
+  const pathGroups = [task.requiredPaths, task.optionalPaths ?? [], task.forbiddenPaths ?? []];
+  if (pathGroups.some(paths => !Array.isArray(paths) ||
+      paths.some(path => typeof path !== 'string' || path.length === 0)))
+    throw new Error(`Task oracle '${task.id}' has an invalid path array.`);
+  for (const path of pathGroups.flat()) {
+    const normalized = normalizePath(path).toLocaleLowerCase('en-US');
+    if (![...pathExtensions].some(extension => normalized.endsWith(`.${extension}`)))
+      throw new Error(
+        `Task oracle '${task.id}' path '${path}' uses an extension not listed in pathExtensions.`);
+  }
   if (task.requiredSymbols !== undefined && !Array.isArray(task.requiredSymbols))
     throw new Error(`Task oracle '${task.id}' has an invalid symbol array.`);
   for (const claim of [...task.requiredClaims, ...(task.forbiddenClaims ?? [])]) {
@@ -134,6 +164,13 @@ function result(task, classification, namedPaths, missingPaths, missingClaims, m
 
 function normalizePath(path) {
   return path.replaceAll('\\', '/').replace(/:\d+(?:-\d+)?$/, '');
+}
+
+function pathPatternFor(path) {
+  return path
+    .split('/')
+    .map(component => component.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[\\\\/]');
 }
 
 function includesText(text, term) {

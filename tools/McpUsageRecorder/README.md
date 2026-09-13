@@ -53,10 +53,18 @@ parallel tool calls by the model response identifier.
 
 ## Saved-answer evaluation
 
-`oracles/tasks.json` records task-specific required files and factual claims. The deterministic
-oracle classifies each saved answer as complete, incomplete, incorrect, or empty and reports every
-missing, unexpected, or contradicted criterion. Tasks marked `partial` retain an explicit list of
-criteria that still require qualitative assessment.
+`oracles/tasks.json` records task-specific required files, factual claims, and `pathExtensions`.
+Every declared required, optional, or forbidden path must use an extension listed by its task, so a
+new language is enabled in registry data rather than in extractor code. Registry loading fails when
+these declarations disagree.
+
+A file is named only when the answer contains a complete, standalone path declared by that task;
+either slash style and an optional `:line` or `:start-end` suffix are accepted. An undeclared bare
+filename such as `package.json`, or an undeclared path shown in prose or sample code, is ignored.
+Code formatting does not exempt a declared path: an exact declared token still counts. The
+deterministic oracle classifies each saved answer as complete, incomplete, incorrect, or empty and
+reports every missing, unexpected, or contradicted criterion. Tasks marked `partial` retain an
+explicit list of criteria that still require qualitative assessment.
 
 Qualitative comparisons keep correctness and preference as separate dimensions. Each pair is
 assessed in both candidate orders. A verdict exists only when both orders map to the same candidate;
