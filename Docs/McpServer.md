@@ -132,7 +132,13 @@ uses the same tokens and stays valid across versions. A `paths` entry that the
 effective exclusion set hides yields an empty selection rather than an error,
 so check `analyze.files` when combining `paths` with exclusions.
 
-The recommended tool sequence is:
+Project discovery is conditional. With exactly one configured local root, omit
+`project`, use project-relative paths, and begin with the project operation that
+answers the question. Use `list_projects` for profiles and the active policy, not
+only to learn that root's name. With several roots, use `list_projects` when the
+project is not already known.
+
+A typical multi-root sequence is:
 
 ```text
 list_projects -> get_tree/analyze -> search_project/related_files/get_file -> pack_context -> read_pack
@@ -145,8 +151,7 @@ Tool descriptions remain self-contained because some clients do not display
 server instructions; each description states the tool's purpose, when to use a
 named alternative, its result, and its key limit.
 
-Use `list_projects` first to obtain the unique project name or absolute path that
-the other tools accept. Use `get_tree` for structure without content, `analyze`
+Use `get_tree` for structure without content, `analyze`
 for transformed size and token estimates before packing, `search_project` for
 textual locations, `related_files` for statically evidenced relationships,
 `get_file` for one file page, and `pack_context` for multi-file context. A large
@@ -315,7 +320,7 @@ description has to fit a budget rather than grow one silently.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
-| `list_projects` | none | First-call session inventory: allowed local roots with path, name, type, and profiles, plus the server `baseline`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. A project tool accepts either a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
+| `list_projects` | none | Session inventory used for profiles, active policy, or choosing among several projects: allowed local roots with path, name, type, and profiles, plus the server `baseline`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. With one local root, project tools accept an omitted `project`; otherwise they accept a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
