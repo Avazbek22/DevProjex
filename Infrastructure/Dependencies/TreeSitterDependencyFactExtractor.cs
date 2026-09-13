@@ -408,10 +408,15 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		cancellationToken.ThrowIfCancellationRequested();
 		var runtime = GetRuntime(language);
 		using var lease = runtime.Rent(_workerBudget);
-		using var tree = lease.Parser.Parse(source) ??
+		var preparedParse = PrepareParseSource(language, source);
+		using var tree = lease.Parser.Parse(preparedParse.Source) ??
 			throw new InvalidOperationException("Tree-sitter returned no syntax tree.");
 		Interlocked.Increment(ref _parseCount);
-		var syntaxDamage = AnalyzeSyntaxDamage(tree.RootNode, relativePath, cancellationToken);
+		var syntaxDamage = AnalyzeSyntaxDamage(
+			tree.RootNode,
+			relativePath,
+			cancellationToken,
+			preparedParse.OmittedRegions);
 		return CaptureNavigation(
 			runtime.Navigation,
 			tree.RootNode,
@@ -439,10 +444,15 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			cancellationToken.ThrowIfCancellationRequested();
 			var runtime = GetRuntime(source.LanguageId);
 			using var lease = runtime.Rent(_workerBudget);
-			using var tree = lease.Parser.Parse(source.Source) ??
+			var preparedParse = PrepareParseSource(source.LanguageId, source.Source);
+			using var tree = lease.Parser.Parse(preparedParse.Source) ??
 				throw new InvalidOperationException("Tree-sitter returned no syntax tree.");
 			Interlocked.Increment(ref _parseCount);
-			var syntaxDamage = AnalyzeSyntaxDamage(tree.RootNode, source.RelativePath, cancellationToken);
+			var syntaxDamage = AnalyzeSyntaxDamage(
+				tree.RootNode,
+				source.RelativePath,
+				cancellationToken,
+				preparedParse.OmittedRegions);
 			var partialParse = syntaxDamage?.Diagnostic;
 			var (declarations, references, errorKinds, rawCaptureLimitExceeded) = CaptureFacts(
 				runtime.Facts,
@@ -458,7 +468,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				source.LanguageId,
 				source.Source,
 				source.ContentFingerprint,
-				tree.RootNode.HasError,
+				syntaxDamage is not null,
 				errorKinds,
 				declarations,
 				references,
@@ -706,11 +716,17 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 	private static SyntaxDamageAnalysis? AnalyzeSyntaxDamage(
 		Node root,
 		string relativePath,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyList<SyntaxDamageRegion>? omittedRegions = null)
 	{
-		if (!root.HasError)
+		if (!root.HasError && omittedRegions is not { Count: > 0 })
 			return null;
-		var damaged = new HashSet<(int StartIndex, int EndIndex, int StartLine, int EndLine)>();
+		var damaged = new HashSet<(int StartIndex, int EndIndex, int StartLine, int EndLine)>(
+			omittedRegions?.Select(static region => (
+				region.StartIndex,
+				region.EndIndex,
+				region.StartLine,
+				region.EndLine)) ?? []);
 		var pending = new Stack<Node>();
 		pending.Push(root);
 		var visited = 0;
@@ -750,6 +766,99 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			ordered.Select(static range => new SyntaxDamageSpan(range.StartIndex, range.EndIndex)).ToArray());
 	}
 
+	/// <summary>
+	/// Tree-sitter-c-sharp cannot place a conditional directive between the unconditional part of a
+	/// type base list and its opening brace. Keeping both branches would invent a configuration; the
+	/// safe projection removes the complete conditional region, preserves every byte position and
+	/// line break, and lets independent members keep their evidence.
+	/// </summary>
+	private static ParseSourcePreparation PrepareParseSource(LanguageId language, string source)
+	{
+		if (language != LanguageId.CSharp || source.IndexOf("#if", StringComparison.Ordinal) < 0)
+			return new ParseSourcePreparation(source, []);
+
+		var lines = ReadSourceLines(source);
+		char[]? projected = null;
+		var omitted = new List<SyntaxDamageRegion>();
+		for (var index = 0; index < lines.Count; index++)
+		{
+			var line = lines[index];
+			if (!IsDirective(source, line, "#if") || !IsConditionalTypeBaseList(source, line.StartIndex))
+				continue;
+
+			var depth = 1;
+			var endLine = -1;
+			for (var candidate = index + 1; candidate < lines.Count; candidate++)
+			{
+				if (IsDirective(source, lines[candidate], "#if"))
+					depth++;
+				else if (IsDirective(source, lines[candidate], "#endif") && --depth == 0)
+				{
+					endLine = candidate;
+					break;
+				}
+			}
+			if (endLine < 0)
+				continue;
+
+			projected ??= source.ToCharArray();
+			var endIndex = lines[endLine].EndIndex;
+			for (var offset = line.StartIndex; offset < endIndex; offset++)
+				if (projected[offset] is not ('\r' or '\n')) projected[offset] = ' ';
+			omitted.Add(new SyntaxDamageRegion(line.StartIndex, endIndex, index + 1, endLine + 1));
+			index = endLine;
+		}
+
+		return projected is null
+			? new ParseSourcePreparation(source, [])
+			: new ParseSourcePreparation(new string(projected), omitted);
+	}
+
+	private static bool IsConditionalTypeBaseList(string source, int directiveStart)
+	{
+		var start = directiveStart;
+		while (start > 0 && directiveStart - start < 4096)
+		{
+			var previous = source[start - 1];
+			if (previous is '{' or '}' or ';')
+				break;
+			start--;
+		}
+		var prefix = source[start..directiveStart];
+		return prefix.Contains(':', StringComparison.Ordinal) &&
+			Regex.IsMatch(prefix, @"\b(class|struct|record|interface)\s+[_\p{L}][\p{L}\p{N}_]*[^{};]*:\s*[^{};]*$",
+				RegexOptions.CultureInvariant);
+	}
+
+	private static bool IsDirective(string source, SourceLine line, string directive)
+	{
+		var text = source.AsSpan(line.StartIndex, line.EndIndex - line.StartIndex).TrimStart();
+		return text.StartsWith(directive, StringComparison.Ordinal) &&
+			(text.Length == directive.Length || char.IsWhiteSpace(text[directive.Length]));
+	}
+
+	private static IReadOnlyList<SourceLine> ReadSourceLines(string source)
+	{
+		var lines = new List<SourceLine>();
+		var start = 0;
+		for (var index = 0; index < source.Length; index++)
+		{
+			if (source[index] == '\r' && index + 1 < source.Length && source[index + 1] == '\n')
+			{
+				lines.Add(new SourceLine(start, index + 2));
+				start = ++index + 1;
+			}
+			else if (source[index] is '\r' or '\n')
+			{
+				lines.Add(new SourceLine(start, index + 1));
+				start = index + 1;
+			}
+		}
+		if (start < source.Length || source.Length == 0)
+			lines.Add(new SourceLine(start, source.Length));
+		return lines;
+	}
+
 	private static Node FindDamagedConstruct(Node defect, Node root)
 	{
 		for (var current = defect.Parent; current is not null && current != root; current = current.Parent)
@@ -785,6 +894,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		IReadOnlyList<SyntaxDamageSpan> Spans);
 
 	private readonly record struct SyntaxDamageSpan(int StartIndex, int EndIndex);
+	private sealed record ParseSourcePreparation(string Source, IReadOnlyList<SyntaxDamageRegion> OmittedRegions);
+	private readonly record struct SyntaxDamageRegion(int StartIndex, int EndIndex, int StartLine, int EndLine);
+	private readonly record struct SourceLine(int StartIndex, int EndIndex);
 
 	private static bool IsFactOwner(string nodeType) => nodeType is
 		"namespace_declaration" or "file_scoped_namespace_declaration" or

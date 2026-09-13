@@ -411,6 +411,13 @@ file. The partial-parse diagnostic reports how many constructions were dropped a
 ranges; no fact from a damaged region is published or guessed. C and C++ compression remains
 independent of dependency extraction.
 
+The C# grammar cannot represent a conditional-compilation block placed between an unconditional type
+base list and its opening brace. DevProjex does not choose a compilation symbol or combine the
+branches. It replaces that complete conditional region with position-preserving whitespace before
+the single parse, reports the region as omitted, and retains only declarations, references, and
+navigation names from the unconditional source around it. A type named only inside that region does
+not become a dependency.
+
 Each supported source file is parsed once per content fingerprint. Both fact and navigation queries
 run against that same live tree before it is disposed; only compact facts remain. Files
 without an adapter are counted as unsupported instead of disappearing. Read, grammar, and query

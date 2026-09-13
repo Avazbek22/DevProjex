@@ -123,6 +123,42 @@ public sealed class DependencyExtractionAndBindingIntegrationTests(ITestOutputHe
 	}
 
 	[Fact]
+	public async Task ConditionalBaseListKeepsFactsOutsideTheConditionalRegion()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var target = fixture.CreateFile("Target.cs", "public sealed class Target { }");
+		var conditional = fixture.CreateFile("Conditional.cs", "public interface IConditional { }");
+		var source = fixture.CreateFile("Consumer.cs", """
+			public sealed class Consumer : IDisposable
+			#if FEATURE_DISPOSABLE
+			    , IConditional
+			#endif
+			{
+			    Target value;
+			    public void Dispose() { }
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, target, conditional, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(result.Files, file => file.Path == "Consumer.cs");
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.True(facts.HasSyntaxErrors);
+		Assert.Contains(facts.Declarations, declaration => declaration.Identity.QualifiedName == "Consumer");
+		Assert.Contains(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Target == "Target.cs" && edge.Status == ResolutionStatus.Resolved);
+		Assert.DoesNotContain(result.Edges, edge =>
+			edge.Source == "Consumer.cs" && edge.Target == "Conditional.cs" && edge.Status == ResolutionStatus.Resolved);
+		var partial = Assert.IsType<DependencyPartialParseDiagnostic>(facts.PartialParse);
+		Assert.Contains(partial.Ranges, range => range.StartLine <= 2 && range.EndLine >= 4);
+	}
+
+	[Fact]
 	public async Task ValidSyntaxKeepsFactsAndReportsByteIdenticalResultsWithoutPartialDiagnostics()
 	{
 		using var fixture = new TemporaryDirectory();
