@@ -50,6 +50,8 @@ function createState(defaults) {
       serverInstructionsSha256: defaults.serverInstructionsSha256 ?? null,
       toolConfigurationSha256: defaults.toolConfigurationSha256 ?? null,
       pricingSha256: defaults.pricingSha256 ?? null,
+      toolsListSha256: defaults.toolsListSha256 ?? null,
+      seriesDefinitionSha256: defaults.seriesDefinitionSha256 ?? null,
     },
     startedAt: defaults.startedAt ?? null,
     endedAt: null,
@@ -82,6 +84,10 @@ function applyEvent(state, event, lineNumber) {
         event.toolConfigurationSha256,
         state.metadata.toolConfigurationSha256);
       state.metadata.pricingSha256 = scalar(event.pricingSha256, state.metadata.pricingSha256);
+      state.metadata.toolsListSha256 = scalar(event.toolsListSha256, state.metadata.toolsListSha256);
+      state.metadata.seriesDefinitionSha256 = scalar(
+        event.seriesDefinitionSha256,
+        state.metadata.seriesDefinitionSha256);
       state.startedAt = scalar(event.startedAt, state.startedAt);
       break;
     case 'mcp.response':

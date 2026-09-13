@@ -12,11 +12,28 @@ export function recordStreamJson(lines, pinnedSession) {
   let observedClientVersion = null;
   let activeTurnId = null;
   const completedUsageTurns = new Set();
+  const interactions = new Map();
+  const responseTexts = new Map();
+  let sequence = 0;
+  let resultText = null;
 
   for (const line of lines) {
     const sourceEvent = typeof line === 'string' ? parseLine(line) : line;
     if (!sourceEvent)
       continue;
+    sequence++;
+
+    if (sourceEvent.type === 'mcp.response') {
+      events.push(sourceEvent);
+      const interaction = interactions.get(sourceEvent.requestId);
+      if (interaction) {
+        interaction.responseSequence = sequence;
+        interaction.responseText = sourceEvent.decodedText ?? null;
+        interaction.responseTokens = exactTokenCount(sourceEvent);
+        interaction.success = sourceEvent.success !== false;
+      }
+      continue;
+    }
 
     if (sourceEvent.type === 'system' && sourceEvent.subtype === 'init') {
       observedSessionId = sourceEvent.session_id ?? observedSessionId;
@@ -34,6 +51,8 @@ export function recordStreamJson(lines, pinnedSession) {
         serverInstructionsSha256: pinnedSession.serverInstructionsSha256,
         toolConfigurationSha256: pinnedSession.toolConfigurationSha256,
         pricingSha256: pinnedSession.pricingSha256,
+        toolsListSha256: pinnedSession.toolsListSha256,
+        seriesDefinitionSha256: pinnedSession.seriesDefinitionSha256,
         startedAt: sourceEvent.timestamp,
       });
       continue;
@@ -45,10 +64,28 @@ export function recordStreamJson(lines, pinnedSession) {
         continue;
       const toolCallIds = [];
       for (const block of sourceEvent.message.content ?? []) {
+        if (block.type === 'text' && typeof block.text === 'string') {
+          const existing = responseTexts.get(turnId) ?? '';
+          responseTexts.set(turnId, `${existing}${block.text}`);
+          continue;
+        }
         if (block.type !== 'tool_use' || !block.id)
           continue;
         toolCallIds.push(block.id);
         toolTurns.set(block.id, turnId);
+        if (!interactions.has(block.id)) {
+          interactions.set(block.id, {
+            sequence,
+            responseSequence: null,
+            id: block.id,
+            turnId,
+            name: block.name,
+            input: block.input ?? null,
+            responseText: null,
+            responseTokens: null,
+            success: true,
+          });
+        }
         events.push({ type: 'tool.call', id: block.id, turnId, name: block.name, success: true });
       }
       if (sourceEvent.message.usage) {
@@ -82,13 +119,23 @@ export function recordStreamJson(lines, pinnedSession) {
         if (block.type !== 'tool_result' || !block.tool_use_id)
           continue;
         const turnId = toolTurns.get(block.tool_use_id);
-        if (turnId)
+        if (turnId) {
           events.push({ type: 'tool.call', id: block.tool_use_id, turnId, success: block.is_error !== true });
+          const interaction = interactions.get(block.tool_use_id);
+          if (interaction) {
+            interaction.responseSequence = sequence;
+            interaction.responseText = toolResultText(block.content);
+            interaction.responseTokens = exactTokenCount(block);
+            interaction.success = block.is_error !== true;
+          }
+        }
       }
       continue;
     }
 
     if (sourceEvent.type === 'result') {
+      if (typeof sourceEvent.result === 'string')
+        resultText = sourceEvent.result;
       events.push({
         type: 'session.end',
         status: sourceEvent.is_error ? 'error' : 'success',
@@ -109,6 +156,8 @@ export function recordStreamJson(lines, pinnedSession) {
   const report = recordEvents(events, pinnedSession);
   return {
     ...report,
+    toolInteractions: [...interactions.values()].sort((left, right) => left.sequence - right.sequence),
+    finalAnswer: resultText ?? [...responseTexts.values()].at(-1) ?? null,
     capture: {
       actualUsageObserved: report.turns.length > 0 && report.turns.every(turn => turn.usageRecords > 0),
       completeOutputUsageObserved: report.turns.length > 0 &&
@@ -116,6 +165,26 @@ export function recordStreamJson(lines, pinnedSession) {
       completedEventObserved: ended,
     },
   };
+}
+
+function toolResultText(content) {
+  if (typeof content === 'string')
+    return content;
+  if (!Array.isArray(content))
+    return null;
+  return content
+    .filter(block => block?.type === 'text' && typeof block.text === 'string')
+    .map(block => block.text)
+    .join('');
+}
+
+function exactTokenCount(source) {
+  const value = source?.tokenCount ?? source?.token_count ?? null;
+  if (value === null)
+    return null;
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new Error('Observed tool response token count must be a non-negative safe integer.');
+  return value;
 }
 
 function parseLine(line) {

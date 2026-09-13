@@ -8,6 +8,7 @@ import test from 'node:test';
 import { recordEvents } from '../lib/recorder.mjs';
 import { validateSeriesConfiguration } from '../lib/series-preflight.mjs';
 import { recordStreamJson } from '../lib/stream-json.mjs';
+import { runPipeline } from '../lib/pipeline-runner.mjs';
 import {
   compareTaskAnswers,
   evaluateTaskAnswer,
@@ -19,6 +20,7 @@ import {
   buildSeriesManifest,
   createRunRecord,
   createSeries,
+  readSeriesRecords,
   resumeSeries,
   storeRunRecord,
   summarizeSeriesRecords,
@@ -383,6 +385,80 @@ test('series command builds its summary directly from stored session reports', (
   }
 });
 
+test('pipeline refuses identity drift and never skips by directory name', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-'));
+  const definitionPath = join(directory, 'definition.json');
+  const definition = validPipelineDefinition('pipeline-identity');
+  writeFileSync(definitionPath, JSON.stringify(definition));
+  const probe = async server => ({
+    instructions: `Instructions for ${server.args[0]}`,
+    toolsList: { tools: [{ name: `tool-${server.args[0]}` }] },
+  });
+  const execute = context => pipelineSessionReport(context, 'success');
+  try {
+    const created = await runPipeline({
+      mode: 'new', rootDirectory: directory, definitionPath, probe, execute,
+    });
+    assert.equal(created.results.filter(result => result.outcome === 'success').length, 2);
+    await assert.rejects(
+      () => runPipeline({ mode: 'new', rootDirectory: directory, definitionPath, probe, execute }),
+      /already exists/);
+
+    let executions = 0;
+    const resumed = await runPipeline({
+      mode: 'resume', seriesDirectory: created.directory, definitionPath, probe,
+      execute: context => { executions++; return pipelineSessionReport(context, 'success'); },
+    });
+    assert.equal(executions, 0);
+    assert.equal(resumed.results.every(result => result.status === 'reused'), true);
+
+    const changedProbe = async server => ({
+      instructions: `Instructions for ${server.args[0]}`,
+      toolsList: { tools: [{ name: `changed-${server.args[0]}` }] },
+    });
+    await assert.rejects(
+      () => runPipeline({
+        mode: 'resume', seriesDirectory: created.directory, definitionPath,
+        probe: changedProbe, execute,
+      }),
+      /tools\/list fingerprint/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('pipeline stores a new immutable attempt after a failed session', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-'));
+  const definitionPath = join(directory, 'definition.json');
+  const definition = validPipelineDefinition('pipeline-attempts');
+  definition.arms = [definition.arms[0], { ...definition.arms[1], id: 'comparison' }];
+  writeFileSync(definitionPath, JSON.stringify(definition));
+  const attempts = new Map();
+  try {
+    const result = await runPipeline({
+      mode: 'new', rootDirectory: directory, definitionPath,
+      probe: async () => ({ instructions: 'Pinned instructions', toolsList: { tools: [] } }),
+      execute: context => {
+        const count = (attempts.get(context.arm.id) ?? 0) + 1;
+        attempts.set(context.arm.id, count);
+        return pipelineSessionReport(context, count === 1 ? 'error' : 'success');
+      },
+    });
+    const records = await readSeriesRecords(result.directory);
+    assert.equal(records.length, 4);
+    for (const arm of definition.arms) {
+      const saved = records
+        .filter(record => record.identity.arm === arm.id)
+        .sort((left, right) => left.identity.attempt - right.identity.attempt);
+      assert.deepEqual(saved.map(record => record.identity.attempt), [1, 2]);
+      assert.deepEqual(saved.map(record => record.measurement.outcome), ['error', 'success']);
+      assert.notEqual(saved[0].identity.sessionId, saved[1].identity.sessionId);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 function validPreflight() {
   return validateSeriesConfiguration(validConfiguration());
 }
@@ -463,6 +539,8 @@ function createSessionReport(manifest, sessionId, status = 'success') {
       toolConfigurationSha256: manifest.identity.toolConfigurationSha256,
       limitsSha256: manifest.identity.limitsSha256,
       pricingSha256: manifest.identity.pricingSha256,
+      toolsListSha256: manifest.identity.toolsListSha256,
+      seriesDefinitionSha256: manifest.identity.seriesDefinitionSha256,
     },
     { type: 'model.usage', turnId: 'turn-1', usage: {
       input_tokens: 10,
@@ -472,6 +550,56 @@ function createSessionReport(manifest, sessionId, status = 'success') {
     } },
     { type: 'session.end', status, durationMs: 25 },
   ]);
+}
+
+function validPipelineDefinition(seriesId) {
+  return {
+    seriesId,
+    productBuildSha: 'd0236dc9cff93970c9657abcd211b8e46ef5f569',
+    model: 'model-1',
+    clientVersion: '2.1.261',
+    toolLoadingMode: 'dynamic',
+    repetitions: 1,
+    protocolVersion: '2025-06-18',
+    client: { command: process.execPath, args: ['client.mjs'] },
+    tasks: [{ id: 'task-one', prompt: 'Inspect the selected project.' }],
+    arms: [
+      {
+        id: 'baseline',
+        server: { command: process.execPath, args: ['baseline.mjs'] },
+        toolConfiguration: { allowed: ['get_file'] },
+      },
+      {
+        id: 'candidate',
+        server: { command: process.execPath, args: ['candidate.mjs'] },
+        toolConfiguration: { allowed: ['get_file', 'search_project'] },
+      },
+    ],
+    limits: {
+      maxAttemptsPerAssignment: 2,
+      probeTimeoutMs: 1_000,
+      sessionTimeoutMs: 1_000,
+      smallFileCharacters: 1_000,
+    },
+    pricing: {
+      currency: 'USD',
+      perMillionTokens: {
+        inputTokens: 3,
+        cacheWriteTokens: 3.75,
+        cacheReadTokens: 0.3,
+        outputTokens: 15,
+      },
+    },
+  };
+}
+
+function pipelineSessionReport(context, status) {
+  const report = createSessionReport(context.manifest, context.sessionId, status);
+  return {
+    ...report,
+    finalAnswer: status === 'success' ? 'Saved answer.' : null,
+    toolInteractions: [],
+  };
 }
 
 function sessionCost(usage, pricing) {
