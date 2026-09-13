@@ -298,18 +298,24 @@ for (const extension of ['go', 'js', 'jsx', 'tsx', 'rs', 'java', 'kt', 'rb', 'ph
   });
 }
 
-test('task oracle registry rejects a path whose extension is not declared', () => {
+test('task oracle registry rejects any declared path whose extension is not listed', () => {
   const directory = mkdtempSync(join(tmpdir(), 'mcp-oracle-'));
   const registryPath = join(directory, 'tasks.json');
   try {
-    writeFileSync(registryPath, JSON.stringify({
-      schemaVersion: 2,
-      tasks: [{ ...pathOracleFixture('go'), requiredPaths: ['src/main.zig'] }],
-    }));
+    for (const paths of [
+      { requiredPaths: ['src/main.zig'] },
+      { optionalPaths: ['src/optional.zig'] },
+      { forbiddenPaths: ['src/forbidden.zig'] },
+    ]) {
+      writeFileSync(registryPath, JSON.stringify({
+        schemaVersion: 2,
+        tasks: [{ ...pathOracleFixture('go'), ...paths }],
+      }));
 
-    assert.throws(
-      () => loadTaskOracleRegistry(registryPath),
-      /path 'src\/main\.zig' uses an extension not listed in pathExtensions/);
+      assert.throws(
+        () => loadTaskOracleRegistry(registryPath),
+        /uses an extension not listed in pathExtensions/);
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -341,6 +347,19 @@ test('task oracle accepts a declared filename at the repository root', () => {
 
   assert.equal(result.classification, 'complete');
   assert.deepEqual(result.namedPaths, ['package.json']);
+});
+
+test('task oracle requires standalone declared paths and normalizes line-qualified separators', () => {
+  const task = pathOracleFixture('go');
+  const answer = [
+    'Ignore prefix/src/main.go and src/main.go.example.',
+    'Use `src\\main.go:12-18` for the expected behavior.',
+  ].join('\n');
+
+  const result = evaluateTaskAnswer(task, answer);
+
+  assert.equal(result.classification, 'complete');
+  assert.deepEqual(result.namedPaths, ['src/main.go']);
 });
 
 function pathOracleFixture(extension) {
