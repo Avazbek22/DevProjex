@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
   ReachabilityClass,
@@ -130,6 +132,16 @@ test('real oracle currently contains twelve tasks and reports every declared occ
     fs.readFile(new URL('../oracles/tasks.json', import.meta.url), 'utf8')));
   assert.equal(registry.tasks.length, 12);
   assert.equal(oracles.tasks.reduce((total, task) => total + task.requiredPaths.length, 0), 65);
+});
+
+test('a supplied executable requires an explicit product source identity', () => {
+  const script = new URL('../reachability.mjs', import.meta.url);
+  const result = spawnSync(process.execPath, [fileURLToPath(script), '--server', 'unused'], {
+    cwd: new URL('../../..', import.meta.url),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--product-sha is required with --server/);
 });
 
 function fixtureRegistry(overrides = {}) {

@@ -23,6 +23,12 @@ try {
   const oracleText = await readFile(oraclePath, 'utf8');
   const registry = JSON.parse(registryText);
   const oracles = JSON.parse(oracleText);
+  const currentSourceSha = (await capture('git', ['rev-parse', 'HEAD'], repositoryRoot)).trim();
+  const productSha = options.productSha ?? currentSourceSha;
+  if (options.server && !options.productSha)
+    throw new Error('--product-sha is required with --server so a supplied executable is not attributed to the current checkout.');
+  if (!/^[0-9a-f]{40}$/i.test(productSha))
+    throw new Error('--product-sha must be a full 40-character Git SHA.');
   const repositories = await prepareRepositories(registry.repositories, workspace, options.repositories);
   const serverPath = options.server
     ? resolve(options.server)
@@ -32,7 +38,7 @@ try {
     oracles,
     repositories,
     (repository, root) => startMcpReachabilityClient(serverCommand(serverPath, root, workspace, repository.id)));
-  result.productSha = (await capture('git', ['rev-parse', 'HEAD'], repositoryRoot)).trim();
+  result.productSha = productSha.toLowerCase();
   result.inputs = {
     registrySha256: sha256Text(registryText),
     oraclesSha256: sha256Text(oracleText),
@@ -100,7 +106,7 @@ function parseArguments(values) {
       parsed.keepWorkspace = true;
       continue;
     }
-    if (!['--registry', '--oracles', '--output', '--workspace', '--repositories', '--server'].includes(name))
+    if (!['--registry', '--oracles', '--output', '--workspace', '--repositories', '--server', '--product-sha'].includes(name))
       throw new Error(`Unknown option '${name}'.`);
     const value = values[++index];
     if (!value)

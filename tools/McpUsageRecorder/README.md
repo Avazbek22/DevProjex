@@ -14,7 +14,9 @@ runs every call sequentially, writes the JSON result, and removes its temporary 
 node tools/McpUsageRecorder/reachability.mjs --output reachability.json
 ```
 
-For an already prepared server and repository directory, pass `--server FILE --repositories DIR`.
+For an already prepared server and repository directory, pass
+`--server FILE --product-sha FULL_SHA --repositories DIR`. The explicit source identity is mandatory
+for a supplied executable, so a stale binary cannot be attributed to the current checkout.
 The runner verifies every repository HEAD against the registry before calling the server. A required
 file is classified as `one-call`, `two-or-three-call-chain`,
 `requires-knowledge-absent-from-task`, or `unreachable`. Exact-path `get_file` is used only as the
