@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { probeMcpServer } from './mcp-probe.mjs';
+import { loadSavedAssessments } from './saved-evaluation.mjs';
 import { recordStreamJson } from './stream-json.mjs';
 import { loadTaskOracleRegistry } from './task-oracle.mjs';
 import {
@@ -26,12 +27,14 @@ export async function loadPipelineDefinition(path) {
 export async function preparePipelineSeries(definition, baseDirectory, probe = probeMcpServer) {
   validateDefinition(definition);
   const oraclePath = resolve(baseDirectory, definition.evaluation.oracleRegistry);
+  const assessmentPath = resolve(baseDirectory, definition.evaluation.savedAssessments);
   const oracleRegistry = await readPinnedJson(oraclePath, 'task oracle registry');
   const taskOracles = loadTaskOracleRegistry(oraclePath);
   for (const task of definition.tasks) {
     if (!taskOracles.has(task.oracle ?? task.id))
       throw new Error(`Task '${task.id}' has no pinned oracle; no session was started.`);
   }
+  await loadSavedAssessments(assessmentPath);
   const observations = [];
   for (const arm of definition.arms) {
     const observed = await probe(resolveCommand(arm.server, baseDirectory), {
@@ -185,6 +188,7 @@ async function executeSession(context) {
     sessionId: context.sessionId,
     model: context.definition.model,
     mcpConfigPath: mcpConfiguration.path,
+    toolConfigPath: mcpConfiguration.toolConfigurationPath,
     arm: context.arm.id,
   };
   let result;
@@ -223,6 +227,7 @@ async function executeSession(context) {
 async function writeSessionConfiguration(context) {
   const directory = await mkdtemp(join(tmpdir(), 'mcp-usage-session-'));
   const path = join(directory, 'mcp.json');
+  const toolConfigurationPath = join(directory, 'tools.json');
   const server = resolveCommand(context.arm.server, context.baseDirectory);
   const value = {
     mcpServers: {
@@ -234,7 +239,11 @@ async function writeSessionConfiguration(context) {
     },
   };
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
-  return { path, directory };
+  await writeFile(
+    toolConfigurationPath,
+    `${JSON.stringify(context.arm.toolConfiguration, null, 2)}\n`,
+    { encoding: 'utf8', flag: 'wx' });
+  return { path, toolConfigurationPath, directory };
 }
 
 async function persistObservedConfiguration(directory, configuration) {
@@ -307,6 +316,11 @@ function validateDefinition(definition) {
       throw new Error(`arm '${arm.id}' toolConfiguration must be an object.`);
   }
   validateCommand(definition.client, 'client');
+  const clientArguments = definition.client.args ?? [];
+  for (const placeholder of ['prompt', 'sessionId', 'model', 'mcpConfigPath', 'toolConfigPath']) {
+    if (!clientArguments.some(argument => argument.includes(`{${placeholder}}`)))
+      throw new Error(`client arguments must consume the {${placeholder}} placeholder.`);
+  }
   if (!definition.limits || !Number.isSafeInteger(definition.limits.maxAttemptsPerAssignment) ||
       definition.limits.maxAttemptsPerAssignment <= 0 ||
       !Number.isSafeInteger(definition.limits.probeTimeoutMs) || definition.limits.probeTimeoutMs <= 0 ||
@@ -368,7 +382,9 @@ function ensureUnique(values, label) {
 }
 
 function replacePlaceholders(value, replacements) {
-  return value.replace(/\{(prompt|sessionId|model|mcpConfigPath|arm)\}/g, (_, name) => replacements[name]);
+  return value.replace(
+    /\{(prompt|sessionId|model|mcpConfigPath|toolConfigPath|arm)\}/g,
+    (_, name) => replacements[name]);
 }
 
 function runProcess(command, timeoutMs) {
@@ -388,12 +404,23 @@ function runProcess(command, timeoutMs) {
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
-    child.on('error', rejectRun);
-    const timer = setTimeout(() => {
+    let settled = false;
+    let timer;
+    child.once('error', error => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      rejectRun(error);
+    });
+    timer = setTimeout(() => {
       timedOut = true;
       terminateProcessTree(child);
     }, timeoutMs);
-    child.on('exit', (exitCode, signal) => {
+    child.once('exit', (exitCode, signal) => {
+      if (settled)
+        return;
+      settled = true;
       clearTimeout(timer);
       resolveRun({ stdout, stderr, exitCode, signal, timedOut, durationMs: Date.now() - started });
     });

@@ -8,6 +8,7 @@ export async function probeMcpServer(server, client, timeoutMs = 30_000) {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
+  const spawnFailure = new Promise((_, reject) => child.once('error', reject));
   const messages = createMessageReader(child.stdout);
   let stderr = '';
   child.stderr.setEncoding('utf8');
@@ -30,7 +31,7 @@ export async function probeMcpServer(server, client, timeoutMs = 30_000) {
         },
       },
     });
-    const initialized = await nextResponse(messages, 1, timeoutMs);
+    const initialized = await nextResponse(messages, 1, timeoutMs, spawnFailure);
     if (initialized.error)
       throw new Error(`Server initialization failed: ${safeError(initialized.error)}.`);
     const instructions = initialized.result?.instructions;
@@ -38,7 +39,7 @@ export async function probeMcpServer(server, client, timeoutMs = 30_000) {
       throw new Error('Server probe rejected: initialize did not return server instructions.');
 
     writeMessage(child, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
-    const toolsList = await readAllTools(child, messages, timeoutMs);
+    const toolsList = await readAllTools(child, messages, timeoutMs, spawnFailure);
     return {
       instructions,
       toolsList,
@@ -51,14 +52,15 @@ export async function probeMcpServer(server, client, timeoutMs = 30_000) {
     throw error;
   } finally {
     clearTimeout(timer);
-    child.stdin.end();
+    if (!child.stdin.destroyed)
+      child.stdin.end();
     if (!child.killed)
       child.kill();
     await waitForExit(child);
   }
 }
 
-async function readAllTools(child, messages, timeoutMs) {
+async function readAllTools(child, messages, timeoutMs, spawnFailure) {
   const pages = [];
   const tools = [];
   const cursors = new Set();
@@ -67,7 +69,7 @@ async function readAllTools(child, messages, timeoutMs) {
     const id = page + 2;
     const params = cursor === null ? {} : { cursor };
     writeMessage(child, { jsonrpc: '2.0', id, method: 'tools/list', params });
-    const listed = await nextResponse(messages, id, timeoutMs);
+    const listed = await nextResponse(messages, id, timeoutMs, spawnFailure);
     if (listed.error)
       throw new Error(`Server tools/list failed: ${safeError(listed.error)}.`);
     if (!Array.isArray(listed.result?.tools))
@@ -154,14 +156,14 @@ function createMessageReader(stream) {
   }
 }
 
-async function nextResponse(reader, id, timeoutMs) {
+async function nextResponse(reader, id, timeoutMs, spawnFailure) {
   const deadline = Date.now() + timeoutMs;
   while (true) {
     const remaining = deadline - Date.now();
     if (remaining <= 0)
       throw new Error(`Server probe timed out waiting for response ${id}.`);
     const message = await withTimeout(
-      reader.next(),
+      Promise.race([reader.next(), spawnFailure]),
       remaining,
       `Server probe timed out waiting for response ${id}.`);
     if (message?.id === id)
@@ -184,6 +186,8 @@ function safeError(error) {
 }
 
 function waitForExit(child) {
+  if (!child.pid)
+    return Promise.resolve();
   if (child.exitCode !== null || child.signalCode !== null)
     return Promise.resolve();
   return new Promise(resolve => child.once('exit', resolve));

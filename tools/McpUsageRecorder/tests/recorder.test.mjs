@@ -8,6 +8,7 @@ import test from 'node:test';
 import { recordEvents } from '../lib/recorder.mjs';
 import { validateSeriesConfiguration } from '../lib/series-preflight.mjs';
 import { recordStreamJson } from '../lib/stream-json.mjs';
+import { probeMcpServer } from '../lib/mcp-probe.mjs';
 import { runPipeline } from '../lib/pipeline-runner.mjs';
 import { buildPipelineReport } from '../lib/pipeline-report.mjs';
 import {
@@ -454,6 +455,14 @@ test('pipeline refuses identity drift and never skips by directory name', async 
   }
 });
 
+test('server probe reports a command start failure', async () => {
+  await assert.rejects(
+    () => probeMcpServer({ command: 'missing-mcp-probe-command-for-test' }, {
+      version: '1.0.0', protocolVersion: '2025-06-18',
+    }, 1_000),
+    /ENOENT|not found/i);
+});
+
 test('pipeline refuses to start when required server observations are unavailable', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-'));
   const definitionPath = join(directory, 'definition.json');
@@ -467,6 +476,26 @@ test('pipeline refuses to start when required server observations are unavailabl
       }),
       /did not expose server instructions; no session was started/);
     assert.equal(readFileSync(definitionPath, 'utf8').length > 0, true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('pipeline refuses a client command that does not consume pinned session inputs', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-'));
+  const definitionPath = join(directory, 'definition.json');
+  const definition = validPipelineDefinition('missing-client-input');
+  definition.client.args = definition.client.args.filter(value => value !== '{toolConfigPath}');
+  writeFileSync(definitionPath, JSON.stringify(definition));
+  let probes = 0;
+  try {
+    await assert.rejects(
+      () => runPipeline({
+        mode: 'new', rootDirectory: directory, definitionPath,
+        probe: async () => { probes++; return { instructions: 'x', toolsList: { tools: [] } }; },
+      }),
+      /must consume the \{toolConfigPath\} placeholder/);
+    assert.equal(probes, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -713,7 +742,11 @@ function validPipelineDefinition(seriesId) {
     toolLoadingMode: 'dynamic',
     repetitions: 1,
     protocolVersion: '2025-06-18',
-    client: { command: process.execPath, args: ['client.mjs'] },
+    client: {
+      command: process.execPath,
+      args: ['client.mjs', '--session-id', '{sessionId}', '--model', '{model}',
+        '--mcp-config', '{mcpConfigPath}', '--tool-config', '{toolConfigPath}', '--prompt', '{prompt}'],
+    },
     tasks: [{ id: 'sample', prompt: 'Inspect the selected project.' }],
     arms: [
       {

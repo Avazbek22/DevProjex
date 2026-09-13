@@ -33,7 +33,9 @@ assessments are report inputs with their own fingerprint and answer-identity che
 The definition pins `seriesId`, `productBuildSha`, `model`, `clientVersion`, `toolLoadingMode`,
 `repetitions`, tasks, arms, limits, and prices. Each task has an `id` and `prompt`. Each arm has an
 `id`, a `server` command, and `toolConfiguration`. The client command receives literal placeholders
-`{prompt}`, `{sessionId}`, `{model}`, `{mcpConfigPath}`, and `{arm}` as individual arguments. A minimal
+`{prompt}`, `{sessionId}`, `{model}`, `{mcpConfigPath}`, `{toolConfigPath}`, and `{arm}` as individual
+arguments. The tool-configuration placeholder is mandatory so the fingerprinted configuration is
+also the configuration consumed by the client. A minimal
 shape is:
 
 ```json
@@ -46,7 +48,7 @@ shape is:
   "repetitions": 3,
   "client": {
     "command": "client-command",
-    "args": ["--stream-json", "--session-id", "{sessionId}", "--model", "{model}", "{prompt}"]
+    "args": ["--stream-json", "--session-id", "{sessionId}", "--model", "{model}", "--mcp-config", "{mcpConfigPath}", "--tool-config", "{toolConfigPath}", "{prompt}"]
   },
   "tasks": [{ "id": "T1", "prompt": "Pinned task text" }],
   "arms": [

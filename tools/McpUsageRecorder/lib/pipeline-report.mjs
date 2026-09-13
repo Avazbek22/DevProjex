@@ -14,7 +14,10 @@ export async function buildPipelineReport(seriesDirectory, definition, baseDirec
   const manifest = await readSeriesManifest(seriesDirectory);
   const records = await readSeriesRecords(seriesDirectory);
   const accounting = summarizeSeriesRecords(manifest, records);
-  await validateRawCaptures(seriesDirectory, records);
+  await validateRawCaptures(
+    seriesDirectory,
+    records,
+    manifest.identity.seriesDefinitionSha256 !== undefined);
   const oraclePath = requiredPath(definition.evaluation?.oracleRegistry, 'evaluation.oracleRegistry', baseDirectory);
   const taskRegistry = loadTaskOracleRegistry(oraclePath);
   const assessments = definition.evaluation?.savedAssessments
@@ -33,14 +36,16 @@ export async function buildPipelineReport(seriesDirectory, definition, baseDirec
   };
 }
 
-async function validateRawCaptures(seriesDirectory, records) {
+async function validateRawCaptures(seriesDirectory, records, required) {
   const directory = join(resolve(seriesDirectory), 'captures');
   let names;
   try {
     names = (await readdir(directory)).filter(name => name.endsWith('.json')).sort();
   } catch (error) {
-    if (error?.code === 'ENOENT')
+    if (error?.code === 'ENOENT' && !required)
       return;
+    if (error?.code === 'ENOENT')
+      throw new Error('Pipeline report rejected: raw captures are missing.');
     throw error;
   }
   const bySession = new Map(records.map(record => [record.identity.sessionId, record]));

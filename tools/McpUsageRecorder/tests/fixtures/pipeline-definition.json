@@ -12,8 +12,11 @@
       "fake-stream-client.mjs",
       "--session-id", "{sessionId}",
       "--model", "{model}",
+      "--mcp-config", "{mcpConfigPath}",
       "--client-version", "client-fixture-1",
-      "--arm", "{arm}"
+      "--tool-config", "{toolConfigPath}",
+      "--arm", "{arm}",
+      "--prompt", "{prompt}"
     ]
   },
   "tasks": [
