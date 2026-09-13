@@ -27,8 +27,8 @@ node tools/McpUsageRecorder/pipeline.mjs --mode new --definition series.json --r
 
 Continue an interrupted series with `--mode resume --series results/<series-id>`. Rebuild a report
 without starting a server or client with `--mode report`; this mode verifies the saved observations,
-definition, oracle registry, and assessment fixtures against the series identity before reading raw
-records.
+run definition, and oracle registry against the series identity before reading raw records. Saved
+assessments are report inputs with their own fingerprint and answer-identity checks.
 
 The definition pins `seriesId`, `productBuildSha`, `model`, `clientVersion`, `toolLoadingMode`,
 `repetitions`, tasks, arms, limits, and prices. Each task has an `id` and `prompt`. Each arm has an
@@ -85,8 +85,8 @@ shape is:
 
 Before the first session, each arm must return non-empty server instructions and a complete
 `tools/list` response. Their exact aggregate fingerprints, the tool configuration, limits, prices,
-product SHA, client and model identities, and the complete definition (including oracle and saved
-assessment contents) become series identity. Creation refuses an existing series directory. Resume
+product SHA, client and model identities, and the complete run definition and oracle contents become
+series identity. Creation refuses an existing series directory. Resume
 refuses any identity difference. A stored assignment is skipped only when the store finds a matching
 successful raw record; failed or aborted work receives a new attempt number and remains in usage and
 cost totals.

@@ -4,7 +4,6 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { probeMcpServer } from './mcp-probe.mjs';
-import { loadSavedAssessments } from './saved-evaluation.mjs';
 import { recordStreamJson } from './stream-json.mjs';
 import { loadTaskOracleRegistry } from './task-oracle.mjs';
 import {
@@ -27,14 +26,12 @@ export async function loadPipelineDefinition(path) {
 export async function preparePipelineSeries(definition, baseDirectory, probe = probeMcpServer) {
   validateDefinition(definition);
   const oraclePath = resolve(baseDirectory, definition.evaluation.oracleRegistry);
-  const assessmentPath = resolve(baseDirectory, definition.evaluation.savedAssessments);
   const oracleRegistry = await readPinnedJson(oraclePath, 'task oracle registry');
   const taskOracles = loadTaskOracleRegistry(oraclePath);
   for (const task of definition.tasks) {
     if (!taskOracles.has(task.oracle ?? task.id))
       throw new Error(`Task '${task.id}' has no pinned oracle; no session was started.`);
   }
-  const savedAssessments = await loadSavedAssessments(assessmentPath);
   const observations = [];
   for (const arm of definition.arms) {
     const observed = await probe(resolveCommand(arm.server, baseDirectory), {
@@ -64,7 +61,7 @@ export async function preparePipelineSeries(definition, baseDirectory, probe = p
     },
     limits: definition.limits,
     pricing: definition.pricing,
-    seriesDefinition: { definition, oracleRegistry, savedAssessments },
+    seriesDefinition: { definition: identityDefinition(definition), oracleRegistry },
   };
 }
 
@@ -147,8 +144,6 @@ export async function validateSavedPipeline(seriesDirectory, definition, baseDir
   const oracleRegistry = await readPinnedJson(
     resolve(baseDirectory, definition.evaluation.oracleRegistry),
     'task oracle registry');
-  const savedAssessments = await loadSavedAssessments(
-    resolve(baseDirectory, definition.evaluation.savedAssessments));
   return resumeSeries(seriesDirectory, {
     seriesId: definition.seriesId,
     productBuildSha: definition.productBuildSha,
@@ -162,7 +157,7 @@ export async function validateSavedPipeline(seriesDirectory, definition, baseDir
     },
     limits: definition.limits,
     pricing: definition.pricing,
-    seriesDefinition: { definition, oracleRegistry, savedAssessments },
+    seriesDefinition: { definition: identityDefinition(definition), oracleRegistry },
   });
 }
 
@@ -359,6 +354,12 @@ async function readPinnedJson(path, label) {
   } catch (error) {
     throw new Error(`Unable to pin ${label}: ${error.message}`);
   }
+}
+
+function identityDefinition(definition) {
+  const copy = structuredClone(definition);
+  delete copy.evaluation.savedAssessments;
+  return copy;
 }
 
 function ensureUnique(values, label) {

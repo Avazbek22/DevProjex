@@ -18,7 +18,7 @@ import {
 } from '../lib/task-oracle.mjs';
 import { reconcileOrderedAssessments, summarizeOrderedAssessments } from '../lib/order-consistency.mjs';
 import { answerFingerprint, evaluateSavedSeries, stripExperience } from '../lib/saved-evaluation.mjs';
-import { analyzeSavedReadings } from '../lib/session-analysis.mjs';
+import { analyzeSavedReadings, extractKnownAddresses } from '../lib/session-analysis.mjs';
 import {
   buildSeriesManifest,
   createRunRecord,
@@ -1090,6 +1090,19 @@ test('reading analyzer finds a known section that a whole-file read ignored', ()
   assert.equal(result.readingGroups[0].classification, 'known-section-unused');
   assert.equal(result.readingGroups[0].readings, 1);
   assert.equal(result.readingGroups[0].characters, 2_000);
+});
+
+test('reading analyzer recognizes line range symbol and structured addresses', () => {
+  const addresses = [
+    ...extractKnownAddresses('src/core.cs:40-44\nsrc/other.cs:RetryAsync'),
+    ...extractKnownAddresses('{"path":"src/third.cs","startLine":7,"endLine":9}'),
+  ];
+
+  assert.deepEqual(addresses, [
+    { path: 'src/core.cs', line: 40, endLine: 44, symbol: null },
+    { path: 'src/other.cs', line: null, endLine: null, symbol: 'RetryAsync' },
+    { path: 'src/third.cs', line: 7, endLine: 9, symbol: null },
+  ]);
 });
 
 test('reading analyzer distinguishes justified small reads from missing large-file support', () => {
