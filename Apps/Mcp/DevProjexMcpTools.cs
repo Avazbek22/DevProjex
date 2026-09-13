@@ -1258,7 +1258,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page, or requests for up to eight files and sixteen inclusive ranges or named declarations; the forms are mutually exclusive. Send one batched call whenever you want more than one file, range, or known symbol, as requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]. Batch responses report ok, partial, not-returned, or unavailable for every item, merge overlapping ranges, and share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements; start_column continues a single-file page.")]
+		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page, or requests for up to eight files and sixteen whole-file, inclusive-range, or named-declaration selections; the forms are mutually exclusive. Send one batched call whenever you want more than one file, range, or known symbol, as requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]. Batch responses report ok, partial, not-returned, or unavailable for every item, merge overlapping ranges, and share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements; start_column continues a single-file page.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1518,7 +1518,12 @@ internal sealed class DevProjexMcpTools(
 			}
 
 			var sectionStatus = page.IsTruncated ? "partial" : "ok";
-			var header = FormatFileReadHeader(escapedPath, page, requestIds, sectionStatus, pathIsEscaped: true);
+			var header = FormatFileReadHeader(
+				escapedPath,
+				page,
+				requestIds,
+				sectionStatus,
+				pathIsEscaped: true);
 			var section = separator + header + page.Text;
 			if (sections.Length + section.Length > sectionBudgetCharacters)
 			{

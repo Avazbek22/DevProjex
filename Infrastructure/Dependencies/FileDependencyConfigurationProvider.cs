@@ -485,7 +485,8 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				true)
 			{
 				ConfigurationState = project.State,
-				ConfigurationDiagnostic = project.Reason
+				ConfigurationDiagnostic = project.Reason,
+				RustTargetRoots = project.Configuration.TargetPaths
 			});
 		}
 
@@ -527,10 +528,18 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		}
 		var rubyScopeByDirectory = rubyProjects.ToDictionary(
 			static project => Path.GetFullPath(project.Directory), static project => project.ScopeId, PathComparer);
+		var rubyScopeByPackage = rubyProjects
+			.Where(static project => project.PackageName is not null)
+			.GroupBy(static project => project.PackageName!, StringComparer.OrdinalIgnoreCase)
+			.Where(static group => group.Count() == 1)
+			.ToDictionary(static group => group.Key, static group => group.Single().ScopeId,
+				StringComparer.OrdinalIgnoreCase);
 		foreach (var project in rubyProjects)
 		{
 			var references = project.ProjectDirectories.Where(rubyScopeByDirectory.ContainsKey)
 				.Select(directory => rubyScopeByDirectory[directory])
+				.Concat(project.ExternalPackages.Where(rubyScopeByPackage.ContainsKey)
+					.Select(package => rubyScopeByPackage[package]))
 				.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 			scopes.Add(new DependencyScopeDescriptor(
 				project.ScopeId, project.Directory, LanguageId.Ruby, references, null, false,
@@ -540,6 +549,8 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				ConfigurationState = project.State,
 				ConfigurationDiagnostic = project.Reason,
 				RubyExternalPackages = project.ExternalPackages
+					.Where(package => !rubyScopeByPackage.ContainsKey(package))
+					.ToHashSet(StringComparer.OrdinalIgnoreCase)
 			});
 		}
 
@@ -1379,6 +1390,18 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 			    package.TryGetValue("name", out var nameValue) && nameValue is string name)
 				packageName = name.Replace('-', '_');
 			var directories = new HashSet<string>(PathComparer);
+			var targetPaths = new HashSet<string>(PathComparer);
+			if (TryGetTable(model, "lib", out var library) &&
+			    library.TryGetValue("path", out var libraryPathValue) && libraryPathValue is string libraryPath)
+				AddRustTargetPath(path, libraryPath, targetPaths);
+			foreach (var targetSection in new[] { "bin", "test", "bench", "example" })
+			{
+				if (!model.TryGetValue(targetSection, out var targetsValue) || targetsValue is not TomlTableArray targets)
+					continue;
+				foreach (var target in targets)
+					if (target.TryGetValue("path", out var targetPathValue) && targetPathValue is string targetPath)
+						AddRustTargetPath(path, targetPath, targetPaths);
+			}
 			foreach (var section in new[] { "dependencies", "dev-dependencies", "build-dependencies" })
 			{
 				if (!TryGetTable(model, section, out var dependencies)) continue;
@@ -1395,7 +1418,10 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				}
 			}
 			return ConfigurationParseResult<RustProjectConfiguration>.Valid(
-				new RustProjectConfiguration(packageName, directories.Order(StringComparer.Ordinal).ToArray()));
+				new RustProjectConfiguration(
+					packageName,
+					directories.Order(StringComparer.Ordinal).ToArray(),
+					targetPaths.Order(StringComparer.Ordinal).ToArray()));
 		}
 		catch (Exception exception) when (exception is InvalidDataException or TomlException or InvalidOperationException)
 		{
@@ -1414,10 +1440,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		var localPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		if (path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase))
 		{
-			var name = Regex.Match(content,
-				"""\b(?:name|spec\.name)\s*=\s*['\"](?<name>[^'\"]+)['\"]""",
-				RegexOptions.CultureInvariant);
-			if (name.Success) packageName = name.Groups["name"].Value;
+			packageName = ReadRubyPackageName(content);
 			foreach (Match dependency in Regex.Matches(content,
 				"""\b(?:add_dependency|add_runtime_dependency)\s*\(?\s*['\"](?<name>[^'\"]+)['\"]""",
 				RegexOptions.CultureInvariant))
@@ -1451,6 +1474,38 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 			directories.Order(StringComparer.Ordinal).ToArray(),
 			externalPackages,
 			localPackages);
+	}
+
+	private static void AddRustTargetPath(string manifestPath, string relativePath, ISet<string> targetPaths)
+	{
+		if (Path.IsPathFullyQualified(relativePath))
+			throw new InvalidDataException("Cargo target path must be relative.");
+		var root = Path.GetDirectoryName(manifestPath)!;
+		var target = Path.GetFullPath(Path.Combine(root, relativePath));
+		if (!IsWithin(root, target))
+			throw new InvalidDataException("Cargo target path must stay inside the package.");
+		targetPaths.Add(target);
+	}
+
+	private static string? ReadRubyPackageName(string content)
+	{
+		var constructorName = Regex.Match(content,
+			"""\bGem::Specification\.new\s*(?:\(\s*)?['\"](?<name>[^'\"]+)['\"]""",
+			RegexOptions.CultureInvariant);
+		if (constructorName.Success)
+			return constructorName.Groups["name"].Value;
+
+		var specificationBlock = Regex.Match(content,
+			"""\bGem::Specification\.new\b[^\r\n]*(?:do\s*|\{\s*)\|(?<receiver>[a-z_]\w*)\|""",
+			RegexOptions.CultureInvariant);
+		if (!specificationBlock.Success)
+			return null;
+
+		var receiver = Regex.Escape(specificationBlock.Groups["receiver"].Value);
+		var assignment = Regex.Match(content,
+			$"""\b{receiver}\.name\s*=\s*['\"](?<name>[^'\"]+)['\"]""",
+			RegexOptions.CultureInvariant);
+		return assignment.Success ? assignment.Groups["name"].Value : null;
 	}
 
 	private static ConfigurationParseResult<ComposerProjectConfiguration> ParseComposerProject(string content)
@@ -1639,9 +1694,12 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 	{
 		public static JavaProjectConfiguration Empty { get; } = new(string.Empty, []);
 	}
-	private sealed record RustProjectConfiguration(string? PackageName, IReadOnlyList<string> ProjectDirectories)
+	private sealed record RustProjectConfiguration(
+		string? PackageName,
+		IReadOnlyList<string> ProjectDirectories,
+		IReadOnlyList<string> TargetPaths)
 	{
-		public static RustProjectConfiguration Empty { get; } = new(null, []);
+		public static RustProjectConfiguration Empty { get; } = new(null, [], []);
 	}
 	private sealed record RubyProjectConfiguration(
 		string? PackageName,

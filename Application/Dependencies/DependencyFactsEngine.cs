@@ -1378,14 +1378,16 @@ public sealed class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolveRustImport(FileFacts source, ImportFact import)
 		{
-			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+			var scope = FindScope(source.ScopeId);
+			if (scope is not null && ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			if (import.ImportedName == "$module")
 			{
 				var sourcePath = Path.Combine(_root, source.Path);
 				var sourceDirectory = Path.GetDirectoryName(sourcePath)!;
 				var sourceStem = Path.GetFileNameWithoutExtension(sourcePath);
-				var directory = sourceStem is "lib" or "main" or "mod"
+				var directory = sourceStem is "lib" or "main" or "mod" ||
+				                IsConventionalRustTargetRoot(scope, sourcePath)
 					? sourceDirectory
 					: Path.Combine(sourceDirectory, sourceStem);
 				if (!string.IsNullOrEmpty(import.ContainingDeclaration))
@@ -1408,7 +1410,7 @@ public sealed class DependencyFactsEngine : IDisposable
 					"wildcard import is resolution context, not a dependency target", []);
 			if (import.IsCrateQualified)
 			{
-				var localDeclarations = LookupQualifiedInScope(source, import.Specifier, 0);
+				var localDeclarations = LookupRustCrateQualifiedInScope(source, import.Specifier);
 				var localFiles = localDeclarations.SelectMany(static declaration => declaration.DeclarationSites)
 					.Select(static site => site.File)
 					.Distinct(StringComparer.Ordinal)
@@ -1448,6 +1450,53 @@ public sealed class DependencyFactsEngine : IDisposable
 				1 => Edge(source, import, ResolutionStatus.Resolved, files[0], "one imported declaration", files),
 				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple imported declarations", files)
 			};
+		}
+
+		private DeclarationFact[] LookupRustCrateQualifiedInScope(FileFacts source, string name)
+		{
+			var exact = LookupQualifiedInScope(source, name, 0);
+			if (exact.Length > 0)
+				return exact;
+
+			var normalized = QualifiedLookupName(name);
+			var suffix = "::" + normalized;
+			var scope = FindScope(source.ScopeId);
+			var sourceTarget = FindUniqueRustTarget(scope, source.Path);
+			if (sourceTarget is null)
+				return [];
+			return _declarations.Where(declaration =>
+				declaration.Identity.ScopeId == source.ScopeId &&
+				declaration.Identity.LanguageId == LanguageId.Rust &&
+				declaration.Identity.GenericArity == 0 &&
+				QualifiedLookupName(declaration.Identity.QualifiedName)
+					.EndsWith(suffix, StringComparison.Ordinal) &&
+				declaration.DeclarationSites.All(site =>
+					PathComparer.Equals(FindUniqueRustTarget(scope, site.File), sourceTarget)) &&
+				IsVisible(source, declaration)).ToArray();
+		}
+
+		private string? FindUniqueRustTarget(DependencyScopeDescriptor? scope, string relativePath)
+		{
+			if (scope is null || scope.RustTargetRoots.Count == 0)
+				return null;
+			var fullPath = Path.GetFullPath(Path.Combine(_root, relativePath));
+			var matches = scope.RustTargetRoots
+				.Where(target => PathComparer.Equals(target, fullPath) ||
+					IsWithin(Path.GetDirectoryName(target)!, fullPath))
+				.Take(2)
+				.ToArray();
+			return matches.Length == 1 ? matches[0] : null;
+		}
+
+		private static bool IsConventionalRustTargetRoot(DependencyScopeDescriptor? scope, string sourcePath)
+		{
+			if (scope is null)
+				return false;
+			var relative = Path.GetRelativePath(scope.Root, sourcePath).Replace('\\', '/');
+			var separator = relative.IndexOf('/');
+			return scope.RustTargetRoots.Any(target => PathComparer.Equals(target, sourcePath)) ||
+			       separator > 0 && relative.IndexOf('/', separator + 1) < 0 &&
+			       relative[..separator] is "tests" or "examples" or "benches";
 		}
 
 		private DependencyEdge ResolveRubyImport(FileFacts source, ImportFact import)
@@ -2414,7 +2463,12 @@ public sealed class DependencyFactsEngine : IDisposable
 				if (!requiresQualifiedLookup)
 					candidates = SelectVisibleJavaCandidates(source, reference, candidates);
 				if (source.LanguageId == LanguageId.Kotlin)
+				{
 					candidates = FilterKotlinSourceSetCandidates(source, candidates);
+					if (reference.SyntaxKind == "identifier")
+						candidates = candidates.Where(static candidate =>
+							candidate.Identity.SymbolKind == SymbolKind.Module).ToArray();
+				}
 			}
 			else if (source.LanguageId == LanguageId.Rust && !requiresQualifiedLookup)
 				candidates = SelectVisibleRustCandidates(source, reference, candidates);

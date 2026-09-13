@@ -40,9 +40,13 @@ export function recordEvents(events, defaults = {}) {
 function createState(defaults) {
   return {
     metadata: {
+      sessionId: defaults.sessionId ?? null,
       clientVersion: defaults.clientVersion ?? null,
       model: defaults.model ?? null,
       toolLoadingMode: defaults.toolLoadingMode ?? null,
+      buildSha: defaults.buildSha ?? null,
+      limits: defaults.limits ?? null,
+      limitsSha256: defaults.limitsSha256 ?? null,
     },
     startedAt: defaults.startedAt ?? null,
     endedAt: null,
@@ -61,9 +65,13 @@ function applyEvent(state, event, lineNumber) {
     throw new Error(`Capture line ${lineNumber} must contain an object.`);
   switch (event.type) {
     case 'session':
+      state.metadata.sessionId = scalar(event.sessionId, state.metadata.sessionId);
       state.metadata.clientVersion = scalar(event.clientVersion, state.metadata.clientVersion);
       state.metadata.model = scalar(event.model, state.metadata.model);
       state.metadata.toolLoadingMode = scalar(event.toolLoadingMode, state.metadata.toolLoadingMode);
+      state.metadata.buildSha = scalar(event.buildSha, state.metadata.buildSha);
+      state.metadata.limits = scalar(event.limits, state.metadata.limits);
+      state.metadata.limitsSha256 = scalar(event.limitsSha256, state.metadata.limitsSha256);
       state.startedAt = scalar(event.startedAt, state.startedAt);
       break;
     case 'mcp.response':

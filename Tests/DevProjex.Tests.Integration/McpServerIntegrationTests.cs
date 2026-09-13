@@ -6377,6 +6377,27 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetFileBatchPathOnlyRequestReadsTheWholeFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Target.cs"), "first-line\nbatch-target-marker\nlast-line\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var batch = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[] { new { path = "Target.cs" } }
+		});
+
+		Assert.NotEqual(true, batch.IsError);
+		Assert.Contains("File: Target.cs", Text(batch), StringComparison.Ordinal);
+		Assert.Contains("Lines: 1-4 of 4", Text(batch), StringComparison.Ordinal);
+		Assert.Contains("first-line", Text(batch), StringComparison.Ordinal);
+		Assert.Contains("batch-target-marker", Text(batch), StringComparison.Ordinal);
+		Assert.Contains("last-line", Text(batch), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetFileBatchMatchesSinglePagesForEightUnicodeFilesAndReportsUnavailableSafely()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -6483,7 +6504,6 @@ public sealed partial class McpServerIntegrationTests
 	[InlineData("missing-path")]
 	[InlineData("too-many-requests")]
 	[InlineData("too-many-ranges")]
-	[InlineData("missing-selector")]
 	[InlineData("both-selectors")]
 	public async Task GetFileBatchRejectsInvalidShapesBeforeReading(string shape)
 	{
@@ -6508,7 +6528,6 @@ public sealed partial class McpServerIntegrationTests
 							.Select(static _ => new { start_line = 1, end_line = 1 }).ToArray()
 					}
 				},
-				"missing-selector" => new object[] { new { path = "A.txt" } },
 				"both-selectors" => new object[]
 				{
 					new
@@ -6528,7 +6547,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.True(result.IsError);
 		Assert.StartsWith(McpErrorCodes.InvalidArguments, Text(result), StringComparison.Ordinal);
-		if (shape is "missing-path" or "missing-selector" or "both-selectors")
+		if (shape is "missing-path" or "both-selectors")
 			Assert.Contains("requests[0]", Text(result), StringComparison.Ordinal);
 	}
 

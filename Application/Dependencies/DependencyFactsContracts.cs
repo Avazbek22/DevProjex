@@ -69,6 +69,7 @@ public sealed record DependencyScopeDescriptor(
 	public bool HasTypeScriptCustomConditions { get; init; }
 	public bool DisableTransitiveProjectReferences { get; init; }
 	public IReadOnlySet<string> RubyExternalPackages { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	public IReadOnlyList<string> RustTargetRoots { get; init; } = [];
 	public IReadOnlyList<string> CIncludeDirectories { get; init; } = [];
 }
 

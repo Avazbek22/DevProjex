@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "tasks": [
+    {
+      "id": "T1",
+      "oracleCoverage": "partial",
+      "requiredPaths": ["httpx/_client.py", "tests/client/test_redirects.py"],
+      "optionalPaths": [],
+      "requiredSymbols": [{ "id": "redirect-headers", "terms": ["_redirect_headers"] }],
+      "requiredClaims": [
+        { "id": "authorization-header", "terms": [["authorization"]] },
+        { "id": "same-origin", "terms": [["same origin", "same-origin"]] },
+        { "id": "scheme-upgrade", "terms": [["http-to-https", "http→https", "http -> https", "https upgrade"]] },
+        { "id": "cross-origin-removal", "terms": [["cross-origin", "different host", "host change"], ["remove", "strip", "drop"]] }
+      ],
+      "manuallyCheckedCriteria": ["Whether the explanation applies the port and scheme exceptions to the correct origin comparison."]
+    },
+    {
+      "id": "T2",
+      "oracleCoverage": "complete",
+      "requiredPaths": ["httpx/_transports/default.py", "httpx/_client.py", "httpx/_transports/base.py", "docs/advanced/transports.md", "docs/advanced/proxies.md", "tests/client/test_proxies.py"],
+      "optionalPaths": [],
+      "requiredSymbols": [{ "id": "transport-types", "terms": ["HTTPTransport", "AsyncHTTPTransport"] }],
+      "requiredClaims": [
+        { "id": "both-transports", "terms": [["httptransport"], ["asynchttptransport"]] },
+        { "id": "construction-sites", "terms": [["_init_transport"], ["_init_proxy_transport"]] },
+        { "id": "test-classification", "terms": [["test"]] }
+      ]
+    },
+    {
+      "id": "T3",
+      "oracleCoverage": "partial",
+      "requiredPaths": ["httpx/_client.py", "httpx/_models.py", "docs/advanced/extensions.md", "httpx/_types.py", "tests/client/test_client.py"],
+      "optionalPaths": [],
+      "requiredSymbols": [{ "id": "build-request", "terms": ["build_request"] }],
+      "requiredClaims": [
+        { "id": "merge-location", "terms": [["build_request"]] },
+        { "id": "precedence", "terms": [["per-request", "per request"], ["win", "precedence", "override"]] },
+        { "id": "request-extensions", "terms": [["request.extensions", "request extensions"]] }
+      ],
+      "manuallyCheckedCriteria": ["Whether the proposed merge preserves validation and the existing constructor lifecycle."]
+    },
+    {
+      "id": "T4",
+      "oracleCoverage": "partial",
+      "requiredPaths": ["src/request.ts", "src/utils/url.ts", "src/hono-base.ts", "src/request.test.ts", "src/utils/url.test.ts"],
+      "optionalPaths": [],
+      "requiredSymbols": [{ "id": "decode-functions", "terms": ["tryDecodeURIComponent", "getPath"] }],
+      "requiredClaims": [
+        { "id": "parameter-decoding", "terms": [["param"], ["trydecodeuricomponent"]] },
+        { "id": "path-decoding", "terms": [["getpath", "_decodeuri"], ["decode"]] },
+        { "id": "invalid-sequence", "terms": [["invalid"], ["fallback", "unchanged", "does not throw", "doesn't throw"]] }
+      ],
+      "manuallyCheckedCriteria": ["Whether eager path decoding and lazy parameter decoding are attributed to the correct request stage."]
+    },
+    {
+      "id": "T5",
+      "oracleCoverage": "complete",
+      "requiredPaths": ["src/context.ts", "src/types.ts", "src/client/types.ts", "src/middleware/bearer-auth/index.ts", "src/middleware/cors/index.ts", "src/context.test.ts"],
+      "optionalPaths": ["src/middleware/bearer-auth/index.test.ts", "src/middleware/cors/index.test.ts"],
+      "requiredSymbols": [{ "id": "json-method", "terms": ["json"] }],
+      "requiredClaims": [
+        { "id": "json-helper", "terms": [["context.json", "c.json"], ["jsonrespond"]] },
+        { "id": "typed-client", "terms": [["typedresponse", "typed response"], ["client"]] },
+        { "id": "grouping", "terms": [["implementation"], ["types"], ["middleware"], ["tests"]] }
+      ]
+    },
+    {
+      "id": "T6",
+      "oracleCoverage": "partial",
+      "strictPaths": false,
+      "requiredPaths": ["package.json", "jsr.json"],
+      "optionalPaths": ["src/middleware/method-not-allowed/index.ts", "src/middleware/body-limit/index.ts", "src/middleware/powered-by/index.ts", "src/middleware/method-not-allowed/index.test.ts", "src/middleware/body-limit/index.test.ts", "src/middleware/powered-by/index.test.ts"],
+      "requiredSymbols": [],
+      "requiredClaims": [
+        { "id": "implementation-template", "terms": [["method-not-allowed", "body-limit", "powered-by"], ["index.ts"]] },
+        { "id": "test-template", "terms": [["index.test.ts"]] },
+        { "id": "distribution-registration", "terms": [["package.json"], ["jsr.json"], ["export"]] }
+      ],
+      "manuallyCheckedCriteria": ["Whether the selected implementation and test files form one matching middleware pair."]
+    },
+    {
+      "id": "T7",
+      "oracleCoverage": "partial",
+      "requiredPaths": ["src/Serilog/Core/LevelOverrideMap.cs", "src/Serilog/Core/Logger.cs", "src/Serilog/LoggerConfiguration.cs", "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs", "test/Serilog.Tests/Core/LevelOverrideMapTests.cs", "test/Serilog.Tests/Core/ChildLoggerTests.cs"],
+      "optionalPaths": [],
+      "requiredSymbols": [{ "id": "effective-level", "terms": ["GetEffectiveLevel"] }],
+      "requiredClaims": [
+        { "id": "effective-level", "terms": [["geteffectivelevel"]] },
+        { "id": "specificity", "terms": [["longest", "descending", "most specific"]] },
+        { "id": "boundary", "terms": [["dot", "period"], ["boundary"]] },
+        { "id": "fallback", "terms": [["fallback", "falls back", "no override"], ["default"]] }
+      ],
+      "manuallyCheckedCriteria": ["Whether shortening and default level-switch behavior are explained without reversing precedence."]
+    },
+    {
+      "id": "T8",
+      "oracleCoverage": "complete",
+      "requiredPaths": ["src/Serilog/Core/ILogEventEnricher.cs", "src/Serilog/Core/Logger.cs", "src/Serilog/Core/Enrichers/PropertyEnricher.cs", "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs", "src/Serilog/Core/Enrichers/ConditionalEnricher.cs", "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs", "src/Serilog/Core/Enrichers/EmptyEnricher.cs", "src/Serilog/Context/LogContextEnricher.cs", "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs", "test/Serilog.Tests/Core/LoggerTests.cs", "test/Serilog.Tests/Context/LogContextTests.cs"],
+      "optionalPaths": [],
+      "requiredSymbols": [{ "id": "enrich-method", "terms": ["Enrich"] }],
+      "requiredClaims": [
+        { "id": "method", "terms": [["enrich"], ["logevent"], ["ilogeventpropertyfactory"]] },
+        { "id": "aggregation", "terms": [["safeaggregateenricher"]] },
+        { "id": "configuration", "terms": [["loggerenrichmentconfiguration"]] },
+        { "id": "test-classification", "terms": [["test"]] }
+      ]
+    },
+    {
+      "id": "N1",
+      "oracleCoverage": "partial",
+      "requiredPaths": ["src/Serilog/Core/IScalarConversionPolicy.cs", "src/Serilog/Capturing/PropertyValueConverter.cs", "src/Serilog/Policies/PrimitiveScalarConversionPolicy.cs", "src/Serilog/Policies/SimpleScalarConversionPolicy.cs", "src/Serilog/Policies/EnumScalarConversionPolicy.cs", "src/Serilog/Policies/ByteArrayScalarConversionPolicy.cs", "src/Serilog/Policies/ByteMemoryScalarConversionPolicy.cs"],
+      "optionalPaths": ["src/Serilog/Serilog.csproj"],
+      "requiredSymbols": [{ "id": "conversion-interface", "terms": ["IScalarConversionPolicy"] }],
+      "requiredClaims": [
+        { "id": "declaration", "terms": [["declaration", "declares"], ["iscalarconversionpolicy"]] },
+        { "id": "implementations", "terms": [["implementation", "implements"], ["five", "5"]] },
+        { "id": "call-site", "terms": [["call site", "call-site"], ["propertyvalueconverter"]] },
+        { "id": "conditional-target", "terms": [["target framework", "conditional"], ["guard", "#if"]] }
+      ],
+      "manuallyCheckedCriteria": ["Whether the conditional target framework and its exact compilation guard are correct."]
+    },
+    {
+      "id": "N2",
+      "oracleCoverage": "complete",
+      "requiredPaths": ["httpx/_urlparse.py", "httpx/_urls.py", "httpx/_exceptions.py", "tests/models/test_url.py"],
+      "optionalPaths": [],
+      "requiredSymbols": [{ "id": "url-exception", "terms": ["InvalidURL"] }],
+      "requiredClaims": [
+        { "id": "limit", "terms": [["65536"]] },
+        { "id": "boundary", "terms": [["exactly 65536", "65536 characters"], ["accepted", "allowed"], ["65537"], ["rejected", "invalid"]] },
+        { "id": "exception", "terms": [["invalidurl"]] },
+        { "id": "whole-message", "terms": [["url too long"]] },
+        { "id": "component-message", "terms": [["url component"], ["too long"]] }
+      ]
+    },
+    {
+      "id": "N3",
+      "oracleCoverage": "partial",
+      "strictPaths": false,
+      "requiredPaths": ["src/hono-base.ts", "src/context.ts", "src/request.ts", "src/compose.ts", "src/request/constants.ts"],
+      "optionalPaths": ["src/helper/route/index.ts", "src/router.ts", "src/types.ts"],
+      "requiredSymbols": [{ "id": "dispatch-symbols", "terms": ["addRoute", "dispatch"] }],
+      "requiredClaims": [
+        { "id": "registration", "terms": [["#addroute", "addroute"], ["pattern", "path"]] },
+        { "id": "dispatch", "terms": [["#dispatch", "dispatch"], ["matchresult"]] },
+        { "id": "request-handoff", "terms": [["context"], ["request"]] },
+        { "id": "handler-progress", "terms": [["compose"], ["matched", "route"]] }
+      ],
+      "manuallyCheckedCriteria": ["Whether the five-file set is minimal and every hand-off is assigned to the correct layer."]
+    },
+    {
+      "id": "N4",
+      "oracleCoverage": "partial",
+      "requiredPaths": ["src/Serilog/Configuration/BatchingOptions.cs", "src/Serilog/Core/Sinks/Batching/BatchingSink.cs", "src/Serilog/Configuration/LoggerSinkConfiguration.cs", "src/Serilog/Core/LoggingFailureKind.cs", "src/Serilog/Core/ILoggingFailureListener.cs", "src/Serilog/Debugging/SelfLog.cs"],
+      "optionalPaths": [],
+      "requiredSymbols": [{ "id": "failure-listener", "terms": ["ILoggingFailureListener"] }],
+      "requiredClaims": [
+        { "id": "no-backpressure", "terms": [["no backpressure", "backpressure is not", "does not apply backpressure"]] },
+        { "id": "drop", "terms": [["drop", "discard"]] },
+        { "id": "nonblocking", "terms": [["does not wait", "doesn't wait", "non-blocking"], ["does not throw", "doesn't throw", "no exception"]] },
+        { "id": "notification", "terms": [["failure listener", "iloggingfailurelistener", "selflog"]] }
+      ],
+      "manuallyCheckedCriteria": ["Whether every notification path is distinguished from the enqueue caller's behavior."]
+    }
+  ]
+}

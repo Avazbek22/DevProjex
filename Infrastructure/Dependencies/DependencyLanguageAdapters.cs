@@ -972,11 +972,18 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 			.Where(static capture => capture.Name == "import.java")
 			.Select(static capture => (capture.StartIndex, capture.EndIndex))
 			.ToArray();
+		var valueScopes = context.References
+			.Where(static capture => capture.Name == "context.value_name" &&
+				!string.IsNullOrWhiteSpace(capture.CapturedName))
+			.ToArray();
 		var referenceCaptures = context.References
-			.Where(static capture => capture.Name == "reference.type")
+			.Where(static capture => capture.Name is "reference.type" or "reference.expression_receiver")
 			.ToArray();
 		var references = Distinct(referenceCaptures
 			.Where(capture =>
+				(capture.Name != "reference.expression_receiver" ||
+				 IsJavaTypeReceiver(capture.Text) &&
+				 !valueScopes.Any(scope => IsJavaReceiverShadowed(capture, scope))) &&
 				!declarationNames.Contains(capture.StartIndex) &&
 				!typeParameterNames.Contains(capture.StartIndex) &&
 				!PrimitiveTypes.Contains(capture.Text) &&
@@ -1025,6 +1032,24 @@ internal sealed class JavaDependencyLanguageAdapter : DependencyLanguageAdapter
 		{
 			TypeParameterScopes = typeParameterScopes
 		};
+	}
+
+	private static bool IsJavaTypeReceiver(string value)
+	{
+		var separator = value.LastIndexOf('.');
+		var name = separator < 0 ? value : value[(separator + 1)..];
+		return name.Length > 0 && char.IsUpper(name[0]);
+	}
+
+	private static bool IsJavaReceiverShadowed(
+		DependencySyntaxCapture receiver,
+		DependencySyntaxCapture value)
+	{
+		if (value.StartIndex > receiver.StartIndex || value.EndIndex < receiver.EndIndex)
+			return false;
+		var separator = receiver.Text.IndexOf('.');
+		var root = separator < 0 ? receiver.Text : receiver.Text[..separator];
+		return string.Equals(value.CapturedName, root, StringComparison.Ordinal);
 	}
 
 	private static FileFacts Failed(DependencyExtractionContext context, string reason) => new(
@@ -1095,22 +1120,30 @@ internal sealed partial class KotlinDependencyLanguageAdapter : DependencyLangua
 			.Where(static capture => capture.Name == "context.type_parameter" && capture.CapturedNameStartIndex >= 0)
 			.Select(static capture => capture.CapturedNameStartIndex)
 			.ToHashSet();
+		var valueScopes = context.References
+			.Where(static capture => capture.Name == "context.value_name" &&
+				!string.IsNullOrWhiteSpace(capture.CapturedName))
+			.ToArray();
 		var references = Distinct(context.References
-			.Where(capture => capture.Name == "reference.type" &&
+			.Where(capture => capture.Name is "reference.type" or "reference.expression_receiver" &&
 				!typeParameterNames.Contains(capture.StartIndex) &&
+				(capture.Name != "reference.expression_receiver" ||
+				 capture.Text.Length > 0 && char.IsUpper(capture.Text[0]) &&
+				 !valueScopes.Any(scope => scope.CapturedName == capture.Text &&
+					 scope.StartIndex <= capture.StartIndex && scope.EndIndex >= capture.EndIndex)) &&
 				!importRanges.Any(range => capture.StartIndex >= range.StartIndex && capture.EndIndex <= range.EndIndex))
 			.SelectMany(capture => TypeNameRegex().Matches(capture.Text)
-				.Select(static match => match.Value)
-				.Where(static name => !PrimitiveTypes.Contains(name))
-				.Select(name =>
+				.Select(static match => (Name: match.Value, match.Index))
+				.Where(static item => !PrimitiveTypes.Contains(item.Name))
+				.Select(item =>
 				{
 					var owners = declarationCaptures
 						.Where(owner => owner.Name != "declaration.function" && Contains(owner, capture))
 						.OrderBy(static owner => owner.StartIndex).Select(static owner => owner.CapturedName!).ToArray();
 					return new ReferenceFact(
 						EvidenceLayer.TypeReference,
-						name,
-						0,
+						item.Name,
+						GenericArityAt(capture.Text, item.Index + item.Name.Length),
 						capture.NodeType,
 						Site(context, capture))
 					{

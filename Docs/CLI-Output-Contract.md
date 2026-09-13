@@ -266,22 +266,22 @@ stay on stderr. The shape is:
       "noFactsReason": null
     }
   ],
-	  "coverage": {
+  "coverage": {
     "files": 3,
     "supported": 3,
     "unsupported": 0,
     "extractionFailed": 0,
     "unsupportedLanguages": {},
     "cSharpErrorNodeKinds": {},
-	    "partialParseDiagnostics": []
-	  },
-	  "resolution": {
-	    "resolved": 1,
-	    "ambiguous": 0,
-	    "unresolved": 0,
-	    "external": 0
-	  },
-	  "searchScope": {
+    "partialParseDiagnostics": []
+  },
+  "resolution": {
+    "resolved": 1,
+    "ambiguous": 0,
+    "unresolved": 0,
+    "external": 0
+  },
+  "searchScope": {
     "files": 3
   }
 }
