@@ -8,6 +8,7 @@ import {
   analyzeReachability,
   containsPath,
   extractTreePaths,
+  extractVisibleRepositoryPaths,
   parseRelatedPaths,
   parseSearchBoundary,
 } from '../lib/reachability-analysis.mjs';
@@ -43,6 +44,12 @@ test('related parser admits resolved files and retains unresolved evidence separ
 test('path detection requires a complete path line', () => {
   assert.equal(containsPath('src/core.cs\n12:needle', 'src/core.cs'), true);
   assert.equal(containsPath('12:load src/core.cs now', 'src/core.cs'), false);
+});
+
+test('search positions count file headings rather than matching lines', () => {
+  const files = ['src/First.cs', 'src/Second.cs'];
+  const text = 'src/First.cs\n9:needle\n10:needle\nsrc/Second.cs\n3:needle';
+  assert.deepEqual(extractVisibleRepositoryPaths(text, files), files);
 });
 
 test('JSON tree paths are reconstructed from nested directories', () => {

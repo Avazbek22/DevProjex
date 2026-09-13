@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 
 export const ReachabilityClass = Object.freeze({
@@ -14,6 +14,7 @@ export async function analyzeReachability(registry, oracles, repositories, clien
   const repositoryById = new Map(registry.repositories.map(repository => [repository.id, repository]));
   const taskResults = [];
   const clients = new Map();
+  const repositoryFiles = new Map();
   try {
     for (const taskSpec of registry.tasks) {
       const oracle = oracleById.get(taskSpec.id);
@@ -30,7 +31,12 @@ export async function analyzeReachability(registry, oracles, repositories, clien
         client = await clientFactory(repository, repositoryRoot);
         clients.set(repository.id, client);
       }
-      taskResults.push(await analyzeTask(taskSpec, oracle, repository, repositoryRoot, client));
+      let files = repositoryFiles.get(repository.id);
+      if (!files) {
+        files = await listRepositoryFiles(repositoryRoot);
+        repositoryFiles.set(repository.id, files);
+      }
+      taskResults.push(await analyzeTask(taskSpec, oracle, repository, repositoryRoot, files, client));
     }
   } finally {
     for (const client of clients.values())
@@ -50,7 +56,7 @@ export async function analyzeReachability(registry, oracles, repositories, clien
   };
 }
 
-async function analyzeTask(spec, oracle, repository, repositoryRoot, client) {
+async function analyzeTask(spec, oracle, repository, repositoryRoot, repositoryFiles, client) {
   const requiredPaths = oracle.requiredPaths.map(normalizePath);
   const direct = new Map(requiredPaths.map(path => [path, []]));
   const searchRuns = [];
@@ -63,17 +69,25 @@ async function analyzeTask(spec, oracle, repository, repositoryRoot, client) {
       context_lines: 0,
       max_results: query.maxResults ?? 200,
     });
+    const visibleFiles = extractVisibleRepositoryPaths(result.text, repositoryFiles);
+    const continuedFiles = result.pages.map(page => extractVisibleRepositoryPaths(page, repositoryFiles));
     const visiblePaths = requiredPaths.filter(path => containsPath(result.text, path));
     const continuedPaths = requiredPaths.filter(path =>
       !visiblePaths.includes(path) && result.pages.some(page => containsPath(page, path)));
-    for (const path of visiblePaths)
-      direct.get(path).push({ surface: 'search_project', input: query.pattern });
+    for (const path of visiblePaths) {
+      direct.get(path).push({
+        surface: 'search_project',
+        input: query.pattern,
+        position: visibleFiles.indexOf(path) + 1,
+      });
+    }
     for (const path of continuedPaths) {
       const pageIndex = result.pages.findIndex(page => containsPath(page, path));
       direct.get(path).push({
         surface: 'search_project+read_pack',
         input: query.pattern,
         calls: pageIndex + 2,
+        position: continuedFiles[pageIndex].indexOf(path) + 1,
       });
     }
     searchRuns.push({
@@ -81,6 +95,8 @@ async function analyzeTask(spec, oracle, repository, repositoryRoot, client) {
       rationale: query.rationale,
       visiblePaths,
       continuedPaths,
+      visibleFiles,
+      continuedFiles,
       boundary: parseSearchBoundary(result.text),
       usedStoredContinuation: result.pages.length > 0,
       error: result.isError ? result.text : null,
@@ -95,7 +111,7 @@ async function analyzeTask(spec, oracle, repository, repositoryRoot, client) {
     const treePaths = extractTreePaths(result.text);
     const visiblePaths = requiredPaths.filter(path => treePaths.includes(path));
     for (const path of visiblePaths)
-      direct.get(path).push({ surface: 'get_tree', input: tree.pattern });
+      direct.get(path).push({ surface: 'get_tree', input: tree.pattern, position: treePaths.indexOf(path) + 1 });
     treeRuns.push({
       pattern: tree.pattern,
       rationale: tree.rationale,
@@ -150,6 +166,7 @@ async function analyzeTask(spec, oracle, repository, repositoryRoot, client) {
       relatedHop: hop ?? null,
       relatedVia: related.parents.get(requiredPath) ?? null,
       matchingTaskQueries: matchingQueries,
+      limitEvidence: buildLimitEvidence(requiredPath, matchingQueries, searchRuns, treeRuns),
       exactPathReadable: !exact.isError,
     });
   }
@@ -170,6 +187,22 @@ async function analyzeTask(spec, oracle, repository, repositoryRoot, client) {
     },
     requiredFiles: results,
   };
+}
+
+function buildLimitEvidence(path, matchingQueries, searchRuns, treeRuns) {
+  const search = searchRuns
+    .filter(run => matchingQueries.includes(run.pattern))
+    .map(run => ({
+      pattern: run.pattern,
+      complete: run.boundary?.complete ?? null,
+      limits: run.boundary?.limits ?? [],
+      initialPosition: run.visibleFiles.indexOf(path) + 1 || null,
+      continuationPage: run.continuedFiles.findIndex(files => files.includes(path)) + 1 || null,
+    }));
+  const tree = treeRuns
+    .filter(run => matchesGlob(path, run.pattern))
+    .map(run => ({ pattern: run.pattern, visible: run.visiblePaths.includes(path), truncated: run.truncated }));
+  return { search, tree };
 }
 
 async function traverseRelated(client, seeds, maximumHops) {
@@ -265,6 +298,20 @@ export function parseRelatedPaths(text) {
 export function containsPath(text, path) {
   const expected = normalizePath(path);
   return normalizeLines(text).some(line => normalizePath(line.trim()) === expected);
+}
+
+export function extractVisibleRepositoryPaths(text, repositoryFiles) {
+  const catalog = repositoryFiles instanceof Set ? repositoryFiles : new Set(repositoryFiles);
+  const seen = new Set();
+  const result = [];
+  for (const line of normalizeLines(text)) {
+    const path = normalizePath(line.trim());
+    if (catalog.has(path) && !seen.has(path)) {
+      seen.add(path);
+      result.push(path);
+    }
+  }
+  return result;
 }
 
 export function extractTreePaths(text) {
@@ -375,6 +422,43 @@ function normalizePath(value) {
 
 function normalizeLines(value) {
   return value.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
+}
+
+async function listRepositoryFiles(root) {
+  const files = [];
+  await visit(root, '');
+  return files.sort(compareOrdinal);
+
+  async function visit(directory, prefix) {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries.sort((left, right) => compareOrdinal(left.name, right.name))) {
+      if (entry.name === '.git')
+        continue;
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory())
+        await visit(resolve(directory, entry.name), relativePath);
+      else if (entry.isFile())
+        files.push(normalizePath(relativePath));
+    }
+  }
+}
+
+function matchesGlob(path, glob) {
+  let pattern = '^';
+  for (let index = 0; index < glob.length; index++) {
+    const character = glob[index];
+    if (character === '*' && glob[index + 1] === '*') {
+      pattern += '.*';
+      index++;
+    } else if (character === '*') {
+      pattern += '[^/]*';
+    } else if (character === '?') {
+      pattern += '[^/]';
+    } else {
+      pattern += character.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`${pattern}$`, 'i').test(path);
 }
 
 function compareOrdinal(left, right) {
