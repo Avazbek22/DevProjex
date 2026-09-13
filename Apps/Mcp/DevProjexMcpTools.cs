@@ -1058,8 +1058,8 @@ internal sealed class DevProjexMcpTools(
 			// Resolved on every search that showed a hit, including one the cap cut: the selector
 			// list below is what stops a caller opening a whole file to find a declaration it was
 			// already holding, and a cut response is exactly when that happens.
-			// A response the character cap already cut has no room to spend on labelling each run,
-			// so the headers are dropped and the remaining characters go to matches. The list stays.
+			// Headers use the match slice's share of the response. If they do not all fit there, they
+			// are dropped; the selector and its optional body keep the space reserved for them.
 			var matchContentLimit = declarationPreview is { IsAddressable: true }
 				? MaximumSearchContentCharacters - MinimumDeclarationSectionCharacters(
 					declarationPreview,
@@ -3040,9 +3040,9 @@ internal sealed class DevProjexMcpTools(
 
 	/// <summary>
 	/// Writes the declarations the shown hits sit in, one line each, in the shape a caller passes
-	/// straight back to <c>get_file</c>. A path and a declaration name are project text, so this
-	/// belongs inside the untrusted block; the sentence that says what to do with it is a constant
-	/// and sits outside.
+	/// straight back to <c>get_file</c>, followed by the bounded first body when its name is unique.
+	/// Paths, names and bodies are project text, so they remain inside the untrusted block; only
+	/// constant instructions and counts sit outside.
 	/// </summary>
 	private static McpDeclarationSectionResult AppendDeclarationSelectors(
 		StringBuilder output,
@@ -3240,9 +3240,9 @@ internal sealed class DevProjexMcpTools(
 	/// </summary>
 	/// <remarks>
 	/// Headers are placed into a finished render rather than written during it, which is what makes
-	/// the two rules hold without unwinding anything. A render the character cap cut is left exactly
-	/// as it was, so a capped response spends every character it has on matches; and a header can
-	/// only ever be placed in front of lines that are already present, so none can be left with no
+	/// the two rules hold without unwinding anything. They are added only when every header fits the
+	/// match slice's budget, leaving the selector and body reservation intact. A header can only be
+	/// placed in front of lines that are already present, so none can be left with no
 	/// hit under it. Placement is all or nothing: a header skipped for want of room would leave the
 	/// hits beneath it reading as part of the declaration named above them.
 	/// </remarks>
