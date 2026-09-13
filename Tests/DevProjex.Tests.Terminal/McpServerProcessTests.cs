@@ -359,7 +359,7 @@ public sealed partial class McpServerProcessTests
 				["read_pack"] = ("Reads one page", "pack_context instead", "1,000 lines"),
 				["search_project"] = ("Searches safe transformed project text", "related_files instead", "max_results=1..200"),
 				["related_files"] = ("Finds statically evidenced", "search_project instead", "direction=dependencies|dependents|both"),
-				["get_file"] = ("Reads selected file text", "pack_context for", "sixteen inclusive ranges")
+				["get_file"] = ("Reads selected file text", "pack_context for", "sixteen whole-file")
 			};
 			foreach (var tool in tools)
 			{

@@ -43,3 +43,28 @@ Run the parser tests with:
 ```text
 node --test tools/McpUsageRecorder/tests/recorder.test.mjs
 ```
+
+`series-preflight.mjs` rejects a comparison unless one server, a fresh empty session, the recorder,
+the full build SHA, pinned limits, model, and client version are all present. When a comparison uses
+a qualitative evaluator, its measured candidate-order disagreement rate and sample size are also
+required. `stream-json.mjs`
+converts streamed client events into the same report while grouping repeated usage snapshots and
+parallel tool calls by the model response identifier.
+
+## Saved-answer evaluation
+
+`oracles/tasks.json` records task-specific required files and factual claims. The deterministic
+oracle classifies each saved answer as complete, incomplete, incorrect, or empty and reports every
+missing, unexpected, or contradicted criterion. Tasks marked `partial` retain an explicit list of
+criteria that still require qualitative assessment.
+
+Qualitative comparisons keep correctness and preference as separate dimensions. Each pair is
+assessed in both candidate orders. A verdict exists only when both orders map to the same candidate;
+otherwise the result is an order disagreement. Every aggregate reports the disagreement count and
+rate for both dimensions and for either dimension.
+
+Evaluate saved summaries with:
+
+```text
+node tools/McpUsageRecorder/evaluate-saved.mjs --oracles tools/McpUsageRecorder/oracles/tasks.json --assessments ordered-assessments.json summary.json
+```

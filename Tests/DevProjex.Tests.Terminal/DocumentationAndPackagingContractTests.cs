@@ -161,7 +161,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("`profile` applies the same effective selection", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("### Batch `get_file`", server, StringComparison.Ordinal);
 		Assert.Contains("one to eight records", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("at most sixteen ranges", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("at most sixteen whole-file, range, or symbol selections", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`ok` when complete, `partial`", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`--remote-hosts`", server, StringComparison.Ordinal);
 		Assert.Contains("[Remote] commit=<sha>", server, StringComparison.Ordinal);
