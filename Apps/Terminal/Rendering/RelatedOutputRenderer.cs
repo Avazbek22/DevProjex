@@ -24,6 +24,7 @@ internal static class RelatedOutputRenderer
 		if (format == AnalysisOutputFormat.Json)
 		{
 			var jsonCoverage = result.Index.Coverage;
+			var resolution = CountResolution(result, direction);
 			var document = new
 			{
 				schemaVersion = 1,
@@ -39,8 +40,10 @@ internal static class RelatedOutputRenderer
 					jsonCoverage.UnsupportedLanguages,
 					jsonCoverage.CSharpErrorNodeKinds,
 					jsonCoverage.ExtractionFailedFiles,
+					jsonCoverage.PartialParseDiagnostics,
 					configurationDiagnostics = jsonCoverage.ConfigurationDiagnostics.Select(ProjectConfigurationDiagnostic)
 				},
+				resolution,
 				searchScope = new { files = result.Index.Files.Count }
 			};
 			await writer.WriteLineAsync(JsonSerializer.Serialize(document, JsonOptions).AsMemory(), cancellationToken)
@@ -64,6 +67,10 @@ internal static class RelatedOutputRenderer
 			if (seed.Dependencies.Count == 0 && seed.Dependents.Count == 0)
 				await writer.WriteLineAsync(localization["Terminal.Related.None"]).ConfigureAwait(false);
 		}
+		var resolutionCounts = CountResolution(result, direction);
+		await writer.WriteLineAsync(
+			$"[Resolution] resolved={resolutionCounts.Resolved} · ambiguous={resolutionCounts.Ambiguous} · " +
+			$"unresolved={resolutionCounts.Unresolved} · external={resolutionCounts.External}").ConfigureAwait(false);
 		var coverage = result.Index.Coverage;
 		await writer.WriteLineAsync(localization.Format(
 			"Terminal.Related.Coverage",
@@ -82,6 +89,35 @@ internal static class RelatedOutputRenderer
 		foreach (var path in coverage.ExtractionFailedFiles.Take(8))
 			await writer.WriteLineAsync($"[Dependency extraction failed] path={TerminalTextEscaping.EscapeSingleLine(path)}")
 				.ConfigureAwait(false);
+		foreach (var diagnostic in coverage.PartialParseDiagnostics.Take(8))
+		{
+			var ranges = string.Join(',', diagnostic.Ranges.Select(static range =>
+				range.StartLine == range.EndLine ? range.StartLine.ToString() : $"{range.StartLine}-{range.EndLine}"));
+			if (diagnostic.RangesTruncated) ranges += ",...";
+			await writer.WriteLineAsync(
+				$"[Dependency partial parse] path={TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)} · " +
+				$"dropped={diagnostic.DroppedConstructs} · lines={ranges}").ConfigureAwait(false);
+		}
+	}
+
+	private static ResolutionCounts CountResolution(DependencyRelatedResult result, DependencyDirection direction)
+	{
+		var edges = new HashSet<DependencyEdge>();
+		foreach (var seed in result.Seeds)
+		{
+			if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
+				foreach (var edge in result.Index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])
+					edges.Add(edge);
+			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
+				foreach (var edge in result.Index.EdgesByTarget.GetValueOrDefault(seed.Seed) ?? [])
+					if (string.Equals(edge.Target, seed.Seed, StringComparison.Ordinal))
+						edges.Add(edge);
+		}
+		return new ResolutionCounts(
+			edges.Count(static edge => edge.Status == ResolutionStatus.Resolved),
+			edges.Count(static edge => edge.Status == ResolutionStatus.Ambiguous),
+			edges.Count(static edge => edge.Status == ResolutionStatus.Unresolved),
+			edges.Count(static edge => edge.Status == ResolutionStatus.External));
 	}
 
 	private static async Task WriteSection(
@@ -117,4 +153,5 @@ internal static class RelatedOutputRenderer
 			diagnostic.ScopeIds.Count);
 
 	private sealed record ConfigurationDiagnosticOutput(string Path, string Problem, int AffectedScopes);
+	private sealed record ResolutionCounts(int Resolved, int Ambiguous, int Unresolved, int External);
 }

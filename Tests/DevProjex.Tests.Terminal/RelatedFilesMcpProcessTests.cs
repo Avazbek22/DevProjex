@@ -9,6 +9,36 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
+	public async Task RealProcessRelatedFilesReportsCHeaderDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("c-project");
+		workspace.WriteFile("c-project/include/model.h", "typedef struct Model { int value; } Model;\n");
+		workspace.WriteFile("c-project/src/app.c", "#include \"../include/model.h\"\nModel read_model(void);\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "src/app.c", ["direction"] = "dependencies"
+		});
+		Assert.Contains("include/model.h", Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessRelatedFilesReportsCppHeaderDependencies()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("cpp-project");
+		workspace.WriteFile("cpp-project/include/model.hpp", "namespace Models { class Model {}; }\n");
+		workspace.WriteFile("cpp-project/src/app.cpp", "#include \"../include/model.hpp\"\nModels::Model read_model();\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "src/app.cpp", ["direction"] = "dependencies"
+		});
+		Assert.Contains("include/model.hpp", Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesReportsJavaManifestDependencies()
 	{
 		using var workspace = new TemporaryDirectory();

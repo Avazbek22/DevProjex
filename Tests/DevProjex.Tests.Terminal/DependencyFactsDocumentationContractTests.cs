@@ -30,6 +30,7 @@ public sealed class DependencyFactsDocumentationContractTests
 			dependencies,
 			StringComparison.Ordinal);
 		Assert.Contains("Import paths are not resolved", dependencies, StringComparison.Ordinal);
+		Assert.Contains("Coverage reports the number of dropped constructions", dependencies, StringComparison.Ordinal);
 		Assert.Contains(
 			"Without an owning `tsconfig.json` or `jsconfig.json`, one narrow capability applies",
 			dependencies,
@@ -40,5 +41,6 @@ public sealed class DependencyFactsDocumentationContractTests
 		Assert.Contains("devprojex related <PATH>", commandLine, StringComparison.Ordinal);
 		Assert.Contains("v5.2 dependency-facts extension", version, StringComparison.Ordinal);
 		Assert.Contains("devprojex-related-files", output, StringComparison.Ordinal);
+		Assert.Contains("partialParseDiagnostics", output, StringComparison.Ordinal);
 	}
 }

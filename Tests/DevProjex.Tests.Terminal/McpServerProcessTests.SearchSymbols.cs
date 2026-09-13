@@ -20,8 +20,20 @@ public sealed partial class McpServerProcessTests
 			"B.run"
 		},
 		{
+			"assigned-members.js",
+			"const first = {};\nfirst.run = function run() { return 'member-marker-a'; };\nconst second = {};\nsecond.run = function run() { return 'member-marker-b'; };\n(function () { return 'fallback-marker'; })();\n",
+			"first.run",
+			"second.run"
+		},
+		{
 			"members.ts",
 			"class A { run(): string { return 'member-marker-a'; } }\nclass B { run(): string { return 'member-marker-b'; } }\n(function (): string { return 'fallback-marker'; })();\n",
+			"A.run",
+			"B.run"
+		},
+		{
+			"members.tsx",
+			"class A { run(): JSX.Element { return <span>member-marker-a</span>; } }\nclass B { run(): JSX.Element { return <span>member-marker-b</span>; } }\nconst fallback = <span>fallback-marker</span>;\n",
 			"A.run",
 			"B.run"
 		},
@@ -66,6 +78,18 @@ public sealed partial class McpServerProcessTests
 			"<?php\nnamespace Sample;\nclass A {\n function run() { return 'member-marker-a'; }\n}\nclass B {\n function run() { return 'member-marker-b'; }\n}\n// fallback-marker\n",
 			"Sample.A.run",
 			"Sample.B.run"
+		},
+		{
+			"members.c",
+			"struct A { char member_marker_a[sizeof(\"member-marker-a\")]; };\nstruct B { char member_marker_b[sizeof(\"member-marker-b\")]; };\n// fallback-marker\n",
+			"members.c#A#member_marker_a",
+			"members.c#B#member_marker_b"
+		},
+		{
+			"members.cpp",
+			"namespace Sample {\nclass A {\n const char *run() { return \"member-marker-a\"; }\n};\nclass B {\n const char *run() { return \"member-marker-b\"; }\n};\n}\n// fallback-marker\n",
+			"Sample::A::run",
+			"Sample::B::run"
 		}
 	};
 

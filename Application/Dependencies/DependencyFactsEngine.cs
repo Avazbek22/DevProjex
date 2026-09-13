@@ -500,6 +500,11 @@ public sealed class DependencyFactsEngine : IDisposable
 				.Where(static file => file.Status == DependencyFileStatus.ExtractionFailed)
 				.Select(static file => file.Path)
 				.Order(StringComparer.Ordinal)
+				.ToArray(),
+			PartialParseDiagnostics = files
+				.Where(static file => file.PartialParse is not null)
+				.Select(static file => file.PartialParse!)
+				.OrderBy(static diagnostic => diagnostic.Path, StringComparer.Ordinal)
 				.ToArray()
 		};
 
@@ -657,6 +662,9 @@ public sealed class DependencyFactsEngine : IDisposable
 		256 + strings.Add(facts.Path) + strings.Add(facts.ScopeId) + strings.Add(facts.ContentFingerprint) +
 		strings.Add(facts.StatusReason) +
 		facts.ErrorNodeKinds.Sum(pair => strings.Add(pair.Key) + 16) +
+		(facts.PartialParse is null
+			? 0
+			: 64 + strings.Add(facts.PartialParse.Path) + facts.PartialParse.Ranges.Count * 16L) +
 		facts.Declarations.Sum(declaration => 160 + strings.Add(declaration.Identity.ScopeId) +
 			strings.Add(declaration.Identity.QualifiedName) + strings.Add(declaration.Identity.FileScope) +
 			strings.Add(declaration.ContainingNamespace) +
@@ -1311,11 +1319,30 @@ public sealed class DependencyFactsEngine : IDisposable
 				LanguageId.TypeScript or LanguageId.JavaScript or LanguageId.Tsx => ResolveTypeScriptImport(source, import),
 				LanguageId.Python => ResolvePythonImport(source, import),
 				LanguageId.Java or LanguageId.Kotlin or LanguageId.Php => ResolveJavaImport(source, import),
+				LanguageId.C or LanguageId.Cpp => ResolveCImport(source, import),
 				LanguageId.Rust => ResolveRustImport(source, import),
 				LanguageId.Ruby => ResolveRubyImport(source, import),
 				_ => Edge(source, import, ResolutionStatus.Unresolved, null,
 					"explicit imports are context, not dependency edges, for this language", [])
 			};
+		}
+
+		private DependencyEdge ResolveCImport(FileFacts source, ImportFact import)
+		{
+			var sourceDirectory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
+			var roots = new List<string>();
+			if (string.Equals(import.ImportedName, "$quoted", StringComparison.Ordinal))
+				roots.Add(sourceDirectory);
+			if (FindScope(source.ScopeId) is { } scope)
+				roots.AddRange(scope.CIncludeDirectories);
+			roots.Add(_root);
+
+			var paths = roots
+				.Select(root => Path.GetFullPath(Path.Combine(root, import.Specifier)))
+				.Where(path => IsWithin(_root, path))
+				.Select(path => PortableRelative(_root, path))
+				.Where(_files.ContainsKey);
+			return FinishImport(source, import, paths, "one repository C header");
 		}
 
 		private DependencyEdge ResolveJavaImport(FileFacts source, ImportFact import)
@@ -2456,6 +2483,8 @@ public sealed class DependencyFactsEngine : IDisposable
 			else if (source.LanguageId == LanguageId.Php && !requiresQualifiedLookup)
 				candidates = candidates.Where(candidate =>
 					string.Equals(candidate.ContainingNamespace, reference.ContainingNamespace, StringComparison.Ordinal)).ToArray();
+			else if (source.LanguageId is LanguageId.C or LanguageId.Cpp)
+				candidates = SelectVisibleCCandidates(source, candidates);
 			if (candidates.Length == 0 && attributeName is not null)
 			{
 				candidates = attributeName.Contains('.')
@@ -2666,6 +2695,19 @@ public sealed class DependencyFactsEngine : IDisposable
 				source.GlobalContextNamespaces.Contains(candidate.ContainingNamespace, StringComparer.Ordinal)).ToArray();
 		}
 
+		private DeclarationFact[] SelectVisibleCCandidates(FileFacts source, DeclarationFact[] candidates)
+		{
+			var visibleFiles = new HashSet<string>(StringComparer.Ordinal) { source.Path };
+			foreach (var import in source.Imports)
+			{
+				var edge = ResolveCImport(source, import);
+				if (edge.Target is not null) visibleFiles.Add(edge.Target);
+				foreach (var candidate in edge.Candidates) visibleFiles.Add(candidate);
+			}
+
+			return candidates.Where(candidate => candidate.DeclarationSites.Any(site => visibleFiles.Contains(site.File))).ToArray();
+		}
+
 		private static DeclarationFact[] SelectVisibleRustCandidates(
 			FileFacts source,
 			ReferenceFact reference,
@@ -2786,7 +2828,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				return false;
 			if (declaration.Identity.ScopeId == source.ScopeId)
 				return true;
-			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php &&
+			return source.LanguageId is LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php or LanguageId.C or LanguageId.Cpp &&
 			       VisibleScopeIds(source.ScopeId).Contains(
 			       declaration.Identity.ScopeId, StringComparer.Ordinal);
 		}
@@ -2963,7 +3005,8 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			var package = GoPackageDirectory(source.Path);
 			return candidates
-				.Where(candidate => candidate.DeclarationSites.Any(site =>
+				.Where(candidate => candidate.Identity.SymbolKind == SymbolKind.Class &&
+					candidate.DeclarationSites.Any(site =>
 					string.Equals(GoPackageDirectory(site.File), package, StringComparison.Ordinal)))
 				.ToArray();
 		}
@@ -3046,7 +3089,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				while (pending.TryDequeue(out var scopeId))
 				{
 					if (!visited.Add(scopeId)) continue;
-					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php) ||
+					if (scope.LanguageId is not (LanguageId.CSharp or LanguageId.Java or LanguageId.Kotlin or LanguageId.Rust or LanguageId.Ruby or LanguageId.Php or LanguageId.C or LanguageId.Cpp) ||
 					    !scopes.TryGetValue(scopeId, out var current)) continue;
 					foreach (var projectReference in current.ProjectReferences) pending.Enqueue(projectReference);
 				}

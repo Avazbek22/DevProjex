@@ -7,6 +7,64 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyExtractionAndBindingIntegrationTests(ITestOutputHelper output)
 {
 	[Fact]
+	public async Task SyntaxDamageDropsOnlyFactsOwnedByTheDamagedConstruction()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var target = fixture.CreateFile("Target.cs", "public sealed class Target { }");
+		var source = fixture.CreateFile("Consumers.cs", """
+			public sealed class Before { Target value; }
+			public sealed class AlsoBefore { Target value; }
+			public static class Broken
+			{
+				public static void Run(
+				{
+					Missing value;
+				}
+			}
+			""");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[project, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var facts = Assert.Single(result.Files, file => file.Path == "Consumers.cs");
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		Assert.True(facts.HasSyntaxErrors);
+		Assert.Contains(facts.Declarations, declaration => declaration.Identity.QualifiedName == "Before");
+		Assert.Contains(facts.Declarations, declaration => declaration.Identity.QualifiedName == "AlsoBefore");
+		Assert.DoesNotContain(facts.References, reference => reference.Name == "Missing");
+		Assert.Equal(2, result.Edges.Single(edge => edge.Source == "Consumers.cs" && edge.Target == "Target.cs").Evidence.Count);
+		var partial = Assert.IsType<DependencyPartialParseDiagnostic>(facts.PartialParse);
+		Assert.Equal("Consumers.cs", partial.Path);
+		Assert.Equal(1, partial.DroppedConstructs);
+		Assert.Contains(partial.Ranges, range => range.StartLine <= 5 && range.EndLine >= 5);
+		Assert.Contains(result.Coverage.PartialParseDiagnostics, diagnostic => diagnostic == partial);
+	}
+
+	[Fact]
+	public async Task ValidSyntaxKeepsFactsAndReportsByteIdenticalResultsWithoutPartialDiagnostics()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var target = fixture.CreateFile("Target.cs", "public sealed class Target { }");
+		var source = fixture.CreateFile("Consumer.cs", "public sealed class Consumer { Target value; }");
+		using var engine = CreateEngine();
+
+		var first = await engine.IndexAsync(fixture.Path, [project, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var second = await engine.IndexAsync(fixture.Path, [project, target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(first.Files, second.Files);
+		Assert.Equal(first.Edges, second.Edges);
+		Assert.All(first.Files, file => Assert.Null(file.PartialParse));
+		Assert.Empty(first.Coverage.PartialParseDiagnostics);
+	}
+
+	[Fact]
 	public async Task CSharpReferences_OnOneLineRemainDistinctOccurrences()
 	{
 		using var fixture = new TemporaryDirectory();

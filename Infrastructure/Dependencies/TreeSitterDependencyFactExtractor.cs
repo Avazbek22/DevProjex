@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using DevProjex.Application.Dependencies;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Compression;
@@ -158,13 +159,20 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				: content.ObservedContentDigest is { } observedDigest
 					? new DependencySourceObservation(DependencySourceObservationKind.Read, observedDigest)
 					: default;
+			if (Path.GetExtension(fullPath).Equals(".h", StringComparison.OrdinalIgnoreCase) &&
+			    LooksLikeCppHeader(content.Source))
+			{
+				language = LanguageId.Cpp;
+				scope = ScopeOwners.GetValue(configuration, static value => new ScopeOwnerIndex(value.Scopes))
+					.Resolve(language, fullPath);
+			}
 			return new PreparedDependencySource(
 				fullPath,
 				relative,
 				scope,
 				language,
 				content.Fingerprint,
-				content.ExtractorIdentity,
+				language == LanguageId.Cpp ? GetExtractorIdentity(language) : content.ExtractorIdentity,
 				content.Source,
 				content.Status,
 				content.StatusReason,
@@ -403,13 +411,15 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		using var tree = lease.Parser.Parse(source) ??
 			throw new InvalidOperationException("Tree-sitter returned no syntax tree.");
 		Interlocked.Increment(ref _parseCount);
+		var syntaxDamage = AnalyzeSyntaxDamage(tree.RootNode, relativePath, cancellationToken);
 		return CaptureNavigation(
 			runtime.Navigation,
 			tree.RootNode,
 			language,
 			relativePath,
 			contentFingerprint,
-			cancellationToken);
+			cancellationToken,
+			syntaxDamage);
 	}
 
 	public FileFacts Extract(
@@ -432,11 +442,14 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			using var tree = lease.Parser.Parse(source.Source) ??
 				throw new InvalidOperationException("Tree-sitter returned no syntax tree.");
 			Interlocked.Increment(ref _parseCount);
+			var syntaxDamage = AnalyzeSyntaxDamage(tree.RootNode, source.RelativePath, cancellationToken);
+			var partialParse = syntaxDamage?.Diagnostic;
 			var (declarations, references, errorKinds, rawCaptureLimitExceeded) = CaptureFacts(
 				runtime.Facts,
 				tree.RootNode,
 				limits.MaximumRawCapturesPerFile,
-				cancellationToken);
+				cancellationToken,
+				syntaxDamage);
 			if (rawCaptureLimitExceeded)
 				return StatusOnly(source, DependencyFileStatus.ExtractionFailed, "fact limit exceeded");
 			var context = new DependencyExtractionContext(
@@ -448,7 +461,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				tree.RootNode.HasError,
 				errorKinds,
 				declarations,
-				references);
+				references,
+				partialParse);
 			var result = runtime.Adapter.Extract(context, limits);
 			var navigation = CaptureNavigation(
 				runtime.Navigation,
@@ -456,12 +470,24 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				source.LanguageId,
 				source.RelativePath,
 				source.ContentFingerprint,
-				cancellationToken);
+				cancellationToken,
+				syntaxDamage);
 			Interlocked.Add(ref _adapterVisitedRanges, context.Work.VisitedRanges);
 			Interlocked.Add(ref _adapterComparisons, context.Work.Comparisons);
 			Interlocked.Add(ref _createdFacts,
 				result.Declarations.Count + result.Imports.Count + result.References.Count);
-			return result with { NavigationDeclarations = navigation };
+			if (partialParse is not null &&
+			    result.Declarations.Count == 0 && result.Imports.Count == 0 &&
+			    result.References.Count == 0 &&
+			    navigation.All(static declaration => declaration.Kind == NavigationSymbolKind.Module))
+				return result with
+				{
+					Status = DependencyFileStatus.ExtractionFailed,
+					StatusReason = "syntax tree contains errors",
+					NavigationDeclarations = navigation,
+					PartialParse = partialParse
+				};
+			return result with { NavigationDeclarations = navigation, PartialParse = partialParse };
 		}
 		catch (Exception exception) when (exception is
 		       IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -521,7 +547,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		Query query,
 		Node root,
 		int rawCaptureLimit,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		SyntaxDamageAnalysis? syntaxDamage)
 	{
 		using var cursor = query.Execute(root);
 		var declarations = new List<DependencySyntaxCapture>();
@@ -552,6 +579,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 						errorKinds[kind] = errorKinds.GetValueOrDefault(kind) + 1;
 					continue;
 				}
+				if (syntaxDamage is not null && IsCaptureAffectedBySyntaxDamage(capture.Node, root, syntaxDamage))
+					continue;
 				var created = TryCreateCapture(capture.Name, capture.Node, materialization);
 				if (created is null)
 					continue;
@@ -581,20 +610,28 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		LanguageId language,
 		string relativePath,
 		string contentFingerprint,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		SyntaxDamageAnalysis? syntaxDamage)
 	{
 		using var cursor = query.Execute(root);
 		var declarations = new List<NavigationDeclaration>();
 		var seen = new HashSet<(int Start, int End, NavigationSymbolKind Kind, string Name)>();
-		var javaNames = language is LanguageId.Java or LanguageId.Kotlin or LanguageId.Ruby or LanguageId.Php
+		var javaNames = language is LanguageId.Java or LanguageId.Kotlin or LanguageId.Ruby or LanguageId.Php or LanguageId.Cpp
 			? new Dictionary<string, int>(StringComparer.Ordinal)
 			: null;
 		var visited = 0;
-		string? fileScopedNamespace = language == LanguageId.Rust ? RustModulePath(relativePath) : null;
+		string? fileScopedNamespace = language switch
+		{
+			LanguageId.Rust => RustModulePath(relativePath),
+			LanguageId.C => relativePath,
+			_ => null
+		};
 		foreach (var capture in cursor.Captures)
 		{
 			if ((visited++ & 255) == 0)
 				cancellationToken.ThrowIfCancellationRequested();
+			if (syntaxDamage is not null && IsCaptureAffectedBySyntaxDamage(capture.Node, root, syntaxDamage))
+				continue;
 			var name = ReadNavigationName(capture.Node, language);
 			if (string.IsNullOrWhiteSpace(name))
 				continue;
@@ -612,7 +649,12 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			{
 				owners.Insert(0, fileScopedNamespace);
 			}
-			var separator = language is LanguageId.Rust or LanguageId.Ruby ? "::" : ".";
+			var separator = language switch
+			{
+				LanguageId.Rust or LanguageId.Ruby or LanguageId.Cpp => "::",
+				LanguageId.C => "#",
+				_ => "."
+			};
 			var owner = owners.Count == 0 ? null : string.Join(separator, owners);
 			var qualifiedName = language == LanguageId.Ruby && owner is not null
 				? capture.Node.Type switch
@@ -661,6 +703,108 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			.ToArray();
 	}
 
+	private static SyntaxDamageAnalysis? AnalyzeSyntaxDamage(
+		Node root,
+		string relativePath,
+		CancellationToken cancellationToken)
+	{
+		if (!root.HasError)
+			return null;
+		var damaged = new HashSet<(int StartIndex, int EndIndex, int StartLine, int EndLine)>();
+		var pending = new Stack<Node>();
+		pending.Push(root);
+		var visited = 0;
+		while (pending.TryPop(out var node))
+		{
+			if ((visited++ & 255) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			if (node.IsError || node.IsMissing)
+			{
+				var owner = FindDamagedConstruct(node, root);
+				var startLine = checked((int)owner.StartPosition.Row + 1);
+				damaged.Add((
+					checked((int)owner.StartIndex),
+					checked((int)owner.EndIndex),
+					startLine,
+					Math.Max(startLine, checked((int)owner.EndPosition.Row + 1))));
+				continue;
+			}
+			foreach (var child in node.Children)
+				if (child.HasError || child.IsError || child.IsMissing)
+					pending.Push(child);
+		}
+		if (damaged.Count == 0)
+			return null;
+		const int maximumReportedRanges = 32;
+		var ordered = damaged.OrderBy(static range => range.StartIndex)
+			.ThenBy(static range => range.EndIndex)
+			.ToArray();
+		return new SyntaxDamageAnalysis(
+			new DependencyPartialParseDiagnostic(
+				relativePath,
+				ordered.Length,
+				ordered.Take(maximumReportedRanges)
+					.Select(static range => new DependencySourceLineRange(range.StartLine, range.EndLine))
+					.ToArray(),
+				ordered.Length > maximumReportedRanges),
+			ordered.Select(static range => new SyntaxDamageSpan(range.StartIndex, range.EndIndex)).ToArray());
+	}
+
+	private static Node FindDamagedConstruct(Node defect, Node root)
+	{
+		for (var current = defect.Parent; current is not null && current != root; current = current.Parent)
+			if (IsFactOwner(current.Type))
+				return current;
+		return defect;
+	}
+
+	private static bool IsCaptureAffectedBySyntaxDamage(
+		Node node,
+		Node root,
+		SyntaxDamageAnalysis syntaxDamage)
+	{
+		if (node.HasError || node.IsError || node.IsMissing)
+			return true;
+		var start = checked((int)node.StartIndex);
+		var end = checked((int)node.EndIndex);
+		if (syntaxDamage.Spans.Any(span => start >= span.StartIndex && end <= span.EndIndex))
+			return true;
+		for (var current = node.Parent; current is not null && current != root; current = current.Parent)
+		{
+			if (current.IsError || current.IsMissing)
+				return true;
+			if (IsFactOwner(current.Type))
+				return current.HasError || syntaxDamage.Spans.Any(span =>
+					checked((int)current.StartIndex) == span.StartIndex && checked((int)current.EndIndex) == span.EndIndex);
+		}
+		return false;
+	}
+
+	private sealed record SyntaxDamageAnalysis(
+		DependencyPartialParseDiagnostic Diagnostic,
+		IReadOnlyList<SyntaxDamageSpan> Spans);
+
+	private readonly record struct SyntaxDamageSpan(int StartIndex, int EndIndex);
+
+	private static bool IsFactOwner(string nodeType) => nodeType is
+		"namespace_declaration" or "file_scoped_namespace_declaration" or
+		"class_declaration" or "abstract_class_declaration" or "struct_declaration" or
+		"interface_declaration" or "record_declaration" or "enum_declaration" or
+		"annotation_type_declaration" or "trait_declaration" or
+		"method_declaration" or "constructor_declaration" or "compact_constructor_declaration" or
+		"function_declaration" or "generator_function_declaration" or "function_definition" or
+		"local_function_statement" or "property_declaration" or "accessor_declaration" or
+		"operator_declaration" or "conversion_operator_declaration" or "lambda_expression" or
+		"internal_module" or "arrow_function" or "generator_function" or "method_definition" or
+		"class_definition" or "lambda" or "type_spec" or
+		"method_spec" or "function_item" or "mod_item" or "struct_item" or "enum_item" or
+		"trait_item" or "union_item" or "impl_item" or "closure_expression" or
+		"object_declaration" or "secondary_constructor" or "anonymous_initializer" or
+		"class" or "module" or "method" or "singleton_method" or "block" or
+		"namespace_definition" or "anonymous_function" or
+		"translation_unit" or "declaration" or "template_declaration" or
+		"class_specifier" or "struct_specifier" or "union_specifier" or "enum_specifier";
+
 	private static string? ReadNavigationName(Node node, LanguageId language)
 	{
 		if (language == LanguageId.Kotlin && node.Type == "function_declaration")
@@ -683,8 +827,20 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		if (language == LanguageId.Kotlin && node.Type == "anonymous_initializer") return "init";
 		if (language == LanguageId.Ruby && node.Type == "assignment")
 			return NormalizeNavigationName(node.GetChildForField("left")?.Text ?? string.Empty);
+		if (language is LanguageId.JavaScript or LanguageId.TypeScript or LanguageId.Tsx &&
+		    node.Type == "assignment_expression")
+			return NormalizeNavigationName(node.GetChildForField("left")?.Text ?? string.Empty);
 		if (language == LanguageId.Php && node.Type is "property_element" or "const_element")
 			return NormalizeNavigationName(node.GetChildForField("name")?.Text ?? node.NamedChildren.FirstOrDefault()?.Text ?? string.Empty);
+		if (language is LanguageId.C or LanguageId.Cpp)
+		{
+			if (node.Type is "function_definition" or "declaration")
+				return NormalizeNavigationName(FindCDeclarationName(node)?.Text ?? string.Empty);
+			if (node.Type == "field_declaration")
+				return FirstNodeOrDescendantText(node.GetChildForField("declarator") ?? node, "field_identifier");
+			if (node.Type is "struct_specifier" or "union_specifier" or "enum_specifier")
+				return FirstNodeOrDescendantText(node.GetChildForField("name") ?? node, "type_identifier");
+		}
 		if (language == LanguageId.Rust && node.Type == "impl_item")
 		{
 			var implementedType = node.GetChildForField("type")?.Text;
@@ -719,6 +875,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				owners.Add(name);
 		}
 		owners.Reverse();
+		if (language == LanguageId.Cpp && node.Type is ("function_definition" or "declaration"))
+			AppendQualifiedCDeclaratorOwners(node, owners);
 		if (language == LanguageId.Go && node.Type == "method_declaration")
 		{
 			var receiver = GoReceiverType(node.GetChildForField("receiver")?.Text);
@@ -751,6 +909,10 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		LanguageId.Php => nodeType is "namespace_definition" or "class_declaration" or
 			"interface_declaration" or "trait_declaration" or "enum_declaration" or
 			"function_definition" or "method_declaration",
+		LanguageId.C => nodeType is "function_definition" or "struct_specifier" or
+			"union_specifier" or "enum_specifier",
+		LanguageId.Cpp => nodeType is "namespace_definition" or "class_specifier" or
+			"struct_specifier" or "union_specifier" or "enum_specifier" or "function_definition",
 		_ => false
 	};
 
@@ -852,6 +1014,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		}
 		return null;
 	}
+
+	private static string? FirstNodeOrDescendantText(Node node, string nodeType) =>
+		node.Type == nodeType ? NormalizeNavigationName(node.Text) : FirstDescendantText(node, nodeType);
 
 	private static bool IsDeclarationCapture(string captureName) =>
 		captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
@@ -963,6 +1128,17 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			var value = name is null ? string.Empty : materialization.Read(name).TrimStart('\\');
 			return CreateCapture(captureName, node, value, value, 0, false, false,
 				capturedNameStartIndex: name is null ? -1 : checked((int)name.StartIndex), evidence: value);
+		}
+		if (captureName.StartsWith("declaration.c_", StringComparison.Ordinal) ||
+		    captureName.StartsWith("declaration.cpp_", StringComparison.Ordinal))
+		{
+			var cNameNode = FindCDeclarationName(node);
+			var cCapturedName = cNameNode is null ? null : materialization.Read(cNameNode);
+			var cIsStatic = node.Children.Any(child =>
+				child.Type == "storage_class_specifier" && materialization.Read(child) == "static");
+			return CreateCapture(captureName, node, cCapturedName ?? string.Empty, cCapturedName, 0,
+				cIsStatic, cIsStatic, capturedNameStartIndex: cNameNode is null ? -1 : checked((int)cNameNode.StartIndex),
+				evidence: cCapturedName ?? string.Empty);
 		}
 
 		var isCompact = captureName.StartsWith("declaration.", StringComparison.Ordinal) ||
@@ -1223,6 +1399,18 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					0,
 					[new DependencyImportBinding(specifier.Split('.').Last(), null, wildcard)]);
 		}
+		if (captureName == "import.go")
+		{
+			var path = node.GetChildForField("path") ?? node.NamedChildren
+				.FirstOrDefault(static child => child.Type is "interpreted_string_literal" or "raw_string_literal");
+			if (path is null) return null;
+			var text = materialization.Read(path);
+			if (text.Length < 2 || text[0] is not ('\"' or '`') || text[^1] != text[0]) return null;
+			var specifier = text[1..^1];
+			return specifier.Length == 0
+				? null
+				: new DependencyImportSyntax(specifier, 0, []);
+		}
 		if (captureName == "import.rust")
 		{
 			var argument = node.GetChildForField("argument");
@@ -1287,7 +1475,69 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			return specifier.Length == 0 ? null : new DependencyImportSyntax(
 				specifier, 0, [new DependencyImportBinding(specifier.Split('\\').Last(), alias, false)]);
 		}
+		if (captureName is "import.c" or "import.cpp")
+		{
+			var path = node.GetChildForField("path") ?? node.NamedChildren.LastOrDefault();
+			if (path is null) return null;
+			var text = materialization.Read(path).Trim();
+			if (text.Length < 3 || text[0] is not ('\"' or '<')) return null;
+			var closing = text[0] == '<' ? '>' : text[0];
+			if (text[^1] != closing) return null;
+			var specifier = text[1..^1];
+			return specifier.Length == 0 ? null : new DependencyImportSyntax(
+				specifier, 0, [new DependencyImportBinding(text[0] == '\"' ? "$quoted" : "$system", null)]);
+		}
 		return null;
+	}
+
+	private static Node? FindCDeclarationName(Node node)
+	{
+		var current = node.GetChildForField("declarator") ?? node.GetChildForField("name");
+		while (current is not null)
+		{
+			if (current.Type is "identifier" or "type_identifier" or "field_identifier" or
+			    "operator_name" or "destructor_name") return current;
+			current = current.GetChildForField("declarator") ?? current.GetChildForField("name") ??
+			          (current.Type == "qualified_identifier"
+				          ? current.NamedChildren.LastOrDefault()
+				          : current.NamedChildren.FirstOrDefault());
+		}
+		return null;
+	}
+
+	private static void AppendQualifiedCDeclaratorOwners(Node node, List<string> owners)
+	{
+		var declarator = node.GetChildForField("declarator");
+		while (declarator is not null && declarator.Type != "qualified_identifier")
+			declarator = declarator.GetChildForField("declarator") ?? declarator.GetChildForField("name");
+		var text = declarator?.Text ?? ExtractQualifiedCDeclarator(node);
+		var separator = text?.LastIndexOf("::", StringComparison.Ordinal) ?? -1;
+		if (separator <= 0)
+			return;
+		var qualifiedOwners = text![..separator]
+			.Split("::", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		var common = 0;
+		while (common < owners.Count && common < qualifiedOwners.Length &&
+		       string.Equals(owners[common], qualifiedOwners[common], StringComparison.Ordinal))
+			common++;
+		for (var index = common; index < qualifiedOwners.Length; index++)
+			owners.Add(qualifiedOwners[index]);
+	}
+
+	private static string? ExtractQualifiedCDeclarator(Node node)
+	{
+		var name = FindCDeclarationName(node)?.Text;
+		if (string.IsNullOrEmpty(name))
+			return null;
+		var text = node.Text;
+		var marker = "::" + name;
+		var nameIndex = text.LastIndexOf(marker, StringComparison.Ordinal);
+		if (nameIndex < 0)
+			return null;
+		var start = nameIndex - 1;
+		while (start >= 0 && (text[start] == ':' || text[start] == '_' || char.IsLetterOrDigit(text[start])))
+			start--;
+		return text[(start + 1)..(nameIndex + marker.Length)];
 	}
 
 	private static IReadOnlyList<DependencyImportBinding> ReadPythonBindings(
@@ -1426,12 +1676,17 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".kt" or ".kts" => LanguageId.Kotlin,
 		".rb" or ".rake" or ".gemspec" or ".ru" => LanguageId.Ruby,
 		".php" or ".phtml" => LanguageId.Php,
+		".c" or ".h" => LanguageId.C,
+		".cc" or ".cpp" or ".cxx" or ".hh" or ".hpp" or ".hxx" => LanguageId.Cpp,
 		_ => LanguageId.Unsupported
 	};
 
 	private static LanguageId LanguageFamily(LanguageId language) => language is LanguageId.JavaScript or LanguageId.Tsx
 		? LanguageId.TypeScript
 		: language;
+	private static bool LooksLikeCppHeader(string source) =>
+		Regex.IsMatch(source, @"\b(namespace|template|class|public|private|protected|constexpr|using)\b",
+			RegexOptions.CultureInvariant);
 	private static string Normalize(string path) => path.Replace('\\', '/');
 	private static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 	private static string OneLine(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
@@ -1766,7 +2021,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.Rust] = new("tree-sitter-rust", "tree_sitter_rust", "rust", new RustDependencyLanguageAdapter()),
 				[LanguageId.Kotlin] = new("tree-sitter-kotlin", "tree_sitter_kotlin", "kotlin", new KotlinDependencyLanguageAdapter()),
 				[LanguageId.Ruby] = new("tree-sitter-ruby", "tree_sitter_ruby", "ruby", new RubyDependencyLanguageAdapter()),
-				[LanguageId.Php] = new("tree-sitter-php", "tree_sitter_php", "php", new PhpDependencyLanguageAdapter())
+				[LanguageId.Php] = new("tree-sitter-php", "tree_sitter_php", "php", new PhpDependencyLanguageAdapter()),
+				[LanguageId.C] = new("tree-sitter-c", "tree_sitter_c", "c", new CDependencyLanguageAdapter()),
+				[LanguageId.Cpp] = new("tree-sitter-cpp", "tree_sitter_cpp", "cpp", new CppDependencyLanguageAdapter())
 			};
 	}
 
