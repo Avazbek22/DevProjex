@@ -290,7 +290,7 @@ export function extractTreePaths(text) {
     if (!node || typeof node !== 'object')
       return;
     for (const [name, value] of Object.entries(node)) {
-      const path = prefix ? `${prefix}/${name}` : name;
+      const path = name === '/' ? prefix : prefix ? `${prefix}/${name}` : name;
       if (value === null || typeof value === 'string')
         paths.push(normalizePath(path));
       else

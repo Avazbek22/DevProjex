@@ -47,9 +47,9 @@ test('path detection requires a complete path line', () => {
 
 test('JSON tree paths are reconstructed from nested directories', () => {
   const text = 'prefix\n<untrusted-data-abc>\n' +
-    '{"rootPath":"/repo","tree":{"src":{"nested":["Needle.cs"]},"README.md":null}}' +
+    '{"rootPath":"/repo","tree":{"src":{"nested":{"/":["Needle.cs"]},"/":["Root.cs"]},"/":["README.md"]}}' +
     '\n</untrusted-data-abc>\nsuffix';
-  assert.deepEqual(extractTreePaths(text), ['README.md', 'src/nested/Needle.cs']);
+  assert.deepEqual(extractTreePaths(text), ['README.md', 'src/Root.cs', 'src/nested/Needle.cs']);
 });
 
 test('analysis distinguishes direct chain knowledge-only and unreachable files', async () => {
