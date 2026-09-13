@@ -14,6 +14,7 @@ public static class McpServerHost
 		"When the project is unknown, use list_projects; ";
 	private const string CommonInstructions =
 		"when a location is unknown, inspect it with get_tree or search_project. " +
+		"For several directories, use one get_tree call such as include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**\"] instead of walking them separately. " +
 		"When one location is known, read it with get_file; when several independent locations are known, group them into one batched get_file call. " +
 		"Use related_files for static dependencies, analyze to size a selection, and pack_context only when a multi-file document is needed; page stored results with read_pack. " +
 		"Secrets are replaced as DEVPROJEX_REDACTED[<category>#<n>]. Example-like values on allowlists, including example.com, 555-0100, " +

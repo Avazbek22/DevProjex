@@ -2211,6 +2211,44 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task TreeGuidanceUsesOneExecutablePatternForSeveralDirectories()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		const string pattern = "src/middleware/{powered-by,body-limit,bearer-auth}/**";
+		foreach (var directory in new[] { "powered-by", "body-limit", "bearer-auth", "other" })
+		{
+			var path = Path.Combine(project, "src", "middleware", directory);
+			Directory.CreateDirectory(path);
+			File.WriteAllText(Path.Combine(path, "index.ts"), $"export const name = '{directory}';\n");
+		}
+
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+		var description = tools.Single(static tool => tool.Name == "get_tree").ProtocolTool.Description!;
+		var instructions = Assert.IsType<string>(server.Client.ServerInstructions);
+
+		Assert.Contains($"include_patterns=[\"{pattern}\"]", description, StringComparison.Ordinal);
+		Assert.Contains($"include_patterns=[\"{pattern}\"]", instructions, StringComparison.Ordinal);
+		Assert.Contains("in one call", description, StringComparison.Ordinal);
+		Assert.Contains("instead of walking them separately", instructions, StringComparison.Ordinal);
+
+		var tree = AllText(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["format"] = "text",
+				["include_patterns"] = new[] { pattern }
+			}));
+		Assert.Contains("powered-by", tree, StringComparison.Ordinal);
+		Assert.Contains("body-limit", tree, StringComparison.Ordinal);
+		Assert.Contains("bearer-auth", tree, StringComparison.Ordinal);
+		Assert.DoesNotContain("other", tree, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task PublishedInputSchemasUseThePortableKeywordSubset()
 	{
 		using var workspace = new TemporaryDirectory();
