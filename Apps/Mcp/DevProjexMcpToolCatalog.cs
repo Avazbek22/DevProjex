@@ -122,7 +122,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		      "type": "array",
 		      "maxItems": {{ProjectSelectionTokens.Exclusions.Count}},
 		      "items": { "type": "string", "enum": [{{tokens}}] },
-		      "description": "Full desired set of built-in exclusion toggles. An empty array turns every toggle off (widest scan); omit the parameter to keep the server baseline — analyze echoes the effective set. Overrides the server baseline and any profile exclusions for this call. Tokens match case-insensitively; duplicates are rejected. hidden-* follow the platform hidden attribute; on Unix-like systems dot-named entries belong to the dot-* toggles."
+		      "description": "Full exclusion set for this call: [] disables every toggle for the widest scan, while omission keeps the server baseline; analyze echoes the result. Overrides profile exclusions. Tokens ignore case and reject duplicates; hidden-* uses platform attributes, while Unix dot names use dot-*."
 		    }
 		""";
 	}

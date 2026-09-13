@@ -9,14 +9,13 @@ public sealed partial class McpServerProcessTests
 	// recorded measurement, not the measurement itself: a ceiling with a few characters to spare is
 	// a tripwire for the next honest addition rather than a budget.
 	//
-	// Recorded on 2026-09-12 from the wire JSON the client received: tools/list result 34,439 on a
-	// default server, 38,357 when per-call exclusions are enabled, and 1,128 of instructions.
-	// The base revision delivered 42,370 characters before the protected JSON tools stopped
-	// publishing duplicate output schemas. The exact mode difference below isolates the optional
-	// exclusion parameter; the total ceiling keeps deliberate room for protocol metadata.
-	private const int ToolsListResultCeiling = 35_000;
-	private const int ToolsListResultFloor = 33_000;
-	private const int ExclusionsParameterCost = 3_918;
+	// Recorded on 2026-09-13 from the wire JSON the client received: tools/list result 27,619 on a
+	// default server and 30,661 when per-call exclusions are enabled. The 27,900 ceiling leaves 281
+	// characters for an intentional catalog change while the exact mode difference below isolates
+	// the optional exclusion parameter.
+	private const int ToolsListResultCeiling = 27_900;
+	private const int ToolsListResultFloor = 27_300;
+	private const int ExclusionsParameterCost = 3_042;
 	private const int InstructionsCeiling = 1_200;
 	private const int InstructionsFloor = 900;
 
