@@ -24,6 +24,7 @@ export function validateSeriesConfiguration(configuration, knownSessionIds = new
   rejectUnless(isPinnedLimits(configuration.limits), 'all series limits must be pinned');
   rejectUnless(nonEmpty(configuration.serverInstructions), 'the server instructions must be pinned');
   rejectUnless(isPinnedValue(configuration.toolConfiguration), 'the tool configuration must be pinned');
+  rejectUnless(isPricing(configuration.pricing), 'all four usage prices and their currency must be pinned');
 
   rejectUnless(nonEmpty(configuration.model) && configuration.model === configuration.expectedModel,
     'the model must match the pinned model');
@@ -41,6 +42,7 @@ export function validateSeriesConfiguration(configuration, knownSessionIds = new
   knownSessionIds.add(sessionId);
   const limits = canonicalize(configuration.limits);
   const toolConfiguration = canonicalize(configuration.toolConfiguration);
+  const pricing = canonicalize(configuration.pricing);
   return Object.freeze({
     seriesId: configuration.seriesId,
     task: configuration.task,
@@ -53,6 +55,7 @@ export function validateSeriesConfiguration(configuration, knownSessionIds = new
     limitsSha256: digest(JSON.stringify(limits)),
     serverInstructionsSha256: digest(configuration.serverInstructions),
     toolConfigurationSha256: digest(JSON.stringify(toolConfiguration)),
+    pricingSha256: digest(JSON.stringify(pricing)),
     model: configuration.model,
     clientVersion: configuration.clientVersion,
     toolLoadingMode: configuration.toolLoadingMode,
@@ -63,6 +66,15 @@ export function validateSeriesConfiguration(configuration, knownSessionIds = new
       })
       : null,
   });
+}
+
+function isPricing(pricing) {
+  if (!pricing || typeof pricing !== 'object' || Array.isArray(pricing) || !nonEmpty(pricing.currency))
+    return false;
+  const rates = pricing.perMillionTokens;
+  return rates && typeof rates === 'object' && !Array.isArray(rates) &&
+    ['inputTokens', 'cacheWriteTokens', 'cacheReadTokens', 'outputTokens']
+      .every(name => Number.isFinite(rates[name]) && rates[name] >= 0);
 }
 
 function isPinnedLimits(limits) {

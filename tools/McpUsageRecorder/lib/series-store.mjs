@@ -17,6 +17,7 @@ const sharedIdentityFields = Object.freeze([
   ['serverInstructionsSha256', 'server instructions fingerprint'],
   ['toolConfigurationSha256', 'tool configuration fingerprint'],
   ['limitsSha256', 'limits fingerprint'],
+  ['pricingSha256', 'pricing fingerprint'],
 ]);
 
 export function buildSeriesManifest(configuration) {
@@ -30,6 +31,7 @@ export function buildSeriesManifest(configuration) {
   const serverInstructions = requireText(configuration.serverInstructions, 'server instructions');
   requireObject(configuration.toolConfiguration, 'tool configuration');
   requireObject(configuration.limits, 'limits');
+  const pricing = normalizePricing(configuration.pricing);
   const identity = {
     seriesId,
     productBuildSha,
@@ -39,10 +41,12 @@ export function buildSeriesManifest(configuration) {
     serverInstructionsSha256: digest(serverInstructions),
     toolConfigurationSha256: digest(canonicalJson(configuration.toolConfiguration)),
     limitsSha256: digest(canonicalJson(configuration.limits)),
+    pricingSha256: digest(canonicalJson(pricing)),
   };
   return {
     schemaVersion: 1,
     identity,
+    pricing,
   };
 }
 
@@ -87,7 +91,7 @@ export async function readSeriesManifest(seriesDirectory) {
   return manifest;
 }
 
-export function createRunRecord(manifest, slot, report, cost) {
+export function createRunRecord(manifest, slot, report) {
   validateManifest(manifest);
   requireObject(slot, 'run slot');
   requireObject(report, 'session report');
@@ -112,6 +116,7 @@ export function createRunRecord(manifest, slot, report, cost) {
     serverInstructionsSha256: report.session.serverInstructionsSha256,
     toolConfigurationSha256: report.session.toolConfigurationSha256,
     limitsSha256: report.session.limitsSha256,
+    pricingSha256: report.session.pricingSha256,
   };
   const mismatch = firstIdentityMismatch(identity, manifest.identity, false);
   if (mismatch)
@@ -120,7 +125,7 @@ export function createRunRecord(manifest, slot, report, cost) {
   const turns = requireTurns(report.turns);
   assertUsageEqual(sumTurnUsage(turns), usage,
     'Raw record rejected: sum of turns does not equal the session total');
-  const normalizedCost = normalizeCost(cost);
+  const normalizedCost = calculateCost(usage, manifest.pricing);
   const outcome = normalizeOutcome(report.session.status);
   const storageKey = digest(canonicalJson({ task, repetition, arm }));
   return {
@@ -166,8 +171,10 @@ export async function storeRunRecord(seriesDirectory, record, requestedStorageKe
       throw new Error(`Saved run mismatch: ${mismatch}; refusing to reuse ${path}.`);
     return { status: 'reused', path };
   }
+  assertCostMatches(record, manifest);
   if (record.storageKey !== storageKey)
     throw new Error('Saved run mismatch: task, repetition, or arm does not match the requested storage slot.');
+  assertStorageKey(record);
   const records = await loadRecords(directory);
   if (records.some(existingRecord => existingRecord.identity.sessionId === record.identity.sessionId))
     throw new Error(`Saved run mismatch: session identifier '${record.identity.sessionId}' is already recorded.`);
@@ -200,6 +207,7 @@ export function summarizeSeriesRecords(manifest, records) {
   const sessionIds = new Set();
   for (const record of records) {
     validateRecord(record);
+    assertStorageKey(record);
     if (record.identity.seriesId !== manifest.identity.seriesId) {
       throw new Error(
         `Raw record '${record.storageKey}' belongs to series '${record.identity.seriesId}', not '${manifest.identity.seriesId}'.`);
@@ -217,6 +225,7 @@ export function summarizeSeriesRecords(manifest, records) {
       sumTurnUsage(record.measurement.turns),
       record.measurement.usage,
       `Raw record '${record.storageKey}' rejected: sum of turns does not equal the session total`);
+    assertCostMatches(record, manifest);
   }
 
   const arms = buildArmTotals(records);
@@ -244,9 +253,36 @@ export function summarizeSeriesRecords(manifest, records) {
 export function validateArmAccounting(records, arms) {
   if (!Array.isArray(records) || !Array.isArray(arms))
     throw new Error('Arm accounting requires raw records and arm totals.');
-  const expected = buildArmTotals(records);
-  if (canonicalJson(expected) !== canonicalJson(arms))
+  const byArm = new Map();
+  for (const arm of arms) {
+    requireObject(arm, 'arm total');
+    const name = requireText(arm.arm, 'arm total name');
+    if (byArm.has(name))
+      throw new Error(`Series summary rejected: arm '${name}' appears more than once.`);
+    byArm.set(name, arm);
+  }
+  const recordArms = new Set(records.map(record => record.identity.arm));
+  if (byArm.size !== recordArms.size || [...recordArms].some(arm => !byArm.has(arm)))
     throw new Error('Series summary rejected: sum of sessions does not equal the arm total.');
+  for (const name of recordArms) {
+    const sessions = records.filter(record => record.identity.arm === name);
+    const actual = byArm.get(name);
+    const usage = sessions.reduce(
+      (total, record) => addUsage(total, record.measurement.usage),
+      emptyUsage());
+    const outcomes = { success: 0, error: 0, aborted: 0 };
+    for (const record of sessions)
+      outcomes[record.measurement.outcome]++;
+    const currency = sessions[0].measurement.cost.currency;
+    if (sessions.some(record => record.measurement.cost.currency !== currency) ||
+        actual.sessions !== sessions.length ||
+        canonicalJson(actual.usage) !== canonicalJson(usage) ||
+        canonicalJson(actual.outcomes) !== canonicalJson(outcomes) ||
+        actual.cost?.currency !== currency ||
+        actual.cost?.amount !== sessions.reduce((sum, record) => sum + record.measurement.cost.amount, 0)) {
+      throw new Error('Series summary rejected: sum of sessions does not equal the arm total.');
+    }
+  }
 }
 
 async function loadRecords(directory) {
@@ -256,7 +292,12 @@ async function loadRecords(directory) {
     .sort();
   const records = [];
   for (const name of names)
-    records.push(JSON.parse(await readFile(join(directory, 'records', name), 'utf8')));
+  {
+    const record = JSON.parse(await readFile(join(directory, 'records', name), 'utf8'));
+    if (name !== `${record.storageKey}.json`)
+      throw new Error(`Raw record file '${name}' does not match its storage key.`);
+    records.push(record);
+  }
   return records;
 }
 
@@ -298,6 +339,10 @@ function validateManifest(manifest) {
   requireFingerprint(manifest.identity.serverInstructionsSha256, 'server instructions fingerprint');
   requireFingerprint(manifest.identity.toolConfigurationSha256, 'tool configuration fingerprint');
   requireFingerprint(manifest.identity.limitsSha256, 'limits fingerprint');
+  requireFingerprint(manifest.identity.pricingSha256, 'pricing fingerprint');
+  const pricing = normalizePricing(manifest.pricing);
+  if (manifest.identity.pricingSha256 !== digest(canonicalJson(pricing)))
+    throw new Error('Series manifest pricing does not match its fingerprint.');
 }
 
 function validateRecord(record) {
@@ -311,13 +356,14 @@ function validateRecord(record) {
     requireText(record.identity[name], name);
   }
   requirePositiveInteger(record.identity.repetition, 'repetition');
-  for (const name of ['serverInstructionsSha256', 'toolConfigurationSha256', 'limitsSha256'])
+  for (const name of ['serverInstructionsSha256', 'toolConfigurationSha256', 'limitsSha256', 'pricingSha256'])
     requireFingerprint(record.identity[name], name);
   requireObject(record.measurement, 'run measurement');
   copyUsage(record.measurement.usage, 'session usage');
   normalizeCost(record.measurement.cost);
   normalizeOutcome(record.measurement.outcome);
   requireTurns(record.measurement.turns);
+
 }
 
 function firstIdentityMismatch(actual, expected, includeSeries) {
@@ -394,6 +440,44 @@ function normalizeCost(cost) {
     amount: cost.amount,
     currency: requireText(cost.currency, 'cost currency'),
   };
+}
+
+function normalizePricing(pricing) {
+  requireObject(pricing, 'pricing');
+  requireObject(pricing.perMillionTokens, 'pricing perMillionTokens');
+  return {
+    currency: requireText(pricing.currency, 'pricing currency'),
+    perMillionTokens: Object.fromEntries(usageNames.map(name => {
+      const rate = pricing.perMillionTokens[name];
+      if (!Number.isFinite(rate) || rate < 0)
+        throw new Error(`Pricing rate ${name} must be a non-negative finite number.`);
+      return [name, rate];
+    })),
+  };
+}
+
+function calculateCost(usage, pricing) {
+  const normalized = normalizePricing(pricing);
+  const amount = usageNames.reduce(
+    (total, name) => total + usage[name] * normalized.perMillionTokens[name],
+    0) / 1_000_000;
+  return { amount, currency: normalized.currency };
+}
+
+function assertCostMatches(record, manifest) {
+  const expected = calculateCost(record.measurement.usage, manifest.pricing);
+  if (canonicalJson(record.measurement.cost) !== canonicalJson(expected))
+    throw new Error(`Raw record '${record.storageKey}' cost does not match its usage and pinned pricing.`);
+}
+
+function assertStorageKey(record) {
+  const expected = digest(canonicalJson({
+    task: record.identity.task,
+    repetition: record.identity.repetition,
+    arm: record.identity.arm,
+  }));
+  if (record.storageKey !== expected)
+    throw new Error('Raw run record storage key does not match its task, repetition, and arm.');
 }
 
 function normalizeOutcome(outcome) {

@@ -16,36 +16,36 @@ try {
   const options = parseOptions(process.argv.slice(3));
   switch (command) {
     case 'new': {
+      allowOnly(options, ['root', 'configuration']);
       const configuration = await readJson(required(options, 'configuration'));
       const result = await createSeries(required(options, 'root'), configuration);
       writeJson({ status: 'created', directory: result.directory, manifest: result.manifest });
       break;
     }
     case 'resume': {
+      allowOnly(options, ['series', 'configuration']);
       const configuration = await readJson(required(options, 'configuration'));
       const result = await resumeSeries(required(options, 'series'), configuration);
       writeJson({ status: 'resumed', directory: result.directory, manifest: result.manifest });
       break;
     }
     case 'append': {
+      allowOnly(options, ['series', 'report', 'task', 'repetition', 'arm']);
       const seriesDirectory = required(options, 'series');
       const manifest = await readSeriesManifest(seriesDirectory);
       const report = await readJson(required(options, 'report'));
-      const repetition = Number.parseInt(required(options, 'repetition'), 10);
-      const amount = Number(required(options, 'cost'));
+      const repetition = Number(required(options, 'repetition'));
       const record = createRunRecord(manifest, {
         task: required(options, 'task'),
         repetition,
         arm: required(options, 'arm'),
-      }, report, {
-        amount,
-        currency: required(options, 'currency'),
-      });
+      }, report);
       const result = await storeRunRecord(seriesDirectory, record);
       writeJson({ ...result, identity: record.identity });
       break;
     }
     case 'summarize': {
+      allowOnly(options, ['series', 'output']);
       const summary = await summarizeSeries(required(options, 'series'));
       const output = options.get('output') ?? '-';
       const json = `${JSON.stringify(summary, null, 2)}\n`;
@@ -92,6 +92,13 @@ function required(options, name) {
   return value;
 }
 
+function allowOnly(options, allowed) {
+  const expected = new Set(allowed);
+  for (const name of options.keys())
+    if (!expected.has(name))
+      throw new Error(`Option '--${name}' is not valid for this command.`);
+}
+
 async function readJson(path) {
   return JSON.parse(await readFile(resolve(path), 'utf8'));
 }
@@ -105,7 +112,7 @@ function usage() {
     'Usage:',
     '  node tools/McpUsageRecorder/series.mjs new --root DIR --configuration FILE',
     '  node tools/McpUsageRecorder/series.mjs resume --series DIR --configuration FILE',
-    '  node tools/McpUsageRecorder/series.mjs append --series DIR --report FILE --task ID --repetition N --arm ID --cost AMOUNT --currency CODE',
+    '  node tools/McpUsageRecorder/series.mjs append --series DIR --report FILE --task ID --repetition N --arm ID',
     '  node tools/McpUsageRecorder/series.mjs summarize --series DIR [--output FILE]',
     '',
   ].join('\n');

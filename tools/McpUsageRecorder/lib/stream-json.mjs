@@ -33,6 +33,7 @@ export function recordStreamJson(lines, pinnedSession) {
         limitsSha256: pinnedSession.limitsSha256,
         serverInstructionsSha256: pinnedSession.serverInstructionsSha256,
         toolConfigurationSha256: pinnedSession.toolConfigurationSha256,
+        pricingSha256: pinnedSession.pricingSha256,
         startedAt: sourceEvent.timestamp,
       });
       continue;

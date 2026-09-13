@@ -48,13 +48,35 @@ node --test tools/McpUsageRecorder/tests/recorder.test.mjs
 
 An experiment series is created or resumed explicitly. Its configuration file contains the series
 identifier, product build SHA, model, client version, tool-loading mode, server instructions, tool
-configuration, and limits. The stored manifest keeps SHA-256 fingerprints instead of copying the
-instructions and configurations into every result.
+configuration, limits, and per-million-token prices for all four usage counters. The stored manifest
+keeps SHA-256 fingerprints instead of copying instructions and configurations into every result.
+
+```json
+{
+  "seriesId": "comparison-2026-09-13",
+  "productBuildSha": "0123456789012345678901234567890123456789",
+  "model": "model-id",
+  "clientVersion": "client-version",
+  "toolLoadingMode": "dynamic",
+  "serverInstructions": "Pinned server instructions",
+  "toolConfiguration": { "allowedTools": ["search_project", "get_file"] },
+  "limits": { "maxTurns": 40, "timeoutMs": 900000 },
+  "pricing": {
+    "currency": "USD",
+    "perMillionTokens": {
+      "inputTokens": 0,
+      "cacheWriteTokens": 0,
+      "cacheReadTokens": 0,
+      "outputTokens": 0
+    }
+  }
+}
+```
 
 ```text
 node tools/McpUsageRecorder/series.mjs new --root results --configuration series-config.json
 node tools/McpUsageRecorder/series.mjs resume --series results/series-id --configuration series-config.json
-node tools/McpUsageRecorder/series.mjs append --series results/series-id --report session.json --task task-id --repetition 1 --arm baseline --cost 0.42 --currency USD
+node tools/McpUsageRecorder/series.mjs append --series results/series-id --report session.json --task task-id --repetition 1 --arm baseline
 node tools/McpUsageRecorder/series.mjs summarize --series results/series-id --output summary.json
 ```
 
@@ -63,6 +85,8 @@ refuses any mismatch. Each task/repetition/arm slot is written once. An existing
 reused only when its complete identity, session identifier, four usage counters, cost, and outcome
 are identical; otherwise `append` fails and names the mismatched field. A different series therefore
 always has a different directory, while continuing an existing series is an explicit checked action.
+Session cost is derived from the four raw usage counters and the pinned price table; `append` does not
+accept a manually calculated cost.
 
 The summary is derived only from the immutable raw records. Before emitting rows it verifies that
 turn usage sums to each session total, session usage sums to each arm total, every record belongs to

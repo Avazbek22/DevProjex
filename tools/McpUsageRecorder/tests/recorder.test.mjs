@@ -180,6 +180,7 @@ test('series preflight rejects each unsafe boundary', () => {
     configuration => { configuration.limits = {}; },
     configuration => { configuration.serverInstructions = ''; },
     configuration => { configuration.toolConfiguration = {}; },
+    configuration => { delete configuration.pricing.perMillionTokens.cacheReadTokens; },
     configuration => { configuration.clientVersion = 'different'; },
     configuration => { delete configuration.evaluator.orderDisagreementRate; },
   ];
@@ -203,6 +204,7 @@ test('series preflight rejects a reused session identifier and records pinned in
   assert.match(snapshot.limitsSha256, /^[0-9a-f]{64}$/);
   assert.match(snapshot.serverInstructionsSha256, /^[0-9a-f]{64}$/);
   assert.match(snapshot.toolConfigurationSha256, /^[0-9a-f]{64}$/);
+  assert.match(snapshot.pricingSha256, /^[0-9a-f]{64}$/);
   assert.throws(() => validateSeriesConfiguration(configuration, known), /session identifier was already used/);
 });
 
@@ -223,6 +225,7 @@ test('series creation and continuation are explicit and validate every pinned in
       value => { value.serverInstructions = 'different instructions'; },
       value => { value.toolConfiguration = { allowedTools: ['get_tree'] }; },
       value => { value.limits = { maxTurns: 41, timeoutMs: 900000 }; },
+      value => { value.pricing.perMillionTokens.outputTokens = 16; },
     ]) {
       const changed = structuredClone(configuration);
       mutate(changed);
@@ -258,6 +261,7 @@ test('saved run reuse requires the complete identity accounting cost and outcome
       ['server instructions fingerprint', value => { value.identity.serverInstructionsSha256 = 'b'.repeat(64); }],
       ['tool configuration fingerprint', value => { value.identity.toolConfigurationSha256 = 'b'.repeat(64); }],
       ['limits fingerprint', value => { value.identity.limitsSha256 = 'b'.repeat(64); }],
+      ['pricing fingerprint', value => { value.identity.pricingSha256 = 'b'.repeat(64); }],
       ['input usage', value => { value.measurement.usage.inputTokens++; }],
       ['cache-write usage', value => { value.measurement.usage.cacheWriteTokens++; }],
       ['cache-read usage', value => { value.measurement.usage.cacheReadTokens++; }],
@@ -290,7 +294,7 @@ test('series summary derives totals from raw turns and checks every accounting b
   });
   second.measurement.turns[0].usage.outputTokens = 7;
   second.measurement.usage.outputTokens = 7;
-  second.measurement.cost.amount = 0.25;
+  second.measurement.cost.amount = sessionCost(second.measurement.usage, manifest.pricing);
 
   const summary = summarizeSeriesRecords(manifest, [first, second]);
   assert.deepEqual(summary.arms[0].usage, {
@@ -300,7 +304,9 @@ test('series summary derives totals from raw turns and checks every accounting b
     outputTokens: 12,
   });
   assert.deepEqual(summary.arms[0].outcomes, { success: 1, error: 1, aborted: 0 });
-  assert.equal(summary.arms[0].cost.amount, 0.5);
+  assert.equal(summary.arms[0].cost.amount,
+    sessionCost(first.measurement.usage, manifest.pricing) +
+      sessionCost(second.measurement.usage, manifest.pricing));
 
   const badSession = structuredClone(first);
   badSession.measurement.usage.inputTokens++;
@@ -313,6 +319,12 @@ test('series summary derives totals from raw turns and checks every accounting b
   assert.throws(
     () => summarizeSeriesRecords(manifest, [first, foreign]),
     /belongs to series 'foreign-series'/);
+
+  const wrongSlot = structuredClone(first);
+  wrongSlot.storageKey = 'b'.repeat(64);
+  assert.throws(
+    () => summarizeSeriesRecords(manifest, [wrongSlot]),
+    /storage key does not match/);
 
   const badArm = structuredClone(summary.arms[0]);
   badArm.usage.outputTokens++;
@@ -337,7 +349,7 @@ test('series command builds its summary directly from stored session reports', (
     writeFileSync(reportPath, JSON.stringify(report));
     runSeriesCommand(script, [
       'append', '--series', join(directory, 'command-series'), '--report', reportPath,
-      '--task', 'task-one', '--repetition', '1', '--arm', 'baseline', '--cost', '0.25', '--currency', 'USD',
+      '--task', 'task-one', '--repetition', '1', '--arm', 'baseline',
     ]);
     runSeriesCommand(script, [
       'summarize', '--series', join(directory, 'command-series'), '--output', summaryPath,
@@ -345,6 +357,14 @@ test('series command builds its summary directly from stored session reports', (
     const summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
     assert.equal(summary.sessions, 1);
     assert.deepEqual(summary.arms[0].usage, report.totals.usage);
+    assert.equal(summary.rows[0].cost.amount, sessionCost(report.totals.usage, manifest.pricing));
+
+    const manualCost = spawnSync(process.execPath, [script,
+      'append', '--series', join(directory, 'command-series'), '--report', reportPath,
+      '--task', 'task-one', '--repetition', '1', '--arm', 'baseline', '--cost', '0.25',
+    ], { encoding: 'utf8' });
+    assert.equal(manualCost.status, 2);
+    assert.match(manualCost.stderr, /--cost.*not valid/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -368,6 +388,15 @@ function validConfiguration() {
     limits: { maxTurns: 40, timeoutMs: 900000, tasks: ['T1'] },
     serverInstructions: 'Use one local DevProjex server.',
     toolConfiguration: { allowedTools: ['get_file', 'search_project'] },
+    pricing: {
+      currency: 'USD',
+      perMillionTokens: {
+        inputTokens: 3,
+        cacheWriteTokens: 3.75,
+        cacheReadTokens: 0.3,
+        outputTokens: 15,
+      },
+    },
     model: 'model-1',
     expectedModel: 'model-1',
     clientVersion: '2.1.261',
@@ -387,6 +416,15 @@ function validSeriesConfiguration(seriesId) {
     serverInstructions: 'Use one local DevProjex server.',
     toolConfiguration: { allowedTools: ['get_file', 'search_project'] },
     limits: { maxTurns: 40, timeoutMs: 900000 },
+    pricing: {
+      currency: 'USD',
+      perMillionTokens: {
+        inputTokens: 3,
+        cacheWriteTokens: 3.75,
+        cacheReadTokens: 0.3,
+        outputTokens: 15,
+      },
+    },
   };
 }
 
@@ -396,7 +434,7 @@ function validRunRecord(manifest, options) {
     task: options.task,
     repetition: options.repetition,
     arm: options.arm,
-  }, report, { amount: 0.25, currency: 'USD' });
+  }, report);
 }
 
 function createSessionReport(manifest, sessionId, status = 'success') {
@@ -411,6 +449,7 @@ function createSessionReport(manifest, sessionId, status = 'success') {
       serverInstructionsSha256: manifest.identity.serverInstructionsSha256,
       toolConfigurationSha256: manifest.identity.toolConfigurationSha256,
       limitsSha256: manifest.identity.limitsSha256,
+      pricingSha256: manifest.identity.pricingSha256,
     },
     { type: 'model.usage', turnId: 'turn-1', usage: {
       input_tokens: 10,
@@ -420,6 +459,12 @@ function createSessionReport(manifest, sessionId, status = 'success') {
     } },
     { type: 'session.end', status, durationMs: 25 },
   ]);
+}
+
+function sessionCost(usage, pricing) {
+  return Object.entries(usage).reduce(
+    (total, [name, tokens]) => total + tokens * pricing.perMillionTokens[name],
+    0) / 1_000_000;
 }
 
 function runSeriesCommand(script, argumentsList) {
