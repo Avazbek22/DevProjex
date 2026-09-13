@@ -237,6 +237,9 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("### The search result carries the selector", server, StringComparison.Ordinal);
 		Assert.Contains("Declarations found (path, symbol, lines):", server, StringComparison.Ordinal);
 		Assert.Contains("[Read declarations]", server, StringComparison.Ordinal);
+		Assert.Contains("Best declaration body (1 of 3):", server, StringComparison.Ordinal);
+		Assert.Contains("limited to 1,800 characters", server, StringComparison.Ordinal);
+		Assert.Contains("same 16,000-character cap", server, StringComparison.Ordinal);
 		Assert.Contains(
 			"### What a bounded result retains",
 			server,

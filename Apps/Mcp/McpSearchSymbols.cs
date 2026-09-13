@@ -261,6 +261,134 @@ internal readonly record struct McpSearchDeclaration(
 	int StartLine,
 	int EndLine);
 
+internal sealed record McpSearchDeclarationPreview(
+	McpSearchDeclaration Declaration,
+	string Text,
+	int RemainingLines,
+	bool IsAddressable);
+
+internal sealed class McpSearchDeclarationPreviewCache
+{
+	private readonly string relativePath;
+	private readonly string content;
+	private readonly IReadOnlyDictionary<string, int> declarationNameCounts;
+	private readonly int maximumCharacters;
+	private readonly CancellationToken cancellationToken;
+	private readonly Dictionary<DeclarationIdentity, McpSearchDeclarationPreview> previews = [];
+	private int[]? lineStarts;
+
+	public McpSearchDeclarationPreviewCache(
+		string relativePath,
+		string content,
+		IReadOnlyList<NavigationDeclaration> declarations,
+		int maximumCharacters,
+		CancellationToken cancellationToken)
+	{
+		this.relativePath = relativePath;
+		this.content = content;
+		declarationNameCounts = CountDeclarationNames(declarations);
+		this.maximumCharacters = maximumCharacters;
+		this.cancellationToken = cancellationToken;
+	}
+
+	public McpSearchDeclarationPreview Get(NavigationDeclaration declaration)
+	{
+		var identity = new DeclarationIdentity(declaration.Name, declaration.StartLine, declaration.EndLine);
+		if (previews.TryGetValue(identity, out var preview))
+			return preview;
+
+		lineStarts ??= BuildLineStarts(content, cancellationToken);
+		var body = Slice(declaration.StartLine, declaration.EndLine);
+		preview = new McpSearchDeclarationPreview(
+			new McpSearchDeclaration(
+				relativePath,
+				declaration.Name,
+				declaration.StartLine,
+				declaration.EndLine),
+			body.Text,
+			body.RemainingLines,
+			declarationNameCounts[declaration.Name] == 1);
+		previews[identity] = preview;
+		return preview;
+	}
+
+	private (string Text, int RemainingLines) Slice(int startLine, int endLine)
+	{
+		var starts = lineStarts!;
+		if (startLine < 1 || endLine < startLine || endLine > starts.Length)
+			return (string.Empty, Math.Max(0, endLine - startLine + 1));
+
+		var output = new StringBuilder(Math.Min(maximumCharacters, 1_024));
+		var hasLine = false;
+		for (var line = startLine; line <= endLine; line++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var start = starts[line - 1];
+			var end = line < starts.Length ? starts[line] : content.Length;
+			if (end > start && content[end - 1] == '\n')
+				end--;
+			if (end > start && content[end - 1] == '\r')
+				end--;
+			var lineText = content.AsSpan(start, end - start);
+			var separator = hasLine ? 1 : 0;
+			if ((long)output.Length + separator + lineText.Length > maximumCharacters)
+			{
+				if (!hasLine)
+					AppendPrefix(output, lineText, maximumCharacters);
+				return (output.ToString(), endLine - line + 1);
+			}
+
+			if (hasLine)
+				output.Append('\n');
+			output.Append(lineText);
+			hasLine = true;
+		}
+
+		return (output.ToString(), 0);
+	}
+
+	private static int[] BuildLineStarts(string content, CancellationToken cancellationToken)
+	{
+		var starts = new List<int> { 0 };
+		for (var index = 0; index < content.Length; index++)
+		{
+			if ((index & 0xFFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			if (content[index] == '\r')
+			{
+				if (index + 1 < content.Length && content[index + 1] == '\n')
+					index++;
+				starts.Add(index + 1);
+			}
+			else if (content[index] == '\n')
+				starts.Add(index + 1);
+		}
+		return starts.ToArray();
+	}
+
+	private static IReadOnlyDictionary<string, int> CountDeclarationNames(
+		IReadOnlyList<NavigationDeclaration> declarations)
+	{
+		var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+		foreach (var declaration in declarations)
+			counts[declaration.Name] = counts.GetValueOrDefault(declaration.Name) + 1;
+		return counts;
+	}
+
+	private static void AppendPrefix(StringBuilder output, ReadOnlySpan<char> text, int maximumCharacters)
+	{
+		var length = Math.Min(text.Length, maximumCharacters);
+		if (length > 0 && length < text.Length &&
+			char.IsHighSurrogate(text[length - 1]) && char.IsLowSurrogate(text[length]))
+		{
+			length--;
+		}
+		output.Append(text[..length]);
+	}
+
+	private readonly record struct DeclarationIdentity(string Name, int StartLine, int EndLine);
+}
+
 internal sealed record McpSearchSymbolResult(
 	IReadOnlyDictionary<McpSearchHitKey, string> Names,
 	IReadOnlyList<McpSearchDeclaration> Declarations,
