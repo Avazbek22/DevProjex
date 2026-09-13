@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,9 @@ import test from 'node:test';
 import { recordEvents } from '../lib/recorder.mjs';
 import { validateSeriesConfiguration } from '../lib/series-preflight.mjs';
 import { recordStreamJson } from '../lib/stream-json.mjs';
+import { probeMcpServer } from '../lib/mcp-probe.mjs';
+import { runPipeline } from '../lib/pipeline-runner.mjs';
+import { buildPipelineReport } from '../lib/pipeline-report.mjs';
 import {
   compareTaskAnswers,
   evaluateTaskAnswer,
@@ -15,10 +18,13 @@ import {
   loadTaskOracleRegistry,
 } from '../lib/task-oracle.mjs';
 import { reconcileOrderedAssessments, summarizeOrderedAssessments } from '../lib/order-consistency.mjs';
+import { answerFingerprint, evaluateSavedSeries, stripExperience } from '../lib/saved-evaluation.mjs';
+import { analyzeSavedReadings, extractKnownAddresses } from '../lib/session-analysis.mjs';
 import {
   buildSeriesManifest,
   createRunRecord,
   createSeries,
+  readSeriesRecords,
   resumeSeries,
   storeRunRecord,
   summarizeSeriesRecords,
@@ -208,6 +214,30 @@ test('series preflight rejects a reused session identifier and records pinned in
   assert.throws(() => validateSeriesConfiguration(configuration, known), /session identifier was already used/);
 });
 
+test('stream-json adapter retains calls response boundaries tokens and final text', () => {
+  const pinned = validPreflight();
+  const report = recordStreamJson([
+    { type: 'system', subtype: 'init', session_id: pinned.sessionId, model: pinned.model,
+      [`${'clau'}de_code_version`]: pinned.clientVersion },
+    { type: `${'assi'}stant`, message: { id: 'turn-1', usage: { input_tokens: 5, output_tokens: 2 },
+      content: [{ type: 'tool_use', id: 'call-1', name: 'get_file', input: { path: 'src/a.cs' } }] } },
+    { type: 'model.input', turnId: 'turn-1', text: 'observable request' },
+    { type: 'mcp.response', requestId: 'call-1', turnId: 'turn-1', wireText: '{"ok":true}',
+      decodedText: 'src/a.cs:7: value', tokenCount: 6 },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1',
+      content: 'src/a.cs:7: value', token_count: 6 }] } },
+    { type: 'result', is_error: false, duration_ms: 15, result: 'Final text.' },
+  ], pinned);
+
+  assert.equal(report.finalAnswer, 'Final text.');
+  assert.equal(report.toolInteractions[0].name, 'get_file');
+  assert.deepEqual(report.toolInteractions[0].input, { path: 'src/a.cs' });
+  assert.equal(report.toolInteractions[0].responseText, 'src/a.cs:7: value');
+  assert.equal(report.toolInteractions[0].responseTokens, 6);
+  assert.equal(report.totals.wireResponseBytes, Buffer.byteLength('{"ok":true}'));
+  assert.equal(report.totals.modelInputBytes, Buffer.byteLength('observable request'));
+});
+
 test('series creation and continuation are explicit and validate every pinned input', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'mcp-series-'));
   try {
@@ -383,6 +413,233 @@ test('series command builds its summary directly from stored session reports', (
   }
 });
 
+test('pipeline refuses identity drift and never skips by directory name', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-'));
+  const definitionPath = join(directory, 'definition.json');
+  const definition = validPipelineDefinition('pipeline-identity');
+  writeFileSync(definitionPath, JSON.stringify(definition));
+  const probe = async server => ({
+    instructions: `Instructions for ${server.args[0]}`,
+    toolsList: { tools: [{ name: `tool-${server.args[0]}` }] },
+  });
+  const execute = context => pipelineSessionReport(context, 'success');
+  try {
+    const created = await runPipeline({
+      mode: 'new', rootDirectory: directory, definitionPath, probe, execute,
+    });
+    assert.equal(created.results.filter(result => result.outcome === 'success').length, 2);
+    await assert.rejects(
+      () => runPipeline({ mode: 'new', rootDirectory: directory, definitionPath, probe, execute }),
+      /already exists/);
+
+    let executions = 0;
+    const resumed = await runPipeline({
+      mode: 'resume', seriesDirectory: created.directory, definitionPath, probe,
+      execute: context => { executions++; return pipelineSessionReport(context, 'success'); },
+    });
+    assert.equal(executions, 0);
+    assert.equal(resumed.results.every(result => result.status === 'reused'), true);
+
+    const changedProbe = async server => ({
+      instructions: `Instructions for ${server.args[0]}`,
+      toolsList: { tools: [{ name: `changed-${server.args[0]}` }] },
+    });
+    await assert.rejects(
+      () => runPipeline({
+        mode: 'resume', seriesDirectory: created.directory, definitionPath,
+        probe: changedProbe, execute,
+      }),
+      /tools\/list fingerprint/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('server probe reports a command start failure', async () => {
+  await assert.rejects(
+    () => probeMcpServer({ command: 'missing-mcp-probe-command-for-test' }, {
+      version: '1.0.0', protocolVersion: '2025-06-18',
+    }, 1_000),
+    /ENOENT|not found/i);
+});
+
+test('pipeline refuses to start when required server observations are unavailable', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-'));
+  const definitionPath = join(directory, 'definition.json');
+  writeFileSync(definitionPath, JSON.stringify(validPipelineDefinition('missing-observation')));
+  try {
+    await assert.rejects(
+      () => runPipeline({
+        mode: 'new', rootDirectory: directory, definitionPath,
+        probe: async () => ({ instructions: '', toolsList: null }),
+        execute: () => { throw new Error('must not execute'); },
+      }),
+      /did not expose server instructions; no session was started/);
+    assert.equal(readFileSync(definitionPath, 'utf8').length > 0, true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('pipeline refuses a client command that does not consume pinned session inputs', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-'));
+  const definitionPath = join(directory, 'definition.json');
+  const definition = validPipelineDefinition('missing-client-input');
+  definition.client.args = definition.client.args.filter(value => value !== '{toolConfigPath}');
+  writeFileSync(definitionPath, JSON.stringify(definition));
+  let probes = 0;
+  try {
+    await assert.rejects(
+      () => runPipeline({
+        mode: 'new', rootDirectory: directory, definitionPath,
+        probe: async () => { probes++; return { instructions: 'x', toolsList: { tools: [] } }; },
+      }),
+      /must consume the \{toolConfigPath\} placeholder/);
+    assert.equal(probes, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('pipeline stores a new immutable attempt after a failed session', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-'));
+  const definitionPath = join(directory, 'definition.json');
+  const definition = validPipelineDefinition('pipeline-attempts');
+  definition.arms = [definition.arms[0], { ...definition.arms[1], id: 'comparison' }];
+  writeFileSync(definitionPath, JSON.stringify(definition));
+  const attempts = new Map();
+  try {
+    const result = await runPipeline({
+      mode: 'new', rootDirectory: directory, definitionPath,
+      probe: async () => ({ instructions: 'Pinned instructions', toolsList: { tools: [] } }),
+      execute: context => {
+        const count = (attempts.get(context.arm.id) ?? 0) + 1;
+        attempts.set(context.arm.id, count);
+        return pipelineSessionReport(context, count === 1 ? 'error' : 'success');
+      },
+    });
+    const records = await readSeriesRecords(result.directory);
+    assert.equal(records.length, 4);
+    for (const arm of definition.arms) {
+      const saved = records
+        .filter(record => record.identity.arm === arm.id)
+        .sort((left, right) => left.identity.attempt - right.identity.attempt);
+      assert.deepEqual(saved.map(record => record.identity.attempt), [1, 2]);
+      assert.deepEqual(saved.map(record => record.measurement.outcome), ['error', 'success']);
+      assert.notEqual(saved[0].identity.sessionId, saved[1].identity.sessionId);
+    }
+    const summary = summarizeSeriesRecords(result.manifest, records);
+    assert.equal(summary.arms.every(arm => arm.sessions === 2), true);
+    assert.equal(summary.arms.every(arm => arm.outcomes.error === 1 && arm.outcomes.success === 1), true);
+    assert.equal(summary.arms.every(arm => arm.cost.amount > 0), true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('pipeline executes every session sequentially', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-'));
+  const definitionPath = join(directory, 'definition.json');
+  writeFileSync(definitionPath, JSON.stringify(validPipelineDefinition('pipeline-sequential')));
+  let active = 0;
+  let maximumActive = 0;
+  try {
+    await runPipeline({
+      mode: 'new', rootDirectory: directory, definitionPath,
+      probe: async () => ({ instructions: 'Pinned instructions', toolsList: { tools: [] } }),
+      execute: async context => {
+        active++;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise(resolveWait => setTimeout(resolveWait, 5));
+        active--;
+        return pipelineSessionReport(context, 'success');
+      },
+    });
+    assert.equal(maximumActive, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('one pipeline command probes runs stores evaluates and analyzes saved sessions', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-command-'));
+  const definitionPath = fileURLToPath(new URL('./fixtures/pipeline-definition.json', import.meta.url));
+  const outputPath = join(directory, 'report.json');
+  const rebuiltPath = join(directory, 'rebuilt.json');
+  const pipelineScript = fileURLToPath(new URL('../pipeline.mjs', import.meta.url));
+  const definition = JSON.parse(readFileSync(definitionPath, 'utf8'));
+  try {
+    const result = spawnSync(process.execPath, [pipelineScript,
+      '--mode', 'new', '--definition', definitionPath, '--root', directory, '--output', outputPath,
+    ], { encoding: 'utf8', timeout: 20_000 });
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(readFileSync(outputPath, 'utf8'));
+    assert.equal(output.report.accounting.sessions, 2);
+    assert.equal(output.report.evaluation.rows[0].answers.left.classification, 'complete');
+    assert.equal(output.report.evaluation.rows[0].answers.right.classification, 'complete');
+    assert.equal(output.report.evaluation.rows[0].ordered.correctness.status, 'verdict');
+    assert.equal(output.report.evaluation.rows[0].ordered.preference.status, 'disagreement');
+    assert.equal(output.report.analysis.readingGroups[0].classification, 'known-section-unused');
+    assert.equal(output.report.analysis.readingGroups[0].readings, 8);
+    assert.equal(output.report.analysis.readingGroups[1].readings, 2);
+    assert.equal(output.report.analysis.readingGroups[2].readings, 2);
+    assert.equal(output.report.analysis.chains.length, 2);
+    assert.equal(output.report.analysis.eliminableTurns, 4);
+    assert.equal(output.report.analysis.toolCarryCost[0].tool, 'get_file');
+    const observed = JSON.parse(readFileSync(
+      join(directory, definition.seriesId, 'observed.json'), 'utf8'));
+    assert.equal(observed.toolsList[0].response.pages.length, 2);
+    assert.equal(observed.toolsList[0].response.tools.length, 2);
+    const recordDirectory = join(directory, definition.seriesId, 'records');
+    const rawRecord = JSON.parse(readFileSync(join(recordDirectory, readdirSync(recordDirectory)[0]), 'utf8'));
+    assert.equal(rawRecord.measurement.wallDurationMs >= 0, true);
+    assert.equal(rawRecord.measurement.responseBoundaries.length, 10);
+    assert.equal(rawRecord.measurement.modelInputs.length, 11);
+    assert.equal(rawRecord.measurement.toolInteractions.length, 10);
+
+    const rebuilt = spawnSync(process.execPath, [pipelineScript,
+      '--mode', 'report', '--definition', definitionPath,
+      '--series', join(directory, definition.seriesId), '--output', rebuiltPath,
+    ], { encoding: 'utf8', timeout: 20_000 });
+    assert.equal(rebuilt.status, 0, rebuilt.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(rebuiltPath, 'utf8')).report, output.report);
+
+    const captureDirectory = join(directory, definition.seriesId, 'captures');
+    const capturePath = join(captureDirectory, readdirSync(captureDirectory)[0]);
+    writeFileSync(capturePath, `${readFileSync(capturePath, 'utf8')} `);
+    const tampered = spawnSync(process.execPath, [pipelineScript,
+      '--mode', 'report', '--definition', definitionPath,
+      '--series', join(directory, definition.seriesId), '--output', rebuiltPath,
+    ], { encoding: 'utf8', timeout: 20_000 });
+    assert.equal(tampered.status, 2);
+    assert.match(tampered.stderr, /raw capture.*does not match its session record/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('pipeline report is rejected before emission when raw accounting differs', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcp-pipeline-report-'));
+  try {
+    const created = await createSeries(directory, validSeriesConfiguration('invalid-accounting'));
+    const record = validRunRecord(created.manifest, {
+      task: 'sample', repetition: 1, arm: 'left',
+      sessionId: '7d444840-9dc0-11d1-b245-5ffdce74fad2',
+    });
+    await storeRunRecord(created.directory, record);
+    record.measurement.usage.inputTokens++;
+    writeFileSync(join(created.directory, 'records', `${record.storageKey}.json`), JSON.stringify(record));
+    await assert.rejects(
+      () => buildPipelineReport(created.directory, {
+        evaluation: { oracleRegistry: 'unused.json' },
+        limits: { smallFileCharacters: 1_000 },
+      }, directory),
+      /sum of turns does not equal the session total/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 function validPreflight() {
   return validateSeriesConfiguration(validConfiguration());
 }
@@ -463,6 +720,8 @@ function createSessionReport(manifest, sessionId, status = 'success') {
       toolConfigurationSha256: manifest.identity.toolConfigurationSha256,
       limitsSha256: manifest.identity.limitsSha256,
       pricingSha256: manifest.identity.pricingSha256,
+      toolsListSha256: manifest.identity.toolsListSha256,
+      seriesDefinitionSha256: manifest.identity.seriesDefinitionSha256,
     },
     { type: 'model.usage', turnId: 'turn-1', usage: {
       input_tokens: 10,
@@ -472,6 +731,64 @@ function createSessionReport(manifest, sessionId, status = 'success') {
     } },
     { type: 'session.end', status, durationMs: 25 },
   ]);
+}
+
+function validPipelineDefinition(seriesId) {
+  return {
+    seriesId,
+    productBuildSha: 'd0236dc9cff93970c9657abcd211b8e46ef5f569',
+    model: 'model-1',
+    clientVersion: '2.1.261',
+    toolLoadingMode: 'dynamic',
+    repetitions: 1,
+    protocolVersion: '2025-06-18',
+    client: {
+      command: process.execPath,
+      args: ['client.mjs', '--session-id', '{sessionId}', '--model', '{model}',
+        '--mcp-config', '{mcpConfigPath}', '--tool-config', '{toolConfigPath}', '--prompt', '{prompt}'],
+    },
+    tasks: [{ id: 'sample', prompt: 'Inspect the selected project.' }],
+    arms: [
+      {
+        id: 'baseline',
+        server: { command: process.execPath, args: ['baseline.mjs'] },
+        toolConfiguration: { allowed: ['get_file'] },
+      },
+      {
+        id: 'candidate',
+        server: { command: process.execPath, args: ['candidate.mjs'] },
+        toolConfiguration: { allowed: ['get_file', 'search_project'] },
+      },
+    ],
+    limits: {
+      maxAttemptsPerAssignment: 2,
+      probeTimeoutMs: 1_000,
+      sessionTimeoutMs: 1_000,
+      smallFileCharacters: 1_000,
+    },
+    pricing: {
+      currency: 'USD',
+      perMillionTokens: {
+        inputTokens: 3,
+        cacheWriteTokens: 3.75,
+        cacheReadTokens: 0.3,
+        outputTokens: 15,
+      },
+    },
+    evaluation: {
+      oracleRegistry: fileURLToPath(new URL('./fixtures/task-oracles.json', import.meta.url)),
+      savedAssessments: fileURLToPath(new URL('./fixtures/saved-assessments.json', import.meta.url)),
+    },
+  };
+}
+
+function pipelineSessionReport(context, status) {
+  const report = createSessionReport(context.manifest, context.sessionId, status);
+  return {
+    ...report,
+    finalAnswer: status === 'success' ? 'Saved answer.' : null,
+    toolInteractions: [],
+  };
 }
 
 function sessionCost(usage, pricing) {
@@ -484,6 +801,37 @@ function runSeriesCommand(script, argumentsList) {
   const result = spawnSync(process.execPath, [script, ...argumentsList], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   return result;
+}
+
+function analysisRecord(interactions, turnIds) {
+  return {
+    identity: {
+      sessionId: '7d444840-9dc0-11d1-b245-5ffdce74fad2',
+      task: 'sample',
+      arm: 'baseline',
+    },
+    measurement: {
+      turns: turnIds.map(turnId => ({ turnId, usage: {
+        inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0,
+      } })),
+      toolInteractions: interactions,
+    },
+  };
+}
+
+function interaction(sequence, responseSequence, id, name, input, responseText, responseTokens,
+  turnId = `turn-${Math.ceil(sequence / 2)}`) {
+  return {
+    sequence,
+    responseSequence,
+    id,
+    turnId,
+    name,
+    input,
+    responseText,
+    responseTokens,
+    success: true,
+  };
 }
 
 const oracleFixture = {
@@ -722,4 +1070,126 @@ test('order-dependent assessment is reported as disagreement instead of a verdic
   assert.equal(report.summary.correctness.disagreementRate, 0);
   assert.equal(report.summary.preference.disagreementRate, 1);
   assert.equal(report.summary.anyDisagreement.disagreementRate, 1);
+});
+
+test('saved evaluation strips experience and rejects an order-dependent choice', () => {
+  const manifest = buildSeriesManifest(validSeriesConfiguration('evaluation-series'));
+  const left = validRunRecord(manifest, {
+    task: 'sample', repetition: 1, arm: 'left',
+    sessionId: '7d444840-9dc0-11d1-b245-5ffdce74fad2',
+  });
+  const right = validRunRecord(manifest, {
+    task: 'sample', repetition: 1, arm: 'right',
+    sessionId: '8d444840-9dc0-11d1-b245-5ffdce74fad2',
+  });
+  left.measurement.finalAnswer = 'The same incomplete answer.\n\n## Experience\nLeft arm was easier.';
+  right.measurement.finalAnswer = 'The same incomplete answer.\n\n## Experience\nRight arm was easier.';
+  const stripped = 'The same incomplete answer.';
+  const fingerprint = answerFingerprint(stripped);
+  const assessments = {
+    schemaVersion: 1,
+    pairs: [{
+      task: 'sample', repetition: 1, candidates: ['left', 'right'],
+      forward: {
+        order: ['left', 'right'], answerSha256: [fingerprint, fingerprint],
+        response: { order: ['left', 'right'], correctness: 'A', preference: 'A' },
+      },
+      reverse: {
+        order: ['right', 'left'], answerSha256: [fingerprint, fingerprint],
+        response: { order: ['right', 'left'], correctness: 'A', preference: 'A' },
+      },
+    }],
+  };
+  const result = evaluateSavedSeries({
+    tasks: [{ id: 'sample' }], repetitions: 1,
+    arms: [{ id: 'left' }, { id: 'right' }],
+  }, [left, right], new Map([['sample', oracleFixture]]), assessments);
+
+  assert.equal(stripExperience(left.measurement.finalAnswer), stripped);
+  assert.equal(result.rows[0].ordered.correctness.status, 'disagreement');
+  assert.equal(result.rows[0].ordered.preference.status, 'disagreement');
+  assert.equal(result.orderConsistency.correctness.disagreementRate, 1);
+  assert.equal(result.orderConsistency.preference.disagreementRate, 1);
+});
+
+test('reading analyzer finds a known section that a whole-file read ignored', () => {
+  const record = analysisRecord([
+    interaction(1, 2, 'search', 'search_project', {}, 'src/core.cs:41: target', 20),
+    interaction(3, 4, 'read', 'get_file', { path: 'src/core.cs' }, 'x'.repeat(2_000), 500),
+  ], ['turn-1', 'turn-2']);
+
+  const result = analyzeSavedReadings([record], { smallFileCharacters: 1_000 });
+
+  assert.equal(result.readingGroups[0].classification, 'known-section-unused');
+  assert.equal(result.readingGroups[0].readings, 1);
+  assert.equal(result.readingGroups[0].characters, 2_000);
+});
+
+test('reading analyzer recognizes line range symbol and structured addresses', () => {
+  const addresses = [
+    ...extractKnownAddresses('src/core.cs:40-44\nsrc/other.cs:RetryAsync'),
+    ...extractKnownAddresses('{"path":"src/third.cs","startLine":7,"endLine":9}'),
+  ];
+
+  assert.deepEqual(addresses, [
+    { path: 'src/core.cs', line: 40, endLine: 44, symbol: null },
+    { path: 'src/other.cs', line: null, endLine: null, symbol: 'RetryAsync' },
+    { path: 'src/third.cs', line: 7, endLine: 9, symbol: null },
+  ]);
+});
+
+test('reading analyzer distinguishes justified small reads from missing large-file support', () => {
+  const record = analysisRecord([
+    interaction(1, 2, 'small', 'get_file', { path: 'src/small.cs' }, 'small', 2),
+    interaction(3, 4, 'large', 'get_file', { path: 'src/large.cs' }, 'x'.repeat(2_000), 500),
+  ], ['turn-1', 'turn-2']);
+
+  const result = analyzeSavedReadings([record], { smallFileCharacters: 1_000 });
+
+  assert.equal(result.readingGroups.find(group => group.classification === 'small-whole-read').readings, 1);
+  assert.equal(result.readingGroups.find(group => group.classification === 'large-needs-address').readings, 1);
+});
+
+test('an address learned inside a read chain does not make that chain batchable', () => {
+  const record = analysisRecord([
+    interaction(1, 2, 'first', 'get_file', { path: 'src/first.cs' }, 'See src/second.cs:12.', 10, 'turn-1'),
+    interaction(3, 4, 'second', 'get_file', { path: 'src/second.cs' }, 'content', 4, 'turn-2'),
+  ], ['turn-1', 'turn-2']);
+
+  const result = analyzeSavedReadings([record], { smallFileCharacters: 1_000 });
+
+  assert.equal(result.chains.length, 1);
+  assert.equal(result.chains[0].addressableBefore, 0);
+  assert.equal(result.chains[0].batchable, false);
+  assert.equal(result.chains[0].eliminableTurns, 0);
+});
+
+test('three reads with addresses known before the chain eliminate two turns', () => {
+  const record = analysisRecord([
+    interaction(1, 2, 'search', 'search_project', {},
+      'src/one.cs:1 src/two.cs:2 src/three.cs:3', 12, 'turn-1'),
+    interaction(3, 4, 'one', 'get_file', { path: 'src/one.cs' }, 'one', 3, 'turn-2'),
+    interaction(5, 6, 'two', 'get_file', { path: 'src/two.cs' }, 'two', 3, 'turn-3'),
+    interaction(7, 8, 'three', 'get_file', { path: 'src/three.cs' }, 'three', 3, 'turn-4'),
+  ], ['turn-1', 'turn-2', 'turn-3', 'turn-4']);
+
+  const result = analyzeSavedReadings([record], { smallFileCharacters: 1_000 });
+
+  assert.equal(result.chains.length, 1);
+  assert.equal(result.chains[0].length, 3);
+  assert.equal(result.chains[0].addressableBefore, 3);
+  assert.equal(result.chains[0].batchable, true);
+  assert.equal(result.chains[0].eliminableTurns, 2);
+  assert.equal(result.toolCarryCost[0].tool, 'search_project');
+  assert.equal(result.toolCarryCost[0].tokenTurns, 36);
+});
+
+test('reading analyzer refuses to estimate an unobserved tool response token count', () => {
+  const record = analysisRecord([
+    interaction(1, 2, 'read', 'get_file', { path: 'src/core.cs' }, 'content', null),
+  ], ['turn-1']);
+
+  assert.throws(
+    () => analyzeSavedReadings([record], { smallFileCharacters: 1_000 }),
+    /has no observed response token count/);
 });

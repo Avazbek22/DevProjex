@@ -14,6 +14,108 @@ node tools/McpUsageRecorder/record.mjs --input capture.ndjson --output report.js
 Use `-` for stdin or stdout. Payload text is represented by byte counts and SHA-256 hashes; the
 report does not copy project or prompt text.
 
+## End-to-end comparison pipeline
+
+`pipeline.mjs` is the supported entry point for a comparative series. It probes every configured
+server, creates or explicitly resumes the immutable store, runs one session at a time, appends each
+attempt immediately, evaluates successful answers, checks all accounting boundaries, and emits the
+reading analysis in one command:
+
+```text
+node tools/McpUsageRecorder/pipeline.mjs --mode new --definition series.json --root results --output report.json
+```
+
+Continue an interrupted series with `--mode resume --series results/<series-id>`. Rebuild a report
+without starting a server or client with `--mode report`; this mode verifies the saved observations,
+run definition, and oracle registry against the series identity before reading raw records. Saved
+assessments are report inputs with their own fingerprint and answer-identity checks.
+
+The definition pins `seriesId`, `productBuildSha`, `model`, `clientVersion`, `toolLoadingMode`,
+`repetitions`, tasks, arms, limits, and prices. Each task has an `id` and `prompt`. Each arm has an
+`id`, a `server` command, and `toolConfiguration`. The client command receives literal placeholders
+`{prompt}`, `{sessionId}`, `{model}`, `{mcpConfigPath}`, `{toolConfigPath}`, and `{arm}` as individual
+arguments. The tool-configuration placeholder is mandatory so the fingerprinted configuration is
+also the configuration consumed by the client. A minimal
+shape is:
+
+```json
+{
+  "seriesId": "comparison-2026-09-13",
+  "productBuildSha": "0123456789012345678901234567890123456789",
+  "model": "model-id",
+  "clientVersion": "client-version",
+  "toolLoadingMode": "dynamic",
+  "repetitions": 3,
+  "client": {
+    "command": "client-command",
+    "args": ["--stream-json", "--session-id", "{sessionId}", "--model", "{model}", "--mcp-config", "{mcpConfigPath}", "--tool-config", "{toolConfigPath}", "{prompt}"]
+  },
+  "tasks": [{ "id": "T1", "prompt": "Pinned task text" }],
+  "arms": [
+    {
+      "id": "baseline",
+      "server": { "command": "server-command", "args": ["mcp", "serve"] },
+      "toolConfiguration": { "allowedTools": ["get_file"] }
+    },
+    {
+      "id": "candidate",
+      "server": { "command": "server-command", "args": ["mcp", "serve"] },
+      "toolConfiguration": { "allowedTools": ["search_project", "get_file"] }
+    }
+  ],
+  "limits": {
+    "maxAttemptsPerAssignment": 2,
+    "probeTimeoutMs": 30000,
+    "sessionTimeoutMs": 900000,
+    "smallFileCharacters": 12000
+  },
+  "pricing": {
+    "currency": "USD",
+    "perMillionTokens": {
+      "inputTokens": 0,
+      "cacheWriteTokens": 0,
+      "cacheReadTokens": 0,
+      "outputTokens": 0
+    }
+  },
+  "evaluation": {
+    "oracleRegistry": "oracles/tasks.json",
+    "savedAssessments": "saved-assessments.json"
+  }
+}
+```
+
+Before the first session, each arm must return non-empty server instructions and a complete
+`tools/list` response. Their exact aggregate fingerprints, the tool configuration, limits, prices,
+product SHA, client and model identities, and the complete run definition and oracle contents become
+series identity. Creation refuses an existing series directory. Resume
+refuses any identity difference. A stored assignment is skipped only when the store finds a matching
+successful raw record; failed or aborted work receives a new attempt number and remains in usage and
+cost totals.
+
+Every process capture is written with create-only semantics before it is adapted. Its SHA-256 is
+stored in the session record, and report generation requires a one-to-one, fingerprint-matched
+mapping between captures and records. A malformed stream retains every parseable usage event; a
+capture that cannot be assigned safely blocks the report instead of becoming a zero-cost session.
+
+The stream adapter retains model turns, tool calls and inputs, model-visible tool results, exact
+per-result token counts supplied by the client, wire and decoded response boundaries, observable
+model-input boundaries, duration, outcome, and final answer. The carry-cost report requires an exact
+client-observed token count for every analyzed tool result and refuses to substitute a character
+estimate. Client-reported duration and measured wall-clock duration remain separate.
+
+Evaluation uses the deterministic task oracle first. A tied pair is eligible only for saved
+assessments recorded in both candidate orders. Each assessment pins the SHA-256 of both candidate
+answers after the `Experience` section has been removed. A verdict is accepted only when the two
+orders identify the same candidate; correctness and preference disagreement counts and rates are
+reported separately. The pipeline has no live qualitative-evaluation path.
+
+The reading analysis classifies whole-file `get_file` calls as `known-section-unused`,
+`small-whole-read`, or `large-needs-address`, with counts, characters, and share of all tool-result
+characters. A read chain is batchable only when every address after its first element was present in
+a tool result before the chain began. Tool carry cost is the observed result-token count multiplied
+by the number of later model turns, aggregated and sorted by tool.
+
 ## Capture events
 
 Each input line is one JSON object:

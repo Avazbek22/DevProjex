@@ -18,6 +18,8 @@ const sharedIdentityFields = Object.freeze([
   ['toolConfigurationSha256', 'tool configuration fingerprint'],
   ['limitsSha256', 'limits fingerprint'],
   ['pricingSha256', 'pricing fingerprint'],
+  ['toolsListSha256', 'tools/list fingerprint'],
+  ['seriesDefinitionSha256', 'series definition fingerprint'],
 ]);
 
 export function buildSeriesManifest(configuration) {
@@ -43,6 +45,10 @@ export function buildSeriesManifest(configuration) {
     limitsSha256: digest(canonicalJson(configuration.limits)),
     pricingSha256: digest(canonicalJson(pricing)),
   };
+  if (configuration.toolsList !== undefined)
+    identity.toolsListSha256 = digest(canonicalJson(configuration.toolsList));
+  if (configuration.seriesDefinition !== undefined)
+    identity.seriesDefinitionSha256 = digest(canonicalJson(configuration.seriesDefinition));
   return {
     schemaVersion: 1,
     identity,
@@ -100,6 +106,7 @@ export function createRunRecord(manifest, slot, report) {
   const task = requireText(slot.task, 'task');
   const repetition = requirePositiveInteger(slot.repetition, 'repetition');
   const arm = requireText(slot.arm, 'arm');
+  const attempt = slot.attempt === undefined ? 1 : requirePositiveInteger(slot.attempt, 'attempt');
   const sessionId = requireText(report.session.sessionId, 'session identifier');
   if (!isUuid(sessionId))
     throw new Error('Session identifier must be a UUID.');
@@ -108,6 +115,7 @@ export function createRunRecord(manifest, slot, report) {
     task,
     repetition,
     arm,
+    attempt,
     sessionId,
     productBuildSha: report.session.buildSha,
     model: report.session.model,
@@ -118,6 +126,9 @@ export function createRunRecord(manifest, slot, report) {
     limitsSha256: report.session.limitsSha256,
     pricingSha256: report.session.pricingSha256,
   };
+  for (const field of ['toolsListSha256', 'seriesDefinitionSha256'])
+    if (manifest.identity[field] !== undefined)
+      identity[field] = report.session[field];
   const mismatch = firstIdentityMismatch(identity, manifest.identity, false);
   if (mismatch)
     throw new Error(`Session report identity mismatch: ${mismatch}.`);
@@ -130,7 +141,7 @@ export function createRunRecord(manifest, slot, report) {
     'Raw record rejected: sum of turns does not equal the session total');
   const normalizedCost = calculateCost(usage, manifest.pricing);
   const outcome = normalizeOutcome(report.session.status);
-  const storageKey = digest(canonicalJson({ task, repetition, arm }));
+  const storageKey = runStorageKey(task, repetition, arm, attempt);
   return {
     schemaVersion: 1,
     storageKey,
@@ -140,12 +151,18 @@ export function createRunRecord(manifest, slot, report) {
       cost: normalizedCost,
       outcome,
       durationMs: nullableNonNegativeInteger(report.session.durationMs, 'duration'),
+      wallDurationMs: nullableNonNegativeInteger(report.session.wallDurationMs, 'wall duration'),
       modelTurns,
       toolCalls: requireNonNegativeInteger(report.totals.toolCalls, 'tool call count'),
       wireResponseBytes: nullableNonNegativeInteger(report.totals.wireResponseBytes, 'wire response bytes'),
       decodedResponseBytes: nullableNonNegativeInteger(report.totals.decodedResponseBytes, 'decoded response bytes'),
       modelInputBytes: nullableNonNegativeInteger(report.totals.modelInputBytes, 'model input bytes'),
       turns,
+      responseBoundaries: normalizeMeasuredArray(report.responses, 'response boundaries'),
+      modelInputs: normalizeMeasuredArray(report.modelInputs, 'model inputs'),
+      toolInteractions: normalizeToolInteractions(report.toolInteractions),
+      finalAnswer: normalizeOptionalText(report.finalAnswer, 'final answer'),
+      capture: report.capture === undefined ? null : canonicalize(report.capture),
     },
   };
 }
@@ -202,6 +219,40 @@ export async function summarizeSeries(seriesDirectory) {
   return summarizeSeriesRecords(manifest, records);
 }
 
+export async function readSeriesRecords(seriesDirectory) {
+  const directory = resolve(seriesDirectory);
+  const manifest = JSON.parse(await readFile(join(directory, 'series.json'), 'utf8'));
+  validateManifest(manifest);
+  const records = await loadRecords(directory);
+  summarizeSeriesRecordsIfPresent(manifest, records);
+  return records;
+}
+
+export function inspectRunAssignment(manifest, records, slot) {
+  validateManifest(manifest);
+  requireObject(slot, 'run slot');
+  const task = requireText(slot.task, 'task');
+  const repetition = requirePositiveInteger(slot.repetition, 'repetition');
+  const arm = requireText(slot.arm, 'arm');
+  const matching = records
+    .filter(record => record.identity.task === task &&
+      record.identity.repetition === repetition && record.identity.arm === arm)
+    .sort((left, right) => normalizedAttempt(left.identity) - normalizedAttempt(right.identity));
+  for (const record of matching) {
+    validateRecord(record);
+    const mismatch = firstIdentityMismatch(record.identity, manifest.identity, true);
+    if (mismatch)
+      throw new Error(`Saved run mismatch: ${mismatch}; refusing to skip the assignment.`);
+    assertStorageKey(record);
+    assertCostMatches(record, manifest);
+  }
+  return {
+    completed: matching.some(record => record.measurement.outcome === 'success'),
+    nextAttempt: matching.reduce((maximum, record) => Math.max(maximum, normalizedAttempt(record.identity)), 0) + 1,
+    attempts: matching,
+  };
+}
+
 export function summarizeSeriesRecords(manifest, records) {
   validateManifest(manifest);
   if (!Array.isArray(records) || records.length === 0)
@@ -244,6 +295,7 @@ export function summarizeSeriesRecords(manifest, records) {
         task: record.identity.task,
         repetition: record.identity.repetition,
         arm: record.identity.arm,
+        attempt: normalizedAttempt(record.identity),
         sessionId: record.identity.sessionId,
         usage: record.measurement.usage,
         cost: record.measurement.cost,
@@ -251,6 +303,11 @@ export function summarizeSeriesRecords(manifest, records) {
       })),
     arms,
   };
+}
+
+function summarizeSeriesRecordsIfPresent(manifest, records) {
+  if (records.length > 0)
+    summarizeSeriesRecords(manifest, records);
 }
 
 export function validateArmAccounting(records, arms) {
@@ -343,6 +400,9 @@ function validateManifest(manifest) {
   requireFingerprint(manifest.identity.toolConfigurationSha256, 'tool configuration fingerprint');
   requireFingerprint(manifest.identity.limitsSha256, 'limits fingerprint');
   requireFingerprint(manifest.identity.pricingSha256, 'pricing fingerprint');
+  for (const name of ['toolsListSha256', 'seriesDefinitionSha256'])
+    if (manifest.identity[name] !== undefined)
+      requireFingerprint(manifest.identity[name], name);
   const pricing = normalizePricing(manifest.pricing);
   if (manifest.identity.pricingSha256 !== digest(canonicalJson(pricing)))
     throw new Error('Series manifest pricing does not match its fingerprint.');
@@ -359,8 +419,13 @@ function validateRecord(record) {
     requireText(record.identity[name], name);
   }
   requirePositiveInteger(record.identity.repetition, 'repetition');
+  if (record.identity.attempt !== undefined)
+    requirePositiveInteger(record.identity.attempt, 'attempt');
   for (const name of ['serverInstructionsSha256', 'toolConfigurationSha256', 'limitsSha256', 'pricingSha256'])
     requireFingerprint(record.identity[name], name);
+  for (const name of ['toolsListSha256', 'seriesDefinitionSha256'])
+    if (record.identity[name] !== undefined)
+      requireFingerprint(record.identity[name], name);
   requireObject(record.measurement, 'run measurement');
   copyUsage(record.measurement.usage, 'session usage');
   normalizeCost(record.measurement.cost);
@@ -369,6 +434,10 @@ function validateRecord(record) {
   const modelTurns = requireNonNegativeInteger(record.measurement.modelTurns, 'model turn count');
   if (modelTurns !== turns.length)
     throw new Error('Raw run record model turn count does not match the distinct turns.');
+  normalizeToolInteractions(record.measurement.toolInteractions);
+  normalizeOptionalText(record.measurement.finalAnswer, 'final answer');
+  normalizeMeasuredArray(record.measurement.responseBoundaries, 'response boundaries');
+  normalizeMeasuredArray(record.measurement.modelInputs, 'model inputs');
 
 }
 
@@ -382,6 +451,8 @@ function firstIdentityMismatch(actual, expected, includeSeries) {
 }
 
 function firstRunMismatch(left, right) {
+  if (normalizedAttempt(left.identity) !== normalizedAttempt(right.identity))
+    return 'attempt';
   const identityFields = [
     ['seriesId', 'series identifier'],
     ['task', 'task'],
@@ -484,11 +555,11 @@ function assertCostMatches(record, manifest) {
 }
 
 function assertStorageKey(record) {
-  const expected = digest(canonicalJson({
-    task: record.identity.task,
-    repetition: record.identity.repetition,
-    arm: record.identity.arm,
-  }));
+  const expected = runStorageKey(
+    record.identity.task,
+    record.identity.repetition,
+    record.identity.arm,
+    normalizedAttempt(record.identity));
   if (record.storageKey !== expected)
     throw new Error('Raw run record storage key does not match its task, repetition, and arm.');
 }
@@ -503,7 +574,74 @@ function compareRecords(left, right) {
   return left.identity.task.localeCompare(right.identity.task, 'en') ||
     left.identity.arm.localeCompare(right.identity.arm, 'en') ||
     left.identity.repetition - right.identity.repetition ||
+    normalizedAttempt(left.identity) - normalizedAttempt(right.identity) ||
     left.identity.sessionId.localeCompare(right.identity.sessionId, 'en');
+}
+
+function runStorageKey(task, repetition, arm, attempt) {
+  const slot = { task, repetition, arm };
+  if (attempt !== 1)
+    slot.attempt = attempt;
+  return digest(canonicalJson(slot));
+}
+
+function normalizedAttempt(identity) {
+  return identity.attempt ?? 1;
+}
+
+function normalizeToolInteractions(interactions) {
+  if (interactions === undefined)
+    return [];
+  if (!Array.isArray(interactions))
+    throw new Error('Tool interactions must be an array.');
+  const ids = new Set();
+  return interactions.map((interaction, index) => {
+    requireObject(interaction, `tool interaction ${index + 1}`);
+    const id = requireText(interaction.id, `tool interaction ${index + 1} identifier`);
+    if (ids.has(id))
+      throw new Error(`Tool interaction identifier '${id}' appears more than once.`);
+    ids.add(id);
+    const responseText = normalizeOptionalText(
+      interaction.responseText,
+      `tool interaction ${index + 1} response`);
+    const responseTokens = interaction.responseTokens === undefined || interaction.responseTokens === null
+      ? null
+      : requireNonNegativeInteger(interaction.responseTokens, `tool interaction ${index + 1} response tokens`);
+    return {
+      sequence: requireNonNegativeInteger(interaction.sequence, `tool interaction ${index + 1} sequence`),
+      responseSequence: interaction.responseSequence === undefined || interaction.responseSequence === null
+        ? null
+        : requireNonNegativeInteger(
+          interaction.responseSequence,
+          `tool interaction ${index + 1} response sequence`),
+      id,
+      turnId: requireText(interaction.turnId, `tool interaction ${index + 1} turn`),
+      name: requireText(interaction.name, `tool interaction ${index + 1} name`),
+      input: interaction.input === undefined ? null : canonicalize(interaction.input),
+      responseText,
+      responseTokens,
+      success: interaction.success !== false,
+    };
+  });
+}
+
+function normalizeMeasuredArray(values, label) {
+  if (values === undefined)
+    return [];
+  if (!Array.isArray(values))
+    throw new Error(`${label} must be an array.`);
+  return values.map((value, index) => {
+    requireObject(value, `${label} entry ${index + 1}`);
+    return canonicalize(value);
+  });
+}
+
+function normalizeOptionalText(value, label) {
+  if (value === undefined || value === null)
+    return null;
+  if (typeof value !== 'string')
+    throw new Error(`${label} must be a string or null.`);
+  return value;
 }
 
 function emptyUsage() {

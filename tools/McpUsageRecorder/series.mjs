@@ -30,7 +30,7 @@ try {
       break;
     }
     case 'append': {
-      allowOnly(options, ['series', 'report', 'task', 'repetition', 'arm']);
+      allowOnly(options, ['series', 'report', 'task', 'repetition', 'arm', 'attempt']);
       const seriesDirectory = required(options, 'series');
       const manifest = await readSeriesManifest(seriesDirectory);
       const report = await readJson(required(options, 'report'));
@@ -39,6 +39,7 @@ try {
         task: required(options, 'task'),
         repetition,
         arm: required(options, 'arm'),
+        attempt: options.has('attempt') ? Number(options.get('attempt')) : 1,
       }, report);
       const result = await storeRunRecord(seriesDirectory, record);
       writeJson({ ...result, identity: record.identity });
@@ -112,7 +113,7 @@ function usage() {
     'Usage:',
     '  node tools/McpUsageRecorder/series.mjs new --root DIR --configuration FILE',
     '  node tools/McpUsageRecorder/series.mjs resume --series DIR --configuration FILE',
-    '  node tools/McpUsageRecorder/series.mjs append --series DIR --report FILE --task ID --repetition N --arm ID',
+    '  node tools/McpUsageRecorder/series.mjs append --series DIR --report FILE --task ID --repetition N --arm ID [--attempt N]',
     '  node tools/McpUsageRecorder/series.mjs summarize --series DIR [--output FILE]',
     '',
   ].join('\n');
