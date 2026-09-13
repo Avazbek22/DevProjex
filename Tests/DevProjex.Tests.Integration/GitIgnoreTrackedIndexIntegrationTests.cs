@@ -295,8 +295,9 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			RootSet("nested"),
 			ExtensionSet(".tmp"));
 
-		Assert.Equal(2, observation.Inventory.DiscoveredGitTrackedPathIndexes.Count);
-		AssertVisible(observation.Paths, "nested/tracked.tmp");
+		// An undeclared embedded repository is opaque; its index is no longer read.
+		Assert.Single(observation.Inventory.DiscoveredGitTrackedPathIndexes);
+		AssertHidden(observation.Paths, "nested/tracked.tmp");
 		AssertHidden(observation.Paths, "nested/untracked.tmp");
 	}
 
@@ -353,9 +354,9 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			RootSet("submodule"),
 			ExtensionSet(".cs"));
 
-		Assert.Equal(2, observation.Inventory.DiscoveredGitTrackedPathIndexes.Count);
-		AssertVisible(observation.Paths, "submodule");
-		AssertVisible(observation.Paths, "submodule/tracked.cs");
+		// A gitlink without a .gitmodules declaration is an opaque embedded repository.
+		Assert.Single(observation.Inventory.DiscoveredGitTrackedPathIndexes);
+		AssertHidden(observation.Paths, "submodule/tracked.cs");
 	}
 
 	[Fact]
@@ -1454,13 +1455,14 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			ExtensionSet(".cs"),
 			rules);
 
-		AssertVisible(
+		// Depth does not make an undeclared embedded repository independent of its owner.
+		AssertHidden(
 			tree.Paths,
 			Path.Combine(repositoryRelativePath, "src", "tracked.cs").Replace('\\', '/'));
 		AssertHidden(
 			tree.Paths,
 			Path.Combine(repositoryRelativePath, "src", "untracked.cs").Replace('\\', '/'));
-		Assert.Equal(2, tree.Inventory.DiscoveredGitTrackedPathIndexes.Count);
+		Assert.Single(tree.Inventory.DiscoveredGitTrackedPathIndexes);
 	}
 
 	[Fact]
@@ -1544,10 +1546,9 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 
 		AssertHidden(tree.Paths, "nested/previously-outer-tracked.txt");
 		AssertHidden(tree.Paths, "nested/local.txt");
-		var nestedBoundary = Assert.Single(
-			tree.Inventory.DiscoveredGitTrackedPathIndexes,
+		// The embedded boundary is retained as ignore evidence without reading its index.
+		Assert.DoesNotContain(tree.Inventory.DiscoveredGitTrackedPathIndexes,
 			index => PathComparer.Default.Equals(index.RepositoryRootPath, nestedRoot));
-		Assert.Equal(0, nestedBoundary.Count);
 	}
 
 	[Fact]
@@ -1560,6 +1561,8 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		InitializeIndex(outerRoot, "README.md");
 		var nestedRoot = temp.CreateDirectory("outer/nested");
 		temp.CreateFile("outer/nested/tracked.cs", "tracked in nested repository");
+		// Only a declared submodule may provide a nested index under an owning repository.
+		temp.CreateFile("outer/.gitmodules", "[submodule \"nested\"]\n path = nested\n");
 		InitializeIndex(nestedRoot, "tracked.cs");
 		File.WriteAllBytes(Path.Combine(outerRoot, ".git", "index"), [0x44, 0x50, 0x58]);
 		var rules = CreateTrackedOnlyRules(outerRoot);

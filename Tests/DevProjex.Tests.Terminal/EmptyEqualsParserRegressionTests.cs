@@ -76,6 +76,14 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--max-tokens"
 			},
 			{
+				["export", "context", ".", "--rank=", "importance"],
+				"--rank"
+			},
+			{
+				["export", "context", ".", "--rank", "importance", "--focus=", "src/App.cs"],
+				"--focus"
+			},
+			{
 				["tui", ".", "--screen=", "inline"],
 				"--screen"
 			},
@@ -143,9 +151,15 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--as",
 		"--branch",
 		"--color",
+		// export context intentionally adds this repeatable required-value option: per-file detail
+		// overrides of the form "<glob>=<full|compact|signatures>".
+		"--detail-for",
+		// related intentionally adds this required-value option to the public CLI grammar.
+		"--direction",
 		"--exclude",
 		"--extension",
 		"--filter",
+		"--focus",
 		"--format",
 		"--git-mode",
 		"--instance",
@@ -158,6 +172,8 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--profile",
 		"--progress",
 		"--project",
+		"--rank",
+		"--remote-hosts",
 		"--root",
 		"--screen",
 		"--search",

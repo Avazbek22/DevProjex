@@ -25,7 +25,7 @@ public sealed class CachedRepositoryRefreshIntegrationTests : IDisposable
 	[Fact]
 	public async Task CachedNetworkOpen_SwitchesToDefaultThenFetchesLatestCommit()
 	{
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		if (!await git.IsGitAvailableAsync(TestContext.Current.CancellationToken))
 			return;
 		await using var remote = await GitTestRepository.CreateAsync(
@@ -88,7 +88,7 @@ public sealed class CachedRepositoryRefreshIntegrationTests : IDisposable
 	[Fact]
 	public async Task CachedNetworkOpen_WhenRemoteIsUnavailable_KeepsUsableLocalCopy()
 	{
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		if (!await git.IsGitAvailableAsync(TestContext.Current.CancellationToken))
 			return;
 		await using var remote = await GitTestRepository.CreateAsync(
@@ -121,7 +121,7 @@ public sealed class CachedRepositoryRefreshIntegrationTests : IDisposable
 	[Fact]
 	public async Task LocalCacheOpen_RestoresLastBranchWithoutAvailableRemote()
 	{
-		var git = new GitRepositoryService();
+		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		if (!await git.IsGitAvailableAsync(TestContext.Current.CancellationToken))
 			return;
 		await using var remote = await GitTestRepository.CreateAsync(

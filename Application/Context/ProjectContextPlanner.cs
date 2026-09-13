@@ -212,7 +212,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			IgnoreOptionCounts: loaded.IgnoreOptionCounts,
 			IgnoreControllerImpactCounts: loaded.IgnoreControllerImpactCounts)
 		{
-			IncludesOutputMetrics = includeTreeOutputMetrics && includeContentOutputMetrics
+			IncludesOutputMetrics = includeTreeOutputMetrics && includeContentOutputMetrics,
+			ObservedControlFiles = loaded.TreeInventory?.ObservedControlFiles ?? []
 		};
 		if (loaded.TreeInventory is not null && loaded.EffectiveRules is not null)
 		{
@@ -558,7 +559,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		bool? stripComments,
 		bool? stripBlankLines,
 		bool? hidePrivateData,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyList<ContentDetailOverride>? contentDetailOverrides = null)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
 		cancellationToken.ThrowIfCancellationRequested();
@@ -568,7 +570,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			HidePrivateData = hidePrivateData ?? baseline.Selection.HidePrivateData,
 			CompressCode = compressCode ?? baseline.Selection.CompressCode,
 			StripComments = stripComments ?? baseline.Selection.StripComments,
-			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines
+			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines,
+			ContentDetailOverrides = contentDetailOverrides ?? baseline.Selection.ContentDetailOverrides
 		};
 		var transformed = baseline with
 		{
@@ -1280,6 +1283,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		Append($"compress-code:{selection.CompressCode == true}");
 		Append($"strip-comments:{selection.StripComments == true}");
 		Append($"strip-blank-lines:{selection.StripBlankLines == true}");
+		// Only appended when the call actually asked for a mix, so a plan without per-file detail
+		// keeps the fingerprint it has always had.
+		foreach (var entry in selection.ContentDetailOverrides ?? [])
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Append($"detail:{(int)entry.RequestedKinds}");
+			foreach (var pattern in entry.Patterns.Patterns)
+				Append("detail-pattern:" + pattern);
+		}
 		foreach (var root in selection.Roots ?? [])
 		{
 			cancellationToken.ThrowIfCancellationRequested();

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
+using DevProjex.Infrastructure.Git;
 using Hex1b;
 using XTerm.Options;
 using XTermTerminal = XTerm.Terminal;
@@ -118,7 +119,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		Action<string>? initializeDataRoot = null,
 		bool writeShellCompletionMarker = false,
 		bool useProgressCheckpointHost = false,
-		bool verifyExecutableRelaunch = false)
+		bool verifyExecutableRelaunch = false,
+		bool allowFileGitTransport = false,
+		string? binaryOverride = null)
 	{
 		if (string.Equals(
 			    Environment.GetEnvironmentVariable(SkipInteractiveTuiTestsVariable),
@@ -126,16 +129,28 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			    StringComparison.Ordinal))
 		{
 			Assert.Skip(
-				"Interactive TUI PTY journeys are disabled in CI while the TUI is pending removal.");
+				"Interactive TUI PTY journeys are disabled in broad CI jobs; Release Validation runs the curated PTY matrix.");
 		}
 
-		var binary = useProgressCheckpointHost
+		// A synthetic file:// remote is granted by the terminal test host only. The shipped
+		// application refuses that transport, so a journey needing one runs on the test host,
+		// which is built from the same DevProjex.Terminal library.
+		var usesTerminalTestHost = useProgressCheckpointHost || allowFileGitTransport;
+		var binary = binaryOverride ?? (usesTerminalTestHost
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
-			: PublishedApplicationLocator.FindExecutable();
+			: PublishedApplicationLocator.FindExecutable());
 		var launchArguments = arguments?.ToArray() ?? [];
+		if (allowFileGitTransport && !useProgressCheckpointHost)
+		{
+			launchArguments =
+			[
+				TerminalTransportPolicyProtocol.TerminalCommandArgument,
+				.. launchArguments
+			];
+		}
 		var launchesThroughDotNetHost = false;
 		if (OperatingSystem.IsWindows() &&
-		    (useProgressCheckpointHost ||
+		    (usesTerminalTestHost ||
 		     Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY") is null) &&
 		    File.Exists(Path.ChangeExtension(binary, ".dll")))
 		{
@@ -166,6 +181,11 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			["LOCALAPPDATA"] = Path.Combine(dataRoot, "local"),
 			["APPDATA"] = Path.Combine(dataRoot, "roaming")
 		};
+		if (allowFileGitTransport)
+		{
+			variables[TerminalTransportPolicyProtocol.AllowLocalFileTransportVariable] =
+				TerminalTransportPolicyProtocol.Enabled;
+		}
 		if (environment is not null)
 		{
 			foreach (var pair in environment)
@@ -179,7 +199,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			launchArguments,
 			variables,
 			writeShellCompletionMarker,
-			verifyExecutableRelaunch && !useProgressCheckpointHost,
+			verifyExecutableRelaunch && !usesTerminalTestHost,
 			launchesThroughDotNetHost);
 
 		var process = new Hex1bTerminalChildProcess(
@@ -749,30 +769,58 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			$"Terminal responses: {CaptureTerminalResponseLog()}");
 	}
 
-	public async Task<string> WaitForStableScreenAsync(
+	public Task<string> WaitForStableScreenAsync(
 		string required,
 		string? forbidden = null,
 		TimeSpan? timeout = null,
+		CancellationToken cancellationToken = default) =>
+		WaitForStableScreenAsync(
+			screen =>
+				screen.Contains(required, StringComparison.Ordinal) &&
+				(forbidden is null || !screen.Contains(forbidden, StringComparison.Ordinal)),
+			forbidden is null
+				? $"containing '{required}'"
+				: $"containing '{required}' without '{forbidden}'",
+			screen =>
+				$"required={screen.Contains(required, StringComparison.Ordinal)} " +
+				$"forbidden={forbidden is not null && screen.Contains(forbidden, StringComparison.Ordinal)}",
+			timeout,
+			cancellationToken);
+
+	public async Task<string> WaitForStableScreenAsync(
+		Func<string, bool> readiness,
+		string readinessDescription,
+		Func<string, string>? timelineState = null,
+		TimeSpan? timeout = null,
 		CancellationToken cancellationToken = default)
 	{
+		ArgumentNullException.ThrowIfNull(readiness);
+		ArgumentException.ThrowIfNullOrWhiteSpace(readinessDescription);
 		var stopwatch = Stopwatch.StartNew();
 		var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(15);
 		var previous = string.Empty;
 		var stableSamples = 0;
+		var timeline = new List<string>();
 		while (stopwatch.Elapsed < effectiveTimeout)
 		{
 			var screen = CaptureScreen();
+			var matches = readiness(screen);
+			if (!string.Equals(previous, screen, StringComparison.Ordinal))
+			{
+				timeline.Add(
+					$"{stopwatch.Elapsed.TotalMilliseconds,7:F0} ms " +
+					$"ready={matches} {timelineState?.Invoke(screen) ?? string.Empty} " +
+					$"chars={screen.Length}");
+			}
 			if (HasExited)
 			{
 				throw new Xunit.Sdk.XunitException(
 					$"Terminal process exited with code {_process.ExitCode} before the screen " +
-					$"stabilized for '{required}'.\nScreen:\n{screen}\nRaw output:\n{CaptureRawOutput()}");
+					$"stabilized while {readinessDescription}.\n" +
+					$"Timeline:\n{string.Join(Environment.NewLine, timeline)}\n" +
+					$"Full screen:\n{screen}\nRaw output:\n{CaptureRawOutput()}");
 			}
 
-			var matches =
-				screen.Contains(required, StringComparison.Ordinal) &&
-				(forbidden is null ||
-				 !screen.Contains(forbidden, StringComparison.Ordinal));
 			if (matches &&
 			    string.Equals(previous, screen, StringComparison.Ordinal))
 			{
@@ -789,12 +837,10 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			await Task.Delay(80, cancellationToken).ConfigureAwait(false);
 		}
 
-		var forbiddenCondition = forbidden is null
-			? string.Empty
-			: $" without '{forbidden}'";
 		throw new TimeoutException(
-			$"Timed out waiting for a stable screen containing '{required}'" +
-			$"{forbiddenCondition}.\n{CaptureScreen()}\n" +
+			$"Timed out waiting for a stable screen while {readinessDescription}.\n" +
+			$"Timeline:\n{string.Join(Environment.NewLine, timeline)}\n" +
+			$"Full screen:\n{CaptureScreen()}\n" +
 			$"Raw output tail:\n{CaptureRawOutputTail()}\n" +
 			$"Terminal responses: {CaptureTerminalResponseLog()}");
 	}
@@ -1109,21 +1155,60 @@ internal static class PublishedApplicationLocator
 			path);
 	}
 
-	public static string FindApplicationAssembly()
+	/// <summary>
+	/// The terminal test host assembly. It hosts the same DevProjex.Terminal library as the shipped
+	/// application and is the only executable that can grant the local file Git transport.
+	/// </summary>
+	public static string FindTerminalTestHostAssembly()
 	{
+		var repository = FindRepositoryRoot();
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
 		var path = Path.Combine(
-			FindRepositoryRoot(),
-			"Apps",
-			"Avalonia",
+			repository,
+			"Tests",
+			"DevProjex.Tests.Terminal.ProgressHost",
 			"bin",
-			ResolveBuildConfiguration(AppContext.BaseDirectory),
+			configuration,
 			"net10.0",
-			"DevProjex.dll");
+			$"{ProgressCheckpointHostName}.dll");
 		if (File.Exists(path))
 			return path;
 		throw new FileNotFoundException(
-			"Build the DevProjex Avalonia host before running process tests.",
+			"Build the terminal test host before running process tests that need a local remote.",
 			path);
+	}
+
+	public static string FindApplicationAssembly(
+		PublishedApplicationHost host = PublishedApplicationHost.Desktop)
+	{
+		var repository = FindRepositoryRoot();
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
+		var projectDirectory = host == PublishedApplicationHost.Desktop
+			? "Avalonia"
+			: "TerminalHost";
+		var assemblyName = host == PublishedApplicationHost.Desktop
+			? "DevProjex.dll"
+			: "devprojex.dll";
+		var basePath = Path.Combine(
+			repository,
+			"Apps",
+			projectDirectory,
+			"bin",
+			configuration,
+			"net10.0");
+		var candidates = host == PublishedApplicationHost.Desktop
+			? new[] { Path.Combine(basePath, assemblyName) }
+			: new[]
+			{
+				Path.Combine(basePath, assemblyName),
+				Path.Combine(basePath, RuntimeInformation.RuntimeIdentifier, assemblyName)
+			};
+		var path = candidates.FirstOrDefault(File.Exists);
+		if (path is not null)
+			return path;
+		throw new FileNotFoundException(
+			$"Build the DevProjex {host} host before running process tests.",
+			candidates[0]);
 	}
 
 	internal static string ResolveBuildConfiguration(string baseDirectory)
@@ -1172,4 +1257,10 @@ internal static class PublishedApplicationLocator
 		}
 		throw new DirectoryNotFoundException("DevProjex repository root was not found.");
 	}
+}
+
+internal enum PublishedApplicationHost
+{
+	Desktop,
+	Headless
 }

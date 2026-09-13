@@ -11,13 +11,27 @@ internal sealed class McpJsonArguments(
 	public static McpJsonArguments Create(
 		CallToolRequestParams request,
 		params string[] allowed)
+		=> Create(request, allowed.ToFrozenSet(StringComparer.Ordinal));
+
+	public static McpJsonArguments Create(
+		CallToolRequestParams request,
+		IReadOnlySet<string> allowed)
 	{
 		ArgumentNullException.ThrowIfNull(request);
-		var allowedSet = allowed.ToHashSet(StringComparer.Ordinal);
-		var arguments = new McpJsonArguments(request.Arguments, allowedSet);
+		ArgumentNullException.ThrowIfNull(allowed);
+		var arguments = new McpJsonArguments(request.Arguments, allowed);
 		arguments.ValidateNames();
 		return arguments;
 	}
+
+	internal static IReadOnlySet<string> FreezeAllowed(params string[] names) =>
+		names.ToFrozenSet(StringComparer.Ordinal);
+
+	public bool Contains(string name) =>
+		_values.TryGetValue(name, out var value) && value.ValueKind != JsonValueKind.Null;
+
+	public bool TryGetElement(string name, out JsonElement value) =>
+		_values.TryGetValue(name, out value) && value.ValueKind != JsonValueKind.Null;
 
 	public string? OptionalString(string name)
 	{
@@ -39,21 +53,68 @@ internal sealed class McpJsonArguments(
 		return value;
 	}
 
+	public IReadOnlyList<string> RequiredStringOrArray(
+		string name,
+		int maximumItems,
+		int maximumItemScalarValues)
+	{
+		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: '{name}' is required and must be a non-empty string or array of strings.");
+		if (value.ValueKind == JsonValueKind.String)
+		{
+			var scalar = value.GetString();
+			if (string.IsNullOrWhiteSpace(scalar) || McpUnicodeLength.ExceedsScalarValueCount(scalar, maximumItemScalarValues))
+				throw Invalid(name, $"a non-empty string containing at most {maximumItemScalarValues} characters");
+			return [scalar];
+		}
+		if (value.ValueKind != JsonValueKind.Array)
+			throw Invalid(name, "a non-empty string or array of strings");
+		var values = OptionalStringArray(name, maximumItems: maximumItems,
+			maximumItemScalarValues: maximumItemScalarValues) ?? [];
+		if (values.Count == 0)
+			throw Invalid(name, "a non-empty string or array of strings");
+		return values;
+	}
+
 	public IReadOnlyList<string>? OptionalStringArray(
 		string name,
 		bool allowWhitespace = false,
 		int? maximumItems = null,
-		int? maximumItemScalarValues = null)
+		int? maximumItemScalarValues = null,
+		string? tooManyItemsHint = null,
+		string? overLengthHint = null,
+		bool allowScalar = true)
 	{
 		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
 			return null;
+		// A caller that means one value writes one value. Reading the scalar as a one-item
+		// list costs nothing, keeps every array call byte-identical, and removes a round
+		// trip that returns no information; focus already accepts both shapes.
+		if (allowScalar && value.ValueKind == JsonValueKind.String)
+		{
+			var scalar = value.GetString();
+			if (string.IsNullOrEmpty(scalar) || (!allowWhitespace && string.IsNullOrWhiteSpace(scalar)))
+				throw Invalid(name, "a non-empty string or an array of non-empty strings");
+			if (maximumItemScalarValues is not null &&
+			    McpUnicodeLength.ExceedsScalarValueCount(scalar, maximumItemScalarValues.Value))
+			{
+				throw Invalid(
+					name,
+					$"a string of at most {maximumItemScalarValues.Value} characters; " +
+					$"{overLengthHint ?? "shorten the paths and retry"}");
+			}
+			return [scalar];
+		}
 		if (value.ValueKind != JsonValueKind.Array)
-			throw Invalid(name, "an array of strings");
+			throw Invalid(name, allowScalar ? "a string or an array of strings" : "an array of strings");
 		if (maximumItems is not null && value.GetArrayLength() > maximumItems.Value)
 		{
 			throw Invalid(
 				name,
-				$"an array with at most {maximumItems.Value} items; narrow the selection and retry");
+				$"an array with at most {maximumItems.Value} items; " +
+				$"{tooManyItemsHint ?? "narrow the selection and retry"}");
 		}
 
 		var result = new List<string>(value.GetArrayLength());
@@ -69,7 +130,8 @@ internal sealed class McpJsonArguments(
 			{
 				throw Invalid(
 					name,
-					$"an array whose items contain at most {maximumItemScalarValues.Value} characters; shorten the paths and retry");
+					$"an array whose items contain at most {maximumItemScalarValues.Value} characters; " +
+					$"{overLengthHint ?? "shorten the paths and retry"}");
 			}
 			result.Add(itemValue);
 		}
@@ -177,10 +239,12 @@ internal sealed class McpJsonArguments(
 		if (unexpected.Length == 0)
 			return;
 
+		var guidance = _allowed.Count == 0
+			? "This tool takes no arguments."
+			: $"Valid arguments: {string.Join(", ", _allowed.OrderBy(static name => name, StringComparer.Ordinal))}.";
 		throw new McpToolException(
 			McpErrorCodes.InvalidArguments,
-			$"{McpErrorCodes.InvalidArguments}: unknown argument(s): {string.Join(", ", unexpected)}. " +
-			$"Valid arguments: {string.Join(", ", _allowed.OrderBy(static name => name, StringComparer.Ordinal))}.");
+			$"{McpErrorCodes.InvalidArguments}: unknown argument(s): {string.Join(", ", unexpected)}. {guidance}");
 	}
 
 	private static McpToolException Invalid(string name, string expected) =>

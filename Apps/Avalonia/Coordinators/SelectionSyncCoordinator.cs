@@ -957,7 +957,8 @@ public sealed partial class SelectionSyncCoordinator(
 	    bool hidePrivateDataApplied = false,
 	    bool compressCodeApplied = false,
 	    bool stripCommentsApplied = false,
-	    bool stripBlankLinesApplied = false)
+	    bool stripBlankLinesApplied = false,
+	    bool compressionUnavailable = false)
     {
         if (viewModel.IgnoreOptions.Count == 0)
             return;
@@ -1000,8 +1001,8 @@ public sealed partial class SelectionSyncCoordinator(
 
         foreach (var option in viewModel.IgnoreOptions)
         {
-			// Redaction rows carry live scan state that the availability snapshot cannot express,
-			// so they are formatted here. Every other transformation takes its catalog label.
+			// Redaction rows carry live scan state that the availability snapshot cannot express.
+			// Compression also reflects live grammar readiness; the remaining rows use catalog labels.
 			if (option.Id is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData)
 			{
 				var isPrivateData = option.Id == IgnoreOptionId.HidePrivateData;
@@ -1012,6 +1013,14 @@ public sealed partial class SelectionSyncCoordinator(
 						: SecretScanState.Disabled,
 					isPrivateData ? privateDataMatchesCount : secretMatchesCount,
 					isPrivateData ? privateDataRedactionsCount : secretRedactionsCount);
+				continue;
+			}
+			if (option.Id == IgnoreOptionId.CompressCode)
+			{
+				option.Label = ignoreOptionsService.FormatCompressCodeLabel(
+					compressedFilesCount,
+					uncompressedFilesCount,
+					compressCodeApplied && compressionUnavailable);
 				continue;
 			}
             if (descriptorsById.TryGetValue(option.Id, out var descriptor))

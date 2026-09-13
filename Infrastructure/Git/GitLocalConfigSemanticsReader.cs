@@ -130,7 +130,7 @@ internal static class GitLocalConfigSemanticsReader
 		}
 	}
 
-	private static bool TryResolveGitDirectory(
+	internal static bool TryResolveGitDirectory(
 		string repositoryRoot,
 		string gitMetadataPath,
 		out string gitDirectory)
@@ -173,7 +173,7 @@ internal static class GitLocalConfigSemanticsReader
 		return Directory.Exists(gitDirectory);
 	}
 
-	private static bool TryResolveCommonDirectory(
+	internal static bool TryResolveCommonDirectory(
 		string gitDirectory,
 		out string commonDirectory)
 	{

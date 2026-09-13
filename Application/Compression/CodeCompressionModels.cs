@@ -48,10 +48,44 @@ public enum CodeCompressionOutcome
 {
 	Compressed,
 	UnchangedUnsupportedLanguage,
+	UnchangedGrammarUnavailable,
 	UnchangedTooLarge,
 	UnchangedParseFailed,
 	UnchangedGateRejected,
 	UnchangedNoBenefit
+}
+
+public enum CodeCompressionAvailabilityState
+{
+	Available,
+	Unavailable,
+	LanguageUnavailable
+}
+
+public enum CodeCompressionUnavailabilityScope
+{
+	AllLanguages,
+	Language
+}
+
+public sealed record CodeCompressionUnavailability(
+	CodeCompressionUnavailabilityScope Scope,
+	string Reason,
+	string? LanguageId = null,
+	string? GrammarLibrary = null);
+
+public sealed record CodeCompressionAvailabilitySnapshot(
+	CodeCompressionAvailabilityState State,
+	IReadOnlyList<CodeCompressionUnavailability> Failures)
+{
+	public const string DiagnosticCode = "DPX-COMPRESSION-UNAVAILABLE";
+
+	public static CodeCompressionAvailabilitySnapshot Available { get; } =
+		new(CodeCompressionAvailabilityState.Available, []);
+
+	public bool IsUnavailable => State != CodeCompressionAvailabilityState.Available;
+
+	public string? PrimaryReason => Failures.FirstOrDefault()?.Reason;
 }
 
 /// <summary>
@@ -87,6 +121,8 @@ public sealed record CodeCompressionPlan(
 	public bool HasEdits => Edits.Count > 0;
 
 	public CodeTransformKinds AffectedKinds => _affectedKinds;
+
+	public CodeCompressionUnavailability? Unavailability { get; init; }
 
 	/// <summary>Characters saved. Never negative: a plan that does not shrink is not applied.</summary>
 	public int SavedCharacters => SourceLength - TransformedLength;

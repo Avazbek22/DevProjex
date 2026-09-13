@@ -14,6 +14,19 @@ internal static class McpTrustedDiagnosticFormatter
 		return FormatWarnings(plan.Diagnostics);
 	}
 
+	/// <summary>
+	/// Whether the plan reported a requested path the effective tree does not hold. Tools that
+	/// tolerate a missing path answer over the rest of the selection, so this warning is the only
+	/// signal that part of the request selected nothing.
+	/// </summary>
+	public static bool ReportsMissingSelectedPath(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		return plan.Diagnostics.Any(static diagnostic =>
+			diagnostic.Severity == ContextDiagnosticSeverity.Warning &&
+			string.Equals(diagnostic.Code, MissingSelectedPathCode, StringComparison.Ordinal));
+	}
+
 	internal static string? FormatWarnings(IReadOnlyList<ContextDiagnostic> diagnostics)
 	{
 		ArgumentNullException.ThrowIfNull(diagnostics);
@@ -24,12 +37,13 @@ internal static class McpTrustedDiagnosticFormatter
 		foreach (var group in warnings)
 		{
 			var groupedDiagnostics = group.ToArray();
-			var message = FormatSafeMessage(group.Key, groupedDiagnostics);
+			var safeCode = SafeCode(group.Key);
+			var message = FormatSafeMessage(safeCode, groupedDiagnostics);
 			output ??= new StringBuilder();
 			if (output.Length > 0)
 				output.AppendLine();
 			output.Append("[Warning ")
-				.Append(McpTextEscaping.EscapeSingleLine(group.Key))
+				.Append(safeCode)
 				.Append("] ")
 				.Append(message);
 		}
@@ -37,12 +51,33 @@ internal static class McpTrustedDiagnosticFormatter
 		return output?.ToString();
 	}
 
+	internal static string? FormatBlocking(ContextDiagnostic diagnostic)
+	{
+		ArgumentNullException.ThrowIfNull(diagnostic);
+		if (diagnostic.Code != GitScopeFilter.UnsafeFilterDiagnosticCode)
+			return null;
+		return $"[Error {GitScopeFilter.UnsafeFilterDiagnosticCode}] Exact working-tree comparison was refused because an untrusted Git filter is configured.";
+	}
+
+	private static string SafeCode(string code) => code switch
+	{
+		GitScopeFilter.DeletedDiagnosticCode => GitScopeFilter.DeletedDiagnosticCode,
+		GitScopeFilter.UnsafeFilterDiagnosticCode => GitScopeFilter.UnsafeFilterDiagnosticCode,
+		ProjectContextGitReadiness.PartialDiagnosticCode => ProjectContextGitReadiness.PartialDiagnosticCode,
+		MissingSelectedPathCode => MissingSelectedPathCode,
+		PartialProjectAccessCode => PartialProjectAccessCode,
+		ProjectSelectionWarningCode => ProjectSelectionWarningCode,
+		_ => ProjectSelectionWarningCode
+	};
+
 	private static string FormatSafeMessage(
 		string code,
 		IReadOnlyList<ContextDiagnostic> diagnostics) =>
 		code switch
 		{
 			GitScopeFilter.DeletedDiagnosticCode => FormatDeletedFiles(diagnostics),
+			GitScopeFilter.UnsafeFilterDiagnosticCode =>
+				"Exact working-tree comparison was refused because an untrusted Git filter is configured.",
 			ProjectContextGitReadiness.PartialDiagnosticCode =>
 				"Some nested Git indexes could not be read; those repository scopes were excluded. Results are partial.",
 			MissingSelectedPathCode => FormatMissingPaths(diagnostics.Count),

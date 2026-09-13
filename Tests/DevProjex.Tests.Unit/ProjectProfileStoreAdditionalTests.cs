@@ -74,7 +74,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void ClearAllProfiles_WhenStorageLockIsBusy_ReturnsBusyAndPreservesProfiles()
+	public void ClearAllProfiles_WhenSelectionLockIsBusy_ReturnsPartialAndRetryCompletes()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -90,8 +90,11 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			var result = store.ClearAllProfiles();
 
-			Assert.Equal(ProjectProfileClearStatus.Busy, result);
+			Assert.Equal(ProjectProfileClearStatus.Partial, result);
 			Assert.True(File.Exists(store.GetPath()));
+			heldLock.Dispose();
+			Assert.Equal(ProjectProfileClearStatus.Cleared, store.ClearAllProfiles());
+			Assert.False(File.Exists(store.GetPath()));
 		}
 		finally
 		{
@@ -100,7 +103,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void ClearAllProfiles_WhenStorageUsesFutureSchema_ReturnsFutureSchemaAndPreservesDocument()
+	public void ClearAllProfiles_WhenSelectionUsesFutureSchema_ReturnsPartialAndPreservesDocument()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -113,7 +116,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			var result = store.ClearAllProfiles();
 
-			Assert.Equal(ProjectProfileClearStatus.FutureSchema, result);
+			Assert.Equal(ProjectProfileClearStatus.Partial, result);
 			Assert.Equal(futureDocument, File.ReadAllText(storagePath));
 		}
 		finally
@@ -820,6 +823,104 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
+	public async Task ClearAllProfiles_WhenMarkLockIsBusy_PreservesSelectionAndMarks()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoBusyMarks");
+			store.SaveProfile(projectPath, CreateProfile());
+			Assert.True((await store.AddMarkAsync(
+				projectPath,
+				new MarkedSecretProfileEntry("9f2a4c1e8b3d", "TOKEN", 24),
+				TestContext.Current.CancellationToken)).Succeeded);
+			var markLockPath = Path.Combine(
+				Path.GetDirectoryName(store.GetPath())!,
+				"project-secret-marks.json.lock");
+			using var heldLock = new FileStream(
+				markLockPath,
+				FileMode.OpenOrCreate,
+				FileAccess.ReadWrite,
+				FileShare.None);
+
+			var result = store.ClearAllProfiles();
+
+			Assert.Equal(ProjectProfileClearStatus.Busy, result);
+			Assert.True(File.Exists(store.GetPath()));
+			using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
+			Assert.True(document.RootElement.GetProperty("profiles")
+				.TryGetProperty(PathUtility.Normalize(projectPath), out _));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public async Task DeleteProfile_WhenSelectionLockFailsAfterMarks_ReturnsPartialAndRetryCompletes()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoPartialDelete");
+			store.SaveProfile(projectPath, CreateProfile());
+			Assert.True((await store.AddMarkAsync(
+				projectPath,
+				new MarkedSecretProfileEntry("9f2a4c1e8b3d", "TOKEN", 24),
+				TestContext.Current.CancellationToken)).Succeeded);
+			using (var heldLock = new FileStream(
+				store.GetPath() + ".lock",
+				FileMode.OpenOrCreate,
+				FileAccess.ReadWrite,
+				FileShare.None))
+			{
+				Assert.Equal(ProjectProfileDeleteStatus.Partial, store.TryDeleteProfileWithResult(projectPath));
+			}
+
+			var marks = await store.LoadMarksAsync(projectPath, TestContext.Current.CancellationToken);
+			Assert.True(marks.Succeeded);
+			Assert.Empty(marks.Snapshot!.Marks);
+			Assert.True(store.TryLoadProfile(projectPath, out _));
+			Assert.Equal(ProjectProfileDeleteStatus.Deleted, store.TryDeleteProfileWithResult(projectPath));
+			Assert.False(store.TryLoadProfile(projectPath, out _));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void SaveProfile_CorruptPrimaryAndBackupRefusesToOverwriteRecoverableBytes()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			Assert.True(store.EnsureStorageExists());
+			const string primaryBytes = "{ invalid-primary";
+			const string backupBytes = "{ invalid-backup";
+			File.WriteAllText(store.GetPath(), primaryBytes);
+			File.WriteAllText(store.GetPath() + ".bak", backupBytes);
+
+			var result = store.TrySaveProfileWithResult(
+				Path.Combine(tempRoot, "Project"),
+				CreateProfile());
+
+			Assert.False(result.Succeeded);
+			Assert.Equal(primaryBytes, File.ReadAllText(store.GetPath()));
+			Assert.Equal(backupBytes, File.ReadAllText(store.GetPath() + ".bak"));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void LookupProfile_HeldStoreLockReportsTemporaryUnavailability()
 	{
 		var tempRoot = CreateTempDirectory();
@@ -839,6 +940,51 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, result.Status);
 			Assert.Null(result.Profile);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public async Task LookupProfile_InProcessContentionUsesOneBoundedTimeout()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var syncField = typeof(ProjectProfileStore).GetField(
+				"_sync",
+				System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+			var sync = Assert.IsType<object>(syncField?.GetValue(store));
+			using var entered = new ManualResetEventSlim();
+			using var release = new ManualResetEventSlim();
+			var holder = Task.Run(() =>
+			{
+				Monitor.Enter(sync);
+				try
+				{
+					entered.Set();
+					release.Wait(TestContext.Current.CancellationToken);
+				}
+				finally
+				{
+					Monitor.Exit(sync);
+				}
+			}, TestContext.Current.CancellationToken);
+			entered.Wait(TestContext.Current.CancellationToken);
+			var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+			var result = store.LookupProfile(
+				Path.Combine(tempRoot, "LockedProfile"),
+				TimeSpan.FromMilliseconds(50));
+
+			stopwatch.Stop();
+			release.Set();
+			await holder;
+			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, result.Status);
+			Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(1));
 		}
 		finally
 		{

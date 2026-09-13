@@ -18,9 +18,87 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Architecture.md",
 		"CLI-Profiles.md",
 		"Desktop-Control.md",
+		"Git-Safety.md",
+		"Security.md",
 		"SmartIgnore.md",
-		"HideSecrets.md"
+		"HideSecrets.md",
+		"Benchmarks.md",
+		"Comparison.md",
+		"Dependencies.md",
+		"Ranking.md",
+		"Release-Channels.md",
+		"Release-Process.md",
+		"CI-Known-Failures.md"
 	];
+
+	[Fact]
+	public void SecurityAndBenchmarkDocumentsKeepTheirEvidenceBoundaries()
+	{
+		var rootPath = FindRepositoryRoot();
+		var security = File.ReadAllText(Path.Combine(rootPath, "Docs", "Security.md"));
+		var benchmarks = File.ReadAllText(Path.Combine(rootPath, "Docs", "Benchmarks.md"));
+		var comparison = File.ReadAllText(Path.Combine(rootPath, "Docs", "Comparison.md"));
+
+		Assert.Contains("Prompt injection", security, StringComparison.Ordinal);
+		Assert.Contains("Secret detection is not proof", security, StringComparison.Ordinal);
+		Assert.Contains("ProxyCommand", security, StringComparison.Ordinal);
+		Assert.Contains("same operating-system user", security, StringComparison.Ordinal);
+		Assert.Contains("paths, names, configuration keys, parser reasons", security, StringComparison.Ordinal);
+		Assert.Contains("only over `https` or `ssh`", security, StringComparison.Ordinal);
+		Assert.Contains("That transport set is fixed in the build", security, StringComparison.Ordinal);
+		Assert.Contains(
+			"no environment variable, profile, configuration file, or command-line value widens it",
+			security,
+			StringComparison.Ordinal);
+		Assert.Contains("d318b683471101618febed18996405ad26462110", benchmarks, StringComparison.Ordinal);
+		Assert.Contains("85e3969b010c72b905203812d1a3f5beb84a2102", benchmarks, StringComparison.Ordinal);
+		Assert.Contains("three", benchmarks, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("operating-system page cache", benchmarks, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("Benchmarks.md", comparison, StringComparison.Ordinal);
+		Assert.Contains("different", comparison, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public void PublishedDocumentationNamesEveryMcpToolAndTheirCount()
+	{
+		var rootPath = FindRepositoryRoot();
+		var toolNames = ReadCatalogToolNames(rootPath);
+		var readMe = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+		var contract = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var enumeration = FirstSentence(
+			ParagraphContaining(readMe, "read-only tools cover the whole workflow"));
+
+		foreach (var name in toolNames)
+			Assert.Contains($"`{name}`", enumeration, StringComparison.Ordinal);
+
+		Assert.Contains(
+			$"{CountWord(toolNames.Length)} read-only tools",
+			enumeration,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"all {CountWord(toolNames.Length).ToLowerInvariant()} tool descriptions",
+			contract,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void GitSafetyProfilesAndFilterRefusalRemainDocumented()
+	{
+		var rootPath = FindRepositoryRoot();
+		var safety = File.ReadAllText(Path.Combine(rootPath, "Docs", "Git-Safety.md"));
+		var smartIgnore = File.ReadAllText(Path.Combine(rootPath, "Docs", "SmartIgnore.md"));
+		var commandLine = File.ReadAllText(Path.Combine(rootPath, "Docs", "CommandLine.md"));
+
+		Assert.Contains("LocalRead", safety, StringComparison.Ordinal);
+		Assert.Contains("ManagedCheckout", safety, StringComparison.Ordinal);
+		Assert.Contains("ExplicitNetwork", safety, StringComparison.Ordinal);
+		Assert.Contains("GIT_CONFIG_NOSYSTEM=1", safety, StringComparison.Ordinal);
+		Assert.Contains("GIT_NO_LAZY_FETCH=1", safety, StringComparison.Ordinal);
+		Assert.Contains("DPX-GIT-UNSAFE-FILTER", safety, StringComparison.Ordinal);
+		Assert.Contains("SSH configuration", safety, StringComparison.Ordinal);
+		Assert.Contains("Git-Safety.md", smartIgnore, StringComparison.Ordinal);
+		Assert.Contains("Git-Safety.md", commandLine, StringComparison.Ordinal);
+	}
 
 	[Fact]
 	public void McpSecretDocumentationSeparatesControlFromDetectionGuarantees()
@@ -49,6 +127,240 @@ public sealed class DocumentationAndPackagingContractTests
 			Assert.Contains("Gitleaks", document, StringComparison.OrdinalIgnoreCase);
 			Assert.Contains("scope-aware", document, StringComparison.OrdinalIgnoreCase);
 		}
+	}
+
+	[Fact]
+	public void McpAgentErgonomicsAreSpecifiedInServerAndVersionContracts()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var version = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedVersion = Regex.Replace(version, @"\s+", " ");
+
+		Assert.Contains("end_line B exceeded the file", server, StringComparison.Ordinal);
+		Assert.Contains("start_line=B+1", server, StringComparison.Ordinal);
+		Assert.Contains("Tree limited to depth D of N", server, StringComparison.Ordinal);
+		Assert.Contains("An explicit `max_depth` is the caller's choice", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("JSON and XML never return partial syntax", server, StringComparison.Ordinal);
+		Assert.Contains("analyze.topFiles[].uninspected", server, StringComparison.Ordinal);
+		Assert.Contains("initialize` result", server, StringComparison.Ordinal);
+		Assert.Contains("never returns an empty success", server, StringComparison.Ordinal);
+		Assert.Contains("no intermediate export is written or read", server, StringComparison.Ordinal);
+		Assert.Contains("only those ranges are excluded from pattern matches", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("merged grep-style group", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("[Budget accounting]", server, StringComparison.Ordinal);
+		Assert.Contains("unique `name` from `list_projects`", normalizedServer, StringComparison.Ordinal);
+		Assert.DoesNotContain("dependency-index warm-up", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("[Dependency configuration]", server, StringComparison.Ordinal);
+		Assert.Contains("JSON object only as spotlighted text", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("reply ≈ E", server, StringComparison.Ordinal);
+		Assert.Contains("For `get_tree`, `analyze`, `pack_context`, and `search_project`, `paths` accepts", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("The entries name literal files or directories", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("at most 2,000 lines and 50,000 characters", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("`profile` applies the same effective selection", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("### Batch `get_file`", server, StringComparison.Ordinal);
+		Assert.Contains("one to eight records", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("at most sixteen whole-file, range, or symbol selections", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("`ok` when complete, `partial`", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("`--remote-hosts`", server, StringComparison.Ordinal);
+		Assert.Contains("[Remote] commit=<sha>", server, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Remote] commit=<sha> branch=<name>", server, StringComparison.Ordinal);
+		Assert.Contains("File names and paths are address fields", server, StringComparison.Ordinal);
+		Assert.Contains("An explicitly selected profile may broaden", server, StringComparison.Ordinal);
+		Assert.Contains("The dependency graph cache is metadata-keyed", server, StringComparison.Ordinal);
+		Assert.Contains("contentMetrics.measured", server, StringComparison.Ordinal);
+		Assert.Contains("documentMetrics", server, StringComparison.Ordinal);
+		Assert.Contains("selection changed during packing; retry", server, StringComparison.Ordinal);
+
+		Assert.Contains("MCP agent ergonomics changes four v5.2 behaviors", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("there is no strict-range switch", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("Passing an explicit `max_depth` restores", normalizedVersion, StringComparison.Ordinal);
+		Assert.Contains("Cached MCP", normalizedVersion, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void McpDocumentationShowsSearchFollowedByOneBatchedRead()
+	{
+		var server = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Docs", "McpServer.md"));
+		var normalized = Regex.Replace(server, @"\s+", " ");
+
+		Assert.Contains("### Search, then one batched read", server, StringComparison.Ordinal);
+		Assert.Contains("\"requests\": [", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"Four single reads of four locations are one call",
+			normalized,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void McpDocumentationStatesDepthSemanticsAndTheContentOnlySearchBoundary()
+	{
+		var server = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Docs", "McpServer.md"));
+		var normalized = Regex.Replace(server, @"\s+", " ");
+
+		Assert.Contains(
+			"`max_depth` counts levels below the project root",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`paths` narrows the selection but never re-roots the tree",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`search_project` matches file content only and never matches paths",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("[Search observed] matches=N · matching-files=M within inspected sources", server, StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] complete · sources inspected=X/Y · matches retained=R/T · matches written=W · declaration files named=N.", server, StringComparison.Ordinal);
+		Assert.Contains("[Search truncated]", server, StringComparison.Ordinal);
+		Assert.Contains("16,000 characters", normalized, StringComparison.Ordinal);
+		Assert.Contains("### Finding a file by name", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"### Search hits name the declaration that contains them",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains("in P.App", server, StringComparison.Ordinal);
+		Assert.Contains("in (no declaration)", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"Location is therefore spelled once in a response",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("Placement is all or nothing", normalized, StringComparison.Ordinal);
+		Assert.DoesNotContain("Enclosing declarations:", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Symbols] annotated=N · files-without-declarations=K.",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains("There is no parameter for it", normalized, StringComparison.Ordinal);
+		Assert.Contains("### Reading a declaration by name", server, StringComparison.Ordinal);
+		Assert.Contains("### The search result carries the selector", server, StringComparison.Ordinal);
+		Assert.Contains("Declarations found (path, symbol, line):", server, StringComparison.Ordinal);
+		Assert.Contains("[Read declarations]", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"### What a bounded result retains",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Search order] bounded evidence priority; canonical path and line break ties.",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"No test, generated, snapshot, or unsupported-language category is excluded or categorically demoted",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("A stronger late record can evict a weaker early record", normalized, StringComparison.Ordinal);
+		Assert.Contains("### A withheld search stays in the session", server, StringComparison.Ordinal);
+		Assert.Contains("Withheld matches by file:", server, StringComparison.Ordinal);
+		Assert.Contains("Counts, not line numbers", normalized, StringComparison.Ordinal);
+		Assert.Contains(
+			"expiry or eviction of one is reported in search terms",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`symbol` cannot be combined with `start_line`, `end_line`, or `start_column`",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("### `pack_context.expand_related`", server, StringComparison.Ordinal);
+		Assert.Contains("**Expansion only ever narrows.**", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Expanded] seeds=1 · hop1=+11 · hop2=+0 · seeds-without-facts=0.",
+			server,
+			StringComparison.Ordinal);
+		Assert.Contains("stops at 400 files", normalized, StringComparison.Ordinal);
+		Assert.Contains(
+			"`include_patterns` is the only parameter that matches a file by its name",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.Contains("the constant `[Name search]` line", normalized, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// The offline guarantee is only worth stating if it says when the refusal happens: before
+	/// anything opens the path, because opening one of these forms is the network operation.
+	/// </summary>
+	[Fact]
+	public void McpDocumentationStatesThatNoProbeLeavesTheMachineBeforeTheRemoteOptIn()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var security = File.ReadAllText(Path.Combine(rootPath, "Docs", "Security.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedSecurity = Regex.Replace(security, @"\s+", " ");
+
+		Assert.Contains(
+			"no probe leaves the machine before that permission is considered",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			@"a form that names a host is refused with `DPX-MCP-INVALID-ARGUMENTS` before" +
+			@" anything opens it: `\\server\share` and `//server/share`, the UNC device" +
+			@" path `\\?\UNC\server\share`, anything in the NT object namespace `\??\`," +
+			" and the automount host maps",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Opening such a path is itself the network operation",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Three device forms address this machine and are not refused",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"No probe leaves the machine before the remote opt-in is considered",
+			normalizedSecurity,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void McpDocumentationStatesWhenServiceNoticesRepeat()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var security = File.ReadAllText(Path.Combine(rootPath, "Docs", "Security.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedSecurity = Regex.Replace(security, @"\s+", " ");
+
+		Assert.Contains("### Service notices repeat only when they change", server, StringComparison.Ordinal);
+		Assert.Contains("### What a connection costs", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"`[Unchanged] filters, protection; see list_projects.`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`[Unchanged] filters; see list_projects.`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`[Unchanged] protection; see list_projects.`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"the pointer names exactly the lines that response withheld",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"A session is never told that a line it was never sent has not changed",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains("Omission has to be provable", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains(
+			"any call that passed `max_file_bytes`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"A new server process is a new session and always starts in full",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Filters are never silent, though an unchanged filter line is reported once per session",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"the untrusted-data boundary around project text is unchanged",
+			normalizedSecurity,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -183,6 +495,467 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void HeadlessPackagesStayRidSpecificAndFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var hostPath = Path.Combine(rootPath, "Apps", "TerminalHost", "DevProjex.TerminalHost.csproj");
+		var host = XDocument.Load(hostPath);
+		string Property(string name) => host.Descendants(name).Single().Value;
+
+		Assert.Equal("Exe", Property("OutputType"));
+		Assert.Equal("devprojex", Property("AssemblyName"));
+		Assert.Equal("devprojex", Property("PackageId"));
+		Assert.Equal("devprojex", Property("ToolCommandName"));
+		Assert.Equal("true", Property("PackAsTool"));
+		Assert.Equal("true", Property("SelfContained"));
+		Assert.Equal("false", Property("PublishAot"));
+		Assert.Equal("false", Property("PublishTrimmed"));
+		Assert.DoesNotContain(
+			host.Descendants("ProjectReference"),
+			element => (element.Attribute("Include")?.Value ?? string.Empty)
+				.Contains("Avalonia", StringComparison.OrdinalIgnoreCase));
+		var rids = Property("RuntimeIdentifiers").Split(';');
+		Assert.Equal(
+			["win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64"],
+			rids);
+		Assert.DoesNotContain("any", rids);
+
+		using var manifestDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Headless",
+			"payload-manifest.json")));
+		var manifestGrammars = manifestDocument.RootElement.GetProperty("grammars")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var infrastructure = XDocument.Load(Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var projectGrammars = infrastructure.Descendants()
+			.Where(static element => element.Name.LocalName is "DevProjexGrammar" or "DevProjexVendoredGrammar")
+			.Select(static element => element.Attribute("Include")?.Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(projectGrammars, manifestGrammars);
+		Assert.Contains("tree-sitter-c-sharp", manifestGrammars);
+		Assert.Contains("tree-sitter-kotlin", manifestGrammars);
+
+		var launcherTemplate = File.ReadAllText(Path.Combine(
+			rootPath, "Packaging", "Npm", "devprojex", "package.json.template"));
+		Assert.DoesNotContain("\"dependencies\"", launcherTemplate, StringComparison.Ordinal);
+		Assert.DoesNotContain("\"scripts\"", launcherTemplate, StringComparison.Ordinal);
+		Assert.Contains("\"optionalDependencies\"", launcherTemplate, StringComparison.Ordinal);
+		Assert.Contains("\"node\": \">=20\"", launcherTemplate, StringComparison.Ordinal);
+
+		var workflow = File.ReadAllText(Path.Combine(
+			rootPath, ".github", "workflows", "publish-packages.yml"));
+		var buildWorkflow = File.ReadAllText(Path.Combine(
+			rootPath, ".github", "workflows", "packages-build.yml"));
+		Assert.Contains("uses: ./.github/workflows/packages-build.yml", workflow, StringComparison.Ordinal);
+		Assert.Contains("Test-HeadlessPackages.ps1", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-HeadlessPackageGateMutation.ps1", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("windows-latest", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("ubuntu-latest", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("macos-latest", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Publish-HeadlessPackages.ps1", workflow, StringComparison.Ordinal);
+		Assert.Contains("Test-ResumableHeadlessPublish.ps1", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("'Scripts/ci/Test-ResumableHeadlessPublish.ps1'", workflow, StringComparison.Ordinal);
+		Assert.Contains("source-sha.txt", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("<clear />", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("NUGET_PACKAGES", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-InstalledNuGetPayloadReceipt", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("microsoft.netcore.app.host.$rid", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("if ($IsMacOS)", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("@('--arch', $architecture)", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("inputs.dry_run == false", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("--skip-duplicate", workflow, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ReleasePayloadContractsTrackGrammarsStoreResourcesAndSdkPublishItems()
+	{
+		var rootPath = FindRepositoryRoot();
+		using var manifestDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Headless",
+			"payload-manifest.json")));
+		var manifest = manifestDocument.RootElement;
+		var manifestGrammars = manifest.GetProperty("grammars")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var infrastructure = XDocument.Load(Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var projectGrammars = infrastructure.Descendants()
+			.Where(static element => element.Name.LocalName is "DevProjexGrammar" or "DevProjexVendoredGrammar")
+			.Select(static element => element.Attribute("Include")?.Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(projectGrammars, manifestGrammars);
+
+		var release = manifest.GetProperty("release");
+		Assert.False(release.TryGetProperty("localizations", out _));
+		var headless = release.GetProperty("headless");
+		Assert.Equal("DevProjex-headless", headless.GetProperty("archivePrefix").GetString());
+		Assert.Equal("SHA256SUMS.headless.txt", headless.GetProperty("checksumFile").GetString());
+
+		var store = release.GetProperty("store");
+		var manifestLanguages = store.GetProperty("resourceLanguages")
+			.EnumerateArray()
+			.Select(static element => element.GetString()!.ToLowerInvariant())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var storeManifest = XDocument.Load(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Windows",
+			"DevProjex.Store",
+			"Package.appxmanifest"));
+		var storeLanguages = storeManifest.Descendants()
+			.Where(static element => element.Name.LocalName == "Resource")
+			.Select(static element => element.Attribute("Language")!.Value.ToLowerInvariant())
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(storeLanguages, manifestLanguages);
+		Assert.Equal(["arm64", "x64"], store.GetProperty("platforms")
+			.EnumerateArray()
+			.Select(static element => element.GetString())
+			.Order(StringComparer.Ordinal));
+
+		var releaseScript = File.ReadAllText(Path.Combine(rootPath, "Scripts", "release-all.ps1"));
+		Assert.Contains("/p:EnableCompressionInSingleFile=false", releaseScript, StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifacts.ps1", releaseScript, StringComparison.Ordinal);
+		var buildTargets = File.ReadAllText(Path.Combine(rootPath, "Directory.Build.targets"));
+		Assert.Contains("@(FilesToBundle)", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("@(ResolvedFileToPublish)", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("Write-PublishPayloadReceipt.ps1", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("DevProjexGenerateFolderPayloadReceipt", buildTargets, StringComparison.Ordinal);
+		Assert.Contains("'$(Configuration)'=='ReleaseStore'", buildTargets, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void HeadlessReleaseAndContainerChannelsRemainDistinctAndFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var buildScript = File.ReadAllText(Path.Combine(rootPath, "Scripts", "build-headless-packages.ps1"));
+		var validator = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-ReleaseArtifacts.ps1"));
+		var archiveWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-headless.yml"));
+		var archiveBuildWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "headless-build.yml"));
+		var containerWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "publish-container.yml"));
+		var containerBuildWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "container-build.yml"));
+		var containerSmoke = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-HeadlessContainerSmoke.ps1"));
+		var dockerfile = File.ReadAllText(Path.Combine(rootPath, "Dockerfile"));
+		var installation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Installation.md"));
+		var releaseProcess = File.ReadAllText(Path.Combine(rootPath, "Docs", "Release-Process.md"));
+
+		Assert.Contains("$($manifest.release.headless.archivePrefix).v$Version.$($Rid.rid).$extension", buildScript, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex.v$Version.$($Rid.rid)", buildScript, StringComparison.Ordinal);
+		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", buildScript, StringComparison.Ordinal);
+		Assert.Contains("'headless'", validator, StringComparison.Ordinal);
+		Assert.Contains("[string]$Rid.binary", validator, StringComparison.Ordinal);
+		Assert.Contains("release.headless.checksumFile", validator, StringComparison.Ordinal);
+
+		Assert.Contains("types: [published]", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/headless-build.yml", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/checkout@v7", archiveBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/setup-dotnet@v6", archiveBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/upload-artifact@v7", archiveBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actions/download-artifact@v8", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("gh release upload", archiveWorkflow, StringComparison.Ordinal);
+		Assert.Contains("if: ${{ needs.prepare.outputs.release_tag != '' }}", archiveWorkflow, StringComparison.Ordinal);
+
+		Assert.Contains("FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("runtime-deps:10.0-noble-chiseled-extra", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("-p:PublishSingleFile=false", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("-p:DevProjexGrammarDelivery=Content", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("USER app", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("ENTRYPOINT [\"devprojex\"]", dockerfile, StringComparison.Ordinal);
+		Assert.DoesNotContain("alpine", dockerfile, StringComparison.OrdinalIgnoreCase);
+
+		using var glama = JsonDocument.Parse(File.ReadAllText(Path.Combine(rootPath, "glama.json")));
+		Assert.Equal("https://glama.ai/mcp/schemas/server.json", glama.RootElement.GetProperty("$schema").GetString());
+		Assert.Equal(["Avazbek22"], glama.RootElement.GetProperty("maintainers").EnumerateArray()
+			.Select(static item => item.GetString()!).ToArray());
+
+		Assert.Contains("uses: ./.github/workflows/container-build.yml", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("ubuntu-24.04-arm", containerBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("docker/setup-buildx-action@v4", containerBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("devprojex-container-images", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("container-images.json", containerBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Publish-HeadlessContainer.ps1", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("'Scripts/ContainerPublishing.ps1'", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("'Scripts/ci/Test-ContainerPromotionPolicy.ps1'", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("steps.promote.outputs.manifest_digest", containerWorkflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("docker/build-push-action", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("packages: write", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("id-token: write", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("attestations: write", containerWorkflow, StringComparison.Ordinal);
+		Assert.Contains("--read-only", containerSmoke, StringComparison.Ordinal);
+		Assert.Contains("--tmpfs /tmp", containerSmoke, StringComparison.Ordinal);
+		Assert.Contains("DPX-GIT-STATE-UNAVAILABLE", containerSmoke, StringComparison.Ordinal);
+		Assert.Contains("DPX-GIT-TRACKED-INDEX-UNAVAILABLE", containerSmoke, StringComparison.Ordinal);
+		Assert.DoesNotContain("setup-qemu", containerWorkflow + containerBuildWorkflow, StringComparison.OrdinalIgnoreCase);
+
+		Assert.Contains("DevProjex-headless.v<version>.<rid>", installation, StringComparison.Ordinal);
+		Assert.Contains("ghcr.io/avazbek22/devprojex", installation, StringComparison.Ordinal);
+		Assert.Contains("intentionally contains no Git", installation, StringComparison.Ordinal);
+		Assert.Contains("latest", releaseProcess, StringComparison.Ordinal);
+		Assert.Contains("exact registry", releaseProcess, StringComparison.Ordinal);
+		Assert.Contains("Two independent producers cannot atomically update one checksum manifest", releaseProcess, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void PrivilegedReleaseWorkflowsPinThirdPartyActions()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflows = new[]
+		{
+			"publish-packages.yml",
+			"publish-container.yml",
+			"release-candidate.yml",
+			"store-package-smoke.yml"
+		};
+		var expectedPins = new[]
+		{
+			"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+			"actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0",
+			"actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
+			"actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+			"actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+			"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0",
+			"docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0",
+			"docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0",
+			"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2"
+		};
+		var combined = string.Join(Environment.NewLine, workflows.Select(name => File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			name))));
+		foreach (var expectedPin in expectedPins)
+			Assert.Contains(expectedPin, combined, StringComparison.Ordinal);
+
+		Assert.DoesNotMatch(@"uses:\s+[^\s]+@v\d", combined);
+		Assert.DoesNotContain("npm@latest", combined, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void HeadlessWorkflowsCoverMasterCoreChangesAndReleaseCandidatePinsOneSha()
+	{
+		// CI tier policy: .github/workflows/README.md. Packaging runs on feature pull requests only
+		// for its own inputs; core code paths trigger the merge tier (push to v*) instead. Change
+		// the policy and these assertions together; never drop an assertion to make a change pass.
+		var rootPath = FindRepositoryRoot();
+		var policy = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "README.md"));
+		Assert.Contains("| 1 Feature |", policy, StringComparison.Ordinal);
+		Assert.Contains("| 2 Merge |", policy, StringComparison.Ordinal);
+		Assert.Contains("| 3 Release |", policy, StringComparison.Ordinal);
+		Assert.Contains("HeadlessWorkflowsCoverMasterCoreChangesAndReleaseCandidatePinsOneSha", policy, StringComparison.Ordinal);
+
+		var corePathPatterns = new[] { "'Apps/Mcp/**'", "'Application/**'", "'Kernel/**'", "'Infrastructure/**'" };
+		foreach (var workflowName in new[]
+				 {
+					 "publish-packages.yml",
+					 "package-headless.yml",
+					 "publish-container.yml"
+				 })
+		{
+			var workflow = File.ReadAllText(Path.Combine(
+				rootPath,
+				".github",
+				"workflows",
+				workflowName));
+			Assert.Contains("Policy: .github/workflows/README.md", workflow, StringComparison.Ordinal);
+			Assert.Contains("concurrency:", workflow, StringComparison.Ordinal);
+			Assert.Contains("source_sha", workflow, StringComparison.Ordinal);
+			Assert.Contains("needs.prepare.outputs.source_sha", workflow, StringComparison.Ordinal);
+			Assert.Contains("github.event.pull_request.number || github.ref", workflow, StringComparison.Ordinal);
+			Assert.Contains(
+				"cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}",
+				workflow,
+				StringComparison.Ordinal);
+
+			var push = TriggerSection(workflow, "push");
+			Assert.Contains("master", push, StringComparison.Ordinal);
+			Assert.Contains("'v*'", push, StringComparison.Ordinal);
+			Assert.Contains("'Directory.Packages.props'", push, StringComparison.Ordinal);
+			foreach (var pattern in corePathPatterns)
+				Assert.Contains(pattern, push, StringComparison.Ordinal);
+
+			var pullRequest = TriggerSection(workflow, "pull_request");
+			Assert.DoesNotContain("branches:", pullRequest, StringComparison.Ordinal);
+			Assert.Contains("branches-ignore: [master]", pullRequest, StringComparison.Ordinal);
+			Assert.Contains("paths:", pullRequest, StringComparison.Ordinal);
+			foreach (var pattern in corePathPatterns)
+				Assert.DoesNotContain(pattern, pullRequest, StringComparison.Ordinal);
+			Assert.DoesNotContain("'Apps/Terminal/**'", pullRequest, StringComparison.Ordinal);
+		}
+
+		var appImage = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "package-appimage.yml"));
+		Assert.Contains("Policy: .github/workflows/README.md", appImage, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/appimage-build.yml", appImage, StringComparison.Ordinal);
+		Assert.Contains("checkout_ref: ${{ needs.prepare.outputs.source_sha }}", appImage, StringComparison.Ordinal);
+		var appImagePush = TriggerSection(appImage, "push");
+		Assert.Contains("'v*'", appImagePush, StringComparison.Ordinal);
+		Assert.Contains("Application/**", appImagePush, StringComparison.Ordinal);
+		var appImagePullRequest = TriggerSection(appImage, "pull_request");
+		Assert.DoesNotContain("branches:", appImagePullRequest, StringComparison.Ordinal);
+		Assert.Contains("branches-ignore: [master]", appImagePullRequest, StringComparison.Ordinal);
+		Assert.DoesNotContain("Application/**", appImagePullRequest, StringComparison.Ordinal);
+		Assert.Contains("Packaging/Linux/**", appImagePullRequest, StringComparison.Ordinal);
+
+		var storeSmoke = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "store-package-smoke.yml"));
+		Assert.DoesNotContain("pull_request:", storeSmoke, StringComparison.Ordinal);
+		Assert.Contains("workflow_call:", storeSmoke, StringComparison.Ordinal);
+		Assert.Contains("force_full:", storeSmoke, StringComparison.Ordinal);
+		Assert.Contains("Select-CiPlan.ps1 -Full", storeSmoke, StringComparison.Ordinal);
+		Assert.DoesNotContain(": write", storeSmoke, StringComparison.Ordinal);
+		Assert.Contains("ref: ${{ needs.plan-store.outputs.source_sha }}", storeSmoke, StringComparison.Ordinal);
+
+		var grammarDelivery = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "grammar-delivery.yml"));
+		Assert.Contains("workflow_call:", grammarDelivery, StringComparison.Ordinal);
+		Assert.Contains("- 'v*'", grammarDelivery, StringComparison.Ordinal);
+		Assert.Contains("branches-ignore: [master]", TriggerSection(grammarDelivery, "pull_request"), StringComparison.Ordinal);
+		Assert.DoesNotContain(": write", grammarDelivery, StringComparison.Ordinal);
+
+		var releaseCandidate = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"release-candidate.yml"));
+		Assert.Contains("sha:", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("workflow_dispatch:", releaseCandidate, StringComparison.Ordinal);
+		Assert.DoesNotContain("pull_request:", releaseCandidate, StringComparison.Ordinal);
+		Assert.DoesNotContain("\n  push:", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("must equal workflow ref SHA", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("printf 'Validated release candidate `%s`.\\n'", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/dotnet.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/release-validate.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/headless-build.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/container-build.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/packages-build.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/appimage-build.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/grammar-delivery.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/store-package-smoke.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("Release candidate report", releaseCandidate, StringComparison.Ordinal);
+		foreach (var gate in new[]
+				 {
+					 "'AppImage dry-run' = $env:APPIMAGE_RESULT",
+					 "'Grammar Delivery' = $env:GRAMMAR_RESULT",
+					 "'Store Package Smoke' = $env:STORE_RESULT"
+				 })
+		{
+			Assert.Contains(gate, releaseCandidate, StringComparison.Ordinal);
+		}
+		Assert.Equal(
+			3,
+			Regex.Matches(
+				releaseCandidate,
+				@"^\s+force_full:\s+true\s*$",
+				RegexOptions.Multiline).Count);
+		Assert.DoesNotContain(": write", releaseCandidate, StringComparison.Ordinal);
+
+		var dotnetWorkflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"dotnet.yml"));
+		var releaseValidationWorkflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"release-validate.yml"));
+		Assert.Contains("force_full:", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains("force_full:", releaseValidationWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Select-CiPlan.ps1 -Full", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Select-CiPlan.ps1 -Full", releaseValidationWorkflow, StringComparison.Ordinal);
+		Assert.Contains("actionlint/cmd/actionlint@v1.7.7", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains("-shellcheck=", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains(".github/workflows/release-candidate.yml", dotnetWorkflow, StringComparison.Ordinal);
+		Assert.Contains("inputs.force_full == true", dotnetWorkflow, StringComparison.Ordinal);
+
+		var buildWorkflows = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["headless-build.yml"] = "package-headless.yml",
+			["container-build.yml"] = "publish-container.yml",
+			["packages-build.yml"] = "publish-packages.yml",
+			["appimage-build.yml"] = "package-appimage.yml"
+		};
+		foreach (var (buildWorkflowName, publishingWorkflowName) in buildWorkflows)
+		{
+			var buildWorkflow = File.ReadAllText(Path.Combine(
+				rootPath,
+				".github",
+				"workflows",
+				buildWorkflowName));
+			Assert.Contains("workflow_call:", buildWorkflow, StringComparison.Ordinal);
+			Assert.DoesNotContain("pull_request:", buildWorkflow, StringComparison.Ordinal);
+			Assert.Contains("contents: read", buildWorkflow, StringComparison.Ordinal);
+			Assert.DoesNotContain(": write", buildWorkflow, StringComparison.Ordinal);
+
+			var publishingWorkflow = File.ReadAllText(Path.Combine(
+				rootPath,
+				".github",
+				"workflows",
+				publishingWorkflowName));
+			Assert.Contains(
+				$"uses: ./.github/workflows/{buildWorkflowName}",
+				publishingWorkflow,
+				StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void ReleaseWorkflowsShareVersionAndAppImageReceiptGates()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflowNames = new[]
+		{
+			"package-appimage.yml",
+			"package-headless.yml",
+			"publish-container.yml",
+			"publish-packages.yml"
+		};
+		foreach (var workflowName in workflowNames)
+		{
+			var workflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", workflowName));
+			Assert.Contains("types: [published]", workflow, StringComparison.Ordinal);
+			Assert.Contains("Scripts/ci/Test-ReleaseVersion.ps1", workflow, StringComparison.Ordinal);
+			Assert.Contains("github.event.release.tag_name", workflow, StringComparison.Ordinal);
+		}
+		var packagesWorkflow = File.ReadAllText(Path.Combine(
+			rootPath, ".github", "workflows", "publish-packages.yml"));
+		Assert.Contains(
+			"SelectSingleNode('/Project/PropertyGroup/DevProjexVersion')",
+			packagesWorkflow,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			".Project.PropertyGroup.DevProjexVersion",
+			packagesWorkflow,
+			StringComparison.Ordinal);
+
+		// The receipt gates moved with the read-only build into appimage-build.yml; the publishing
+		// wrapper keeps only version resolution and the release upload.
+		var appImageBuildWorkflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "appimage-build.yml"));
+		Assert.Contains("DevProjexGenerateReleasePayloadReceipt=true", appImageBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"receipt_root=\"${GITHUB_WORKSPACE}/artifacts/appimage-release",
+			appImageBuildWorkflow,
+			StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifacts.ps1", appImageBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-ReleaseArtifactGateMutation.ps1", appImageBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("-Channels appimage", appImageBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("ref: ${{ inputs.checkout_ref }}", appImageBuildWorkflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("needs.prepare", appImageBuildWorkflow, StringComparison.Ordinal);
+
+		var releaseProcess = File.ReadAllText(Path.Combine(rootPath, "Docs", "Release-Process.md"));
+		Assert.Contains("must match", releaseProcess, StringComparison.Ordinal);
+		Assert.Contains("workflow_dispatch", releaseProcess, StringComparison.Ordinal);
+		Assert.Contains("AppImage workflow enables the same SDK-generated", releaseProcess, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void ReadmeCommandExamplesParseAgainstTheProductionCommandTree()
 	{
 		var rootPath = FindRepositoryRoot();
@@ -288,7 +1061,7 @@ public sealed class DocumentationAndPackagingContractTests
 			RegexOptions.CultureInvariant);
 		Assert.True(readinessRow.Success, "Desktop Control Git-readiness state contract is missing.");
 		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering.Where(static item =>
-			         DesktopOpenReadiness.RequiresGitReadiness(item.Id)))
+					 DesktopOpenReadiness.RequiresGitReadiness(item.Id)))
 		{
 			Assert.Contains($"`{descriptor.Token}`", readinessRow.Value, StringComparison.Ordinal);
 		}
@@ -450,6 +1223,8 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("env -u CI \"$2\"", workflow, StringComparison.Ordinal);
 		Assert.Contains("Portable Launcher ConPTY TUI Smoke", workflow, StringComparison.Ordinal);
+		Assert.Contains("${{ startsWith(matrix.rid, 'win-') }}", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("${{ matrix.rid == 'win-x64' }}", workflow, StringComparison.Ordinal);
 		Assert.Contains("Published Native PTY TUI Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Published Single-File Extraction Contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(
@@ -479,8 +1254,7 @@ public sealed class DocumentationAndPackagingContractTests
 			completionStepIndex + completionStepName.Length,
 			StringComparison.Ordinal);
 		var completionStep = workflow[
-			completionStepIndex..
-			(completionStepEndIndex >= 0 ? completionStepEndIndex : workflow.Length)];
+			completionStepIndex..(completionStepEndIndex >= 0 ? completionStepEndIndex : workflow.Length)];
 		Assert.Contains(
 			"artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}",
 			completionStep,
@@ -567,7 +1341,12 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Published Broken Pipe Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Startup Smoke (macOS)", workflow, StringComparison.Ordinal);
-		Assert.Contains("branches: [ \"master\", \"v5.1\" ]", workflow, StringComparison.Ordinal);
+		// Release Validation is tier 1: every pull request, no base-branch list to go stale, and no
+		// `push: v*` because the open release PR already covers each merge into a version branch.
+		Assert.Contains("Policy: .github/workflows/README.md", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("branches:", TriggerSection(workflow, "pull_request"), StringComparison.Ordinal);
+		Assert.Contains("branches: [ \"master\" ]", TriggerSection(workflow, "push"), StringComparison.Ordinal);
+		Assert.DoesNotContain("'v*'", TriggerSection(workflow, "push"), StringComparison.Ordinal);
 		Assert.Contains("Smart Secrets context contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"Password=DEVPROJEX_REDACTED[connection-password#1]",
@@ -665,7 +1444,11 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.DoesNotContain("\"--report\"", workflow, StringComparison.Ordinal);
 
 		var desktopEntry = File.ReadAllText(
-			Path.Combine(rootPath, "Packaging", "Linux", "devprojex.desktop"));
+			Path.Combine(
+				rootPath,
+				"Packaging",
+				"Linux",
+				"io.github.Avazbek22.DevProjex.desktop"));
 		Assert.Contains("Exec=devprojex open %f", desktopEntry, StringComparison.Ordinal);
 		Assert.DoesNotContain("Exec=devprojex %F", desktopEntry, StringComparison.Ordinal);
 
@@ -781,7 +1564,7 @@ public sealed class DocumentationAndPackagingContractTests
 		};
 
 		foreach (var file in productRoots.SelectMany(path =>
-			         Directory.EnumerateFiles(path, "*.cs", SearchOption.AllDirectories)))
+					 Directory.EnumerateFiles(path, "*.cs", SearchOption.AllDirectories)))
 		{
 			var source = File.ReadAllText(file);
 			Assert.DoesNotContain(
@@ -811,9 +1594,9 @@ public sealed class DocumentationAndPackagingContractTests
 		};
 
 		foreach (var sourcePath in Directory.EnumerateFiles(
-			         testsRoot,
-			         "*.cs",
-			         SearchOption.AllDirectories))
+					 testsRoot,
+					 "*.cs",
+					 SearchOption.AllDirectories))
 		{
 			var source = File.ReadAllText(sourcePath);
 			foreach (var obsoletePathPattern in obsoletePathPatterns)
@@ -882,6 +1665,158 @@ public sealed class DocumentationAndPackagingContractTests
 		}
 	}
 
+	[Fact]
+	public void AppImageWorkflowAndDocumentationKeepTheReleaseContractFailClosed()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"package-appimage.yml"));
+		var installation = File.ReadAllText(Path.Combine(
+			rootPath,
+			"Docs",
+			"Installation.md"));
+		var linuxPackaging = File.ReadAllText(Path.Combine(
+			rootPath,
+			"Packaging",
+			"Linux",
+			"README.md"));
+
+		// The publishing wrapper owns the events and the release upload; the read-only build
+		// (runners, publish flags, validators) lives in appimage-build.yml so that the release
+		// candidate can call it without write permissions.
+		var buildWorkflow = File.ReadAllText(Path.Combine(
+			rootPath,
+			".github",
+			"workflows",
+			"appimage-build.yml"));
+
+		Assert.Contains("workflow_dispatch:", workflow, StringComparison.Ordinal);
+		Assert.Contains("pull_request:", workflow, StringComparison.Ordinal);
+		Assert.Contains("- Packaging/Linux/**", workflow, StringComparison.Ordinal);
+		Assert.Contains("- Kernel/ProcessEntryPointResolver.cs", workflow, StringComparison.Ordinal);
+		Assert.Contains("types: [published]", workflow, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/appimage-build.yml", workflow, StringComparison.Ordinal);
+		Assert.Contains("needs: [prepare, build]", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"if: ${{ needs.prepare.outputs.upload_release == 'true' }}",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains("gh release upload", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("--updateinformation", workflow, StringComparison.Ordinal);
+
+		Assert.Contains("workflow_call:", buildWorkflow, StringComparison.Ordinal);
+		Assert.DoesNotContain(": write", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("runner: ubuntu-22.04-arm", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishSingleFile=true", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("/p:IncludeNativeLibrariesForSelfExtract=true", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishReadyToRun=true", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("/p:PublishTrimmed=false", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("appstreamcli validate --strict --explain", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_VERSION: 0.16.4", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("APPSTREAM_SHA256:", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("LIBXMLB_SHA256:", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("MESON_SHA256:", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("desktop-file-validate", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("appdir-lint.sh", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Verify packaged binary identity", buildWorkflow, StringComparison.Ordinal);
+		Assert.DoesNotContain("--updateinformation", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("output_path}.zsync", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("DevProjex-<version>-x86_64.AppImage", installation, StringComparison.Ordinal);
+		Assert.Contains("--appimage-extract-and-run", installation, StringComparison.Ordinal);
+		Assert.Contains("Open Anyway", installation, StringComparison.Ordinal);
+		Assert.Contains("data/DevProjex", linuxPackaging, StringComparison.Ordinal);
+		Assert.Contains("https://github.com/Avazbek22/DevProjex", linuxPackaging, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// Returns the body of one <c>on:</c> trigger (for example <c>push</c>) of a workflow file: the
+	/// lines after <c>  eventName:</c> up to the next two-space-indented key. Comments and blank
+	/// lines inside the block are kept.
+	/// </summary>
+	private static string TriggerSection(string workflow, string eventName)
+	{
+		var lines = workflow.Split('\n');
+		var start = Array.FindIndex(lines, line => line.TrimEnd('\r') == $"  {eventName}:");
+		Assert.True(start >= 0, $"Trigger '{eventName}' is missing.");
+		var section = new System.Text.StringBuilder();
+		for (var index = start + 1; index < lines.Length; index++)
+		{
+			var line = lines[index].TrimEnd('\r');
+			if (line.Length > 0 &&
+				!line.StartsWith("    ", StringComparison.Ordinal) &&
+				!line.StartsWith("  #", StringComparison.Ordinal))
+			{
+				break;
+			}
+			section.Append(line).Append('\n');
+		}
+		return section.ToString();
+	}
+
 	private static string FindRepositoryRoot()
 		=> PublishedApplicationLocator.FindRepositoryRoot();
+
+	/// <summary>
+	/// The tool names the MCP catalog registers, read from its source so that adding a tool is
+	/// what makes the documentation assertions fail.
+	/// </summary>
+	private static string[] ReadCatalogToolNames(string rootPath)
+	{
+		var catalog = File.ReadAllText(
+			Path.Combine(rootPath, "Apps", "Mcp", "DevProjexMcpToolCatalog.cs"));
+		var names = Regex
+			.Matches(
+				catalog,
+				@"Create\(\s*target,\s*nameof\(DevProjexMcpTools\.\w+\),\s*""(?<name>[a-z_]+)""")
+			.Select(match => match.Groups["name"].Value)
+			.ToArray();
+		Assert.NotEmpty(names);
+		Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+
+		// A registration this reader cannot parse must fail loudly rather than lower the count on
+		// both sides of the comparison and let a stale document pass.
+		Assert.Equal(Regex.Matches(catalog, @"Create\(\s*target,").Count, names.Length);
+		return names;
+	}
+
+	private static string ParagraphContaining(string document, string marker)
+	{
+		var paragraph = document
+			.ReplaceLineEndings("\n")
+			.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+			.FirstOrDefault(block => block.Contains(marker, StringComparison.Ordinal));
+		Assert.True(paragraph is not null, $"No paragraph contains '{marker}'.");
+		return paragraph!;
+	}
+
+	/// <summary>
+	/// The opening sentence of a paragraph, so that a name mentioned in later prose cannot stand in
+	/// for a name missing from the enumeration itself.
+	/// </summary>
+	private static string FirstSentence(string paragraph)
+	{
+		var end = paragraph.IndexOf(". ", StringComparison.Ordinal);
+		return end < 0 ? paragraph : paragraph[..(end + 1)];
+	}
+
+	private static string CountWord(int value) => value switch
+	{
+		1 => "One",
+		2 => "Two",
+		3 => "Three",
+		4 => "Four",
+		5 => "Five",
+		6 => "Six",
+		7 => "Seven",
+		8 => "Eight",
+		9 => "Nine",
+		10 => "Ten",
+		11 => "Eleven",
+		12 => "Twelve",
+		_ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
+	};
 }

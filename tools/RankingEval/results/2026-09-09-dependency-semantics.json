@@ -1,0 +1,2795 @@
+{
+  "protocol": "focus-v1",
+  "runDate": "2026-09-09",
+  "productSha": "83eba7965ff7e36030cf3d12824286bf649d60ce",
+  "evaluatorSha": "83eba7965ff7e36030cf3d12824286bf649d60ce",
+  "repositories": [
+    {
+      "id": "devprojex",
+      "commit": "c249c30944b15771f351ff2057f77817b1706ea4",
+      "candidateFiles": 2299,
+      "cells": [
+        {
+          "task": "token-budget-report",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7883941970985493,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.71525,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.71525,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6123213070115725,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "token-budget-report",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.89425,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.857625,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.857625,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6123213070115725,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "token-budget-report",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9471183897987249,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9288036004500563,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9288036004500563,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9283467539003523,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "mandatory-redaction",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8864716179044762,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8865,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8865,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8850923816755252,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "mandatory-redaction",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9432429053631703,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.68575,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.943235808952238,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6752777060191165,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "mandatory-redaction",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.971625,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.971625,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9716214526815852,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9713492364003534,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "nested-git-changes",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6388194097048524,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6388194097048524,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6389097274318579,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5310165638194219,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "nested-git-changes",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8194774346793349,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.819454863715929,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8194774346793349,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5310165638194219,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "nested-git-changes",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9097387173396675,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.90975,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.90975,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5310165638194219,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "stored-mcp-pack",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "stored-mcp-pack",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.34166770846355793,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.34166770846355793,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.34175,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.2597694686533596,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "stored-mcp-pack",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6708544284017751,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6708544284017751,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.670875,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.2597694686533596,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "remote-clone-cache",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "remote-clone-cache",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "remote-clone-cache",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.3061875,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        }
+      ],
+      "performance": [
+        {
+          "mode": "cold",
+          "order": "importance-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 3367.1824,
+          "medianPeakWorkingSetBytes": 338567168,
+          "elapsedMilliseconds": [
+            3367.1824,
+            3596.2695,
+            3283.5977,
+            4181.2526,
+            3398.2208,
+            3337.3673,
+            2990.8836
+          ],
+          "peakWorkingSetBytes": [
+            334336000,
+            338567168,
+            332017664,
+            339476480,
+            340037632,
+            342458368,
+            338341888
+          ]
+        },
+        {
+          "mode": "cold",
+          "order": "focus-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 3046.1145,
+          "medianPeakWorkingSetBytes": 336171008,
+          "elapsedMilliseconds": [
+            2968.6839,
+            3051.5595,
+            3054.3005,
+            3046.1145,
+            2997.0571,
+            3229.4201,
+            3025.3329
+          ],
+          "peakWorkingSetBytes": [
+            336171008,
+            332259328,
+            338776064,
+            338595840,
+            331841536,
+            340357120,
+            332247040
+          ]
+        },
+        {
+          "mode": "warm",
+          "order": "importance-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 821.0713,
+          "medianPeakWorkingSetBytes": 336416768,
+          "elapsedMilliseconds": [
+            835.7627,
+            821.0713,
+            848.6071,
+            785.1113,
+            810.6919,
+            876.2512,
+            762.3393
+          ],
+          "peakWorkingSetBytes": [
+            336109568,
+            336416768,
+            336289792,
+            335892480,
+            337719296,
+            341602304,
+            337432576
+          ]
+        },
+        {
+          "mode": "warm",
+          "order": "focus-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 799.9978,
+          "medianPeakWorkingSetBytes": 338018304,
+          "elapsedMilliseconds": [
+            784.6291,
+            796.0365,
+            804.2805,
+            799.9978,
+            815.7584,
+            803.2382,
+            780.0932
+          ],
+          "peakWorkingSetBytes": [
+            335548416,
+            338411520,
+            343240704,
+            336695296,
+            336998400,
+            338018304,
+            338706432
+          ]
+        }
+      ]
+    },
+    {
+      "id": "repomix",
+      "commit": "85e3969b010c72b905203812d1a3f5beb84a2102",
+      "candidateFiles": 951,
+      "cells": [
+        {
+          "task": "git-frequency-order",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7333666833416709,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7333666833416709,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7333666833416709,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7193259610321222,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "git-frequency-order",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8667333416677084,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8667166791697924,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8666833416708354,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8499225679290441,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "git-frequency-order",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9333666708338543,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9333666708338543,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9333708356772298,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9299007036233313,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "mcp-path-confinement",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7271817954488622,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.72725,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7271135567783892,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.704095470572281,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "mcp-path-confinement",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8635908977244311,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.437125,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.43684342171085544,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.36568530778982955,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "mcp-path-confinement",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.9318125,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.718544909056816,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.718544909056816,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.4956317204301075,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "remote-config-trust",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.15075,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.15075,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.15053763440860216,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.14947421131697547,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "remote-config-trust",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.575375,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5752688172043011,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.575375,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5639840841997176,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "remote-config-trust",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7876875,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7876476839407389,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7876609576197025,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7860831234256926,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "local-pack-pipeline",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.09325,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.09302325581395349,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.09279639819909954,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.05300261096605744,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "local-pack-pipeline",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.54656832104013,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.546625,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5465116279069767,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.536604062859333,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "local-pack-pipeline",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7733125,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.773284160520065,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7733125,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7689072953169799,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "mcp-pack-codebase",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.3508377094273568,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.3508377094273568,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.3506753376688344,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.31558133403638283,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "mcp-pack-codebase",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6754188547136785,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.539125,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.248906113264158,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.538779084313235,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "mcp-pack-codebase",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8377297162145269,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.5563125,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6245,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.5258165787188565,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        }
+      ],
+      "performance": [
+        {
+          "mode": "cold",
+          "order": "importance-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 671.3917,
+          "medianPeakWorkingSetBytes": 119107584,
+          "elapsedMilliseconds": [
+            671.3917,
+            666.5333,
+            665.6214,
+            682.9876,
+            671.316,
+            674.5555,
+            684.0304
+          ],
+          "peakWorkingSetBytes": [
+            115433472,
+            119107584,
+            119676928,
+            119209984,
+            115863552,
+            115183616,
+            119246848
+          ]
+        },
+        {
+          "mode": "cold",
+          "order": "focus-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 754.8219,
+          "medianPeakWorkingSetBytes": 119062528,
+          "elapsedMilliseconds": [
+            688.7588,
+            793.7319,
+            767.3181,
+            754.8219,
+            735.8173,
+            726.1674,
+            761.5679
+          ],
+          "peakWorkingSetBytes": [
+            119652352,
+            117420032,
+            115879936,
+            119885824,
+            115560448,
+            119062528,
+            119689216
+          ]
+        },
+        {
+          "mode": "warm",
+          "order": "importance-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 400.0844,
+          "medianPeakWorkingSetBytes": 127700992,
+          "elapsedMilliseconds": [
+            411.6051,
+            393.6317,
+            400.0844,
+            394.0057,
+            398.1876,
+            409.9396,
+            400.306
+          ],
+          "peakWorkingSetBytes": [
+            127700992,
+            127922176,
+            127438848,
+            127209472,
+            128225280,
+            128036864,
+            126697472
+          ]
+        },
+        {
+          "mode": "warm",
+          "order": "focus-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 456.4358,
+          "medianPeakWorkingSetBytes": 129171456,
+          "elapsedMilliseconds": [
+            439.8923,
+            456.4358,
+            505.1084,
+            605.5841,
+            453.1175,
+            511.3243,
+            421.7267
+          ],
+          "peakWorkingSetBytes": [
+            129478656,
+            129171456,
+            129585152,
+            129548288,
+            128765952,
+            128638976,
+            128503808
+          ]
+        }
+      ]
+    },
+    {
+      "id": "flask",
+      "commit": "d318b683471101618febed18996405ad26462110",
+      "candidateFiles": 212,
+      "cells": [
+        {
+          "task": "blueprint-errors",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "blueprint-errors",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.134,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.13378344586146537,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.13378344586146537,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.1036356579117609,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "blueprint-errors",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.567,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.567,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5669458682335292,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5555555555555556,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "session-cookie",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.040010002500625155,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.040010002500625155,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.040010002500625155,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "session-cookie",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.520125,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5200050012503126,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.520125,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5196446446446447,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "session-cookie",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7600625,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7600625,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7600475029689355,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7595515470374546,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "cli-discovery",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "cli-discovery",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "cli-discovery",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.4067754234639665,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.4067383422927866,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.4068125,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": null,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.40036643922163256,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        },
+        {
+          "task": "context-lifetime",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "context-lifetime",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.4122280570142536,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.4123015376922115,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.412375,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.4062894670371306,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "context-lifetime",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7061507688461057,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7061691355709732,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7061875,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6946807819705137,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "json-provider",
+          "budget": 4000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6401600400100025,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.50875,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5086271567891973,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.5086271567891973,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.422737955346651,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "json-provider",
+          "budget": 8000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0.5,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8200800200050012,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7543442930366295,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7543135783945987,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.7543442930366295,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.6623711340206185,
+              "oracle": false,
+              "oracleAfterSeeds": false
+            }
+          }
+        },
+        {
+          "task": "json-provider",
+          "budget": 16000,
+          "orders": {
+            "current": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 1,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "importance-v1": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8771721465183148,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "seed-first": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8771721465183148,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-v1": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.24425,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "focus-ppr": {
+              "available": true,
+              "recallNew": 0,
+              "allRequired": false,
+              "irrelevantTokenShare": 0.8771875,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            },
+            "directed-from-seed": {
+              "available": true,
+              "recallNew": 1,
+              "allRequired": true,
+              "irrelevantTokenShare": 0.24173825797955728,
+              "oracle": true,
+              "oracleAfterSeeds": true
+            }
+          }
+        }
+      ],
+      "performance": [
+        {
+          "mode": "cold",
+          "order": "importance-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 452.0299,
+          "medianPeakWorkingSetBytes": 90632192,
+          "elapsedMilliseconds": [
+            511.7297,
+            484.7042,
+            452.0299,
+            499.4049,
+            419.2998,
+            446.6937,
+            442.6254
+          ],
+          "peakWorkingSetBytes": [
+            90546176,
+            91312128,
+            90251264,
+            91844608,
+            90972160,
+            90632192,
+            90447872
+          ]
+        },
+        {
+          "mode": "cold",
+          "order": "focus-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 455.0153,
+          "medianPeakWorkingSetBytes": 90906624,
+          "elapsedMilliseconds": [
+            449.7902,
+            455.0153,
+            456.666,
+            463.2982,
+            451.3558,
+            462.0028,
+            452.1243
+          ],
+          "peakWorkingSetBytes": [
+            90906624,
+            90664960,
+            91193344,
+            90951680,
+            91303936,
+            90894336,
+            90247168
+          ]
+        },
+        {
+          "mode": "warm",
+          "order": "importance-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 173.7945,
+          "medianPeakWorkingSetBytes": 92155904,
+          "elapsedMilliseconds": [
+            173.7945,
+            176.0894,
+            139.6663,
+            180.4542,
+            168.2649,
+            167.8376,
+            189.4435
+          ],
+          "peakWorkingSetBytes": [
+            91758592,
+            91914240,
+            92176384,
+            92381184,
+            92155904,
+            91930624,
+            92762112
+          ]
+        },
+        {
+          "mode": "warm",
+          "order": "focus-v1",
+          "repetitions": 7,
+          "medianElapsedMilliseconds": 180.4945,
+          "medianPeakWorkingSetBytes": 92450816,
+          "elapsedMilliseconds": [
+            181.3438,
+            180.4945,
+            172.4648,
+            177.8908,
+            182.8114,
+            193.4057,
+            179.6668
+          ],
+          "peakWorkingSetBytes": [
+            92684288,
+            92495872,
+            92913664,
+            91987968,
+            92307456,
+            92344320,
+            92450816
+          ]
+        }
+      ]
+    }
+  ],
+  "criterion": {
+    "eligibleCells": 15,
+    "overallRecallNewDelta": 0.3333333333333333,
+    "repositoryRecallNewDelta": {
+      "devprojex": 0.1,
+      "repomix": 0.3888888888888889,
+      "flask": 1
+    },
+    "allRequiredRegressions": 0,
+    "warmIncrementalMilliseconds": {
+      "devprojex": -21.073499999999967,
+      "repomix": 56.351399999999956,
+      "flask": 6.699999999999989
+    },
+    "warmIncrementalPercent": {
+      "devprojex": -2.566585873845544,
+      "repomix": 14.084878090722846,
+      "flask": 3.8551277514535776
+    },
+    "maximumPeakWorkingSetGrowthPercent": {
+      "devprojex": 0.4760571268552226,
+      "repomix": 1.1514898803605222,
+      "flask": 0.3200142228543491
+    },
+    "recallPassed": true,
+    "allRequiredPassed": true,
+    "timePassed": true,
+    "memoryPassed": true,
+    "passed": true
+  }
+}

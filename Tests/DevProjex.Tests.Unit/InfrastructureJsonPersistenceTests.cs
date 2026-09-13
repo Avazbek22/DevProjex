@@ -608,6 +608,57 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_DetailedResultReportsCommittedPrimaryWhenBackupFails()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "secret-marks.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		File.WriteAllText(fileSet.PrimaryPath, "old");
+		var operations = new JsonStoreWriteOperations(
+			static (_, _, _) => throw new PlatformNotSupportedException("replace unavailable"),
+			static (_, _, _) => throw new IOException("backup unavailable"));
+
+		var result = JsonStorePersistence.WriteAtomicDurableWithResult(
+			fileSet,
+			new TestDocument("committed", 7),
+			JsonOptions,
+			maximumPayloadBytes: 1024,
+			operations);
+
+		Assert.Equal(JsonStoreWriteResult.CommittedBackupFailed, result);
+		Assert.Contains("\"name\":\"committed\"", File.ReadAllText(fileSet.PrimaryPath));
+		Assert.False(File.Exists(fileSet.BackupPath));
+		Assert.Empty(Directory.EnumerateFiles(fileSet.DirectoryPath, "*.tmp"));
+	}
+
+	[Fact]
+	public void JsonStorePersistence_OversizedStreamingWriteRejectsBeforePayloadSizedAllocation()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "bounded.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		File.WriteAllText(fileSet.PrimaryPath, "primary-before");
+		File.WriteAllText(fileSet.BackupPath, "backup-before");
+		var document = Enumerable.Range(0, 1_000_000).ToArray();
+		var before = GC.GetAllocatedBytesForCurrentThread();
+
+		var result = JsonStorePersistence.WriteAtomicDurableWithResult(
+			fileSet,
+			document,
+			JsonOptions,
+			maximumPayloadBytes: 1024);
+		var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+		Assert.Equal(JsonStoreWriteResult.Rejected, result);
+		Assert.Equal("primary-before", File.ReadAllText(fileSet.PrimaryPath));
+		Assert.Equal("backup-before", File.ReadAllText(fileSet.BackupPath));
+		Assert.Empty(Directory.EnumerateFiles(fileSet.DirectoryPath, "*.tmp"));
+		Assert.True(
+			allocated < 256 * 1024,
+			$"Bounded serialization allocated {allocated:N0} bytes before rejecting the oversized sequence.");
+	}
+
+	[Fact]
 	public void CrossProcessFileLock_AcquireFailsFastWhenSidecarLockIsAlreadyHeld()
 	{
 		using var temp = new TemporaryDirectory();

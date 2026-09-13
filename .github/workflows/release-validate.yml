@@ -1,11 +1,27 @@
 name: Release Validation
 
+# CI tier 1, 2, and 3. Policy: .github/workflows/README.md
+# Runs on every pull request (the planner limits it to the touched release paths) because the
+# publish smoke exercises published single-file binaries per RID, which no test suite covers.
+# Do not add a `push: v*` trigger: every merge into v5.x is also a synchronize of the open
+# release PR, so the pull_request run already covers the merge tier without a second run.
+
 on:
   push:
     branches: [ "master" ]
   pull_request:
-    branches: [ "master", "v5.1" ]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: false
+        type: string
+      force_full:
+        description: Run every release-validation job without changed-path filtering
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -29,8 +45,9 @@ jobs:
       run_release: ${{ steps.plan.outputs.run_release }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
           fetch-depth: 0
 
       - name: Validate CI planner contracts
@@ -43,12 +60,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PREVIOUS_GATE_NAME: Release Gate
-        run: >
-          ./Scripts/ci/Select-CiPlan.ps1
-          -GitHubEventPath $env:GITHUB_EVENT_PATH
-          -GitHubEventName $env:GITHUB_EVENT_NAME
-          -PreviousGateName $env:PREVIOUS_GATE_NAME
-          -GitHubOutputPath $env:GITHUB_OUTPUT
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          $common = @{
+            PreviousGateName = $env:PREVIOUS_GATE_NAME
+            GitHubOutputPath = $env:GITHUB_OUTPUT
+          }
+          if ($env:FORCE_FULL -eq 'true') {
+            ./Scripts/ci/Select-CiPlan.ps1 -Full @common
+          }
+          else {
+            ./Scripts/ci/Select-CiPlan.ps1 `
+              -GitHubEventPath $env:GITHUB_EVENT_PATH `
+              -GitHubEventName $env:GITHUB_EVENT_NAME `
+              @common
+          }
 
   validate-release-config:
     name: Validate Release Config
@@ -58,7 +84,9 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Validate release metadata and Store alias contract
         shell: pwsh
@@ -101,10 +129,12 @@ jobs:
       matrix: ${{ fromJson(needs.prepare-publish-matrix.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -117,7 +147,7 @@ jobs:
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb zsh fish
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
@@ -1596,8 +1626,8 @@ jobs:
 
           Write-Host "Portable launcher smoke passed for ${{ matrix.rid }}."
 
-      - name: Portable Launcher ConPTY TUI Smoke (Windows x64)
-        if: ${{ matrix.rid == 'win-x64' }}
+      - name: Portable Launcher ConPTY TUI Smoke (Windows)
+        if: ${{ startsWith(matrix.rid, 'win-') }}
         env:
           DEVPROJEX_SKIP_TUI_PTY_TESTS: 0
         shell: pwsh
@@ -1668,6 +1698,46 @@ jobs:
             --filter $filter `
             --logger "console;verbosity=minimal"
 
+  release-local-channel-gate:
+    name: Local Release Channel Gate (Windows)
+    needs:
+      - plan-release
+      - validate-release-config
+    if: ${{ needs.plan-release.outputs.run_release == 'true' }}
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build and gate representative local release channels
+        shell: pwsh
+        run: |
+          ./Scripts/release-all.ps1 `
+            -Channels github `
+            -Rids win-x64,linux-x64 `
+            -SkipWack `
+            -NonInteractive
+          . ./Scripts/release-helpers.ps1
+          $version = (Get-DefaultReleaseVersionInfo -repoRoot (Resolve-Path '.').Path).DisplayVersion
+          ./Scripts/Test-ReleaseArtifacts.ps1 `
+            -PublishRoot publish `
+            -Version $version `
+            -Channels github `
+            -Rids win-x64,linux-x64
+          ./Scripts/Test-ReleaseArtifactGateMutation.ps1 `
+            -PublishRoot publish `
+            -Version $version `
+            -Channels github `
+            -Rids win-x64,linux-x64
+
   release-gate:
     name: Release Gate
     needs:
@@ -1675,6 +1745,7 @@ jobs:
       - validate-release-config
       - prepare-publish-matrix
       - publish-smoke
+      - release-local-channel-gate
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1687,14 +1758,18 @@ jobs:
           CONFIG_RESULT: ${{ needs.validate-release-config.result }}
           MATRIX_RESULT: ${{ needs.prepare-publish-matrix.result }}
           PUBLISH_RESULT: ${{ needs.publish-smoke.result }}
+          LOCAL_CHANNEL_RESULT: ${{ needs.release-local-channel-gate.result }}
+          FORCE_FULL: ${{ inputs.force_full }}
         run: |
           $results = @{
             plan = $env:PLAN_RESULT
             config = $env:CONFIG_RESULT
             matrix = $env:MATRIX_RESULT
             publish = $env:PUBLISH_RESULT
+            local_channel = $env:LOCAL_CHANNEL_RESULT
           }
-          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
+          $accepted = if ($env:FORCE_FULL -eq 'true') { @('success') } else { @('success', 'skipped') }
+          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin $accepted })
           if ($failed.Count -gt 0) {
             throw "Selected release jobs failed: $($failed.ForEach({ \"$($_.Key)=$($_.Value)\" }) -join ', ')"
           }

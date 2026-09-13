@@ -30,6 +30,35 @@ users should install or generate the platform launcher and use that command.
 Direct invocation of the physical Windows WinExe path is an advanced diagnostic
 detail and is not the supported shell entry point.
 
+## CI without a persistent install (from v5.2)
+
+The v5.2 headless packages expose this command contract without the desktop app.
+They are published independently; before their first publication, use a direct
+GitHub release binary. The npm route requires Node 20 or later:
+
+```yaml
+- uses: actions/setup-node@v4
+  with:
+    node-version: 24
+- run: npx -y devprojex analyze . --findings --fail-on-findings
+```
+
+The NuGet route requires .NET SDK 10.0.100 or later:
+
+```yaml
+- uses: actions/setup-dotnet@v5
+  with:
+    dotnet-version: 10.0.x
+- run: dnx devprojex analyze . --findings --fail-on-findings
+```
+
+`dnx` performs a non-interactive first download by default; its opt-in switch is
+`--interactive`, and it has no `--yes` option. The DevProjex arguments above do not
+require a delimiter. Both examples return policy exit code `3` when an effective
+secret finding exists and never print the detected value. npm installs with
+`--omit=optional` cannot run the binary; see [Installation.md](Installation.md)
+for the documented exit-`1` launcher diagnostic.
+
 ## Command Tree
 
 ```text
@@ -38,6 +67,7 @@ devprojex
 ├── mcp
 ├── open
 ├── analyze
+├── related
 ├── tree
 ├── export
 │   ├── context, ctx
@@ -77,12 +107,27 @@ devprojex
 `dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
 diagnostic workflows.
 
-`devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--hide-private-data] [--allow-remote]`
+`devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--exclude NAME ...] [--unrestricted] [--allow-agent-exclusions] [--hide-private-data] [--allow-remote]`
 starts the local read-only MCP stdio server. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
 tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
 enables RepoCache-backed clone/acquire for MCP project tools without changing
 the local roots returned by `list_projects`.
+Without exclusion flags the server runs with `smart-ignore` and `empty-folders`
+only — narrower than the desktop standard set, so an agent sees dot-files,
+extensionless files, hidden entries, and empty files the way Git does.
+`--exclude` sets the server baseline exclusion set from the shared exclusion
+tokens plus two MCP-only tokens: `none` disables all toggles and `default`
+expands to the server default set, so `--exclude default --exclude dot-folders`
+extends it while a list without `default` replaces it. The baseline applies
+only when a tool does not name an explicit profile. An explicit `--exclude`
+list pins the set: exclusion toggles added in later versions default to off for
+that server until the line is updated. `--unrestricted` is the widest-baseline preset — equivalent to
+`--exclude none --git-mode none` and rejected in combination with either flag;
+secret redaction still applies and the `.git` administrative area remains
+excluded in every mode. `--allow-agent-exclusions` opts in to per-call
+agent control by publishing an `exclusions` array parameter on the selection
+tools; redaction toggles are never part of that vocabulary.
 Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then
 `CLAUDE_PROJECT_DIR`, then the current directory. See
 [McpServer.md](McpServer.md) for its security model, tools, and client
@@ -104,9 +149,9 @@ to stdout and exit with code `0` without opening Desktop or Terminal Workspace.
 
 ## Common Selection Options
 
-Six commands accept the same typed path-selection options, through `--exclude`
-in the list below: `analyze`, `tree`, `export context`, `export project`, `open`,
-and `profile save`. All except `tree` also accept the five
+Seven commands accept the same typed path-selection options, through `--exclude`
+in the list below: `analyze`, `related`, `tree`, `export context`, `export project`, `open`,
+and `profile save`. All except `tree` and `related` also accept the five
 content-transformation options that follow. `open` additionally accepts the
 `auto` profile:
 
@@ -118,7 +163,7 @@ content-transformation options that follow. `open` additionally accepts the
 --select-from <FILE|->
 --git-mode <MODE>
 --exclude <NAME>             repeatable
---max-file-bytes <SIZE>      analyze, tree, and export context only
+--max-file-bytes <SIZE>      analyze, related, tree, and export context only
 --hide-secrets [<true|false|on|off>]
 --hide-private-data [<true|false|on|off>]
 --compress-code [<true|false|on|off>]
@@ -134,7 +179,7 @@ negative form: `--no-hide-secrets`, `--no-hide-private-data`,
 conflict with an existing command option.
 
 `--max-file-bytes SIZE` is an invocation-only narrowing filter for `analyze`,
-`tree`, and `export context`. Files strictly larger than SIZE are removed after
+`related`, `tree`, and `export context`. Files strictly larger than SIZE are removed after
 all profile, ignore, Git, and explicit path filters; a file exactly SIZE bytes is
 kept. SIZE may be a byte count or use a case-insensitive binary suffix:
 `k|kb|kib`, `m|mb|mib`, or `g|gb|gib`, all with a 1024 multiplier. The filter is
@@ -146,7 +191,7 @@ unambiguous discovered entry.
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
 default is `auto`. Direct selection commands (`analyze`, `tree`, both exports,
-and `profile save`) default to `standard`.
+`related`, and `profile save`) default to `standard`.
 
 Git filtering is independent from ordinary Exclusions.
 
@@ -155,7 +200,7 @@ Git modes:
 | Token | Behavior |
 |---|---|
 | `none` | No Git-based filtering |
-| `gitignore` | Respect applicable hierarchical `.gitignore` rules |
+| `gitignore` | Respect hierarchical `.gitignore` and repository-local `info/exclude`, with opaque embedded repositories and independent declared submodules |
 | `tracked` | Include only paths returned from applicable indexes by the installed Git CLI; no readable index fails closed with exit `3` |
 | `staged` | Include files with staged changes |
 | `changes` | Include staged, unstaged, and untracked files; ignored untracked files remain excluded |
@@ -168,6 +213,7 @@ The three state scopes are invocation-only and cannot be saved in local or
 portable profiles. `open` supports `staged` and `changes`; diff scopes are
 available in direct CLI commands, Terminal Workspace, and MCP, but not Desktop.
 The Git scope narrows the effective profile selection before file-size limits.
+Git subprocess isolation, network boundaries, and the `DPX-GIT-UNSAFE-FILTER` refusal are specified in [Git process safety](Git-Safety.md).
 Smart Ignore, Exclusions, explicit selected paths, extensions, and globs still
 apply. Selected content always comes from the current working tree, including
 when a staged file has newer unstaged edits.
@@ -183,6 +229,15 @@ loads but a nested index does not, that nested scope is excluded and reported wi
 `DPX-GIT-TRACKED-INDEX-PARTIAL`. If none load, commands report
 `DPX-GIT-TRACKED-INDEX-UNAVAILABLE`; they never reinterpret `tracked` as `gitignore`.
 An absent `.gitignore` is an active empty rule set, not a fallback to `none`.
+Repository-local `info/exclude` has lower priority than the root `.gitignore`;
+worktrees resolve it through `gitdir:` and `commondir`. Global excludes are not
+read. In `gitignore` and `tracked`, a nested repository is opaque unless its
+path is declared in its owner's `.gitmodules`; initialized declared submodules
+use their own rules, recursively. Without an owning repository, the first
+repository in each subtree is independent. See [SmartIgnore.md](SmartIgnore.md)
+for the complete ownership, source-resolution, and fail-closed specification.
+This changes v5.2 visibility without adding options: use `--git-mode none` to
+traverse embedded repositories and ignore local exclusion rules.
 The administrative path named exactly `.git` remains excluded; `.github` and other
 `.git*` names are not treated as Git metadata.
 
@@ -190,12 +245,12 @@ Exclusion tokens:
 
 ```text
 smart-ignore
+empty-folders
+empty-files
 hidden-folders
 hidden-files
 dot-folders
 dot-files
-empty-folders
-empty-files
 extensionless-files
 none
 ```
@@ -324,6 +379,16 @@ immediately when stdin is an interactive terminal. Its entries are combined with
 profile path selection as one explicit override. Input is limited to 100,000
 non-empty entries and 16 MiB.
 
+When Git supplies the list, disable its C-style path quoting so non-ASCII names
+remain literal UTF-8 input:
+
+```shell
+git -c core.quotepath=false diff --name-only | devprojex export context . --select-from - -o -
+```
+
+The reader deliberately does not auto-unescape quotes or octal sequences because
+those characters can be part of a real file name.
+
 ## Repository URL Sources
 
 `tui`, `open`, `analyze`, `tree`, `export context`, and `export project` accept either a
@@ -342,9 +407,9 @@ devprojex export context https://github.com/owner/repo -o -
 ```
 
 A successful first clone is added to repository history only for network clone
-sources: `https://`, `http://`, `ssh://`, `git://`, and SCP syntax. Local paths
-and `file://` sources remain valid clone sources and use the managed cache, but
-are never added to repository history. Later invocations reuse the complete
+sources: `https://`, `http://`, `ssh://`, `git://`, and SCP syntax. An existing
+local path is opened as an ordinary project rather than cloned, so it reaches
+neither the managed cache nor that history. A `file://` source is refused. Later invocations reuse the complete
 cached checkout and can work offline. Clone progress follows
 `--progress`, `--verbosity`, and `--plain`: an interactive stderr reuses one line,
 while redirected, CI, dumb-terminal, and plain output is limited to start, three
@@ -465,7 +530,9 @@ parent directory must already exist.
 detector errors are never emitted. The number of descriptors equals the combined
 effective matched counts from the same inspection session. `--fail-on-findings`
 writes the requested report and returns policy exit code `3` when any effective
-finding exists; unlike `--strict`, it does not gate ordinary diagnostics.
+finding exists or when a selected text file could not be inspected. A broken
+stdout consumer never upgrades that policy result to success. Unlike `--strict`,
+it does not gate ordinary diagnostics.
 Either findings option runs count-only secret detection when it was otherwise
 disabled, but never changes `--hide-secrets` or the emitted content. JSON adds
 `findingCount`; `findings` remains conditional on `--findings`. Text reports
@@ -492,6 +559,53 @@ devprojex analyze . --compress-code --format json
 devprojex analyze . --hide-secrets --findings --fail-on-findings
 devprojex analyze . --top-files 10
 devprojex analyze . --max-file-bytes 1m
+```
+
+## Related
+
+```shell
+devprojex related <PATH> [--project PROJECT|URL] [options]
+```
+
+`PATH` is one project-relative seed file inside the effective selection. `--project`
+defaults to the current directory and accepts the same local-directory or Git-URL source
+as `analyze`; `--branch` remains URL-only. The seed chooses where the answer starts, while
+the dependency engine indexes the complete effective manifest produced by the selected
+profile, roots, extensions, paths, Git mode, exclusions, and file-size limit. It never
+returns a candidate outside that manifest.
+
+Specific options are:
+
+```text
+--project <PROJECT|URL>
+--direction <dependencies|dependents|both>   default: both
+-f, --format <text|json>                     default: text
+--branch <NAME>                              URL source only
+--max-file-bytes <SIZE>
+<shared path-selection options>
+<shared output options>
+```
+
+Text output contains localized `Dependencies` and `Dependents` sections. Each row has a
+portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
+and a cross-scope marker where applicable; ambiguous references stay grouped with their
+candidate paths. JSON is the deterministic `devprojex-related-files` document described in
+[CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no content-transformation
+flags and does not return source content.
+
+An unsupported seed language is a successful empty result plus
+`warning[DPX-DEPENDENCY-UNSUPPORTED]` on stderr. A supported seed with no projected edges
+reports that no related files exist. Missing seeds, paths outside the effective selection,
+invalid direction or format values, and invalid shared options use the ordinary argument
+and selection errors. See [Dependencies.md](Dependencies.md) for evidence layers, resolver
+boundaries, limits, and cache behavior.
+
+Examples:
+
+```shell
+devprojex related Application/Services/ProjectAnalysisService.cs
+devprojex related src/main.ts --direction dependencies --format json
+devprojex related tests/test_app.py --project . --select src --select tests
 ```
 
 ## Tree
@@ -555,6 +669,9 @@ Specific options:
 --force
 -n, --dry-run
 --max-tokens <N>
+--rank <importance>
+--focus <PATH>              repeatable; at most 16; requires --rank importance
+--detail-for <GLOB=LEVEL>   repeatable; at most 16; requires file content
 ```
 
 The format applies to the entire document. JSON and XML are parseable structured
@@ -583,6 +700,50 @@ In JSON and XML, the existing `metrics` object and tree continue to describe the
 complete effective selection, while `files` and `tokenBudget` describe the
 content admitted by the budget.
 
+`--detail-for "<glob>=<full|compact|signatures>"` overrides the detail level for the
+files a glob claims. The option is repeatable and accepts at most 16 values. Each
+value splits on its **last** `=`, so a glob may itself contain that character while
+the level never does. Values apply in order and the **last** matching one wins, so
+list general globs before specific ones. Globs use the project-relative syntax with
+`/` separators; an invalid value is a usage error and exits `2`.
+
+There is no `--detail` flag: `--compress-code`, `--strip-comments`, and
+`--strip-blank-lines` are this command's own level, and `--detail-for` layers per-file
+overrides on top of them. An override to `full` therefore adds no reduction of its own
+for the files it claims, while still never removing one the selected profile requires.
+Selection is never widened; a glob matching nothing is reported. The option requires
+file content and is invalid with `--view tree`.
+
+With `--detail-for`, dry run adds `Detail mix: full N; compact N; signatures N` and,
+when some glob claimed nothing, `Detail patterns matching nothing: ...`. JSON and XML
+documents add `detail` to each file entry and to each skipped-file entry. Without the
+option nothing changes.
+
+`--rank importance` opts into the experimental `importance-v1` order described
+in [Ranking.md](Ranking.md). Selection, profiles, Git scope, globs, and exclusions
+run first; ranking never adds a file. With `--max-tokens`, the existing greedy
+pass considers candidates in importance order. Without a budget, every selected
+file is emitted in that order. The option is invalid with `--view tree`.
+Omitting `--rank` preserves the existing bytes and does not read Git history or
+index dependency facts. The trusted stderr report names graph coverage, the
+200-commit Git window, the top ten entries, and ranked skips.
+
+Repeated `--focus PATH` values opt into `focus-v1` within importance ranking.
+Each path may be relative to the project root or absolute inside it and must be a
+file in the already effective selection. The command validates at most 16 supplied
+values before canonical-file deduplication. Seeds keep caller order at hop 0;
+remaining files are ordered by minimum undirected dependency-graph hop, then their
+`importance-v1` priority and canonical path. Unreachable files follow in ordinary
+importance order. Focus never widens `--select`, profile, Git scope, exclusion,
+glob, submodule, or file-size filters. A seed is considered first by the same
+greedy budget pass but is not guaranteed admission when it is too large.
+In the registered evaluation, focus and an explicitly assembled directed context
+had identical RecallNew and AllRequired outcomes in all nine repository/budget
+aggregates, while directed context spent less budget on irrelevant files. Focus
+automates neighborhood priority in one export while retaining the broad selection
+and fallback; it is not presented as more accurate than a directed workflow. The
+published timing measures the ranking invocation, not the whole context export.
+
 With `--hide-secrets` or `--hide-private-data`, detector and budget failures fail closed and
 produce no complete output artifact. A text file above the supported scan limit or in an
 unsupported encoding does not abort the remaining analysis: its content is withheld from context
@@ -600,7 +761,8 @@ performs planning and destination preflight but does not generate a document,
 create an artifact, or print a result path. Its operational plan is written to
 stderr.
 With `--max-tokens`, dry-run performs the same transformed-content forecast and
-writes the same budget report without generating the document.
+writes the same budget report without materializing prepared files or serializing
+the document.
 
 Examples:
 
@@ -612,6 +774,9 @@ devprojex export context . --format markdown -o ../devprojex-context.md --force
 devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
 devprojex export context . --hide-private-data --format markdown -o ../devprojex-private.md
 devprojex export context . --compress-code --format markdown -o ../devprojex-compact.md
+devprojex export context . --view content --compress-code --detail-for docs/**=full -o -
+$ devprojex export context . --view content --rank importance --max-tokens 16000 -o ../devprojex-ranked.md
+$ devprojex export context . --view content --rank importance --focus Application/Context/ProjectContextDocumentService.cs --max-tokens 16000 -o -
 ```
 
 ## Export Project
@@ -641,11 +806,26 @@ Folder and ZIP exports preserve selected binary bytes, timestamps, directory
 structure, and included empty directories. Staging is cleaned after cancellation
 or failure. Canonical destination checks reject destinations equal to or inside
 the source, including paths reached through symlinks or junctions.
+On Unix, folder copies preserve safe permission and executable bits without
+carrying setuid/setgid metadata. ZIP entries record the same modes for conforming
+extractors. Destination staging is private to the current user, and completed ZIP
+files remain user-readable and writable only.
 
 With `--hide-secrets` or `--hide-private-data`, detected values in text files are replaced. Binary files remain
 unchanged. The result is intentionally not byte-for-byte faithful and may not
 build or run. `--dry-run` states this before any destination or staging path is
-created.
+created and performs the same transformation-notice collision preflight as the
+real export. A reserved notice file that is outside the effective selection does
+not collide because it is not copied.
+
+Code compression in a project copy is best-effort when its grammar is unavailable:
+stderr reports `DPX-COMPRESSION-UNAVAILABLE`, the complete source remains in the
+copy, and the transformation notice is emitted only when at least one file was
+actually transformed. A pass-through file is copied from one open source handle;
+if its captured identity changes before EOF, export fails closed with a source
+unavailable error. The copy is not a project-wide point-in-time snapshot, so edits
+between files can still be observed at different moments. Stop writers before
+producing a release archive.
 
 On success, file and folder destinations write exactly one absolute result path
 to stdout. A ZIP destination of `-` writes only the raw archive bytes instead.
@@ -807,7 +987,7 @@ install it using the shell's normal completion mechanism.
 `--color`, `--plain`, `--verbosity`, and `-q`/`--quiet` are recursive root
 options and may be placed on every command. Commands without optional ANSI or
 diagnostic output accept and ignore values that do not affect their payload.
-`--progress` remains limited to `analyze`, `tree`, and exports.
+`--progress` remains limited to `analyze`, `related`, `tree`, and exports.
 
 Environment defaults sit below explicit flags and above capability detection:
 `DEVPROJEX_COLOR`, `DEVPROJEX_PROGRESS`, `DEVPROJEX_VERBOSITY`, and

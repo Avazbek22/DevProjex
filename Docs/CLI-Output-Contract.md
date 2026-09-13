@@ -103,6 +103,27 @@ The base shape is:
       "lines": 0,
       "chars": 0,
       "tokens": 0
+    },
+    "contentOnly": {
+      "measured": {
+        "files": 0,
+        "lines": 0,
+        "chars": 0,
+        "tokens": 0
+      },
+      "estimated": {
+        "files": 0,
+        "chars": 0,
+        "tokens": 0
+      }
+    },
+    "document": {
+      "view": "content",
+      "format": "text",
+      "lines": 0,
+      "chars": 0,
+      "tokens": 0,
+      "estimated": false
     }
   },
   "diagnostics": [],
@@ -115,6 +136,16 @@ analysis. With no explicit CLI root override it contains the effective profile
 roots; an explicit `--root` replaces it with the validated requested subset.
 Available roots discovered before that restriction are not exposed in analysis
 JSON. `inventory` contains only the projected `files` and `folders` counts.
+
+The existing `metrics.content` object retains its clipboard-style v1 meaning for
+compatibility. `metrics.contentOnly.measured` excludes Root and file headings and
+counts only inspected transformed file bodies. `metrics.contentOnly.estimated`
+separately reports files whose content metrics are size-based. `metrics.document`
+models the exact `export context --view content --format text` document shape with
+its Root line and project-relative file headings; `estimated` is true when one or
+more bodies are estimates or lack text metrics. Every emitted `topFiles` entry has an `estimated`
+Boolean, so an estimated largest file cannot be mistaken for part of the measured
+content total.
 
 For a local source, `project.source` is null. For a cached Git source it is an
 object containing `type: "git"`, the safe `repositoryUrl`, and nullable `branch`
@@ -144,7 +175,8 @@ tree text and content headings. Machine metadata remains directly addressable:
 ```
 
 When enabled content inspection withholds one or more files because they are too
-large, unreadable, non-regular filesystem entries, or use an unsupported encoding,
+large, unreadable, access-denied, non-regular filesystem entries, or use an
+unsupported encoding,
 analysis adds:
 
 ```json
@@ -163,8 +195,8 @@ analysis adds:
 
 `unscannableCount` equals the array length. Each entry contains a source-relative
 `path` with `/` separators and a `reason` token of exactly `too-large`,
-`unreadable`, or `unsupported-encoding`. The object is omitted when no files are
-withheld.
+`unreadable`, `access-denied`, or `unsupported-encoding`. The object is omitted
+when no files are withheld.
 
 With `--findings`, analysis adds an ordered top-level `findings` array. Each
 effective finding contains exactly `ruleId`, `category` (`secret` or
@@ -189,10 +221,78 @@ transformation. Inventory and source byte size still describe the selected proje
 files, not a materialized export container. Machine selection output exposes the
 independent `compressCode`, `stripComments`, and `stripBlankLines` Booleans.
 
+When a requested syntax transformation cannot load its grammar delivery source or
+a language grammar, `analyze` and `export context` preserve complete source text and
+emit warning `DPX-COMPRESSION-UNAVAILABLE` on stderr. Their JSON diagnostics include
+the same stable code, warning severity, and one-line reason naming the content
+directory or grammar resource. This warning does not change exit status and is not
+promoted by `analyze --strict`; it reports reduced optimization, not incomplete or
+unsafe output. Unsupported languages and parse/safety rejection remain distinct
+unchanged-file outcomes and do not use this code.
+
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
 `--fail-on-findings` likewise writes the requested document before returning
-policy exit code `3` when effective findings exist; the two gates are independent.
+policy exit code `3` when effective findings exist or selected text could not be
+inspected. A broken output pipe does not turn that policy result into success; the
+two gates are independent.
+
+## Related-files JSON
+
+`related --format json` emits one deterministic document on stdout. Operational
+progress and the optional `warning[DPX-DEPENDENCY-UNSUPPORTED]` language diagnostic
+stay on stderr. The shape is:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-related-files",
+  "direction": "both",
+  "seeds": [
+    {
+      "seed": "Services/ClockService.cs",
+      "languageId": "cSharp",
+      "dependencies": [
+        {
+          "path": "Contracts/IClock.cs",
+          "status": "resolved",
+          "reasons": ["type reference IClock at line 3"],
+          "candidates": ["Contracts/IClock.cs"],
+          "crossScope": false,
+          "estimatedTokens": 84
+        }
+      ],
+      "dependents": [],
+      "noFactsReason": null
+    }
+  ],
+  "coverage": {
+    "files": 3,
+    "supported": 3,
+    "unsupported": 0,
+    "extractionFailed": 0,
+    "unsupportedLanguages": {},
+    "cSharpErrorNodeKinds": {}
+  },
+  "searchScope": {
+    "files": 3
+  }
+}
+```
+
+`direction` is `dependencies`, `dependents`, or `both`. Seeds and related paths use
+portable project-relative `/` separators. Each related item retains its aggregate
+evidence reasons, resolution status, sorted candidate list, cross-compilation-scope
+flag, and estimated source tokens. Ambiguous references have `status: "ambiguous"`
+and list every allowed candidate; self-file edges are absent. A seed whose language
+has no adapter has empty relationship arrays and a non-null `noFactsReason`.
+
+`coverage` describes the complete effective manifest, not only the seeds. Its
+unsupported-language and C# error-node dictionaries use stable ordinal keys.
+`searchScope.files` is the manifest file count after the profile, selected paths,
+Git mode, exclusions, and file-size limit. No field can contain a file or candidate
+outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and
+resolution semantics.
 
 ## Recent and Cache JSON
 
@@ -317,6 +417,26 @@ estimated tokens for both groups, up to 25 largest skipped paths, an `and X more
 line when needed, and a `--compress-code`/larger-budget hint. stdout remains the
 document-only channel.
 
+With `export context --rank importance`, stderr additionally receives a bounded,
+trusted ranking report after the document has been planned. Its summary names
+`importance-v1`, graph coverage, the fixed Git window, and signal degradation;
+at most ten `[Ranking top]` lines report path, unique dependents, unique
+dependencies, Git activity, and an optional role label. Ranked budget omissions
+use `[Skipped] path — priority P, T tokens, R remaining: does not fit the remaining
+budget`. The existing largest-skipped report remains present. Project-derived
+paths are single-line escaped. stdout remains document-only.
+
+With one or more `--focus` values, the summary algorithm is `focus-v1` and names
+the seed count, bounded hop histogram (`0` through `7`, one `8+` bucket and
+`max hop`), unreachable count, `importance-v1` within-hop order, graph coverage,
+and Git window. A degraded seed count distinguishes resolved links, facts without
+resolved neighbors, extraction failure, and unsupported facts. A seed top line is
+`[Ranking top] PATH — seed`; other top lines add hop, canonical parent relation,
+final priority, and the original importance priority. Focus-ranked budget misses
+use `[Skipped] PATH — hop H, priority P, T tokens, R remaining: does not fit the
+remaining budget` (or `unreachable`). Existing coverage, shallow-Git, contribution,
+role, confidence, and largest-skipped output remains present.
+
 ## Context JSON
 
 The top-level shape is:
@@ -384,6 +504,54 @@ The existing `metrics` object and `tree` describe the complete effective
 selection before token-budget omission; `files` and `tokenBudget` describe the
 content admitted by the budget.
 
+With `export context --rank importance`, JSON adds an optional `ranking` object
+after `files`. It contains stable fields `algorithm`, `graphVariant`,
+`candidateFiles`, `graphSupportedSources`, `graphExtractionFailures`,
+`graphCoverage`, `gitWindow`, `gitCommits`, `gitUnavailableReason`,
+`redistributedMissingSignals`, and `top`. Each of at most ten `top` entries has
+`path`, `priority`, `score`, `dependents`, `dependencies`, optional `commits`,
+optional `mostRecentCommitPosition`, and `role`. The object is absent when rank is
+omitted. Its `skipped` array contains at most ten highest-priority budget misses,
+each with `path`, `priority`, `estimatedTokens`, `remainingEstimatedTokens`, and
+the stable `reason`. Ranking changes neither a file's prepared content nor its
+token cost. `role` uses `source`, `test-source`, `manifest`, or `entry-point`;
+`gitUnavailableReason` uses lowercase kebab-case tokens headed by `none`.
+
+With focus, `algorithm` is `focus-v1` and `ranking` additionally contains:
+
+```json
+{
+  "focus": {
+    "algorithm": "focus-v1",
+    "withinHop": "importance-v1",
+    "seeds": [
+      { "requested": "src/app.py", "path": "src/app.py", "state": "resolved" }
+    ],
+    "hops": { "0": 1, "1": 6 },
+    "hopsBeyond": 0,
+    "maxHop": 1,
+    "unreachable": 20
+  }
+}
+```
+
+Seed states are `resolved`, `no-resolved-neighbors`, `extraction-failed`, and
+`unsupported`. Every `top` and `skipped` entry adds `hop` (number or null) and
+`baseImportancePriority`. A reachable non-seed also adds `via` with `path` and
+relation `dependent-of`, `dependency-of`, or `linked-with`. These properties and
+the `focus` object are omitted entirely without focus; `importance-v1` JSON stays
+byte-for-byte unchanged.
+`focus.seeds[].requested` preserves the submitted spelling only after applying the
+same safe output-path policy and captured local-user occurrence decision as
+`project.root`. With private-data masking enabled, an absolute seed masks its local
+user segment with the same placeholder as the document header.
+
+With `--detail-for`, every entry in `files` and every entry in
+`tokenBudget.largestSkippedFiles` additionally carries `detail`, a
+`full|compact|signatures` string naming the level resolved for that file. It names the
+resolved level, not a guarantee that a transformation applied. The field is additive
+and present only for a call that supplied the option.
+
 ## Context XML
 
 XML uses the root element `devprojexContext` with `schemaVersion="1"` and
@@ -431,6 +599,11 @@ export. The report always identifies included and skipped file counts and
 estimated tokens, lists at most 25 largest skipped files plus an `and X more`
 line, and recommends `--compress-code` or a larger budget. It belongs to stderr;
 the context document on stdout remains byte-clean.
+When `export context --detail-for` is present, the dry-run plan adds
+`Detail mix: full N; compact N; signatures N` after its size line, and
+`Detail patterns matching nothing: ...` when some supplied glob claimed nothing. Both
+lines go to stderr with the rest of the plan and appear only for a call that supplied
+the option.
 
 A project-copy dry run with Hide Secrets enabled also states that detected text
 will be changed, binary files will remain unchanged, and the result may not build
@@ -512,6 +685,23 @@ The `DPX-*` code is stable and language-independent. Normal verbosity never
 prints raw `Exception.Message`, an inner exception, or a platform-localized I/O
 message. Diagnostic verbosity may report an exception type, safe path context,
 stack trace, and request identifier, but never file content or secrets.
+
+`profile reset` returns policy exit code `3` with
+`DPX-CLI-PROFILE-PARTIAL` when persistent marks were removed but the selection
+profile could not be removed. The operation is idempotent; repeating it completes
+the remaining stage once storage is available.
+
+`profile save` and applying `profile import` return policy exit code `3` with
+`DPX-CLI-PROFILE-CONFLICT` if the local profile changed after the command observed
+its revision but before it committed. The command does not overwrite the newer
+profile; repeat it to plan against the latest revision.
+
+`export project` reports `DPX-COMPRESSION-UNAVAILABLE` on stderr when a requested
+syntax transformation cannot load its grammar. The affected source remains
+complete, success and strict-policy semantics are unchanged, and the copy notice
+is printed only when at least one file was actually transformed. Pass-through
+copy also fails as source unavailable if the identity captured from its open
+source handle changes before EOF.
 
 Secret inspection never emits uninspected text. A selected text file above the supported
 16 MiB limit fails no command: `export context` omits its text, and `export project`

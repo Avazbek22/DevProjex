@@ -29,5 +29,6 @@
   <ItemGroup>
     <Compile Include="..\Shared\StoreListing\**\*.cs" LinkBase="StoreListing" />
     <Compile Include="..\Shared\ProjectLoadWorkflow\**\*.cs" LinkBase="ProjectLoadWorkflow" />
+    <Compile Include="..\..\Scripts\ReleasePayloadInspection.cs" Link="ReleasePayloadInspection.cs" />
   </ItemGroup>
 </Project>

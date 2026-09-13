@@ -1,4 +1,5 @@
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Application.Ranking;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -22,6 +23,16 @@ public sealed record AnalyzeCommandRequest(
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null);
 
+public sealed record RelatedCommandRequest(
+	string ProjectPath,
+	string SeedPath,
+	ProjectSelectionSpec Selection,
+	DependencyDirection Direction,
+	AnalysisOutputFormat Format,
+	TerminalOutputOptions Output,
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null);
+
 public sealed record TreeCommandRequest(
 	string ProjectPath,
 	ProjectSelectionSpec Selection,
@@ -42,6 +53,8 @@ public sealed record ExportContextCommandRequest(
 	bool DryRun,
 	long? MaximumEstimatedTokens,
 	TerminalOutputOptions Output,
+	ProjectContextRank? Rank = null,
+	IReadOnlyList<string>? Focus = null,
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null);
 

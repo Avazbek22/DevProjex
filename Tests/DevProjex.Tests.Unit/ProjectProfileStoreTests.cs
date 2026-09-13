@@ -3,6 +3,32 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfileStoreTests
 {
 	[Fact]
+	public void ExpectedRevisionRejectsAConcurrentProfileUpdate()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs"], []));
+		var observed = store.LookupProfile(project, TimeSpan.FromSeconds(1));
+		Assert.Equal(ProjectProfileLookupStatus.Found, observed.Status);
+		Assert.NotNull(observed.UpdatedUtc);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [".json"], []),
+			observed.UpdatedUtc.Value.AddMinutes(1)));
+
+		var stale = store.TrySaveProfileWithResult(
+			project,
+			new ProjectSelectionProfile([], [".md"], []),
+			observed.UpdatedUtc);
+
+		Assert.Equal(ProjectProfileSaveStatus.Conflict, stale.Status);
+		Assert.False(stale.Succeeded);
+		Assert.True(store.TryLoadProfile(project, out var current));
+		Assert.Equal([".json"], current.SelectedExtensions);
+	}
+
+	[Fact]
 	public void TrySaveProfilesWithResult_PersistsEveryProfileInOneBatch()
 	{
 		using var temporary = new TemporaryDirectory();
@@ -307,7 +333,7 @@ public sealed class ProjectProfileStoreTests
 	}
 
 	[Fact]
-	public void TryLoadProfile_CorruptedJson_ReturnsFalseAndRecoversOnNextSave()
+	public void TryLoadProfile_CorruptedJson_ReturnsFalseAndRefusesDestructiveSave()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -315,7 +341,8 @@ public sealed class ProjectProfileStoreTests
 			var store = CreateStore(tempRoot);
 			var path = store.GetPath();
 			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-			File.WriteAllText(path, "{ this is not valid json");
+			const string corruptPayload = "{ this is not valid json";
+			File.WriteAllText(path, corruptPayload);
 
 			Assert.False(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out _));
 
@@ -323,12 +350,8 @@ public sealed class ProjectProfileStoreTests
 				SelectedRootFolders: ["src"],
 				SelectedExtensions: [".cs"],
 				SelectedIgnoreOptions: [IgnoreOptionId.HiddenFiles]);
-			store.SaveProfile(Path.Combine(tempRoot, "RepoA"), profile);
-
-			Assert.True(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out var loaded));
-			Assert.Single(loaded.SelectedRootFolders);
-			Assert.Single(loaded.SelectedExtensions);
-			Assert.Single(loaded.SelectedIgnoreOptions);
+			Assert.False(store.TrySaveProfile(Path.Combine(tempRoot, "RepoA"), profile));
+			Assert.Equal(corruptPayload, File.ReadAllText(path));
 		}
 		finally
 		{

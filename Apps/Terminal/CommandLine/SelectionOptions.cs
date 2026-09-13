@@ -289,7 +289,7 @@ internal sealed class SelectionOptions
 	private static ProjectContextValidationException InvalidSelectionSource() =>
 		new("DPX-CLI-SELECT-FROM-INVALID", "Selection source is invalid.");
 
-	private static IReadOnlyCollection<ProjectExclusion> ParseExclusions(
+	internal static IReadOnlyCollection<ProjectExclusion> ParseExclusions(
 		IReadOnlyList<CliExclusionValue> values)
 	{
 		if (values.Any(static value => value.IsNone))

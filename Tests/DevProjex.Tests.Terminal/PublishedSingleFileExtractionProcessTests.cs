@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -8,6 +9,10 @@ public sealed class PublishedSingleFileExtractionProcessTests
 {
 	private static readonly TimeSpan ProcessTimeout = TimeSpan.FromSeconds(60);
 	private const string ProcessSecret = "ghp_" + "Q7wE9rT2yU4iO6pA8sD0fG1hJ3kL5zX7cV9b";
+
+	// A published build reads no environment input for its transport policy. The name is kept here
+	// so the refusal stays asserted against the value that used to widen it.
+	private const string RetiredTransportPolicyVariable = "DEVPROJEX_INTERNAL_TEST_ALLOW_FILE_GIT";
 
 	[Fact]
 	public async Task ExpandedCliCommandsHonorProcessContractsAndRedirectedStdin()
@@ -104,7 +109,7 @@ public sealed class PublishedSingleFileExtractionProcessTests
 	}
 
 	[Fact]
-	public async Task UrlSourcesExportThroughThePublishedProcess()
+	public async Task UrlSourcesOverALocalTransportAreRefusedByThePublishedProcess()
 	{
 		var application = GetPublishedSingleFileOrSkip();
 		if (!IsGitAvailable())
@@ -125,6 +130,7 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		var temporary = workspace.CreateDirectory("url/temp");
 		var dataRoot = workspace.CreateDirectory("url/data");
 		var environment = CreateEnvironment(home, temporary, dataRoot, bundleExtractionRoot: null);
+		environment[RetiredTransportPolicyVariable] = "1";
 
 		var context = await RunAsync(
 			application,
@@ -136,28 +142,10 @@ public sealed class PublishedSingleFileExtractionProcessTests
 			environment,
 			workspace.Path,
 			TestContext.Current.CancellationToken);
-		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
-		Assert.Contains("PublishedRemoteMarker", context.StandardOutput, StringComparison.Ordinal);
-		var progressLines = context.StandardError
-			.ReplaceLineEndings("\n")
-			.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-		Assert.InRange(progressLines.Length, 2, 6);
-		Assert.StartsWith("Cloning ", progressLines[0], StringComparison.Ordinal);
-		Assert.Equal("Clone completed.", progressLines[^1]);
 
-		var quietContext = await RunAsync(
-			application,
-			[
-				"export", "context", repositoryUrl,
-				"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain",
-				"--language", "en", "--progress", "never"
-			],
-			environment,
-			workspace.Path,
-			TestContext.Current.CancellationToken);
-		Assert.Equal(CommandLineExitCodes.Success, quietContext.ExitCode);
-		Assert.Equal(context.StandardOutput, quietContext.StandardOutput);
-		Assert.Empty(quietContext.StandardError);
+		Assert.Equal(CommandLineExitCodes.UsageError, context.ExitCode);
+		Assert.Empty(context.StandardOutput);
+		Assert.Contains("DPX-CLI-GIT-URL-INVALID", context.StandardError, StringComparison.Ordinal);
 
 		var destination = Path.Combine(workspace.Path, "url", "exported");
 		var project = await RunAsync(
@@ -169,11 +157,10 @@ public sealed class PublishedSingleFileExtractionProcessTests
 			environment,
 			workspace.Path,
 			TestContext.Current.CancellationToken);
-		Assert.Equal(CommandLineExitCodes.Success, project.ExitCode);
-		Assert.Equal(
-			"internal sealed class PublishedRemoteMarker {}\n",
-			File.ReadAllText(Path.Combine(destination, "src", "remote.cs")).ReplaceLineEndings("\n"));
-		Assert.Empty(project.StandardError);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, project.ExitCode);
+		Assert.Contains("DPX-CLI-GIT-URL-INVALID", project.StandardError, StringComparison.Ordinal);
+		Assert.False(Directory.Exists(destination));
 	}
 
 	[Fact]

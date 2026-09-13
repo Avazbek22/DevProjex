@@ -15,6 +15,10 @@ internal static class GitIgnoreMatcherFileCache
 	private static readonly LinkedList<CacheEntry> CacheLru = new();
 	private static long _retainedSourceBytes;
 
+	// Linked worktrees share info/exclude, but each parsed matcher owns a different root.
+	internal static string CreateCacheKey(string scopeRootPath, string sourcePath) =>
+		string.Concat(Path.GetFullPath(scopeRootPath), "\0", sourcePath);
+
 	public static GitIgnoreMatcherLoadResult Load(
 		string scopeRootPath,
 		string gitIgnorePath,
@@ -62,7 +66,7 @@ internal static class GitIgnoreMatcherFileCache
 		{
 			var initialProbe = ProbeSource(gitIgnorePath);
 			if (initialProbe.Status == SourceProbeStatus.NotFound)
-				return GitIgnoreMatcherLoadResult.NotFound;
+				return GitIgnoreMatcherLoadResult.NotFoundAt(gitIgnorePath);
 			if (initialProbe.Status == SourceProbeStatus.SymbolicLink)
 				return GitIgnoreMatcherLoadResult.SymbolicLinkSkipped;
 			if (initialProbe.Status != SourceProbeStatus.RegularFile)
@@ -86,9 +90,10 @@ internal static class GitIgnoreMatcherFileCache
 			}
 
 			var normalizedPath = Path.GetFullPath(gitIgnorePath);
+			var cacheKey = CreateCacheKey(scopeRootPath, normalizedPath);
 			lock (CacheSync)
 			{
-				if (Cache.TryGetValue(normalizedPath, out var cachedNode) &&
+				if (Cache.TryGetValue(cacheKey, out var cachedNode) &&
 				    cachedNode.Value.SourceLengthBytes == source.LengthBytes &&
 				    string.Equals(
 					    cachedNode.Value.ContentFingerprint,
@@ -98,7 +103,9 @@ internal static class GitIgnoreMatcherFileCache
 				{
 					CacheLru.Remove(cachedNode);
 					CacheLru.AddFirst(cachedNode);
-					return GitIgnoreMatcherLoadResult.Loaded(cachedNode.Value.Matcher);
+					return GitIgnoreMatcherLoadResult.Loaded(
+						cachedNode.Value.Matcher,
+						initialProbe.Stamp.ToIdentity(gitIgnorePath));
 				}
 			}
 
@@ -110,24 +117,27 @@ internal static class GitIgnoreMatcherFileCache
 			var scopedMatcher = new ScopedGitIgnoreMatcher(Path.GetFullPath(scopeRootPath), matcher);
 			lock (CacheSync)
 			{
-				Remove(normalizedPath);
+				Remove(cacheKey);
 				// Source length is a stable proxy for the parsed matcher's footprint. A single
 				// pathological source is still usable, but is never retained by the process cache.
 				if (source.LengthBytes <= MaximumRetainedSourceBytes)
 				{
 					var entry = new CacheEntry(
 						normalizedPath,
+						scopedMatcher.ScopeRootPath,
 						source.LengthBytes,
 						source.ContentFingerprint,
 						comparisonSemantics,
 						scopedMatcher);
-					Cache[normalizedPath] = CacheLru.AddFirst(entry);
+					Cache[cacheKey] = CacheLru.AddFirst(entry);
 					_retainedSourceBytes += source.LengthBytes;
 					TrimCache();
 				}
 			}
 
-			return GitIgnoreMatcherLoadResult.Loaded(scopedMatcher);
+			return GitIgnoreMatcherLoadResult.Loaded(
+				scopedMatcher,
+				initialProbe.Stamp.ToIdentity(gitIgnorePath));
 		}
 		catch (Exception exception) when (exception is
 		       IOException or
@@ -184,7 +194,7 @@ internal static class GitIgnoreMatcherFileCache
 		while ((Cache.Count > CacheLimit || _retainedSourceBytes > MaximumRetainedSourceBytes) &&
 		       CacheLru.Last is { } leastRecentlyUsed)
 		{
-			Remove(leastRecentlyUsed.Value.Path);
+			Remove(CreateCacheKey(leastRecentlyUsed.Value.ScopeRootPath, leastRecentlyUsed.Value.Path));
 		}
 	}
 
@@ -199,6 +209,7 @@ internal static class GitIgnoreMatcherFileCache
 
 	private sealed record CacheEntry(
 		string Path,
+		string ScopeRootPath,
 		long SourceLengthBytes,
 		string ContentFingerprint,
 		GitPathComparisonSemantics ComparisonSemantics,
@@ -215,7 +226,15 @@ internal static class GitIgnoreMatcherFileCache
 	private readonly record struct SourceStamp(
 		long LengthBytes,
 		long LastWriteTicksUtc,
-		long CreationTicksUtc);
+		long CreationTicksUtc)
+	{
+		public ProjectControlFileIdentity ToIdentity(string path) =>
+			new(
+				PathUtility.Normalize(path),
+				Exists: true,
+				LengthBytes,
+				LastWriteTicksUtc);
+	}
 
 	private readonly record struct SourceProbeResult(
 		SourceProbeStatus Status,
@@ -245,7 +264,8 @@ internal enum GitIgnoreMatcherLoadStatus
 
 internal readonly record struct GitIgnoreMatcherLoadResult(
 	GitIgnoreMatcherLoadStatus Status,
-	ScopedGitIgnoreMatcher? Matcher)
+	ScopedGitIgnoreMatcher? Matcher,
+	IReadOnlyList<ProjectControlFileIdentity>? ObservedControlFiles = null)
 {
 	public static GitIgnoreMatcherLoadResult NotFound { get; } =
 		new(GitIgnoreMatcherLoadStatus.NotFound, null);
@@ -256,6 +276,14 @@ internal readonly record struct GitIgnoreMatcherLoadResult(
 	public static GitIgnoreMatcherLoadResult ReadFailure { get; } =
 		new(GitIgnoreMatcherLoadStatus.ReadFailure, null);
 
-	public static GitIgnoreMatcherLoadResult Loaded(ScopedGitIgnoreMatcher matcher) =>
-		new(GitIgnoreMatcherLoadStatus.Loaded, matcher);
+	public static GitIgnoreMatcherLoadResult NotFoundAt(string path) =>
+		new(
+			GitIgnoreMatcherLoadStatus.NotFound,
+			null,
+			[ProjectControlFileIdentityProbe.Missing(path)]);
+
+	public static GitIgnoreMatcherLoadResult Loaded(
+		ScopedGitIgnoreMatcher matcher,
+		params ProjectControlFileIdentity[] observedControlFiles) =>
+		new(GitIgnoreMatcherLoadStatus.Loaded, matcher, observedControlFiles);
 }

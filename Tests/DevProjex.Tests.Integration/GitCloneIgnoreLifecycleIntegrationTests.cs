@@ -395,7 +395,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	}
 
 	[Fact]
-	public void OrdinaryFolderScan_GitAdministrativeBoundaryTracksGitIgnoreControllerState()
+	public void OrdinaryFolderScan_GitAdministrativeBoundaryHoldsAcrossControllerStates()
 	{
 		using var workspace = CreateWorkspace(CloneFixtureKind.DotNet);
 		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
@@ -415,9 +415,12 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			gitIgnoreEnabled,
 			isChecked: false);
 
-		Assert.Contains(allIgnoresDisabled.TreeInventory!.Entries, entry => entry.RelativePath == ".git");
-		Assert.Contains(allIgnoresDisabled.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders);
-		Assert.Equal(1, allIgnoresDisabled.IgnoreOptionCounts.DotFolders);
+		// The administrative boundary is a product rule, not a controller effect:
+		// disabling every ignore option still keeps .git out of the inventory, so
+		// the DotFolders toggle has nothing left to own here.
+		Assert.DoesNotContain(allIgnoresDisabled.TreeInventory!.Entries, entry =>
+			entry.RelativePath == ".git" || entry.RelativePath.StartsWith(".git/", StringComparison.Ordinal));
+		Assert.Equal(0, allIgnoresDisabled.IgnoreOptionCounts.DotFolders);
 	}
 
 	private static SelectionRefreshSnapshot RefreshFull(

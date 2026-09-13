@@ -73,6 +73,7 @@ public sealed class DevProjexCommandTree
 		root.Subcommands.Add(BuildMcpCommand());
 		root.Subcommands.Add(BuildOpenCommand());
 		root.Subcommands.Add(BuildAnalyzeCommand());
+		root.Subcommands.Add(BuildRelatedCommand());
 		root.Subcommands.Add(BuildTreeCommand());
 		root.Subcommands.Add(BuildExportCommand());
 		root.Subcommands.Add(BuildProfileCommand());
@@ -110,7 +111,27 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.McpAllowRemote")
 		};
+		var remoteHosts = new Option<string[]>("--remote-hosts")
+		{
+			Description = "Allow only these comma-separated remote Git hosts when --allow-remote is enabled.",
+			HelpName = "HOST[,HOST...]",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
 		var gitMode = CreateMcpGitModeOption();
+		var exclude = CreateMcpExcludeOption();
+		// Arity is pinned to zero: command validators run before arity validation in
+		// System.CommandLine, and GetValue on an over-arity result throws instead of
+		// reporting a parse error. A value-less switch keeps every spelling graceful.
+		var unrestricted = new Option<bool>("--unrestricted")
+		{
+			Description = L("Terminal.Option.McpUnrestricted"),
+			Arity = ArgumentArity.Zero
+		};
+		var allowAgentExclusions = new Option<bool>("--allow-agent-exclusions")
+		{
+			Description = L("Terminal.Option.McpAgentExclusions")
+		};
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
@@ -118,13 +139,29 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(roots);
 		command.Options.Add(hidePrivateData);
 		command.Options.Add(allowRemote);
+		command.Options.Add(remoteHosts);
 		command.Options.Add(gitMode);
+		command.Options.Add(exclude);
+		command.Options.Add(unrestricted);
+		command.Options.Add(allowAgentExclusions);
+		CompletionConflictRegistry.RegisterMutual(unrestricted, exclude);
+		CompletionConflictRegistry.RegisterMutual(unrestricted, gitMode);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(unrestricted) &&
+			    (result.GetResult(exclude) is not null || result.GetResult(gitMode) is not null))
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.UnrestrictedConflict")));
+		});
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
 			"devprojex mcp --root . --root ../shared",
 			"devprojex mcp --root . --hide-private-data",
-			"devprojex mcp --root . --git-mode tracked");
+			"devprojex mcp --root . --git-mode tracked",
+			"devprojex mcp --root . --exclude default --exclude dot-folders",
+			"devprojex mcp --root . --unrestricted",
+			"devprojex mcp --root . --allow-agent-exclusions",
+			"devprojex mcp --root . --unrestricted --allow-agent-exclusions");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];
@@ -132,15 +169,36 @@ public sealed class DevProjexCommandTree
 				explicitRoots,
 				environment.Variables,
 				Directory.GetCurrentDirectory());
+			var excludeValues = parseResult.GetValue(exclude);
+			IReadOnlyCollection<ProjectExclusion>? baselineExclusions;
+			GitFilteringMode? gitModeValue;
+			if (parseResult.GetValue(unrestricted))
+			{
+				baselineExclusions = [];
+				gitModeValue = GitFilteringMode.None;
+			}
+			else
+			{
+				baselineExclusions = excludeValues is { Length: > 0 }
+					? SelectionOptions.ParseExclusions(excludeValues)
+					: null;
+				gitModeValue = parseResult.GetValue(gitMode);
+			}
+
 			try
 			{
 				await McpServerHost.RunWithStandardStreamsAsync(
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
-						parseResult.GetValue(gitMode),
+						gitModeValue,
+						baselineExclusions,
+						parseResult.GetValue(allowAgentExclusions),
 						_serviceFactory.AppDataPathProvider,
-						cancellationToken)
+						cancellationToken,
+						parseResult.GetResult(remoteHosts) is null
+							? null
+							: parseResult.GetValue(remoteHosts) ?? [])
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}
@@ -152,6 +210,57 @@ public sealed class DevProjexCommandTree
 			}
 		});
 		return command;
+	}
+
+	private Option<CliExclusionValue[]> CreateMcpExcludeOption()
+	{
+		var option = new Option<CliExclusionValue[]>("--exclude")
+		{
+			Description = L("Terminal.Option.McpExclude"),
+			HelpName = "NAME",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false,
+			CustomParser = result =>
+			{
+				var values = new List<CliExclusionValue>(result.Tokens.Count);
+				foreach (var token in result.Tokens)
+				{
+					// 'default' expands to the server default set, so a startup line extends it
+					// ("--exclude default --exclude dot-folders") instead of re-listing it. Any
+					// other name list replaces the default set — the CLI --exclude rule.
+					if (string.Equals(token.Value, McpServerBaseline.DefaultExclusionsToken, StringComparison.OrdinalIgnoreCase))
+					{
+						foreach (var exclusion in McpServerBaseline.DefaultExclusions)
+							values.Add(new CliExclusionValue(exclusion));
+						continue;
+					}
+
+					// The hidden legacy hide-secrets alias stays out of the server baseline:
+					// redaction is not an exclusion the MCP surface may reason about.
+					if (CliChoiceSets.Exclusion.TryParse(token.Value, out var value) &&
+					    value.Exclusion is not ProjectExclusion.HideSecrets)
+					{
+						values.Add(value);
+						continue;
+					}
+
+					result.AddError(LocalizedParseError.Create(_localization.Format(
+						"Terminal.Validation.UnknownExclusion",
+						token.Value)));
+				}
+
+				if (values.Any(static value => value.IsNone) &&
+				    values.Any(static value => !value.IsNone))
+				{
+					result.AddError(LocalizedParseError.Create(
+						_localization["Terminal.Validation.ExcludeNone"]));
+				}
+
+				return values.ToArray();
+			}
+		};
+		option.CompletionSources.Add([.. CliChoiceSets.Exclusion.Tokens, McpServerBaseline.DefaultExclusionsToken]);
+		return option;
 	}
 
 	private Option<GitFilteringMode?> CreateMcpGitModeOption()
@@ -386,6 +495,105 @@ public sealed class DevProjexCommandTree
 		return command;
 	}
 
+	private Command BuildRelatedCommand()
+	{
+		var command = new Command("related", L("Terminal.Command.Related"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex related Application/Services/ProjectAnalysisService.cs",
+			"devprojex related src/main.ts --direction dependencies --format json");
+		var seed = RequiredArgument("PATH");
+		seed.Description = L("Terminal.Argument.RelatedPath");
+		seed.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.FilesAndDirectories,
+			FileSystemCompletionSource.ResolveProjectDirectory(context)));
+		var project = new Option<string?>("--project")
+		{
+			Description = L("Terminal.Option.RelatedProject"),
+			HelpName = "PROJECT",
+			DefaultValueFactory = _ => Directory.GetCurrentDirectory()
+		};
+		project.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.Directories));
+		var direction = CliChoiceSymbols.Option(
+			"--direction",
+			L("Terminal.Option.RelatedDirection"),
+			CliDependencyDirection.Both,
+			CliChoiceSets.DependencyDirection,
+			_localization);
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		format.Aliases.Add("-f");
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeContentTransformations: false,
+			includeMaxFileBytes: true);
+		command.Arguments.Add(seed);
+		command.Options.Add(project);
+		command.Options.Add(direction);
+		command.Options.Add(format);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var output = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				output,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							output)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(parseResult, cancellationToken)
+						.ConfigureAwait(false);
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
+					return await new RelatedCommandHandler(services, environment).ExecuteAsync(
+						new RelatedCommandRequest(
+							resolvedSource.ProjectPath,
+							parseResult.GetValue(seed) ??
+								throw new InvalidOperationException("The required related seed was not parsed."),
+							spec,
+							parseResult.GetValue(direction) switch
+							{
+								CliDependencyDirection.Dependencies => DependencyDirection.Dependencies,
+								CliDependencyDirection.Dependents => DependencyDirection.Dependents,
+								CliDependencyDirection.Both => DependencyDirection.Both,
+								_ => throw new ArgumentOutOfRangeException()
+							},
+							parseResult.GetValue(format) == CliTextJsonFormat.Json
+								? AnalysisOutputFormat.Json
+								: AnalysisOutputFormat.Text,
+							output,
+							selection.GetMaxFileBytes(parseResult),
+							resolvedSource.RepositorySourceUrl),
+						cancellationToken).ConfigureAwait(false);
+				},
+				_localization).ConfigureAwait(false);
+		});
+		return command;
+	}
+
 	private Command BuildExportCommand()
 	{
 		var command = new Command("export", L("Terminal.Command.Export"));
@@ -430,6 +638,29 @@ public sealed class DevProjexCommandTree
 			Description = L("Terminal.Option.MaxTokens"),
 			HelpName = "N"
 		};
+		var rank = CliChoiceSymbols.NullableOption(
+			"--rank",
+			L("Terminal.Option.Rank"),
+			CliChoiceSets.ContextRank,
+			_localization);
+		var focus = new Option<string[]>("--focus")
+		{
+			Description = L("Terminal.Option.Focus"),
+			HelpName = "PATH",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
+		focus.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.FilesAndDirectories,
+			FileSystemCompletionSource.ResolveProjectDirectory(context)));
+		var detailFor = new Option<string[]>("--detail-for")
+		{
+			Description = L("Terminal.Option.DetailFor"),
+			HelpName = "GLOB=LEVEL",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
 		var branch = BranchOption();
 		var selection = new SelectionOptions(
 			_localization,
@@ -442,6 +673,9 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(force);
 		command.Options.Add(dryRun);
 		command.Options.Add(maximumEstimatedTokens);
+		command.Options.Add(rank);
+		command.Options.Add(focus);
+		command.Options.Add(detailFor);
 		command.Options.Add(branch);
 		selection.AddTo(command);
 		_output.AddProgressTo(command);
@@ -468,6 +702,50 @@ public sealed class DevProjexCommandTree
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.MaxTokens")));
+			}
+			if (CliParseValue.TryGet(result, rank, out var rankValue) &&
+			    rankValue is not null &&
+			    CliParseValue.TryGet(result, view, out var viewValue) &&
+			    viewValue == ProjectContextView.Tree)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.RankRequiresContent")));
+			}
+			var focusValues = result.GetResult(focus) is null
+				? null
+				: result.GetValue(focus) ?? [];
+			if (focusValues is not null && result.GetValue(rank) is null)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.FocusRequiresRank")));
+			}
+			if (focusValues is { Length: > 16 })
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.FocusLimit")));
+			}
+			if (focusValues?.Any(string.IsNullOrWhiteSpace) == true)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.FocusEmpty")));
+			}
+			if (result.GetResult(detailFor) is not null)
+			{
+				if (CliParseValue.TryGet(result, view, out var detailView) &&
+				    detailView == ProjectContextView.Tree)
+				{
+					result.AddError(LocalizedParseError.Create(
+						L("Terminal.Validation.DetailForRequiresContent")));
+				}
+				try
+				{
+					DetailForOption.Parse(result.GetValue(detailFor) ?? []);
+				}
+				catch (DetailForOptionException failure)
+				{
+					result.AddError(LocalizedParseError.Create(
+						_localization.Format("Terminal.Validation.DetailFor", failure.Message)));
+				}
 			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
@@ -497,11 +775,15 @@ public sealed class DevProjexCommandTree
 						services,
 						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
+					var detailOverrides = DetailForOption.Parse(
+						parseResult.GetResult(detailFor) is null ? null : parseResult.GetValue(detailFor));
 					return await new ExportContextCommandHandler(services, environment)
 						.ExecuteAsync(
 							new ExportContextCommandRequest(
 								projectPath,
-								spec,
+								detailOverrides is null
+									? spec
+									: spec with { ContentDetailOverrides = detailOverrides },
 								parseResult.GetValue(view),
 								parseResult.GetValue(format),
 								parseResult.GetValue(outputPath),
@@ -509,6 +791,10 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(dryRun),
 								parseResult.GetValue(maximumEstimatedTokens),
 								outputOptions,
+								Rank: parseResult.GetValue(rank),
+								Focus: parseResult.GetResult(focus) is null
+									? null
+									: parseResult.GetValue(focus) ?? [],
 								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
 								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
@@ -777,7 +1063,9 @@ public sealed class DevProjexCommandTree
 					TreeTextFormat? treeFormatValue = parseResult.GetValue(format) is { } requestedTreeFormat
 						? ParseTreeFormat(requestedTreeFormat)
 						: null;
-					return await new DesktopCommandHandler(environment)
+					return await new DesktopCommandHandler(
+							environment,
+							launcher: new DesktopProcessLauncher(_serviceFactory.HostCapabilities))
 						.OpenAsync(
 							DesktopOpenRequestFactory.Create(
 								projectPath,

@@ -9,6 +9,18 @@ using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Services;
 
+internal interface IRawContentIdentitySnapshot
+{
+	ReadOnlyMemory<byte> RawContentHash { get; }
+}
+
+internal interface IRawContentIdentityFileContentAnalyzer
+{
+	ValueTask<IFileContentSnapshot> OpenCompleteSnapshotWithRawContentIdentityAsync(
+		string path,
+		CancellationToken cancellationToken = default);
+}
+
 public delegate FileStream FileContentReadStreamOpener(
 	string path,
 	int bufferSize,
@@ -27,7 +39,8 @@ public delegate FileStream FileContentReadStreamOpener(
 public sealed class FileContentAnalyzer :
 	IFileContentAnalyzer,
 	IPrewarmFileContentAnalyzer,
-	ICoherentFileContentAnalyzer
+	ICoherentFileContentAnalyzer,
+	IRawContentIdentityFileContentAnalyzer
 {
 	// 512 bytes is sufficient - all binary formats have null bytes in first 512 bytes
 	private const int BinaryCheckBufferSize = 512;
@@ -61,6 +74,8 @@ public sealed class FileContentAnalyzer :
 		// Other binary
 		".bin", ".dat", ".db", ".sqlite", ".mdb"
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+	private static readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> KnownBinaryExtensionLookup =
+		KnownBinaryExtensions.GetAlternateLookup<ReadOnlySpan<char>>();
 	private static readonly Encoding StrictUtf8 = new UTF8Encoding(
 		encoderShouldEmitUTF8Identifier: true,
 		throwOnInvalidBytes: true);
@@ -243,7 +258,19 @@ public sealed class FileContentAnalyzer :
 	public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
 		string path,
 		CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(OpenCompleteSnapshotSync(path, cancellationToken));
+		ValueTask.FromResult(OpenCompleteSnapshotSync(
+			path,
+			captureRawContentIdentity: false,
+			cancellationToken));
+
+	ValueTask<IFileContentSnapshot>
+		IRawContentIdentityFileContentAnalyzer.OpenCompleteSnapshotWithRawContentIdentityAsync(
+			string path,
+			CancellationToken cancellationToken) =>
+		ValueTask.FromResult(OpenCompleteSnapshotSync(
+			path,
+			captureRawContentIdentity: true,
+			cancellationToken));
 
 	public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
 		string path,
@@ -289,9 +316,10 @@ public sealed class FileContentAnalyzer :
 					new ClassifiedCompleteTextFileBuffer(FileContentClassification.Text));
 			}
 
-			var bomEncoding = DetectBomEncoding(stream, cancellationToken);
+			var prefix = ReadPrefix(stream, cancellationToken);
+			var bomEncoding = prefix.Encoding;
 			var encoding = bomEncoding ?? StrictUtf8;
-			if (!CheckForNullBytes(stream, cancellationToken))
+			if (!prefix.IsText)
 			{
 				return IdentifiedBuffer(
 					stream,
@@ -467,8 +495,9 @@ public sealed class FileContentAnalyzer :
 						CrLfPairCount: 0)));
 			}
 
-			var encoding = DetectBomEncoding(stream, cancellationToken);
-			if (encoding is null && !CheckForNullBytes(stream, cancellationToken))
+			var prefix = ReadPrefix(stream, cancellationToken);
+			var encoding = prefix.Encoding;
+			if (!prefix.IsText)
 				return Identified(
 					stream,
 					new FileContentMetricsResult(FileContentClassification.Binary));
@@ -494,9 +523,11 @@ public sealed class FileContentAnalyzer :
 			var metrics = CountMetricsStreaming(
 				stream,
 				sizeBytes,
-				encoding ?? StrictUtf8,
+				encoding,
 				cancellationToken,
 				calculateFingerprint: false,
+				out _,
+				calculateRawContentHash: false,
 				out _);
 			return Identified(
 				stream,
@@ -553,6 +584,7 @@ public sealed class FileContentAnalyzer :
 
 	private IFileContentSnapshot OpenCompleteSnapshotSync(
 		string path,
+		bool captureRawContentIdentity,
 		CancellationToken cancellationToken)
 	{
 		FileStream? stream = null;
@@ -583,13 +615,19 @@ public sealed class FileContentAnalyzer :
 						IsEmpty: true,
 						IsWhitespaceOnly: false,
 						IsEstimated: false),
-					SHA256.HashData(ReadOnlySpan<byte>.Empty));
+					SHA256.HashData(ReadOnlySpan<byte>.Empty),
+					captureRawContentIdentity
+						? SHA256.HashData(ReadOnlySpan<byte>.Empty)
+						: null);
+				if (captureRawContentIdentity)
+					ContentPipelineDiagnostics.RecordSourceVersionHashPass();
 				stream = null;
 				return emptySnapshot;
 			}
 
-			var encoding = DetectBomEncoding(stream, cancellationToken);
-			if (encoding is null && !CheckForNullBytes(stream, cancellationToken))
+			var prefix = ReadPrefix(stream, cancellationToken);
+			var encoding = prefix.Encoding;
+			if (!prefix.IsText)
 			{
 				return new ClassifiedFileContentSnapshot(
 					new FileContentMetricsResult(FileContentClassification.Binary));
@@ -598,10 +636,12 @@ public sealed class FileContentAnalyzer :
 			var metrics = CountMetricsStreaming(
 				stream,
 				sizeBytes,
-				encoding ?? StrictUtf8,
+				encoding,
 				cancellationToken,
 				calculateFingerprint: true,
-				out var contentFingerprint);
+				out var contentFingerprint,
+				captureRawContentIdentity,
+				out var rawContentHash);
 			if (metrics is null)
 			{
 				return new ClassifiedFileContentSnapshot(
@@ -614,7 +654,8 @@ public sealed class FileContentAnalyzer :
 				stream,
 				encoding ?? StrictUtf8,
 				metrics,
-				contentFingerprint!);
+				contentFingerprint!,
+				rawContentHash);
 			stream = null;
 			return snapshot;
 		}
@@ -752,8 +793,9 @@ public sealed class FileContentAnalyzer :
 				TextFileEncoding.Utf8);
 		}
 
-		var encoding = DetectBomEncoding(stream, cancellationToken);
-		if (encoding is null && !CheckForNullBytes(stream, cancellationToken))
+		var prefix = ReadPrefix(stream, cancellationToken);
+		var encoding = prefix.Encoding;
+		if (!prefix.IsText)
 			return new ContentReadFact(null, FileContentClassification.Binary, null, null);
 
 		if (sizeBytes > maxSizeForFullRead)
@@ -804,7 +846,7 @@ public sealed class FileContentAnalyzer :
 	/// Checks first 512 bytes for null bytes to detect binary content.
 	/// Returns true if no null bytes found (text file), false otherwise (binary).
 	/// </summary>
-	private static bool CheckForNullBytes(FileStream stream, CancellationToken cancellationToken)
+	private static PrefixProbe ReadPrefix(FileStream stream, CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		stream.Position = 0;
@@ -812,27 +854,16 @@ public sealed class FileContentAnalyzer :
 		Span<byte> buffer = stackalloc byte[toRead];
 		int bytesRead = stream.Read(buffer);
 
-		if (TryResolveBomEncoding(buffer[..bytesRead], out _))
-			return true;
+		stream.Position = 0;
+		if (TryResolveBomEncoding(buffer[..bytesRead], out var encoding))
+			return new PrefixProbe(encoding, IsText: true);
 
 		// Span.Contains uses the runtime's vectorized search without changing the
 		// established null-byte binary detection contract.
-		return !buffer[..bytesRead].Contains((byte)0);
+		return new PrefixProbe(null, !buffer[..bytesRead].Contains((byte)0));
 	}
 
-	private static Encoding? DetectBomEncoding(
-		FileStream stream,
-		CancellationToken cancellationToken)
-	{
-		cancellationToken.ThrowIfCancellationRequested();
-		stream.Position = 0;
-		Span<byte> bom = stackalloc byte[(int)Math.Min(4, stream.Length)];
-		var bytesRead = stream.Read(bom);
-		stream.Position = 0;
-		return TryResolveBomEncoding(bom[..bytesRead], out var encoding)
-			? encoding
-			: null;
-	}
+	private readonly record struct PrefixProbe(Encoding? Encoding, bool IsText);
 
 	private static bool TryResolveBomEncoding(ReadOnlySpan<byte> value, out Encoding encoding)
 	{
@@ -875,20 +906,12 @@ public sealed class FileContentAnalyzer :
 		string path,
 		int bufferSize,
 		FileShare fileShare,
-		bool asynchronous = false)
-	{
-		UnixFileTypeInspector.EnsureRegularFile(path);
-		// Callers keep this handle for length, probing, and decoding. Besides saving an
-		// extra open/stat cycle, one handle gives each operation a more coherent file view.
-		return new FileStream(
+		bool asynchronous = false) =>
+		UnixFileTypeInspector.OpenRegularFileForSequentialRead(
 			path,
-			FileMode.Open,
-			FileAccess.Read,
-			fileShare,
 			bufferSize,
-			FileOptions.SequentialScan |
-			(asynchronous ? FileOptions.Asynchronous : FileOptions.None));
-	}
+			fileShare,
+			asynchronous);
 
 	private static bool HasKnownBinaryExtension(string path)
 	{
@@ -896,12 +919,7 @@ public sealed class FileContentAnalyzer :
 		if (extension.IsEmpty)
 			return false;
 
-		if (KnownBinaryExtensions.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup))
-			return lookup.Contains(extension);
-
-		// The ordinal-ignore-case frozen set supports span lookup on current runtimes.
-		// Keep a compatibility fallback so an implementation detail cannot change behavior.
-		return KnownBinaryExtensions.Contains(extension.ToString());
+		return KnownBinaryExtensionLookup.Contains(extension);
 	}
 
 	/// <summary>
@@ -911,32 +929,47 @@ public sealed class FileContentAnalyzer :
 	private static TextFileMetrics? CountMetricsStreaming(
 		FileStream stream,
 		long sizeBytes,
-		Encoding encoding,
+		Encoding? bomEncoding,
 		CancellationToken cancellationToken,
 		bool calculateFingerprint,
-		out byte[]? contentFingerprint)
+		out byte[]? contentFingerprint,
+		bool calculateRawContentHash,
+		out byte[]? rawContentHash)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		ContentPipelineDiagnostics.RecordFullFileRead(sizeBytes);
 		contentFingerprint = null;
+		rawContentHash = null;
 
 		byte[]? byteBuffer = null;
 		char[]? charBuffer = null;
 		using var fingerprint = calculateFingerprint
 			? IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
 			: null;
+		using var rawContentIdentity = calculateRawContentHash
+			? IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
+			: null;
 		try
 		{
 			var counter = new TextMetricsCounter();
-			var bomEncoding = DetectBomEncoding(stream, cancellationToken);
 			var effectiveEncoding = bomEncoding is null
-				? encoding
+				? StrictUtf8
 				: ResolveBomFallbackEncoding(bomEncoding);
 			var decoder = effectiveEncoding.GetDecoder();
 			byteBuffer = ArrayPool<byte>.Shared.Rent(StreamingBufferSize);
 			charBuffer = ArrayPool<char>.Shared.Rent(
 				Math.Max(1, effectiveEncoding.GetMaxCharCount(StreamingBufferSize)));
-			stream.Position = GetPreambleLength(bomEncoding);
+			var preambleLength = GetPreambleLength(bomEncoding);
+			stream.Position = 0;
+			if (preambleLength > 0)
+			{
+				stream.ReadExactly(byteBuffer.AsSpan(0, preambleLength));
+				rawContentIdentity?.AppendData(byteBuffer.AsSpan(0, preambleLength));
+				if (calculateRawContentHash)
+					ContentPipelineDiagnostics.RecordSourceVersionHashBytes(preambleLength);
+			}
+			if (calculateRawContentHash)
+				ContentPipelineDiagnostics.RecordSourceVersionHashPass();
 
 			while (true)
 			{
@@ -944,6 +977,9 @@ public sealed class FileContentAnalyzer :
 				var bytesRead = stream.Read(byteBuffer, 0, StreamingBufferSize);
 				if (bytesRead == 0)
 					break;
+				rawContentIdentity?.AppendData(byteBuffer.AsSpan(0, bytesRead));
+				if (calculateRawContentHash)
+					ContentPipelineDiagnostics.RecordSourceVersionHashBytes(bytesRead);
 
 				var bytesConsumed = 0;
 				while (bytesConsumed < bytesRead)
@@ -991,6 +1027,7 @@ public sealed class FileContentAnalyzer :
 			}
 
 			contentFingerprint = fingerprint?.GetHashAndReset();
+			rawContentHash = rawContentIdentity?.GetHashAndReset();
 			if (calculateFingerprint)
 				ContentPipelineDiagnostics.RecordContentFingerprint();
 			return counter.Build(sizeBytes);
@@ -1485,12 +1522,15 @@ public sealed class FileContentAnalyzer :
 		FileStream stream,
 		Encoding encoding,
 		TextFileMetrics metrics,
-		byte[] contentFingerprint) : IFileContentSnapshot
+		byte[] contentFingerprint,
+		byte[]? rawContentHash) : IFileContentSnapshot, IRawContentIdentitySnapshot
 	{
 		private FileStream? _stream = stream;
 
 		public FileContentMetricsResult Result { get; } =
 			new(FileContentClassification.Text, metrics);
+
+		public ReadOnlyMemory<byte> RawContentHash { get; } = rawContentHash ?? [];
 
 		public async ValueTask CopyTextToAsync(
 			int maximumCharacters,

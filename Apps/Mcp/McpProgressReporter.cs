@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Application.Dependencies;
 
 namespace DevProjex.Mcp;
 
@@ -17,8 +18,11 @@ internal sealed class McpProgressReporter(
 	private long _lastReportTimestamp;
 	private Task _pending = Task.CompletedTask;
 
-	public void Milestone(double progress, string message) =>
-		Report(progress, message, force: true);
+	public void Milestone(double progress, string message)
+	{
+		lock (_sync)
+			ReportLocked(progress, message, force: _lastReportTimestamp == 0);
+	}
 
 	public IProgress<ProjectCopyExportProgress> Measure(
 		string phase,
@@ -35,6 +39,18 @@ internal sealed class McpProgressReporter(
 			Report(mapped, $"{phase} {processed}/{total}", force: false);
 		});
 
+	public IProgress<DependencyIndexProgress> MeasureFacts(
+		string phase,
+		double start,
+		double end) =>
+		new SynchronousProgress<DependencyIndexProgress>(value =>
+		{
+			var total = Math.Max(0, value.TotalFiles);
+			var processed = Math.Clamp(value.CompletedFiles, 0, total);
+			var fraction = total == 0 ? 1d : processed / (double)total;
+			Report(start + fraction * (end - start), $"{phase} {processed}/{total}", force: false);
+		});
+
 	public Task CompleteAsync(double progress, string message)
 	{
 		Report(progress, message, force: true);
@@ -45,33 +61,36 @@ internal sealed class McpProgressReporter(
 	private void Report(double progress, string message, bool force)
 	{
 		lock (_sync)
+			ReportLocked(progress, message, force);
+	}
+
+	private void ReportLocked(double progress, string message, bool force)
+	{
+		var normalized = Math.Clamp(progress, 0d, Total);
+		if (normalized <= _lastProgress)
+			return;
+
+		var now = Stopwatch.GetTimestamp();
+		if (!force &&
+		    (normalized - _lastProgress < MinimumIntermediateStep ||
+		     _lastReportTimestamp != 0 &&
+		     Stopwatch.GetElapsedTime(_lastReportTimestamp, now) < MinimumIntermediateInterval))
 		{
-			var normalized = Math.Clamp(progress, 0d, Total);
-			if (normalized <= _lastProgress)
-				return;
-
-			var now = Stopwatch.GetTimestamp();
-			if (!force &&
-			    (normalized - _lastProgress < MinimumIntermediateStep ||
-			     _lastReportTimestamp != 0 &&
-			     Stopwatch.GetElapsedTime(_lastReportTimestamp, now) < MinimumIntermediateInterval))
-			{
-				return;
-			}
-
-			_lastProgress = normalized;
-			_lastReportTimestamp = now;
-			if (_progressToken is not { } progressToken)
-				return;
-
-			var notification = new ProgressNotificationValue
-			{
-				Progress = (float)normalized,
-				Total = (float)Total,
-				Message = message
-			};
-			_pending = SendAfterAsync(_pending, progressToken, notification);
+			return;
 		}
+
+		_lastProgress = normalized;
+		_lastReportTimestamp = now;
+		if (_progressToken is not { } progressToken)
+			return;
+
+		var notification = new ProgressNotificationValue
+		{
+			Progress = (float)normalized,
+			Total = (float)Total,
+			Message = message
+		};
+		_pending = SendAfterAsync(_pending, progressToken, notification);
 	}
 
 	private async Task SendAfterAsync(

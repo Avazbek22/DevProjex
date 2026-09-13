@@ -1,6 +1,7 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -16,22 +17,32 @@ public sealed class AnalyzeCommandHandler(
 		var topFileRanking = request.TopFiles is { } topFileCount
 			? new TopFileRanking(topFileCount)
 			: null;
-		Action<ContentFileMetrics>? topFileObserver = topFileRanking is null
-			? null
-			: metrics => topFileRanking.Add(
+		var contentFileMetrics = new List<ContentFileMetrics>();
+		var estimatedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		void ObserveContentFile(ContentFileMetrics metrics)
+		{
+			contentFileMetrics.Add(metrics);
+			if (metrics.IsEstimated)
+				estimatedPaths.Add(metrics.Path);
+			topFileRanking?.Add(
 				metrics.Path,
 				CodeCompressionSnapshot.EstimateTokens(metrics.CharCount));
-		var plan = await new StatusRenderer(environment, request.Output)
-			.RunAsync(
-				services.Localization["Terminal.Status.AnalyzingProject"],
-				() => services.ContextFactory.BuildAsync(
-					request.ProjectPath,
-					request.Selection,
-					includeOutputMetrics: true,
-					cancellationToken: cancellationToken,
-					includeContentOutputMetrics: includeSourceContentMetrics && topFileRanking is null,
-					repositorySourceUrl: request.RepositorySourceUrl))
-			.ConfigureAwait(false);
+		}
+		ProjectContextPlan plan;
+		using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Selection))
+		{
+			plan = await new StatusRenderer(environment, request.Output)
+				.RunAsync(
+					services.Localization["Terminal.Status.AnalyzingProject"],
+					() => services.ContextFactory.BuildAsync(
+						request.ProjectPath,
+						request.Selection,
+						includeOutputMetrics: true,
+						cancellationToken: cancellationToken,
+						includeContentOutputMetrics: false,
+						repositorySourceUrl: request.RepositorySourceUrl))
+				.ConfigureAwait(false);
+		}
 		plan = await ProjectFileSizeFilter.ApplyAsync(
 				services.ContextPlanner,
 				plan,
@@ -48,7 +59,7 @@ public sealed class AnalyzeCommandHandler(
 					request.Selection,
 					includeOutputMetrics: true,
 					cancellationToken: cancellationToken,
-					includeContentOutputMetrics: topFileRanking is null,
+					includeContentOutputMetrics: false,
 					repositorySourceUrl: request.RepositorySourceUrl)
 				.ConfigureAwait(false);
 			transformationContext = CreateTransformationContext(plan);
@@ -60,13 +71,12 @@ public sealed class AnalyzeCommandHandler(
 		if (transformationContext is not null)
 		{
 			await using var prepared = await services.SecretRedactionOutputPreparer
-				.PrepareAsync(
+				.MeasureAsync(
 					transformationContext,
 					plan.IncludedFiles,
 					request.IncludeFindings && plan.Selection.HideSecrets == true,
-					cancellationToken)
+					cancellationToken: cancellationToken)
 				.ConfigureAwait(false);
-			var transformedAnalyzer = services.SecretRedactionOutputPreparer.CreatePreparedAnalyzer(prepared);
 			if (findingsRequested && plan.Selection.HideSecrets == true)
 			{
 				effectiveFindingCount = prepared.Snapshot?.DetectedCount ?? 0;
@@ -77,14 +87,9 @@ public sealed class AnalyzeCommandHandler(
 				}
 				findingsCapturedByOutput = true;
 			}
-			var transformedMetrics = await ProjectContentMetricsCalculator
-				.CalculateAsync(
-					transformedAnalyzer,
-					plan.IncludedFiles,
-					topFileObserver,
-					progress: null,
-					cancellationToken)
-				.ConfigureAwait(false);
+			foreach (var fileMetrics in prepared.TransformedFileMetrics)
+				ObserveContentFile(fileMetrics);
+			var transformedMetrics = prepared.GetTransformedMetrics();
 			plan = plan with
 			{
 				Analysis = plan.Analysis with
@@ -118,13 +123,15 @@ public sealed class AnalyzeCommandHandler(
 					: null,
 				UnscannableFiles = prepared.UnscannableFiles
 			};
+			if (prepared.CompressionSnapshot is { } compressionSnapshot)
+				plan = CodeCompressionDiagnostic.Append(plan, compressionSnapshot.Availability);
 		}
-		else if (topFileRanking is not null)
+		else
 		{
 			var sourceMetrics = await services.AnalysisService
 				.CalculateContentMetricsAsync(
 					plan.IncludedFiles,
-					topFileObserver,
+					ObserveContentFile,
 					cancellationToken)
 				.ConfigureAwait(false);
 			plan = plan with
@@ -151,6 +158,14 @@ public sealed class AnalyzeCommandHandler(
 					item.Tokens))
 			};
 		}
+		var analysisOutputMetrics = ExportOutputMetricsCalculator.FromOrderedContentFilesForAnalysis(
+			contentFileMetrics,
+			plan.IncludedFiles,
+			plan.SourceRoot,
+			ResolveDocumentRoot(plan, transformationContext));
+		var estimatedRelativePaths = estimatedPaths
+			.Select(path => PathUtility.GetPortableRelativePath(plan.SourceRoot, path))
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 
 		if (findingsRequested && !findingsCapturedByOutput)
 		{
@@ -201,8 +216,17 @@ public sealed class AnalyzeCommandHandler(
 				Findings = request.IncludeFindings ? effectiveFindings : null
 			};
 		}
-		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
-			.Write(plan.Diagnostics);
+		var policyExitCode = plan.HasErrors ||
+		                     request.Strict && plan.Diagnostics.Any(static diagnostic =>
+			                     diagnostic.Code != CodeCompressionAvailabilitySnapshot.DiagnosticCode) ||
+		                     request.FailOnFindings &&
+		                     (effectiveFindingCount > 0 || plan.UnscannableFiles is { Count: > 0 })
+			? CommandLineExitCodes.PolicyFailure
+			: CommandLineExitCodes.Success;
+		try
+		{
+			new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
+				.Write(plan.Diagnostics);
 
 		var outputPath = request.OutputPath is not null and not "-"
 			? ExactOutputDestinationValidator.ValidateAnalysis(
@@ -219,7 +243,12 @@ public sealed class AnalyzeCommandHandler(
 			if (request.Format == AnalysisOutputFormat.Json)
 			{
 				await new MachineOutputRenderer(environment)
-					.WriteAnalysisJsonAsync(plan, environment.Output, cancellationToken)
+					.WriteAnalysisJsonAsync(
+						plan,
+						environment.Output,
+						cancellationToken,
+						analysisOutputMetrics,
+						estimatedRelativePaths)
 					.ConfigureAwait(false);
 			}
 			else
@@ -257,7 +286,9 @@ public sealed class AnalyzeCommandHandler(
 						(destination, token) => renderer.WriteAnalysisJsonContentAsync(
 							plan,
 							destination,
-							token),
+							token,
+							analysisOutputMetrics,
+							estimatedRelativePaths),
 						cancellationToken,
 						ValidateDestination)
 					.ConfigureAwait(false);
@@ -275,11 +306,12 @@ public sealed class AnalyzeCommandHandler(
 			TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		}
 
-		return plan.HasErrors ||
-		       request.Strict && plan.Diagnostics.Count > 0 ||
-		       request.FailOnFindings && effectiveFindingCount > 0
-			? CommandLineExitCodes.PolicyFailure
-			: CommandLineExitCodes.Success;
+			return policyExitCode;
+		}
+		catch (TerminalBrokenPipeException)
+		{
+			return policyExitCode;
+		}
 	}
 
 	internal static bool HasContentTransformations(ProjectSelectionSpec selection) =>
@@ -290,6 +322,22 @@ public sealed class AnalyzeCommandHandler(
 		SecretRedactionFeatureSelection.Resolve(
 			selection.HideSecrets == true,
 			selection.HidePrivateData == true) != SecretRedactionFeatures.None;
+
+	private static string ResolveDocumentRoot(
+		ProjectContextPlan plan,
+		ContentTransformationContext? transformationContext)
+	{
+		var displayRoot = plan.SourceIdentity is
+		{
+			SourceType: ProjectSourceType.GitClone,
+			SourceReference.Length: > 0
+		} identity
+			? RepositoryWebPathPresentationService.NormalizeForDisplay(identity.SourceReference)
+			: plan.SourceRoot;
+		return OutputRootPathPresentation.ResolvePath(
+			displayRoot,
+			OutputRootPathPresentation.CaptureRedactionDecision(transformationContext)).Text;
+	}
 
 	private ContentTransformationContext? CreateTransformationContext(
 		ProjectContextPlan plan,

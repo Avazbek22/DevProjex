@@ -336,8 +336,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	internal static string? GetCurrentExecutablePath()
 	{
-		if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
-			return Environment.ProcessPath;
+		var selfLaunchPath = ProcessEntryPointResolver.ResolveSelfLaunchPath();
+		if (!string.IsNullOrWhiteSpace(selfLaunchPath))
+			return selfLaunchPath;
 
 		using var process = Process.GetCurrentProcess();
 		return process.MainModule?.FileName;
@@ -1848,7 +1849,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			var fullCommandPath = Path.GetFullPath(commandPath);
 			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
 			startInfo.WorkingDirectory = Path.GetDirectoryName(fullCommandPath)!;
-			startInfo.Arguments = $"/d /s /c \"\"{Path.GetFileName(fullCommandPath)}\" --version\"";
+			startInfo.Arguments = $"/d /s /c \"\".\\{Path.GetFileName(fullCommandPath)}\" --version\"";
 		}
 		else
 		{

@@ -8,6 +8,34 @@ namespace DevProjex.Tests.Terminal;
 public sealed class CliUrlSourceCommandTests
 {
 	[Theory]
+	[InlineData("http://example.test/team/repository.git")]
+	[InlineData("git://example.test/team/repository.git")]
+	[InlineData("file:///tmp/repository.git")]
+	public async Task DisallowedRemoteTransportFailsBeforeGitOrCacheAccess(string source)
+	{
+		using var data = new TemporaryDirectory();
+		var git = new CountingGitRepositoryService();
+		var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En) with
+		{
+			GitRepositoryService = git
+		};
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(_ => services))
+			.RunAsync(
+				["analyze", source, "--format", "json"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(0, git.CallCount);
+		Assert.Empty(services.RepoCacheService.ListCacheEntriesForManagement().Entries);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-GIT-URL-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
 	[InlineData(false, true, false)]
 	[InlineData(true, false, false)]
 	[InlineData(true, true, true)]
@@ -120,6 +148,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task LocalUrlSourceClonesReusesCacheSelectsBranchWithoutRecordingRecentHistory()
 	{
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -140,7 +169,7 @@ public sealed class CliUrlSourceCommandTests
 		var bare = Path.Combine(workspace.Path, "origin.git");
 		RunGit(workspace.Path, "clone", "--bare", source, bare);
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		using var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En);
+		using var services = CreateFileRemoteFactory(() => data.Path).Create(AppLanguage.En);
 		var factory = new TerminalServiceFactory(_ => services);
 
 		using var main = await AnalyzeAsync(factory, repositoryUrl, "main");
@@ -194,6 +223,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task UrlSourceFlowsThroughTreeAndExportsUsingTheManagedCache()
 	{
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -209,7 +239,7 @@ public sealed class CliUrlSourceCommandTests
 		var bare = Path.Combine(workspace.Path, "export-origin.git");
 		RunGit(workspace.Path, "clone", "--bare", source, bare);
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		var factory = new TerminalServiceFactory(() => data.Path);
+		var factory = CreateFileRemoteFactory(() => data.Path);
 		var treeEnvironment = new TestTerminalEnvironment();
 
 		var treeExitCode = await new TerminalApplication(treeEnvironment, factory).RunAsync(
@@ -258,6 +288,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task RemoteShallowDiffIsConsistentAcrossCliContentCommands()
 	{
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -279,7 +310,7 @@ public sealed class CliUrlSourceCommandTests
 		var bare = Path.Combine(workspace.Path, "diff-origin.git");
 		RunGit(workspace.Path, "clone", "--bare", source, bare);
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		var factory = new TerminalServiceFactory(() => data.Path);
+		var factory = CreateFileRemoteFactory(() => data.Path);
 		string[] scope = ["--branch", "main", "--git-mode", "diff:HEAD~1..HEAD", "--progress", "never"];
 
 		var analyzeEnvironment = new TestTerminalEnvironment();
@@ -332,6 +363,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task RedirectedUrlCloneProgressNeverContaminatesContextPayloadAndStaysBounded()
 	{
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
 
@@ -356,7 +388,7 @@ public sealed class CliUrlSourceCommandTests
 			"--language", "en"
 		];
 
-		var factory = new TerminalServiceFactory(() => data.Path);
+		var factory = CreateFileRemoteFactory(() => data.Path);
 		var progressExitCode = await new TerminalApplication(
 				progressEnvironment,
 				factory)
@@ -383,6 +415,7 @@ public sealed class CliUrlSourceCommandTests
 	[Fact]
 	public async Task MissingFileRemoteReturnsRuntimeFailureWithoutPayload()
 	{
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		using var workspace = new TemporaryDirectory();
 		using var data = new TemporaryDirectory();
 		var missing = Path.Combine(workspace.Path, "missing.git");
@@ -459,6 +492,13 @@ public sealed class CliUrlSourceCommandTests
 		Assert.Empty(environment.StandardError);
 		return JsonDocument.Parse(environment.StandardOutput);
 	}
+
+	private static TerminalServiceFactory CreateFileRemoteFactory(Func<string> dataRoot) =>
+		new(
+			dataRoot,
+			new GitRepositoryService(
+				allowFileTransportForTests: true,
+				retainTestManagedMarker: false));
 
 	private static bool IsGitAvailable()
 	{

@@ -136,8 +136,16 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 		}
 	}
 
-	public string FormatCompressCodeLabel(int? compressedFiles, int? uncompressedFiles)
-		=> localization["Settings.Ignore.CompressCode"];
+	public string FormatCompressCodeLabel(
+		int? compressedFiles,
+		int? uncompressedFiles,
+		bool unavailable = false)
+	{
+		var label = localization["Settings.Ignore.CompressCode"];
+		return unavailable
+			? localization.Format("Settings.Ignore.CompressCodeUnavailable", label)
+			: label;
+	}
 
 	public string FormatStripCommentsLabel(int? strippedFiles, int? unchangedFiles)
 		=> localization["Settings.Ignore.StripComments"];

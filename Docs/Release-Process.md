@@ -1,0 +1,300 @@
+# Release process
+
+DevProjex has two local desktop release channels and five CI-owned channels.
+`Scripts/release-all.ps1` owns the GitHub desktop artifacts and Microsoft Store
+upload. AppImage, headless archives, and the Docker image are assembled only by
+release workflows. NuGet and npm are built and published only by
+`.github/workflows/publish-packages.yml`; the local desktop script never publishes
+any CI-owned channel.
+
+## Release metadata and AppImage receipts
+
+Every workflow triggered by `release: published` verifies the release tag before
+any build begins. After removing the conventional leading `v`, the tag must match
+`DevProjexVersion` in `Directory.Build.props` exactly. AppImage, headless archive,
+container, and NuGet/npm workflow runs all use
+`Scripts/ci/Test-ReleaseVersion.ps1`, so a mismatch stops with the same diagnostic.
+A `workflow_dispatch` run may use an explicit version instead; the selected
+override and the repository version are then written to the job summary.
+
+The AppImage workflow enables the same SDK-generated single-file payload receipt
+used by the desktop and headless channels. Before AppDir assembly, the common
+release validator compares the published executable with that receipt in both
+directions, including embedded resources, paths, sizes, and hashes. A mutation
+gate damages a copy of an embedded resource and proves that validation fails while
+naming the AppImage publish payload and the changed entry. Packaging continues
+only after both checks pass.
+
+## CI tiers
+
+Checks are tiered by how close a commit is to a release; the policy and the
+rules that keep it cheap live in `.github/workflows/README.md`. A pull request
+into a version branch runs `.NET CI` and Release Validation, both narrowed by
+the change planner. A merge into `v*` additionally runs the headless archive,
+container, package, and AppImage dry-runs once per merge; those check runs are
+attached to the merged commit, so the open release pull request shows them
+without a second run. Master adds the Store smoke, and the release candidate
+below runs every read-only gate for one commit.
+
+## Release candidate gate
+
+Before creating a release tag, dispatch `.github/workflows/release-candidate.yml`
+with the full 40-character commit SHA that will be tagged:
+
+```shell
+candidate_sha=$(git rev-parse origin/v5.2)
+gh workflow run release-candidate.yml --ref "$candidate_sha" -f sha="$candidate_sha"
+```
+
+For a manual dispatch, the input SHA must equal `github.sha` for the selected
+workflow ref. This keeps the workflow definition and source tree on one commit;
+both identities are printed in the summary. Pull requests do not run the RC
+aggregator: the ordinary `.NET CI` workflow runs a lightweight `actionlint` job
+instead, so edits to workflow composition are checked without duplicating every
+matrix and packaging build.
+
+The gate checks out that exact SHA and runs reusable `.NET CI`, Release
+Validation, the read-only headless archive, container, headless-package, and
+AppImage builds, Grammar Delivery, and the Store package smoke. The three
+planners receive `force_full: true`; every test, documentation, release-config,
+local-channel, publish-smoke, and Store job must run, and each reusable gate
+fails if one of its jobs is skipped. The four read-only build workflows have no
+direct pull-request trigger and are invoked by their publishing workflow on a
+merge into `v*` or on a published release.
+No channel publishes from the RC: write and OIDC permissions exist only in the
+outer release workflows. The final job writes one table covering all eight gates
+and fails if any called workflow was skipped, canceled, or unsuccessful. A green
+manually dispatched release-candidate report for the exact commit is required
+before the tag is created.
+
+## Local channel model
+
+The default invocation selects both local channels:
+
+- `github`: six self-contained desktop artifacts for `win-x64`, `win-arm64`,
+  `linux-x64`, `linux-arm64`, `osx-x64`, and `osx-arm64`;
+- `store`: one unsigned `.msixupload` whose bundle contains x64 and arm64
+  application packages and all Store resource languages, plus the generated
+  `.msixbundle` and x64 `.msix` companions used by local validation and WACK.
+
+The build still runs in an isolated temporary workspace. Only validated outputs
+are copied back to:
+
+- `publish/github/v<version>`;
+- `publish/store/v<version>`.
+
+`Packaging/Headless/payload-manifest.json` keeps the cross-channel facts that are
+independent of one build: the six RIDs, executable and grammar naming, and Store
+alias, architectures, and resource languages. Every local build additionally
+emits `publish-payload.<rid>.json`. This build receipt is the authoritative list
+of publish files for that RID; each entry records its path, size, SHA-256, and,
+for a managed assembly, its complete embedded-resource name table. The receipt
+is covered by `SHA256SUMS.txt` and travels beside the release artifacts.
+
+## Operator commands
+
+Run a complete local release from an elevated PowerShell console because the
+Store WACK phase requires administrator rights:
+
+```powershell
+./Scripts/release-all.ps1 -NonInteractive
+```
+
+Rebuild and validate only the Store channel, including WACK, from an elevated
+PowerShell console:
+
+```powershell
+./Scripts/release-all.ps1 -Channels store -NonInteractive
+```
+
+Build one GitHub RID for debugging. This is intentionally marked `PARTIAL`, its
+checksum manifest lists only the selected artifact and its RID receipt, and it
+is not release-ready:
+
+```powershell
+./Scripts/release-all.ps1 -Channels github -Rids win-x64 -SkipWack -NonInteractive
+```
+
+`-GitHubArtifactsOnly` remains an alias for `-Channels github`:
+
+```powershell
+./Scripts/release-all.ps1 -Version 5.2 -GitHubArtifactsOnly
+```
+
+Build Store without WACK from a non-elevated console, then validate the existing
+upload with WACK from an elevated console:
+
+```powershell
+./Scripts/release-all.ps1 -Channels store -SkipWack -NonInteractive
+./Scripts/release-all.ps1 -Channels store -WackOnly -NonInteractive
+```
+
+Re-run the fail-closed static gate without building or invoking WACK:
+
+```powershell
+./Scripts/release-all.ps1 -ValidateArtifactsOnly -Channels github,store -NonInteractive
+```
+
+Validate only an existing partial GitHub RID set:
+
+```powershell
+./Scripts/release-all.ps1 -ValidateArtifactsOnly -Channels github -Rids win-x64 -NonInteractive
+```
+
+CI uses the same non-interactive channel selection and can invoke the standalone
+gate explicitly:
+
+```powershell
+./Scripts/release-all.ps1 -Channels github -Rids win-x64,linux-x64 -SkipWack -NonInteractive
+./Scripts/Test-ReleaseArtifacts.ps1 -PublishRoot publish -Version 5.2 -Channels github -Rids win-x64,linux-x64
+./Scripts/Test-ReleaseArtifactGateMutation.ps1 -PublishRoot publish -Version 5.2 -Channels github -Rids win-x64,linux-x64
+```
+
+When `-NonInteractive` is set, `Read-Host` is never called. An invalid explicit
+version or invalid channel/RID selection exits with code 1 and one diagnostic
+line. Without `-Version`, the version still comes from `Directory.Build.props`
+through `Scripts/release-helpers.ps1`.
+
+## Release readiness
+
+A complete GitHub channel must contain exactly the six named artifacts and a
+matching `SHA256SUMS.txt`. A subset contains `PARTIAL-BUILD.txt`; validation may
+pass for exactly the requested RIDs, but the summary remains `PARTIAL` and the set
+must not be attached to a release.
+
+The static gate checks, without running foreign-RID binaries:
+
+- the exact selected GitHub artifact/receipt set and every SHA-256;
+- Windows file/product versions, Linux and macOS version evidence, archive layout,
+  and executable mode bits;
+- the .NET single-file manifest against the RID receipt in both directions,
+  including every file path, size, SHA-256, and every managed assembly resource;
+  any compressed bundle entry fails validation;
+- macOS `Info.plist` version and application layout;
+- Store upload, bundle, x64/arm64 application packages, package/bundle versions,
+  execution alias, exact application payload from both RID receipts, and all
+  Store resource languages. The Store directory must contain exactly the
+  versioned `.msixupload`, x64|arm64 `.msixbundle`, x64 `.msix`, and the two
+  Windows RID receipts emitted by the existing packaging layout.
+- the AppImage input single-file bundle against its RID receipt before AppDir
+  assembly; the AppImage workflow runs the common receipt mutation gate as well.
+
+Store compares every application-package file and managed resource in both
+directions. The only channel-generated additions are `AppxManifest.xml`,
+`AppxBlockMap.xml`, `[Content_Types].xml`, `AppxSignature.p7x`, `resources.pri`,
+and `Assets/**`; this allowlist is centralized in the validator. Sizes and
+SHA-256 values are checked for archive/package entries. A missing or unexpected
+help file, ignore profile, icon-pack asset, compression language resource,
+gitleaks rule, notice, managed assembly, or native RID library fails identically.
+
+The host `win-x64` artifact also runs `--version`, `tree`, compressed and full
+`analyze`, the secret findings exit-code/redaction check, and the MCP initialize
+handshake. The MCP check prints `SKIPPED` when Node is unavailable; no check is
+silently omitted. Store is release-ready only after the static gate and WACK both
+pass. A `-SkipWack` summary explicitly says that Store is not release-ready.
+
+Every successful invocation prints one line per selected artifact with byte size
+and SHA-256, the status of each selected channel, and its output directory.
+
+## Adding a channel
+
+A new distribution channel is not connected until all five conditions are met:
+
+1. Its stable metadata is represented in the shared manifest and its build emits
+   a complete content receipt from the channel's own publish inputs.
+2. A static completeness gate fails closed on missing or invalid content.
+3. A mutation gate proves the completeness gate rejects a damaged real artifact.
+4. A functional smoke exercises the artifact through its public entry point.
+5. Its publication path and release-readiness requirements are documented.
+
+The current publishing paths remain separate: GitHub desktop archives and Store
+uploads are prepared locally, AppImage is attached by the release workflow, and
+NuGet/npm are published through `publish-packages.yml` after their own static,
+mutation, and three-OS functional gates.
+
+Every packaging wrapper resolves its checkout once to a full commit SHA. All
+downstream build, gate, artifact, and publish jobs use that immutable SHA, and the
+package and container artifacts carry it in their receipts. Privileged release
+workflows pin third-party actions to reviewed commit SHAs.
+
+NuGet and npm publication is resumable without allowing overwrite. Before each
+package is pushed, the workflow queries the registry. For NuGet it downloads the
+published package and compares the embedded payload receipt and every semantic
+payload entry, ignoring signing-only ZIP metadata rather than comparing signed
+package bytes. For npm it compares `npm view ... dist.integrity` with the SHA-512
+integrity of the local `npm pack` tarball. Identical content is logged and skipped;
+different content for an existing identity is a hard failure. RID/platform
+packages remain ordered before the NuGet pointer and npm launcher. The read-only
+package gate simulates interruption after three packages, resumes to all fourteen,
+then proves both the identical-skip and mismatch-failure paths.
+
+The NuGet smoke uses a generated configuration with `<clear/>`, the local artifact
+feed as its only source, and isolated package and HTTP caches. It verifies the
+installed pointer and RID payload receipts against the gated packages before
+running the public CLI and MCP smoke.
+
+## CI-owned headless archives
+
+`.github/workflows/package-headless.yml` builds all six
+`DevProjex-headless.v<version>.<rid>.zip|tar.gz` archives from the same single-file
+publish directories used to stage npm platform packages. The workflow validates
+the complete set and uploads it only for a published release, or for a manual run
+that names an existing `release_tag`. Outputs are staged below
+`artifacts/headless/release/headless/v<version>`.
+
+This channel satisfies the five connection requirements as follows:
+
+1. RID and executable names come from `payload-manifest.json`; each build emits a
+   complete `publish-payload.<rid>.json` from `_FilesToBundle`.
+2. `Test-ReleaseArtifacts.ps1 -Channels headless` checks the exact archive set,
+   USTAR executable modes, single-file entries, resources, sizes, and hashes.
+3. `Test-ReleaseArtifactGateMutation.ps1 -Channels headless` damages deterministic
+   file and resource entries plus grammar, localization, and native-library cases.
+4. The workflow runs `--version`, `tree`, both `analyze` forms, the secret exit-3
+   check, and an MCP initialize handshake against the linux-x64 archive payload.
+5. The workflow attaches archives, receipts, and `SHA256SUMS.headless.txt` to the
+   GitHub release; installation commands live in `Docs/Installation.md`.
+
+The separate checksum filename is deliberate. Desktop artifacts and
+`SHA256SUMS.txt` are produced by an operator, while headless assets are produced by
+CI. Two independent producers cannot atomically update one checksum manifest.
+
+## CI-owned Docker image
+
+`.github/workflows/publish-container.yml` builds amd64 and arm64 from the root
+`Dockerfile` once in its read-only build job. It records each tested archive hash,
+image ID, source SHA, and version, then pushes those saved images without rebuilding
+only for `release: published`. Pull requests and manual runs build, validate, and
+smoke without pushing. The SDK stage cross-publishes linux-arm64 on the x64 runner;
+`BUILDPLATFORM` keeps the compiler native, and the final multi-architecture image
+contains the prebuilt output without a target-architecture build step.
+
+The container channel meets the same connection contract:
+
+1. The folder publish opts into the shared build receipt and uses manifest RID and
+   binary metadata. Store retains its existing automatic folder-receipt default.
+2. `Test-ReleaseArtifacts.ps1 -Channels container` compares the extracted `/app`
+   directory with its receipt in both directions, including managed resources.
+3. `Test-ReleaseArtifactGateMutation.ps1 -Channels container` mutates a copied
+   extracted payload and proves the common diff rejects it.
+4. amd64 and native arm64 jobs run version, tree, compression, secret, and MCP
+   smoke with `--read-only`, `--tmpfs /tmp`, and a read-only project mount.
+5. The published multi-architecture manifest is assembled from the exact registry
+   digests of the tested archives. Build provenance attests that manifest digest.
+   The version tag is always published; `latest` moves only when that version is
+   stable and not older than the maximum stable semantic version already in GHCR.
+   Prereleases never move `latest`. Docker and MCP
+   client recipes are documented in `Docs/Installation.md` and `Docs/McpServer.md`.
+
+The image is a folder publish with `DevProjexGrammarDelivery=Content`. Grammar
+libraries stay beside the executable, and `CodeCompressionFactory` selects content
+delivery from the presence of that `grammars` directory on every OS. It does not
+fall back to embedded delivery when a shipped grammar is missing. Neither .NET
+single-file extraction nor grammar materialization needs a writable filesystem at
+startup.
+
+The runtime image deliberately omits Git and SSH. Its smoke proves `--git-mode none`
+works and both tracked-index and momentary Git scopes fail explicitly with
+`DPX-GIT-TRACKED-INDEX-UNAVAILABLE` or `DPX-GIT-STATE-UNAVAILABLE`; the
+user-facing limitation and alternatives are in
+`Docs/Installation.md`.

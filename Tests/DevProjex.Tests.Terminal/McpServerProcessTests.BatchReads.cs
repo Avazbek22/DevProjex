@@ -1,0 +1,378 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
+using DevProjex.Infrastructure.ProjectProfiles;
+using ModelContextProtocol;
+using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
+
+namespace DevProjex.Tests.Terminal;
+
+public sealed partial class McpServerProcessTests
+{
+	[Fact]
+	public async Task RealProcessSupportsBatchReadsAndRedactsRelatedFilesInlineAndFromStorage()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/tsconfig.json",
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		workspace.WriteFile("project/Small.txt", $"one\ntwo {Secret}\nthree\n");
+		var imports = new StringBuilder();
+		for (var index = 0; index < 700; index++)
+		{
+			var name = $"target{index:D4}-{Secret}";
+			workspace.WriteFile($"project/{name}.ts", $"export default {index};\n");
+			imports.Append("import value").Append(index).Append(" from './").Append(name).AppendLine(".js';");
+		}
+		workspace.WriteFile("project/Main.ts", imports.ToString());
+
+		var (process, client, errorTask, output) = await StartPublishedMcpAsync(
+			workspace,
+			project,
+			["--allow-remote", "--remote-hosts", "github.com"]);
+		try
+		{
+			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
+			var getFile = Assert.Single(tools, static tool => tool.Name == "get_file");
+			Assert.True(getFile.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("requests", out _));
+			Assert.False(Assert.Single(tools, static tool => tool.Name == "related_files")
+				.ProtocolTool.Annotations?.IdempotentHint);
+
+			var batch = await client.CallToolAsync("get_file", new Dictionary<string, object?>
+			{
+				["requests"] = new object[]
+				{
+					new { path = "Small.txt", ranges = new[] { new { start_line = 1, end_line = 2 } } },
+					new { path = "Small.txt", ranges = new[] { new { start_line = 2, end_line = 9 } } }
+				}
+			}, progress: null, options: null, TestContext.Current.CancellationToken);
+			var batchText = Assert.IsType<TextContentBlock>(Assert.Single(batch.Content)).Text;
+			Assert.NotEqual(true, batch.IsError);
+			Assert.Contains("Requests: 1.1, 2.1", batchText, StringComparison.Ordinal);
+			Assert.DoesNotContain(Secret, batchText, StringComparison.Ordinal);
+
+			var related = await client.CallToolAsync("related_files", new Dictionary<string, object?>
+			{
+				["path"] = "Main.ts",
+				["direction"] = "dependencies"
+			}, progress: null, options: null, TestContext.Current.CancellationToken);
+			var relatedText = Assert.IsType<TextContentBlock>(Assert.Single(related.Content)).Text;
+			var packMatch = Regex.Match(relatedText, "Related-files result stored as '([^']+)'");
+			Assert.True(packMatch.Success, relatedText);
+			Assert.DoesNotContain(Secret, relatedText, StringComparison.Ordinal);
+
+			var page = await client.CallToolAsync("read_pack", new Dictionary<string, object?>
+			{
+				["pack_id"] = packMatch.Groups[1].Value
+			}, progress: null, options: null, TestContext.Current.CancellationToken);
+			var pageText = Assert.IsType<TextContentBlock>(Assert.Single(page.Content)).Text;
+			Assert.DoesNotContain(Secret, pageText, StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[", pageText, StringComparison.Ordinal);
+
+			var denied = await client.CallToolAsync("get_tree", new Dictionary<string, object?>
+			{
+				["project"] = "https://gitlab.com/owner/repository.git"
+			}, progress: null, options: null, TestContext.Current.CancellationToken);
+			Assert.True(denied.IsError);
+			Assert.StartsWith("DPX-MCP-REMOTE-HOST-DENIED",
+				Assert.IsType<TextContentBlock>(Assert.Single(denied.Content)).Text, StringComparison.Ordinal);
+		}
+		finally
+		{
+			process.StandardInput.Close();
+			await client.DisposeAsync();
+		}
+
+		await Task.WhenAll(
+			process.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken),
+			output.WaitForSourceEofAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
+		var standardError = await errorTask;
+		Assert.True(process.ExitCode == 0, $"Unexpected exit code {process.ExitCode}. stderr: {standardError}");
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+		process.Dispose();
+	}
+
+	/// <summary>
+	/// A large manifest reports progress while it is walked, and the walk ends at 100.
+	/// </summary>
+	/// <remarks>
+	/// The terminal notification is waited for rather than assumed. The server writes it before
+	/// the result — <see cref="AssertFinalProgressPrecedesResult"/> pins that on the recorded stream —
+	/// but it is delivered on its own path, and the return of the call says nothing about whether
+	/// that delivery has happened yet. Reading the collected values at the moment the call returns
+	/// asked the wrong question, and answered it differently depending on how loaded the machine
+	/// was: the last value, or all of them, could still be in flight.
+	/// </remarks>
+	[Fact(Timeout = 120_000)]
+	public async Task RealProcessThrottlesDependencyProgressForTenThousandFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 10_000; index++)
+			workspace.WriteFile($"project/File{index:D5}.txt", "value\n");
+		var (process, client, errorTask, output) = await StartPublishedMcpAsync(workspace, project, []);
+		var progress = new InlineProgress<ProgressNotificationValue>();
+		try
+		{
+			var result = await client.CallToolAsync("related_files", new Dictionary<string, object?>
+			{
+				["path"] = "File00000.txt"
+			}, progress, new RequestOptions { ProgressToken = new ProgressToken("throttle") },
+				TestContext.Current.CancellationToken);
+
+			Assert.NotEqual(true, result.IsError);
+			await progress
+				.WaitForAsync(static value => value.Progress >= 100f, TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			Assert.InRange(progress.Values.Count, 2, 20);
+			Assert.Equal(5f, progress.Values[0].Progress);
+			Assert.Equal(100f, progress.Values[^1].Progress);
+		}
+		finally
+		{
+			process.StandardInput.Close();
+			await client.DisposeAsync();
+		}
+		await CompletePublishedMcpAsync(process, errorTask, output);
+		AssertFinalProgressPrecedesResult(output.GetRecordedText());
+	}
+
+	/// <summary>
+	/// The terminal progress notification is written before the result of the call it belongs to,
+	/// so a caller that treats the result as the end of the call cannot be handed a truncated
+	/// sequence by anything the server did.
+	/// </summary>
+	/// <remarks>
+	/// Read from the recorded bytes rather than from what arrived, because the two are different
+	/// claims: this one is about the order things were written in, and it is the half that a test
+	/// waiting for delivery would otherwise stop checking.
+	/// </remarks>
+	private static void AssertFinalProgressPrecedesResult(string recordedTransport)
+	{
+		var finalProgress = -1;
+		var callResult = -1;
+		var position = 0;
+		foreach (var line in recordedTransport.Split('\n'))
+		{
+			position++;
+			if (line.Contains("notifications/progress", StringComparison.Ordinal))
+			{
+				var reported = Regex.Match(line, @"""progress""\s*:\s*([0-9.]+)");
+				if (reported.Success &&
+					float.TryParse(
+						reported.Groups[1].Value,
+						System.Globalization.CultureInfo.InvariantCulture,
+						out var value) &&
+					value >= 100f)
+				{
+					finalProgress = position;
+				}
+			}
+			else if (line.Contains("\"result\"", StringComparison.Ordinal))
+			{
+				callResult = position;
+			}
+		}
+
+		Assert.True(finalProgress > 0, "The server never wrote a terminal progress notification.");
+		Assert.True(callResult > 0, "The server never wrote a result for the call.");
+		Assert.True(
+			finalProgress < callResult,
+			$"The result was written at line {callResult}, ahead of the terminal progress " +
+			$"notification at line {finalProgress}, so a caller that stops at the result cannot " +
+			"see the whole sequence.");
+	}
+
+	/// <summary>
+	/// The same check, reachable from the cases that drive it with a written-out sequence.
+	/// </summary>
+	internal static void AssertFinalProgressPrecedesResultForContract(string recordedTransport) =>
+		AssertFinalProgressPrecedesResult(recordedTransport);
+
+	[Fact(Timeout = 120_000)]
+	public async Task RealProcessReportsWhenSearchStopsAtTheInspectedByteBudget()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 5; index++)
+		{
+			var prefix = index == 4 ? "needle-after-budget\n" : "clean\n";
+			workspace.WriteFile($"project/Large{index}.txt", prefix + new string('x', 14 * 1024 * 1024));
+		}
+		var (process, client, errorTask, output) = await StartPublishedMcpAsync(workspace, project, []);
+		try
+		{
+			var result = await client.CallToolAsync("search_project", new Dictionary<string, object?>
+			{
+				["pattern"] = "needle-after-budget",
+				["ignore_case"] = false,
+				["context_lines"] = 0
+			}, progress: null, options: null, TestContext.Current.CancellationToken);
+			var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+			Assert.NotEqual(true, result.IsError);
+			Assert.DoesNotContain("Large4.txt", text, StringComparison.Ordinal);
+			Assert.Contains("[No matches] The pattern matched nothing in 4 inspected selected file(s)", text, StringComparison.Ordinal);
+			Assert.Contains("[Search boundary] partial", text, StringComparison.Ordinal);
+			Assert.Contains("limits=inspection-bytes", text, StringComparison.Ordinal);
+			Assert.Contains("continue the search", text, StringComparison.Ordinal);
+		}
+		finally
+		{
+			process.StandardInput.Close();
+			await client.DisposeAsync();
+		}
+		await CompletePublishedMcpAsync(process, errorTask, output);
+	}
+
+	[Fact]
+	public async Task RealProcessRejectsAPortableProfileReplacedByAnOutsideDirectoryAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var profiles = workspace.CreateDirectory("project/profiles");
+		var outside = workspace.CreateDirectory("outside");
+		workspace.WriteFile("project/Visible.txt", "visible\n");
+		var profile = JsonSerializer.Serialize(new
+		{
+			schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+			kind = PortableProjectProfileService.DocumentKind,
+			selection = new
+			{
+				roots = (string[]?)null,
+				extensions = new[] { ".txt" },
+				selectedPaths = (string[]?)null,
+				gitMode = "none",
+				exclusions = Array.Empty<string>(),
+				hideSecrets = false,
+				hidePrivateData = false
+			}
+		});
+		File.WriteAllText(Path.Combine(profiles, "profile.json"), profile);
+		File.WriteAllText(Path.Combine(outside, "profile.json"), profile);
+
+		var (process, client, errorTask, output) = await StartPublishedMcpAsync(workspace, project, []);
+		try
+		{
+			var before = await client.CallToolAsync("get_file", new Dictionary<string, object?>
+			{
+				["profile"] = "profiles/profile.json",
+				["path"] = "Visible.txt"
+			}, progress: null, options: null, TestContext.Current.CancellationToken);
+			Assert.True(
+				before.IsError != true,
+				Assert.IsType<TextContentBlock>(Assert.Single(before.Content)).Text);
+
+			Directory.Delete(profiles, recursive: true);
+			CreatePortableProfileDirectoryAliasOrSkip(profiles, outside);
+			var after = await client.CallToolAsync("get_file", new Dictionary<string, object?>
+			{
+				["profile"] = "profiles/profile.json",
+				["path"] = "Visible.txt"
+			}, progress: null, options: null, TestContext.Current.CancellationToken);
+
+			Assert.True(after.IsError);
+			Assert.StartsWith(
+				"DPX-MCP-ROOT-VIOLATION",
+				Assert.IsType<TextContentBlock>(Assert.Single(after.Content)).Text,
+				StringComparison.Ordinal);
+		}
+		finally
+		{
+			process.StandardInput.Close();
+			await client.DisposeAsync();
+		}
+
+		await Task.WhenAll(
+			process.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken),
+			output.WaitForSourceEofAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
+		var standardError = await errorTask;
+		Assert.True(process.ExitCode == 0, $"Unexpected exit code {process.ExitCode}. stderr: {standardError}");
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+		process.Dispose();
+	}
+
+	private static async Task<(Process Process, McpClient Client, Task<string> Error, RecordingReadStream Output)>
+		StartPublishedMcpAsync(
+			TemporaryDirectory workspace,
+			string project,
+			IReadOnlyList<string> additionalArguments)
+	{
+		var start = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		start.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		start.ArgumentList.Add("mcp");
+		start.ArgumentList.Add("--root");
+		start.ArgumentList.Add(project);
+		foreach (var argument in additionalArguments)
+			start.ArgumentList.Add(argument);
+		start.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		var process = Process.Start(start) ?? throw new InvalidOperationException("MCP process did not start.");
+		var error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var output = new RecordingReadStream(process.StandardOutput.BaseStream);
+		var client = await McpClient.CreateAsync(
+			new StreamClientTransport(process.StandardInput.BaseStream, output),
+			clientOptions: null,
+			loggerFactory: null,
+			TestContext.Current.CancellationToken);
+		return (process, client, error, output);
+	}
+
+	private static async Task CompletePublishedMcpAsync(
+		Process process,
+		Task<string> errorTask,
+		RecordingReadStream output)
+	{
+		await Task.WhenAll(
+			process.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken),
+			output.WaitForSourceEofAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
+		var standardError = await errorTask;
+		Assert.True(process.ExitCode == 0, $"Unexpected exit code {process.ExitCode}. stderr: {standardError}");
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+		process.Dispose();
+	}
+
+	private static void CreatePortableProfileDirectoryAliasOrSkip(string linkPath, string targetPath)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			try
+			{
+				Directory.CreateSymbolicLink(linkPath, targetPath);
+				return;
+			}
+			catch (Exception exception) when (
+				exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+			{
+				Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		using var process = Process.Start(new ProcessStartInfo(
+			"cmd.exe",
+			$"/d /c mklink /J \"{linkPath}\" \"{targetPath}\"")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		});
+		if (process is null || !process.WaitForExit(5_000) || process.ExitCode != 0 || !Directory.Exists(linkPath))
+			Assert.Skip("Windows junction creation is unavailable.");
+	}
+
+}

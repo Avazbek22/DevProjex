@@ -1,0 +1,188 @@
+name: Publish Headless Container
+
+# CI tier 2 (push to v*) and 3 (master, release). Policy: .github/workflows/README.md
+# - `pull_request` runs ONLY when the container inputs themselves change (paths below). Core code
+#   paths belong to `push`; copying them here makes every feature push cross-build the image.
+# - `branches-ignore: [master]` keeps the release PR (v* -> master) out: the push run on v* already
+#   attaches its checks to the same commit the release PR shows. Never replace it with `branches:`.
+# - The read-only build is container-build.yml (also used by release-candidate.yml). Only the
+#   publish job may push to GHCR, and only for `release: published`.
+
+on:
+  push:
+    branches: [master, 'v*']
+    paths:
+      - '.github/workflows/publish-container.yml'
+      - '.github/workflows/container-build.yml'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'glama.json'
+      - 'Apps/Terminal/**'
+      - 'Apps/TerminalHost/**'
+      - 'Apps/Mcp/**'
+      - 'Assets/Localization/**'
+      - 'Application/**'
+      - 'Infrastructure/**'
+      - 'Kernel/**'
+      - 'Packaging/Headless/**'
+      - 'Scripts/*Headless*'
+      - 'Scripts/ContainerPublishing.ps1'
+      - 'Scripts/ci/Test-ContainerPromotionPolicy.ps1'
+      - 'Scripts/*Release*'
+      - 'Scripts/release-archive-helpers.ps1'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
+      - 'Directory.Build.*'
+      - 'Directory.Packages.props'
+  pull_request:
+    # The release PR (v* -> master) is excluded: its head commit already carries the push run.
+    branches-ignore: [master]
+    paths:
+      - '.github/workflows/publish-container.yml'
+      - '.github/workflows/container-build.yml'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'glama.json'
+      - 'Packaging/Headless/**'
+      - 'Scripts/*Headless*'
+      - 'Scripts/ContainerPublishing.ps1'
+      - 'Scripts/ci/Test-ContainerPromotionPolicy.ps1'
+      - 'Scripts/*Release*'
+      - 'Scripts/release-archive-helpers.ps1'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
+      - 'Directory.Build.targets'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the v prefix
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: false
+        type: string
+      version:
+        description: Optional image version; defaults to Directory.Build.props
+        required: false
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# One run per pull request or branch head. Feature pushes and branch merges cancel their own
+# superseded runs; release, dispatch, and workflow_call runs are never cancelled.
+concurrency:
+  # All release publications share one group so an older release cannot race a newer latest tag.
+  group: publish-container-${{ github.workflow }}-${{ github.event_name == 'release' && 'registry' || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  IMAGE_NAME: ghcr.io/avazbek22/devprojex
+
+jobs:
+  prepare:
+    name: Resolve container version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      source_sha: ${{ steps.version.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          PUBLISHED_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            version="${PUBLISHED_RELEASE_TAG#v}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" || -z "${DISPATCH_VERSION}" ]]; then
+            version="$(sed -n 's:.*<DevProjexVersion[^>]*>\([^<]*\)</DevProjexVersion>.*:\1:p' Directory.Build.props)"
+          else
+            version="${DISPATCH_VERSION}"
+          fi
+          if [[ "${version}" == v* || ! "${version}" =~ ^[0-9]+\.[0-9]+([.][0-9]+)?([+-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "::error::Unsupported version syntax: ${version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "source_sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate release version metadata
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ReleaseVersion.ps1
+          -ResolvedVersion '${{ steps.version.outputs.version }}'
+          -EventName '${{ github.event_name }}'
+          -ReleaseTag '${{ github.event.release.tag_name }}'
+
+  build:
+    name: Read-only container gates
+    needs: prepare
+    uses: ./.github/workflows/container-build.yml
+    with:
+      checkout_ref: ${{ needs.prepare.outputs.source_sha }}
+      version: ${{ needs.prepare.outputs.version }}
+
+  publish:
+    name: Publish multi-architecture image and provenance
+    if: ${{ github.event_name == 'release' }}
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: devprojex-container-images
+          path: artifacts/container-images
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote the tested images without rebuilding
+        id: promote
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          ./Scripts/Publish-HeadlessContainer.ps1
+          -ArtifactsRoot artifacts/container-images
+          -ImageName '${{ env.IMAGE_NAME }}'
+          -Version '${{ needs.prepare.outputs.version }}'
+          -SourceSha '${{ needs.prepare.outputs.source_sha }}'
+          -RegistryOwner '${{ github.repository_owner }}'
+          -GitHubOutputPath $env:GITHUB_OUTPUT
+
+      - name: Attest image build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.promote.outputs.manifest_digest }}
+          push-to-registry: true

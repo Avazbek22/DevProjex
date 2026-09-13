@@ -8,7 +8,12 @@ internal sealed record McpTextPage(
 	int EndLine,
 	int TotalLines,
 	bool IsTruncated,
-	bool CharacterLimitReached);
+	bool CharacterLimitReached)
+{
+	public int StartColumn { get; init; } = 1;
+	public int? NextLine { get; init; }
+	public int? NextColumn { get; init; }
+}
 
 internal static class McpTextRanges
 {
@@ -20,12 +25,16 @@ internal static class McpTextRanges
 		int maximumCharacters,
 		CancellationToken cancellationToken,
 		int? knownTotalLines = null,
-		int firstStreamLineNumber = 1)
+		int firstStreamLineNumber = 1,
+		int? startColumn = null)
 	{
 		ArgumentNullException.ThrowIfNull(stream);
 		if (knownTotalLines is < 0)
 			throw new ArgumentOutOfRangeException(nameof(knownTotalLines));
 		var start = startLine ?? 1;
+		var column = startColumn ?? 1;
+		if (column < 1)
+			throw InvalidColumnRange(start, column);
 		if (firstStreamLineNumber < 1 || firstStreamLineNumber > start)
 			throw new ArgumentOutOfRangeException(nameof(firstStreamLineNumber));
 		var requestedEnd = endLine ?? int.MaxValue;
@@ -34,7 +43,7 @@ internal static class McpTextRanges
 		if (knownTotalLines is 0 && (startLine is > 1 || endLine is > 0))
 			throw InvalidRange(start, endLine, 0);
 		if (knownTotalLines is { } knownTotal && knownTotal > 0 &&
-		    (start > knownTotal || endLine > knownTotal))
+		    start > knownTotal)
 		{
 			throw InvalidRange(start, endLine, knownTotal);
 		}
@@ -60,6 +69,8 @@ internal static class McpTextRanges
 		var hasAppendedLine = false;
 		var currentLineHasContent = false;
 		var currentLineOverflowed = false;
+		var currentLineScalarCount = 0;
+		char? pendingHighSurrogate = null;
 		var previousWasCarriageReturn = false;
 		var endedWithLineBreak = false;
 		var requestedLinesRead = knownTotalLines is 0;
@@ -75,6 +86,8 @@ internal static class McpTextRanges
 		void CompleteLine()
 		{
 			var lineNumber = ++total;
+			if (lineNumber == start && column > currentLineScalarCount + 1)
+				throw InvalidColumnRange(start, column);
 			if (ShouldCaptureLine(lineNumber) && !characterLimit)
 			{
 				var separatorLength = hasAppendedLine ? 1 : 0;
@@ -103,7 +116,34 @@ internal static class McpTextRanges
 			lineBuilder.Clear();
 			currentLineHasContent = false;
 			currentLineOverflowed = false;
+			currentLineScalarCount = 0;
 			requestedLinesRead = knownTotalLines.HasValue && lineNumber >= lastLineToRead;
+		}
+
+		void ProcessScalar(char first, char? second = null)
+		{
+			currentLineHasContent = true;
+			currentLineScalarCount++;
+			if (characterLimit || !ShouldCaptureLine(total + 1) ||
+			    (total + 1 == start && currentLineScalarCount < column))
+				return;
+			var width = second is null ? 1 : 2;
+			if (lineBuilder.Length + width <= bufferedLineLimit)
+			{
+				lineBuilder.Append(first);
+				if (second is { } following)
+					lineBuilder.Append(following);
+			}
+			else
+				currentLineOverflowed = true;
+		}
+
+		void FlushPendingHighSurrogate()
+		{
+			if (pendingHighSurrogate is not { } pending)
+				return;
+			ProcessScalar(pending);
+			pendingHighSurrogate = null;
 		}
 
 		try
@@ -120,6 +160,16 @@ internal static class McpTextRanges
 
 				foreach (var character in readBuffer.AsSpan(0, read))
 				{
+					if (pendingHighSurrogate is { } pending)
+					{
+						if (char.IsLowSurrogate(character))
+						{
+							ProcessScalar(pending, character);
+							pendingHighSurrogate = null;
+							continue;
+						}
+						FlushPendingHighSurrogate();
+					}
 					if (character == '\n')
 					{
 						endedWithLineBreak = true;
@@ -146,16 +196,16 @@ internal static class McpTextRanges
 
 					previousWasCarriageReturn = false;
 					endedWithLineBreak = false;
-					currentLineHasContent = true;
-					if (characterLimit || !ShouldCaptureLine(total + 1))
+					if (char.IsHighSurrogate(character))
+					{
+						pendingHighSurrogate = character;
 						continue;
-					if (lineBuilder.Length < bufferedLineLimit)
-						lineBuilder.Append(character);
-					else
-						currentLineOverflowed = true;
+					}
+					ProcessScalar(character);
 				}
 			}
 
+			FlushPendingHighSurrogate();
 			if (!requestedLinesRead && (currentLineHasContent || endedWithLineBreak))
 				CompleteLine();
 		}
@@ -171,16 +221,20 @@ internal static class McpTextRanges
 				throw InvalidRange(start, endLine, reportedTotal);
 			return new McpTextPage(string.Empty, 0, 0, 0, false, false);
 		}
-		if (start > reportedTotal || endLine > reportedTotal)
+		if (start > reportedTotal)
 			throw InvalidRange(start, endLine, reportedTotal);
-		var effectiveEnd = endLine ?? reportedTotal;
-		return new McpTextPage(
+		var effectiveEnd = Math.Min(endLine ?? reportedTotal, reportedTotal);
+		var page = new McpTextPage(
 			builder.ToString(),
 			start,
 			actualEnd,
 			reportedTotal,
-			actualEnd < effectiveEnd,
-			characterLimit);
+			characterLimit || actualEnd < effectiveEnd,
+			characterLimit)
+		{
+			StartColumn = column
+		};
+		return AddContinuation(page, column);
 	}
 
 	public static McpTextPage Slice(
@@ -200,8 +254,8 @@ internal static class McpTextRanges
 		}
 
 		var start = startLine ?? 1;
-		var requestedEnd = endLine ?? total;
-		if (start < 1 || start > total || requestedEnd < start || requestedEnd > total)
+		var requestedEnd = Math.Min(endLine ?? total, total);
+		if (start < 1 || start > total || endLine < start)
 			throw InvalidRange(start, endLine, total);
 
 		var upper = Math.Min(requestedEnd, checked(start + maximumLines - 1));
@@ -247,7 +301,8 @@ internal static class McpTextRanges
 		int? endLine,
 		int maximumLines,
 		int maximumCharacters,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		int? startColumn = null)
 	{
 		ArgumentNullException.ThrowIfNull(text);
 		cancellationToken.ThrowIfCancellationRequested();
@@ -260,8 +315,11 @@ internal static class McpTextRanges
 		}
 
 		var start = startLine ?? 1;
-		var requestedEnd = endLine ?? total;
-		if (start < 1 || start > total || requestedEnd < start || requestedEnd > total)
+		var column = startColumn ?? 1;
+		if (column < 1)
+			throw InvalidColumnRange(start, column);
+		var requestedEnd = Math.Min(endLine ?? total, total);
+		if (start < 1 || start > total || endLine < start)
 			throw InvalidRange(start, endLine, total);
 
 		var upper = Math.Min(requestedEnd, checked(start + maximumLines - 1));
@@ -277,7 +335,13 @@ internal static class McpTextRanges
 			if (lineNumber > upper)
 				return false;
 
-			var line = text.AsSpan(offset, length);
+			var completeLine = text.AsSpan(offset, length);
+			var line = completeLine;
+			if (lineNumber == start)
+			{
+				var columnOffset = ResolveScalarColumnOffset(completeLine, lineNumber, column);
+				line = completeLine[columnOffset..];
+			}
 			var required = line.Length + (hasAppendedLine ? 1 : 0);
 			if ((long)builder.Length + required > maximumCharacters)
 			{
@@ -317,13 +381,59 @@ internal static class McpTextRanges
 		if (continueScanning && lineNumber <= upper)
 			CaptureLine(lineStart, text.Length - lineStart, lineNumber);
 
-		return new McpTextPage(
+		var page = new McpTextPage(
 			builder.ToString(),
 			start,
 			actualEnd,
 			total,
-			actualEnd < requestedEnd,
-			characterLimit);
+			characterLimit || actualEnd < requestedEnd,
+			characterLimit)
+		{
+			StartColumn = column
+		};
+		return AddContinuation(page, column);
+	}
+
+	private static McpTextPage AddContinuation(McpTextPage page, int startColumn)
+	{
+		if (!page.IsTruncated)
+			return page;
+		if (page.CharacterLimitReached && page.StartLine == page.EndLine)
+		{
+			return page with
+			{
+				NextLine = page.StartLine,
+				NextColumn = checked(startColumn + CountScalars(page.Text.AsSpan()))
+			};
+		}
+		return page with { NextLine = page.EndLine + 1, NextColumn = 1 };
+	}
+
+	private static int ResolveScalarColumnOffset(ReadOnlySpan<char> line, int lineNumber, int column)
+	{
+		var target = column - 1;
+		var scalars = 0;
+		var offset = 0;
+		while (offset < line.Length && scalars < target)
+		{
+			offset += char.IsHighSurrogate(line[offset]) && offset + 1 < line.Length &&
+			          char.IsLowSurrogate(line[offset + 1]) ? 2 : 1;
+			scalars++;
+		}
+		if (scalars != target)
+			throw InvalidColumnRange(lineNumber, column);
+		return offset;
+	}
+
+	private static int CountScalars(ReadOnlySpan<char> text)
+	{
+		var count = 0;
+		for (var index = 0; index < text.Length; index++, count++)
+		{
+			if (char.IsHighSurrogate(text[index]) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
+				index++;
+		}
+		return count;
 	}
 
 	private static void AppendBoundedPrefix(StringBuilder builder, string line, int maximumCharacters)
@@ -390,4 +500,9 @@ internal static class McpTextRanges
 			McpErrorCodes.InvalidRange,
 			$"{McpErrorCodes.InvalidRange}: requested line range {start}-{end?.ToString() ?? "end"} is invalid. " +
 			$"Valid lines are 1-{total} and start_line must not exceed end_line.");
+
+	private static McpToolException InvalidColumnRange(int line, int column) =>
+		new(
+			McpErrorCodes.InvalidRange,
+			$"{McpErrorCodes.InvalidRange}: start_column {column} is outside line {line}; columns are 1-based Unicode characters.");
 }

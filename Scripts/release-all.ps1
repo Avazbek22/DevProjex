@@ -1,14 +1,12 @@
 <#
 .SYNOPSIS
-  Interactive release builder that runs in an isolated temporary workspace.
+  Builds or validates selected local release channels in an isolated workspace.
 
 .DESCRIPTION
-  This script keeps your local Rider workspace stable:
-    1) asks for a version in 2-4 segment format (4.6 / 4.7.1 / 4.7.1.0)
-    2) copies repo to a temporary isolated workspace
-    3) builds GitHub artifacts in Release mode
-    4) optionally builds the Microsoft Store package in ReleaseStore mode
-    5) copies final artifacts back to local publish folders only
+  The default run builds all GitHub and Microsoft Store artifacts. Channels and
+  GitHub runtime identifiers can be narrowed for diagnostics. Existing artifacts
+  can be validated without rebuilding, and WACK can be run separately from an
+  elevated console after a Store build that used -SkipWack.
 
   The script never writes build artifacts into your working source tree
   except:
@@ -24,9 +22,23 @@ param(
     [string]$Version = "",
     [switch]$ValidateConfigOnly,
     [switch]$SmokeStoreBuildOnly,
-    [switch]$GitHubArtifactsOnly
+    [switch]$GitHubArtifactsOnly,
+    [string[]]$Channels = @("github", "store"),
+    [string[]]$Rids = @(
+        "win-x64",
+        "win-arm64",
+        "linux-x64",
+        "linux-arm64",
+        "osx-x64",
+        "osx-arm64"
+    ),
+    [switch]$SkipWack,
+    [switch]$WackOnly,
+    [switch]$ValidateArtifactsOnly,
+    [switch]$NonInteractive
 )
 
+$script:ChannelsExplicit = $PSBoundParameters.ContainsKey('Channels')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "release-helpers.ps1")
@@ -41,10 +53,304 @@ $script:StoreApplicationId = "App"
 $script:StoreExecutionAliasName = "devprojex.exe"
 $script:StoreUiPackageExecutable = "DevProjex.Avalonia\DevProjex.exe"
 $script:StoreFullTrustEntryPoint = "Windows.FullTrustApplication"
+$script:AllReleaseChannels = @("github", "store")
+$script:AllReleaseRids = @(
+    "win-x64",
+    "win-arm64",
+    "linux-x64",
+    "linux-arm64",
+    "osx-x64",
+    "osx-arm64"
+)
 
 function Write-Step([string]$message) {
     Write-Host ""
     Write-Host "=== $message ===" -ForegroundColor Cyan
+}
+
+function ConvertTo-ReleaseSelection(
+    [string[]]$values,
+    [string[]]$allowed,
+    [string]$kind
+) {
+    $selection = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($value in @($values)) {
+        foreach ($token in @(([string]$value).Split(','))) {
+            $normalized = $token.Trim().ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($normalized)) {
+                continue
+            }
+            if ($normalized -notin $allowed) {
+                throw "Unknown release $kind '$token'. Allowed values: $($allowed -join ', ')."
+            }
+            if ($normalized -notin $selection) {
+                $selection.Add($normalized)
+            }
+        }
+    }
+    if ($selection.Count -eq 0) {
+        throw "At least one release $kind must be selected."
+    }
+    return $selection.ToArray()
+}
+
+function Resolve-ReleaseInvocation([bool]$channelsExplicit) {
+    $selectedChannels = @(ConvertTo-ReleaseSelection -values $Channels -allowed $script:AllReleaseChannels -kind 'channel')
+    $selectedRids = @(ConvertTo-ReleaseSelection -values $Rids -allowed $script:AllReleaseRids -kind 'RID')
+
+    if ($GitHubArtifactsOnly) {
+        if ($channelsExplicit -and
+            ($selectedChannels.Count -ne 1 -or $selectedChannels[0] -cne 'github')) {
+            throw "-GitHubArtifactsOnly is an alias for -Channels github and cannot be combined with another channel selection."
+        }
+        $selectedChannels = @('github')
+    }
+
+    $legacyModes = @(@($ValidateConfigOnly, $SmokeStoreBuildOnly) | Where-Object { $_ })
+    if ($legacyModes.Count -gt 1 -or
+        (($ValidateConfigOnly -or $SmokeStoreBuildOnly) -and
+            ($GitHubArtifactsOnly -or $WackOnly -or $ValidateArtifactsOnly))) {
+        throw "Use only one of -ValidateConfigOnly, -SmokeStoreBuildOnly, -WackOnly, or -ValidateArtifactsOnly."
+    }
+    if ($WackOnly -and 'github' -in $selectedChannels) {
+        throw "-WackOnly supports only the store channel; pass -Channels store."
+    }
+    if ($SkipWack -and $WackOnly) {
+        throw "-SkipWack cannot be combined with -WackOnly."
+    }
+    if ($ValidateArtifactsOnly -and $WackOnly) {
+        throw "-ValidateArtifactsOnly cannot be combined with -WackOnly."
+    }
+
+    return [pscustomobject]@{
+        Channels = $selectedChannels
+        Rids = $selectedRids
+        IsPartialGitHub = ($selectedRids.Count -ne $script:AllReleaseRids.Count)
+    }
+}
+
+function Resolve-ReleaseVersionInfo([string]$repoRoot) {
+    $defaultReleaseVersionInfo = Get-DefaultReleaseVersionInfo -repoRoot $repoRoot
+    $initialVersion = if ([string]::IsNullOrWhiteSpace($Version)) {
+        [string]$defaultReleaseVersionInfo.DisplayVersion
+    }
+    else {
+        $Version
+    }
+
+    if ($NonInteractive) {
+        $parsedVersion = Try-ParseVersionInput -rawVersion $initialVersion
+        if ($null -eq $parsedVersion) {
+            throw "Invalid release version '$initialVersion'. Expected 1-4 numeric segments."
+        }
+        return $parsedVersion
+    }
+
+    return Get-VersionInteractive -currentValue $initialVersion
+}
+
+function Invoke-ReleaseArtifactValidator(
+    [string]$publishRoot,
+    [string]$version,
+    [string[]]$channels,
+    [string[]]$rids,
+    [string]$validatorRepoRoot = ""
+) {
+    $arguments = @{
+        PublishRoot = $publishRoot
+        Version = $version
+        Channels = $channels
+        Rids = $rids
+    }
+    $validationRoot = if ([string]::IsNullOrWhiteSpace($validatorRepoRoot)) {
+        $script:IsolatedRepoRoot
+    }
+    else {
+        $validatorRepoRoot
+    }
+    & (Join-Path $validationRoot 'Scripts\Test-ReleaseArtifacts.ps1') @arguments
+}
+
+function Write-GitHubPartialMarker(
+    [string]$releaseDirectory,
+    [string]$version,
+    [string[]]$rids
+) {
+    $markerPath = Join-Path $releaseDirectory 'PARTIAL-BUILD.txt'
+    $content = @(
+        'PARTIAL BUILD - NOT READY FOR RELEASE',
+        "Version: $version",
+        "RIDs: $($rids -join ', ')"
+    )
+    Set-Content -LiteralPath $markerPath -Value $content -Encoding UTF8
+}
+
+function Write-ChannelChecksums([string]$directory) {
+    $artifactFiles = @(
+        Get-ChildItem -LiteralPath $directory -File |
+            Where-Object {
+                $_.Name -notin @('SHA256SUMS.txt', 'PARTIAL-BUILD.txt', 'msix-build.log')
+            } |
+            Sort-Object Name
+    )
+    $hashLines = @($artifactFiles | ForEach-Object {
+        "$(Get-FileSha256Hex -path $_.FullName) *$($_.Name)"
+    })
+    Write-ReleaseChecksumManifest -path (Join-Path $directory 'SHA256SUMS.txt') -lines $hashLines
+}
+
+function Write-ReleaseSummary(
+    [string]$sourceRoot,
+    [string]$version,
+    [string[]]$channels,
+    [bool]$partialGitHub,
+    [string]$githubStatus,
+    [string]$storeStatus
+) {
+    Write-Step 'Release summary'
+    foreach ($channel in $channels) {
+        $directory = Join-Path $sourceRoot "publish\$channel\v$version"
+        $status = if ($channel -ceq 'github') { $githubStatus } else { $storeStatus }
+        if ($channel -ceq 'github' -and $partialGitHub) {
+            $status += '; PARTIAL'
+        }
+        Write-Host "Channel ${channel}: $status"
+        foreach ($artifact in @(Get-ChildItem -LiteralPath $directory -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin @('SHA256SUMS.txt', 'PARTIAL-BUILD.txt', 'msix-build.log') } |
+            Sort-Object Name)) {
+            Write-Host "  $($artifact.Name) | $($artifact.Length) bytes | SHA-256 $(Get-FileSha256Hex -path $artifact.FullName)"
+        }
+        Write-Host "  Output: $directory"
+    }
+}
+
+function Test-WackSummaryPassed([string]$summaryPath) {
+    if (-not (Test-Path -LiteralPath $summaryPath -PathType Leaf)) {
+        return $false
+    }
+    return $null -ne (Get-Content -LiteralPath $summaryPath |
+        Where-Object { $_ -match '^(MSIXUPLOAD|MSIXBUNDLE|MSIX): PASS \(' } |
+        Select-Object -First 1)
+}
+
+function Invoke-CapturedArtifactCommand(
+    [string]$executablePath,
+    [string[]]$arguments,
+    [string]$workingDirectory
+) {
+    $quotedArguments = @($arguments | ForEach-Object {
+        $argument = [string]$_
+        if ($argument.Length -eq 0 -or $argument -match '[\s"]') {
+            '"' + $argument.Replace('"', '\"') + '"'
+        }
+        else {
+            $argument
+        }
+    })
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $executablePath
+    $startInfo.Arguments = $quotedArguments -join ' '
+    $startInfo.WorkingDirectory = $workingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw "Could not start release artifact '$executablePath'."
+    }
+    try {
+        $standardOutputTask = $process.StandardOutput.ReadToEndAsync()
+        $standardErrorTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(120000)) {
+            $process.Kill()
+            throw "Release artifact command timed out: $($arguments -join ' ')"
+        }
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            StandardOutput = $standardOutputTask.GetAwaiter().GetResult()
+            StandardError = $standardErrorTask.GetAwaiter().GetResult()
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Invoke-HostGitHubArtifactSmoke(
+    [string]$releaseDirectory,
+    [string]$version,
+    [string[]]$selectedRids
+) {
+    if (-not [Environment]::Is64BitOperatingSystem -or
+        [Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
+        'win-x64' -notin $selectedRids) {
+        Write-Host 'Host artifact smoke: SKIPPED (win-x64 Windows host artifact was not selected).'
+        return
+    }
+
+    $artifactPath = Join-Path $releaseDirectory "DevProjex.v$version.win-x64.exe"
+    $sampleRoot = Join-Path $releaseDirectory '_functional-smoke'
+    New-Item -ItemType Directory -Path $sampleRoot -Force | Out-Null
+    $secretValue = 'ghp_123456789012345678901234567890123456'
+    try {
+        @'
+namespace Sample;
+public static class Program {
+    public static int Compute(int value) {
+        var implementationMustDisappear = value * 2;
+        return implementationMustDisappear;
+    }
+}
+'@ | Set-Content -LiteralPath (Join-Path $sampleRoot 'Program.cs') -Encoding UTF8
+        "token=$secretValue" | Set-Content -LiteralPath (Join-Path $sampleRoot 'settings.txt') -Encoding UTF8
+
+        $versionResult = Invoke-CapturedArtifactCommand $artifactPath @('--version') $sampleRoot
+        if ($versionResult.ExitCode -ne 0 -or $versionResult.StandardOutput.Trim() -cne $version) {
+            throw "Host artifact --version smoke failed. Expected '$version', got '$($versionResult.StandardOutput.Trim())'."
+        }
+        $treeResult = Invoke-CapturedArtifactCommand $artifactPath @('tree', $sampleRoot, '--git-mode', 'none', '--exclude', 'none') $sampleRoot
+        if ($treeResult.ExitCode -ne 0 -or
+            $treeResult.StandardOutput.IndexOf('Program.cs', [System.StringComparison]::Ordinal) -lt 0) {
+            throw 'Host artifact tree smoke failed.'
+        }
+        $fullResult = Invoke-CapturedArtifactCommand $artifactPath @('analyze', $sampleRoot, '--format', 'json', '--git-mode', 'none', '--exclude', 'none', '-o', '-') $sampleRoot
+        $compressedResult = Invoke-CapturedArtifactCommand $artifactPath @('analyze', $sampleRoot, '--format', 'json', '--git-mode', 'none', '--exclude', 'none', '--compress-code', '-o', '-') $sampleRoot
+        if ($fullResult.ExitCode -ne 0 -or $compressedResult.ExitCode -ne 0) {
+            throw 'Host artifact analyze smoke failed.'
+        }
+        $full = $fullResult.StandardOutput | ConvertFrom-Json
+        $compressed = $compressedResult.StandardOutput | ConvertFrom-Json
+        if ([long]$compressed.metrics.content.chars -ge [long]$full.metrics.content.chars) {
+            throw 'Host artifact compression smoke did not reduce content characters.'
+        }
+        $findingsResult = Invoke-CapturedArtifactCommand $artifactPath @('analyze', $sampleRoot, '--format', 'json', '--git-mode', 'none', '--exclude', 'none', '--findings', '--fail-on-findings', '-o', '-') $sampleRoot
+        $combinedFindingsOutput = $findingsResult.StandardOutput + $findingsResult.StandardError
+        if ($findingsResult.ExitCode -ne 3 -or
+            $combinedFindingsOutput.IndexOf('findingCount', [System.StringComparison]::Ordinal) -lt 0 -or
+            $combinedFindingsOutput.IndexOf($secretValue, [System.StringComparison]::Ordinal) -ge 0) {
+            throw 'Host artifact secret-finding smoke failed or exposed the secret value.'
+        }
+
+        $node = Get-Command node -ErrorAction SilentlyContinue
+        if ($null -eq $node) {
+            Write-Host 'MCP initialize smoke: SKIPPED (node was not found in PATH).'
+        }
+        else {
+            Invoke-ExternalCommand `
+                -filePath $node.Source `
+                -arguments @((Join-Path $script:IsolatedRepoRoot 'Scripts\smoke-headless-mcp.mjs'), $artifactPath, $sampleRoot) `
+                -failureMessage 'Host artifact MCP initialize smoke failed' `
+                -workingDirectory $script:IsolatedRepoRoot
+        }
+        Write-Host 'Host artifact functional smoke passed.'
+    }
+    finally {
+        if (Test-Path -LiteralPath $sampleRoot) {
+            Remove-Item -LiteralPath $sampleRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Invoke-ExternalCommand(
@@ -371,6 +677,25 @@ function Assert-StoreExecutionAliasManifestContract(
     }
 }
 
+function Assert-StorePackageCarriesGrammarPayload(
+    [string]$packageRoot,
+    [string]$artifactPath
+) {
+    # A packaged app refuses runtime-materialized grammar libraries, so the payload must ship as
+    # signed package content. An application package without it silently loses code compression,
+    # comment stripping, and blank-line stripping for every Store user.
+    $applicationDirectory = Split-Path -Path $script:StoreUiPackageExecutable -Parent
+    $grammarDirectory = Join-Path (Join-Path $packageRoot $applicationDirectory) "grammars"
+    Assert-Condition (Test-Path $grammarDirectory) "Store package '$artifactPath' does not contain the grammar content directory '$applicationDirectory\grammars'. The build must run with DevProjexGrammarDelivery=Content."
+
+    $grammarLibraries = @(Get-ChildItem -Path $grammarDirectory -File -Filter "tree-sitter-*.dll" -ErrorAction SilentlyContinue)
+    Assert-Condition ($grammarLibraries.Count -ge 20) "Store package '$artifactPath' carries only $($grammarLibraries.Count) grammar libraries; at least 20 are expected."
+
+    foreach ($sentinel in @("tree-sitter-c-sharp.dll", "tree-sitter-kotlin.dll")) {
+        Assert-Condition (Test-Path (Join-Path $grammarDirectory $sentinel)) "Store package '$artifactPath' is missing the grammar library '$sentinel'."
+    }
+}
+
 function Expand-ZipContainer(
     [string]$archivePath,
     [string]$destinationPath
@@ -406,6 +731,7 @@ function Assert-StoreArtifactContainsExecutionAliasCore(
         }
 
         Assert-StoreExecutionAliasManifestContract -manifestPath $manifestPath -RequirePackagedApplicationExecutable -packageRoot $extractionPath
+        Assert-StorePackageCarriesGrammarPayload -packageRoot $extractionPath -artifactPath $artifactPath
         return 1
     }
 
@@ -602,6 +928,7 @@ function Invoke-StoreSmokeBuild([string]$repoRoot, [string]$versionOverride) {
     $msbuildPath = Get-MsBuildPath
     $targetPlatformResolution = Resolve-StoreTargetPlatformVersion -projectPath $projectPath
     $outputRoot = Join-Path $env:TEMP ("devprojex-store-smoke-" + [Guid]::NewGuid().ToString("N"))
+    $payloadReceiptDirectory = Join-Path $outputRoot 'payload-receipts'
     $originalProjectContent = $null
     $projectPatched = $false
 
@@ -618,6 +945,16 @@ function Invoke-StoreSmokeBuild([string]$repoRoot, [string]$versionOverride) {
         $originalProjectContent = Get-Content -Path $projectPath -Raw
         $projectPatched = Set-StoreProjectTargetPlatformVersion -projectPath $projectPath -targetPlatformVersion $targetPlatformResolution.ResolvedVersion
 
+        foreach ($staleStorePath in @(
+            (Join-Path $repoRoot 'Packaging\Windows\DevProjex.Store\bin'),
+            (Join-Path $repoRoot 'Packaging\Windows\DevProjex.Store\obj'),
+            (Join-Path $repoRoot 'Packaging\Windows\DevProjex.Store\BundleArtifacts')
+        )) {
+            if (Test-Path -LiteralPath $staleStorePath) {
+                Remove-Item -LiteralPath $staleStorePath -Recurse -Force
+            }
+        }
+
         Invoke-ExternalCommand -filePath "dotnet" -arguments (@("restore", $appProjectPath, "/p:Configuration=ReleaseStore") + $versionProperties) -failureMessage "dotnet restore failed for store smoke build" -workingDirectory $repoRoot
 
         $msbuildArgs = @(
@@ -628,17 +965,58 @@ function Invoke-StoreSmokeBuild([string]$repoRoot, [string]$versionOverride) {
             "/p:AppxBundlePlatforms=x64|arm64",
             "/p:UapAppxPackageBuildMode=StoreUpload",
             "/p:GenerateAppInstallerFile=false",
-            "/p:AppxPackageDir=$outputRoot\"
+            "/p:AppxPackageDir=$outputRoot\",
+            "/p:DevProjexGenerateReleasePayloadReceipt=true",
+            "/p:DevProjexPayloadReceiptDirectory=$payloadReceiptDirectory"
         ) + $versionProperties
 
         Invoke-ExternalCommand -filePath $msbuildPath -arguments $msbuildArgs -failureMessage "MS Store smoke build failed" -workingDirectory $repoRoot
 
-        $artifacts = Get-ChildItem -Path $outputRoot -Recurse -File -Include *.msixupload,*.msixbundle,*.msix -ErrorAction SilentlyContinue
+        $artifacts = @(
+            Get-ChildItem -Path $outputRoot -Recurse -File -Include *.msixupload,*.msixbundle,*.msix -ErrorAction SilentlyContinue
+            Get-ChildItem `
+                -Path (Join-Path $repoRoot 'Packaging\Windows\DevProjex.Store\bin\x64\ReleaseStore') `
+                -Recurse `
+                -File `
+                -Filter "DevProjex.Store_${storePackageVersion}_x64_ReleaseStore.msix" `
+                -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+        )
         if ($null -eq $artifacts -or $artifacts.Count -eq 0) {
             throw "Store smoke build did not produce any MSIX artifacts."
         }
 
         Assert-StoreArtifactsContainExecutionAlias -artifacts @($artifacts) -tempDirectory (Join-Path $outputRoot "_execution_alias_validation")
+
+        $validationPublishRoot = Join-Path $outputRoot 'publish'
+        [void](New-StoreValidationDirectory `
+            -artifacts @($artifacts) `
+            -payloadReceipts @(Get-ChildItem -LiteralPath $payloadReceiptDirectory -File -Filter 'publish-payload.win-*.json') `
+            -buildLogPath '' `
+            -publishRoot $validationPublishRoot `
+            -version $resolvedDisplayVersion)
+        Invoke-ReleaseArtifactValidator `
+            -publishRoot $validationPublishRoot `
+            -version $resolvedDisplayVersion `
+            -channels @('store') `
+            -rids $script:AllReleaseRids `
+            -validatorRepoRoot $repoRoot
+        & (Join-Path $repoRoot 'Scripts\Test-ReleaseArtifactGateMutation.ps1') `
+            -PublishRoot $validationPublishRoot `
+            -Version $resolvedDisplayVersion `
+            -Channels @('store') `
+            -Rids $script:AllReleaseRids
+        if ($LASTEXITCODE -ne 0) {
+            throw "Store artifact mutation gate failed with exit code $LASTEXITCODE."
+        }
+        Write-ReleaseSummary `
+            -sourceRoot $outputRoot `
+            -version $resolvedDisplayVersion `
+            -channels @('store') `
+            -partialGitHub $false `
+            -githubStatus 'not selected' `
+            -storeStatus 'built and validated; WACK not run (smoke mode)'
 
         Write-Host "Store smoke build succeeded."
         $artifacts | Sort-Object Name | ForEach-Object { Write-Host "  $($_.FullName)" }
@@ -951,7 +1329,8 @@ function New-MacReleaseArchive(
 function Build-GitHubArtifactsInWorkspace(
     [string]$version,
     [string]$configuration,
-    [string]$storePackageVersion
+    [string]$storePackageVersion,
+    [string[]]$rids
 ) {
     $projectPath = Join-Path $script:IsolatedRepoRoot "Apps\Avalonia\DevProjex.Avalonia.csproj"
     if (-not (Test-Path $projectPath)) {
@@ -962,6 +1341,7 @@ function Build-GitHubArtifactsInWorkspace(
 
     $releaseDir = Join-Path $script:IsolatedRepoRoot "publish\github\v$version"
     $workDir = Join-Path $releaseDir "_work"
+    $receiptDir = Join-Path $workDir "receipts"
 
     $targets = @(
         @{ Rid = "win-x64"; Binary = "DevProjex.exe"; Kind = "Windows"; Name = "DevProjex.v$version.win-x64.exe" },
@@ -970,7 +1350,7 @@ function Build-GitHubArtifactsInWorkspace(
         @{ Rid = "linux-arm64"; Binary = "DevProjex"; Kind = "Linux"; Name = "DevProjex.v$version.linux-arm64.tar.gz" },
         @{ Rid = "osx-x64"; Binary = "DevProjex"; Kind = "MacOS"; Name = "DevProjex.v$version.osx-x64.app.tar.gz" },
         @{ Rid = "osx-arm64"; Binary = "DevProjex"; Kind = "MacOS"; Name = "DevProjex.v$version.osx-arm64.app.tar.gz" }
-    )
+    ) | Where-Object { $_.Rid -in $rids }
 
     if (Test-Path $releaseDir) {
         Remove-Item -Path $releaseDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -978,6 +1358,7 @@ function Build-GitHubArtifactsInWorkspace(
 
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
     New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $receiptDir -Force | Out-Null
 
     Write-Host "Preparing GitHub release artifacts..."
     Write-Host "  Version: $version"
@@ -999,12 +1380,15 @@ function Build-GitHubArtifactsInWorkspace(
             "--self-contained", "true",
             "/p:PublishSingleFile=true",
             "/p:IncludeNativeLibrariesForSelfExtract=true",
+            "/p:EnableCompressionInSingleFile=false",
             # ReadyToRun reduces JIT work for packaged RID-specific desktop binaries.
             "/p:PublishReadyToRun=true",
             "/p:PublishTrimmed=false",
             "/p:EnableProjectLoadTiming=false",
             "/p:DebugType=None",
             "/p:DebugSymbols=false",
+            "/p:DevProjexGenerateReleasePayloadReceipt=true",
+            "/p:DevProjexPayloadReceiptDirectory=$receiptDir",
             "-o", $ridOutDir
         ) + $versionProperties
 
@@ -1048,23 +1432,25 @@ function Build-GitHubArtifactsInWorkspace(
                 throw "Unsupported GitHub artifact kind '$($target.Kind)' for $rid."
             }
         }
+
+        $receiptName = "publish-payload.$rid.json"
+        $receiptPath = Join-Path $receiptDir $receiptName
+        if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
+            throw "Payload receipt was not generated for RID '$rid': $receiptPath"
+        }
+        Copy-Item -LiteralPath $receiptPath -Destination (Join-Path $releaseDir $receiptName) -Force
     }
 
-    $shaFile = Join-Path $releaseDir "SHA256SUMS.txt"
-    $hashLines = @()
-    Get-ChildItem -Path $releaseDir -File |
-        Where-Object { $_.Name -ne "SHA256SUMS.txt" } |
-        Sort-Object Name |
-        ForEach-Object {
-            $hash = Get-FileSha256Hex -path $_.FullName
-            $hashLines += "$hash *$($_.Name)"
-        }
-
-    Write-ReleaseChecksumManifest -path $shaFile -lines $hashLines
+    if ($rids.Count -ne $script:AllReleaseRids.Count) {
+        Write-GitHubPartialMarker -releaseDirectory $releaseDir -version $version -rids $rids
+    }
+    Write-ChannelChecksums -directory $releaseDir
 
     if (Test-Path $workDir) {
         Remove-Item -Path $workDir -Recurse -Force -ErrorAction SilentlyContinue
     }
+
+    Invoke-HostGitHubArtifactSmoke -releaseDirectory $releaseDir -version $version -selectedRids $rids
 
     Write-Host ""
     Write-Host "GitHub release artifacts are ready:"
@@ -1211,6 +1597,8 @@ function Build-StoreArtifactsInWorkspace(
 
     $publishStoreDir = Join-Path $script:IsolatedRepoRoot "publish\store"
     New-Item -ItemType Directory -Force -Path $publishStoreDir | Out-Null
+    $payloadReceiptDirectory = Join-Path $publishStoreDir 'payload-receipts'
+    New-Item -ItemType Directory -Force -Path $payloadReceiptDirectory | Out-Null
     $buildLogRelative = "publish\store\msix-build.log"
 
     $bundleMode = if ($bundlePlatforms -like "*|*") { "Always" } else { "Never" }
@@ -1222,6 +1610,8 @@ function Build-StoreArtifactsInWorkspace(
         "/p:AppxBundlePlatforms=$bundlePlatforms",
         "/p:UapAppxPackageBuildMode=StoreUpload",
         "/p:AppxPackageDir=publish\store\",
+        "/p:DevProjexGenerateReleasePayloadReceipt=true",
+        "/p:DevProjexPayloadReceiptDirectory=$payloadReceiptDirectory",
         "/p:EnableProjectLoadTiming=false",
         "/flp:logfile=$buildLogRelative;verbosity=normal"
     ) + $versionProperties
@@ -1313,11 +1703,61 @@ function Build-StoreArtifactsInWorkspace(
     Write-Host "  Architectures: $bundlePlatforms"
 }
 
-function Get-StoreArtifactPaths() {
-    $candidateRoots = @(
-        (Join-Path $script:IsolatedRepoRoot "publish\store"),
-        (Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\publish\store")
-    )
+function New-StoreValidationDirectory(
+    [object[]]$artifacts,
+    [object[]]$payloadReceipts,
+    [string]$buildLogPath,
+    [string]$publishRoot,
+    [string]$version
+) {
+    $destination = Join-Path $publishRoot "store\v$version"
+    if (Test-Path -LiteralPath $destination) {
+        Remove-Item -LiteralPath $destination -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $destination -Force | Out-Null
+
+    foreach ($artifact in @($artifacts | Sort-Object Name -Unique)) {
+        Copy-Item -LiteralPath $artifact.FullName -Destination (Join-Path $destination $artifact.Name) -Force
+    }
+    foreach ($receipt in @($payloadReceipts | Sort-Object Name -Unique)) {
+        Copy-Item -LiteralPath $receipt.FullName -Destination (Join-Path $destination $receipt.Name) -Force
+    }
+    if (-not [string]::IsNullOrWhiteSpace($buildLogPath) -and
+        (Test-Path -LiteralPath $buildLogPath -PathType Leaf)) {
+        Copy-Item -LiteralPath $buildLogPath -Destination (Join-Path $destination 'msix-build.log') -Force
+    }
+    Write-ChannelChecksums -directory $destination
+    return $destination
+}
+
+function Stage-StoreArtifactsForValidation([string]$version) {
+    $artifacts = @(Get-StoreArtifactPaths)
+    if ($artifacts.Count -eq 0) {
+        throw "MS Store artifacts (.msixupload/.msixbundle/.msix) not found in isolated workspace."
+    }
+    return New-StoreValidationDirectory `
+        -artifacts $artifacts `
+        -payloadReceipts @(Get-StorePayloadReceiptPaths) `
+        -buildLogPath (Join-Path $script:IsolatedRepoRoot 'publish\store\msix-build.log') `
+        -publishRoot (Join-Path $script:IsolatedRepoRoot 'publish') `
+        -version $version
+}
+
+function Get-StorePayloadReceiptPaths() {
+    $receiptDirectory = Join-Path $script:IsolatedRepoRoot 'publish\store\payload-receipts'
+    if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) {
+        return @()
+    }
+    return @(Get-ChildItem -LiteralPath $receiptDirectory -File -Filter 'publish-payload.win-*.json')
+}
+
+function Get-StoreArtifactPaths([string[]]$candidateRoots = @()) {
+    if ($candidateRoots.Count -eq 0) {
+        $candidateRoots = @(
+            (Join-Path $script:IsolatedRepoRoot "publish\store"),
+            (Join-Path $script:IsolatedRepoRoot "Packaging\Windows\DevProjex.Store\publish\store")
+        )
+    }
 
     $artifacts = @()
     foreach ($candidateRoot in $candidateRoots) {
@@ -1432,10 +1872,18 @@ function Get-InnerPackageFromMsixUpload([string]$msixUploadPath, [string]$tempDi
     return $null
 }
 
-function Invoke-WackValidationInWorkspace() {
+function Invoke-WackValidationInWorkspace(
+    [string]$artifactRoot = "",
+    [string]$reportDirectory = ""
+) {
     Write-Step "Running WACK validation"
 
-    $storeArtifacts = Get-StoreArtifactPaths
+    $storeArtifacts = if ([string]::IsNullOrWhiteSpace($artifactRoot)) {
+        @(Get-StoreArtifactPaths)
+    }
+    else {
+        @(Get-StoreArtifactPaths -candidateRoots @($artifactRoot))
+    }
     if ($null -eq $storeArtifacts -or $storeArtifacts.Count -eq 0) {
         throw "WACK validation failed: Store artifacts were not found in isolated workspace."
     }
@@ -1445,7 +1893,12 @@ function Invoke-WackValidationInWorkspace() {
         throw "WACK validation cannot start: appcert.exe not found. Install Windows SDK (App Certification Kit)."
     }
 
-    $reportDir = Join-Path $script:IsolatedRepoRoot "publish\store\wack"
+    $reportDir = if ([string]::IsNullOrWhiteSpace($reportDirectory)) {
+        Join-Path $script:IsolatedRepoRoot "publish\store\wack"
+    }
+    else {
+        $reportDirectory
+    }
     New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
     $tempExtractionDir = Join-Path $reportDir "_temp_msixupload"
     $summaryLines = New-Object System.Collections.Generic.List[string]
@@ -1551,58 +2004,25 @@ function Invoke-WackValidationInWorkspace() {
 function Publish-ArtifactsToSource(
     [string]$sourceRoot,
     [string]$version,
-    [switch]$GitHubOnly
+    [string[]]$channels
 ) {
     Write-Step "Publishing artifacts to source publish folder"
 
-    $isolatedGitHubDir = Join-Path $script:IsolatedRepoRoot "publish\github\v$version"
-    if (-not (Test-Path $isolatedGitHubDir)) {
-        throw "Isolated GitHub artifacts folder not found: $isolatedGitHubDir"
-    }
-
-    $sourceGitHubDir = Join-Path $sourceRoot "publish\github\v$version"
-    if (Test-Path $sourceGitHubDir) {
-        Remove-Item -Path $sourceGitHubDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    New-Item -ItemType Directory -Path $sourceGitHubDir -Force | Out-Null
-    Copy-Item -Path (Join-Path $isolatedGitHubDir "*") -Destination $sourceGitHubDir -Recurse -Force
-
-    if ($GitHubOnly) {
-        return @{
-            GitHub = $sourceGitHubDir
-            Store = $null
+    $published = @{}
+    foreach ($channel in $channels) {
+        $isolatedDirectory = Join-Path $script:IsolatedRepoRoot "publish\$channel\v$version"
+        if (-not (Test-Path -LiteralPath $isolatedDirectory -PathType Container)) {
+            throw "Isolated $channel artifacts folder not found: $isolatedDirectory"
         }
+        $sourceDirectory = Join-Path $sourceRoot "publish\$channel\v$version"
+        if (Test-Path -LiteralPath $sourceDirectory) {
+            Remove-Item -LiteralPath $sourceDirectory -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $sourceDirectory -Force | Out-Null
+        Copy-Item -Path (Join-Path $isolatedDirectory '*') -Destination $sourceDirectory -Recurse -Force
+        $published[$channel] = $sourceDirectory
     }
-
-    $storeArtifacts = Get-StoreArtifactPaths
-    if ($null -eq $storeArtifacts -or $storeArtifacts.Count -eq 0) {
-        throw "MS Store artifacts (.msixupload/.msixbundle/.msix) not found in isolated workspace."
-    }
-
-    $sourceStoreDir = Join-Path $sourceRoot "publish\store\v$version"
-    if (Test-Path $sourceStoreDir) {
-        Remove-Item -Path $sourceStoreDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    New-Item -ItemType Directory -Path $sourceStoreDir -Force | Out-Null
-
-    foreach ($storeArtifact in $storeArtifacts) {
-        Copy-Item -Path $storeArtifact.FullName -Destination (Join-Path $sourceStoreDir $storeArtifact.Name) -Force
-    }
-
-    $isolatedBuildLogPath = Join-Path $script:IsolatedRepoRoot "publish\store\msix-build.log"
-    if (Test-Path $isolatedBuildLogPath) {
-        Copy-Item -Path $isolatedBuildLogPath -Destination (Join-Path $sourceStoreDir "msix-build.log") -Force
-    }
-
-    $isolatedWackDir = Join-Path $script:IsolatedRepoRoot "publish\store\wack"
-    if (Test-Path $isolatedWackDir) {
-        Copy-Item -Path $isolatedWackDir -Destination (Join-Path $sourceStoreDir "wack") -Recurse -Force
-    }
-
-    return @{
-        GitHub = $sourceGitHubDir
-        Store = $sourceStoreDir
-    }
+    return $published
 }
 
 function Start-DeferredCleanup([string]$targetPath) {
@@ -1743,74 +2163,173 @@ function Cleanup-IsolatedWorkspace() {
     }
 }
 
-Ensure-DotnetAvailable
-$repoRoot = Get-DevProjexRepoRoot -startPath $PSScriptRoot
+function Invoke-ReleaseMain() {
+    $repoRoot = Get-DevProjexRepoRoot -startPath $PSScriptRoot
+    $invocation = Resolve-ReleaseInvocation -channelsExplicit $script:ChannelsExplicit
 
-if (($ValidateConfigOnly -and $SmokeStoreBuildOnly) -or
-    ($GitHubArtifactsOnly -and ($ValidateConfigOnly -or $SmokeStoreBuildOnly))) {
-    throw "Use only one of -ValidateConfigOnly, -SmokeStoreBuildOnly, or -GitHubArtifactsOnly."
-}
-
-if ($ValidateConfigOnly) {
-    Invoke-ReleaseConfigValidation -repoRoot $repoRoot
-    return
-}
-
-if ($SmokeStoreBuildOnly) {
-    Invoke-StoreSmokeBuild -repoRoot $repoRoot -versionOverride $Version
-    return
-}
-
-$defaultReleaseVersionInfo = Get-DefaultReleaseVersionInfo -repoRoot $repoRoot
-$initialVersion = if ([string]::IsNullOrWhiteSpace($Version)) { [string]$defaultReleaseVersionInfo.DisplayVersion } else { $Version }
-$versionInfo = Get-VersionInteractive -currentValue $initialVersion
-$resolvedVersion = [string]$versionInfo.DisplayVersion
-$storePackageVersion = [string]$versionInfo.StorePackageVersion
-$sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$finalPaths = $null
-
-Write-Step "Release plan"
-Write-Host "Version: $resolvedVersion"
-Write-Host "Store package version: $storePackageVersion"
-Write-Host "Build mode  : isolated workspace (local source tree untouched)"
-Write-Host "GitHub build: Release (single-file, self-contained)"
-if ($GitHubArtifactsOnly) {
-    Write-Host "Store build : skipped (-GitHubArtifactsOnly)"
-}
-else {
-    Write-Host "Store build : ReleaseStore (.msixupload, x64|arm64)"
-    Write-Host "Store check : WACK (must pass before artifacts are published)"
-}
-Write-Host "Store listing CSV: not modified"
-Write-Step "Validating release config"
-Invoke-ReleaseConfigValidation -repoRoot $repoRoot
-
-try {
-    Create-IsolatedWorkspace -sourceRoot $sourceRoot
-    Configure-IsolatedNuGetCache
-
-    Write-Step "Building GitHub artifacts in isolated workspace"
-    Build-GitHubArtifactsInWorkspace -version $resolvedVersion -configuration "Release" -storePackageVersion $storePackageVersion
-
-    if (-not $GitHubArtifactsOnly) {
-        Write-Step "Building Microsoft Store package in isolated workspace"
-        Build-StoreArtifactsInWorkspace -displayVersion $resolvedVersion -configuration "ReleaseStore" -platform "x64" -bundlePlatforms "x64|arm64" -packageVersion $storePackageVersion
-
-        Invoke-WackValidationInWorkspace
+    if ($ValidateConfigOnly) {
+        Invoke-ReleaseConfigValidation -repoRoot $repoRoot
+        Write-Step 'Release summary'
+        Write-Host 'Configuration: VALIDATED'
+        return
     }
 
-    $finalPaths = Publish-ArtifactsToSource `
+    if ($SmokeStoreBuildOnly) {
+        Ensure-DotnetAvailable
+        Invoke-StoreSmokeBuild -repoRoot $repoRoot -versionOverride $Version
+        return
+    }
+
+    $versionInfo = Resolve-ReleaseVersionInfo -repoRoot $repoRoot
+    $resolvedVersion = [string]$versionInfo.DisplayVersion
+    $storePackageVersion = [string]$versionInfo.StorePackageVersion
+    $sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $sourcePublishRoot = Join-Path $sourceRoot 'publish'
+
+    if ($ValidateArtifactsOnly) {
+        Invoke-ReleaseArtifactValidator `
+            -publishRoot $sourcePublishRoot `
+            -version $resolvedVersion `
+            -channels $invocation.Channels `
+            -rids $invocation.Rids `
+            -validatorRepoRoot $repoRoot
+        $wackSummary = Join-Path $sourceRoot "publish\store\v$resolvedVersion\wack\summary.txt"
+        $storeStatus = if (Test-WackSummaryPassed -summaryPath $wackSummary) {
+            'validated; WACK passed'
+        }
+        else {
+            'validated; WACK not passed'
+        }
+        Write-ReleaseSummary `
+            -sourceRoot $sourceRoot `
+            -version $resolvedVersion `
+            -channels $invocation.Channels `
+            -partialGitHub $invocation.IsPartialGitHub `
+            -githubStatus 'validated' `
+            -storeStatus $storeStatus
+        return
+    }
+
+    if ($WackOnly) {
+        $storeDirectory = Join-Path $sourceRoot "publish\store\v$resolvedVersion"
+        Invoke-ReleaseArtifactValidator `
+            -publishRoot $sourcePublishRoot `
+            -version $resolvedVersion `
+            -channels @('store') `
+            -rids $invocation.Rids `
+            -validatorRepoRoot $repoRoot
+        Invoke-WackValidationInWorkspace `
+            -artifactRoot $storeDirectory `
+            -reportDirectory (Join-Path $storeDirectory 'wack')
+        Write-ReleaseSummary `
+            -sourceRoot $sourceRoot `
+            -version $resolvedVersion `
+            -channels @('store') `
+            -partialGitHub $false `
+            -githubStatus 'not selected' `
+            -storeStatus 'validated; WACK passed'
+        return
+    }
+
+    Ensure-DotnetAvailable
+    Write-Step "Release plan"
+    Write-Host "Version: $resolvedVersion"
+    Write-Host "Store package version: $storePackageVersion"
+    Write-Host "Channels: $($invocation.Channels -join ', ')"
+    if ('github' -in $invocation.Channels) {
+        Write-Host "GitHub RIDs: $($invocation.Rids -join ', ')"
+        if ($invocation.IsPartialGitHub) {
+            Write-Host 'GitHub set: PARTIAL (not release-ready)'
+        }
+    }
+    Write-Host "Build mode: isolated workspace (local source tree untouched)"
+    if ('github' -in $invocation.Channels) {
+        Write-Host "GitHub build: Release (single-file, self-contained, uncompressed bundle)"
+    }
+    if ('store' -in $invocation.Channels) {
+        Write-Host "Store build: ReleaseStore (.msixupload, x64|arm64)"
+        Write-Host $(if ($SkipWack) { 'Store check: WACK not run (-SkipWack); not release-ready' } else { 'Store check: WACK must pass' })
+    }
+    Write-Step "Headless package channels"
+    Write-Host "NuGet and npm headless channels are published by the publish-packages workflow."
+    Write-Host "Store listing CSV: not modified"
+    Write-Step "Validating release config"
+    Invoke-ReleaseConfigValidation -repoRoot $repoRoot
+
+    try {
+        Create-IsolatedWorkspace -sourceRoot $sourceRoot
+        Configure-IsolatedNuGetCache
+
+        if ('github' -in $invocation.Channels) {
+            Write-Step "Building GitHub artifacts in isolated workspace"
+            Build-GitHubArtifactsInWorkspace `
+                -version $resolvedVersion `
+                -configuration "Release" `
+                -storePackageVersion $storePackageVersion `
+                -rids $invocation.Rids
+            Invoke-ReleaseArtifactValidator `
+                -publishRoot (Join-Path $script:IsolatedRepoRoot 'publish') `
+                -version $resolvedVersion `
+                -channels @('github') `
+                -rids $invocation.Rids
+        }
+
+        if ('store' -in $invocation.Channels) {
+            Write-Step "Building Microsoft Store package in isolated workspace"
+            Build-StoreArtifactsInWorkspace `
+                -displayVersion $resolvedVersion `
+                -configuration "ReleaseStore" `
+                -platform "x64" `
+                -bundlePlatforms "x64|arm64" `
+                -packageVersion $storePackageVersion
+            $storeValidationDirectory = Stage-StoreArtifactsForValidation -version $resolvedVersion
+            Invoke-ReleaseArtifactValidator `
+                -publishRoot (Join-Path $script:IsolatedRepoRoot 'publish') `
+                -version $resolvedVersion `
+                -channels @('store') `
+                -rids $invocation.Rids
+            if (-not $SkipWack) {
+                Invoke-WackValidationInWorkspace `
+                    -artifactRoot $storeValidationDirectory `
+                    -reportDirectory (Join-Path $storeValidationDirectory 'wack')
+            }
+        }
+
+        [void](Publish-ArtifactsToSource `
+            -sourceRoot $sourceRoot `
+            -version $resolvedVersion `
+            -channels $invocation.Channels)
+    }
+    finally {
+        Restore-NuGetEnvironment
+        Cleanup-IsolatedWorkspace
+    }
+
+    $storeStatus = if ('store' -notin $invocation.Channels) {
+        'not selected'
+    }
+    elseif ($SkipWack) {
+        'built and validated; WACK not passed; not release-ready'
+    }
+    else {
+        'built and validated; WACK passed'
+    }
+    Write-ReleaseSummary `
         -sourceRoot $sourceRoot `
         -version $resolvedVersion `
-        -GitHubOnly:$GitHubArtifactsOnly
-
-    Write-Step "Done"
-    Write-Host "GitHub artifacts: $($finalPaths.GitHub)"
-    if (-not $GitHubArtifactsOnly) {
-        Write-Host "MS Store artifacts: $($finalPaths.Store)"
-    }
+        -channels $invocation.Channels `
+        -partialGitHub $invocation.IsPartialGitHub `
+        -githubStatus 'built and validated' `
+        -storeStatus $storeStatus
 }
-finally {
-    Restore-NuGetEnvironment
-    Cleanup-IsolatedWorkspace
+
+try {
+    Invoke-ReleaseMain
+}
+catch {
+    if ($NonInteractive) {
+        [Console]::Error.WriteLine($_.Exception.Message.Replace("`r", ' ').Replace("`n", ' '))
+        exit 1
+    }
+    throw
 }

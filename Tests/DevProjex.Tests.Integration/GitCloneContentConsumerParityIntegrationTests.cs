@@ -6,7 +6,7 @@ public sealed class GitCloneContentConsumerParityIntegrationTests
 	[Fact]
 	public async Task ShallowClone_OutputFlowsFromCloneResultThroughTreeMetricsPreviewAndExport()
 	{
-		var gitService = new GitRepositoryService();
+		var gitService = new GitRepositoryService(allowFileTransportForTests: true);
 		if (!await gitService.IsGitAvailableAsync(TestContext.Current.CancellationToken))
 			return;
 

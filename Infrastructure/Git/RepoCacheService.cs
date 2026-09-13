@@ -23,6 +23,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	private const int MaximumPortablePathComponentBytes = 255;
 	private const int MaximumRepositoryNameUtf8Bytes =
 		MaximumPortablePathComponentBytes - UniquePathSuffixLength - 1;
+	private const int MaximumSynchronousPublicationFileCount = 1024;
 	private const UnixFileMode PrivateUnixDirectoryMode =
 		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 	internal const long MaximumCacheIndexBytes = 64L * 1024 * 1024;
@@ -230,14 +231,20 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 					Path.Combine(container, RepositoryCacheLayout.MarkerFileName),
 					contentKind == RepositoryCacheContentKind.Git ? "git" : "zip");
 				Directory.Move(normalizedStagingPath, destination);
+				var approximateSize = CalculateDirectorySizeBounded(
+					container,
+					MaximumSynchronousPublicationFileCount,
+					out var sizeIsComplete);
 				RecordIndexedRepositoryCore(
 					repositoryUrl,
 					destination,
 					branch: null,
 					commitHash: null,
 					RepositoryCacheEntryState.Ready,
-					CalculateDirectorySize(container),
+					approximateSize,
 					contentKind);
+				if (!sizeIsComplete)
+					ScheduleRepositorySizeRefresh(destination);
 			}
 			return destination;
 		}
@@ -250,7 +257,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 	public RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl)
 	{
-		var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl);
 		if (identity.Length == 0)
 			return null;
 
@@ -459,7 +466,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		string? branch = null,
 		CancellationToken cancellationToken = default)
 	{
-		var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl);
 		if (identity.Length == 0)
 			return null;
 
@@ -519,7 +526,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		string repositoryUrl,
 		CancellationToken cancellationToken = default)
 	{
-		var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl);
 		if (identity.Length == 0)
 			throw new ArgumentException("Repository URL is invalid.", nameof(repositoryUrl));
 
@@ -636,7 +643,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		string identity;
 		try
 		{
-			identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+			identity = RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl);
 		}
 		catch
 		{
@@ -1340,6 +1347,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 					{
 						if (!await TryRestoreRemoteBranchAsync(
 								entry.LocalPath,
+								entry.RepositoryUrl,
 								effectiveBranch,
 								cancellationToken)
 							.ConfigureAwait(false))
@@ -1475,13 +1483,24 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 	private static async Task<bool> TryRestoreRemoteBranchAsync(
 		string repositoryPath,
+		string repositoryUrl,
 		string branch,
 		CancellationToken cancellationToken)
 	{
 		var normalizedBranch = GitBranchNameValidator.ValidateAndNormalize(branch);
+		if (!GitRemoteIdentityStore.Matches(repositoryPath, repositoryUrl))
+			return false;
+		var networkOverrides = await RunGitForOutputAsync(
+			repositoryPath,
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.NetworkOverrides),
+			cancellationToken).ConfigureAwait(false);
+		if (!string.IsNullOrWhiteSpace(networkOverrides))
+			return false;
 		if (await RunGitForOutputAsync(
 			    repositoryPath,
-			    ["remote", "set-branches", "--add", "origin", normalizedBranch],
+			    GitProcessOperation.ManagedConfigWrite(
+				    GitManagedConfigWriteKind.AddTrackedBranch,
+				    normalizedBranch),
 			    cancellationToken).ConfigureAwait(false) is null)
 		{
 			return false;
@@ -1489,7 +1508,10 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 		return await RunGitForOutputAsync(
 			       repositoryPath,
-			       ["fetch", "origin", normalizedBranch, "--depth", "1"],
+			       GitProcessOperation.FetchBranch(
+				       repositoryUrl,
+				       normalizedBranch,
+				       allowFileTransport: RepositoryTransportPolicy.AllowsLocalFileTransport),
 			       cancellationToken).ConfigureAwait(false) is not null;
 	}
 
@@ -1516,42 +1538,45 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	{
 		var current = await RunGitForOutputAsync(
 			repositoryPath,
-			["rev-parse", "--abbrev-ref", "HEAD"],
+			GitProcessOperation.ListBranches(GitBranchListKind.Current),
 			cancellationToken).ConfigureAwait(false);
 		if (!string.IsNullOrWhiteSpace(current) && !string.Equals(current.Trim(), "HEAD", StringComparison.Ordinal))
 			return current.Trim();
 
 		var configured = await RunGitForOutputAsync(
 			repositoryPath,
-			["config", "--worktree", "--get", "devprojex.branch"],
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.WorktreeBranch),
 			cancellationToken).ConfigureAwait(false);
 		return string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
 	}
 
 	private static async Task<string?> RunGitForOutputAsync(
 		string workingDirectory,
-		IReadOnlyList<string> arguments,
+		GitProcessOperation operation,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		deadline.CancelAfter(operation.Deadline);
+		var operationToken = deadline.Token;
 		using var process = new Process
 		{
-			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, arguments)
+			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, operation)
 		};
 		process.Start();
 		process.StandardInput.Close();
 		var output = GitProcessOutputReader.ReadAsync(
 			process.StandardOutput,
 			GitProcessOutputReader.MaximumOutputCharacters,
-			cancellationToken);
+			operationToken);
 		var error = GitProcessOutputReader.ReadAsync(
 			process.StandardError,
 			GitProcessOutputReader.MaximumOutputCharacters,
-			cancellationToken);
+			operationToken);
 		try
 		{
 			await GitRepositoryService
-				.WaitForExitOrTerminateAsync(process, cancellationToken)
+				.WaitForExitOrTerminateAsync(process, operationToken)
 				.ConfigureAwait(false);
 			if (!await GitProcessOutputReader
 				    .WaitForCompletionAfterExitAsync(process, output, error)
@@ -1572,7 +1597,9 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			await GitProcessOutputReader
 				.ObserveAfterTerminationAsync(process, output, error)
 				.ConfigureAwait(false);
-			throw;
+			if (cancellationToken.IsCancellationRequested)
+				throw;
+			return null;
 		}
 	}
 
@@ -1851,8 +1878,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		RepositoryCacheContentKind contentKind)
 	{
 		var safeUrl = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
-		var identity = RepositoryUrlUtility.GetComparisonKey(safeUrl);
-		if (identity.Length == 0 || string.IsNullOrWhiteSpace(localPath))
+		if (string.IsNullOrWhiteSpace(localPath))
 			return;
 
 		string normalizedPath;
@@ -1866,6 +1892,14 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		}
 
 		if (!IsInCache(normalizedPath))
+			return;
+		var identitySource = GitRemoteIdentityStore.TryReadSourceIdentity(
+			normalizedPath,
+			out var storedSourceIdentity)
+			? storedSourceIdentity
+			: safeUrl;
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(identitySource);
+		if (identity.Length == 0)
 			return;
 
 		var fileSet = GetIndexFileSet();
@@ -1895,11 +1929,30 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			var entries = document.Entries
 				.Where(candidate =>
 					!string.Equals(candidate.Identity, identity, StringComparison.Ordinal) &&
-					!ArePathsInSameRepository(candidate.LocalPath, normalizedPath))
+					!ArePathsInSameRepository(candidate.LocalPath, normalizedPath) &&
+					!IsLegacySafeUrlIdentity(candidate, safeUrl, identity))
 				.ToList();
 			entries.Add(entry);
 			WriteIndex(fileSet, entries);
 		}
+	}
+
+	private static bool IsLegacySafeUrlIdentity(
+		RepositoryCacheIndexEntry candidate,
+		string safeUrl,
+		string replacementIdentity)
+	{
+		if (!string.Equals(
+				RepositoryUrlUtility.ToSafeDisplay(candidate.RepositoryUrl),
+				safeUrl,
+				StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		var anonymousIdentity = RepositoryUrlUtility.GetSourceCacheKey(candidate.RepositoryUrl);
+		return !string.Equals(anonymousIdentity, replacementIdentity, StringComparison.Ordinal) &&
+		       string.Equals(candidate.Identity, anonymousIdentity, StringComparison.Ordinal);
 	}
 
 	private RepositoryCacheIndexEntry? FindIndexedRepositoryByIdentity(string identity)
@@ -2439,6 +2492,39 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		return total;
 	}
 
+	private static long CalculateDirectorySizeBounded(
+		string path,
+		int maximumFileCount,
+		out bool complete)
+	{
+		long total = 0;
+		var fileCount = 0;
+		complete = true;
+		try
+		{
+			foreach (var file in Directory.EnumerateFiles(path, "*", RecursiveCacheEnumeration))
+			{
+				if (++fileCount > maximumFileCount)
+				{
+					complete = false;
+					return 0;
+				}
+
+				try
+				{
+					total = checked(total + new FileInfo(file).Length);
+				}
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OverflowException)
+				{
+				}
+			}
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+		{
+		}
+		return total;
+	}
+
 	private static long CalculateIndexedSize(IEnumerable<RepositoryCacheIndexEntry> entries)
 	{
 		long total = 0;
@@ -2681,7 +2767,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		return new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries);
 	}
 
-	private static RepositoryCacheIndexEntry? NormalizeIndexEntryOrNull(
+	private RepositoryCacheIndexEntry? NormalizeIndexEntryOrNull(
 		RepositoryCacheIndexEntry entry,
 		DateTimeOffset maximumAcceptedTimestamp)
 	{
@@ -2690,8 +2776,21 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			var safeUrl = RepositoryUrlUtility.ToSafeDisplay(entry.RepositoryUrl);
 			if (safeUrl.Length == 0)
 				return null;
+			var identity = entry.Identity;
+			if (!RepositoryUrlUtility.IsCurrentSourceCacheKey(identity))
+			{
+				var identitySource = GitRemoteIdentityStore.TryReadSourceIdentity(
+					entry.LocalPath,
+					out var storedSourceIdentity)
+					? storedSourceIdentity
+					: safeUrl;
+				identity = RepositoryUrlUtility.GetSourceCacheKey(identitySource);
+				if (identity.Length == 0)
+					return null;
+			}
 			return entry with
 			{
+				Identity = identity,
 				RepositoryUrl = safeUrl,
 				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
 				              entry.LastUsedUtc > maximumAcceptedTimestamp

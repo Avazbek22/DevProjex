@@ -288,7 +288,7 @@ public sealed class IgnoreRulesHierarchicalGitIgnoreMatrixTests
 	}
 
 	[Fact]
-	public void GitIgnoreScanContexts_NestedGitMetadata_IsHardPrunedOnlyByActiveOrCandidateController()
+	public void GitIgnoreScanContexts_NestedGitMetadata_IsHardPrunedInEveryMode()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "logs/\n");
@@ -300,7 +300,9 @@ public sealed class IgnoreRulesHierarchicalGitIgnoreMatrixTests
 
 		Assert.True(activeRules.CreateGitIgnoreScanContext(temp.Path)
 			.Evaluate(fullPath, relativePath, isDirectory: true, ".git").IsIgnored);
-		Assert.False(disabledRules.CreateGitIgnoreScanContext(temp.Path)
+		// The administrative boundary holds with Git filtering off: .git is a product
+		// boundary, so even the widest baseline never surfaces it.
+		Assert.True(disabledRules.CreateGitIgnoreScanContext(temp.Path)
 			.Evaluate(fullPath, relativePath, isDirectory: true, ".git").IsIgnored);
 		Assert.True(disabledRules.CreateGitIgnoreCandidateScanContext(temp.Path)
 			.Evaluate(fullPath, relativePath, isDirectory: true, ".git").IsIgnored);

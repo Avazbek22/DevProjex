@@ -6,7 +6,8 @@ namespace DevProjex.Infrastructure.ProjectProfiles;
 
 internal sealed class PersistentSecretMarkStore(
 	Func<string> appDataPathProvider,
-	TimeSpan? lockTimeout = null)
+	TimeSpan? lockTimeout = null,
+	JsonStoreWriteOperations? writeOperations = null)
 {
 	private const int CurrentSchemaVersion = 4;
 	private const int AppliedRevisionSchemaVersion = 2;
@@ -833,14 +834,16 @@ internal sealed class PersistentSecretMarkStore(
 			path,
 			ProjectProfileStorageLimits.MaximumJsonBytes);
 
-	private static bool TrySave(JsonStoreFileSet fileSet, PersistentSecretMarkDb database)
+	private bool TrySave(JsonStoreFileSet fileSet, PersistentSecretMarkDb database)
 	{
 		database.SchemaVersion = CurrentSchemaVersion;
-		return JsonStorePersistence.TryWriteAtomicDurable(
+		var result = JsonStorePersistence.WriteAtomicDurableWithResult(
 			fileSet,
 			database,
 			SerializerOptions,
-			ProjectProfileStorageLimits.MaximumJsonBytes);
+			ProjectProfileStorageLimits.MaximumJsonBytes,
+			writeOperations);
+		return result is JsonStoreWriteResult.Committed or JsonStoreWriteResult.CommittedBackupFailed;
 	}
 
 	private static async ValueTask<T> RunOffCallerThreadAsync<T>(Func<T> operation, CancellationToken cancellationToken)

@@ -11,6 +11,76 @@ public sealed class SecretRedactionCommandContractTests
 	private const string PrivateEmail = "ivan.petrov@corp.internal";
 
 	[Fact]
+	public void RealCli_ExportAndAnalyzeUseTheSameStructuredValueCorpus()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile("project/.env", "DB_PASSWORD=\"dotenv # value\" # keep\n");
+		workspace.Temporary.WriteFile(
+			"project/connections.txt",
+			"Server=db;Password=ado&value;Database=app\n" +
+			"jdbc:postgresql://db/app?user=admin&password=jdbc-value&ssl=true\n");
+		workspace.Temporary.WriteFile(
+			"project/appsettings.json",
+			"{\"Passwords\":[\"json-one\",\"json-two\"],\"Port\":8080}\n");
+		workspace.Temporary.WriteFile(
+			"project/application.yml",
+			"password: |-\n  yaml-one\n  yaml-two\nport: 8080\n");
+		workspace.Temporary.WriteFile(
+			"project/web.config",
+			"<Password><![CDATA[xml-value]]></Password><Port>8080</Port>\n");
+		workspace.Temporary.WriteFile("project/settings.py", "SECRET_KEY = r\"python-value\"\n");
+		workspace.Temporary.WriteFile(
+			"project/Dockerfile",
+			"ENV NORMAL=x \\\n    DB_PASSWORD=docker-value\n");
+		workspace.Temporary.WriteFile(
+			"project/.netrc",
+			"machine host login user password\n\"netrc value\"\n");
+		workspace.Temporary.WriteFile(
+			"project/.npmrc",
+			"//registry.example.com/:_auth=npm-value\n");
+
+		var export = RunPublished(
+			workspace,
+			"export", "context", workspace.ProjectRoot,
+			"--view", "content", "--format", "json",
+			"--git-mode", "none", "--exclude", "none",
+			"--hide-secrets", "--plain", "-o", "-");
+		Assert.True(export.ExitCode == CommandLineExitCodes.Success, export.StandardError);
+		using var exportDocument = JsonDocument.Parse(export.StandardOutput);
+		var exportedContent = string.Join(
+			'\n',
+			exportDocument.RootElement.GetProperty("files").EnumerateArray()
+				.Select(static file => file.GetProperty("content").GetString()));
+
+		foreach (var value in new[]
+		         {
+			         "dotenv # value", "ado&value", "jdbc-value", "json-one", "json-two",
+			         "yaml-one", "yaml-two", "xml-value", "python-value", "docker-value",
+			         "netrc value", "npm-value"
+		         })
+		{
+			Assert.DoesNotContain(value, exportedContent, StringComparison.Ordinal);
+		}
+		Assert.Contains(" # keep", exportedContent, StringComparison.Ordinal);
+		Assert.Contains(";Database=app", exportedContent, StringComparison.Ordinal);
+		Assert.Contains("&ssl=true", exportedContent, StringComparison.Ordinal);
+		Assert.Contains("<Port>8080</Port>", exportedContent, StringComparison.Ordinal);
+		Assert.Contains("port: 8080", exportedContent, StringComparison.Ordinal);
+
+		var analyze = RunPublished(
+			workspace,
+			"analyze", workspace.ProjectRoot,
+			"--format", "json", "--git-mode", "none", "--exclude", "none",
+			"--hide-secrets", "--plain", "-o", "-");
+		Assert.True(analyze.ExitCode == CommandLineExitCodes.Success, analyze.StandardError);
+		using var analyzeDocument = JsonDocument.Parse(analyze.StandardOutput);
+		var placeholderCount = CountOccurrences(exportedContent, SecretRedactionLegend.PlaceholderPrefix);
+		Assert.Equal(
+			placeholderCount,
+			analyzeDocument.RootElement.GetProperty("redaction").GetProperty("redactedCount").GetInt32());
+	}
+
+	[Fact]
 	public async Task ExportContext_LocalProfileAppliesPersistentManualSecretMarks()
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);
@@ -503,6 +573,69 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Fact]
+	public async Task ExportAndAnalyze_PreserveSourceDetectedCoverageWhenCommentsAreStripped()
+	{
+		const string token = "pat7o9mw4c058sei5.bb075cee667b90855a4471502369a2bd7e93f38ba6aa8039a2527e577ca5793a";
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile(
+			"project/src/source-detected.cs",
+			$"// airtable credential{Environment.NewLine}" +
+			$"internal static class SourceDetected {{ public const string Value = \"{token}\"; }}{Environment.NewLine}");
+		var export = new TestTerminalEnvironment();
+
+		var exportExitCode = await RunAsync(
+			workspace,
+			export,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content",
+				"--format", "text",
+				"--git-mode", "none",
+				"--hide-secrets",
+				"--strip-comments",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exportExitCode);
+		Assert.Contains(
+			"public const string Value = \"DEVPROJEX_REDACTED[airtable-personnal-access-token#1]\";",
+			export.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(token, export.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(token, export.StandardError, StringComparison.Ordinal);
+		Assert.Empty(export.StandardError);
+
+		var analyze = new TestTerminalEnvironment();
+		var analyzeExitCode = await RunAsync(
+			workspace,
+			analyze,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--git-mode", "none",
+				"--hide-secrets",
+				"--strip-comments",
+				"--findings",
+				"--format", "json",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, analyzeExitCode);
+		using var document = JsonDocument.Parse(analyze.StandardOutput);
+		var redaction = document.RootElement.GetProperty("redaction");
+		Assert.Equal(1, redaction.GetProperty("matchedCount").GetInt32());
+		Assert.Equal(1, redaction.GetProperty("redactedCount").GetInt32());
+		var finding = Assert.Single(
+			document.RootElement.GetProperty("findings").EnumerateArray(),
+			static item => item.GetProperty("relativePath").GetString() == "src/source-detected.cs");
+		Assert.Equal("airtable-personnal-access-token", finding.GetProperty("ruleId").GetString());
+		Assert.DoesNotContain(token, analyze.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(token, analyze.StandardError, StringComparison.Ordinal);
+		Assert.Empty(analyze.StandardError);
+	}
+
 	[Theory]
 	[InlineData("\n")]
 	[InlineData("\r\n")]
@@ -862,6 +995,34 @@ public sealed class SecretRedactionCommandContractTests
 		}
 	}
 
+	[Fact]
+	public async Task ExportContext_HideSecretsIgnoresInlineAllowMarkerFromProjectContent()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile(
+			"project/src/inline-allow.cs",
+			$"const string token = \"{GithubToken}\"; // gitleaks:allow\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content",
+				"--format", "text",
+				"--git-mode", "none",
+				"--hide-secrets",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Theory]
 	[InlineData("folder")]
 	[InlineData("zip")]
@@ -1162,6 +1323,77 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
+	public async Task FailOnFindingsReturnsPolicyFailureWhenSelectedTextCannotBeScanned()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		await File.WriteAllTextAsync(
+			Path.Combine(workspace.ProjectRoot, "oversized.txt"),
+			new string('x', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1)),
+			TestContext.Current.CancellationToken);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--git-mode", "none",
+				"--fail-on-findings",
+				"--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(0, document.RootElement.GetProperty("findingCount").GetInt32());
+		Assert.Single(document.RootElement
+			.GetProperty("contentInspection")
+			.GetProperty("unscannableFiles")
+			.EnumerateArray());
+	}
+
+	[Theory]
+	[InlineData("hidden-files")]
+	[InlineData("dot-files")]
+	[InlineData("smart-ignore")]
+	public async Task ExportContext_PathExclusionOverridePreservesPortableProfileSecretRedaction(
+		string exclusion)
+	{
+		using var workspace = CreateWorkspace();
+		var profile = workspace.Temporary.WriteFile(
+			"profile.json",
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "hideSecrets": true
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", profile,
+				"--exclude", exclusion,
+				"--view", "content",
+				"--format", "text",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task ExportContext_LocalProfileAppliesSourceBoundMarkToOnlySelectedOccurrence()
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);
@@ -1281,6 +1513,27 @@ public sealed class SecretRedactionCommandContractTests
 				environment,
 				new TerminalServiceFactory(() => workspace.AppDataRoot))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
+
+	private static TerminalTestProcessResult RunPublished(Workspace workspace, params string[] arguments)
+	{
+		var startInfo = new System.Diagnostics.ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		startInfo.ArgumentList.Add("--language");
+		startInfo.ArgumentList.Add("en");
+		startInfo.ArgumentList.Add("--progress");
+		startInfo.ArgumentList.Add("never");
+		startInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
+		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = workspace.AppDataRoot;
+		return TerminalTestProcess.Run(startInfo, TimeSpan.FromMinutes(1));
+	}
 
 	private static async Task AddPersistentManualSecretAsync(
 		Workspace workspace,

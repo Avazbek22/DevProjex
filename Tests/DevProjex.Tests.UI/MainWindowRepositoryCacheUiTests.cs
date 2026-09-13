@@ -1389,9 +1389,24 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 
 	private static void RunGit(string repositoryPath, IReadOnlyList<string> arguments)
 	{
+		var startInfo = new ProcessStartInfo(GitRuntime.GitExecutable)
+		{
+			WorkingDirectory = repositoryPath,
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		if (OperatingSystem.IsWindows())
+		{
+			startInfo.ArgumentList.Add("-c");
+			startInfo.ArgumentList.Add("core.longpaths=true");
+		}
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
 		using var process = new Process
 		{
-			StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, arguments)
+			StartInfo = startInfo
 		};
 		Assert.True(process.Start());
 		process.StandardInput.Close();

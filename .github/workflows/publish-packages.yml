@@ -1,0 +1,243 @@
+name: Publish Headless Packages
+
+# CI tier 2 (push to v*) and 3 (master, release, dispatch). Policy: .github/workflows/README.md
+# - `pull_request` runs ONLY when the package inputs themselves change (paths below). Core code
+#   paths belong to `push`; copying them here makes every feature push pack and smoke npm and
+#   NuGet on three operating systems.
+# - `branches-ignore: [master]` keeps the release PR (v* -> master) out: the push run on v* already
+#   attaches its checks to the same commit the release PR shows. Never replace it with `branches:`.
+# - The read-only build is packages-build.yml (also used by release-candidate.yml). Publishing
+#   needs an explicit workflow_dispatch with dry_run=false; nothing else may publish.
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [master, 'v*']
+    paths:
+      - '.github/workflows/publish-packages.yml'
+      - '.github/workflows/packages-build.yml'
+      - 'Apps/Terminal/**'
+      - 'Apps/TerminalHost/**'
+      - 'Apps/Mcp/**'
+      - 'Assets/Localization/**'
+      - 'Application/**'
+      - 'Infrastructure/**'
+      - 'Kernel/**'
+      - 'Packaging/Headless/**'
+      - 'Packaging/Npm/**'
+      - 'Scripts/*Headless*'
+      - 'Scripts/ci/Test-ResumableHeadlessPublish.ps1'
+      - 'Tests/DevProjex.Tests.Terminal/**'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'Directory.Packages.props'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
+  pull_request:
+    # The release PR (v* -> master) is excluded: its head commit already carries the push run.
+    branches-ignore: [master]
+    paths:
+      - '.github/workflows/publish-packages.yml'
+      - '.github/workflows/packages-build.yml'
+      - 'Packaging/Headless/**'
+      - 'Packaging/Npm/**'
+      - 'Scripts/*Headless*'
+      - 'Scripts/ci/Test-ResumableHeadlessPublish.ps1'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
+      - 'Directory.Build.targets'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: DevProjex display version (for example 5.2 or 5.2.0)
+        required: true
+        default: '5.2'
+        type: string
+      channels:
+        description: Channels to publish after every gate passes
+        required: true
+        default: both
+        type: choice
+        options: [nuget, npm, both]
+      dry_run:
+        description: Build and gate without publishing
+        required: true
+        default: true
+        type: boolean
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: false
+        type: string
+      version:
+        description: Optional package version; defaults to Directory.Build.props
+        required: false
+        type: string
+      channels:
+        description: Channels to gate
+        required: false
+        default: both
+        type: string
+      dry_run:
+        description: Build and gate without publishing
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+# One run per pull request or branch head. Feature pushes and branch merges cancel their own
+# superseded runs; release, dispatch, and workflow_call runs are never cancelled.
+concurrency:
+  group: publish-headless-packages-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  prepare:
+    name: Resolve package version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      display_version: ${{ steps.version.outputs.display_version }}
+      package_version: ${{ steps.version.outputs.package_version }}
+      source_sha: ${{ steps.version.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+
+      - name: Resolve package version
+        id: version
+        shell: pwsh
+        run: |
+          $displayVersion = if ('${{ github.event_name }}' -ceq 'release') {
+            '${{ github.event.release.tag_name }}'.TrimStart('v')
+          } elseif ('${{ github.event_name }}' -ceq 'pull_request' -or [string]::IsNullOrWhiteSpace('${{ inputs.version }}')) {
+            $buildProps = [xml](Get-Content Directory.Build.props -Raw)
+            $versionNode = $buildProps.SelectSingleNode('/Project/PropertyGroup/DevProjexVersion')
+            if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText)) {
+              throw 'DevProjexVersion was not found in Directory.Build.props.'
+            }
+            $versionNode.InnerText.Trim()
+          } else {
+            '${{ inputs.version }}'
+          }
+          if ([string]::IsNullOrWhiteSpace($displayVersion)) {
+            throw 'Could not resolve the DevProjex display version.'
+          }
+          $packageVersion = $displayVersion
+          if ($packageVersion -match '^(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            $packageVersion = "$packageVersion.0"
+          }
+          if ($packageVersion -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)([-+].+)?$') {
+            throw "Version '${{ inputs.version }}' is not a supported semantic version."
+          }
+          "display_version=$displayVersion" >> $env:GITHUB_OUTPUT
+          "package_version=$packageVersion" >> $env:GITHUB_OUTPUT
+          "source_sha=$(git rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+
+      - name: Validate release version metadata
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ReleaseVersion.ps1
+          -ResolvedVersion '${{ steps.version.outputs.display_version }}'
+          -EventName '${{ github.event_name }}'
+          -ReleaseTag '${{ github.event.release.tag_name }}'
+
+  build:
+    name: Read-only package gates
+    needs: prepare
+    uses: ./.github/workflows/packages-build.yml
+    with:
+      checkout_ref: ${{ needs.prepare.outputs.source_sha }}
+      display_version: ${{ needs.prepare.outputs.display_version }}
+      package_version: ${{ needs.prepare.outputs.package_version }}
+
+  publish-nuget:
+    name: Publish NuGet packages
+    needs: [prepare, build]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false && (inputs.channels == 'nuget' || inputs.channels == 'both') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: nuget
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: headless-packages
+          path: artifacts/headless
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Exchange OIDC token for a temporary NuGet key
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish or verify RID packages, then pointer
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          ./Scripts/Publish-HeadlessPackages.ps1 `
+            -ArtifactsRoot artifacts/headless `
+            -Channels nuget `
+            -NuGetApiKey $env:NUGET_API_KEY `
+            -ExpectedSourceSha $env:SOURCE_SHA
+
+  publish-npm:
+    name: Publish npm packages
+    needs: [prepare, build]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false && (inputs.channels == 'npm' || inputs.channels == 'both') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: headless-packages
+          path: artifacts/headless
+
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install trusted-publishing npm CLI
+        run: npm install --global npm@12.0.2
+
+      - name: Publish or verify platform packages, then launcher
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          $npmVersion = [version]((npm --version).Trim())
+          if ($npmVersion -lt [version]'11.5.1') { throw "npm $npmVersion does not support trusted publishing." }
+          ./Scripts/Publish-HeadlessPackages.ps1 `
+            -ArtifactsRoot artifacts/headless `
+            -Channels npm `
+            -ExpectedSourceSha $env:SOURCE_SHA

@@ -24,7 +24,7 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 	}
 
 	[Fact]
-	public void AdministrativeNameMatrix_DependsOnSelectedGitModeAndPlatformPathSemantics()
+	public void AdministrativeNameMatrix_IsModeIndependentAndFollowsPlatformPathSemantics()
 	{
 		using var temp = new TemporaryDirectory();
 		var service = new IgnoreRulesService(new SmartIgnoreService([]));
@@ -60,7 +60,11 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 				expectedIgnored,
 				tracked.Evaluate(path, $"nested/{name}", isDirectory: true, name).IsIgnored);
 			Assert.Equal(expectedIgnored, activeRules.IsGitIgnored(path, isDirectory: true, name));
-			Assert.False(disabled.Evaluate(path, $"nested/{name}", isDirectory: true, name).IsIgnored);
+			// The administrative boundary is mode-independent: disabling Git filtering
+			// changes nothing for .git while every other name stays visible.
+			Assert.Equal(
+				expectedIgnored,
+				disabled.Evaluate(path, $"nested/{name}", isDirectory: true, name).IsIgnored);
 		}
 
 		Assert.True(active.Evaluate(

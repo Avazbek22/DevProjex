@@ -536,10 +536,18 @@ public sealed class TreeSitterCodeCompressorTests
 	[Fact]
 	public void UnsupportedExtension_IsLeftFullWithAReason()
 	{
-		var (plan, text) = Compress("notes.md", "# hello\n");
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath());
+		const string source = "# hello\n";
+		var plan = scope.Analyze(
+			"notes.md",
+			"notes.md",
+			source,
+			TestContext.Current.CancellationToken).Plan;
 
 		Assert.Equal(CodeCompressionOutcome.UnchangedUnsupportedLanguage, plan.Outcome);
-		Assert.Equal("# hello\n", text);
+		Assert.Equal(source, plan.Apply(source).Text);
+		Assert.Equal(CodeCompressionAvailabilityState.Available, compressor.CaptureAvailability().State);
 	}
 
 	[Fact]
@@ -1338,7 +1346,10 @@ public sealed class TreeSitterCodeCompressorTests
 				"Widget.cs",
 				CodeCompressionFixtures.CSharp,
 				TestContext.Current.CancellationToken);
-			Assert.Equal(CodeCompressionOutcome.UnchangedParseFailed, first.Plan.Outcome);
+			// The old assertion called every native-runtime failure a parse failure. The
+			// availability contract now identifies the delivery failure without changing fallback text.
+			Assert.Equal(CodeCompressionOutcome.UnchangedGrammarUnavailable, first.Plan.Outcome);
+			Assert.Equal(CodeCompressionUnavailabilityScope.Language, first.Plan.Unavailability?.Scope);
 		}
 
 		using var secondScope = compressor.CreateScope(Path.GetTempPath());
@@ -1366,7 +1377,7 @@ public sealed class TreeSitterCodeCompressorTests
 				"failed.cs",
 				CodeCompressionFixtures.CSharp,
 				TestContext.Current.CancellationToken);
-			Assert.Equal(CodeCompressionOutcome.UnchangedParseFailed, failed.Plan.Outcome);
+			Assert.Equal(CodeCompressionOutcome.UnchangedGrammarUnavailable, failed.Plan.Outcome);
 		}
 
 		using var retryScope = compressor.CreateScope(Path.GetTempPath());
@@ -1390,6 +1401,71 @@ public sealed class TreeSitterCodeCompressorTests
 			compressor.RuntimeDiagnostics.GlobalWorkerCapacity);
 	}
 
+	[Theory]
+	[InlineData(GrammarFailureKind.Missing)]
+	[InlineData(GrammarFailureKind.IncompatibleAbi)]
+	[InlineData(GrammarFailureKind.InvalidBinary)]
+	public void GrammarLoadFailure_IsReportedAsLanguageUnavailable(GrammarFailureKind failureKind)
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		using var compressor = new TreeSitterCodeCompressor(
+			new FailingGrammarLibraryLocator(failureKind),
+			[harness.Pack]);
+		using var session = new CodeCompressionSession(compressor);
+		using var scope = session.BeginOutput("project", ["Widget.cs"]);
+
+		var result = scope.Transform(
+			"Widget.cs",
+			"Widget.cs",
+			CodeCompressionFixtures.CSharp,
+			TestContext.Current.CancellationToken);
+		var snapshot = scope.Complete();
+
+		Assert.Equal(CodeCompressionFixtures.CSharp, result.Text);
+		Assert.Equal(
+			CodeCompressionOutcome.UnchangedGrammarUnavailable,
+			Assert.Single(snapshot.Unchanged).Outcome);
+		Assert.Equal(CodeCompressionAvailabilityState.LanguageUnavailable, snapshot.Availability.State);
+		var failure = Assert.Single(snapshot.Availability.Failures);
+		Assert.Equal("csharp", failure.LanguageId);
+		Assert.Equal(harness.Pack.Library, failure.GrammarLibrary);
+		var expectedReason = failureKind switch
+		{
+			GrammarFailureKind.Missing => "not found",
+			GrammarFailureKind.IncompatibleAbi => "ABI is incompatible",
+			GrammarFailureKind.InvalidBinary => "not a valid native library",
+			_ => throw new ArgumentOutOfRangeException(nameof(failureKind), failureKind, null)
+		};
+		Assert.Contains(expectedReason, failure.Reason, StringComparison.OrdinalIgnoreCase);
+		Assert.Equal(snapshot.Availability, session.Diagnostics.Availability);
+	}
+
+	[Fact]
+	public void EmptyGrammarDelivery_IsReportedAsGloballyUnavailable()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		using var compressor = new TreeSitterCodeCompressor(
+			new EmptyGrammarLibraryLocator(),
+			[harness.Pack]);
+		using var session = new CodeCompressionSession(compressor);
+		using var scope = session.BeginOutput("project", ["Widget.cs"]);
+
+		_ = scope.Transform(
+			"Widget.cs",
+			"Widget.cs",
+			CodeCompressionFixtures.CSharp,
+			TestContext.Current.CancellationToken);
+		var snapshot = scope.Complete();
+
+		Assert.Equal(CodeCompressionAvailabilityState.Unavailable, snapshot.Availability.State);
+		var failure = Assert.Single(snapshot.Availability.Failures);
+		Assert.Equal(CodeCompressionUnavailabilityScope.AllLanguages, failure.Scope);
+		Assert.Contains("No grammar libraries", failure.Reason, StringComparison.Ordinal);
+		Assert.Equal(
+			CodeCompressionOutcome.UnchangedGrammarUnavailable,
+			Assert.Single(snapshot.Unchanged).Outcome);
+	}
+
 	[Fact]
 	public void PermanentQueryCompilationFailure_IsNotRetriedAcrossScopes()
 	{
@@ -1411,6 +1487,7 @@ public sealed class TreeSitterCodeCompressorTests
 
 		Assert.Equal(1, locator.ResolveCount);
 		Assert.Equal(0, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(CodeCompressionAvailabilityState.Available, compressor.CaptureAvailability().State);
 	}
 
 	[Fact]
@@ -1547,6 +1624,39 @@ public sealed class TreeSitterCodeCompressorTests
 				throw new IOException("Injected transient grammar access failure.");
 			return inner.Resolve(libraryBaseName);
 		}
+	}
+
+	public enum GrammarFailureKind
+	{
+		Missing,
+		IncompatibleAbi,
+		InvalidBinary
+	}
+
+	private sealed class FailingGrammarLibraryLocator(GrammarFailureKind failureKind)
+		: IGrammarLibraryLocator
+	{
+		public string StrategyName => "test";
+		public IReadOnlyList<string> EnumerateLibraries() => ["tree-sitter-c-sharp"];
+
+		public string Resolve(string libraryBaseName) => failureKind switch
+		{
+			GrammarFailureKind.Missing =>
+				throw new FileNotFoundException("Injected missing grammar.", libraryBaseName),
+			GrammarFailureKind.IncompatibleAbi =>
+				throw new InvalidOperationException("Injected incompatible grammar ABI."),
+			GrammarFailureKind.InvalidBinary =>
+				throw new BadImageFormatException("Injected invalid grammar binary."),
+			_ => throw new ArgumentOutOfRangeException(nameof(failureKind), failureKind, null)
+		};
+	}
+
+	private sealed class EmptyGrammarLibraryLocator : IGrammarLibraryLocator
+	{
+		public string StrategyName => "empty test";
+		public IReadOnlyList<string> EnumerateLibraries() => [];
+		public string Resolve(string libraryBaseName) =>
+			throw new InvalidOperationException("Resolve must not run for an empty delivery source.");
 	}
 
 	private sealed class CancelAtAnalysisPhaseObserver : ITreeSitterAnalysisPhaseObserver

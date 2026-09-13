@@ -31,7 +31,7 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 			var prefix = isConfiguration
 				? $"{{ \"Password\": \"p{index:D4}!\" }}\n"
 				: $"internal sealed class Type{index:D4} {{ string apiKeyName = \"not-a-credential\"; }}\n";
-			var content = prefix + new string('x', targetSize - prefix.Length);
+			var content = prefix + new string(isConfiguration ? ' ' : 'x', targetSize - prefix.Length);
 			var relativePath = isConfiguration
 				? $"config/appsettings.{index:D4}.json"
 				: $"src/group-{index % 40:D2}/file-{index:D4}.cs";
@@ -117,9 +117,9 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 			detectionsBeforeSelectionOnlyRefresh,
 			session.GetCacheDiagnostics().DetectionRuns);
 
-		var changed = await File.ReadAllTextAsync(paths[0], TestContext.Current.CancellationToken);
-		await File.WriteAllTextAsync(paths[0], changed[..^1] + "y", TestContext.Current.CancellationToken);
-		File.SetLastWriteTimeUtc(paths[0], DateTime.UtcNow.AddSeconds(2));
+		var changed = await File.ReadAllTextAsync(paths[1], TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(paths[1], changed[..^1] + "y", TestContext.Current.CancellationToken);
+		File.SetLastWriteTimeUtc(paths[1], DateTime.UtcNow.AddSeconds(2));
 		_ = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
 		Assert.Equal(fileCount * 3, analyzer.ReadCount);
 		Assert.Equal(
@@ -241,6 +241,7 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				detector.Detect(file.RelativePath, file.Content.AsSpan(), token).Count);
 			var smartMeasurement = Measure(files, (file, token) =>
 				smartScope.Detect(file.FullPath, file.RelativePath, file.Content.AsSpan(), token).Count);
+			var prefilter = detector.InspectKeywordPrefilterStatistics();
 			TestContext.Current.TestOutputHelper?.WriteLine(
 				$"{Path.GetFileName(root)}: manifest={manifestIdentity}, files={files.Count:N0}, " +
 				$"chars={totalCharacters:N0}, " +
@@ -260,6 +261,8 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				$"cached={cachedStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"selectionOnly={selectionOnlyStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"candidate={candidateMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
+				$"prefilter={prefilter.NodeCount:N0} nodes/{prefilter.TransitionCount:N0} transitions/" +
+				$"{prefilter.AlphabetSize:N0} symbols/{prefilter.EstimatedStorageBytes:N0} B, " +
 				$"detect={detectionMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"smart={smartMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"throughput={ToMegabytes(totalCharacters) / smartMeasurement.Elapsed.TotalSeconds:F1} MB/s, " +

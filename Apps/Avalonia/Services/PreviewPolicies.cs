@@ -1021,9 +1021,6 @@ internal static class MetricsCalculationPolicy
         }
     }
 
-    public static bool ShouldProceedWithMetricsCalculation(bool hasAnyCheckedNodes, bool hasCompleteMetricsBaseline) =>
-        hasAnyCheckedNodes || hasCompleteMetricsBaseline;
-
     public static int GetBaselineWarmupParallelism(int processorCount)
     {
         if (processorCount <= 1)

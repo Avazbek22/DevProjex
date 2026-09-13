@@ -57,6 +57,7 @@ function Enable-FullCiPlan {
 		'UI',
 		'TerminalCommand',
 		'IgnoreScanner',
+		'Documentation',
 		'Release',
 		'Store',
 		'Full'
@@ -165,7 +166,9 @@ function Add-PathToCiPlan {
 	}
 
 	if (Test-PathStartsWith $normalized 'Tests/DevProjex.Tests.Unit/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit') -Reason "Unit tests: $normalized"
+		# The terminal command matrix builds and runs this same assembly under its own filter, so a
+		# change to any file in the project can break that job while leaving the Unit suite green.
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'TerminalCommand') -Reason "Unit tests: $normalized"
 		return
 	}
 
@@ -196,18 +199,21 @@ function Add-PathToCiPlan {
 	}
 
 	if ((Test-PathStartsWith $normalized 'Tests/DevProjex.Tests.Terminal.ProgressHost/') -or
-		(Test-PathStartsWith $normalized 'Tests/Shared/TerminalProgress/')) {
-		Enable-CiTargets -Plan $Plan -Targets @('Terminal') -Reason "Terminal test infrastructure: $normalized"
+		(Test-PathStartsWith $normalized 'Tests/Shared/TerminalProgress/') -or
+		(Test-PathStartsWith $normalized 'Tests/Shared/TerminalHost/')) {
+		# The Unit tests reference the progress host as well, and both shared folders are
+		# compiled into it, so a change here can break the Unit suite and not only the Terminal one.
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Terminal') -Reason "Terminal test infrastructure: $normalized"
 		return
 	}
 
 	if (Test-PathStartsWith $normalized 'Tests/Shared/ProjectLoadWorkflow/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'UI') -Reason "Shared project-load tests: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'UI', 'TerminalCommand') -Reason "Shared project-load tests: $normalized"
 		return
 	}
 
 	if (Test-PathStartsWith $normalized 'Tests/Shared/StoreListing/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration') -Reason "Shared Store-listing tests: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'TerminalCommand') -Reason "Shared Store-listing tests: $normalized"
 		return
 	}
 
@@ -217,12 +223,12 @@ function Add-PathToCiPlan {
 	}
 
 	if (Test-PathStartsWith $normalized 'Apps/Avalonia/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'UI', 'Release', 'Store') -Reason "Desktop production surface: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'UI', 'TerminalCommand', 'Release', 'Store') -Reason "Desktop production surface: $normalized"
 		return
 	}
 
 	if (Test-PathStartsWith $normalized 'Apps/Terminal/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Integration', 'Terminal', 'TerminalCommand', 'Release', 'Store') -Reason "Terminal production surface: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'TerminalCommand', 'Release', 'Store') -Reason "Terminal production surface: $normalized"
 		return
 	}
 
@@ -232,7 +238,7 @@ function Add-PathToCiPlan {
 		# read it: embedded-resource loading (Unit), per-language coverage (Integration)
 		# and the documentation contracts (Terminal, Documentation). Non-text files in the
 		# same directory stay on the shared production layer plan below.
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'Documentation') -Reason "Help content: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'TerminalCommand', 'Documentation') -Reason "Help content: $normalized"
 		return
 	}
 
@@ -248,12 +254,12 @@ function Add-PathToCiPlan {
 	}
 
 	if (Test-PathStartsWith $normalized 'Packaging/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Release', 'Store') -Reason "Packaging contract: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'TerminalCommand', 'Documentation', 'Release', 'Store') -Reason "Packaging contract: $normalized"
 		return
 	}
 
 	if (Test-PathStartsWith $normalized 'Scripts/') {
-		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Release', 'Store') -Reason "Build/release tooling: $normalized"
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'TerminalCommand', 'Release', 'Store') -Reason "Build/release tooling: $normalized"
 		return
 	}
 
@@ -265,10 +271,10 @@ function New-CiTestMatrix {
 	param([Parameter(Mandatory)][System.Collections.IDictionary] $Plan)
 
 	$suites = @(
-		@{ Name = 'Unit'; Id = 'unit'; Project = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; Trx = 'unit.trx'; Filter = '' },
-		@{ Name = 'Integration'; Id = 'integration'; Project = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; Trx = 'integration.trx'; Filter = '--filter Category!=TerminalCommand' },
-		@{ Name = 'Terminal'; Id = 'terminal'; Project = 'Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj'; Trx = 'terminal.trx'; Filter = '' },
-		@{ Name = 'UI'; Id = 'ui'; Project = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; Trx = 'ui.trx'; Filter = '' }
+		@{ Name = 'Unit'; Id = 'unit'; Project = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; Trx = 'unit.trx' },
+		@{ Name = 'Integration'; Id = 'integration'; Project = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; Trx = 'integration.trx' },
+		@{ Name = 'Terminal'; Id = 'terminal'; Project = 'Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj'; Trx = 'terminal.trx' },
+		@{ Name = 'UI'; Id = 'ui'; Project = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; Trx = 'ui.trx' }
 	)
 	$operatingSystems = @(
 		@{ Name = 'Windows'; Runner = 'windows-latest'; Id = 'windows' },
@@ -291,7 +297,6 @@ function New-CiTestMatrix {
 				suite_id = $suite.Id
 				project_path = $suite.Project
 				trx_name = $suite.Trx
-				test_filter_args = $suite.Filter
 			})
 		}
 	}
@@ -338,11 +343,33 @@ function Get-CiChangePlan {
 	}
 }
 
+# Whether a commit is in the checkout at all. A force-push leaves the event's `before` on no ref,
+# and fetch-depth 0 fetches refs, so the commit it names is simply absent. Asked before a range is
+# built from it, rather than found out by letting git fail on the range.
+function Test-CommitReachable {
+	param([Parameter(Mandatory)][AllowEmptyString()][string] $Sha)
+
+	if ($Sha -notmatch '^[0-9a-fA-F]{40}$' -or $Sha -match '^0{40}$') {
+		return $false
+	}
+
+	& git cat-file -e "$Sha^{commit}" 2>$null | Out-Null
+	$reachable = $LASTEXITCODE -eq 0
+	# A missing commit is an answer here, not a failure. The pwsh step wrapper ends the step with
+	# whatever the last native command left in $LASTEXITCODE, so this cannot be left set.
+	$global:LASTEXITCODE = 0
+	return $reachable
+}
+
 function Get-CiEventComparison {
 	[CmdletBinding()]
 	param(
 		[Parameter(Mandatory)][string] $EventName,
-		[Parameter(Mandatory)][psobject] $Event
+		[Parameter(Mandatory)][psobject] $Event,
+
+		# How a commit is looked for. Replaced in the contract tests, which work with commits that
+		# exist in no repository.
+		[scriptblock] $CommitReachable = { param([string] $Sha) Test-CommitReachable -Sha $Sha }
 	)
 
 	$validSha = '^[0-9a-fA-F]{40}$'
@@ -355,18 +382,25 @@ function Get-CiEventComparison {
 		return [pscustomobject]@{ Full = $true; BaseSha = ''; HeadSha = ''; MergeBase = $false }
 	}
 
-	# A synchronize event compares only the newly pushed delta. The previous HEAD already has CI evidence.
+	# A synchronize event compares only the newly pushed delta. The previous HEAD already has CI
+	# evidence -- but only while it still exists. A rebase or an amended push replaces it, and the
+	# event still names it, so the delta falls back to the same merge-base comparison an opened
+	# event uses. The previous gate is not consulted on that path, for the same reason it is not
+	# consulted for opened: the comparison already covers the pull request whole.
 	if ($EventName -eq 'pull_request' -and
 		$action -eq 'synchronize' -and
 		$eventBefore -match $validSha -and
-		$eventAfter -match $validSha) {
+		$eventAfter -match $validSha -and
+		(& $CommitReachable $eventBefore) -and
+		(& $CommitReachable $eventAfter)) {
 		return [pscustomobject]@{ Full = $false; BaseSha = $eventBefore; HeadSha = $eventAfter; MergeBase = $false }
 	}
 
 	if ($EventName -eq 'pull_request' -and $null -ne $pullRequest) {
 		$baseSha = [string]$pullRequest.base.sha
 		$headSha = [string]$pullRequest.head.sha
-		if ($baseSha -match $validSha -and $headSha -match $validSha) {
+		if ($baseSha -match $validSha -and $headSha -match $validSha -and
+			(& $CommitReachable $baseSha) -and (& $CommitReachable $headSha)) {
 			return [pscustomobject]@{ Full = $false; BaseSha = $baseSha; HeadSha = $headSha; MergeBase = $true }
 		}
 	}
@@ -374,7 +408,9 @@ function Get-CiEventComparison {
 	if ($EventName -eq 'push' -and
 		$eventBefore -match $validSha -and
 		$eventBefore -notmatch '^0{40}$' -and
-		$eventAfter -match $validSha) {
+		$eventAfter -match $validSha -and
+		(& $CommitReachable $eventBefore) -and
+		(& $CommitReachable $eventAfter)) {
 		return [pscustomobject]@{ Full = $false; BaseSha = $eventBefore; HeadSha = $eventAfter; MergeBase = $false }
 	}
 

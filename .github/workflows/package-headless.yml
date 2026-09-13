@@ -1,0 +1,159 @@
+name: Package Headless Release Archives
+
+# CI tier 2 (push to v*) and 3 (master, release). Policy: .github/workflows/README.md
+# - `pull_request` runs ONLY when the archive packaging itself changes (paths below). Core code
+#   paths belong to `push`; copying them here makes every feature push build six archives.
+# - `branches-ignore: [master]` keeps the release PR (v* -> master) out: the push run on v* already
+#   attaches its checks to the same commit the release PR shows. Never replace it with `branches:`.
+# - The read-only build is headless-build.yml (also used by release-candidate.yml). Only
+#   release-upload may write, and only for a published release or an explicit release_tag.
+
+on:
+  push:
+    branches: [master, 'v*']
+    paths:
+      - '.github/workflows/package-headless.yml'
+      - '.github/workflows/headless-build.yml'
+      - 'Apps/Terminal/**'
+      - 'Apps/TerminalHost/**'
+      - 'Apps/Mcp/**'
+      - 'Application/**'
+      - 'Infrastructure/**'
+      - 'Kernel/**'
+      - 'Packaging/Headless/**'
+      - 'Scripts/*Headless*'
+      - 'Scripts/*Release*'
+      - 'Scripts/release-archive-helpers.ps1'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
+      - 'Directory.Build.*'
+      - 'Directory.Packages.props'
+  pull_request:
+    # The release PR (v* -> master) is excluded: its head commit already carries the push run.
+    branches-ignore: [master]
+    paths:
+      - '.github/workflows/package-headless.yml'
+      - '.github/workflows/headless-build.yml'
+      - 'Packaging/Headless/**'
+      - 'Scripts/*Headless*'
+      - 'Scripts/*Release*'
+      - 'Scripts/release-archive-helpers.ps1'
+      - 'Scripts/ci/Test-ReleaseVersion.ps1'
+      - 'Directory.Build.targets'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without the v prefix
+        required: true
+        type: string
+      release_tag:
+        description: Existing GitHub release tag to receive the archives
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: false
+        type: string
+      version:
+        description: Optional archive version; defaults to Directory.Build.props
+        required: false
+        type: string
+      release_tag:
+        description: Existing release tag; omit for validation-only runs
+        required: false
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# One run per pull request or branch head. Feature pushes and branch merges cancel their own
+# superseded runs; release, dispatch, and workflow_call runs are never cancelled.
+concurrency:
+  group: package-headless-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  prepare:
+    name: Resolve headless archive version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      release_tag: ${{ steps.metadata.outputs.release_tag }}
+      source_sha: ${{ steps.metadata.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+      - name: Resolve release metadata
+        id: metadata
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          DISPATCH_RELEASE_TAG: ${{ inputs.release_tag }}
+          PUBLISHED_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            version="${PUBLISHED_RELEASE_TAG#v}"
+            release_tag="${PUBLISHED_RELEASE_TAG}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" || -z "${DISPATCH_VERSION}" ]]; then
+            version="$(sed -n 's:.*<DevProjexVersion[^>]*>\([^<]*\)</DevProjexVersion>.*:\1:p' Directory.Build.props)"
+            release_tag=""
+          else
+            version="${DISPATCH_VERSION}"
+            release_tag="${DISPATCH_RELEASE_TAG}"
+          fi
+          if [[ "${version}" == v* || ! "${version}" =~ ^[0-9]+\.[0-9]+([.][0-9]+)?([+-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "::error::Unsupported version syntax: ${version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "source_sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate release version metadata
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ReleaseVersion.ps1
+          -ResolvedVersion '${{ steps.metadata.outputs.version }}'
+          -EventName '${{ github.event_name }}'
+          -ReleaseTag '${{ github.event.release.tag_name }}'
+
+  build:
+    name: Read-only headless archive gates
+    needs: prepare
+    uses: ./.github/workflows/headless-build.yml
+    with:
+      checkout_ref: ${{ needs.prepare.outputs.source_sha }}
+      version: ${{ needs.prepare.outputs.version }}
+
+  release-upload:
+    name: Upload complete headless set to GitHub release
+    if: ${{ needs.prepare.outputs.release_tag != '' }}
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: headless-release-assets
+          path: artifacts/headless-release
+
+      - name: Upload archives, receipts, and checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}" artifacts/headless-release/* --clobber
