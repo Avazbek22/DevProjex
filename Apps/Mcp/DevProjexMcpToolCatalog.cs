@@ -560,44 +560,44 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
-	    {{ProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    "path": { "type": "string", "minLength": 1, "description": "Single-file form. Exactly one of path or requests is required; supplying both is rejected before file access. The path must name an existing file inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    {{CompactProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    "path": { "type": "string", "minLength": 1, "description": "Single-file form. Exactly one of path or requests is required. Names an existing selected file; Markdown escapes from the default get_tree format are accepted, while format=text supplies literal names." },
 	    "requests": {
 	      "type": "array",
 	      "minItems": 1,
 	      "maxItems": 8,
-	      "description": "Batch form: up to eight file requests and sixteen file selections total. A path alone reads the whole file; ranges or symbol narrow it. Exactly one of requests or path is required; supplying both is rejected before file access. Single-file range arguments cannot be combined with requests.",
+	      "description": "Batch form. Exactly one of requests or path is required. Reads up to eight files and sixteen selections; a path reads the whole file, while ranges or symbol narrow it. Single-file ranges cannot accompany requests.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
-	          "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Existing file path inside the effective project selection." },
+	          "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Existing selected project file." },
 	          "ranges": {
 	            "type": "array",
 	            "minItems": 1,
 	            "maxItems": 16,
-	            "description": "Inclusive transformed-text line ranges requested for this file.",
+	            "description": "Inclusive transformed-text line ranges for this file.",
 	            "items": {
 	              "type": "object",
 	              "properties": {
-	                "start_line": { "description": "First 1-based transformed-text line, inclusive.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	                "end_line": { "description": "Last 1-based transformed-text line, inclusive.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	                "start_line": { "description": "First 1-based transformed-text line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	                "end_line": { "description": "Last inclusive 1-based transformed-text line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	              },
 	              "required": ["start_line", "end_line"],
 	              "additionalProperties": false
 	            }
 	          },
-	          "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Named declaration to read from this file instead of ranges or the whole file. Ranges and symbol cannot be combined." }
+	          "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Reads this named declaration instead of ranges; the two forms cannot combine." }
 	        },
 	        "required": ["path"],
 	        "additionalProperties": false
 	      }
 	    },
-	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Read the lines that declare this symbol instead of a line range, with path. Takes a qualified name, or a simple name that is unique in the file; search_project names the declaration each hit sits inside. Cannot be combined with start_line, end_line, or start_column. A name matching several declarations, no declaration, or a file none were extracted from returns DPX-MCP-INVALID-ARGUMENTS." }
+	    "start_line": { "description": "First 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "end_line": { "description": "Last inclusive 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "start_column": { "description": "First 1-based Unicode character on start_line; use a returned continuation value.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Reads a qualified, or file-unique simple, declaration with path instead of a range; search_project supplies names. Cannot combine with line or column fields; missing, unavailable, or non-unique declarations return DPX-MCP-INVALID-ARGUMENTS." }
 	  },
 	  "additionalProperties": false
 	}
