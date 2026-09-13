@@ -109,41 +109,6 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private const string ProjectProperty = """
-	"project": {
-	  "type": "string",
-	  "description": "Unique project name or absolute path returned by list_projects, or a Git URL when the server allows remote sources. Optional only when one local root is configured."
-	}
-	""";
-
-	private const string BranchProperty = """
-	"branch": {
-	  "type": "string",
-	  "minLength": 1,
-	  "description": "Optional Git branch for a remote project URL; invalid for local project paths."
-	}
-	""";
-
-	private const string IncludeProperty = """
-	"include_patterns": {
-	  "description": "One project-relative glob pattern using '/', or an array of up to 256 of them, that only narrow the effective filters. A pattern matches the whole relative path: '*' and '?' stay inside one path segment, '**/' spans any depth ('**/*.cs' is every C# file, 'src/**' a subtree), '{a,b}' lists alternatives. Matching is case-sensitive on every platform; '!' negation and '[...]' classes are rejected.",
-	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 512 },
-	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
-	  ]
-	}
-	""";
-
-	private const string ExcludeProperty = """
-	"exclude_patterns": {
-	  "description": "One project-relative glob pattern using '/', or an array of up to 256 of them, that remove further paths; same syntax as include_patterns.",
-	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 512 },
-	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
-	  ]
-	}
-	""";
-
 	// Published only when the server was started with --allow-agent-exclusions. Content redaction
 	// toggles are never part of this vocabulary; the enum is the shared exclusion catalog.
 	private static string ExclusionsPropertyFragment()
@@ -157,14 +122,66 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		      "type": "array",
 		      "maxItems": {{ProjectSelectionTokens.Exclusions.Count}},
 		      "items": { "type": "string", "enum": [{{tokens}}] },
-		      "description": "Full desired set of built-in exclusion toggles. An empty array turns every toggle off (widest scan); omit the parameter to keep the server baseline — analyze echoes the effective set. Overrides the server baseline and any profile exclusions for this call. Tokens match case-insensitively; duplicates are rejected. hidden-* follow the platform hidden attribute; on Unix-like systems dot-named entries belong to the dot-* toggles."
+		      "description": "Full exclusion set for this call: [] disables every toggle for the widest scan, while omission keeps the server baseline; analyze echoes the result. Overrides profile exclusions. Tokens ignore case and reject duplicates; hidden-* uses platform attributes, while Unix dot names use dot-*."
 		    }
 		""";
 	}
 
-	private const string PathsProperty = """
+	private const string TopFilesProperty = """
+	"top_files": {
+	  "description": "Returns this many largest text files by estimated tokens.",
+	  "default": 10,
+	  "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 1000 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
+	}
+	""";
+
+	private const string TreeFormatProperty = """
+	"format": {
+	  "type": "string",
+	  "enum": ["markdown", "text", "json", "xml"],
+	  "default": "markdown",
+	  "description": "Selects the tree representation; markdown is the compact default."
+	}
+	""";
+
+	private const string CompactProjectProperty = """
+	"project": {
+	  "type": "string",
+	  "description": "Project name, listed absolute path, or allowed remote Git URL; omit only with one local root."
+	}
+	""";
+
+	private const string CompactBranchProperty = """
+	"branch": {
+	  "type": "string",
+	  "minLength": 1,
+	  "description": "Remote Git branch; invalid for local projects."
+	}
+	""";
+
+	private const string CompactIncludeProperty = """
+	"include_patterns": {
+	  "description": "Narrows with project-relative '/' globs: '*' and '?' stay in one segment, '**/' spans depths, and '{a,b}' alternates; matching is case-sensitive, while '!' and '[...]' are rejected.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 512 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	  ]
+	}
+	""";
+
+	private const string CompactExcludeProperty = """
+	"exclude_patterns": {
+	  "description": "Removes paths with the same project-relative glob syntax as include_patterns.",
+	  "oneOf": [
+	    { "type": "string", "minLength": 1, "maxLength": 512 },
+	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	  ]
+	}
+	""";
+
+	private const string CompactPathsProperty = """
 	"paths": {
-	  "description": "One existing project-relative file or directory, or an array of up to 256 of them, that narrow the selection. Values are literal paths: *, ?, {, and [ are ordinary filename characters here, not glob syntax.",
+	  "description": "Narrows selection to literal paths for existing project-relative files or directories; glob characters are ordinary.",
 	  "oneOf": [
 	    { "type": "string", "minLength": 1, "maxLength": 4096 },
 	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
@@ -172,24 +189,24 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private const string ProfileProperty = """
+	private const string CompactProfileProperty = """
 	"profile": {
 	  "type": "string",
 	  "minLength": 1,
-	  "description": "Selection profile. 'standard' uses the desktop set of all eight exclusion toggles with gitignore and is stricter than the server default. 'local' uses the profile saved by the desktop app for this project and listed by list_projects.profiles. Otherwise use a portable profile JSON path inside the project root."
+	  "description": "Selection profile: standard uses all eight exclusion toggles plus gitignore; local uses the desktop profile listed by list_projects.profiles; otherwise give a portable profile path inside the project."
 	}
 	""";
 
-	private const string DetailProperty = """
+	private const string CompactDetailProperty = """
 	"detail": {
 	  "type": "string",
 	  "enum": ["full", "compact", "signatures"],
 	  "default": "full",
-	  "description": "Content detail: full keeps text, compact strips comments and blank lines, signatures keeps code signatures where supported; unsupported languages remain unchanged."
+	  "description": "Content transform: full keeps text, compact removes comments and blank lines, and signatures keeps supported code signatures; other languages remain unchanged."
 	}
 	""";
 
-	private const string DetailByPatternProperty = """
+	private const string CompactDetailByPatternProperty = """
 	"detail_by_pattern": {
 	  "type": "array",
 	  "maxItems": 16,
@@ -201,43 +218,43 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	        "minItems": 1,
 	        "maxItems": 32,
 	        "items": { "type": "string", "minLength": 1, "maxLength": 512 },
-	        "description": "Same syntax and matcher as include_patterns."
+	        "description": "Uses the include_patterns glob syntax."
 	      },
 	      "detail": { "type": "string", "enum": ["full", "compact", "signatures"] }
 	    },
 	    "required": ["patterns", "detail"],
 	    "additionalProperties": false
 	  },
-	  "description": "Per-file overrides on detail. Entries apply in order and the LAST match wins - last-match, not first-match - so list general globs first. Never widens the selection; a glob matching nothing is reported in the trailer. An invalid entry names its index."
+	  "description": "Overrides detail by file in array order; the last match wins, never widens selection, and unmatched or invalid entries are reported."
 	}
 	""";
 
-	private const string TrackedOnlyProperty = """
+	private const string CompactTrackedOnlyProperty = """
 	"tracked_only": {
-	  "description": "Restrict results to files tracked by Git; accepts a boolean or the string 'true' or 'false'.",
+	  "description": "Restricts results to Git-tracked files; accepts a boolean or its string form.",
 	  "default": false,
 	  "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ]
 	}
 	""";
 
-	private const string MaximumTokensProperty = """
+	private const string CompactMaximumTokensProperty = """
 	"max_tokens": {
-	  "description": "Maximum estimated content tokens admitted by the greedy file pass; accepts an integer or numeric string. Document structure and the budget report are outside this content budget. All token figures use a character heuristic, not a tokenizer.",
+	  "description": "Sets greedy content admission; document structure and its report are outside this heuristic token budget.",
 	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
 	}
 	""";
 
-	private const string RankProperty = """
+	private const string CompactRankProperty = """
 	"rank": {
 	  "type": "string",
 	  "enum": ["importance"],
-	  "description": "Ranking mode; the only value is importance. It orders the effective selection by importance-v1, controls greedy admission with max_tokens, and otherwise controls document order. Omit it to preserve ordinary order and avoid dependency or Git-history work."
+	  "description": "Orders the selection with importance-v1 and controls max_tokens admission; omission keeps ordinary order and avoids dependency or Git-history work."
 	}
 	""";
 
-	private const string FocusProperty = """
+	private const string CompactFocusProperty = """
 	"focus": {
-	  "description": "One selected path or an array of 1..16 selected paths that seed focus-v1 ordering. Requires rank=importance. Seeds are considered first; graph hops order the remaining effective selection without widening it.",
+	  "description": "Seeds focus-v1 order from 1..16 selected paths; requires rank=importance and never widens selection.",
 	  "oneOf": [
 	    { "type": "string", "minLength": 1, "maxLength": 4096 },
 	    { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
@@ -245,9 +262,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private const string GitScopeProperty = """
+	private const string CompactGitScopeProperty = """
 	"git_scope": {
-	  "description": "Git path scope: staged, changes (including untracked files), or diff:<ref>..<ref>. It only narrows selected paths; content always comes from the current working tree.",
+	  "description": "Narrows to staged, changed (including untracked files), or diff:<ref>..<ref> paths; content stays from the current working tree.",
 	  "maxLength": 4096,
 	  "oneOf": [
 	    { "type": "string", "enum": ["staged", "changes"] },
@@ -256,42 +273,25 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private const string TopFilesProperty = """
-	"top_files": {
-	  "description": "Number of largest text files to return by estimated tokens; default 10; integer or numeric string.",
-	  "default": 10,
-	  "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 1000 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
-	}
-	""";
-
-	private static string ExpandRelatedProperty =>
-		$$"""
-	"expand_related": {
-	  "description": "Also pack the statically resolved neighbours of the given seed files, in one call instead of a related_files round trip. Expansion only narrows: a neighbour outside the effective filters, the Git scope, or paths never enters. Only resolved edges travel. Stops at {{McpRelatedExpansion.MaximumExpandedFiles}} files and says so.",
-	  "type": "object",
-	  "properties": {
-	    "seeds": { "type": "array", "minItems": 1, "maxItems": {{McpRelatedExpansion.MaximumSeeds}}, "items": { "type": "string" }, "description": "Project-relative files already inside the effective selection; directories and globs are rejected." },
-	    "hops": { "type": "integer", "minimum": {{McpRelatedExpansion.MinimumHops}}, "maximum": {{McpRelatedExpansion.MaximumHops}}, "default": {{McpRelatedExpansion.MinimumHops}}, "description": "How many edges out from each seed to follow." },
-	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Which way to follow edges; same meaning as related_files.direction." }
-	  },
-	  "required": ["seeds"],
-	  "additionalProperties": false
-	}
-	""";
-
-	private const string MaxFileBytesProperty = """
+	private const string CompactMaxFileBytesProperty = """
 	"max_file_bytes": {
-	  "description": "Exclude otherwise selected files strictly larger than this byte count; integer or numeric string.",
+	  "description": "Excludes selected files larger than this byte count; accepts an integer or numeric string.",
 	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
 	}
 	""";
 
-	private const string TreeFormatProperty = """
-	"format": {
-	  "type": "string",
-	  "enum": ["markdown", "text", "json", "xml"],
-	  "default": "markdown",
-	  "description": "Tree representation. Markdown is the compact default; text uses drawing characters, while JSON and XML are structured."
+	private static string CompactExpandRelatedProperty =>
+		$$"""
+	"expand_related": {
+	  "description": "Adds resolved neighbours of seed files without widening filters or Git scope; stops at {{McpRelatedExpansion.MaximumExpandedFiles}} files and reports the limit.",
+	  "type": "object",
+	  "properties": {
+	    "seeds": { "type": "array", "minItems": 1, "maxItems": {{McpRelatedExpansion.MaximumSeeds}}, "items": { "type": "string" }, "description": "Selected project-relative seed files; directories and globs are invalid." },
+	    "hops": { "type": "integer", "minimum": {{McpRelatedExpansion.MinimumHops}}, "maximum": {{McpRelatedExpansion.MaximumHops}}, "default": {{McpRelatedExpansion.MinimumHops}}, "description": "Number of edges to follow from each seed." },
+	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Traversal direction, matching related_files." }
+	  },
+	  "required": ["seeds"],
+	  "additionalProperties": false
 	}
 	""";
 
@@ -301,16 +301,16 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
-	    {{PathsProperty}},
-	    {{IncludeProperty}},
-	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{TrackedOnlyProperty}},
-	    {{GitScopeProperty}},
-	    {{MaxFileBytesProperty}},
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    {{CompactPathsProperty}},
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactGitScopeProperty}},
+	    {{CompactMaxFileBytesProperty}},
 	    "max_depth": {
-	      "description": "Maximum tree depth from 0 to 1000, counted in levels below the project root and never below a paths entry: 0 returns the root alone, 1 adds its direct children, and a file inside src/router needs 3. Omit it to let a large tree pick the deepest complete depth that fits. Accepts an integer or numeric string.",
+	      "description": "Limits levels below the project root without descending below a paths entry; omit it for the deepest complete tree that fits.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
 	    },
 	    {{TreeFormatProperty}}
@@ -323,21 +323,21 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
-	    {{PathsProperty}},
-	    {{IncludeProperty}},
-	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{ProfileProperty}},
-	    {{DetailProperty}},
-	    {{DetailByPatternProperty}},
-	    {{TrackedOnlyProperty}},
-	    {{GitScopeProperty}},
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    {{CompactPathsProperty}},
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactProfileProperty}},
+	    {{CompactDetailProperty}},
+	    {{CompactDetailByPatternProperty}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactGitScopeProperty}},
 	    {{TopFilesProperty}},
-	    {{MaxFileBytesProperty}},
-	    {{MaximumTokensProperty}},
-	    {{RankProperty}},
-	    {{FocusProperty}}
+	    {{CompactMaxFileBytesProperty}},
+	    {{CompactMaximumTokensProperty}},
+	    {{CompactRankProperty}},
+	    {{CompactFocusProperty}}
 	  },
 	  "additionalProperties": false
 	}
@@ -347,23 +347,23 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
-	    {{PathsProperty}},
-	    {{IncludeProperty}},
-	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{ProfileProperty}},
-	    {{DetailProperty}},
-	    {{DetailByPatternProperty}},
-	    {{TrackedOnlyProperty}},
-	    {{GitScopeProperty}},
-	    {{RankProperty}},
-	    {{FocusProperty}},
-	    {{MaximumTokensProperty}},
-	    {{MaxFileBytesProperty}},
-	    {{ExpandRelatedProperty}},
-	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Pack view: tree includes structure only, content includes files only, tree-content includes both." },
-	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown", "description": "Pack format: markdown or text for readable output; json or xml for structured output." }
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    {{CompactPathsProperty}},
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactProfileProperty}},
+	    {{CompactDetailProperty}},
+	    {{CompactDetailByPatternProperty}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactGitScopeProperty}},
+	    {{CompactRankProperty}},
+	    {{CompactFocusProperty}},
+	    {{CompactMaximumTokensProperty}},
+	    {{CompactMaxFileBytesProperty}},
+	    {{CompactExpandRelatedProperty}},
+	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content", "description": "Chooses tree, file content, or both for the pack." },
+	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown", "description": "Chooses readable markdown/text or structured JSON/XML output." }
 	  },
 	  "additionalProperties": false
 	}
@@ -373,10 +373,10 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    "pack_id": { "type": "string", "minLength": 1, "description": "Session-scoped id returned by pack_context, search_project, or related_files." },
-	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "pack_id": { "type": "string", "minLength": 1, "description": "Session id returned by pack_context, search_project, or related_files." },
+	    "start_line": { "description": "First 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "end_line": { "description": "Last inclusive 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "start_column": { "description": "First 1-based Unicode character on start_line; use a returned continuation value.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
 	  "required": ["pack_id"],
 	  "additionalProperties": false
@@ -387,18 +387,18 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
-	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression, limited to 4,096 characters and a 2-second evaluation timeout, applied after redaction. It is matched against file content only and never against file names or paths; use get_tree with include_patterns to find files by name. Text inserted by redaction never matches." },
-	    {{PathsProperty}},
-	    {{IncludeProperty}},
-	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{TrackedOnlyProperty}},
-	    {{GitScopeProperty}},
-	    {{MaxFileBytesProperty}},
-	    "context_lines": { "description": "Lines before and after each match, 0..20, default 2; overlapping windows are merged. Accepts an integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
-	    "ignore_case": { "description": "Case-insensitive matching; accepts a boolean or the string 'true' or 'false'.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
-	    "max_results": { "description": "Maximum displayed matching lines, 1..200, default 50; matching continues through the inspected source budget, and the complete or partial boundary distinguishes encountered, retained, and written counts. Accepts an integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Required .NET regex with a 2-second timeout over redacted file content, never paths; use get_tree include_patterns for names. Text inserted by redaction never matches." },
+	    {{CompactPathsProperty}},
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactGitScopeProperty}},
+	    {{CompactMaxFileBytesProperty}},
+	    "context_lines": { "description": "Context lines per match; overlapping windows merge.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
+	    "ignore_case": { "description": "Enables case-insensitive matching; accepts a boolean or its string form.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
+	    "max_results": { "description": "Limits displayed match lines while scanning continues; the boundary reports encountered, retained, and written counts.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
 	  "required": ["pattern"],
 	  "additionalProperties": false
@@ -409,44 +409,44 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
-	    {{ProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    "path": { "type": "string", "minLength": 1, "description": "Single-file form. Exactly one of path or requests is required; supplying both is rejected before file access. The path must name an existing file inside the effective project selection. Markdown-escaped names copied from the default get_tree format are accepted ('\\_'-style ASCII punctuation); use get_tree with format=text to copy unescaped names." },
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    {{CompactProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    "path": { "type": "string", "minLength": 1, "description": "Single-file form. Exactly one of path or requests is required. Names an existing selected file; Markdown escapes from the default get_tree format are accepted, while format=text supplies literal names." },
 	    "requests": {
 	      "type": "array",
 	      "minItems": 1,
 	      "maxItems": 8,
-	      "description": "Batch form: up to eight file requests and sixteen file selections total. A path alone reads the whole file; ranges or symbol narrow it. Exactly one of requests or path is required; supplying both is rejected before file access. Single-file range arguments cannot be combined with requests.",
+	      "description": "Batch form. Exactly one of requests or path is required. Reads up to eight files and sixteen selections; a path reads the whole file, while ranges or symbol narrow it. Single-file ranges cannot accompany requests.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
-	          "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Existing file path inside the effective project selection." },
+	          "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Existing selected project file." },
 	          "ranges": {
 	            "type": "array",
 	            "minItems": 1,
 	            "maxItems": 16,
-	            "description": "Inclusive transformed-text line ranges requested for this file.",
+	            "description": "Inclusive transformed-text line ranges for this file.",
 	            "items": {
 	              "type": "object",
 	              "properties": {
-	                "start_line": { "description": "First 1-based transformed-text line, inclusive.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	                "end_line": { "description": "Last 1-based transformed-text line, inclusive.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	                "start_line": { "description": "First 1-based transformed-text line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	                "end_line": { "description": "Last inclusive 1-based transformed-text line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	              },
 	              "required": ["start_line", "end_line"],
 	              "additionalProperties": false
 	            }
 	          },
-	          "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Named declaration to read from this file instead of ranges or the whole file. Ranges and symbol cannot be combined." }
+	          "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Reads this named declaration instead of ranges; the two forms cannot combine." }
 	        },
 	        "required": ["path"],
 	        "additionalProperties": false
 	      }
 	    },
-	    "start_line": { "description": "First 1-based line of the returned text after replacements; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "end_line": { "description": "Last 1-based line of the returned text after replacements, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "start_column": { "description": "First 1-based Unicode character within start_line; use the continuation value returned for a long line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Read the lines that declare this symbol instead of a line range, with path. Takes a qualified name, or a simple name that is unique in the file; search_project names the declaration each hit sits inside. Cannot be combined with start_line, end_line, or start_column. A name matching several declarations, no declaration, or a file none were extracted from returns DPX-MCP-INVALID-ARGUMENTS." }
+	    "start_line": { "description": "First 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "end_line": { "description": "Last inclusive 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "start_column": { "description": "First 1-based Unicode character on start_line; use a returned continuation value.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
+	    "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Reads a qualified, or file-unique simple, declaration with path instead of a range; search_project supplies names. Cannot combine with line or column fields; missing, unavailable, or non-unique declarations return DPX-MCP-INVALID-ARGUMENTS." }
 	  },
 	  "additionalProperties": false
 	}
@@ -456,22 +456,22 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
 	    "path": {
-	      "description": "One seed path, or up to 16 seed paths, inside the effective project selection.",
+	      "description": "Seed file, or up to 16 seed files, within the effective selection.",
 	      "oneOf": [
 	        { "type": "string", "minLength": 1, "maxLength": 4096 },
 	        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
 	      ]
 	    },
-	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Static relationship direction: dependencies are files the seed references, dependents are files that reference the seed, both returns both sections." },
-	    {{IncludeProperty}},
-	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{ProfileProperty}},
-	    {{TrackedOnlyProperty}},
-	    {{GitScopeProperty}},
-	    {{MaxFileBytesProperty}}
+	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Chooses outward dependencies, inward dependents, or both." },
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactProfileProperty}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactGitScopeProperty}},
+	    {{CompactMaxFileBytesProperty}}
 	  },
 	  "required": ["path"],
 	  "additionalProperties": false

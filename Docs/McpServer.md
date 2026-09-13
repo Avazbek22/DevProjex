@@ -300,20 +300,21 @@ can ignore it without changing any route or result.
 ### What a connection costs
 
 Before a client asks anything about a project it has already paid for the tool schemas and the
-server instructions. Measured on 2026-09-11 from the characters a client received:
+server instructions. Measured on 2026-09-13 from the characters a client received:
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` normalized result, default server | 33,333 |
-| `tools/list` wire JSON result, default server | 34,439 |
-| `tools/list` wire JSON result with per-call exclusions | 38,357 |
-| `instructions` | 1,128 |
+| `tools/list` normalized result, default server | 26,953 |
+| `tools/list` C# client wire result, default server | 27,619 |
+| `tools/list` C# client wire result with per-call exclusions | 30,661 |
+| `instructions` | 1,145 |
 
 Removing the two output schemas reduced the default catalog from 42,370 characters at the
 base revision to 32,516 before the named batch-read selector and discovery hints were added.
-Those additions make the final catalog 33,333 characters. `pack_context` is the largest single
-tool at 7,238 characters, most of it input schema. The `exclusions`
-parameter costs a flat 3,918 characters, 653 on each of the six tools that take it. A process
+Concise descriptions now keep the final catalog at 26,953 characters without changing schema
+types, accepted values, bounds, or tool behavior. `pack_context` is the largest single tool at
+5,614 characters, including 4,737 characters of input schema. The `exclusions`
+parameter costs a flat 3,042 characters, 507 on each of the six tools that take it. A process
 test holds the default `tools/list` result and the instructions under ceilings with deliberate
 headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
 description has to fit a budget rather than grow one silently.
