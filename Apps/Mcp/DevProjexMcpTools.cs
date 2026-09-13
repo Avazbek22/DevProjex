@@ -258,7 +258,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Measures a selection before packaging: transformed content, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns structured measured-versus-estimated metrics after required protection. project comes from list_projects. Key parameters: detail=full|compact|signatures, top_files=1..1000, git_scope, paths, patterns, profile, max_file_bytes. detail_by_pattern overrides detail per file; the last matching entry wins. max_tokens adds admission: the files that budget admits, from the same greedy pass pack_context uses, producing no content. Use it to pick a budget, not before every pack. rank and focus require max_tokens.")]
+		"Measures a selection before packaging: protected content metrics, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns measured-versus-estimated metrics without file bodies. Key parameters: detail=full|compact|signatures, top_files, git_scope, paths, patterns, profile, and max_file_bytes. detail_by_pattern uses its last match. max_tokens reports the same greedy admission as pack_context; rank and focus require it.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>

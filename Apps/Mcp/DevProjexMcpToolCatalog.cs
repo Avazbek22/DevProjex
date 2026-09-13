@@ -258,7 +258,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private const string TopFilesProperty = """
 	"top_files": {
-	  "description": "Number of largest text files to return by estimated tokens; default 10; integer or numeric string.",
+	  "description": "Returns this many largest text files by estimated tokens.",
 	  "default": 10,
 	  "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 1000 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
 	}
@@ -474,21 +474,21 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{ProjectProperty}},
-	    {{BranchProperty}},
-	    {{PathsProperty}},
-	    {{IncludeProperty}},
-	    {{ExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{ProfileProperty}},
-	    {{DetailProperty}},
-	    {{DetailByPatternProperty}},
-	    {{TrackedOnlyProperty}},
-	    {{GitScopeProperty}},
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    {{CompactPathsProperty}},
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactProfileProperty}},
+	    {{CompactDetailProperty}},
+	    {{CompactDetailByPatternProperty}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactGitScopeProperty}},
 	    {{TopFilesProperty}},
-	    {{MaxFileBytesProperty}},
-	    {{MaximumTokensProperty}},
-	    {{RankProperty}},
-	    {{FocusProperty}}
+	    {{CompactMaxFileBytesProperty}},
+	    {{CompactMaximumTokensProperty}},
+	    {{CompactRankProperty}},
+	    {{CompactFocusProperty}}
 	  },
 	  "additionalProperties": false
 	}
