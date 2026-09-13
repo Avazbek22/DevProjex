@@ -123,6 +123,9 @@ export function createRunRecord(manifest, slot, report) {
     throw new Error(`Session report identity mismatch: ${mismatch}.`);
   const usage = copyUsage(report.totals.usage, 'session usage');
   const turns = requireTurns(report.turns);
+  const modelTurns = requireNonNegativeInteger(report.totals.modelTurns, 'model turn count');
+  if (modelTurns !== turns.length)
+    throw new Error('Raw record rejected: model turn count does not match the distinct turns.');
   assertUsageEqual(sumTurnUsage(turns), usage,
     'Raw record rejected: sum of turns does not equal the session total');
   const normalizedCost = calculateCost(usage, manifest.pricing);
@@ -137,7 +140,7 @@ export function createRunRecord(manifest, slot, report) {
       cost: normalizedCost,
       outcome,
       durationMs: nullableNonNegativeInteger(report.session.durationMs, 'duration'),
-      modelTurns: requireNonNegativeInteger(report.totals.modelTurns, 'model turn count'),
+      modelTurns,
       toolCalls: requireNonNegativeInteger(report.totals.toolCalls, 'tool call count'),
       wireResponseBytes: nullableNonNegativeInteger(report.totals.wireResponseBytes, 'wire response bytes'),
       decodedResponseBytes: nullableNonNegativeInteger(report.totals.decodedResponseBytes, 'decoded response bytes'),
@@ -362,7 +365,10 @@ function validateRecord(record) {
   copyUsage(record.measurement.usage, 'session usage');
   normalizeCost(record.measurement.cost);
   normalizeOutcome(record.measurement.outcome);
-  requireTurns(record.measurement.turns);
+  const turns = requireTurns(record.measurement.turns);
+  const modelTurns = requireNonNegativeInteger(record.measurement.modelTurns, 'model turn count');
+  if (modelTurns !== turns.length)
+    throw new Error('Raw run record model turn count does not match the distinct turns.');
 
 }
 
@@ -402,10 +408,17 @@ function firstRunMismatch(left, right) {
 function requireTurns(turns) {
   if (!Array.isArray(turns))
     throw new Error('Session turns must be an array.');
-  return turns.map(turn => ({
-    turnId: requireText(turn.turnId, 'turn identifier'),
-    usage: copyUsage(turn.usage, 'turn usage'),
-  }));
+  const seen = new Set();
+  return turns.map(turn => {
+    const turnId = requireText(turn.turnId, 'turn identifier');
+    if (seen.has(turnId))
+      throw new Error(`Session turn identifier '${turnId}' appears more than once.`);
+    seen.add(turnId);
+    return {
+      turnId,
+      usage: copyUsage(turn.usage, 'turn usage'),
+    };
+  });
 }
 
 function sumTurnUsage(turns) {

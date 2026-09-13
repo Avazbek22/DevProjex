@@ -295,18 +295,24 @@ test('series summary derives totals from raw turns and checks every accounting b
   second.measurement.turns[0].usage.outputTokens = 7;
   second.measurement.usage.outputTokens = 7;
   second.measurement.cost.amount = sessionCost(second.measurement.usage, manifest.pricing);
-
-  const summary = summarizeSeriesRecords(manifest, [first, second]);
-  assert.deepEqual(summary.arms[0].usage, {
-    inputTokens: 20,
-    cacheWriteTokens: 4,
-    cacheReadTokens: 6,
-    outputTokens: 12,
+  const aborted = validRunRecord(manifest, {
+    task: 'task-one', repetition: 3, arm: 'baseline',
+    sessionId: '9d444840-9dc0-11d1-b245-5ffdce74fad2',
+    status: 'aborted',
   });
-  assert.deepEqual(summary.arms[0].outcomes, { success: 1, error: 1, aborted: 0 });
+
+  const summary = summarizeSeriesRecords(manifest, [first, second, aborted]);
+  assert.deepEqual(summary.arms[0].usage, {
+    inputTokens: 30,
+    cacheWriteTokens: 6,
+    cacheReadTokens: 9,
+    outputTokens: 17,
+  });
+  assert.deepEqual(summary.arms[0].outcomes, { success: 1, error: 1, aborted: 1 });
   assert.equal(summary.arms[0].cost.amount,
     sessionCost(first.measurement.usage, manifest.pricing) +
-      sessionCost(second.measurement.usage, manifest.pricing));
+      sessionCost(second.measurement.usage, manifest.pricing) +
+      sessionCost(aborted.measurement.usage, manifest.pricing));
 
   const badSession = structuredClone(first);
   badSession.measurement.usage.inputTokens++;
@@ -326,10 +332,17 @@ test('series summary derives totals from raw turns and checks every accounting b
     () => summarizeSeriesRecords(manifest, [wrongSlot]),
     /storage key does not match/);
 
+  const duplicateTurn = structuredClone(first);
+  duplicateTurn.measurement.turns.push(structuredClone(duplicateTurn.measurement.turns[0]));
+  duplicateTurn.measurement.modelTurns++;
+  assert.throws(
+    () => summarizeSeriesRecords(manifest, [duplicateTurn]),
+    /turn identifier.*more than once/);
+
   const badArm = structuredClone(summary.arms[0]);
   badArm.usage.outputTokens++;
   assert.throws(
-    () => validateArmAccounting([first, second], [badArm]),
+    () => validateArmAccounting([first, second, aborted], [badArm]),
     /sum of sessions does not equal the arm total/);
 });
 
