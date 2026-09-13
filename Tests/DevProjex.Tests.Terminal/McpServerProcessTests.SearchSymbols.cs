@@ -119,13 +119,43 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains($"in {firstSymbol}\n", search, StringComparison.Ordinal);
 		Assert.Contains($"in {secondSymbol}\n", search, StringComparison.Ordinal);
 		Assert.Contains("in (no declaration)\n", search, StringComparison.Ordinal);
+		var firstSelector = Regex.Match(
+			search,
+			$"^{Regex.Escape(fileName)} {Regex.Escape(firstSymbol)} (?<start>[0-9]+)-(?<end>[0-9]+)$",
+			RegexOptions.Multiline,
+			TimeSpan.FromSeconds(2));
+		var secondSelector = Regex.Match(
+			search,
+			$"^{Regex.Escape(fileName)} {Regex.Escape(secondSymbol)} (?<start>[0-9]+)-(?<end>[0-9]+)$",
+			RegexOptions.Multiline,
+			TimeSpan.FromSeconds(2));
+		Assert.True(firstSelector.Success, search);
+		Assert.True(secondSelector.Success, search);
 
 		var first = Normalize(AllProcessText(await CallAsync(
 			server,
 			"get_file",
 			new Dictionary<string, object?> { ["path"] = fileName, ["symbol"] = firstSymbol })));
+		Assert.Contains(
+			$"Lines: {firstSelector.Groups["start"].Value}-{firstSelector.Groups["end"].Value} of ",
+			first,
+			StringComparison.Ordinal);
 		Assert.Contains("member-marker-a", first, StringComparison.Ordinal);
 		Assert.DoesNotContain("member-marker-b", first, StringComparison.Ordinal);
+
+		var batch = Normalize(AllProcessText(await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["requests"] = new object[]
+				{
+					new { path = fileName, symbol = firstSymbol },
+					new { path = fileName, symbol = secondSymbol }
+				}
+			})));
+		Assert.Contains("member-marker-a", batch, StringComparison.Ordinal);
+		Assert.Contains("member-marker-b", batch, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -215,7 +245,7 @@ public sealed partial class McpServerProcessTests
 			new Dictionary<string, object?> { ["pattern"] = "coordinate-marker", ["context_lines"] = 0 })));
 		Assert.Contains("in Multi.Locate\n", searched, StringComparison.Ordinal);
 		Assert.Contains("9:        return \"coordinate-marker\";", searched, StringComparison.Ordinal);
-		Assert.Contains("Multi.cs Multi.Locate 7", searched, StringComparison.Ordinal);
+		Assert.Contains("Multi.cs Multi.Locate 7-10", searched, StringComparison.Ordinal);
 
 		var named = Normalize(AllProcessText(await CallAsync(
 			server,
@@ -335,7 +365,7 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain("\nin P.Wide", wide, StringComparison.Ordinal);
 		// The selector list still ships on a cut response: that is exactly when a caller would
 		// otherwise open a whole file to find a declaration it is already holding.
-		Assert.Contains("Declarations found (path, symbol, line):", wide, StringComparison.Ordinal);
+		Assert.Contains("Declarations found (path, symbol, lines):", wide, StringComparison.Ordinal);
 		Assert.Contains("[Symbols] annotated=0", wide, StringComparison.Ordinal);
 		Assert.True(wide.Length <= 18_000, $"Capped search returned {wide.Length} characters.");
 	}
@@ -483,14 +513,14 @@ public sealed partial class McpServerProcessTests
 
 		// Two hits share one declaration, so the list carries it once: this is what a caller reads
 		// back, and a declaration touched twice is still one thing to open.
-		Assert.Contains("Declarations found (path, symbol, line):", text, StringComparison.Ordinal);
-		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.One 5"));
-		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.Two 7"));
+		Assert.Contains("Declarations found (path, symbol, lines):", text, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.One 5-5"));
+		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.Two 7-7"));
 
 		// The sentence that turns the list into a call is a constant and sits outside the block,
 		// while the paths and names inside it are project text and stay in.
 		var untrustedEnd = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
-		Assert.True(text.IndexOf("src/App.cs P.App.One 5", StringComparison.Ordinal) < untrustedEnd);
+		Assert.True(text.IndexOf("src/App.cs P.App.One 5-5", StringComparison.Ordinal) < untrustedEnd);
 		Assert.True(
 			text.IndexOf("[Read declarations]", StringComparison.Ordinal) > untrustedEnd,
 			"The instruction must be trusted text, outside the untrusted block.");
@@ -499,6 +529,154 @@ public sealed partial class McpServerProcessTests
 			"its path and symbol; for several of them, one get_file requests call.",
 			text,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessIncludesOnlyTheFirstDeclarationBodyAndReportsTheTotal()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("body-project");
+		workspace.WriteFile(
+			"body-project/src/App.cs",
+			"namespace P;\npublic sealed class App\n{\n    string First()\n    {\n        var required = \"first-body-evidence\";\n        return \"body-marker-a\";\n    }\n\n    string Second()\n    {\n        var unused = \"second-body-evidence\";\n        return \"body-marker-b\";\n    }\n}\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "body-marker-(a|b)",
+				["context_lines"] = 0
+			})));
+
+		Assert.Contains("Best declaration body (1 of 2):", text, StringComparison.Ordinal);
+		Assert.Contains("get_file {\"path\":\"src/App.cs\",\"symbol\":\"P.App.First\"}", text,
+			StringComparison.Ordinal);
+		var body = ExtractBestDeclarationBody(text);
+		Assert.Contains("first-body-evidence", body, StringComparison.Ordinal);
+		Assert.DoesNotContain("second-body-evidence", body, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Declaration body] shown=1/2; read the other 1 declaration separately with get_file.",
+			text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessBoundsAndContinuesATruncatedDeclarationBody()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("long-body-project");
+		var source = new StringBuilder("sealed class LongBody\n{\n    string Read()\n    {\n        var marker = \"body-limit-marker\";\n");
+		for (var line = 0; line < 100; line++)
+			source.Append("        var value").Append(line.ToString("D3", CultureInfo.InvariantCulture))
+				.Append(" = \"").Append(new string('x', 36)).Append("\";\n");
+		source.Append("        return marker;\n    }\n}\n");
+		workspace.WriteFile("long-body-project/LongBody.cs", source.ToString());
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "body-limit-marker", ["context_lines"] = 0 })));
+
+		var body = ExtractBestDeclarationBody(text);
+		Assert.InRange(body.Length, 1, 1_800);
+		var truncation = Regex.Match(
+			text,
+			@"\[Declaration body truncated: (?<remaining>[0-9]+) line\(s\) remain; call get_file with the arguments above\.\]",
+			RegexOptions.None,
+			TimeSpan.FromSeconds(2));
+		Assert.True(truncation.Success, text);
+		Assert.True(int.Parse(truncation.Groups["remaining"].Value, CultureInfo.InvariantCulture) > 0);
+		Assert.Contains("get_file {\"path\":\"LongBody.cs\",\"symbol\":\"LongBody.Read\"}", text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessProtectsSecretsInsideTheDeclarationBody()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("protected-body-project");
+		const string secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		workspace.WriteFile(
+			"protected-body-project/Secrets.cs",
+			$"sealed class Secrets\n{{\n    string Read()\n    {{\n        var marker = \"protected-body-marker\";\n        var token = \"{secret}\";\n        return token + marker;\n    }}\n}}\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "protected-body-marker", ["context_lines"] = 0 })));
+
+		var body = ExtractBestDeclarationBody(text);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", body, StringComparison.Ordinal);
+		Assert.DoesNotContain(secret, text, StringComparison.Ordinal);
+		var close = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+		Assert.True(text.IndexOf("Best declaration body", StringComparison.Ordinal) < close);
+	}
+
+	[Fact]
+	public async Task RealProcessOmitsTheBodyWhenThePrintedSymbolIsNotUnique()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("overload-project");
+		workspace.WriteFile(
+			"overload-project/App.cs",
+			"namespace P;\nsealed class App\n{\n    string Run(int value) => \"overload-marker-a\";\n    string Run(string value) => \"overload-marker-b\";\n}\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "overload-marker", ["context_lines"] = 0 })));
+
+		Assert.Contains("App.cs P.App.Run 4-4", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Best declaration body", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Declaration body] omitted because the first symbol is not unique in its file; use its listed range.",
+			text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessKeepsTheDeclarationBodyInsideTheSearchCharacterLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("bounded-search-project");
+		var ownerName = $"Bounded{new string('A', 500)}";
+		var source = new StringBuilder($"sealed class {ownerName}\n{{\n    string Read()\n    {{\n");
+		for (var line = 0; line < 200; line++)
+			source.Append("        var marker").Append(line.ToString("D3", CultureInfo.InvariantCulture))
+				.Append(" = \"").Append(new string('y', 100)).Append("\";\n");
+		source.Append("        return marker000;\n    }\n}\n");
+		workspace.WriteFile("bounded-search-project/Bounded.cs", source.ToString());
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "var marker",
+				["context_lines"] = 0,
+				["max_results"] = 200
+			})));
+
+		Assert.Contains("Best declaration body (1 of 1):", text, StringComparison.Ordinal);
+		Assert.DoesNotContain($"in {ownerName}.Read", text, StringComparison.Ordinal);
+		Assert.Contains("[Search truncated]", text, StringComparison.Ordinal);
+		Assert.InRange(SpotlightBody(text).Length, 1, 16_000);
 	}
 
 	[Fact]
@@ -534,7 +712,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("[Read declarations]", searched, StringComparison.Ordinal);
 		var selectors = Regex.Matches(
 			SpotlightBody(searched),
-			@"^(?<path>src/[^ ]+\.cs) (?<symbol>[^ ]+) (?<line>[0-9]+)$",
+			@"^(?<path>src/[^ ]+\.cs) (?<symbol>[^ ]+) (?<start>[0-9]+)-(?<end>[0-9]+)$",
 			RegexOptions.Multiline,
 			TimeSpan.FromSeconds(2));
 		Assert.Equal(2, selectors.Count);
@@ -645,5 +823,17 @@ public sealed partial class McpServerProcessTests
 		var openEnd = open < 0 ? -1 : text.IndexOf('\n', open);
 		var close = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
 		return openEnd < 0 || close < openEnd ? text : text[(openEnd + 1)..close];
+	}
+
+	private static string ExtractBestDeclarationBody(string text)
+	{
+		var body = SpotlightBody(text);
+		var lines = body.IndexOf("\nlines ", StringComparison.Ordinal);
+		var contentStart = lines < 0 ? -1 : body.IndexOf('\n', lines + 1);
+		if (contentStart < 0)
+			return string.Empty;
+		contentStart++;
+		var truncated = body.IndexOf("\n[Declaration body truncated:", contentStart, StringComparison.Ordinal);
+		return truncated >= 0 ? body[contentStart..truncated] : body[contentStart..].TrimEnd();
 	}
 }

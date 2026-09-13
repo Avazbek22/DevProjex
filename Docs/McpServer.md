@@ -641,7 +641,9 @@ does not return every match it encountered, it also reports
 not a claim about an uninspected suffix. A group cut only in its trailing context
 lines withheld no match, so it receives the cap notice without an additional-match
 line. Trusted counts and constants remain outside the untrusted block; no path enters
-them.
+them. The first uniquely addressable declaration body and its selector share this
+same 16,000-character cap with the match text; they displace lower-priority matches
+rather than increasing the response limit.
 
 Every search ends with a trusted boundary line. A complete search says:
 
@@ -1049,15 +1051,38 @@ After the matches, inside the same untrusted block, a search that found a hit in
 declaration lists each declaration once, in the shape a caller passes straight back:
 
 ```text
-Declarations found (path, symbol, line):
-src/Core/LevelOverrideMap.cs Core.LevelOverrideMap 17
+Declarations found (path, symbol, lines):
+src/Core/LevelOverrideMap.cs Core.LevelOverrideMap 17-58
 ```
 
 One line per declaration, not per hit: a declaration ten matches landed in is still
-one thing to open. The name is the innermost named declaration the navigation projection
-reports. C#, JavaScript, TypeScript, Go, Python, Java, Rust, Kotlin, Ruby, PHP, C, and C++ include supported members and functions,
-with their owner chain when names repeat within a file.
+one thing to open. The name and inclusive range come directly from the innermost named
+declaration the navigation projection reports. The name is accepted unchanged by
+`get_file.symbol`. C#, JavaScript, TypeScript, Go, Python, Java, Rust, Kotlin, Ruby, PHP,
+C, and C++ include supported members and functions, with their owner chain when names
+repeat within a file.
 At most 20 are listed.
+
+When the first declaration has exactly one declaration with that printed name in its
+file, the same untrusted block also carries its protected body:
+
+```text
+Best declaration body (1 of 3):
+get_file {"path":"src/Core/LevelOverrideMap.cs","symbol":"Core.LevelOverrideMap.GetLevel"}
+lines 31-38
+public LogEventLevel GetLevel(string source)
+{
+    ...
+}
+```
+
+The body comes from the same transformed snapshot that produced the match, so mandatory
+secret masking and configured private-data replacement have already run. Only this one
+body is included. It is limited to 1,800 characters; a cut body reports exactly how many
+declaration lines remain and prints the complete `get_file` arguments needed to read it.
+The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
+separate reads. If the first printed name identifies more than one declaration in its
+file, no body is guessed; the response says to use the listed inclusive range instead.
 
 One trusted constant closes it:
 

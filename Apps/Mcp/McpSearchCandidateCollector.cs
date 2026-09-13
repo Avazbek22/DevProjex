@@ -158,7 +158,8 @@ internal sealed record McpSearchCandidate(
 	int MatchLine,
 	int Score,
 	string StableText,
-	int StorageCharacters);
+	int StorageCharacters,
+	McpSearchDeclarationPreview? DeclarationPreview = null);
 
 internal readonly record struct McpSearchBoundary(
 	int EligibleSources,
