@@ -99,8 +99,9 @@ function extractDeclaredPaths(text, task) {
     .sort((left, right) => right.length - left.length || left.localeCompare(right, 'en'))
     .map(pathPatternFor)
     .join('|');
+  const selector = '(?:(?::\\d+(?:-\\d+)?)|(?:::[A-Za-z_][A-Za-z0-9_.+\\-]*(?:::[A-Za-z_][A-Za-z0-9_.+\\-]*)*)|(?::[A-Za-z_][A-Za-z0-9_.+\\-]*)|(?:#[A-Za-z0-9_][A-Za-z0-9_.:+\\-]*))?';
   const pathPattern = new RegExp(
-    `(?:^|[\\s\x60"'(\\[])(${alternatives})(?::\\d+(?:-\\d+)?)?(?=$|[\\s\x60"',.;!?)}\\]])`,
+    `(?:^|[\\s\x60"'(\\[])(${alternatives})${selector}(?=$|[\\s\x60"',.;!?)}\\]])`,
     'gm');
   const paths = new Set();
   for (const match of text.matchAll(pathPattern))

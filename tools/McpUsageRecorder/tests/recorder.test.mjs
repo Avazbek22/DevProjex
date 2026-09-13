@@ -362,6 +362,56 @@ test('task oracle requires standalone declared paths and normalizes line-qualifi
   assert.deepEqual(result.namedPaths, ['src/main.go']);
 });
 
+for (const [name, reference] of [
+  ['line number', 'src/main.go:42'],
+  ['line range', 'src/main.go:42-99'],
+  ['pytest node id', 'src/main.go::test_name'],
+  ['named symbol', 'src/main.go:SymbolName'],
+  ['line anchor', 'src/main.go#L42'],
+  ['named anchor', 'src/main.go#anchor'],
+]) {
+  test(`task oracle accepts a declared path with a ${name} selector`, () => {
+    const result = evaluateTaskAnswer(
+      pathOracleFixture('go'),
+      `The expected behavior is implemented in ${reference}.`);
+
+    assert.equal(result.classification, 'complete');
+    assert.deepEqual(result.namedPaths, ['src/main.go']);
+  });
+}
+
+test('task oracle rejects a declared path followed directly by a letter', () => {
+  const result = evaluateTaskAnswer(
+    pathOracleFixture('go'),
+    'The expected behavior is implemented in src/main.goSuffix.');
+
+  assert.equal(result.classification, 'incomplete');
+  assert.deepEqual(result.namedPaths, []);
+});
+
+test('task oracle rejects a declared path inside a longer path', () => {
+  const result = evaluateTaskAnswer(
+    pathOracleFixture('go'),
+    'The expected behavior is implemented in generated/src/main.go.');
+
+  assert.equal(result.classification, 'incomplete');
+  assert.deepEqual(result.namedPaths, []);
+});
+
+test('task oracle recognizes a test selector appended to a declared Python path', () => {
+  const task = {
+    ...pathOracleFixture('py'),
+    requiredPaths: ['tests/client/test_redirects.py'],
+    forbiddenPaths: [],
+  };
+
+  const result = evaluateTaskAnswer(task,
+    'The expected behavior is covered by tests/client/test_redirects.py:test_cross_domain_redirect_with_auth_header.');
+
+  assert.equal(result.classification, 'complete');
+  assert.deepEqual(result.namedPaths, ['tests/client/test_redirects.py']);
+});
+
 function pathOracleFixture(extension) {
   return {
     id: `path-${extension}`,

@@ -58,10 +58,12 @@ Every declared required, optional, or forbidden path must use an extension liste
 new language is enabled in registry data rather than in extractor code. Registry loading fails when
 these declarations disagree.
 
-A file is named only when the answer contains a complete, standalone path declared by that task;
-either slash style and an optional `:line` or `:start-end` suffix are accepted. An undeclared bare
-filename such as `package.json`, or an undeclared path shown in prose or sample code, is ignored.
-Code formatting does not exempt a declared path: an exact declared token still counts. The
+A file is named only when the answer contains a complete, standalone path declared by that task.
+The path ends at its exact declared spelling; an adjacent `:line`, `:start-end`, `::test_name`,
+`:SymbolName`, `#L42`, or `#anchor` is its selector, while any other adjacent character rejects
+the match. Either slash style is accepted. An undeclared bare filename such as `package.json`, or
+an undeclared path shown in prose or sample code, is ignored. Code formatting does not exempt a
+declared path: an exact declared token still counts. The
 deterministic oracle classifies each saved answer as complete, incomplete, incorrect, or empty and
 reports every missing, unexpected, or contradicted criterion. Tasks marked `partial` retain an
 explicit list of criteria that still require qualitative assessment.
