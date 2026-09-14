@@ -844,7 +844,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, patterns, and max_file_bytes. First unique declaration includes up to 1,800 protected body characters within the same cap; read the rest with one batched get_file requests call.")]
+		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap; read the rest with one batched get_file requests call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -976,12 +976,19 @@ internal sealed class DevProjexMcpTools(
 				rendered.WrittenHits,
 				navigationByFile,
 				cancellationToken);
-			var declarationPreview = FindFirstDeclarationPreview(candidateSnapshot, symbols.Declarations);
-			if (declarationPreview is { IsAddressable: true })
+			var declarationPreview = McpSearchSymbols.SelectDeclarationBodyPreview(
+				candidateSnapshot,
+				symbols.Declarations,
+				regex);
+			var reservedCharacters = 0;
+			while (declarationPreview is { IsAddressable: true })
 			{
-				var reservedCharacters = MinimumDeclarationSectionCharacters(
+				var requiredCharacters = MinimumDeclarationSectionCharacters(
 					declarationPreview,
 					symbols.Declarations.Count);
+				if (requiredCharacters <= reservedCharacters)
+					break;
+				reservedCharacters = requiredCharacters;
 				rendered = RenderSearchGroups(
 					ordered,
 					maximumResults,
@@ -990,7 +997,10 @@ internal sealed class DevProjexMcpTools(
 					rendered.WrittenHits,
 					navigationByFile,
 					cancellationToken);
-				declarationPreview = FindFirstDeclarationPreview(candidateSnapshot, symbols.Declarations);
+				declarationPreview = McpSearchSymbols.SelectDeclarationBodyPreview(
+					candidateSnapshot,
+					symbols.Declarations,
+					regex);
 			}
 
 			var output = rendered.Output;
@@ -3040,7 +3050,7 @@ internal sealed class DevProjexMcpTools(
 
 	/// <summary>
 	/// Writes the declarations the shown hits sit in, one line each, in the shape a caller passes
-	/// straight back to <c>get_file</c>, followed by the bounded first body when its name is unique.
+	/// straight back to <c>get_file</c>, followed by the bounded selected body when its name is unique.
 	/// Paths, names and bodies are project text, so they remain inside the untrusted block; only
 	/// constant instructions and counts sit outside.
 	/// </summary>
@@ -3053,7 +3063,7 @@ internal sealed class DevProjexMcpTools(
 			return McpDeclarationSectionResult.None;
 
 		var heading = $"{Environment.NewLine}{DeclarationsHeading}{Environment.NewLine}";
-		var body = preview is { IsAddressable: true } && preview.Declaration == declarations[0]
+		var body = preview is { IsAddressable: true }
 			? FormatDeclarationBody(preview, declarations.Count)
 			: string.Empty;
 		var room = MaximumSearchContentCharacters - output.Length - heading.Length - body.Length;
@@ -3075,7 +3085,7 @@ internal sealed class DevProjexMcpTools(
 		return new McpDeclarationSectionResult(
 			DeclarationsListed: true,
 			BodyWritten: body.Length > 0,
-			FirstSymbolAmbiguous: preview is { IsAddressable: false });
+			SelectedSymbolAmbiguous: preview is { IsAddressable: false });
 	}
 
 	private static int MinimumDeclarationSectionCharacters(
@@ -3124,25 +3134,13 @@ internal sealed class DevProjexMcpTools(
 		return output.ToString();
 	}
 
-	private static McpSearchDeclarationPreview? FindFirstDeclarationPreview(
-		IReadOnlyList<McpSearchCandidate> candidates,
-		IReadOnlyList<McpSearchDeclaration> declarations)
-	{
-		if (declarations.Count == 0)
-			return null;
-		var first = declarations[0];
-		return candidates
-			.Select(static candidate => candidate.DeclarationPreview)
-			.FirstOrDefault(preview => preview?.Declaration == first);
-	}
-
 	private static string? FormatDeclarationBodyNotice(
 		McpDeclarationSectionResult section,
 		int declarationCount)
 	{
-		if (section.FirstSymbolAmbiguous)
+		if (section.SelectedSymbolAmbiguous)
 		{
-			return "[Declaration body] omitted because the first symbol is not unique in its file; " +
+			return "[Declaration body] omitted because the selected symbol is not unique in its file; " +
 				   "use its listed range.";
 		}
 		if (!section.BodyWritten)
@@ -4016,7 +4014,7 @@ internal sealed class DevProjexMcpTools(
 	private readonly record struct McpDeclarationSectionResult(
 		bool DeclarationsListed,
 		bool BodyWritten,
-		bool FirstSymbolAmbiguous)
+		bool SelectedSymbolAmbiguous)
 	{
 		public static readonly McpDeclarationSectionResult None = new(false, false, false);
 	}

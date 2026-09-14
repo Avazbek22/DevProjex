@@ -532,7 +532,7 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
-	public async Task RealProcessIncludesOnlyTheFirstDeclarationBodyAndReportsTheTotal()
+	public async Task RealProcessIncludesOnlyTheSelectedDeclarationBodyAndReportsTheTotal()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("body-project");
@@ -642,7 +642,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("App.cs P.App.Run 4-4", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("Best declaration body", text, StringComparison.Ordinal);
 		Assert.Contains(
-			"[Declaration body] omitted because the first symbol is not unique in its file; use its listed range.",
+			"[Declaration body] omitted because the selected symbol is not unique in its file; use its listed range.",
 			text,
 			StringComparison.Ordinal);
 	}
