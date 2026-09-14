@@ -116,8 +116,8 @@ var report = new
 		seed.Dependents,
 		evidence = languageEdges
 			.Where(edge => string.Equals(edge.Source, seed.Seed, StringComparison.Ordinal) ||
-			               string.Equals(edge.Target, seed.Seed, StringComparison.Ordinal) ||
-			               edge.DeclarationFiles.Contains(seed.Seed, StringComparer.Ordinal))
+						   string.Equals(edge.Target, seed.Seed, StringComparison.Ordinal) ||
+						   edge.DeclarationFiles.Contains(seed.Seed, StringComparer.Ordinal))
 			.OrderBy(static edge => edge.Source, StringComparer.Ordinal)
 			.ThenBy(static edge => edge.Target, StringComparer.Ordinal)
 			.ThenBy(static edge => edge.Reference, StringComparer.Ordinal)
@@ -202,19 +202,19 @@ static bool IsControlFile(string path)
 {
 	var name = Path.GetFileName(path);
 	return name.Equals("CMakeLists.txt", StringComparison.OrdinalIgnoreCase) ||
-	       name.Equals("package.json", StringComparison.OrdinalIgnoreCase) ||
-	       name.Equals("pyproject.toml", StringComparison.OrdinalIgnoreCase) ||
-	       name.Equals("setup.cfg", StringComparison.OrdinalIgnoreCase) ||
-	       name.Equals("pom.xml", StringComparison.OrdinalIgnoreCase) ||
-	       name.Equals("build.gradle", StringComparison.OrdinalIgnoreCase) ||
-	       name.Equals("build.gradle.kts", StringComparison.OrdinalIgnoreCase) ||
-	       name.Equals("Cargo.toml", StringComparison.OrdinalIgnoreCase) ||
-	       name.Equals("Gemfile", StringComparison.OrdinalIgnoreCase) ||
-	       name.Equals("composer.json", StringComparison.OrdinalIgnoreCase) ||
-	       name.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ||
-	       name.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase) ||
-	       name.StartsWith("tsconfig", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
-	       name.StartsWith("jsconfig", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+		   name.Equals("package.json", StringComparison.OrdinalIgnoreCase) ||
+		   name.Equals("pyproject.toml", StringComparison.OrdinalIgnoreCase) ||
+		   name.Equals("setup.cfg", StringComparison.OrdinalIgnoreCase) ||
+		   name.Equals("pom.xml", StringComparison.OrdinalIgnoreCase) ||
+		   name.Equals("build.gradle", StringComparison.OrdinalIgnoreCase) ||
+		   name.Equals("build.gradle.kts", StringComparison.OrdinalIgnoreCase) ||
+		   name.Equals("Cargo.toml", StringComparison.OrdinalIgnoreCase) ||
+		   name.Equals("Gemfile", StringComparison.OrdinalIgnoreCase) ||
+		   name.Equals("composer.json", StringComparison.OrdinalIgnoreCase) ||
+		   name.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ||
+		   name.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase) ||
+		   name.StartsWith("tsconfig", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
+		   name.StartsWith("jsconfig", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
 }
 
 static LanguageId ParseLanguage(string value) => value.ToLowerInvariant() switch
