@@ -6,7 +6,12 @@ CLI output with the real MCP `related_files` surface for every declared sample. 
 relations combine explicit entries in `registry.json` with uniquely resolvable repository-local
 `#include` directives discovered by the runner. The scanner records whether each expected relation
 resolved, remained explicit but unresolved, fell inside a reported partial-parse range, or vanished
-silently. An unexpected resolved edge makes the run fail.
+silently. An unexpected resolved edge makes the run fail. Pinned source fragments keep macro-before-
+declaration, conditional-in-generated-header, and generated-header cases in the live sample set.
+
+The same run scans the ten previously checked non-native language repositories. Their file, fact,
+navigation, and edge counters must exactly match the baseline product SHA in `registry.json`; the
+command names every changed counter and fails instead of silently accepting drift.
 
 Run the complete sequential protocol with:
 

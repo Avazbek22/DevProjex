@@ -101,6 +101,22 @@ export function mergeRelations(declared, discovered) {
     left.direction.localeCompare(right.direction, 'en') || left.path.localeCompare(right.path, 'en'));
 }
 
+export function compareRegressionBaseline(repository, scan) {
+  if (!repository.baseline)
+    throw new Error(`${repository.id} needs pinned regression metrics.`);
+  const actual = { files: scan.files, edges: scan.edges };
+  const differences = [];
+  for (const section of ['files', 'edges']) {
+    for (const [name, expected] of Object.entries(repository.baseline[section] ?? {})) {
+      const observed = actual[section]?.[name];
+      if (observed !== expected) differences.push(`${section}.${name}: expected ${expected}, observed ${observed}`);
+    }
+  }
+  if (differences.length > 0)
+    throw new Error(`${repository.id} differs from the pinned regression baseline: ${differences.join('; ')}.`);
+  return { exact: true, files: repository.baseline.files, edges: repository.baseline.edges };
+}
+
 function normalizePortablePath(value) {
   const parts = [];
   for (const part of value.split('/')) {

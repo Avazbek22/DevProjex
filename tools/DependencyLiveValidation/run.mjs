@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { startMcpReachabilityClient } from '../McpUsageRecorder/lib/mcp-reachability-client.mjs';
 import {
   classifyExpectedRelations,
+  compareRegressionBaseline,
   compareRelated,
   mergeRelations,
   normalizeCliRelated,
@@ -53,6 +54,7 @@ try {
       reference: relation.reference,
       line: relation.line ?? 0,
       evidence: relation.evidence,
+      includeForm: relation.includeForm,
     })));
     await writeFile(probesPath, `${JSON.stringify(probes, null, 2)}\n`);
     const scannerArguments = [
@@ -74,8 +76,11 @@ try {
       category: repository.category,
       commit: repository.commit,
       languages: repository.languages,
-      scan: repository.category === 'native' ? scan : compactScan(scan),
+      scan: compactScan(scan),
       samples,
+      regression: repository.category === 'regression'
+        ? compareRegressionBaseline(repository, scan)
+        : undefined,
     });
   }
 
@@ -87,6 +92,7 @@ try {
       scannerSha256: await sha256File(scanner.path),
       serverSha256: await sha256File(server.path),
     },
+    regressionBaselineProductSha: registry.regressionBaselineProductSha,
     repositories: reports,
     summary: summarize(reports),
   };
@@ -159,9 +165,11 @@ async function attachExplicitIncludeRelations(repository, root) {
       const evidence = `${file.relativePath}:${index + 1}: ${lines[index].trim()}`;
       if (samples.has(file.relativePath)) relations.get(file.relativePath).push({
         direction: 'dependencies', path: target, reference: specifier, line: index + 1, evidence,
+        includeForm: match[1] === '"' ? 'relative' : 'system',
       });
       if (samples.has(target)) relations.get(target).push({
         direction: 'dependents', path: file.relativePath, reference: specifier, line: index + 1, evidence,
+        includeForm: match[1] === '"' ? 'relative' : 'system',
       });
     }
   }
@@ -205,6 +213,7 @@ function compactScan(scan) {
 function summarize(reports) {
   const native = reports.filter(report => report.category === 'native');
   const samples = native.flatMap(report => report.samples);
+  const relations = samples.flatMap(sample => sample.sourceCheck.relations);
   return {
     repositories: reports.length,
     nativeRepositories: native.length,
@@ -218,6 +227,8 @@ function summarize(reports) {
     missedHonestly: samples.reduce((sum, sample) => sum + sample.sourceCheck.missedHonestly, 0),
     missedSilently: samples.reduce((sum, sample) => sum + sample.sourceCheck.missedSilently, 0),
     falseEdges: samples.reduce((sum, sample) => sum + sample.sourceCheck.falseEdges.length, 0),
+    relativeIncludesChecked: relations.filter(relation => relation.includeForm === 'relative').length,
+    systemIncludesChecked: relations.filter(relation => relation.includeForm === 'system').length,
   };
 }
 
@@ -239,6 +250,12 @@ async function prepareRepositories(declarations, workspaceRoot, suppliedRoot) {
       const inside = fullPath.startsWith(`${resolve(target)}${process.platform === 'win32' ? '\\' : '/'}`);
       if (!inside || !(await exists(fullPath)))
         throw new Error(`${repository.id}:${sample.path} is not a file at the pinned commit.`);
+      if (sample.sourceContains?.length > 0) {
+        const source = await readFile(fullPath, 'utf8');
+        for (const fragment of sample.sourceContains)
+          if (!source.includes(fragment))
+            throw new Error(`${repository.id}:${sample.path} no longer contains the pinned source evidence '${fragment}'.`);
+      }
     }
     result.set(repository.id, target);
   }
@@ -277,6 +294,8 @@ async function captureExecutable(executable, args, cwd, environment) {
 function validateRegistry(registry) {
   if (registry?.schemaVersion !== 1 || !Array.isArray(registry.repositories) || registry.repositories.length === 0)
     throw new Error('Registry must contain repositories under schema version 1.');
+  if (!/^[0-9a-f]{40}$/i.test(registry.regressionBaselineProductSha ?? ''))
+    throw new Error('Registry must pin a regression baseline product SHA.');
   const ids = new Set();
   for (const repository of registry.repositories) {
     if (!repository.id || ids.has(repository.id)) throw new Error('Repository ids must be present and unique.');

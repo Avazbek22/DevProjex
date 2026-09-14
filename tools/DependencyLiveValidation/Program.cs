@@ -57,6 +57,7 @@ var relationProbes = probes.Select(probe =>
 		probe.Reference,
 		probe.Line,
 		probe.Evidence,
+		probe.IncludeForm,
 		engineState = state
 	};
 }).ToArray();
@@ -274,4 +275,5 @@ internal sealed record RelationProbe(
 	string Target,
 	string Reference,
 	int Line,
-	string Evidence);
+	string Evidence,
+	string? IncludeForm);

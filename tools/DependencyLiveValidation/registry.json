@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "regressionBaselineProductSha": "581e52f7ab6c0a97116719e1d9b4fa7aa3db4e62",
   "repositories": [
     {
       "id": "curl",
@@ -9,7 +10,7 @@
       "languages": ["c", "cpp"],
       "samples": [
         { "path": "lib/llist.c", "expectedRelations": [] },
-        { "path": "lib/dynhds.c", "expectedRelations": [] },
+        { "path": "lib/dynhds.c", "sourceContains": ["UNITTEST bool dynhds_contains"], "expectedRelations": [] },
         { "path": "src/tool_parsecfg.c", "expectedRelations": [] }
       ]
     },
@@ -21,7 +22,7 @@
       "languages": ["c", "cpp"],
       "samples": [
         { "path": "src/os.cc", "expectedRelations": [] },
-        { "path": "include/fmt/compile.h", "expectedRelations": [] },
+        { "path": "include/fmt/compile.h", "sourceContains": ["FMT_BEGIN_EXPORT"], "expectedRelations": [] },
         { "path": "include/fmt/color.h", "expectedRelations": [] }
       ]
     },
@@ -58,7 +59,171 @@
       "samples": [
         { "path": "src/google/protobuf/descriptor.cc", "expectedRelations": [] },
         { "path": "src/google/protobuf/message.cc", "expectedRelations": [] },
-        { "path": "src/google/protobuf/descriptor.pb.h", "expectedRelations": [] }
+        {
+          "path": "src/google/protobuf/descriptor.pb.h",
+          "sourceContains": ["@@protoc_insertion_point(class_definition:", "#if defined(PROTOBUF_CUSTOM_VTABLE)"],
+          "expectedRelations": []
+        }
+      ]
+    },
+    {
+      "id": "serilog",
+      "category": "regression",
+      "url": "https://github.com/serilog/serilog.git",
+      "commit": "49b5339ce85385dc52d4d8e8f2b8308becf23506",
+      "languages": ["csharp"],
+      "baseline": {
+        "files": { "total": 216, "supported": 210, "failed": 6, "partial": 19, "declarations": 249, "imports": 0, "references": 5754, "navigation": 2056 },
+        "edges": { "total": 1723, "resolved": 655, "ambiguous": 0, "unresolved": 358, "external": 710 }
+      },
+      "samples": [
+        { "path": "src/Serilog/Guard.cs", "expectedRelations": [] },
+        { "path": "src/Serilog/Events/EventProperty.cs", "expectedRelations": [] },
+        { "path": "src/Serilog/Core/LoggingLevelSwitch.cs", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "client-golang",
+      "category": "regression",
+      "url": "https://github.com/prometheus/client_golang.git",
+      "commit": "3f5d6801b95618d04d5057edb1724b02aae69082",
+      "languages": ["go"],
+      "baseline": {
+        "files": { "total": 166, "supported": 166, "failed": 0, "partial": 0, "declarations": 1521, "imports": 861, "references": 2663, "navigation": 2605 },
+        "edges": { "total": 1438, "resolved": 563, "ambiguous": 0, "unresolved": 875, "external": 0 }
+      },
+      "samples": [
+        { "path": "prometheus/collector.go", "expectedRelations": [] },
+        { "path": "prometheus/counter.go", "expectedRelations": [] },
+        { "path": "prometheus/registry.go", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "express",
+      "category": "regression",
+      "url": "https://github.com/expressjs/express.git",
+      "commit": "53d4a0d606c0388f764f192b306ce0e90200e7e8",
+      "languages": ["javascript"],
+      "baseline": {
+        "files": { "total": 141, "supported": 141, "failed": 0, "partial": 0, "declarations": 123, "imports": 403, "references": 213, "navigation": 291 },
+        "edges": { "total": 453, "resolved": 18, "ambiguous": 0, "unresolved": 435, "external": 0 }
+      },
+      "samples": [
+        { "path": "index.js", "expectedRelations": [] },
+        { "path": "lib/application.js", "expectedRelations": [] },
+        { "path": "lib/response.js", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "zod",
+      "category": "regression",
+      "url": "https://github.com/colinhacks/zod.git",
+      "commit": "12e6272746eb79c9713f4818e85a15231bd368b6",
+      "languages": ["typescript"],
+      "baseline": {
+        "files": { "total": 476, "supported": 476, "failed": 0, "partial": 4, "declarations": 2747, "imports": 1324, "references": 18325, "navigation": 7947 },
+        "edges": { "total": 6671, "resolved": 643, "ambiguous": 0, "unresolved": 5814, "external": 214 }
+      },
+      "samples": [
+        { "path": "packages/zod/src/v4/core/parse.ts", "expectedRelations": [] },
+        { "path": "packages/zod/src/v4/core/regexes.ts", "expectedRelations": [] },
+        { "path": "packages/zod/src/v4/classic/parse.ts", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "react-hook-form",
+      "category": "regression",
+      "url": "https://github.com/react-hook-form/react-hook-form.git",
+      "commit": "28334faa6105b0475060592c6bf27dca87e3941e",
+      "languages": ["tsx"],
+      "baseline": {
+        "files": { "total": 174, "supported": 174, "failed": 0, "partial": 0, "declarations": 594, "imports": 745, "references": 3741, "navigation": 3655 },
+        "edges": { "total": 1828, "resolved": 42, "ambiguous": 0, "unresolved": 1568, "external": 218 }
+      },
+      "samples": [
+        { "path": "src/controller.tsx", "expectedRelations": [] },
+        { "path": "src/form.tsx", "expectedRelations": [] },
+        { "path": "src/useFormContext.tsx", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "pydantic",
+      "category": "regression",
+      "url": "https://github.com/pydantic/pydantic.git",
+      "commit": "ba830dc07550dd7a11f167cbf8b8b707712cd88e",
+      "languages": ["python"],
+      "baseline": {
+        "files": { "total": 449, "supported": 449, "failed": 0, "partial": 1, "declarations": 13947, "imports": 6543, "references": 12822, "navigation": 13947 },
+        "edges": { "total": 6987, "resolved": 1417, "ambiguous": 570, "unresolved": 3358, "external": 1642 }
+      },
+      "samples": [
+        { "path": "pydantic/aliases.py", "expectedRelations": [] },
+        { "path": "pydantic/color.py", "expectedRelations": [] },
+        { "path": "pydantic/root_model.py", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "spring-petclinic",
+      "category": "regression",
+      "url": "https://github.com/spring-projects/spring-petclinic.git",
+      "commit": "818c4136ea971c21674525f9053de0d9c7ad8cfe",
+      "languages": ["java"],
+      "baseline": {
+        "files": { "total": 50, "supported": 50, "failed": 0, "partial": 0, "declarations": 50, "imports": 471, "references": 847, "navigation": 368 },
+        "edges": { "total": 837, "resolved": 116, "ambiguous": 0, "unresolved": 721, "external": 0 }
+      },
+      "samples": [
+        { "path": "src/main/java/org/springframework/samples/petclinic/PetClinicApplication.java", "expectedRelations": [] },
+        { "path": "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java", "expectedRelations": [] },
+        { "path": "src/main/java/org/springframework/samples/petclinic/model/BaseEntity.java", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "okio",
+      "category": "regression",
+      "url": "https://github.com/square/okio.git",
+      "commit": "e8dad1a9a86b96b04e51aa941e834b400114667c",
+      "languages": ["kotlin"],
+      "baseline": {
+        "files": { "total": 327, "supported": 327, "failed": 0, "partial": 5, "declarations": 816, "imports": 2182, "references": 7669, "navigation": 5724 },
+        "edges": { "total": 4250, "resolved": 1599, "ambiguous": 0, "unresolved": 2651, "external": 0 }
+      },
+      "samples": [
+        { "path": "okio/src/commonMain/kotlin/okio/Segment.kt", "expectedRelations": [] },
+        { "path": "okio/src/commonMain/kotlin/okio/TypedOptions.kt", "expectedRelations": [] },
+        { "path": "okio/src/jvmMain/kotlin/okio/RealBufferedSource.kt", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "sinatra",
+      "category": "regression",
+      "url": "https://github.com/sinatra/sinatra.git",
+      "commit": "cb22afd7902b566b6eaba6c4ea89739494a65d12",
+      "languages": ["ruby"],
+      "baseline": {
+        "files": { "total": 151, "supported": 151, "failed": 0, "partial": 0, "declarations": 270, "imports": 223, "references": 1912, "navigation": 1336 },
+        "edges": { "total": 1149, "resolved": 313, "ambiguous": 0, "unresolved": 836, "external": 0 }
+      },
+      "samples": [
+        { "path": "lib/sinatra/base.rb", "expectedRelations": [] },
+        { "path": "lib/sinatra/indifferent_hash.rb", "expectedRelations": [] },
+        { "path": "sinatra-contrib/lib/sinatra/config_file.rb", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "guzzle",
+      "category": "regression",
+      "url": "https://github.com/guzzle/guzzle.git",
+      "commit": "93939470950a9b11e2e84204166ef5e048c55fe4",
+      "languages": ["php"],
+      "baseline": {
+        "files": { "total": 137, "supported": 137, "failed": 0, "partial": 0, "declarations": 164, "imports": 819, "references": 6587, "navigation": 3533 },
+        "edges": { "total": 1872, "resolved": 723, "ambiguous": 0, "unresolved": 1149, "external": 0 }
+      },
+      "samples": [
+        { "path": "src/BodySummarizer.php", "expectedRelations": [] },
+        { "path": "src/Utils.php", "expectedRelations": [] },
+        { "path": "tests/Auth/DigestAuthTest.php", "expectedRelations": [] }
       ]
     }
   ]

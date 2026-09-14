@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   classifyExpectedRelations,
+  compareRegressionBaseline,
   compareRelated,
   mergeRelations,
   normalizeCliRelated,
@@ -77,9 +78,28 @@ test('quoted includes prefer the exact relative file while system includes requi
 test('declared relation evidence takes precedence over discovered include evidence', () => {
   const result = mergeRelations(
     [{ direction: 'dependencies', path: 'include/api.h', reference: 'ApiType', evidence: 'checked type use' }],
-    [{ direction: 'dependencies', path: 'include/api.h', reference: 'api.h', evidence: '#include "api.h"' }]);
+    [{ direction: 'dependencies', path: 'include/api.h', reference: 'api.h', evidence: '#include "api.h"', includeForm: 'relative' }]);
 
   assert.deepEqual(result, [
     { direction: 'dependencies', path: 'include/api.h', reference: 'ApiType', evidence: 'checked type use' },
   ]);
+});
+
+test('pinned regression metrics reject any drift', () => {
+  const repository = {
+    id: 'sample',
+    baseline: {
+      files: { total: 2, supported: 2, failed: 0, partial: 0 },
+      edges: { total: 3, resolved: 1, unresolved: 2 },
+    },
+  };
+  const scan = {
+    files: { total: 2, supported: 2, failed: 0, partial: 0 },
+    edges: { total: 3, resolved: 1, unresolved: 2 },
+  };
+
+  assert.equal(compareRegressionBaseline(repository, scan).exact, true);
+  assert.throws(
+    () => compareRegressionBaseline(repository, { ...scan, edges: { ...scan.edges, resolved: 0 } }),
+    /edges\.resolved: expected 1, observed 0/);
 });
