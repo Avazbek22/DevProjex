@@ -641,7 +641,7 @@ does not return every match it encountered, it also reports
 not a claim about an uninspected suffix. A group cut only in its trailing context
 lines withheld no match, so it receives the cap notice without an additional-match
 line. Trusted counts and constants remain outside the untrusted block; no path enters
-them. The first uniquely addressable declaration body and its selector share this
+them. The selected uniquely addressable declaration body and its selector share this
 same 16,000-character cap with the match text; they displace lower-priority matches
 rather than increasing the response limit.
 
@@ -1063,7 +1063,16 @@ C, and C++ include supported members and functions, with their owner chain when 
 repeat within a file.
 At most 20 are listed.
 
-When the first declaration has exactly one declaration with that printed name in its
+The declaration body is selected without changing match order or the declaration list.
+Literal fragments of at least three characters are taken conservatively from the search
+pattern. A declaration name containing any fragment exactly wins first; otherwise a
+name containing a fragment after case-folding and removing separators wins. Within the
+same name quality, the declaration containing the most distinct matched lines wins.
+The existing deterministic declaration order breaks the remaining ties. If the pattern
+has no qualifying literal fragment, the existing order chooses the body without using
+name or hit-count preference.
+
+When the selected declaration has exactly one declaration with that printed name in its
 file, the same untrusted block also carries its protected body:
 
 ```text
@@ -1081,7 +1090,7 @@ secret masking and configured private-data replacement have already run. Only th
 body is included. It is limited to 1,800 characters; a cut body reports exactly how many
 declaration lines remain and prints the complete `get_file` arguments needed to read it.
 The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
-separate reads. If the first printed name identifies more than one declaration in its
+separate reads. If the selected printed name identifies more than one declaration in its
 file, no body is guessed; the response says to use the listed inclusive range instead.
 
 One trusted constant closes it:

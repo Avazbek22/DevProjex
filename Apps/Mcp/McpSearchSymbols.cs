@@ -129,6 +129,67 @@ internal static class McpSearchSymbols
 		return engine.ExtractNavigation(relativePath, transformedText, fingerprint, cancellationToken);
 	}
 
+	public static McpSearchDeclarationPreview? SelectDeclarationBodyPreview(
+		IReadOnlyList<McpSearchCandidate> candidates,
+		IReadOnlyList<McpSearchDeclaration> declarations,
+		McpSearchRegex regex)
+	{
+		ArgumentNullException.ThrowIfNull(candidates);
+		ArgumentNullException.ThrowIfNull(declarations);
+		ArgumentNullException.ThrowIfNull(regex);
+		if (declarations.Count == 0)
+			return null;
+
+		if (!regex.HasDeclarationBodyLiteralTerms)
+			return FindPreview(candidates, declarations[0]);
+
+		var declarationSet = declarations.ToHashSet();
+		var previews = new Dictionary<McpSearchDeclaration, McpSearchDeclarationPreview>();
+		var matchedLines = new Dictionary<McpSearchDeclaration, int>();
+		var seenLines = new HashSet<DeclarationMatchLine>();
+		foreach (var candidate in candidates)
+		{
+			var preview = candidate.DeclarationPreview;
+			if (preview is null || !declarationSet.Contains(preview.Declaration))
+				continue;
+
+			previews.TryAdd(preview.Declaration, preview);
+			var line = new DeclarationMatchLine(preview.Declaration, candidate.MatchLine);
+			if (seenLines.Add(line))
+				matchedLines[preview.Declaration] = matchedLines.GetValueOrDefault(preview.Declaration) + 1;
+		}
+
+		McpSearchDeclarationPreview? best = null;
+		var bestNameQuality = McpDeclarationBodyNameMatchQuality.None;
+		var bestMatchedLines = -1;
+		foreach (var declaration in declarations)
+		{
+			if (!previews.TryGetValue(declaration, out var preview))
+				continue;
+
+			var nameQuality = regex.DeclarationBodyNameMatchQuality(declaration.Name);
+			var lineCount = matchedLines.GetValueOrDefault(declaration);
+			if (best is not null &&
+				(nameQuality < bestNameQuality || nameQuality == bestNameQuality && lineCount <= bestMatchedLines))
+			{
+				continue;
+			}
+
+			best = preview;
+			bestNameQuality = nameQuality;
+			bestMatchedLines = lineCount;
+		}
+
+		return best;
+	}
+
+	private static McpSearchDeclarationPreview? FindPreview(
+		IReadOnlyList<McpSearchCandidate> candidates,
+		McpSearchDeclaration declaration) =>
+		candidates
+			.Select(static candidate => candidate.DeclarationPreview)
+			.FirstOrDefault(preview => preview?.Declaration == declaration);
+
 	/// <summary>
 	/// Turns a declaration name into the lines that declare it, so a caller can read a symbol
 	/// without first learning where it lives.
@@ -192,6 +253,8 @@ internal static class McpSearchSymbols
 	}
 
 	private sealed record DeclarationSpan(int Start, int End, string Name, int CharacterLength);
+
+	private readonly record struct DeclarationMatchLine(McpSearchDeclaration Declaration, int Line);
 }
 
 internal enum McpSymbolLookupStatus
