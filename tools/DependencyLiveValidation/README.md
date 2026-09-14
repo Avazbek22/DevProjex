@@ -3,7 +3,10 @@
 This tool records dependency-fact coverage and checked related-file projections for repositories at
 fixed commits. It runs the in-process dependency engine for aggregate facts, then compares `related`
 CLI output with the real MCP `related_files` surface for every declared sample. Checked source
-relations are kept in `registry.json`; an unexpected resolved edge makes the run fail.
+relations combine explicit entries in `registry.json` with uniquely resolvable repository-local
+`#include` directives discovered by the runner. The scanner records whether each expected relation
+resolved, remained explicit but unresolved, fell inside a reported partial-parse range, or vanished
+silently. An unexpected resolved edge makes the run fail.
 
 Run the complete sequential protocol with:
 

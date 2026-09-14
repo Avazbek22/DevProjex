@@ -3,8 +3,10 @@ import test from 'node:test';
 import {
   classifyExpectedRelations,
   compareRelated,
+  mergeRelations,
   normalizeCliRelated,
   parseMcpRelated,
+  resolveIncludeCandidates,
 } from '../lib/live-validation.mjs';
 
 test('CLI and MCP related results normalize to the same evidence', () => {
@@ -48,4 +50,36 @@ test('a resolved edge absent from the checked source relation list is rejected',
   });
 
   assert.deepEqual(result.falseEdges, ['dependencies:include/unrelated.h']);
+});
+
+test('engine classification preserves evidence from a related source file', () => {
+  const result = classifyExpectedRelations({
+    expectedRelations: [{
+      direction: 'dependents',
+      path: 'src/caller.c',
+      reference: 'api.h',
+      engineState: 'missed-honestly',
+    }],
+  }, { dependencies: [], dependents: [] });
+
+  assert.equal(result.missedHonestly, 1);
+  assert.equal(result.missedSilently, 0);
+});
+
+test('quoted includes prefer the exact relative file while system includes require a unique suffix', () => {
+  const paths = new Set(['src/local.h', 'include/local.h', 'include/library/api.h']);
+
+  assert.deepEqual(resolveIncludeCandidates('src/main.c', 'local.h', true, paths), ['src/local.h']);
+  assert.deepEqual(resolveIncludeCandidates('src/main.c', 'library/api.h', false, paths), ['include/library/api.h']);
+  assert.deepEqual(resolveIncludeCandidates('src/main.c', 'local.h', false, paths), ['include/local.h', 'src/local.h']);
+});
+
+test('declared relation evidence takes precedence over discovered include evidence', () => {
+  const result = mergeRelations(
+    [{ direction: 'dependencies', path: 'include/api.h', reference: 'ApiType', evidence: 'checked type use' }],
+    [{ direction: 'dependencies', path: 'include/api.h', reference: 'api.h', evidence: '#include "api.h"' }]);
+
+  assert.deepEqual(result, [
+    { direction: 'dependencies', path: 'include/api.h', reference: 'ApiType', evidence: 'checked type use' },
+  ]);
 });

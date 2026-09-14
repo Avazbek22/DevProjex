@@ -2,16 +2,18 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startMcpReachabilityClient } from '../McpUsageRecorder/lib/mcp-reachability-client.mjs';
 import {
   classifyExpectedRelations,
   compareRelated,
+  mergeRelations,
   normalizeCliRelated,
   parseMcpRelated,
+  resolveIncludeCandidates,
 } from './lib/live-validation.mjs';
 
 const toolRoot = dirname(fileURLToPath(import.meta.url));
@@ -39,10 +41,25 @@ try {
   for (const repository of registry.repositories) {
     const root = repositories.get(repository.id);
     const scanPath = join(workspace, `${repository.id}-scan.json`);
+    const checkedRepository = repository.category === 'native'
+      ? { ...repository, samples: await attachExplicitIncludeRelations(repository, root) }
+      : repository;
+    const probesPath = join(workspace, `${repository.id}-probes.json`);
+    const probes = checkedRepository.samples.flatMap(sample => sample.expectedRelations.map(relation => ({
+      seed: sample.path,
+      direction: relation.direction,
+      source: relation.direction === 'dependencies' ? sample.path : relation.path,
+      target: relation.direction === 'dependencies' ? relation.path : sample.path,
+      reference: relation.reference,
+      line: relation.line ?? 0,
+      evidence: relation.evidence,
+    })));
+    await writeFile(probesPath, `${JSON.stringify(probes, null, 2)}\n`);
     const scannerArguments = [
       '--root', root,
       '--languages', repository.languages.join(','),
       '--samples', repository.samples.map(sample => sample.path).join(';'),
+      '--probes', probesPath,
       '--output', scanPath,
     ];
     if (repository.excludeDirectories?.length > 0)
@@ -50,14 +67,14 @@ try {
     await runExecutable(scanner, scannerArguments, repositoryRoot);
     const scan = JSON.parse(await readFile(scanPath, 'utf8'));
     const samples = repository.category === 'native'
-      ? await validateNativeSamples(repository, root, scan, server, workspace, options.allowUnchecked)
+      ? await validateNativeSamples(checkedRepository, root, scan, server, workspace, options.allowUnchecked)
       : [];
     reports.push({
       id: repository.id,
       category: repository.category,
       commit: repository.commit,
       languages: repository.languages,
-      scan,
+      scan: repository.category === 'native' ? scan : compactScan(scan),
       samples,
     });
   }
@@ -111,7 +128,8 @@ async function validateNativeSamples(repository, root, scan, server, workspaceRo
       const scanSample = scan.samples.find(sample => sample.seed === declared.path);
       if (!scanSample)
         throw new Error(`${repository.id}:${declared.path}: scanner did not return the declared sample.`);
-      const sourceCheck = classifyExpectedRelations({ ...declared, evidence: scanSample.evidence }, cli);
+      const expectedRelations = scan.relationProbes.filter(probe => probe.seed === declared.path);
+      const sourceCheck = classifyExpectedRelations({ expectedRelations, evidence: scanSample.evidence }, cli);
       if (!allowUnchecked && sourceCheck.falseEdges.length > 0)
         throw new Error(`${repository.id}:${declared.path}: resolved edges are not present in the checked relation list: ${sourceCheck.falseEdges.join(', ')}`);
       reports.push({ path: declared.path, cliMcpEqual: true, related: cli, sourceCheck, facts: scanSample.facts });
@@ -120,6 +138,68 @@ async function validateNativeSamples(repository, root, scan, server, workspaceRo
   } finally {
     await mcp.close();
   }
+}
+
+async function attachExplicitIncludeRelations(repository, root) {
+  const excluded = new Set(repository.excludeDirectories ?? ['node_modules', 'bin', 'obj', 'artifacts', 'build', '.venv', 'venv']);
+  const files = await enumerateNativeFiles(root, excluded);
+  const paths = new Set(files.map(file => file.relativePath));
+  const samples = new Set(repository.samples.map(sample => sample.path));
+  const relations = new Map(repository.samples.map(sample => [sample.path, []]));
+  for (const file of files) {
+    const source = await readFile(file.fullPath, 'utf8');
+    const lines = source.split(/\r\n|\r|\n/);
+    for (let index = 0; index < lines.length; index++) {
+      const match = /^\s*#\s*include\s*([<"])([^>"]+)[>"]/.exec(lines[index]);
+      if (!match) continue;
+      const specifier = match[2].replaceAll('\\', '/');
+      const candidates = resolveIncludeCandidates(file.relativePath, specifier, match[1] === '"', paths);
+      if (candidates.length !== 1) continue;
+      const target = candidates[0];
+      const evidence = `${file.relativePath}:${index + 1}: ${lines[index].trim()}`;
+      if (samples.has(file.relativePath)) relations.get(file.relativePath).push({
+        direction: 'dependencies', path: target, reference: specifier, line: index + 1, evidence,
+      });
+      if (samples.has(target)) relations.get(target).push({
+        direction: 'dependents', path: file.relativePath, reference: specifier, line: index + 1, evidence,
+      });
+    }
+  }
+  return repository.samples.map(sample => ({
+    ...sample,
+    expectedRelations: mergeRelations(sample.expectedRelations ?? [], relations.get(sample.path) ?? []),
+  }));
+}
+
+async function enumerateNativeFiles(root, excluded) {
+  const result = [];
+  const pending = [root];
+  const extensions = new Set(['.c', '.h', '.cc', '.cpp', '.cxx', '.hh', '.hpp', '.hxx']);
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => right.name.localeCompare(left.name, 'en'));
+    for (const entry of entries) {
+      const fullPath = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== '.git' && !excluded.has(entry.name)) pending.push(fullPath);
+      } else if (entry.isFile() && extensions.has(extname(entry.name).toLowerCase())) {
+        result.push({ fullPath, relativePath: relative(root, fullPath).replaceAll('\\', '/') });
+      }
+    }
+  }
+  result.sort((left, right) => left.relativePath.localeCompare(right.relativePath, 'en'));
+  return result;
+}
+
+function compactScan(scan) {
+  return {
+    manifestFiles: scan.manifestFiles,
+    languages: scan.languages,
+    files: scan.files,
+    edges: scan.edges,
+    failures: scan.failures,
+  };
 }
 
 function summarize(reports) {

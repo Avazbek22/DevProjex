@@ -66,11 +66,11 @@ export function classifyExpectedRelations(sample, observed) {
   const expected = sample.expectedRelations ?? [];
   const classified = expected.map(relation => {
     const key = `${relation.direction}:${relation.path}`;
-    const state = actualResolved.has(key)
+    const state = relation.engineState ?? (actualResolved.has(key)
       ? 'confirmed'
       : relation.reference && actualUnresolved.has(relation.reference)
         ? 'missed-honestly'
-        : 'missed-silently';
+        : 'missed-silently');
     return { ...relation, state };
   });
   const expectedKeys = new Set(expected.map(relation => `${relation.direction}:${relation.path}`));
@@ -82,6 +82,37 @@ export function classifyExpectedRelations(sample, observed) {
     missedSilently: classified.filter(relation => relation.state === 'missed-silently').length,
     falseEdges,
   };
+}
+
+export function resolveIncludeCandidates(source, specifier, quoted, paths) {
+  if (quoted) {
+    const sourceDirectory = source.includes('/') ? source.slice(0, source.lastIndexOf('/')) : '';
+    const direct = normalizePortablePath(`${sourceDirectory}/${specifier}`);
+    if (!direct.startsWith('../') && paths.has(direct)) return [direct];
+  }
+  return [...paths].filter(path => path === specifier || path.endsWith(`/${specifier}`)).sort();
+}
+
+export function mergeRelations(declared, discovered) {
+  const result = new Map();
+  for (const relation of [...discovered, ...declared])
+    result.set(`${relation.direction}\0${relation.path}`, relation);
+  return [...result.values()].sort((left, right) =>
+    left.direction.localeCompare(right.direction, 'en') || left.path.localeCompare(right.path, 'en'));
+}
+
+function normalizePortablePath(value) {
+  const parts = [];
+  for (const part of value.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (parts.length === 0) return `../${parts.join('/')}`;
+      parts.pop();
+    } else {
+      parts.push(part);
+    }
+  }
+  return parts.join('/');
 }
 
 function normalizeFiles(files = []) {

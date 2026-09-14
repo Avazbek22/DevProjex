@@ -25,6 +25,41 @@ var languageFiles = snapshot.Files
 	.ToArray();
 var languagePaths = languageFiles.Select(static file => file.Path).ToHashSet(StringComparer.Ordinal);
 var languageEdges = snapshot.Edges.Where(edge => languagePaths.Contains(edge.Source)).ToArray();
+var probes = options.Probes is null
+	? []
+	: JsonSerializer.Deserialize<RelationProbe[]>(
+		await File.ReadAllTextAsync(options.Probes),
+		new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+var relationProbes = probes.Select(probe =>
+{
+	var matching = languageEdges.Where(edge =>
+		string.Equals(edge.Source, probe.Source, StringComparison.Ordinal) &&
+		string.Equals(edge.Reference, probe.Reference, StringComparison.Ordinal)).ToArray();
+	var confirmed = matching.Any(edge =>
+		edge.Status == ResolutionStatus.Resolved &&
+		string.Equals(edge.Target, probe.Target, StringComparison.Ordinal));
+	var sourceStatus = snapshot.FileByPath.GetValueOrDefault(probe.Source)?.Status;
+	var sourcePartial = snapshot.FileByPath.GetValueOrDefault(probe.Source)?.PartialParse;
+	var lineWasDropped = probe.Line > 0 && sourcePartial?.Ranges.Any(range =>
+		range.StartLine <= probe.Line && range.EndLine >= probe.Line) == true;
+	var state = confirmed
+		? "confirmed"
+		: sourceStatus is not DependencyFileStatus.Supported || matching.Length > 0 || lineWasDropped
+			? "missed-honestly"
+			: "missed-silently";
+	return new
+	{
+		probe.Seed,
+		probe.Direction,
+		path = probe.Direction == "dependencies" ? probe.Target : probe.Source,
+		probe.Source,
+		probe.Target,
+		probe.Reference,
+		probe.Line,
+		probe.Evidence,
+		engineState = state
+	};
+}).ToArray();
 var report = new
 {
 	root,
@@ -49,6 +84,7 @@ var report = new
 		unresolved = languageEdges.Count(static edge => edge.Status == ResolutionStatus.Unresolved),
 		external = languageEdges.Count(static edge => edge.Status == ResolutionStatus.External)
 	},
+	relationProbes,
 	partialParse = languageFiles
 		.Where(static file => file.PartialParse is not null)
 		.Select(static file => file.PartialParse)
@@ -203,6 +239,7 @@ internal sealed record Options(
 	string[] Languages,
 	string[] Samples,
 	IReadOnlySet<string> ExcludedDirectories,
+	string? Probes,
 	string? Output)
 {
 	public static Options Parse(string[] values)
@@ -217,7 +254,7 @@ internal sealed record Options(
 		var excluded = (Optional(values, "--exclude-directories") ?? "node_modules;bin;obj;artifacts;build;.venv;venv")
 			.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
 			.ToHashSet(StringComparer.OrdinalIgnoreCase);
-		return new Options(root, languages, samples, excluded, Optional(values, "--output"));
+		return new Options(root, languages, samples, excluded, Optional(values, "--probes"), Optional(values, "--output"));
 	}
 
 	private static string Required(string[] values, string name) =>
@@ -229,3 +266,12 @@ internal sealed record Options(
 		return index >= 0 && index + 1 < values.Length ? values[index + 1] : null;
 	}
 }
+
+internal sealed record RelationProbe(
+	string Seed,
+	string Direction,
+	string Source,
+	string Target,
+	string Reference,
+	int Line,
+	string Evidence);

@@ -46,7 +46,7 @@
       "samples": [
         { "path": "crypto/evp/evp_lib.c", "expectedRelations": [] },
         { "path": "ssl/ssl_lib.c", "expectedRelations": [] },
-        { "path": "include/openssl/ssl.h.in", "expectedRelations": [] }
+        { "path": "include/internal/common.h", "expectedRelations": [] }
       ]
     },
     {
