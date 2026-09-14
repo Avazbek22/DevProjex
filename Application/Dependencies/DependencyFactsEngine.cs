@@ -2705,7 +2705,9 @@ public sealed class DependencyFactsEngine : IDisposable
 				foreach (var candidate in edge.Candidates) visibleFiles.Add(candidate);
 			}
 
-			return candidates.Where(candidate => candidate.DeclarationSites.Any(site => visibleFiles.Contains(site.File))).ToArray();
+			return candidates.Where(candidate =>
+				candidate.Identity.SymbolKind != SymbolKind.Function &&
+				candidate.DeclarationSites.Any(site => visibleFiles.Contains(site.File))).ToArray();
 		}
 
 		private static DeclarationFact[] SelectVisibleRustCandidates(

@@ -418,6 +418,33 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task CppMacroArgumentCannotResolveAsAnUnrelatedFunction()
+	{
+		using var fixture = new TemporaryDirectory();
+		var project = fixture.CreateFile("CMakeLists.txt", "add_executable(extension_test extension_test.cc)\n");
+		var first = fixture.CreateFile("include/first.hpp", "inline void SetExtension() {}\n");
+		var second = fixture.CreateFile("include/second.hpp", "inline void SetExtension() {}\n");
+		var source = fixture.CreateFile("extension_test.cc", """
+			#include "include/first.hpp"
+			#include "include/second.hpp"
+			TEST(CppGeneratedCode, SetExtension) {}
+			""");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[project, first, second, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Files.Single(static file => file.Path == "extension_test.cc").References,
+			static reference => reference.Name == "SetExtension");
+		Assert.DoesNotContain(index.Edges, static edge =>
+			edge.Source == "extension_test.cc" &&
+			edge.Reference == "SetExtension" &&
+			edge.Status is ResolutionStatus.Resolved or ResolutionStatus.Ambiguous);
+	}
+
+	[Fact]
 	public async Task RubySyntaxErrorsFailClosedWithoutPublishingRecoveredFacts()
 	{
 		using var fixture = new TemporaryDirectory();
