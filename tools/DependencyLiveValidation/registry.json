@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "repositories": [
+    {
+      "id": "curl",
+      "category": "native",
+      "url": "https://github.com/curl/curl.git",
+      "commit": "04bfe8fbbf552a3baf38c629bf9dd59916b3c559",
+      "languages": ["c", "cpp"],
+      "samples": [
+        { "path": "lib/llist.c", "expectedRelations": [] },
+        { "path": "lib/dynhds.c", "expectedRelations": [] },
+        { "path": "src/tool_parsecfg.c", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "fmt",
+      "category": "native",
+      "url": "https://github.com/fmtlib/fmt.git",
+      "commit": "e5d13d826f4266de65d2463dc3bff4ff3d25221e",
+      "languages": ["c", "cpp"],
+      "samples": [
+        { "path": "src/os.cc", "expectedRelations": [] },
+        { "path": "include/fmt/compile.h", "expectedRelations": [] },
+        { "path": "include/fmt/color.h", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "libuv",
+      "category": "native",
+      "url": "https://github.com/libuv/libuv.git",
+      "commit": "5152db2cbfeb5582e9c27c5ea1dba2cd9e10759b",
+      "languages": ["c", "cpp"],
+      "samples": [
+        { "path": "src/uv-common.c", "expectedRelations": [] },
+        { "path": "src/unix/core.c", "expectedRelations": [] },
+        { "path": "include/uv.h", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "openssl",
+      "category": "native",
+      "url": "https://github.com/openssl/openssl.git",
+      "commit": "0893a62353583343eb712adef6debdfbe597c227",
+      "languages": ["c", "cpp"],
+      "samples": [
+        { "path": "crypto/evp/evp_lib.c", "expectedRelations": [] },
+        { "path": "ssl/ssl_lib.c", "expectedRelations": [] },
+        { "path": "include/openssl/ssl.h.in", "expectedRelations": [] }
+      ]
+    },
+    {
+      "id": "protobuf",
+      "category": "native",
+      "url": "https://github.com/protocolbuffers/protobuf.git",
+      "commit": "7fcfd66022455635fa29af92987cdc0967efd4f3",
+      "languages": ["c", "cpp"],
+      "samples": [
+        { "path": "src/google/protobuf/descriptor.cc", "expectedRelations": [] },
+        { "path": "src/google/protobuf/message.cc", "expectedRelations": [] },
+        { "path": "src/google/protobuf/descriptor.pb.h", "expectedRelations": [] }
+      ]
+    }
+  ]
+}
