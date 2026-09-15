@@ -655,8 +655,8 @@ not a claim about an uninspected suffix. A group cut only in its trailing contex
 lines withheld no match, so it receives the cap notice without an additional-match
 line. Trusted counts and constants remain outside the untrusted block; no path enters
 them. The selected uniquely addressable declaration body and its selector share this
-same 16,000-character cap with the match text; they displace lower-priority matches
-rather than increasing the response limit.
+same 16,000-character cap with the match text. Matches are chosen once at the full
+cap, and body placement never removes a shown match or a distinct matching file.
 
 Every search ends with a trusted boundary line. A complete search says:
 
@@ -1102,11 +1102,50 @@ public LogEventLevel GetLevel(string source)
 The body comes from the same transformed snapshot that produced the match, so mandatory
 secret masking and configured private-data replacement have already run. Only this one
 body is included. It is limited to 3,000 characters within the unchanged 16,000-character
-search response budget; a cut body reports exactly how many
+search response budget. Its declaration is selected once from the full displayed
+match slice and is not reconsidered during placement. Complete overlapping context
+lines from that same declaration are printed in the body rather than twice; matching
+lines, context outside the printed body, and other files remain in their original order.
+Only spare space is used beyond that reclaimed context. When space is insufficient,
+the body is cut at a complete line or omitted, never at the expense of a shown match.
+A cut body reports exactly how many
 declaration lines remain and prints the complete `get_file` arguments needed to read it.
 The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
 separate reads. If the selected printed name identifies more than one declaration in its
 file, no body is guessed; the response says to use the listed inclusive range instead.
+
+#### Evidence-preserving placement checks
+
+The same real-server queries were compared on the Release build at
+`1faac5c637a31e500bc09ef6ce9a63cff605051a` and the placement implementation at
+`62432f5ed20147ae2a3acc25a4947af0c4441aa7`. Each used `context_lines: 3`,
+`max_results: 200`, default case-insensitive matching, and the same selection.
+File counts include every file with a numbered matching line, including documentation,
+not just files with supported declarations. Matching lines are counted in the match
+section, not counted twice when a body repeats one.
+
+| Pinned repository | Pattern | Distinct files before → after | Shown matches before → after | Body before → after |
+|---|---|---:|---:|---|
+| Serilog `49b5339ce85385dc52d4d8e8f2b8308becf23506` | `Emit` | 51 → 51 | 62 → 66 | `Serilog.Core.Sinks.AggregateSink.Emit` → omitted |
+| client_golang `3f5d6801b95618d04d5057edb1724b02aae69082` | `Observe` | 34 → 34 | 60 → 62 | `Summary.Observe` → omitted |
+| Zod `12e6272746eb79c9713f4818e85a15231bd368b6` | `parse` | 57 → 60 | 58 → 60 | `parseArgs` → omitted |
+
+These dense responses use their space for evidence rather than an extra body. No
+matching file was lost. In Zod, one previously shown matching line moved to the stored
+pack as the full-cap breadth allocation admitted more files; its exact numbered text
+was confirmed through `read_pack`. Retention limits and stored whole-file continuation
+are unchanged.
+
+Deterministic process fixtures also cover the last fitting exact-name hit: the previous
+placement returned 89 of 101 matching lines and gave the body to `Sample.Configure`;
+the fixed placement returns all 101, keeps `Sample.Needle` selected, and omits its body
+when it cannot fit. A separate 26-file fixture returns 26 files instead of 24, while a
+continuation fixture verifies that every retained matching address is present inline
+or in `read_pack`. Run these checks with:
+
+```powershell
+dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release -m:1 --filter "FullyQualifiedName~RealProcessPreservesTheExactNameMatchAtTheEndOfTheSearchSlice|FullyQualifiedName~RealProcessKeepsEveryMatchingFileWhenTheBodyWouldNeedItsSpace|FullyQualifiedName~RealProcessPrintsOverlappingDeclarationContextOnlyOnce|FullyQualifiedName~RealProcessBodyPlacementKeepsEveryRetainedMatchInlineOrInTheStoredPack"
+```
 
 One trusted constant closes it:
 
