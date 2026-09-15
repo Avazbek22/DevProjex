@@ -24,8 +24,8 @@ with the reason, so that the cost of the move is recorded beside the failure tha
 
 ## 1. Progress notifications read before they arrive
 
-Two tests, the same scenario and the same assertion, failing on Windows and macOS across branches
-whose diffs cannot affect them.
+Two tests, the same scenario and the same assertion, failing on Windows, macOS and Linux across
+branches whose diffs cannot affect them.
 
 - `DevProjex.Tests.Terminal.McpServerProcessTests.RealProcessThrottlesDependencyProgressForTenThousandFiles`
   — `Tests/DevProjex.Tests.Terminal/McpServerProcessTests.BatchReads.cs:99`, failing assertion at line 118
@@ -49,9 +49,15 @@ a value previously seen only on its Integration sibling, which is what one would
 share a mechanism rather than a behaviour.
 Both tests pass locally, the Terminal one in about nine seconds.
 
-**Cause.** One test producing several different final values is the signature of a delivery race,
-and the code says why. The test passes an `IProgress<T>` into `CallToolAsync` and reads
-`progress.Values` the instant the call returns:
+**Cause.** The server's write order is correct. `McpProgressReporter.CompleteAsync` awaits its
+serialized pending notifications, including the forced terminal notification, before the tool
+returns. The race is in client-side observation: ModelContextProtocol 2.2.0 yields and dispatches
+incoming notifications and responses independently. Its convenience `CallToolAsync` progress
+overload disposes the temporary notification subscription when the response completes, before an
+already received notification necessarily reaches that subscription. A persistent subscription
+avoids that loss but does not make callback completion order equal transport order.
+
+The original assertions treated callback completion order as the server's sequence:
 
 ```csharp
 Assert.InRange(progress.Values.Count, 2, 20);
@@ -59,19 +65,36 @@ Assert.Equal(5f, progress.Values[0].Progress);
 Assert.Equal(100f, progress.Values[^1].Progress);
 ```
 
-A progress notification is a separate JSON-RPC message from the tool result, and nothing sequences
-the last notification before the result is observed. So the final `100` can still be in flight, and
-whatever the throttle last emitted stands in its place — `10.0065002`, `10.0150003`, `42.1534996`,
-all mid-scan values. When almost nothing has been dispatched yet, the count assertion fails instead.
-There is no poll and no wait: `[Fact(Timeout = 120_000)]` bounds the whole test, not the arrival of
-a notification. The test carries no `Category` trait, so no CI filter excludes it.
+Waiting only for the terminal callback did not finish the correction: an earlier callback can
+complete afterwards. `DelayedEarlierCallbackDoesNotChangeTheObservedProgressSequence` proves this
+with an event barrier, not a delay. The recorded stream contains `5`, `100`, then the tool result;
+the endpoint callbacks complete as `100`, `5`. Other notifications may arrive between them and
+are independently awaited as well. The old observation fails with `Expected: 5 · Actual: 100`
+even though the transport-order assertion passes.
 
-**Fixed under #382, pending a clean week.** The loss was measured to the side of the boundary it
-happens on: the server writes the terminal notification before the result of the call, so a value
-missing on the client was already on the wire and was lost on delivery. The test now waits for the
-terminal notification instead of assuming the return of the call means it has arrived, and the
-write order is pinned separately against the recorded transport. This entry closes once that has
-run clean for a week; until then the occurrences above stand as the record.
+**Closed.** Both large-manifest tests now take counts and ordered values from the recorded
+completed call. An explicit token-scoped subscription remains alive until all the recorded
+notifications have been delivered; the delivered multiset must equal the recorded one. The
+assertions still require 2–20 notifications, first exactly `5`, last exactly `100`, strictly
+increasing transport values, and every progress notification before the tool result. Terminal
+also rechecks the complete recording at EOF. No retry, skip, value tolerance, throttle or product
+timeout changed. Both whole-test limits and both delivery budgets are unchanged.
+
+The server guarantees notification-before-result **on the transport**. A client dispatching
+messages concurrently must not infer callback completion from a completed request; it must keep
+its subscription alive through delivery. The historical failures above remain recorded.
+
+Sequential local runs on Windows, .NET SDK 10.0.401, one exact test filter per invocation:
+
+| Test | Original observation | Completed-transport observation |
+|---|---|---|
+| `RealProcessThrottlesDependencyProgressForTenThousandFiles` | 20/20 passed | 20/20 passed |
+| `DependencyProgressForTenThousandFilesStaysThrottledAndKeepsEndpoints` | 20/20 passed | 20/20 passed |
+
+The ordinary local sample did not reproduce the historical failure. The event-barrier test did:
+it failed before the observation correction and passed after it, independently of machine speed.
+The unchanged whole-test limits are 120 seconds for Terminal and 60 seconds for Integration;
+their delivery limits remain 30 and 60 seconds respectively.
 
 ## 2. The runner enumerating zero tests
 

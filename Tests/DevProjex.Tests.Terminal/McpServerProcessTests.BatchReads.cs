@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Tests.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -99,12 +100,9 @@ public sealed partial class McpServerProcessTests
 	/// A large manifest reports progress while it is walked, and the walk ends at 100.
 	/// </summary>
 	/// <remarks>
-	/// The terminal notification is waited for rather than assumed. The server writes it before
-	/// the result — <see cref="AssertFinalProgressPrecedesResult"/> pins that on the recorded stream —
-	/// but it is delivered on its own path, and the return of the call says nothing about whether
-	/// that delivery has happened yet. Reading the collected values at the moment the call returns
-	/// asked the wrong question, and answered it differently depending on how loaded the machine
-	/// was: the last value, or all of them, could still be in flight.
+	/// Counts and endpoints come from the completed transport, not callback completion order.
+	/// The explicit subscription stays alive until every recorded notification has been delivered.
+	/// <see cref="AssertFinalProgressPrecedesResult"/> also checks the complete stream at EOF.
 	/// </remarks>
 	[Fact(Timeout = 120_000)]
 	public async Task RealProcessThrottlesDependencyProgressForTenThousandFiles()
@@ -114,22 +112,33 @@ public sealed partial class McpServerProcessTests
 		for (var index = 0; index < 10_000; index++)
 			workspace.WriteFile($"project/File{index:D5}.txt", "value\n");
 		var (process, client, errorTask, output) = await StartPublishedMcpAsync(workspace, project, []);
-		var progress = new InlineProgress<ProgressNotificationValue>();
+		var delivery = new ProgressDelivery();
+		var token = new ProgressToken("throttle");
+		await using var registration = client.RegisterNotificationHandler(
+			NotificationMethods.ProgressNotification,
+			(notification, _) =>
+			{
+				if (notification.Params?.Deserialize<ProgressNotificationParams>() is { } value &&
+					value.ProgressToken == token)
+					delivery.Report(value.Progress.Progress);
+				return ValueTask.CompletedTask;
+			});
 		try
 		{
 			var result = await client.CallToolAsync("related_files", new Dictionary<string, object?>
 			{
 				["path"] = "File00000.txt"
-			}, progress, new RequestOptions { ProgressToken = new ProgressToken("throttle") },
+			}, progress: null, new RequestOptions { ProgressToken = token },
 				TestContext.Current.CancellationToken);
 
 			Assert.NotEqual(true, result.IsError);
-			await progress
-				.WaitForAsync(static value => value.Progress >= 100f, TestContext.Current.CancellationToken)
-				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
-			Assert.InRange(progress.Values.Count, 2, 20);
-			Assert.Equal(5f, progress.Values[0].Progress);
-			Assert.Equal(100f, progress.Values[^1].Progress);
+			var values = RecordedProgressAssertions.ReadCompletedCall(
+				RecordedProgressAssertions.Parse(output.GetRecordedText()), "throttle");
+			RecordedProgressAssertions.AssertThrottled(values);
+			using var deliveryTimeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+			deliveryTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+			var delivered = await delivery.WaitForCountAsync(values.Length, deliveryTimeout.Token);
+			Assert.Equal(values.Order(), delivered.Order());
 		}
 		finally
 		{
@@ -137,6 +146,8 @@ public sealed partial class McpServerProcessTests
 			await client.DisposeAsync();
 		}
 		await CompletePublishedMcpAsync(process, errorTask, output);
+		RecordedProgressAssertions.AssertThrottled(RecordedProgressAssertions.ReadCompletedCall(
+			RecordedProgressAssertions.Parse(output.GetRecordedText()), "throttle"));
 		AssertFinalProgressPrecedesResult(output.GetRecordedText());
 	}
 

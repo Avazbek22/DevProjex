@@ -7,6 +7,7 @@ using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Dependencies;
 using DevProjex.Mcp;
+using DevProjex.Tests.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -6300,20 +6301,16 @@ public sealed partial class McpServerIntegrationTests
 		for (var index = 0; index < 10_000; index++)
 			File.WriteAllText(Path.Combine(project, $"File{index:D5}.txt"), "value\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
-		var finalProgress = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-		var progress = new InlineProgress<ProgressNotificationValue>(value =>
-		{
-			if (value.Progress == 100f)
-				finalProgress.TrySetResult();
-		});
-		var token = new ProgressToken(Guid.NewGuid().ToString("N"));
+		var delivery = new ProgressDelivery();
+		var tokenText = Guid.NewGuid().ToString("N");
+		var token = new ProgressToken(tokenText);
 		await using var registration = server.Client.RegisterNotificationHandler(
 			NotificationMethods.ProgressNotification,
 			(notification, _) =>
 			{
 				if (notification.Params?.Deserialize<ProgressNotificationParams>() is { } value &&
 					value.ProgressToken == token)
-					progress.Report(value.Progress);
+					delivery.Report(value.Progress.Progress);
 				return ValueTask.CompletedTask;
 			});
 
@@ -6321,13 +6318,13 @@ public sealed partial class McpServerIntegrationTests
 			"related_files",
 			new Dictionary<string, object?> { ["path"] = "File00000.txt" },
 			options: new RequestOptions { ProgressToken = token });
-		await finalProgress.Task.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
-		var values = progress.Values;
-
 		Assert.NotEqual(true, result.IsError);
-		Assert.InRange(values.Count, 2, 20);
-		Assert.Equal(5f, values[0].Progress);
-		Assert.Equal(100f, values[^1].Progress);
+		var values = RecordedProgressAssertions.ReadCompletedCall(server.GetWireMessages(0), tokenText);
+		RecordedProgressAssertions.AssertThrottled(values);
+		using var deliveryTimeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		deliveryTimeout.CancelAfter(TimeSpan.FromSeconds(60));
+		var delivered = await delivery.WaitForCountAsync(values.Length, deliveryTimeout.Token);
+		Assert.Equal(values.Order(), delivered.Order());
 	}
 
 	[Fact]
