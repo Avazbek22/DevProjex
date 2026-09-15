@@ -22,7 +22,7 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
-	public async Task RealProcessIncludesADeclarationBetweenTheOldAndNewBodyLimitsInFull()
+	public async Task RealProcessIncludesAMediumDeclarationInFullWithAnExplicitBodyLimit()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("medium-body-project");
@@ -30,7 +30,8 @@ public sealed partial class McpServerProcessTests
 			string.Join("\n", Enumerable.Range(0, 25).Select(index => $"        var value{index} = \"{new string('x', 60)}\";")) +
 			"\n        return marker;\n    }\n}\n";
 		workspace.WriteFile("medium-body-project/Sample.cs", source);
-		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"),
+			["--search-body-chars", "3000"]);
 
 		var text = Normalize(await SearchAsync(server, "medium-body-marker"));
 
@@ -63,7 +64,7 @@ public sealed partial class McpServerProcessTests
 			text,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain("symbol\":\"P.Auxiliary.Configure\"", text, StringComparison.Ordinal);
-		Assert.InRange(ExtractBestDeclarationBody(text).Length, 1, 3_000);
+		Assert.InRange(ExtractBestDeclarationBody(text).Length, 1, 1_800);
 		Assert.InRange(SpotlightBody(text).Length, 1, 16_000);
 
 		var scalar = Normalize(AllProcessText(await CallAsync(

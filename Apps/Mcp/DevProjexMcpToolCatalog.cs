@@ -27,9 +27,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		];
 		var search = _tools.Single(tool => tool.ProtocolTool.Name == "search_project").ProtocolTool;
 		search.Description = searchBodyCharacters == 0
-			? search.Description?.Replace(" The best unique declaration includes up to 3,000 protected body characters within the same cap; read the rest with one batched get_file requests call.",
+			? search.Description?.Replace(" The best unique declaration includes up to 1,800 protected body characters within the same cap; read the rest with one batched get_file requests call.",
 				string.Empty, StringComparison.Ordinal)
-			: search.Description?.Replace("3,000", searchBodyCharacters.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+			: search.Description?.Replace("1,800", searchBodyCharacters.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 		if (toolSet == McpToolSet.Reduced)
 		{
 			_tools = _tools.Where(tool => tool.ProtocolTool.Name is not ("analyze" or "pack_context")).ToArray();

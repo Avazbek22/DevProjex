@@ -18,7 +18,7 @@ the normal unknown-tool protocol error (`-32602`) naming that tool. `read_pack`
 continues to read retained search and dependency results in either set.
 
 `--search-body-chars off|N` fixes the search declaration-body limit at startup:
-`N` is an integer from 1 to 16,000 characters, with a default of 3,000;
+`N` is an integer from 1 to 16,000 characters, with a default of 1,800;
 `off` disables the body. Zero, negative, fractional, and out-of-range values
 are rejected before startup. Declaration ranges, match order, selection of the
 best declaration, and the total 16,000-character search budget remain unchanged.
@@ -1116,7 +1116,7 @@ public LogEventLevel GetLevel(string source)
 
 The body comes from the same transformed snapshot that produced the match, so mandatory
 secret masking and configured private-data replacement have already run. Only this one
-body is included when enabled. By default, it is limited to 3,000 characters within the unchanged 16,000-character
+body is included when enabled. By default, it is limited to 1,800 characters within the unchanged 16,000-character
 search response budget. Its declaration is selected once from the full displayed
 match slice and is not reconsidered during placement. Complete overlapping context
 lines from that same declaration are printed in the body rather than twice; matching
