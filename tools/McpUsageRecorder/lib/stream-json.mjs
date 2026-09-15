@@ -106,7 +106,9 @@ export function recordStreamJson(lines, pinnedSession) {
         }
       } else if (streamEvent.type === 'message_delta' && activeTurnId && streamEvent.usage) {
         events.push({ type: 'model.usage', turnId: activeTurnId, usage: streamEvent.usage });
-        completedUsageTurns.add(activeTurnId);
+        const outputTokens = streamEvent.usage.output_tokens ?? streamEvent.usage.outputTokens;
+        if (Number.isSafeInteger(outputTokens) && outputTokens >= 0)
+          completedUsageTurns.add(activeTurnId);
       }
       continue;
     }

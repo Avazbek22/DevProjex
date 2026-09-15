@@ -5,6 +5,9 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpSearchRegexDeclarationSelectionTests
 {
 	[Theory]
+	[InlineData("GetEffectiveLevel", "GetEffectiveLevel", "Equal")]
+	[InlineData("GetEffectiveLevel", "Serilog.Core.LevelOverrideMap.GetEffectiveLevel", "Equal")]
+	[InlineData("Thing", "App::Thing", "Equal")]
 	[InlineData("EffectiveLevel", "P.GetEffectiveLevelCore", "Exact")]
 	[InlineData("get_effective_level", "P.GetEffectiveLevel", "SeparatorInsensitive")]
 	[InlineData("(?:Effective|Current)[A-Z]+Level", "P.GetEffectiveLevel", "Exact")]
@@ -45,7 +48,7 @@ public sealed class McpSearchRegexDeclarationSelectionTests
 			McpDeclarationBodyNameMatchQuality.None,
 			regex.DeclarationBodyNameMatchQuality("P.Forbidden.capture"));
 		Assert.Equal(
-			McpDeclarationBodyNameMatchQuality.Exact,
-			regex.DeclarationBodyNameMatchQuality("P.AllowedValue"));
+			"Equal",
+			regex.DeclarationBodyNameMatchQuality("P.AllowedValue").ToString());
 	}
 }

@@ -1,5 +1,10 @@
 # MCP usage recorder
 
+All twelve registered tasks now include explicit affirmative contradictions with
+pinned source evidence. See [the criteria](oracles/CONTRADICTIONS.md) for what
+each assertion means and the remaining language limitations. Denying a false
+assertion does not count as making it; merely omitting evidence stays incomplete.
+
 ## Deterministic oracle reachability
 
 `reachability.mjs` checks whether the files declared by `oracles/tasks.json` can be surfaced by the
@@ -49,6 +54,7 @@ reading analysis in one command:
 
 ```text
 node tools/McpUsageRecorder/pipeline.mjs --mode new --definition series.json --root results --output report.json
+node tools/McpUsageRecorder/pipeline.mjs --mode report --definition series.json --series results/series-id --format markdown
 ```
 
 Continue an interrupted series with `--mode resume --series results/<series-id>`. Rebuild a report
@@ -56,9 +62,12 @@ without starting a server or client with `--mode report`; this mode verifies the
 run definition, and oracle registry against the series identity before reading raw records. Saved
 assessments are report inputs with their own fingerprint and answer-identity checks.
 
-The definition pins `seriesId`, `productBuildSha`, `model`, `clientVersion`, `toolLoadingMode`,
+The definition pins `seriesId`, `model`, `clientVersion`, `toolLoadingMode`,
 `repetitions`, tasks, arms, limits, and prices. Each task has an `id` and `prompt`. Each arm has an
-`id`, a `server` command, and `toolConfiguration`. The client command receives literal placeholders
+`id`, its own full lowercase `productBuildSha`, a `server` command, `toolConfiguration`,
+and a non-empty `limits` object. A top-level `productBuildSha` is retained as legacy
+series provenance only; it never substitutes for either arm's build identity.
+The client command receives literal placeholders
 `{prompt}`, `{sessionId}`, `{model}`, `{mcpConfigPath}`, `{toolConfigPath}`, and `{arm}` as individual
 arguments. The tool-configuration placeholder is mandatory so the fingerprinted configuration is
 also the configuration consumed by the client. A minimal
@@ -80,11 +89,15 @@ shape is:
   "arms": [
     {
       "id": "baseline",
+      "productBuildSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "limits": { "maximumResults": 200 },
       "server": { "command": "server-command", "args": ["mcp", "serve"] },
       "toolConfiguration": { "allowedTools": ["get_file"] }
     },
     {
       "id": "candidate",
+      "productBuildSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "limits": { "maximumResults": 200 },
       "server": { "command": "server-command", "args": ["mcp", "serve"] },
       "toolConfiguration": { "allowedTools": ["search_project", "get_file"] }
     }
@@ -105,6 +118,7 @@ shape is:
     }
   },
   "evaluation": {
+    "orderCalibration": { "evaluatedPairs": 18, "orderDisagreementRate": 0.3333333333333333 },
     "oracleRegistry": "oracles/tasks.json",
     "savedAssessments": "saved-assessments.json"
   }
@@ -112,8 +126,10 @@ shape is:
 ```
 
 Before the first session, each arm must return non-empty server instructions and a complete
-`tools/list` response. Their exact aggregate fingerprints, the tool configuration, limits, prices,
-product SHA, client and model identities, and the complete run definition and oracle contents become
+`tools/list` response, including every wire page. Instructions, catalog, configuration,
+build SHA, and merged limits have independent fingerprints for each arm; an arm never
+borrows another arm's snapshot. The client and model identities, complete run definition,
+oracle contents, prices, and any supplied recorded assessments also become
 series identity. Creation refuses an existing series directory. Resume
 refuses any identity difference. A stored assignment is skipped only when the store finds a matching
 successful raw record; failed or aborted work receives a new attempt number and remains in usage and
@@ -130,11 +146,43 @@ model-input boundaries, duration, outcome, and final answer. The carry-cost repo
 client-observed token count for every analyzed tool result and refuses to substitute a character
 estimate. Client-reported duration and measured wall-clock duration remain separate.
 
-Evaluation uses the deterministic task oracle first. A tied pair is eligible only for saved
-assessments recorded in both candidate orders. Each assessment pins the SHA-256 of both candidate
+Evaluation uses the deterministic task oracle first. Ties and still-unverified partial
+criteria require both candidate orders. Use `evaluation.savedAssessments` for recorded
+assessments, or replace that field with a `judge` command whose arguments consume
+`{assessmentInputPath}`. The input is JSON containing the task, criteria, independent
+correctness/preference dimensions, and anonymous answers A/B. The command returns JSON
+with separate `correctness` and `preference` choices (`A`, `B`, or `tie`). It is invoked
+sequentially in both orders. Each successful order and every failed attempt is stored
+create-only; a retry does not overwrite the first order or its process capture.
+
+The calibration sample size and measured order-disagreement rate are required before
+either mode starts; they are supplied measurement provenance, not inferred from a
+new series. Each assessment pins the SHA-256 of both candidate
 answers after the `Experience` section has been removed. A verdict is accepted only when the two
 orders identify the same candidate; correctness and preference disagreement counts and rates are
-reported separately. The pipeline has no live qualitative-evaluation path.
+reported separately as top-level `orderDisagreement`, also in the Markdown table.
+Recorded fake-server, fake-client, and judge-response fixtures exercise the complete
+command without any model request. No additional model sessions were used to validate it.
+
+The JSON `table` contains each arm's model turns, tool calls, all four usage counters,
+cost from pinned rates, wall duration, per-task oracle classifications, and separate
+ordered correctness/preference results. Error/aborted attempts remain in totals.
+Before releasing a table the pipeline replays raw client transcripts and verifies
+their turns, calls, usage, final answers, durations, and capture fingerprints against
+the immutable records; it also verifies session-to-arm sums. A missing successful
+assignment, changed identity, altered transcript, invalid judgment, or accounting
+mismatch blocks release. Missing usage is never replaced with character/4 estimates.
+Absent per-turn API usage or an unobserved output counter also blocks the table,
+instead of treating unknown cost as zero. Failed-launch attempts are the explicit
+zero-usage case because the client never started. Partial captures remain stored
+even when their incomplete usage prevents a conclusive comparison.
+
+Server/model/client commands and SHAs are explicitly pinned inputs, not inferred
+from directory names. The runner checks client-reported model, version and session
+identity, but cannot derive a Git SHA from an arbitrary server executable. Build
+publication must bind its command to the declared commit. Server limits other than
+the runner's attempt/probe/session deadlines must be configured in the pinned startup
+arguments and client tool configuration; the runner does not invent server flags.
 
 The reading analysis classifies whole-file `get_file` calls as `known-section-unused`,
 `small-whole-read`, or `large-needs-address`, with counts, characters, and share of all tool-result

@@ -25,11 +25,15 @@
   "arms": [
     {
       "id": "left",
+      "productBuildSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "limits": { "maxResults": 200 },
       "server": { "command": "node", "args": ["fake-mcp-server.mjs", "left"] },
       "toolConfiguration": { "allowed": ["search_project", "get_file"] }
     },
     {
       "id": "right",
+      "productBuildSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "limits": { "maxResults": 200 },
       "server": { "command": "node", "args": ["fake-mcp-server.mjs", "right"] },
       "toolConfiguration": { "allowed": ["search_project", "get_file"] }
     }
@@ -50,6 +54,7 @@
     }
   },
   "evaluation": {
+    "orderCalibration": { "evaluatedPairs": 18, "orderDisagreementRate": 0.3333333333333333 },
     "oracleRegistry": "task-oracles.json",
     "savedAssessments": "saved-assessments.json"
   }

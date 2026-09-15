@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import './task-contradictions.test.mjs';
+import './pipeline-builds.test.mjs';
 import { recordEvents } from '../lib/recorder.mjs';
 import { validateSeriesConfiguration } from '../lib/series-preflight.mjs';
 import { recordStreamJson } from '../lib/stream-json.mjs';
@@ -23,6 +25,7 @@ import { analyzeSavedReadings, extractKnownAddresses } from '../lib/session-anal
 import {
   buildSeriesManifest,
   createRunRecord,
+  expectedRunIdentity,
   createSeries,
   readSeriesRecords,
   resumeSeries,
@@ -751,11 +754,15 @@ function validPipelineDefinition(seriesId) {
     arms: [
       {
         id: 'baseline',
+        productBuildSha: 'a'.repeat(40),
+        limits: { maxResults: 200 },
         server: { command: process.execPath, args: ['baseline.mjs'] },
         toolConfiguration: { allowed: ['get_file'] },
       },
       {
         id: 'candidate',
+        productBuildSha: 'b'.repeat(40),
+        limits: { maxResults: 200 },
         server: { command: process.execPath, args: ['candidate.mjs'] },
         toolConfiguration: { allowed: ['get_file', 'search_project'] },
       },
@@ -776,6 +783,7 @@ function validPipelineDefinition(seriesId) {
       },
     },
     evaluation: {
+      orderCalibration: { evaluatedPairs: 18, orderDisagreementRate: 1 / 3 },
       oracleRegistry: fileURLToPath(new URL('./fixtures/task-oracles.json', import.meta.url)),
       savedAssessments: fileURLToPath(new URL('./fixtures/saved-assessments.json', import.meta.url)),
     },
@@ -783,7 +791,8 @@ function validPipelineDefinition(seriesId) {
 }
 
 function pipelineSessionReport(context, status) {
-  const report = createSessionReport(context.manifest, context.sessionId, status);
+  const report = createSessionReport({ ...context.manifest,
+    identity: expectedRunIdentity(context.manifest, context.arm.id) }, context.sessionId, status);
   return {
     ...report,
     finalAnswer: status === 'success' ? 'Saved answer.' : null,

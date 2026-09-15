@@ -9,6 +9,19 @@ server starts with `--allow-remote`.
 devprojex mcp --root /absolute/path/to/project
 ```
 
+The default `--tool-set full` publishes all eight tools, with unchanged instructions
+and responses. `--tool-set reduced` publishes exactly `list_projects`, `get_tree`,
+`search_project`, `related_files`, `get_file`, and `read_pack`; it omits `analyze`
+and `pack_context`. The set is fixed at startup, not changed during a session.
+Reduced instructions and catalog guidance do not mention omitted tools. Calling an omitted tool returns
+the normal unknown-tool protocol error (`-32602`) naming that tool. `read_pack`
+continues to read retained search and dependency results in either set.
+
+The Release process measurement on Windows x64 gives 27,710 characters for the
+full `tools/list` result and 17,049 for reduced. These correspond to roughly
+6,928 and 4,262 tokens using the character/4 estimate, not model usage. Process
+budgets are 27,900 and 17,500 characters respectively.
+
 Repeat `--root` to expose more than one project. When no explicit root is given,
 DevProjex uses `DEVPROJEX_ROOT`, then `CLAUDE_PROJECT_DIR`, then the current
 directory. A `project` argument is optional only when the server has exactly one root.
@@ -1065,7 +1078,8 @@ At most 20 are listed.
 
 The declaration body is selected without changing match order or the declaration list.
 Literal fragments of at least three characters are taken conservatively from the search
-pattern. A declaration name containing any fragment exactly wins first; otherwise a
+pattern. Exact ordinal equality with the full printed name or its last segment after
+a dot, colon, or navigation owner separator wins first. Otherwise a declaration name containing any fragment exactly wins; otherwise a
 name containing a fragment after case-folding and removing separators wins. Within the
 same name quality, the declaration containing the most distinct matched lines wins.
 The existing deterministic declaration order breaks the remaining ties. If the pattern
@@ -1087,7 +1101,8 @@ public LogEventLevel GetLevel(string source)
 
 The body comes from the same transformed snapshot that produced the match, so mandatory
 secret masking and configured private-data replacement have already run. Only this one
-body is included. It is limited to 1,800 characters; a cut body reports exactly how many
+body is included. It is limited to 3,000 characters within the unchanged 16,000-character
+search response budget; a cut body reports exactly how many
 declaration lines remain and prints the complete `get_file` arguments needed to read it.
 The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
 separate reads. If the selected printed name identifies more than one declaration in its

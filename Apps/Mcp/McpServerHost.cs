@@ -24,12 +24,28 @@ public static class McpServerHost
 		"Each read_pack page has at most 1,000 lines or 50,000 characters. In globs, " +
 		"* stays within one path segment; **/ matches at any depth.";
 
-	internal static string BuildInstructions(int rootCount) => rootCount switch
+	internal static string BuildInstructions(int rootCount, McpToolSet toolSet = McpToolSet.Full)
 	{
-		1 => SingleRootInstructions + CommonInstructions,
-		> 1 => MultipleRootInstructions + CommonInstructions,
-		_ => throw new ArgumentOutOfRangeException(nameof(rootCount), "At least one MCP root is required.")
-	};
+		ValidateToolSet(toolSet);
+		var prefix = rootCount switch
+		{
+			1 => SingleRootInstructions,
+			> 1 => MultipleRootInstructions,
+			_ => throw new ArgumentOutOfRangeException(nameof(rootCount), "At least one MCP root is required.")
+		};
+		var common = toolSet == McpToolSet.Full ? CommonInstructions : CommonInstructions
+			.Replace("Use related_files for dependencies, analyze for size, pack_context only when a multi-file document is needed, and read_pack for stored pages. ",
+				"Use related_files for dependencies and read_pack for stored search or dependency pages. ", StringComparison.Ordinal)
+			.Replace("Inline pack_context is limited to 50,000 characters; larger packs are stored. ", string.Empty,
+				StringComparison.Ordinal);
+		return prefix + common;
+	}
+
+	private static void ValidateToolSet(McpToolSet toolSet)
+	{
+		if (toolSet is not (McpToolSet.Full or McpToolSet.Reduced))
+			throw new ArgumentOutOfRangeException(nameof(toolSet), "The MCP tool set must be full or reduced.");
+	}
 
 	public static Task RunAsync(
 		IReadOnlyList<string> roots,
@@ -38,7 +54,8 @@ public static class McpServerHost
 		GitFilteringMode? gitMode = null,
 		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
 		bool agentExclusions = false,
-		CancellationToken cancellationToken = default) =>
+		CancellationToken cancellationToken = default,
+		McpToolSet toolSet = McpToolSet.Full) =>
 		RunWithStandardStreamsAsync(
 			roots,
 			hidePrivateData,
@@ -48,7 +65,8 @@ public static class McpServerHost
 			agentExclusions,
 			appDataPathProvider: null,
 			cancellationToken,
-			remoteHosts: null);
+			remoteHosts: null,
+			toolSet: toolSet);
 
 	internal static Task RunWithStandardStreamsAsync(
 		IReadOnlyList<string> roots,
@@ -59,7 +77,8 @@ public static class McpServerHost
 		bool agentExclusions,
 		Func<string>? appDataPathProvider,
 		CancellationToken cancellationToken,
-		IReadOnlyCollection<string>? remoteHosts = null)
+		IReadOnlyCollection<string>? remoteHosts = null,
+		McpToolSet toolSet = McpToolSet.Full)
 	{
 		ValidateGitMode(gitMode);
 		ValidateExclusions(exclusions);
@@ -75,7 +94,8 @@ public static class McpServerHost
 			gitMode: gitMode,
 			exclusions: exclusions,
 			agentExclusions: agentExclusions,
-			remoteHosts: normalizedRemoteHosts);
+			remoteHosts: normalizedRemoteHosts,
+			toolSet: toolSet);
 	}
 
 	internal static async Task RunWithStreamsAsync(
@@ -92,11 +112,13 @@ public static class McpServerHost
 		GitFilteringMode? gitMode = null,
 		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
 		bool agentExclusions = false,
-		IReadOnlySet<string>? remoteHosts = null)
+		IReadOnlySet<string>? remoteHosts = null,
+		McpToolSet toolSet = McpToolSet.Full)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
 		ArgumentNullException.ThrowIfNull(output);
+		ValidateToolSet(toolSet);
 		ValidateGitMode(gitMode);
 		ValidateExclusions(exclusions);
 
@@ -133,7 +155,7 @@ public static class McpServerHost
 			agentExclusions,
 			allowRemote,
 			remoteHosts);
-		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions);
+		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions, toolSet);
 
 		var builder = Host.CreateApplicationBuilder([]);
 		builder.Logging.ClearProviders();
@@ -146,7 +168,7 @@ public static class McpServerHost
 					Title = "DevProjex",
 					Version = ResolveVersion()
 				};
-				options.ServerInstructions = BuildInstructions(rootRegistry.Roots.Count);
+				options.ServerInstructions = BuildInstructions(rootRegistry.Roots.Count, toolSet);
 			})
 			.WithStreamServerTransport(input, output)
 			.WithTools<DevProjexMcpToolCatalog>(catalog)

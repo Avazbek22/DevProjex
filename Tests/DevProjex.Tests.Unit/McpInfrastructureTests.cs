@@ -69,9 +69,11 @@ public sealed class McpInfrastructureTests
 				typeof(GitFilteringMode?),
 				typeof(IReadOnlyCollection<ProjectExclusion>),
 				typeof(bool),
-				typeof(CancellationToken)
+				typeof(CancellationToken),
+				typeof(McpToolSet)
 			],
 			method.GetParameters().Select(static parameter => parameter.ParameterType));
+		Assert.Equal(McpToolSet.Full, method.GetParameters()[^1].DefaultValue);
 	}
 
 	[Fact]

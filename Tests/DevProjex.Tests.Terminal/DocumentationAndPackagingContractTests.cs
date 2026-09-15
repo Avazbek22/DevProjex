@@ -238,13 +238,13 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Declarations found (path, symbol, lines):", server, StringComparison.Ordinal);
 		Assert.Contains("[Read declarations]", server, StringComparison.Ordinal);
 		Assert.Contains("Best declaration body (1 of 3):", server, StringComparison.Ordinal);
-		Assert.Contains("A declaration name containing any fragment exactly wins first", normalized,
+		Assert.Contains("Exact ordinal equality with the full printed name or its last segment", normalized,
 			StringComparison.Ordinal);
 		Assert.Contains("the declaration containing the most distinct matched lines wins", normalized,
 			StringComparison.Ordinal);
 		Assert.Contains("If the pattern has no qualifying literal fragment", normalized,
 			StringComparison.Ordinal);
-		Assert.Contains("limited to 1,800 characters", server, StringComparison.Ordinal);
+		Assert.Contains("limited to 3,000 characters", server, StringComparison.Ordinal);
 		Assert.Contains("same 16,000-character cap", server, StringComparison.Ordinal);
 		Assert.Contains(
 			"### What a bounded result retains",

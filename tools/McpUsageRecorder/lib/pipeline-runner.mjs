@@ -6,9 +6,11 @@ import { spawn } from 'node:child_process';
 import { probeMcpServer } from './mcp-probe.mjs';
 import { loadSavedAssessments } from './saved-evaluation.mjs';
 import { recordStreamJson } from './stream-json.mjs';
+import { recordEvents } from './recorder.mjs';
 import { loadTaskOracleRegistry } from './task-oracle.mjs';
 import {
   createRunRecord,
+  expectedRunIdentity,
   createSeries,
   inspectRunAssignment,
   readSeriesManifest,
@@ -27,27 +29,30 @@ export async function loadPipelineDefinition(path) {
 export async function preparePipelineSeries(definition, baseDirectory, probe = probeMcpServer) {
   validateDefinition(definition);
   const oraclePath = resolve(baseDirectory, definition.evaluation.oracleRegistry);
-  const assessmentPath = resolve(baseDirectory, definition.evaluation.savedAssessments);
   const oracleRegistry = await readPinnedJson(oraclePath, 'task oracle registry');
   const taskOracles = loadTaskOracleRegistry(oraclePath);
   for (const task of definition.tasks) {
     if (!taskOracles.has(task.oracle ?? task.id))
       throw new Error(`Task '${task.id}' has no pinned oracle; no session was started.`);
   }
-  await loadSavedAssessments(assessmentPath);
+  if (definition.evaluation.savedAssessments)
+    await loadSavedAssessments(resolve(baseDirectory, definition.evaluation.savedAssessments));
+  const savedAssessments = definition.evaluation.savedAssessments
+    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.savedAssessments), 'saved ordered assessments')
+    : null;
   const observations = [];
   for (const arm of definition.arms) {
     const observed = await probe(resolveCommand(arm.server, baseDirectory), {
       name: 'mcp-usage-recorder',
       version: definition.clientVersion,
       protocolVersion: definition.protocolVersion,
-    }, definition.limits.probeTimeoutMs);
+    }, arm.limits.probeTimeoutMs ?? definition.limits.probeTimeoutMs);
     validateObservation(observed, arm.id);
     observations.push({ arm: arm.id, ...observed });
   }
   return {
     seriesId: definition.seriesId,
-    productBuildSha: definition.productBuildSha,
+    productBuildSha: definition.productBuildSha ?? definition.arms[0].productBuildSha,
     model: definition.model,
     clientVersion: definition.clientVersion,
     toolLoadingMode: definition.toolLoadingMode,
@@ -64,7 +69,8 @@ export async function preparePipelineSeries(definition, baseDirectory, probe = p
     },
     limits: definition.limits,
     pricing: definition.pricing,
-    seriesDefinition: { definition: identityDefinition(definition), oracleRegistry },
+    armConfigurations: buildArmConfigurations(definition, observations),
+    seriesDefinition: { definition: identityDefinition(definition), oracleRegistry, savedAssessments },
   };
 }
 
@@ -96,7 +102,7 @@ export async function runPipeline(options) {
             results.push({ task: task.id, repetition, arm: arm.id, status: 'reused' });
             break;
           }
-          if (state.nextAttempt > definition.limits.maxAttemptsPerAssignment) {
+          if (state.nextAttempt > (arm.limits.maxAttemptsPerAssignment ?? definition.limits.maxAttemptsPerAssignment)) {
             results.push({ task: task.id, repetition, arm: arm.id, status: 'attempt-limit' });
             break;
           }
@@ -147,9 +153,12 @@ export async function validateSavedPipeline(seriesDirectory, definition, baseDir
   const oracleRegistry = await readPinnedJson(
     resolve(baseDirectory, definition.evaluation.oracleRegistry),
     'task oracle registry');
+  const savedAssessments = definition.evaluation.savedAssessments
+    ? await readPinnedJson(resolve(baseDirectory, definition.evaluation.savedAssessments), 'saved ordered assessments')
+    : null;
   return resumeSeries(seriesDirectory, {
     seriesId: definition.seriesId,
-    productBuildSha: definition.productBuildSha,
+    productBuildSha: definition.productBuildSha ?? definition.arms[0].productBuildSha,
     model: definition.model,
     clientVersion: definition.clientVersion,
     toolLoadingMode: definition.toolLoadingMode,
@@ -160,7 +169,10 @@ export async function validateSavedPipeline(seriesDirectory, definition, baseDir
     },
     limits: definition.limits,
     pricing: definition.pricing,
-    seriesDefinition: { definition: identityDefinition(definition), oracleRegistry },
+    armConfigurations: buildArmConfigurations(definition, JSON.parse(observed.serverInstructions).map(value => ({
+      ...value, toolsList: observed.toolsList.find(item => item.arm === value.arm)?.response,
+    }))),
+    seriesDefinition: { definition: identityDefinition(definition), oracleRegistry, savedAssessments },
   });
 }
 
@@ -168,18 +180,19 @@ async function executeSession(context) {
   if (context.execute)
     return context.execute(context);
   const mcpConfiguration = await writeSessionConfiguration(context);
+  const identity = expectedRunIdentity(context.manifest, context.arm.id);
   const pinned = {
     sessionId: context.sessionId,
     model: context.definition.model,
     clientVersion: context.definition.clientVersion,
     toolLoadingMode: context.definition.toolLoadingMode,
-    buildSha: context.definition.productBuildSha,
-    limits: context.definition.limits,
-    limitsSha256: context.manifest.identity.limitsSha256,
-    serverInstructionsSha256: context.manifest.identity.serverInstructionsSha256,
-    toolConfigurationSha256: context.manifest.identity.toolConfigurationSha256,
+    buildSha: identity.productBuildSha,
+    limits: { ...context.definition.limits, ...context.arm.limits },
+    limitsSha256: identity.limitsSha256,
+    serverInstructionsSha256: identity.serverInstructionsSha256,
+    toolConfigurationSha256: identity.toolConfigurationSha256,
     pricingSha256: context.manifest.identity.pricingSha256,
-    toolsListSha256: context.manifest.identity.toolsListSha256,
+    toolsListSha256: identity.toolsListSha256,
     seriesDefinitionSha256: context.manifest.identity.seriesDefinitionSha256,
   };
   const command = resolveCommand(context.definition.client, context.baseDirectory);
@@ -196,11 +209,14 @@ async function executeSession(context) {
     result = await runProcess({
       ...command,
       args: (command.args ?? []).map(argument => replacePlaceholders(argument, replacements)),
-    }, context.definition.limits.sessionTimeoutMs);
+    }, context.arm.limits.sessionTimeoutMs ?? context.definition.limits.sessionTimeoutMs);
     const capture = await storeRawCapture(context.seriesDirectory, context.sessionId, result);
     const parsed = parseCapturedLines(result.stdout);
-    let report = recordStreamJson(parsed.lines, pinned);
-    const failed = result.exitCode !== 0 || result.timedOut || parsed.invalidLines > 0;
+    let report = result.processError && parsed.lines.length === 0 && parsed.invalidLines === 0
+      ? { ...recordEvents([{ type: 'session.end', status: 'error', durationMs: result.durationMs }], pinned),
+        finalAnswer: null, toolInteractions: [], capture: { actualUsageObserved: false } }
+      : recordStreamJson(parsed.lines, pinned);
+    const failed = result.exitCode !== 0 || result.timedOut || parsed.invalidLines > 0 || result.processError;
     if (failed && report.session.status === 'success') {
       report = {
         ...report,
@@ -217,6 +233,7 @@ async function executeSession(context) {
         processExitCode: result.exitCode,
         processSignal: result.signal,
         timedOut: result.timedOut,
+        processError: result.processError ?? null,
       },
     };
   } finally {
@@ -257,6 +274,8 @@ async function persistObservedConfiguration(directory, configuration) {
   } catch (error) {
     if (error?.code !== 'EEXIST')
       throw error;
+    if (await readFile(path, 'utf8') !== `${JSON.stringify(value, null, 2)}\n`)
+      throw new Error('Saved server observations differ from the pinned comparison configuration.');
   }
 }
 
@@ -272,6 +291,7 @@ async function storeRawCapture(seriesDirectory, sessionId, result) {
     signal: result.signal,
     timedOut: result.timedOut,
     durationMs: result.durationMs,
+    processError: result.processError ?? null,
   };
   const json = `${JSON.stringify(value, null, 2)}\n`;
   await writeFile(join(directory, `${sessionId}.json`), json, { encoding: 'utf8', flag: 'wx' });
@@ -296,21 +316,33 @@ function parseCapturedLines(stdout) {
 function validateDefinition(definition) {
   if (!definition || typeof definition !== 'object' || Array.isArray(definition))
     throw new Error('Pipeline definition must be an object.');
-  for (const name of ['seriesId', 'productBuildSha', 'model', 'clientVersion', 'toolLoadingMode'])
+  for (const name of ['seriesId', 'model', 'clientVersion', 'toolLoadingMode'])
     requireText(definition[name], name);
-  if (!/^[0-9a-f]{40}$/.test(definition.productBuildSha))
+  if (definition.productBuildSha !== undefined && !/^[0-9a-f]{40}$/.test(definition.productBuildSha))
     throw new Error('productBuildSha must be a full lowercase Git SHA.');
   if (!Number.isSafeInteger(definition.repetitions) || definition.repetitions <= 0)
     throw new Error('repetitions must be a positive safe integer.');
   if (!Array.isArray(definition.tasks) || definition.tasks.length === 0)
     throw new Error('At least one task is required.');
-  if (!Array.isArray(definition.arms) || definition.arms.length < 2)
-    throw new Error('At least two comparison arms are required.');
+  if (!Array.isArray(definition.arms) || definition.arms.length !== 2)
+    throw new Error('Exactly two comparison arms are required.');
   ensureUnique(definition.tasks.map(task => requireText(task.id, 'task id')), 'task id');
   ensureUnique(definition.arms.map(arm => requireText(arm.id, 'arm id')), 'arm id');
   for (const task of definition.tasks)
     requireText(task.prompt, `task '${task.id}' prompt`);
   for (const arm of definition.arms) {
+    if (!/^[0-9a-f]{40}$/.test(arm.productBuildSha ?? ''))
+      throw new Error(`arm '${arm.id}' productBuildSha must be a full lowercase Git SHA.`);
+    if (!arm.limits || typeof arm.limits !== 'object' || Array.isArray(arm.limits) || Object.keys(arm.limits).length === 0)
+      throw new Error(`arm '${arm.id}' limits must be pinned separately.`);
+    for (const [name, value] of Object.entries(arm.limits)) {
+      if (value === null || value === undefined || (typeof value === 'number' &&
+          (!Number.isFinite(value) || value < 0)))
+        throw new Error(`arm '${arm.id}' limit '${name}' is invalid.`);
+      if (['maxAttemptsPerAssignment', 'probeTimeoutMs', 'sessionTimeoutMs'].includes(name) &&
+          (!Number.isSafeInteger(value) || value <= 0))
+        throw new Error(`arm '${arm.id}' execution limit '${name}' must be a positive safe integer.`);
+    }
     validateCommand(arm.server, `arm '${arm.id}' server`);
     if (!arm.toolConfiguration || typeof arm.toolConfiguration !== 'object' || Array.isArray(arm.toolConfiguration))
       throw new Error(`arm '${arm.id}' toolConfiguration must be an object.`);
@@ -331,7 +363,31 @@ function validateDefinition(definition) {
   if (!definition.evaluation || typeof definition.evaluation !== 'object')
     throw new Error('evaluation configuration is required.');
   requireText(definition.evaluation.oracleRegistry, 'evaluation.oracleRegistry');
-  requireText(definition.evaluation.savedAssessments, 'evaluation.savedAssessments');
+  const calibration = definition.evaluation.orderCalibration;
+  if (!Number.isSafeInteger(calibration?.evaluatedPairs) || calibration.evaluatedPairs <= 0 ||
+      !Number.isFinite(calibration.orderDisagreementRate) || calibration.orderDisagreementRate < 0 ||
+      calibration.orderDisagreementRate > 1)
+    throw new Error('Measured evaluator order calibration is required before a series can start.');
+  if (definition.evaluation.savedAssessments)
+    requireText(definition.evaluation.savedAssessments, 'evaluation.savedAssessments');
+  else
+    validateCommand(definition.evaluation.judge, 'evaluation judge');
+  if (definition.evaluation.judge && !definition.evaluation.judge.args?.some(argument =>
+      argument.includes('{assessmentInputPath}')))
+    throw new Error('evaluation judge must consume the {assessmentInputPath} placeholder.');
+}
+
+function buildArmConfigurations(definition, observations) {
+  return definition.arms.map(arm => {
+    const observed = observations.find(item => item.arm === arm.id);
+    validateObservation(observed, arm.id);
+    return {
+      id: arm.id, productBuildSha: arm.productBuildSha,
+      serverInstructions: observed.instructions, toolsList: observed.toolsList,
+      toolConfiguration: arm.toolConfiguration,
+      limits: { ...definition.limits, ...arm.limits },
+    };
+  });
 }
 
 function validateObservation(observed, arm) {
@@ -387,8 +443,8 @@ function replacePlaceholders(value, replacements) {
     (_, name) => replacements[name]);
 }
 
-function runProcess(command, timeoutMs) {
-  return new Promise((resolveRun, rejectRun) => {
+export function runProcess(command, timeoutMs) {
+  return new Promise(resolveRun => {
     const started = Date.now();
     const child = spawn(command.command, command.args ?? [], {
       cwd: command.cwd,
@@ -411,13 +467,14 @@ function runProcess(command, timeoutMs) {
         return;
       settled = true;
       clearTimeout(timer);
-      rejectRun(error);
+      resolveRun({ stdout, stderr, exitCode: null, signal: null, timedOut: false,
+        processError: error.message, durationMs: Date.now() - started });
     });
     timer = setTimeout(() => {
       timedOut = true;
       terminateProcessTree(child);
     }, timeoutMs);
-    child.once('exit', (exitCode, signal) => {
+    child.once('close', (exitCode, signal) => {
       if (settled)
         return;
       settled = true;

@@ -119,6 +119,17 @@ public sealed class DevProjexCommandTree
 			AllowMultipleArgumentsPerToken = false
 		};
 		var gitMode = CreateMcpGitModeOption();
+		var toolSet = new Option<string>("--tool-set")
+		{
+			Description = "Publish the full tool catalog, or reduced without analyze and pack_context.",
+			HelpName = "full|reduced",
+			DefaultValueFactory = _ => "full"
+		};
+		toolSet.Validators.Add(result =>
+		{
+			if (result.GetValueOrDefault<string>() is not ("full" or "reduced"))
+				result.AddError("--tool-set must be full or reduced.");
+		});
 		var exclude = CreateMcpExcludeOption();
 		// Arity is pinned to zero: command validators run before arity validation in
 		// System.CommandLine, and GetValue on an over-arity result throws instead of
@@ -141,6 +152,7 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(allowRemote);
 		command.Options.Add(remoteHosts);
 		command.Options.Add(gitMode);
+		command.Options.Add(toolSet);
 		command.Options.Add(exclude);
 		command.Options.Add(unrestricted);
 		command.Options.Add(allowAgentExclusions);
@@ -198,7 +210,8 @@ public sealed class DevProjexCommandTree
 						cancellationToken,
 						parseResult.GetResult(remoteHosts) is null
 							? null
-							: parseResult.GetValue(remoteHosts) ?? [])
+							: parseResult.GetValue(remoteHosts) ?? [],
+						parseResult.GetValue(toolSet) == "reduced" ? McpToolSet.Reduced : McpToolSet.Full)
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}

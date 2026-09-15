@@ -46,7 +46,7 @@ export function evaluateSavedSeries(definition, records, taskRegistry, assessmen
         };
         const oracleComparison = compareTaskAnswers(oracle[candidates[0]], oracle[candidates[1]]);
         let ordered = null;
-        if (oracleComparison.choice === 'tie') {
+        if (requiresOrderedAssessment(task, oracleComparison, Object.values(oracle))) {
           const key = assessmentKey(taskDefinition.id, repetition, candidates);
           const saved = assessmentByKey.get(key);
           if (!saved)
@@ -74,6 +74,11 @@ export function evaluateSavedSeries(definition, records, taskRegistry, assessmen
     orderConsistency: summarizeDisagreements(rows),
     assessmentsSha256: assessments ? digest(canonicalJson(assessments)) : null,
   };
+}
+
+export function requiresOrderedAssessment(task, comparison, answers) {
+  return comparison.choice === 'tie' ||
+    (task.oracleCoverage === 'partial' && answers.every(answer => answer.supported));
 }
 
 export function stripExperience(answer) {

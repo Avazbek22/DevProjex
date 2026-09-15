@@ -5,6 +5,41 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
+	public async Task RealProcessPrefersAnEqualLastNameSegmentOverMoreSubstringMatches()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("equal-term-project");
+		workspace.WriteFile(
+			"equal-term-project/Definitions.cs",
+			"namespace P;\nsealed class Sample\n{\n    string TestEnablePrefixMatching()\n    {\n        var a = \"EnablePrefixMatching\";\n        var b = \"EnablePrefixMatching\";\n        return a + b;\n    }\n    bool EnablePrefixMatching = false;\n}\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var text = Normalize(await SearchAsync(server, "EnablePrefixMatching"));
+
+		Assert.Contains("symbol\":\"P.Sample.EnablePrefixMatching\"", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("symbol\":\"P.Sample.TestEnablePrefixMatching\"", text, StringComparison.Ordinal);
+		Assert.Contains("bool EnablePrefixMatching = false;", ExtractBestDeclarationBody(text), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessIncludesADeclarationBetweenTheOldAndNewBodyLimitsInFull()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("medium-body-project");
+		var source = "sealed class Sample\n{\n    string Read()\n    {\n        var marker = \"medium-body-marker\";\n" +
+			string.Join("\n", Enumerable.Range(0, 25).Select(index => $"        var value{index} = \"{new string('x', 60)}\";")) +
+			"\n        return marker;\n    }\n}\n";
+		workspace.WriteFile("medium-body-project/Sample.cs", source);
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var text = Normalize(await SearchAsync(server, "medium-body-marker"));
+
+		Assert.InRange(ExtractBestDeclarationBody(text).Length, 1_801, 3_000);
+		Assert.Contains("return marker;", ExtractBestDeclarationBody(text), StringComparison.Ordinal);
+		Assert.DoesNotContain("Declaration body truncated", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessGivesTheBodyToADeclarationWhoseNameContainsTheSearchTerm()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -28,7 +63,7 @@ public sealed partial class McpServerProcessTests
 			text,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain("symbol\":\"P.Auxiliary.Configure\"", text, StringComparison.Ordinal);
-		Assert.InRange(ExtractBestDeclarationBody(text).Length, 1, 1_800);
+		Assert.InRange(ExtractBestDeclarationBody(text).Length, 1, 3_000);
 		Assert.InRange(SpotlightBody(text).Length, 1, 16_000);
 
 		var scalar = Normalize(AllProcessText(await CallAsync(

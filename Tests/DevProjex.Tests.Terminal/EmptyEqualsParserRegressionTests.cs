@@ -180,6 +180,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--select",
 		"--select-from",
 		"--timeout",
+		"--tool-set",
 		"--top-files",
 		"--tree-format",
 		"--verbosity",
