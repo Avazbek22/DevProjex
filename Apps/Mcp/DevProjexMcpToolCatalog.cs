@@ -25,8 +25,26 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote)
 		];
 		if (toolSet == McpToolSet.Reduced)
+		{
 			_tools = _tools.Where(tool => tool.ProtocolTool.Name is not ("analyze" or "pack_context")).ToArray();
+			foreach (var tool in _tools)
+			{
+				tool.ProtocolTool.Description = ReducedDescription(tool.ProtocolTool.Description);
+				var schema = tool.ProtocolTool.InputSchema.GetRawText()
+					.Replace("pack_context, search_project, or related_files", "search_project or related_files", StringComparison.Ordinal)
+					.Replace("; analyze echoes the result.", ".", StringComparison.Ordinal);
+				tool.ProtocolTool.InputSchema = ParseSchema(schema);
+			}
+		}
 	}
+
+	private static string? ReducedDescription(string? description) => description?
+		.Replace("use analyze instead for size and token metrics, or pack_context for multi-file content.",
+			"use get_file instead for file content.", StringComparison.Ordinal)
+		.Replace("created by pack_context, search_project, or related_files", "created by search_project or related_files", StringComparison.Ordinal)
+		.Replace("use pack_context instead, or related_files for dependencies, when none is valid.",
+			"use search_project for evidence or related_files for dependencies when none is valid.", StringComparison.Ordinal)
+		.Replace("use pack_context for broad multi-file context.", "use batched requests for several known files.", StringComparison.Ordinal);
 
 	public int Count => _tools.Count;
 	public McpServerTool this[int index] => _tools[index];

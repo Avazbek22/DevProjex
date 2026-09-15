@@ -22,6 +22,12 @@ public sealed partial class McpServerProcessTests
 		{
 			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
 			Assert.Equal(toolSet == "full" ? ExpectedTools : ReducedTools, tools.Select(tool => tool.Name));
+			foreach (var tool in tools)
+			{
+				var description = Assert.IsType<string>(tool.Description);
+				Assert.InRange(description.Length, 1, 800);
+				Assert.InRange(description.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length, 40, 100);
+			}
 			var size = ReadToolsListResult(output.GetRecordedText()).Length;
 			TestContext.Current.TestOutputHelper!.WriteLine($"{toolSet} catalog characters={size}");
 			Assert.InRange(size, 1, ceiling);
@@ -31,6 +37,14 @@ public sealed partial class McpServerProcessTests
 			{
 				Assert.DoesNotContain("analyze", instructions, StringComparison.Ordinal);
 				Assert.DoesNotContain("pack_context", instructions, StringComparison.Ordinal);
+				foreach (var tool in tools)
+				{
+					foreach (var hidden in new[] { "analyze", "pack_context" })
+					{
+						Assert.DoesNotContain(hidden, tool.Description ?? string.Empty, StringComparison.Ordinal);
+						Assert.DoesNotContain(hidden, tool.ProtocolTool.InputSchema.GetRawText(), StringComparison.Ordinal);
+					}
+				}
 				foreach (var hidden in new[] { "analyze", "pack_context" })
 				{
 					var exception = await Assert.ThrowsAsync<McpProtocolException>(() => client.CallToolAsync(
