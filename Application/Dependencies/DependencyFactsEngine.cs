@@ -1335,18 +1335,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		{
 			if (Path.IsPathRooted(import.Specifier))
 				return Edge(source, import, ResolutionStatus.Unresolved, null, "absolute Bash paths are not project-relative evidence", []);
-			try
-			{
-				var directory = Path.GetDirectoryName(Path.Combine(_root, source.Path))!;
-				var target = Path.GetFullPath(Path.Combine(directory, import.Specifier));
-				var relative = PortableRelative(_root, target);
-				return FinishImport(source, import,
-					IsWithin(_root, target) && _files.ContainsKey(relative) ? [relative] : [], "one script-relative file in the manifest");
-			}
-			catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
-			{
-				return Edge(source, import, ResolutionStatus.Unresolved, null, "Bash path is not a supported file path", []);
-			}
+			var reason = import.ImportedName is "source" or "." && !import.Specifier.Contains('/')
+				? "the Bash source search depends on unknown PATH and sourcepath settings"
+				: "the Bash execution working directory is unknown";
+			return Edge(source, import, ResolutionStatus.Unresolved, null, reason, []);
 		}
 
 		private DependencyEdge ResolveCImport(FileFacts source, ImportFact import)

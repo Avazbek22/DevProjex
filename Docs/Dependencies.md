@@ -391,9 +391,13 @@ produces `External`.
 
 Bash (`.sh`, `.bash`) records named functions in both `name()` and `function name` forms for
 dependency facts and symbol navigation. `source path`, `. path`, direct script-path commands and
-`bash path` / `sh path` supply explicit file evidence. Literal relative paths are interpreted from
-the importing script's directory, never from the process working directory. Only targets already
-inside the allowed manifest can resolve; absolute paths remain unresolved.
+`bash path` / `sh path` supply explicit file evidence, not proof of a target. Relative paths depend
+on the execution working directory, which the index does not know. They remain `Unresolved` with
+that reason and no target or candidates, even when exactly one selected file matches a path from
+the repository root or the script's directory: those directories are not exhaustive runtime bases,
+and the selected manifest is not the runtime filesystem. A slashless `source` / `.` argument also
+depends on `PATH` and the `sourcepath` shell option; its unresolved reason names both settings.
+Absolute paths remain unresolved. No shell code is executed to establish a base.
 
 Variable expansion, command substitution, tilde expansion, globbing and escaped path expressions
 remain `Unresolved`: the index does not execute shell code or infer variable values. Commands found

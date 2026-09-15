@@ -6,7 +6,7 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyBashIntegrationTests
 {
 	[Fact]
-	public async Task LiteralSourcesAndScriptCommandsResolveFromTheScriptDirectory()
+	public async Task LiteralSourcesAndScriptCommandsRemainUnresolvedWithoutRuntimeDirectories()
 	{
 		using var fixture = new TemporaryDirectory();
 		var source = fixture.CreateFile("scripts/main.sh", "source '../lib/common.sh'\n. \"../lib/other.bash\"\n./worker.sh\nbash ./worker.sh\ngrep value input\n");
@@ -18,10 +18,16 @@ public sealed class DependencyBashIntegrationTests
 		Assert.All(index.Files, file => Assert.Equal(DependencyFileStatus.Supported, file.Status));
 		Assert.Equal(3, index.Edges.Count);
 		Assert.Equal(4, index.Files.Single(file => file.Path == "scripts/main.sh").Imports.Count);
-		Assert.All(index.Edges, edge => Assert.Equal(ResolutionStatus.Resolved, edge.Status));
-		Assert.Contains(index.Edges, edge => edge.Target == "lib/common.sh");
-		Assert.Contains(index.Edges, edge => edge.Target == "lib/other.bash");
-		Assert.Equal(2, Assert.Single(index.Edges, edge => edge.Target == "scripts/worker.sh").Evidence.Count);
+		Assert.All(index.Edges, edge =>
+		{
+			Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+			Assert.Null(edge.Target);
+			Assert.Empty(edge.Candidates);
+			Assert.Equal("the Bash execution working directory is unknown", Assert.Single(edge.Reasons));
+		});
+		Assert.Contains(index.Edges, edge => edge.Reference == "../lib/common.sh");
+		Assert.Contains(index.Edges, edge => edge.Reference == "../lib/other.bash");
+		Assert.Equal(2, Assert.Single(index.Edges, edge => edge.Reference == "./worker.sh").Evidence.Count);
 	}
 
 	[Theory]
