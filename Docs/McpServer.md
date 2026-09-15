@@ -1116,7 +1116,7 @@ public LogEventLevel GetLevel(string source)
 
 The body comes from the same transformed snapshot that produced the match, so mandatory
 secret masking and configured private-data replacement have already run. Only this one
-body is included when enabled. Its startup limit defaults to 3,000 characters within the unchanged 16,000-character
+body is included when enabled. By default, it is limited to 3,000 characters within the unchanged 16,000-character
 search response budget. Its declaration is selected once from the full displayed
 match slice and is not reconsidered during placement. Complete overlapping context
 lines from that same declaration are printed in the body rather than twice; matching
