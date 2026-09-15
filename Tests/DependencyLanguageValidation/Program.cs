@@ -62,14 +62,32 @@ var report = JsonSerializer.Serialize(new
 	declarations = index.Declarations.Count(declaration => languages.Contains(declaration.Identity.LanguageId)),
 	edges = edges.GroupBy(edge => edge.Status).ToDictionary(group => group.Key.ToString(), group => group.Count()),
 	edgeHash = Digest(edges),
-	factsHash = Digest(languageFiles.Select(file => new { file.Path, file.ScopeId, file.ContentFingerprint, file.Status,
-		file.Declarations, file.Imports, file.References, file.NavigationDeclarations, file.ContextNamespaces,
-		file.Aliases, file.GlobalContextNamespaces, file.GlobalAliases, file.TypeParameters, file.TypeParameterScopes, file.CSharpUsingDirectives })),
+	factsHash = Digest(languageFiles.Select(file => new
+	{
+		file.Path,
+		file.ScopeId,
+		file.ContentFingerprint,
+		file.Status,
+		file.Declarations,
+		file.Imports,
+		file.References,
+		file.NavigationDeclarations,
+		file.ContextNamespaces,
+		file.Aliases,
+		file.GlobalContextNamespaces,
+		file.GlobalAliases,
+		file.TypeParameters,
+		file.TypeParameterScopes,
+		file.CSharpUsingDirectives
+	})),
 	resolvedEdges = edges.Where(edge => edge.Status == ResolutionStatus.Resolved),
 	sources,
 	samples = index.Files.Where(file => samples.Contains(file.Path)).Select(file => new
 	{
-		file.Path, file.NavigationDeclarations, file.Imports, file.References,
+		file.Path,
+		file.NavigationDeclarations,
+		file.Imports,
+		file.References,
 		edges = index.Edges.Where(edge => edge.Source == file.Path)
 	})
 }, new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } });
