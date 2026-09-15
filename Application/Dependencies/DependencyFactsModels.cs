@@ -15,7 +15,8 @@ public enum LanguageId
 	Php,
 	C,
 	Cpp,
-	Unsupported
+	Unsupported,
+	Bash
 }
 
 public enum SymbolKind

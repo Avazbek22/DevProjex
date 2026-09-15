@@ -8,6 +8,12 @@ public sealed partial class McpServerProcessTests
 	public static TheoryData<string, string, string, string> MemberNavigationCases => new()
 	{
 		{
+			"members.sh",
+			"first() { echo 'member-marker-a'; }\nfunction second { echo 'member-marker-b'; }\n# fallback-marker\n",
+			"first",
+			"second"
+		},
+		{
 			"Members.cs",
 			"namespace P;\nclass A { string Run() { return \"member-marker-a\"; } }\nclass B { string Run() { return \"member-marker-b\"; } }\n// fallback-marker\n",
 			"P.A.Run",

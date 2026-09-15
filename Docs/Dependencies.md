@@ -44,6 +44,19 @@ deduplicated before resolution. Results use four statuses:
 
 ## Selection and scope
 
+### Bash
+
+Bash (`.sh`, `.bash`) records named functions in both `name()` and `function name` forms for
+dependency facts and symbol navigation. `source path`, `. path`, direct script-path commands and
+`bash path` / `sh path` supply explicit file evidence. Literal relative paths are interpreted from
+the importing script's directory, never from the process working directory. Only targets already
+inside the allowed manifest can resolve; absolute paths remain unresolved.
+
+Variable expansion, command substitution, tilde expansion, globbing and escaped path expressions
+remain `Unresolved`: the index does not execute shell code or infer variable values. Commands found
+through `PATH`, such as `grep`, are not file dependencies. Interpreter flags and computed command
+names are not interpreted. Function calls do not create cross-file edges.
+
 There are three separate scopes. The **allowed manifest** is the effective DevProjex selection from
 `ProjectContextPlan.IncludedFiles` and its `SourceRoot`. **Seed files** are the paths named by a
 `related` or `related_files` request. **Candidate files** are related files projected from the index.

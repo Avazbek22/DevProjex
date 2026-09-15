@@ -1202,6 +1202,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		if (captureName.StartsWith("import.", StringComparison.Ordinal))
 		{
 			var importSyntax = CreateImportSyntax(captureName, node, materialization, moduleCallName);
+			if (captureName == "import.bash" && importSyntax is null) return null;
 			var importEvidence = CreateCompactImportEvidence(captureName, importSyntax);
 			return CreateCapture(captureName, node, importEvidence, null, 0, false, false,
 				FindImportOwner(captureName, node, materialization), importSyntax, evidence: importEvidence);
@@ -1343,6 +1344,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string captureName,
 		DependencyImportSyntax? syntax)
 	{
+		if (captureName == "import.bash")
+			return OneLineEvidence($"{syntax?.Bindings.Single().Name} {syntax?.Specifier}");
 		if (captureName is "import.esm" or "import.export")
 			return OneLineEvidence($"{(captureName == "import.export" ? "export" : "import")} {syntax?.Specifier ?? string.Empty}");
 		if (captureName == "import.call")
@@ -1451,12 +1454,48 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		return null;
 	}
 
+	private static DependencyImportSyntax? ReadBashImport(Node node, NodeTextMaterializationCounter materialization)
+	{
+		var commandNode = node.GetChildForField("name");
+		if (commandNode is null) return null;
+		var command = materialization.Read(commandNode);
+		var arguments = node.GetChildrenForField("argument").ToArray();
+		Node? path;
+		if (command is "source" or ".")
+			path = arguments.FirstOrDefault();
+		else if (command is "bash" or "sh")
+		{
+			path = arguments.FirstOrDefault();
+			if (path is not null && materialization.Read(path) == "--") path = arguments.Skip(1).FirstOrDefault();
+			if (path is not null && materialization.Read(path).StartsWith('-')) return null;
+		}
+		else
+		{
+			if (!command.Contains('/')) return null;
+			path = commandNode.NamedChildren.FirstOrDefault() ?? commandNode;
+		}
+		if (path is null) return null;
+		var text = materialization.Read(path);
+		var literal = path.Type is "word" or "raw_string" ||
+			path.Type == "string" && path.NamedChildren.All(static child => child.Type == "string_content");
+		if (text.Length >= 2 && text[0] is '\'' or '"' && text[^1] == text[0])
+			text = text[1..^1];
+		// Escapes and unquoted expansion syntax are deliberately not evaluated.
+		literal &= !text.Contains('\\') &&
+			(path.Type == "raw_string" || !text.AsSpan().ContainsAny('$', '`', '~')) &&
+			(path.Type != "word" || !text.AsSpan().ContainsAny('*', '?', '['));
+		if (text.Length == 0) return null;
+		return new DependencyImportSyntax(text, 0, [new DependencyImportBinding(command, null)], literal);
+	}
+
 	private static DependencyImportSyntax? CreateImportSyntax(
 		string captureName,
 		Node node,
 		NodeTextMaterializationCounter materialization,
 		string? moduleCallName)
 	{
+		if (captureName == "import.bash")
+			return ReadBashImport(node, materialization);
 		if (captureName is "import.esm" or "import.export")
 		{
 			var source = node.GetChildForField("source");
@@ -1790,6 +1829,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".php" or ".phtml" => LanguageId.Php,
 		".c" or ".h" => LanguageId.C,
 		".cc" or ".cpp" or ".cxx" or ".hh" or ".hpp" or ".hxx" => LanguageId.Cpp,
+		".sh" or ".bash" => LanguageId.Bash,
 		_ => LanguageId.Unsupported
 	};
 
@@ -2135,7 +2175,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.Ruby] = new("tree-sitter-ruby", "tree_sitter_ruby", "ruby", new RubyDependencyLanguageAdapter()),
 				[LanguageId.Php] = new("tree-sitter-php", "tree_sitter_php", "php", new PhpDependencyLanguageAdapter()),
 				[LanguageId.C] = new("tree-sitter-c", "tree_sitter_c", "c", new CDependencyLanguageAdapter()),
-				[LanguageId.Cpp] = new("tree-sitter-cpp", "tree_sitter_cpp", "cpp", new CppDependencyLanguageAdapter())
+				[LanguageId.Cpp] = new("tree-sitter-cpp", "tree_sitter_cpp", "cpp", new CppDependencyLanguageAdapter()),
+				[LanguageId.Bash] = new("tree-sitter-bash", "tree_sitter_bash", "bash", new BashDependencyLanguageAdapter())
 			};
 	}
 
