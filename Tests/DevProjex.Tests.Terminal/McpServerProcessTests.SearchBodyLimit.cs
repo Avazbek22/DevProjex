@@ -64,16 +64,23 @@ public sealed partial class McpServerProcessTests
 		using var workspace = new TemporaryDirectory();
 		var project = CreateBodyLimitProject(workspace);
 		var responses = new List<string>();
-		foreach (var arguments in new string[][] { [], ["--search-body-chars", "3000"], ["--search-body-chars", "off"] })
+		foreach (var arguments in new string[][] { [], ["--search-body-chars", "1800"], ["--search-body-chars", "3000"], ["--search-body-chars", "off"] })
 		{
 			await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory(Guid.NewGuid().ToString("N")), arguments);
+			if (arguments.Length == 0)
+				Assert.Contains("up to 1,800 characters", server.Client.ServerInstructions, StringComparison.Ordinal);
 			var response = Normalize(await SearchAsync(server, "body-cap-marker"));
 			responses.Add(Regex.Replace(response, @"untrusted-data-[0-9a-f]{24}", "untrusted-data-nonce"));
 		}
 		Assert.Equal(responses[0], responses[1]);
+		Assert.NotEqual(responses[0], responses[2]);
+		Assert.InRange(ExtractBestDeclarationBody(responses[0]).Length, 1, 1_800);
+		Assert.InRange(ExtractBestDeclarationBody(responses[2]).Length, 1_801, 3_000);
+		Assert.DoesNotContain("Best declaration body", responses[3], StringComparison.Ordinal);
+		Assert.Contains("Sample.Read 3-97", responses[3], StringComparison.Ordinal);
 		var numberedMatches = Regex.Matches(responses[0], @"(?m)^\s*[0-9]+:.*body-cap-marker").Count;
 		Assert.Equal(2, numberedMatches);
-		Assert.Equal(numberedMatches, Regex.Matches(responses[2], @"(?m)^\s*[0-9]+:.*body-cap-marker").Count);
+		Assert.Equal(numberedMatches, Regex.Matches(responses[3], @"(?m)^\s*[0-9]+:.*body-cap-marker").Count);
 	}
 
 	[Theory]

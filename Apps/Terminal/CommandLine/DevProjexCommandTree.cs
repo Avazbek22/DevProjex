@@ -133,9 +133,9 @@ public sealed class DevProjexCommandTree
 		var exclude = CreateMcpExcludeOption();
 		var searchBodyCharacters = new Option<string>("--search-body-chars")
 		{
-			Description = "Limit the search declaration body to 1..16000 characters, or off; default 3000.",
+			Description = "Limit the search declaration body to 1..16000 characters, or off; default 1800.",
 			HelpName = "off|N",
-			DefaultValueFactory = _ => "3000"
+			DefaultValueFactory = _ => "1800"
 		};
 		searchBodyCharacters.Validators.Add(result =>
 		{

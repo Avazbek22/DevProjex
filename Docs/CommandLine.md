@@ -110,7 +110,7 @@ diagnostic workflows.
 `devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--exclude NAME ...] [--unrestricted] [--allow-agent-exclusions] [--hide-private-data] [--allow-remote]`
 starts the local read-only MCP stdio server. `--search-body-chars off|N` sets the
 search declaration-body character limit: `N` must be an integer from 1 to 16,000,
-defaulting to 3,000; `off` disables bodies but keeps declaration ranges and matches.
+defaulting to 1,800; `off` disables bodies but keeps declaration ranges and matches.
 Invalid values fail before startup. The total search response budget remains
 16,000 characters; catalog descriptions and instructions reflect the chosen limit.
 `--tool-set full|reduced` selects a

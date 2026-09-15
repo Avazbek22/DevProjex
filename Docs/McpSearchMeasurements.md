@@ -36,3 +36,16 @@ The remaining two cases do not expose a declaration with the requested variable
 name: Go package variables and Python assignments are absent from the current
 navigation projection. Equality cannot select an entity missing from that
 projection. This change does not expand extraction or dependency facts.
+
+## Startup body-limit comparison
+
+Recorded on `1515c4a3b27dd92196943b241fcb6b3938267cca` using one binary,
+four tasks and three repeats per task in each of three startup configurations:
+36 sessions in total. This recorded comparison determined the new default of
+1,800 characters. No new model sessions were run for the default change.
+
+| `--search-body-chars` | Model turns | Cost (USD) | Complete answers | Required paths not named | Incorrect answers |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `off` | 173 | 1.27 | 2 / 12 | 22 / 54 | Not reported |
+| `1800` | 161 | 1.21 | 5 / 12 | 14 / 54 | Not reported |
+| `3000` | 179 | 1.38 | 2 / 12 | 30 / 54 | 1 |
