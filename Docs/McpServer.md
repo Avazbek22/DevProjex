@@ -655,8 +655,8 @@ not a claim about an uninspected suffix. A group cut only in its trailing contex
 lines withheld no match, so it receives the cap notice without an additional-match
 line. Trusted counts and constants remain outside the untrusted block; no path enters
 them. The selected uniquely addressable declaration body and its selector share this
-same 16,000-character cap with the match text; they displace lower-priority matches
-rather than increasing the response limit.
+same 16,000-character cap with the match text. Matches are chosen once at the full
+cap, and body placement never removes a shown match or a distinct matching file.
 
 Every search ends with a trusted boundary line. A complete search says:
 
@@ -1102,7 +1102,13 @@ public LogEventLevel GetLevel(string source)
 The body comes from the same transformed snapshot that produced the match, so mandatory
 secret masking and configured private-data replacement have already run. Only this one
 body is included. It is limited to 3,000 characters within the unchanged 16,000-character
-search response budget; a cut body reports exactly how many
+search response budget. Its declaration is selected once from the full displayed
+match slice and is not reconsidered during placement. Complete overlapping context
+lines from that same declaration are printed in the body rather than twice; matching
+lines, context outside the printed body, and other files remain in their original order.
+Only spare space is used beyond that reclaimed context. When space is insufficient,
+the body is cut at a complete line or omitted, never at the expense of a shown match.
+A cut body reports exactly how many
 declaration lines remain and prints the complete `get_file` arguments needed to read it.
 The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
 separate reads. If the selected printed name identifies more than one declaration in its

@@ -980,28 +980,9 @@ internal sealed class DevProjexMcpTools(
 				candidateSnapshot,
 				symbols.Declarations,
 				regex);
-			var reservedCharacters = 0;
-			while (declarationPreview is { IsAddressable: true })
-			{
-				var requiredCharacters = MinimumDeclarationSectionCharacters(
-					declarationPreview,
-					symbols.Declarations.Count);
-				if (requiredCharacters <= reservedCharacters)
-					break;
-				reservedCharacters = requiredCharacters;
-				rendered = RenderSearchGroups(
-					ordered,
-					maximumResults,
-					MaximumSearchContentCharacters - reservedCharacters);
-				symbols = McpSearchSymbols.Resolve(
-					rendered.WrittenHits,
-					navigationByFile,
-					cancellationToken);
-				declarationPreview = McpSearchSymbols.SelectDeclarationBodyPreview(
-					candidateSnapshot,
-					symbols.Declarations,
-					regex);
-			}
+			var bodyLayout = PlanSearchDeclarationBody(rendered, symbols.Declarations, declarationPreview);
+			rendered = bodyLayout.Rendered;
+			declarationPreview = bodyLayout.Preview;
 
 			var output = rendered.Output;
 			var shownMatches = rendered.ShownMatches;
@@ -1068,12 +1049,11 @@ internal sealed class DevProjexMcpTools(
 			// Resolved on every search that showed a hit, including one the cap cut: the selector
 			// list below is what stops a caller opening a whole file to find a declaration it was
 			// already holding, and a cut response is exactly when that happens.
-			// Headers use the match slice's share of the response. If they do not all fit there, they
-			// are dropped; the selector and its optional body keep the space reserved for them.
-			var matchContentLimit = declarationPreview is { IsAddressable: true }
+			// Naming and the optional body use only space left by the fixed evidence slice.
+			var matchContentLimit = declarationPreview is { IsAddressable: true, Text.Length: > 0 }
 				? MaximumSearchContentCharacters - MinimumDeclarationSectionCharacters(
 					declarationPreview,
-					symbols.Declarations.Count)
+					symbols.Declarations)
 				: MaximumSearchContentCharacters;
 			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols, matchContentLimit);
 			if (namesRefused)
@@ -2814,7 +2794,7 @@ internal sealed class DevProjexMcpTools(
 			: line.Text;
 	}
 
-	private static McpSearchRenderSlice RenderSearchGroups(
+	internal static McpSearchRenderSlice RenderSearchGroups(
 		IReadOnlyList<McpSearchRenderedGroup> ordered,
 		int maximumResults,
 		int maximumCharacters)
@@ -3063,7 +3043,7 @@ internal sealed class DevProjexMcpTools(
 			return McpDeclarationSectionResult.None;
 
 		var heading = $"{Environment.NewLine}{DeclarationsHeading}{Environment.NewLine}";
-		var body = preview is { IsAddressable: true }
+		var body = preview is { IsAddressable: true, Text.Length: > 0 }
 			? FormatDeclarationBody(preview, declarations.Count)
 			: string.Empty;
 		var room = MaximumSearchContentCharacters - output.Length - heading.Length - body.Length;
@@ -3090,12 +3070,101 @@ internal sealed class DevProjexMcpTools(
 
 	private static int MinimumDeclarationSectionCharacters(
 		McpSearchDeclarationPreview preview,
-		int declarationCount) =>
+		IReadOnlyList<McpSearchDeclaration> declarations) =>
 		Environment.NewLine.Length +
 		DeclarationsHeading.Length +
 		Environment.NewLine.Length +
-		FormatDeclarationSelector(preview.Declaration).Length +
-		FormatDeclarationBody(preview, declarationCount).Length;
+		FormatDeclarationSelector(declarations[0]).Length +
+		FormatDeclarationBody(preview, declarations.Count).Length;
+
+	internal static McpSearchBodyLayout PlanSearchDeclarationBody(
+		McpSearchRenderSlice rendered,
+		IReadOnlyList<McpSearchDeclaration> declarations,
+		McpSearchDeclarationPreview? preview)
+	{
+		if (preview is not { IsAddressable: true, Text.Length: > 0 } || declarations.Count == 0)
+			return new McpSearchBodyLayout(rendered, preview);
+
+		// Selection is final. Only a complete context line repeated by this body's prefix may
+		// surrender space; matching lines, their order, and the retained result never change.
+		var text = rendered.Output.ToString();
+		var bodyLines = preview.Text.Split('\n');
+		var reclaimable = new Dictionary<int, McpSearchRenderedLine>();
+		foreach (var line in rendered.RenderedLines)
+		{
+			var bodyIndex = line.LineNumber - preview.Declaration.StartLine;
+			if (line.IsMatch || line.RelativePath != preview.Declaration.RelativePath ||
+				bodyIndex < 0 || bodyIndex >= bodyLines.Length)
+				continue;
+			var end = text.IndexOf('\n', line.Offset);
+			if (end < 0)
+				continue;
+			var marker = text.IndexOf('-', line.Offset, end - line.Offset);
+			var lineEnd = end > line.Offset && text[end - 1] == '\r' ? end - 1 : end;
+			if (marker >= 0 && text.AsSpan(marker + 1, lineEnd - marker - 1)
+				.SequenceEqual(McpTextEscaping.EscapeSingleLine(bodyLines[bodyIndex]).AsSpan()))
+				reclaimable[bodyIndex] = line;
+		}
+
+		var reclaimed = 0;
+		var prefixLength = 0;
+		var includedLines = 0;
+		var framingCharacters = MinimumDeclarationSectionCharacters(
+			preview with { Text = string.Empty, RemainingLines = 0 }, declarations);
+		McpSearchDeclarationPreview? fitting = null;
+		var fittingLineCount = 0;
+		foreach (var bodyLine in bodyLines)
+		{
+			if (includedLines > 0)
+				prefixLength++;
+			prefixLength += bodyLine.Length;
+			if (reclaimable.TryGetValue(includedLines, out var context))
+				reclaimed += text.IndexOf('\n', context.Offset) + 1 - context.Offset;
+			includedLines++;
+			var prefix = preview with
+			{
+				Text = preview.Text[..prefixLength],
+				RemainingLines = prefixLength == preview.Text.Length
+					? preview.RemainingLines
+					: preview.Declaration.EndLine - preview.Declaration.StartLine + 1 - includedLines
+			};
+			var truncationCharacters = prefix.RemainingLines > 0
+				? Environment.NewLine.Length + FormatDeclarationBodyTruncationNotice(prefix.RemainingLines).Length
+				: 0;
+			if (prefix.Text.Length == 0 || rendered.Output.Length - reclaimed + framingCharacters +
+				prefix.Text.Length + truncationCharacters > MaximumSearchContentCharacters)
+				continue;
+			fitting = prefix;
+			fittingLineCount = includedLines;
+		}
+
+		if (fitting is null)
+			return new McpSearchBodyLayout(rendered, preview with { Text = string.Empty });
+		var removed = reclaimable.Where(entry => entry.Key < fittingLineCount)
+			.Select(static entry => entry.Value.Offset).ToHashSet();
+		if (removed.Count == 0)
+			return new McpSearchBodyLayout(rendered, fitting);
+
+		var output = new StringBuilder();
+		var lines = new List<McpSearchRenderedLine>(rendered.RenderedLines.Count - removed.Count);
+		var cursor = 0;
+		var startsGroup = false;
+		foreach (var line in rendered.RenderedLines)
+		{
+			output.Append(text.AsSpan(cursor, line.Offset - cursor));
+			var end = text.IndexOf('\n', line.Offset) + 1;
+			startsGroup |= line.StartsGroup;
+			if (!removed.Contains(line.Offset))
+			{
+				lines.Add(line with { Offset = output.Length, StartsGroup = startsGroup });
+				output.Append(text.AsSpan(line.Offset, end - line.Offset));
+				startsGroup = false;
+			}
+			cursor = end;
+		}
+		output.Append(text.AsSpan(cursor));
+		return new McpSearchBodyLayout(rendered with { Output = output, RenderedLines = lines }, fitting);
+	}
 
 	private static string FormatDeclarationSelector(McpSearchDeclaration declaration) =>
 		$"{EscapeSingleLine(declaration.RelativePath)} {EscapeSingleLine(declaration.Name)} " +
@@ -3125,14 +3194,15 @@ internal sealed class DevProjexMcpTools(
 			.Append(preview.Text);
 		if (preview.RemainingLines > 0)
 		{
-			output.AppendLine()
-				.Append("[Declaration body truncated: ")
-				.Append(preview.RemainingLines.ToString(CultureInfo.InvariantCulture))
-				.Append(" line(s) remain; call get_file with the arguments above.]");
+			output.AppendLine().Append(FormatDeclarationBodyTruncationNotice(preview.RemainingLines));
 		}
 		output.AppendLine();
 		return output.ToString();
 	}
+
+	private static string FormatDeclarationBodyTruncationNotice(int remainingLines) =>
+		$"[Declaration body truncated: {remainingLines.ToString(CultureInfo.InvariantCulture)} " +
+		"line(s) remain; call get_file with the arguments above.]";
 
 	private static string? FormatDeclarationBodyNotice(
 		McpDeclarationSectionResult section,
@@ -4004,12 +4074,14 @@ internal sealed class DevProjexMcpTools(
 	private static string ResolveProjectName(string root)
 		=> McpRootRegistry.GetProjectName(root);
 
-	private sealed record McpSearchRenderSlice(
+	internal sealed record McpSearchRenderSlice(
 		StringBuilder Output,
 		List<McpSearchHit> WrittenHits,
 		List<McpSearchRenderedLine> RenderedLines,
 		int ShownMatches,
 		bool Truncated);
+
+	internal sealed record McpSearchBodyLayout(McpSearchRenderSlice Rendered, McpSearchDeclarationPreview? Preview);
 
 	private readonly record struct McpDeclarationSectionResult(
 		bool DeclarationsListed,

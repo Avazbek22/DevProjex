@@ -245,6 +245,8 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("If the pattern has no qualifying literal fragment", normalized,
 			StringComparison.Ordinal);
 		Assert.Contains("limited to 3,000 characters", server, StringComparison.Ordinal);
+		Assert.Contains("body placement never removes a shown match or a distinct matching file", server, StringComparison.Ordinal);
+		Assert.Contains("not reconsidered during placement", server, StringComparison.Ordinal);
 		Assert.Contains("same 16,000-character cap", server, StringComparison.Ordinal);
 		Assert.Contains(
 			"### What a bounded result retains",

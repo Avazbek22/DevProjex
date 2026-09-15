@@ -666,7 +666,7 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
-	public async Task RealProcessKeepsTheDeclarationBodyInsideTheSearchCharacterLimit()
+	public async Task RealProcessPreservesDenseMatchesInsteadOfReservingDeclarationBodySpace()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("bounded-search-project");
@@ -691,7 +691,7 @@ public sealed partial class McpServerProcessTests
 				["max_results"] = 200
 			})));
 
-		Assert.Contains("Best declaration body (1 of 1):", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Best declaration body (1 of 1):", text, StringComparison.Ordinal);
 		Assert.DoesNotContain($"in {ownerName}.Read", text, StringComparison.Ordinal);
 		Assert.Contains("[Search truncated]", text, StringComparison.Ordinal);
 		Assert.InRange(SpotlightBody(text).Length, 1, 16_000);
