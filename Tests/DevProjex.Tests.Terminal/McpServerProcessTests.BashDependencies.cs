@@ -18,8 +18,8 @@ public sealed partial class McpServerProcessTests
 		var result = await CallAsync(server, "related_files", new Dictionary<string, object?> { ["path"] = "main.sh", ["direction"] = "dependencies" });
 		var text = AllProcessText(result);
 		Assert.NotEqual(true, result.IsError);
-		Assert.Contains("lib.sh", text, StringComparison.Ordinal);
-		Assert.Contains("[Resolution] resolved=1 · ambiguous=0 · unresolved=1 · external=0", text, StringComparison.Ordinal);
+		Assert.Contains("[No related files] in the effective selection; unresolved references=2.", text, StringComparison.Ordinal);
+		Assert.Contains("[Resolution] resolved=0 · ambiguous=0 · unresolved=2 · external=0", text, StringComparison.Ordinal);
 		var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
 		foreach (var argument in new[] { PublishedApplicationLocator.FindApplicationAssembly(), "related", "main.sh", "--project", project,
 			"--direction", "dependencies", "--format", "json", "--git-mode", "none", "--exclude", "none", "--language", "en", "--plain", "--progress", "never" })
@@ -29,9 +29,9 @@ public sealed partial class McpServerProcessTests
 		Assert.True(cli.ExitCode == 0, cli.StandardError + cli.StandardOutput);
 		using var document = JsonDocument.Parse(cli.StandardOutput);
 		var resolution = document.RootElement.GetProperty("resolution");
-		Assert.Equal(1, resolution.GetProperty("resolved").GetInt32());
-		Assert.Equal(1, resolution.GetProperty("unresolved").GetInt32());
+		Assert.Equal(0, resolution.GetProperty("resolved").GetInt32());
+		Assert.Equal(2, resolution.GetProperty("unresolved").GetInt32());
 		var dependencies = Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray()).GetProperty("dependencies");
-		Assert.Equal("lib.sh", Assert.Single(dependencies.EnumerateArray()).GetProperty("path").GetString());
+		Assert.Empty(dependencies.EnumerateArray());
 	}
 }
