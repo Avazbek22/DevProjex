@@ -62,6 +62,7 @@ export async function probeMcpServer(server, client, timeoutMs = 30_000) {
 
 async function readAllTools(child, messages, timeoutMs, spawnFailure) {
   const pages = [];
+  const wirePages = [];
   const tools = [];
   const cursors = new Set();
   let cursor = null;
@@ -75,10 +76,11 @@ async function readAllTools(child, messages, timeoutMs, spawnFailure) {
     if (!Array.isArray(listed.result?.tools))
       throw new Error('Server probe rejected: tools/list did not return a tools array.');
     pages.push(listed.result);
+    wirePages.push(listed.wireText);
     tools.push(...listed.result.tools);
     cursor = listed.result.nextCursor ?? null;
     if (cursor === null)
-      return { tools, pages };
+      return { tools, pages, wirePages };
     if (typeof cursor !== 'string' || cursor.length === 0 || cursors.has(cursor))
       throw new Error('Server probe rejected: tools/list pagination cursor is invalid or repeated.');
     cursors.add(cursor);
@@ -122,7 +124,9 @@ function createMessageReader(stream) {
       if (line.length === 0)
         continue;
       try {
-        deliver(JSON.parse(line));
+        const message = JSON.parse(line);
+        Object.defineProperty(message, 'wireText', { value: line });
+        deliver(message);
       } catch (error) {
         rejectAll(new Error(`Server returned invalid JSON: ${error.message}`));
       }

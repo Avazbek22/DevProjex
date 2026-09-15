@@ -49,10 +49,21 @@ export function buildSeriesManifest(configuration) {
     identity.toolsListSha256 = digest(canonicalJson(configuration.toolsList));
   if (configuration.seriesDefinition !== undefined)
     identity.seriesDefinitionSha256 = digest(canonicalJson(configuration.seriesDefinition));
+  const arms = configuration.armConfigurations === undefined ? undefined : Object.fromEntries(
+    configuration.armConfigurations.map(arm => [arm.id, {
+      productBuildSha: requireText(arm.productBuildSha, `arm '${arm.id}' product SHA`),
+      serverInstructionsSha256: digest(requireText(arm.serverInstructions, `arm '${arm.id}' instructions`)),
+      toolConfigurationSha256: digest(canonicalJson(arm.toolConfiguration)),
+      toolsListSha256: digest(canonicalJson(arm.toolsList)),
+      limitsSha256: digest(canonicalJson(arm.limits)),
+    }]));
+  if (arms !== undefined)
+    identity.armIdentitiesSha256 = digest(canonicalJson(arms));
   return {
     schemaVersion: 1,
     identity,
     pricing,
+    ...(arms === undefined ? {} : { arms }),
   };
 }
 
@@ -88,6 +99,8 @@ export async function resumeSeries(seriesDirectory, configuration) {
   const mismatch = firstIdentityMismatch(actual.identity, expected.identity, true);
   if (mismatch)
     throw new Error(`Series identity mismatch: ${mismatch}.`);
+  if (canonicalJson(actual.arms ?? null) !== canonicalJson(expected.arms ?? null))
+    throw new Error('Series identity mismatch: comparison arm fingerprints.');
   return { directory, manifest: actual };
 }
 
@@ -95,6 +108,14 @@ export async function readSeriesManifest(seriesDirectory) {
   const manifest = JSON.parse(await readFile(join(resolve(seriesDirectory), 'series.json'), 'utf8'));
   validateManifest(manifest);
   return manifest;
+}
+
+export function expectedRunIdentity(manifest, arm) {
+  if (manifest.arms === undefined)
+    return manifest.identity;
+  if (!Object.hasOwn(manifest.arms, arm))
+    throw new Error(`Comparison arm '${arm}' does not belong to this series.`);
+  return { ...manifest.identity, ...manifest.arms[arm] };
 }
 
 export function createRunRecord(manifest, slot, report) {
@@ -129,7 +150,7 @@ export function createRunRecord(manifest, slot, report) {
   for (const field of ['toolsListSha256', 'seriesDefinitionSha256'])
     if (manifest.identity[field] !== undefined)
       identity[field] = report.session[field];
-  const mismatch = firstIdentityMismatch(identity, manifest.identity, false);
+  const mismatch = firstIdentityMismatch(identity, expectedRunIdentity(manifest, arm), false);
   if (mismatch)
     throw new Error(`Session report identity mismatch: ${mismatch}.`);
   const usage = copyUsage(report.totals.usage, 'session usage');
@@ -172,7 +193,7 @@ export async function storeRunRecord(seriesDirectory, record, requestedStorageKe
   const manifest = JSON.parse(await readFile(join(directory, 'series.json'), 'utf8'));
   validateManifest(manifest);
   validateRecord(record);
-  const manifestMismatch = firstIdentityMismatch(record.identity, manifest.identity, true);
+  const manifestMismatch = firstIdentityMismatch(record.identity, expectedRunIdentity(manifest, record.identity.arm), true);
   if (manifestMismatch)
     throw new Error(`Saved run mismatch: ${manifestMismatch}.`);
   const storageKey = requireFingerprint(requestedStorageKey, 'storage key');
@@ -240,7 +261,7 @@ export function inspectRunAssignment(manifest, records, slot) {
     .sort((left, right) => normalizedAttempt(left.identity) - normalizedAttempt(right.identity));
   for (const record of matching) {
     validateRecord(record);
-    const mismatch = firstIdentityMismatch(record.identity, manifest.identity, true);
+    const mismatch = firstIdentityMismatch(record.identity, expectedRunIdentity(manifest, record.identity.arm), true);
     if (mismatch)
       throw new Error(`Saved run mismatch: ${mismatch}; refusing to skip the assignment.`);
     assertStorageKey(record);
@@ -266,7 +287,7 @@ export function summarizeSeriesRecords(manifest, records) {
       throw new Error(
         `Raw record '${record.storageKey}' belongs to series '${record.identity.seriesId}', not '${manifest.identity.seriesId}'.`);
     }
-    const sharedMismatch = firstIdentityMismatch(record.identity, manifest.identity, false);
+    const sharedMismatch = firstIdentityMismatch(record.identity, expectedRunIdentity(manifest, record.identity.arm), false);
     if (sharedMismatch)
       throw new Error(`Raw record '${record.storageKey}' has a different ${sharedMismatch}.`);
     if (storageKeys.has(record.storageKey))
@@ -300,6 +321,9 @@ export function summarizeSeriesRecords(manifest, records) {
         usage: record.measurement.usage,
         cost: record.measurement.cost,
         outcome: record.measurement.outcome,
+        modelTurns: record.measurement.modelTurns,
+        toolCalls: record.measurement.toolCalls,
+        wallDurationMs: record.measurement.wallDurationMs,
       })),
     arms,
   };
@@ -391,6 +415,17 @@ function validateManifest(manifest) {
   if (manifest.schemaVersion !== 1)
     throw new Error('Unsupported series manifest schema version.');
   requireObject(manifest.identity, 'series identity');
+  if (manifest.arms !== undefined) {
+    requireObject(manifest.arms, 'comparison arms');
+    if (manifest.identity.armIdentitiesSha256 !== digest(canonicalJson(manifest.arms)))
+      throw new Error('Series manifest arm fingerprints do not match their identity.');
+    for (const [arm, identity] of Object.entries(manifest.arms)) {
+      if (!/^[0-9a-f]{40}$/.test(identity.productBuildSha ?? ''))
+        throw new Error(`Comparison arm '${arm}' requires a full lowercase product SHA.`);
+      for (const field of ['serverInstructionsSha256', 'toolConfigurationSha256', 'toolsListSha256', 'limitsSha256'])
+        requireFingerprint(identity[field], `arm '${arm}' ${field}`);
+    }
+  }
   requireText(manifest.identity.seriesId, 'series identifier');
   requireText(manifest.identity.productBuildSha, 'product SHA');
   requireText(manifest.identity.model, 'model');
