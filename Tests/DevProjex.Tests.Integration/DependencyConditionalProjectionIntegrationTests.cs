@@ -73,6 +73,41 @@ public sealed class DependencyConditionalProjectionIntegrationTests
 		Assert.NotNull(facts.PartialParse);
 	}
 
+	[Theory]
+	[InlineData("class Holder { public object Run() { return new Box\n#if FEATURE\n<Target>\n#else\n<Inside>\n#endif\n(); } }\nclass Box {}", 0)]
+	[InlineData("class Holder { public object Run() { return new Box<\n#if FEATURE\nTarget,\n#else\nInside,\n#endif\nTail>(); } }\nclass Box<T> {}", 1)]
+	[InlineData("class Holder : Box\n#if FEATURE\n<Target>\n#elif OTHER\n/* comment */ <Inside>\n#else\n<Tail>\n#endif\n{}\nclass Box {}", 0)]
+	[InlineData("class Holder : Box<\n#if FEATURE\nTarget,\n#else\nInside,\n#endif\nTail> {}\nclass Box<T> {}", 1)]
+	[InlineData("class Holder { public object Run() { return new Box\n#if FEATURE\n/* comment\n*/ <Target>\n#else\n// comment\n<Inside>\n#endif\n(); } }\nclass Box {}", 0)]
+	public void ErasingConditionalGenericArgumentsCannotInventADifferentTypeReference(string source, int incorrectArity)
+	{
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		var facts = Extract(extractor, source);
+		Assert.DoesNotContain(facts.References, reference => reference.Name == "Box" && reference.GenericArity == incorrectArity);
+		Assert.NotNull(facts.PartialParse);
+	}
+
+	[Fact]
+	public void ErasingConditionalQualificationCannotInventAReferenceToTheOutsideName()
+	{
+		var source = "class Holder { public object Run() { return new Box\n#if FEATURE\n.Target\n#else\n.Inside\n#endif\n(); } }\nclass Box {}";
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		var facts = Extract(extractor, source);
+		Assert.DoesNotContain(facts.References, reference => reference.Name == "Box");
+	}
+
+	[Fact]
+	public void AGenericTypeWhollyInsideAnOmittedParameterDoesNotBlockIndependentNavigation()
+	{
+		var source = "class Holder { public void Run(\n#if FEATURE\nReadOnlySpan<Target> first,\n#else\nInside second,\n#endif\nTarget last) { Target value; } }";
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		var facts = Extract(extractor, source);
+		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name == "Holder.Run");
+		Assert.Contains(facts.References, reference => reference.Name == "Target");
+		Assert.DoesNotContain(facts.References, reference => reference.Name == "ReadOnlySpan" || reference.Name == "Inside");
+		Assert.Equal(1, Assert.IsType<DependencyPartialParseDiagnostic>(facts.PartialParse).DroppedConstructs);
+	}
+
 	[Fact]
 	public void ErasingAConditionalTypeParameterCannotInventAReferenceToAProjectType()
 	{

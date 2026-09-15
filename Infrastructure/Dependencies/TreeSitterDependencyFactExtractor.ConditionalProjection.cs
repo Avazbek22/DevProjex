@@ -54,7 +54,7 @@ public sealed partial class TreeSitterDependencyFactExtractor
 	private static ParseSourcePreparation PrepareDamagedConditionalRegions(string source, Node root,
 		SyntaxDamageAnalysis damage, CancellationToken cancellationToken)
 	{
-		var protectedSpans = ReadProtectedConditionalSpans(root, cancellationToken, out var bindingSpans);
+		var protectedSpans = ReadProtectedConditionalSpans(root, cancellationToken, out var bindingSpans, out var argumentSpans);
 		var lines = ReadSourceLines(source);
 		char[]? projected = null;
 		var omitted = new List<SyntaxDamageRegion>();
@@ -81,7 +81,10 @@ public sealed partial class TreeSitterDependencyFactExtractor
 			var start = lines[index].StartIndex;
 			var end = lines[endLine].EndIndex;
 			if (damage.Spans.Any(span => start < span.EndIndex && end > span.StartIndex) &&
-				!bindingSpans.Any(span => start < span.EndIndex && end > span.StartIndex))
+				!bindingSpans.Any(span => start < span.EndIndex && end > span.StartIndex) &&
+				!argumentSpans.Any(span => start < span.EndIndex && end > span.StartIndex &&
+					(span.StartIndex < start || span.EndIndex > end)) &&
+				!HasConditionalTypeContinuation(source, lines, index, endLine))
 			{
 				projected ??= source.ToCharArray();
 				for (var offset = start; offset < end; offset++)
@@ -94,10 +97,11 @@ public sealed partial class TreeSitterDependencyFactExtractor
 	}
 
 	private static IReadOnlyList<SyntaxDamageSpan> ReadProtectedConditionalSpans(Node root, CancellationToken cancellationToken,
-		out IReadOnlyList<SyntaxDamageSpan> bindingSpans)
+		out IReadOnlyList<SyntaxDamageSpan> bindingSpans, out IReadOnlyList<SyntaxDamageSpan> argumentSpans)
 	{
 		var spans = new List<SyntaxDamageSpan>();
 		var bindings = new List<SyntaxDamageSpan>();
+		var arguments = new List<SyntaxDamageSpan>();
 		var pending = new Stack<Node>();
 		pending.Push(root);
 		var visited = 0;
@@ -108,6 +112,8 @@ public sealed partial class TreeSitterDependencyFactExtractor
 			// Removing a binder would reinterpret its surviving uses as ordinary project types.
 			if (node.Type == "type_parameter_list")
 				bindings.Add(new SyntaxDamageSpan(checked((int)node.StartIndex), checked((int)node.EndIndex)));
+			if (node.Type == "type_argument_list")
+				arguments.Add(new SyntaxDamageSpan(checked((int)node.StartIndex), checked((int)node.EndIndex)));
 			if (node.Type is "comment" or "string_literal" or "verbatim_string_literal" or "raw_string_literal" or
 				"interpolated_string_expression" or "character_literal")
 			{
@@ -118,7 +124,59 @@ public sealed partial class TreeSitterDependencyFactExtractor
 				pending.Push(child);
 		}
 		bindingSpans = bindings;
+		argumentSpans = arguments;
 		return spans;
+	}
+
+	// An erased continuation must not change a surviving type's qualification or generic arity.
+	private static bool HasConditionalTypeContinuation(string source, IReadOnlyList<SourceLine> lines, int startLine, int endLine)
+	{
+		var preceding = lines[startLine].StartIndex - 1;
+		while (preceding >= 0 && char.IsWhiteSpace(source[preceding])) preceding--;
+		if (preceding >= 0 && source[preceding] == '.') return true;
+		var angleDepth = 0;
+		for (var offset = lines[startLine].StartIndex - 1; offset >= 0; offset--)
+		{
+			var character = source[offset];
+			if (character is '{' or '}' or ';' or '(' or ')' or '[' or ']') break;
+			if (character == '>') angleDepth++;
+			else if (character == '<')
+			{
+				if (angleDepth == 0) return true;
+				angleDepth--;
+			}
+		}
+		var firstToken = true;
+		var blockComment = false;
+		for (var index = startLine; index <= endLine; index++)
+		{
+			var line = lines[index];
+			var offset = line.StartIndex;
+			while (offset < line.EndIndex)
+			{
+				if (blockComment)
+				{
+					if (source[offset] == '*' && offset + 1 < line.EndIndex && source[offset + 1] == '/')
+					{
+						blockComment = false;
+						offset += 2;
+					}
+					else offset++;
+					continue;
+				}
+				if (char.IsWhiteSpace(source[offset])) { offset++; continue; }
+				if (source[offset] == '/' && offset + 1 < line.EndIndex)
+				{
+					if (source[offset + 1] == '/') break;
+					if (source[offset + 1] == '*') { blockComment = true; offset += 2; continue; }
+				}
+				if (source[offset] == '#') { firstToken = true; break; }
+				if (firstToken && source[offset] is '<' or '.') return true;
+				firstToken = false;
+				break;
+			}
+		}
+		return false;
 	}
 
 	private static bool IsUnprotectedDirective(string source, SourceLine line, string directive,

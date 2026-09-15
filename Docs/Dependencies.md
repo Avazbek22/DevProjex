@@ -461,7 +461,10 @@ without choosing a symbol, evaluating a condition, or combining branches. Charac
 every line break are preserved. The replacement is accepted only if syntax damage disappears or
 shrinks without reaching previously undamaged source. Remaining damaged constructions still fail
 closed. Directive-looking text in comments and literals is not removed; a region containing a
-type-parameter binder is not removed because its surviving uses could change meaning.
+type-parameter binder or splitting a generic argument list is not removed because its surviving
+uses could change meaning. A conditional branch continuing an outside type name with generic
+arguments or qualification is also retained. Generic type heads bypass the early base-list
+shortcut and require the same syntax and identity checks as other damaged constructions.
 Every removed region is reported with its exact source-line range, and contributes no declaration,
 reference, or navigation name. Unconditional declarations around it retain their original ranges.
 

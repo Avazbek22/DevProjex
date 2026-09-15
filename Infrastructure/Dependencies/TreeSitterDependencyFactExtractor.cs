@@ -385,7 +385,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				ReadQuery(definition.QueryDirectory, "declarations.scm") + "\0" +
 				ReadQuery(definition.QueryDirectory, "references.scm") + "\0" +
 				ReadQuery(definition.QueryDirectory, "navigation.scm") + "\0" + DiagnosticErrorQuery));
-			var projectionIdentity = id == LanguageId.CSharp ? ":conditional-projection-v2" : string.Empty;
+			var projectionIdentity = id == LanguageId.CSharp ? ":conditional-projection-v3" : string.Empty;
 			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}{projectionIdentity}";
 		});
 
@@ -798,7 +798,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 					break;
 				}
 			}
-			if (endLine < 0)
+			if (endLine < 0 || HasConditionalTypeContinuation(source, lines, index, endLine))
 				continue;
 
 			projected ??= source.ToCharArray();
@@ -825,7 +825,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 			start--;
 		}
 		var prefix = source[start..directiveStart];
-		return prefix.Contains(':', StringComparison.Ordinal) &&
+		return !prefix.Contains('<', StringComparison.Ordinal) && prefix.Contains(':', StringComparison.Ordinal) &&
 			Regex.IsMatch(prefix, @"\b(class|struct|record|interface)\s+[_\p{L}][\p{L}\p{N}_]*[^{};]*:\s*[^{};]*$",
 				RegexOptions.CultureInvariant);
 	}
