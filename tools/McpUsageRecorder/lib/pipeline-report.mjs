@@ -90,9 +90,13 @@ async function validateRawCaptures(seriesDirectory, records, required) {
     const lines = capture.stdout.split(/\r?\n/).filter(line => line.trim()).flatMap(line => {
       try { return [JSON.parse(line)]; } catch { return []; }
     });
-    const replayed = capture.processError
+    const launchFailed = capture.processError && capture.stdout.trim().length === 0;
+    const replayed = launchFailed
       ? recordEvents([{ type: 'session.end', status: 'error' }], pinned)
       : recordStreamJson(lines, pinned);
+    if (!launchFailed && (!replayed.capture.actualUsageObserved ||
+        !replayed.capture.completeOutputUsageObserved))
+      throw new Error('Pipeline report rejected: API usage is missing or incomplete; zero cost cannot be inferred.');
     if (JSON.stringify(replayed.totals.usage) !== JSON.stringify(record.measurement.usage) ||
         replayed.totals.modelTurns !== record.measurement.modelTurns ||
         replayed.totals.toolCalls !== record.measurement.toolCalls ||

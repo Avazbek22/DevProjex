@@ -212,7 +212,7 @@ async function executeSession(context) {
     }, context.arm.limits.sessionTimeoutMs ?? context.definition.limits.sessionTimeoutMs);
     const capture = await storeRawCapture(context.seriesDirectory, context.sessionId, result);
     const parsed = parseCapturedLines(result.stdout);
-    let report = result.processError
+    let report = result.processError && parsed.lines.length === 0 && parsed.invalidLines === 0
       ? { ...recordEvents([{ type: 'session.end', status: 'error', durationMs: result.durationMs }], pinned),
         finalAnswer: null, toolInteractions: [], capture: { actualUsageObserved: false } }
       : recordStreamJson(parsed.lines, pinned);

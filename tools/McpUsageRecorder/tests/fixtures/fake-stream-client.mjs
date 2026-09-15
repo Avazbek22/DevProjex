@@ -33,6 +33,7 @@ emit({
     content: [{ type: 'text', text: `${finalAnswer}\n\n## Experience\n${arm} notes.` }],
   },
 });
+emitCompletedUsage('turn-11', 9);
 emit({ type: 'result', is_error: false, duration_ms: 25, result: `${finalAnswer}\n\n## Experience\n${arm} notes.` });
 
 function emitTool(turn, name, input, text, tokenCount) {
@@ -61,8 +62,21 @@ function emitTool(turn, name, input, text, tokenCount) {
     type: 'user',
     message: { content: [{ type: 'tool_result', tool_use_id: callId, content: text, token_count: tokenCount }] },
   });
+  emitCompletedUsage(turnId, 3);
+}
+
+function emitCompletedUsage(turnId, outputTokens) {
+  if (options.get('--omit-usage') === 'yes')
+    return;
+  emit({ type: 'stream_event', event: { type: 'message_start', message: { id: turnId } } });
+  emit({ type: 'stream_event', event: { type: 'message_delta', usage: options.get('--omit-usage') === 'output'
+    ? { input_tokens: 0 } : { output_tokens: outputTokens } } });
 }
 
 function emit(value) {
+  if (options.get('--omit-usage') === 'yes' && value.message)
+    delete value.message.usage;
+  if (options.get('--omit-usage') === 'output' && value.message?.usage)
+    delete value.message.usage.output_tokens;
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }

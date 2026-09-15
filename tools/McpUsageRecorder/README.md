@@ -172,6 +172,10 @@ their turns, calls, usage, final answers, durations, and capture fingerprints ag
 the immutable records; it also verifies session-to-arm sums. A missing successful
 assignment, changed identity, altered transcript, invalid judgment, or accounting
 mismatch blocks release. Missing usage is never replaced with character/4 estimates.
+Absent per-turn API usage or an unobserved output counter also blocks the table,
+instead of treating unknown cost as zero. Failed-launch attempts are the explicit
+zero-usage case because the client never started. Partial captures remain stored
+even when their incomplete usage prevents a conclusive comparison.
 
 Server/model/client commands and SHAs are explicitly pinned inputs, not inferred
 from directory names. The runner checks client-reported model, version and session

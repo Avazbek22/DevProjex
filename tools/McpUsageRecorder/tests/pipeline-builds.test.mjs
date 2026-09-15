@@ -96,6 +96,20 @@ test('a table cannot release counters that differ from the raw client transcript
   } finally { f.cleanup(); }
 });
 
+test('a table refuses missing or incomplete API usage rather than treating it as zero', async () => {
+  for (const mode of ['yes', 'output']) {
+    const f = fixture();
+    try {
+      f.definition.client.args.push('--omit-usage', mode); f.save();
+      const result = await runPipeline({ mode: 'new', rootDirectory: f.directory, definitionPath: f.definitionPath });
+      const records = await readSeriesRecords(result.directory);
+      assert.ok(records.every(record => !record.measurement.capture.actualUsageObserved ||
+        !record.measurement.capture.completeOutputUsageObserved));
+      await assert.rejects(() => buildPipelineReport(result.directory, f.definition, f.directory), /API usage.*missing or incomplete/);
+    } finally { f.cleanup(); }
+  }
+});
+
 test('a failed client launch is saved as an immutable attempt', async () => {
   const f = fixture();
   try {
