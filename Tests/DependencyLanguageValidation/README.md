@@ -19,9 +19,9 @@ extension bindings, so these numbers are not an estimate for all shell text in e
 
 Across these files, 1155/1553 sources are literal (74.37%), 393/1553 contain variable or command
 expansion (25.31%), and 5/1553 use other computed input (0.32%). This total is dominated by Git's
-test scripts. Without Git, 96/104 sources are computed (92.31%); literal path resolution has low
-coverage in Bash-it and bats-core. Absolute literal paths remain unresolved, so the literal count
-does not imply a resolved project dependency.
+test scripts. Without Git, 96/104 sources are computed (92.31%). A literal argument establishes
+source evidence, not its runtime file target. Absolute paths, unknown working directories and
+shell search settings remain unresolved, so the literal count does not imply a project dependency.
 
 Three files per repository were inspected:
 
@@ -31,12 +31,43 @@ Three files per repository were inspected:
 - bats-core: `contrib/release.sh`, `lib/bats-core/test_functions.bash`,
   `lib/bats-core/tracing.bash`: no resolved edges, 6 unresolved groups.
 - Git: `ci/run-build-and-tests.sh`, `ci/test-documentation.sh`, `t/t0000-basic.sh`:
-  one resolved edge, four unresolved groups. The resolved edge is `. ./test-lib.sh` at line 21 in
-  `t/t0000-basic.sh`; the target `t/test-lib.sh` contains Git's test framework.
+  five unresolved groups. The former resolved edge was `. ./test-lib.sh` at line 21 in
+  `t/t0000-basic.sh`; although `t/test-lib.sh` contains Git's test framework, the source argument
+  does not establish that the script is launched from `t`.
 
-Both source and target of that edge were opened. No unexpected resolved edge remains in these
-samples. Two bats-core symlink blobs under `pick_up_toplevel/folder1` and `folder2` were excluded
-according to their tracked Git mode, rather than treated as executable source text.
+All twelve samples retain identical navigation declarations. Two bats-core symlink blobs under
+`pick_up_toplevel/folder1` and `folder2` were excluded according to their tracked Git mode, rather
+than treated as executable source text.
+
+### Working-directory comparison
+
+The same selected files were processed sequentially with the implementation at
+`1faac5c637a31e500bc09ef6ce9a63cff605051a` and the changed Bash resolver. These are edge groups for
+the entire selected corpus, not only the twelve samples above.
+
+| Repository | Resolved before | Ambiguous before | Unresolved before | Resolved after | Ambiguous after | Unresolved after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Bash-it/bash-it | 0 | 0 | 97 | 0 | 0 | 97 |
+| nvm-sh/nvm | 0 | 0 | 3 | 0 | 0 | 3 |
+| bats-core/bats-core | 0 | 0 | 9 | 0 | 0 | 9 |
+| git/git | 1132 | 0 | 343 | 0 | 0 | 1475 |
+
+The 1132 former resolved groups have unknown runtime bases. Neither a unique selected match nor
+two matches from the root and script directory exhausts possible working directories. They now
+retain their literal arguments and source sites without publishing a target or guessed candidates.
+Functions, source-site signatures, selected-file counts and extraction failures are unchanged.
+
+A separate Bash 5.2.21 run on Ubuntu changed only the launch directory: the same `source ./lib.sh`
+script loaded the root, script-directory and third-directory libraries in turn. Slashless
+`source lib.sh` loaded a `PATH` library with `sourcepath` enabled, and the working-directory library
+with it disabled. The same `./other.sh` invocation likewise ran different scripts from the root
+and script directory. This checks shell semantics without executing corpus code.
+
+`results/bash-working-directory.json` records the before/after counters and hashes for these four
+Bash corpora and eighteen controls: the sixteen existing-language pins below plus Cats and Ox.
+Every control edge hash and normalized file-facts/navigation hash is identical at the same selected
+manifest. Real CLI/MCP calls also agree for all twelve Bash samples; every checked function name
+is still accepted unchanged by `get_file`.
 
 ## Scala corpus
 
