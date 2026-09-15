@@ -10,7 +10,8 @@ internal sealed class DevProjexMcpTools(
 	McpPackRegistry packs,
 	bool agentExclusions = false,
 	bool allowRemote = false,
-	IReadOnlySet<string>? remoteHosts = null)
+	IReadOnlySet<string>? remoteHosts = null,
+	int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
 {
 	private const int MaximumTreeLines = 2_000;
 	private const int MaximumTreeCharacters = 50_000;
@@ -923,12 +924,13 @@ internal sealed class DevProjexMcpTools(
 								relative,
 								file.Content,
 								token);
-							declarationPreviews ??= new McpSearchDeclarationPreviewCache(
-								relative,
-								file.Content,
-								navigation,
-								MaximumSearchDeclarationBodyCharacters,
-								token);
+							if (searchBodyCharacters > 0)
+								declarationPreviews ??= new McpSearchDeclarationPreviewCache(
+									relative,
+									file.Content,
+									navigation,
+									searchBodyCharacters,
+									token);
 							AddSearchCandidates(
 								candidates,
 								relative,
