@@ -97,6 +97,16 @@ public sealed class DependencyConditionalProjectionIntegrationTests
 	}
 
 	[Fact]
+	public void ErasingAnOutsideQualificationCannotInventAReferenceToAnUnqualifiedProjectType()
+	{
+		var source = "class Holder {\n#if FEATURE\nExternal.\n#else\nOther.\n#endif\nThing value; }\nclass Thing {}";
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		var facts = Extract(extractor, source);
+		Assert.DoesNotContain(facts.References, reference => reference.Name == "Thing" &&
+			reference.Reason != "C# preprocessor configuration is not available");
+	}
+
+	[Fact]
 	public void ACompleteGenericBaseKeepsIndependentMembersAroundAnOmittedInterface()
 	{
 		var source = "class Holder<T> : Box<T>\n#if FEATURE\n, Inside\n#endif\n{ public void Run() {\n#if BODY\nConditional value;\n#else\nConditional other;\n#endif\nTarget last; } }";

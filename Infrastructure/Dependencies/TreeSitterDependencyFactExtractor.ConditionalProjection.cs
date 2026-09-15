@@ -148,6 +148,7 @@ public sealed partial class TreeSitterDependencyFactExtractor
 		}
 		var firstToken = true;
 		var blockComment = false;
+		var lastCharacter = '\0';
 		for (var index = startLine; index <= endLine; index++)
 		{
 			var line = lines[index];
@@ -170,13 +171,19 @@ public sealed partial class TreeSitterDependencyFactExtractor
 					if (source[offset + 1] == '/') break;
 					if (source[offset + 1] == '*') { blockComment = true; offset += 2; continue; }
 				}
-				if (source[offset] == '#') { firstToken = true; break; }
+				if (source[offset] == '#')
+				{
+					if (lastCharacter is '.' or '<' or ':') return true;
+					firstToken = true;
+					lastCharacter = '\0';
+					break;
+				}
 				if (firstToken && source[offset] is '<' or '.') return true;
 				firstToken = false;
-				break;
+				lastCharacter = source[offset++];
 			}
 		}
-		return false;
+		return lastCharacter is '.' or '<' or ':';
 	}
 
 	private static bool IsUnprotectedDirective(string source, SourceLine line, string directive,
