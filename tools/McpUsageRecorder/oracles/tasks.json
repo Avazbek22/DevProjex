@@ -1,8 +1,14 @@
 {
   "schemaVersion": 2,
+  "criteriaDefinition": {
+    "date": "2026-09-15",
+    "productBuildSha": "af88c2bf47f9481858eda5d435c764183d4d1a1a",
+    "method": "Explicit affirmative contradictions derived from pinned source before any subsequent series; saved answers were not used."
+  },
   "tasks": [
     {
       "id": "T1",
+      "forbiddenClaims": [{ "id": "cross-origin-preservation", "match": "affirmative-phrase", "terms": [["authorization is preserved across different hosts", "authorization is kept when the host changes", "authorization сохраняется при смене хоста"]], "evidence": [{ "commit": "26d48e0634e6ee9cdc0533996db289ce4b430177", "path": "httpx/_client.py", "lines": "546-563" }] }],
       "oracleCoverage": "partial",
       "pathExtensions": ["py"],
       "requiredPaths": ["httpx/_client.py", "tests/client/test_redirects.py"],
@@ -18,6 +24,7 @@
     },
     {
       "id": "T2",
+      "forbiddenClaims": [{ "id": "synchronous-async-pool", "match": "affirmative-phrase", "terms": [["AsyncHTTPTransport uses a synchronous ConnectionPool", "AsyncHTTPTransport использует синхронный ConnectionPool"]], "evidence": [{ "commit": "26d48e0634e6ee9cdc0533996db289ce4b430177", "path": "httpx/_transports/default.py", "lines": "279-331" }] }],
       "oracleCoverage": "complete",
       "pathExtensions": ["py", "md"],
       "requiredPaths": ["httpx/_transports/default.py", "httpx/_client.py", "httpx/_transports/base.py", "docs/advanced/transports.md", "docs/advanced/proxies.md", "tests/client/test_proxies.py"],
@@ -31,6 +38,7 @@
     },
     {
       "id": "T3",
+      "forbiddenClaims": [{ "id": "discarded-request-extensions", "match": "affirmative-phrase", "terms": [["build_request discards per-request extensions", "build_request ignores per-request extensions", "build_request отбрасывает extensions запроса"]], "evidence": [{ "commit": "26d48e0634e6ee9cdc0533996db289ce4b430177", "path": "httpx/_client.py", "lines": "370-389" }] }],
       "oracleCoverage": "partial",
       "pathExtensions": ["py", "md"],
       "requiredPaths": ["httpx/_client.py", "httpx/_models.py", "docs/advanced/extensions.md", "httpx/_types.py", "tests/client/test_client.py"],
@@ -45,6 +53,7 @@
     },
     {
       "id": "T4",
+      "forbiddenClaims": [{ "id": "malformed-encoding-throws", "match": "affirmative-phrase", "terms": [["tryDecodeURIComponent always throws on malformed percent encoding", "malformed percent encoding always throws", "tryDecodeURIComponent всегда выбрасывает исключение при некорректном percent encoding"]], "evidence": [{ "commit": "eebdf7be39abf0a872671835ccce0c4f03ea497a", "path": "src/utils/url.ts", "lines": "81-93,221-222" }] }],
       "oracleCoverage": "partial",
       "pathExtensions": ["ts"],
       "requiredPaths": ["src/request.ts", "src/utils/url.ts", "src/hono-base.ts", "src/request.test.ts", "src/utils/url.test.ts"],
@@ -59,6 +68,7 @@
     },
     {
       "id": "T5",
+      "forbiddenClaims": [{ "id": "unserialized-json-object", "match": "affirmative-phrase", "terms": [["Context.json returns the object without serialization", "c.json returns the object without serialization", "Context.json возвращает объект без сериализации"]], "evidence": [{ "commit": "eebdf7be39abf0a872671835ccce0c4f03ea497a", "path": "src/context.ts", "lines": "725-742" }] }],
       "oracleCoverage": "complete",
       "pathExtensions": ["ts"],
       "requiredPaths": ["src/context.ts", "src/types.ts", "src/client/types.ts", "src/middleware/bearer-auth/index.ts", "src/middleware/cors/index.ts", "src/context.test.ts"],
@@ -72,6 +82,7 @@
     },
     {
       "id": "T6",
+      "forbiddenClaims": [{ "id": "automatic-middleware-export", "match": "affirmative-phrase", "terms": [["new middleware is automatically exported without package.json or jsr.json registration", "новый middleware автоматически экспортируется без регистрации в package.json и jsr.json"]], "evidence": [{ "commit": "eebdf7be39abf0a872671835ccce0c4f03ea497a", "path": "package.json", "lines": "38-247" }, { "commit": "eebdf7be39abf0a872671835ccce0c4f03ea497a", "path": "jsr.json", "lines": "8-50" }] }],
       "oracleCoverage": "partial",
       "pathExtensions": ["json", "ts"],
       "strictPaths": false,
@@ -87,6 +98,7 @@
     },
     {
       "id": "T7",
+      "forbiddenClaims": [{ "id": "shortest-override-priority", "match": "affirmative-phrase", "terms": [["the shortest namespace override wins", "the least specific override wins", "побеждает самый короткий namespace override"]], "evidence": [{ "commit": "1b461379f4e218a939d5c94897df2a1dbbf90573", "path": "src/Serilog/Core/LevelOverrideMap.cs", "lines": "53-88" }] }],
       "oracleCoverage": "partial",
       "pathExtensions": ["cs"],
       "requiredPaths": ["src/Serilog/Core/LevelOverrideMap.cs", "src/Serilog/Core/Logger.cs", "src/Serilog/LoggerConfiguration.cs", "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs", "test/Serilog.Tests/Core/LevelOverrideMapTests.cs", "test/Serilog.Tests/Core/ChildLoggerTests.cs"],
@@ -102,6 +114,7 @@
     },
     {
       "id": "T8",
+      "forbiddenClaims": [{ "id": "enrichment-after-sinks", "match": "affirmative-phrase", "terms": [["enrichers run after sink dispatch", "enrichers are invoked after the sink", "enrichment occurs after the sink receives the event", "enrichers вызываются после отправки в sink"]], "evidence": [{ "commit": "1b461379f4e218a939d5c94897df2a1dbbf90573", "path": "src/Serilog/Core/Logger.cs", "lines": "469-482" }] }],
       "oracleCoverage": "complete",
       "pathExtensions": ["cs"],
       "requiredPaths": ["src/Serilog/Core/ILogEventEnricher.cs", "src/Serilog/Core/Logger.cs", "src/Serilog/Core/Enrichers/PropertyEnricher.cs", "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs", "src/Serilog/Core/Enrichers/ConditionalEnricher.cs", "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs", "src/Serilog/Core/Enrichers/EmptyEnricher.cs", "src/Serilog/Context/LogContextEnricher.cs", "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs", "test/Serilog.Tests/Core/LoggerTests.cs", "test/Serilog.Tests/Context/LogContextTests.cs"],
@@ -116,6 +129,7 @@
     },
     {
       "id": "N1",
+      "forbiddenClaims": [{ "id": "unconditional-byte-memory-policy", "match": "affirmative-phrase", "terms": [["ByteMemoryScalarConversionPolicy is compiled on every target framework", "ByteMemoryScalarConversionPolicy is unconditional", "ByteMemoryScalarConversionPolicy компилируется на всех target frameworks"]], "evidence": [{ "commit": "1b461379f4e218a939d5c94897df2a1dbbf90573", "path": "src/Serilog/Policies/ByteMemoryScalarConversionPolicy.cs", "lines": "15-22" }] }],
       "oracleCoverage": "partial",
       "pathExtensions": ["cs", "csproj"],
       "requiredPaths": ["src/Serilog/Core/IScalarConversionPolicy.cs", "src/Serilog/Capturing/PropertyValueConverter.cs", "src/Serilog/Policies/PrimitiveScalarConversionPolicy.cs", "src/Serilog/Policies/SimpleScalarConversionPolicy.cs", "src/Serilog/Policies/EnumScalarConversionPolicy.cs", "src/Serilog/Policies/ByteArrayScalarConversionPolicy.cs", "src/Serilog/Policies/ByteMemoryScalarConversionPolicy.cs"],
@@ -131,6 +145,7 @@
     },
     {
       "id": "N2",
+      "forbiddenClaims": [{ "id": "reversed-url-limit", "match": "affirmative-phrase", "terms": [["65536 is rejected", "65536 characters are rejected", "exactly 65536 characters is rejected", "65536 отклоняется", "65537 is accepted", "65537 characters are accepted", "65537 принимается"]], "evidence": [{ "commit": "26d48e0634e6ee9cdc0533996db289ce4b430177", "path": "httpx/_urlparse.py", "lines": "29,218-219,268-269" }] }],
       "oracleCoverage": "complete",
       "pathExtensions": ["py"],
       "requiredPaths": ["httpx/_urlparse.py", "httpx/_urls.py", "httpx/_exceptions.py", "tests/models/test_url.py"],
@@ -146,6 +161,7 @@
     },
     {
       "id": "N3",
+      "forbiddenClaims": [{ "id": "context-router-matching", "match": "affirmative-phrase", "terms": [["Context performs router matching", "Context selects the matched routes", "Context выполняет router.match"]], "evidence": [{ "commit": "eebdf7be39abf0a872671835ccce0c4f03ea497a", "path": "src/hono-base.ts", "lines": "408-438" }] }],
       "oracleCoverage": "partial",
       "pathExtensions": ["ts"],
       "strictPaths": false,
@@ -162,6 +178,7 @@
     },
     {
       "id": "N4",
+      "forbiddenClaims": [{ "id": "blocking-enqueue", "match": "affirmative-phrase", "terms": [["BatchingSink.Emit waits for queue capacity", "Emit blocks until the queue has room", "BatchingSink.Emit throws when the queue is full", "BatchingSink.Emit ждёт освобождения очереди"]], "evidence": [{ "commit": "1b461379f4e218a939d5c94897df2a1dbbf90573", "path": "src/Serilog/Core/Sinks/Batching/BatchingSink.cs", "lines": "86-105" }] }],
       "oracleCoverage": "partial",
       "pathExtensions": ["cs"],
       "requiredPaths": ["src/Serilog/Configuration/BatchingOptions.cs", "src/Serilog/Core/Sinks/Batching/BatchingSink.cs", "src/Serilog/Configuration/LoggerSinkConfiguration.cs", "src/Serilog/Core/LoggingFailureKind.cs", "src/Serilog/Core/ILoggingFailureListener.cs", "src/Serilog/Debugging/SelfLog.cs"],

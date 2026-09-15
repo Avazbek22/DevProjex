@@ -1,5 +1,10 @@
 # MCP usage recorder
 
+All twelve registered tasks now include explicit affirmative contradictions with
+pinned source evidence. See [the criteria](oracles/CONTRADICTIONS.md) for what
+each assertion means and the remaining language limitations. Denying a false
+assertion does not count as making it; merely omitting evidence stays incomplete.
+
 ## Deterministic oracle reachability
 
 `reachability.mjs` checks whether the files declared by `oracles/tasks.json` can be surfaced by the

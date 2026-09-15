@@ -4,6 +4,10 @@ export function loadTaskOracleRegistry(path) {
   const source = JSON.parse(readFileSync(path, 'utf8'));
   if (source.schemaVersion !== 2 || !Array.isArray(source.tasks))
     throw new Error('Task oracle registry must use schema version 2 and contain a tasks array.');
+  if (source.criteriaDefinition !== undefined &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(source.criteriaDefinition.date ?? '') ||
+       !/^[0-9a-f]{40}$/.test(source.criteriaDefinition.productBuildSha ?? '')))
+    throw new Error('Task oracle criteriaDefinition requires a date and a full lowercase product SHA.');
   return new Map(source.tasks.map(task => [task.id, validateTask(task)]));
 }
 
@@ -27,7 +31,7 @@ export function evaluateTaskAnswer(task, answer) {
     .filter(symbol => !symbol.terms.some(term => includesText(text, term)))
     .map(symbol => symbol.id);
   const contradictedClaims = (task.forbiddenClaims ?? [])
-    .filter(claim => claim.terms.every(group => group.some(term => includesText(text, term))))
+    .filter(claim => isForbiddenClaimAsserted(text, claim))
     .map(claim => claim.id);
   const classification = unexpectedPaths.length > 0 || contradictedClaims.length > 0
     ? 'incorrect'
@@ -135,8 +139,16 @@ function validateTask(task) {
     throw new Error(`Task oracle '${task.id}' has an invalid symbol array.`);
   for (const claim of [...task.requiredClaims, ...(task.forbiddenClaims ?? [])]) {
     if (typeof claim.id !== 'string' || !Array.isArray(claim.terms) ||
-        claim.terms.some(group => !Array.isArray(group) || group.length === 0))
+        claim.terms.length === 0 ||
+        claim.terms.some(group => !Array.isArray(group) || group.length === 0 ||
+          group.some(term => typeof term !== 'string' || term.trim().length === 0)))
       throw new Error(`Task oracle '${task.id}' has an invalid claim.`);
+    if (claim.match !== undefined && claim.match !== 'affirmative-phrase')
+      throw new Error(`Task oracle '${task.id}' has an unsupported claim matching mode.`);
+    if (claim.match === 'affirmative-phrase' && (!Array.isArray(claim.evidence) ||
+        claim.evidence.length === 0 || claim.evidence.some(item =>
+          !/^[0-9a-f]{40}$/.test(item.commit ?? '') || !item.path || !item.lines)))
+      throw new Error(`Task oracle '${task.id}' requires pinned source evidence for affirmative phrases.`);
   }
   for (const symbol of task.requiredSymbols ?? []) {
     if (typeof symbol.id !== 'string' || !Array.isArray(symbol.terms) || symbol.terms.length === 0)
@@ -175,7 +187,34 @@ function pathPatternFor(path) {
 }
 
 function includesText(text, term) {
-  return text.toLocaleLowerCase('en-US').includes(term.toLocaleLowerCase('en-US'));
+  return normalizeClaimText(text).includes(normalizeClaimText(term));
+}
+
+function normalizeClaimText(text) {
+  return text.toLocaleLowerCase('en-US').replace(/(?<=\d)[, \u00a0](?=\d{3}\b)/g, '')
+    .replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function isForbiddenClaimAsserted(text, claim) {
+  if (claim.match !== 'affirmative-phrase')
+    return claim.terms.every(group => group.some(term => includesText(text, term)));
+  const clauses = text.split(/(?<=[.!?])\s+|[\r\n;]+|\b(?:but|however|но|однако)\b/iu);
+  return clauses.some(clause => {
+    const normalized = normalizeClaimText(clause);
+    const positions = claim.terms.map(group => group.map(term => {
+      const phrase = normalizeClaimText(term);
+      return { start: normalized.indexOf(phrase), length: phrase.length };
+    }).filter(position => position.start >= 0));
+    if (positions.some(group => group.length === 0))
+      return false;
+    const first = Math.min(...positions.flat().map(position => position.start));
+    const last = Math.max(...positions.flat().map(position => position.start + position.length));
+    const before = normalized.slice(0, first);
+    const after = normalized.slice(last);
+    const deniedBefore = /\b(?:not(?! only\b)|never|false|incorrect|wrong|deny|reject|refute|contrary to)\b|(?:^|\s)(?:не|неверно|ложно|ошибочно|неправда)(?:\s|,|$)/iu.test(before);
+    const deniedAfter = /^["'”’\s,:-]*(?:is|was|would be|это)?\s*(?:false|incorrect|wrong|untrue|неверно|ложно|неправда)\b/iu.test(after);
+    return !deniedBefore && !deniedAfter;
+  });
 }
 
 function classificationRank(classification) {
