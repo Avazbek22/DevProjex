@@ -177,6 +177,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--root",
 		"--screen",
 		"--search",
+		"--search-body-chars",
 		"--select",
 		"--select-from",
 		"--timeout",

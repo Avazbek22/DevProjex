@@ -17,6 +17,21 @@ Reduced instructions and catalog guidance do not mention omitted tools. Calling 
 the normal unknown-tool protocol error (`-32602`) naming that tool. `read_pack`
 continues to read retained search and dependency results in either set.
 
+`--search-body-chars off|N` fixes the search declaration-body limit at startup:
+`N` is an integer from 1 to 16,000 characters, with a default of 3,000;
+`off` disables the body. Zero, negative, fractional, and out-of-range values
+are rejected before startup. Declaration ranges, match order, selection of the
+best declaration, and the total 16,000-character search budget remain unchanged.
+The catalog and instructions describe the active limit, or omit body guidance
+when disabled. Bodies still use only spare space and their overlapping context;
+they do not displace matches from other files.
+
+```shell
+devprojex mcp --root /absolute/path/to/project --search-body-chars off
+devprojex mcp --root /absolute/path/to/project --search-body-chars 1800
+devprojex mcp --root /absolute/path/to/project --search-body-chars 3000
+```
+
 The Release process measurement on Windows x64 gives 27,710 characters for the
 full `tools/list` result and 17,049 for reduced. These correspond to roughly
 6,928 and 4,262 tokens using the character/4 estimate, not model usage. Process
@@ -1101,7 +1116,7 @@ public LogEventLevel GetLevel(string source)
 
 The body comes from the same transformed snapshot that produced the match, so mandatory
 secret masking and configured private-data replacement have already run. Only this one
-body is included. It is limited to 3,000 characters within the unchanged 16,000-character
+body is included when enabled. By default, it is limited to 3,000 characters within the unchanged 16,000-character
 search response budget. Its declaration is selected once from the full displayed
 match slice and is not reconsidered during placement. Complete overlapping context
 lines from that same declaration are printed in the body rather than twice; matching

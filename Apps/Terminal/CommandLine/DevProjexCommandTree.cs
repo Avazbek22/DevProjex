@@ -131,6 +131,23 @@ public sealed class DevProjexCommandTree
 				result.AddError("--tool-set must be full or reduced.");
 		});
 		var exclude = CreateMcpExcludeOption();
+		var searchBodyCharacters = new Option<string>("--search-body-chars")
+		{
+			Description = "Limit the search declaration body to 1..16000 characters, or off; default 3000.",
+			HelpName = "off|N",
+			DefaultValueFactory = _ => "3000"
+		};
+		searchBodyCharacters.Validators.Add(result =>
+		{
+			try
+			{
+				_ = McpServerHost.ParseSearchBodyCharacters(result.GetValueOrDefault<string>());
+			}
+			catch (ArgumentException exception)
+			{
+				result.AddError(LocalizedParseError.Create(exception.Message));
+			}
+		});
 		// Arity is pinned to zero: command validators run before arity validation in
 		// System.CommandLine, and GetValue on an over-arity result throws instead of
 		// reporting a parse error. A value-less switch keeps every spelling graceful.
@@ -153,6 +170,7 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(remoteHosts);
 		command.Options.Add(gitMode);
 		command.Options.Add(toolSet);
+		command.Options.Add(searchBodyCharacters);
 		command.Options.Add(exclude);
 		command.Options.Add(unrestricted);
 		command.Options.Add(allowAgentExclusions);
@@ -211,7 +229,8 @@ public sealed class DevProjexCommandTree
 						parseResult.GetResult(remoteHosts) is null
 							? null
 							: parseResult.GetValue(remoteHosts) ?? [],
-						parseResult.GetValue(toolSet) == "reduced" ? McpToolSet.Reduced : McpToolSet.Full)
+						parseResult.GetValue(toolSet) == "reduced" ? McpToolSet.Reduced : McpToolSet.Full,
+						McpServerHost.ParseSearchBodyCharacters(parseResult.GetValue(searchBodyCharacters)))
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}

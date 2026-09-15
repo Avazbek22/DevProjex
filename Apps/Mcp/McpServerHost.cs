@@ -24,9 +24,23 @@ public static class McpServerHost
 		"Each read_pack page has at most 1,000 lines or 50,000 characters. In globs, " +
 		"* stays within one path segment; **/ matches at any depth.";
 
-	internal static string BuildInstructions(int rootCount, McpToolSet toolSet = McpToolSet.Full)
+	internal const int MaximumSearchBodyCharacters = 16_000;
+
+	internal static int ParseSearchBodyCharacters(string? value)
+	{
+		if (string.Equals(value, "off", StringComparison.Ordinal))
+			return 0;
+		if (int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var limit) &&
+			limit is >= 1 and <= MaximumSearchBodyCharacters)
+			return limit;
+		throw new ArgumentException("--search-body-chars must be off or an integer from 1 to 16000.");
+	}
+
+	internal static string BuildInstructions(int rootCount, McpToolSet toolSet = McpToolSet.Full,
+		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
 	{
 		ValidateToolSet(toolSet);
+		ValidateSearchBodyCharacters(searchBodyCharacters);
 		var prefix = rootCount switch
 		{
 			1 => SingleRootInstructions,
@@ -38,7 +52,15 @@ public static class McpServerHost
 				"Use related_files for dependencies and read_pack for stored search or dependency pages. ", StringComparison.Ordinal)
 			.Replace("Inline pack_context is limited to 50,000 characters; larger packs are stored. ", string.Empty,
 				StringComparison.Ordinal);
-		return prefix + common;
+		var body = searchBodyCharacters == 0 ? string.Empty :
+			$" One search declaration body: up to {searchBodyCharacters.ToString("N0", CultureInfo.InvariantCulture)} characters.";
+		return prefix + common + body;
+	}
+
+	private static void ValidateSearchBodyCharacters(int limit)
+	{
+		if (limit is < 0 or > MaximumSearchBodyCharacters)
+			throw new ArgumentOutOfRangeException(nameof(limit), "Search body characters must be 0 (off) or from 1 to 16000.");
 	}
 
 	private static void ValidateToolSet(McpToolSet toolSet)
@@ -78,7 +100,8 @@ public static class McpServerHost
 		Func<string>? appDataPathProvider,
 		CancellationToken cancellationToken,
 		IReadOnlyCollection<string>? remoteHosts = null,
-		McpToolSet toolSet = McpToolSet.Full)
+		McpToolSet toolSet = McpToolSet.Full,
+		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
 	{
 		ValidateGitMode(gitMode);
 		ValidateExclusions(exclusions);
@@ -95,7 +118,8 @@ public static class McpServerHost
 			exclusions: exclusions,
 			agentExclusions: agentExclusions,
 			remoteHosts: normalizedRemoteHosts,
-			toolSet: toolSet);
+			toolSet: toolSet,
+			searchBodyCharacters: searchBodyCharacters);
 	}
 
 	internal static async Task RunWithStreamsAsync(
@@ -113,12 +137,14 @@ public static class McpServerHost
 		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
 		bool agentExclusions = false,
 		IReadOnlySet<string>? remoteHosts = null,
-		McpToolSet toolSet = McpToolSet.Full)
+		McpToolSet toolSet = McpToolSet.Full,
+		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
 		ArgumentNullException.ThrowIfNull(output);
 		ValidateToolSet(toolSet);
+		ValidateSearchBodyCharacters(searchBodyCharacters);
 		ValidateGitMode(gitMode);
 		ValidateExclusions(exclusions);
 
@@ -127,7 +153,7 @@ public static class McpServerHost
 			rootRegistry,
 			allowRemote,
 			() => remoteServicesFactory?.Invoke() ??
-			      McpRemoteProjectServices.Create(appDataPathProvider),
+				  McpRemoteProjectServices.Create(appDataPathProvider),
 			remoteHosts: remoteHosts);
 		var rootJail = new McpProjectRootJail(rootRegistry, projectSources);
 		var services = new Lazy<McpServices>(
@@ -154,8 +180,9 @@ public static class McpServerHost
 			packs,
 			agentExclusions,
 			allowRemote,
-			remoteHosts);
-		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions, toolSet);
+			remoteHosts,
+			searchBodyCharacters);
+		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions, toolSet, searchBodyCharacters);
 
 		var builder = Host.CreateApplicationBuilder([]);
 		builder.Logging.ClearProviders();
@@ -168,7 +195,7 @@ public static class McpServerHost
 					Title = "DevProjex",
 					Version = ResolveVersion()
 				};
-				options.ServerInstructions = BuildInstructions(rootRegistry.Roots.Count, toolSet);
+				options.ServerInstructions = BuildInstructions(rootRegistry.Roots.Count, toolSet, searchBodyCharacters);
 			})
 			.WithStreamServerTransport(input, output)
 			.WithTools<DevProjexMcpToolCatalog>(catalog)
@@ -198,7 +225,7 @@ public static class McpServerHost
 	internal static void ValidateGitMode(GitFilteringMode? gitMode)
 	{
 		if (gitMode is null or GitFilteringMode.None or GitFilteringMode.RespectGitIgnore or
-		    GitFilteringMode.TrackedFilesOnly)
+			GitFilteringMode.TrackedFilesOnly)
 		{
 			return;
 		}
@@ -241,7 +268,7 @@ public static class McpServerHost
 				var host = bracketed ? token[1..^1] : token;
 				var kind = Uri.CheckHostName(host);
 				if (host.Length == 0 || host.Contains('/') || host.Contains('@') ||
-				    (!bracketed && host.Contains(':')) || kind == UriHostNameType.Unknown)
+					(!bracketed && host.Contains(':')) || kind == UriHostNameType.Unknown)
 				{
 					throw new ArgumentException("Remote hosts must be comma-separated host names without schemes, ports, or paths.", nameof(hosts));
 				}

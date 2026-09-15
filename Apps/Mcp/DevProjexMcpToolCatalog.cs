@@ -10,7 +10,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private readonly IReadOnlyList<McpServerTool> _tools;
 
 	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote, bool agentExclusions = false,
-		McpToolSet toolSet = McpToolSet.Full)
+		McpToolSet toolSet = McpToolSet.Full,
+		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
 	{
 		ArgumentNullException.ThrowIfNull(target);
 		_tools =
@@ -24,6 +25,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote)
 		];
+		var search = _tools.Single(tool => tool.ProtocolTool.Name == "search_project").ProtocolTool;
+		search.Description = searchBodyCharacters == 0
+			? search.Description?.Replace(" The best unique declaration includes up to 3,000 protected body characters within the same cap; read the rest with one batched get_file requests call.",
+				string.Empty, StringComparison.Ordinal)
+			: search.Description?.Replace("3,000", searchBodyCharacters.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 		if (toolSet == McpToolSet.Reduced)
 		{
 			_tools = _tools.Where(tool => tool.ProtocolTool.Name is not ("analyze" or "pack_context")).ToArray();
