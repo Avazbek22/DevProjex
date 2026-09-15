@@ -97,6 +97,20 @@ public sealed class DependencyConditionalProjectionIntegrationTests
 	}
 
 	[Fact]
+	public void ACompleteGenericBaseKeepsIndependentMembersAroundAnOmittedInterface()
+	{
+		var source = "class Holder<T> : Box<T>\n#if FEATURE\n, Inside\n#endif\n{ public void Run() {\n#if BODY\nConditional value;\n#else\nConditional other;\n#endif\nTarget last; } }";
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		var facts = Extract(extractor, source);
+		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name == "Holder.Run");
+		Assert.Contains(facts.References, reference => reference.Name == "Target");
+		Assert.Contains(facts.References, reference => reference.Name == "Conditional" &&
+			reference.Reason == "C# preprocessor configuration is not available");
+		Assert.DoesNotContain(facts.References, reference => reference.Name == "Inside");
+		Assert.Equal(1, Assert.IsType<DependencyPartialParseDiagnostic>(facts.PartialParse).DroppedConstructs);
+	}
+
+	[Fact]
 	public void AGenericTypeWhollyInsideAnOmittedParameterDoesNotBlockIndependentNavigation()
 	{
 		var source = "class Holder { public void Run(\n#if FEATURE\nReadOnlySpan<Target> first,\n#else\nInside second,\n#endif\nTarget last) { Target value; } }";

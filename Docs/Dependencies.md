@@ -463,8 +463,8 @@ shrinks without reaching previously undamaged source. Remaining damaged construc
 closed. Directive-looking text in comments and literals is not removed; a region containing a
 type-parameter binder or splitting a generic argument list is not removed because its surviving
 uses could change meaning. A conditional branch continuing an outside type name with generic
-arguments or qualification is also retained. Generic type heads bypass the early base-list
-shortcut and require the same syntax and identity checks as other damaged constructions.
+arguments or qualification is also retained. Such continuations bypass the early base-list
+shortcut; complete generic bases keep that shortcut and its independent conditional members.
 Every removed region is reported with its exact source-line range, and contributes no declaration,
 reference, or navigation name. Unconditional declarations around it retain their original ranges.
 

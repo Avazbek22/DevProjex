@@ -825,7 +825,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 			start--;
 		}
 		var prefix = source[start..directiveStart];
-		return !prefix.Contains('<', StringComparison.Ordinal) && prefix.Contains(':', StringComparison.Ordinal) &&
+		return prefix.Contains(':', StringComparison.Ordinal) &&
 			Regex.IsMatch(prefix, @"\b(class|struct|record|interface)\s+[_\p{L}][\p{L}\p{N}_]*[^{};]*:\s*[^{};]*$",
 				RegexOptions.CultureInvariant);
 	}
