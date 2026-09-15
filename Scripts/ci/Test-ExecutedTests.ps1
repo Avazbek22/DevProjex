@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-	Fails a CI job that reported success without executing any test.
+	Requires a successfully completed, nonempty CI test run.
 
 .DESCRIPTION
 	`dotnet test` exits zero when no test matched, and the xUnit VSTest adapter yields zero test
@@ -14,6 +14,10 @@
 	missed it entirely; and in a separate pair of runs a literal `Passed!  - Failed:     0` line was
 	printed for a run the test host had crashed out of. The `.trx` carries both facts honestly.
 
+	Successful completion must be explicit: only `Completed` and `Passed` are accepted. A crashed
+	host can report `Failed` with zero failed tests and nonzero passed tests, so checking only the
+	unsuccessful counters would miss it. Individual outcome totals must also equal executed tests.
+
 	Every result file is judged on its own, and so is every results directory. Anything that
 	aggregates first lets a healthy sibling vouch for an empty one, which is exactly the shape the
 	recorded failure had: the terminal command job writes two directories, and the suite that
@@ -23,12 +27,11 @@
 	under it by an earlier run and counted them as this one's.
 
 .NOTES
-	One limit, stated because it is not visible from here. The outcome attribute is how a completed
-	run admits it was cut short, and the two writers do not agree on the vocabulary: the VSTest
-	logger emits `Aborted` and `Error`, while the xUnit report writer behind `--report-xunit-trx`
-	emits neither — only `Timeout` of the three is reachable for the UI suite. For that suite an
-	aborted host is caught by the step's own exit code instead, which is why this check runs only
-	when the steps before it succeeded.
+	The summary vocabulary differs between writers: VSTest can label a crashed host `Aborted`,
+	`Error`, or `Failed`; the xUnit report writer behind `--report-xunit-trx` uses different labels.
+	Only explicit successful outcomes are accepted. A host interrupted before its writer observes
+	the interruption cannot promise that its artifact describes the interruption, so native exit
+	status is mandatory as well. This guard supplements it and runs only after successful steps.
 #>
 [CmdletBinding()]
 param(
@@ -94,8 +97,8 @@ foreach ($path in $ResultsPath) {
 		# An aborted run still reports the tests it managed to finish, and the console line for one
 		# has read `Passed!  - Failed:     0`. See the note above on which writer says what.
 		$outcome = $summary.GetAttribute('outcome')
-		if ($outcome -in @('Aborted', 'Error', 'Timeout')) {
-			throw "$JobName did not run to completion: '$($file.Name)' reports outcome '$outcome'. " +
+		if ($outcome -notin @('Completed', 'Passed')) {
+			throw "$JobName does not establish successful completion: '$($file.Name)' reports outcome '$outcome'. " +
 			      "See Docs/CI-Known-Failures.md."
 		}
 
@@ -117,9 +120,17 @@ foreach ($path in $ResultsPath) {
 		}
 		# Skipped tests are counted in the total and not in `executed`, which is why a lower executed
 		# count is ordinary. A test that executed and then reported no outcome at all is not.
-		if ($outcomes -le 0) {
-			throw "$JobName wrote '$($file.Name)' claiming $executed test(s) executed while none " +
-			      "passed, failed, errored, timed out or aborted. Nothing was actually run."
+		if ($outcomes -ne $executed) {
+			throw "$JobName wrote '$($file.Name)' claiming $executed test(s) executed, but its " +
+			      "individual outcome totals report $outcomes."
+		}
+		$unsuccessful = @('failed', 'error', 'timeout', 'aborted', 'passedButRunAborted', 'disconnected') |
+			ForEach-Object { Get-Counter -Counters $counters -Name $_ } |
+			Measure-Object -Sum |
+			Select-Object -ExpandProperty Sum
+		if ($unsuccessful -ne 0) {
+			throw "$JobName did not run successfully: '$($file.Name)' reports $unsuccessful " +
+			      "failed, errored, timed out, aborted or disconnected test(s)."
 		}
 
 		$executedHere += $executed

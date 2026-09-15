@@ -983,7 +983,11 @@ jobs:
             -c Release `
             --no-restore `
             --filter "FullyQualifiedName~PublishedSingleFileExtractionProcessTests|FullyQualifiedName~McpServerProcessTests.PublishedSingleFileCompletesHandshakeListsToolsCallsToolAndExitsOnEof" `
-            --logger "console;verbosity=minimal"
+            --logger "console;verbosity=minimal" `
+            --logger "trx;LogFileName=release-extraction.trx" `
+            --results-directory "TestResults/release-extraction"
+          if ($LASTEXITCODE -ne 0) { throw "Published extraction tests failed for ${{ matrix.rid }}." }
+          ./Scripts/ci/Test-ExecutedTests.ps1 -ResultsPath "TestResults/release-extraction" -JobName "Published Extraction (${{ matrix.rid }})"
 
       - name: Published Completion Native Shell Integration
         shell: pwsh
@@ -998,7 +1002,11 @@ jobs:
             -c Release `
             --no-restore `
             --filter "FullyQualifiedName~GeneratedCompletionNativeShellIntegrationTests" `
-            --logger "console;verbosity=minimal"
+            --logger "console;verbosity=minimal" `
+            --logger "trx;LogFileName=release-completion.trx" `
+            --results-directory "TestResults/release-completion"
+          if ($LASTEXITCODE -ne 0) { throw "Published completion tests failed for ${{ matrix.rid }}." }
+          ./Scripts/ci/Test-ExecutedTests.ps1 -ResultsPath "TestResults/release-completion" -JobName "Published Completion (${{ matrix.rid }})"
 
       - name: Enable Rootless Mount Namespace Gate (Linux x64)
         if: ${{ matrix.rid == 'linux-x64' }}
@@ -1032,7 +1040,11 @@ jobs:
             -c Release `
             --no-restore `
             --filter $filter `
-            --logger "console;verbosity=minimal"
+            --logger "console;verbosity=minimal" `
+            --logger "trx;LogFileName=release-mount.trx" `
+            --results-directory "TestResults/release-mount"
+          if ($LASTEXITCODE -ne 0) { throw "Rootless mount tests failed for ${{ matrix.rid }}." }
+          ./Scripts/ci/Test-ExecutedTests.ps1 -ResultsPath "TestResults/release-mount" -JobName "Rootless Mount (${{ matrix.rid }})"
 
       - name: Restore Rootless Mount Namespace Policy (Linux x64)
         if: ${{ always() && matrix.rid == 'linux-x64' }}
@@ -1483,10 +1495,13 @@ jobs:
               -c Release `
               --no-restore `
               --filter "FullyQualifiedName~TerminalCommandSetupCrossPlatformIntegrationTests.InstallOrRepair_ReleaseGateEnvironment_InstallsOfficialWindowsLauncherThroughPublicApi" `
-              --logger "console;verbosity=minimal"
+              --logger "console;verbosity=minimal" `
+              --logger "trx;LogFileName=release-launcher.trx" `
+              --results-directory "TestResults/release-launcher"
             if ($LASTEXITCODE -ne 0) {
               throw "Production terminal launcher installation failed for ${{ matrix.rid }}."
             }
+            ./Scripts/ci/Test-ExecutedTests.ps1 -ResultsPath "TestResults/release-launcher" -JobName "Portable Launcher (${{ matrix.rid }})"
           }
           finally {
             Remove-Item Env:DEVPROJEX_RELEASE_WINDOWS_LAUNCHER_TARGET -ErrorAction SilentlyContinue
@@ -1657,7 +1672,11 @@ jobs:
             -c Release `
             --no-restore `
             --filter $filter `
-            --logger "console;verbosity=minimal"
+            --logger "console;verbosity=minimal" `
+            --logger "trx;LogFileName=release-conpty.trx" `
+            --results-directory "TestResults/release-conpty"
+          if ($LASTEXITCODE -ne 0) { throw "Portable launcher ConPTY tests failed for ${{ matrix.rid }}." }
+          ./Scripts/ci/Test-ExecutedTests.ps1 -ResultsPath "TestResults/release-conpty" -JobName "Portable Launcher ConPTY (${{ matrix.rid }})"
 
       - name: Published Native PTY TUI Smoke (Unix)
         if: ${{ startsWith(matrix.rid, 'linux-') || startsWith(matrix.rid, 'osx-') }}
@@ -1696,7 +1715,19 @@ jobs:
             -c Release `
             --no-restore `
             --filter $filter `
-            --logger "console;verbosity=minimal"
+            --logger "console;verbosity=minimal" `
+            --logger "trx;LogFileName=release-pty.trx" `
+            --results-directory "TestResults/release-pty"
+          if ($LASTEXITCODE -ne 0) { throw "Published native PTY tests failed for ${{ matrix.rid }}." }
+          ./Scripts/ci/Test-ExecutedTests.ps1 -ResultsPath "TestResults/release-pty" -JobName "Published Native PTY (${{ matrix.rid }})"
+
+      - name: Upload release test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-test-results-${{ matrix.rid }}
+          path: TestResults/release-*
+          if-no-files-found: warn
 
   release-local-channel-gate:
     name: Local Release Channel Gate (Windows)
