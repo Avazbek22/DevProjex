@@ -187,7 +187,7 @@ function pathPatternFor(path) {
 }
 
 function includesText(text, term) {
-  return normalizeClaimText(text).includes(normalizeClaimText(term));
+  return text.toLocaleLowerCase('en-US').includes(term.toLocaleLowerCase('en-US'));
 }
 
 function normalizeClaimText(text) {

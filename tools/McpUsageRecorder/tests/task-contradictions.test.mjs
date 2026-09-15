@@ -20,6 +20,15 @@ test('an omitted assertion remains incomplete rather than incorrect', () => {
   assert.equal(evaluateTaskAnswer(task, 'src/url.py').classification, 'incomplete');
 });
 
+test('contradiction normalization preserves the existing required term spelling', () => {
+  const exactTask = { ...task, requiredSymbols: [{ id: 'method', terms: ['Exact_Name'] }] };
+  const prefix = 'src/url.py tests/url.py. ';
+  assert.equal(evaluateTaskAnswer(exactTask, `${prefix}65536 is accepted. ExactName.`).classification, 'incomplete');
+  assert.equal(evaluateTaskAnswer(exactTask, `${prefix}65,536 is accepted. Exact_Name.`).classification, 'incomplete');
+  assert.equal(evaluateTaskAnswer(exactTask, `${prefix}65536 is accepted. Exact_Name.`).classification, 'complete');
+  assert.equal(evaluateTaskAnswer(exactTask, `${prefix}65536 is accepted. Exact_Name. 65,536 is rejected.`).classification, 'incorrect');
+});
+
 test('negation and rejection of a contradictory assertion do not assert it', () => {
   for (const denial of [
     'It is not true that 65536 is rejected.',
