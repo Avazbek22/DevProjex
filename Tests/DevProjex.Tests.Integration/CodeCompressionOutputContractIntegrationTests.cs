@@ -778,7 +778,7 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	[Theory]
 	[InlineData(ProjectCopyExportFormat.Folder)]
 	[InlineData(ProjectCopyExportFormat.Zip)]
-	public async Task TransformedCopyRejectsReservedNoticeNameCollisionOutsideTheExportPlan(
+	public async Task TransformedCopyIgnoresReservedNoticeNameOutsideTheExportPlan(
 		ProjectCopyExportFormat format)
 	{
 		using var workspace = CompressionWorkspace.Create(CompressibleSource);
@@ -787,15 +787,13 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			? Path.Combine(workspace.DestinationParent, "collision-copy")
 			: Path.Combine(workspace.DestinationParent, "collision-copy.zip");
 
-		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
-			workspace.ExportAsyncForTest(
+		var result = await workspace.ExportAsyncForTest(
 				destination,
 				format,
 				compress: true,
-				includeReservedNoticeInPlan: false));
+				includeReservedNoticeInPlan: false);
 
-		Assert.Equal(ProjectCopyExportError.ReservedNoticeNameConflict, exception.Error);
-		Assert.False(Path.Exists(destination));
+		Assert.True(Path.Exists(result.DestinationPath));
 		Assert.Empty(Directory.EnumerateFileSystemEntries(
 			workspace.DestinationParent,
 			".devprojex-*.tmp"));

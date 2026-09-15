@@ -1,0 +1,6 @@
+{
+  "name": "csharp-ivt",
+  "edges": [
+    { "source": "Consumer/Consumer.cs", "reference": "InternalThing", "status": "Unresolved", "reasonContains": "absence is not evidence" }
+  ]
+}

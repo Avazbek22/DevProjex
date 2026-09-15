@@ -1,0 +1,350 @@
+{
+  "baselineProductSha": "af88c2bf47f9481858eda5d435c764183d4d1a1a",
+  "repositories": [
+    {
+      "repository": "curl",
+      "commit": "04bfe8fbbf552a3baf38c629bf9dd59916b3c559",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "files": 1036,
+      "before": {
+        "Unresolved": 7668,
+        "Resolved": 2895,
+        "Ambiguous": 1
+      },
+      "after": {
+        "Unresolved": 7668,
+        "Resolved": 2895,
+        "Ambiguous": 1
+      },
+      "beforeEdgeHash": "A44FAE3666E2FECEB4B7EE72C3A324F8DB189DAEE8880ED7BD8AECC869FF2535",
+      "afterEdgeHash": "A44FAE3666E2FECEB4B7EE72C3A324F8DB189DAEE8880ED7BD8AECC869FF2535",
+      "beforeFactsHash": "83B775906069AF93818FAC2A1F12610D4DA70E8AF85B33BC454D4714C08154B6",
+      "afterFactsHash": "83B775906069AF93818FAC2A1F12610D4DA70E8AF85B33BC454D4714C08154B6"
+    },
+    {
+      "repository": "fmt",
+      "commit": "e5d13d826f4266de65d2463dc3bff4ff3d25221e",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "files": 74,
+      "before": {
+        "Unresolved": 5694,
+        "Resolved": 364,
+        "Ambiguous": 1
+      },
+      "after": {
+        "Unresolved": 5694,
+        "Resolved": 364,
+        "Ambiguous": 1
+      },
+      "beforeEdgeHash": "DD29141F7963E27302E8A0304F0C204CDAA37A844B413F2BC69C709CE15EFF68",
+      "afterEdgeHash": "DD29141F7963E27302E8A0304F0C204CDAA37A844B413F2BC69C709CE15EFF68",
+      "beforeFactsHash": "255211D9068986B157D29EB643AA6D81325030205D9B50E8495D5D1AFE7EE896",
+      "afterFactsHash": "255211D9068986B157D29EB643AA6D81325030205D9B50E8495D5D1AFE7EE896"
+    },
+    {
+      "repository": "libuv",
+      "commit": "5152db2cbfeb5582e9c27c5ea1dba2cd9e10759b",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "files": 360,
+      "before": {
+        "Unresolved": 4194,
+        "Resolved": 561,
+        "Ambiguous": 8
+      },
+      "after": {
+        "Unresolved": 4194,
+        "Resolved": 561,
+        "Ambiguous": 8
+      },
+      "beforeEdgeHash": "458AFF6F2DA44C44EB26C7A43CA7AB93B69D437C5E5C04A347266A713DA1DFD2",
+      "afterEdgeHash": "458AFF6F2DA44C44EB26C7A43CA7AB93B69D437C5E5C04A347266A713DA1DFD2",
+      "beforeFactsHash": "815C24CF3D82CEEEB3480FE4DD446A38B965A02BC1599E074344BEFFA82AA039",
+      "afterFactsHash": "815C24CF3D82CEEEB3480FE4DD446A38B965A02BC1599E074344BEFFA82AA039"
+    },
+    {
+      "repository": "openssl",
+      "commit": "0893a62353583343eb712adef6debdfbe597c227",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "files": 2211,
+      "before": {
+        "Unresolved": 26106,
+        "Resolved": 1330
+      },
+      "after": {
+        "Unresolved": 26106,
+        "Resolved": 1330
+      },
+      "beforeEdgeHash": "671AA206B250BFBF90E13147133171ADB0331D4AB4ED8D9DF42BD78355A3893D",
+      "afterEdgeHash": "671AA206B250BFBF90E13147133171ADB0331D4AB4ED8D9DF42BD78355A3893D",
+      "beforeFactsHash": "114294783DA473D73598FC6A06926C44E8D67487C552588A113887D9098AE8DE",
+      "afterFactsHash": "114294783DA473D73598FC6A06926C44E8D67487C552588A113887D9098AE8DE"
+    },
+    {
+      "repository": "protobuf",
+      "commit": "7fcfd66022455635fa29af92987cdc0967efd4f3",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "files": 1177,
+      "before": {
+        "Unresolved": 41340,
+        "Resolved": 3064,
+        "Ambiguous": 147
+      },
+      "after": {
+        "Unresolved": 41340,
+        "Resolved": 3064,
+        "Ambiguous": 147
+      },
+      "beforeEdgeHash": "4D3958A9558CCEF990331A81DF6814042B6A49B016DA470D810392AE4358CB43",
+      "afterEdgeHash": "4D3958A9558CCEF990331A81DF6814042B6A49B016DA470D810392AE4358CB43",
+      "beforeFactsHash": "B57103C80D50CD3F6B6F939E8CEFBBC8AD7C3875FAD73BF4A92B13C150B5F23D",
+      "afterFactsHash": "B57103C80D50CD3F6B6F939E8CEFBBC8AD7C3875FAD73BF4A92B13C150B5F23D"
+    },
+    {
+      "repository": "serilog",
+      "commit": "49b5339ce85385dc52d4d8e8f2b8308becf23506",
+      "languages": [
+        "csharp"
+      ],
+      "files": 216,
+      "before": {
+        "External": 710,
+        "Resolved": 655,
+        "Unresolved": 358
+      },
+      "after": {
+        "External": 710,
+        "Resolved": 655,
+        "Unresolved": 358
+      },
+      "beforeEdgeHash": "13C7C1400175528C1CB8F8E179CD5A0BBBE23EAAB0C48FF2C38451045D9EE778",
+      "afterEdgeHash": "13C7C1400175528C1CB8F8E179CD5A0BBBE23EAAB0C48FF2C38451045D9EE778",
+      "beforeFactsHash": "B0D558EA4B36B31B7F17EEE96EB67901F9D31C85C55E475523829E3B43B04DAB",
+      "afterFactsHash": "B0D558EA4B36B31B7F17EEE96EB67901F9D31C85C55E475523829E3B43B04DAB"
+    },
+    {
+      "repository": "client-golang",
+      "commit": "3f5d6801b95618d04d5057edb1724b02aae69082",
+      "languages": [
+        "go"
+      ],
+      "files": 166,
+      "before": {
+        "Unresolved": 875,
+        "Resolved": 563
+      },
+      "after": {
+        "Unresolved": 875,
+        "Resolved": 563
+      },
+      "beforeEdgeHash": "C237F3969D661FCA1F9CF6A93161724374A002F3B5F43E6D6F16D4820035B896",
+      "afterEdgeHash": "C237F3969D661FCA1F9CF6A93161724374A002F3B5F43E6D6F16D4820035B896",
+      "beforeFactsHash": "945F73DD4E2861662AD09B9EC98A6112D9172CCF5700F13B96EF026E5CC33837",
+      "afterFactsHash": "945F73DD4E2861662AD09B9EC98A6112D9172CCF5700F13B96EF026E5CC33837"
+    },
+    {
+      "repository": "express",
+      "commit": "53d4a0d606c0388f764f192b306ce0e90200e7e8",
+      "languages": [
+        "javascript"
+      ],
+      "files": 141,
+      "before": {
+        "Unresolved": 435,
+        "Resolved": 18
+      },
+      "after": {
+        "Unresolved": 435,
+        "Resolved": 18
+      },
+      "beforeEdgeHash": "B6D74F9F603D22EDE24854FD267B46455D3C26DA44E8F969F31BA2D9A89B1235",
+      "afterEdgeHash": "B6D74F9F603D22EDE24854FD267B46455D3C26DA44E8F969F31BA2D9A89B1235",
+      "beforeFactsHash": "D527211A909726EA945653DD15AD35ABA25BF61075AE30C93888F3886AAF8859",
+      "afterFactsHash": "D527211A909726EA945653DD15AD35ABA25BF61075AE30C93888F3886AAF8859"
+    },
+    {
+      "repository": "zod",
+      "commit": "12e6272746eb79c9713f4818e85a15231bd368b6",
+      "languages": [
+        "typescript"
+      ],
+      "files": 480,
+      "before": {
+        "External": 232,
+        "Resolved": 643,
+        "Unresolved": 5821
+      },
+      "after": {
+        "External": 232,
+        "Resolved": 643,
+        "Unresolved": 5821
+      },
+      "beforeEdgeHash": "8DC443DCCCFA4E38A94B011D2986547A7D4767E26342FA8BF2F9A870A295CA9E",
+      "afterEdgeHash": "8DC443DCCCFA4E38A94B011D2986547A7D4767E26342FA8BF2F9A870A295CA9E",
+      "beforeFactsHash": "0697720EAF8F84AE9FC343AFB3BC19E6DDACFC14DD40C10464352252BE78DDD8",
+      "afterFactsHash": "0697720EAF8F84AE9FC343AFB3BC19E6DDACFC14DD40C10464352252BE78DDD8"
+    },
+    {
+      "repository": "react-hook-form",
+      "commit": "28334faa6105b0475060592c6bf27dca87e3941e",
+      "languages": [
+        "tsx"
+      ],
+      "files": 174,
+      "before": {
+        "Unresolved": 1568,
+        "External": 218,
+        "Resolved": 42
+      },
+      "after": {
+        "Unresolved": 1568,
+        "External": 218,
+        "Resolved": 42
+      },
+      "beforeEdgeHash": "DB8EA6538E7D377848DEF94A2EC4AB1CAFD5549F9C2A0B7C2A89E824051DFD0D",
+      "afterEdgeHash": "DB8EA6538E7D377848DEF94A2EC4AB1CAFD5549F9C2A0B7C2A89E824051DFD0D",
+      "beforeFactsHash": "56773848C55EF17963DF27F39CA0D6764CBCB90F9B5B8990010826D60E54A82B",
+      "afterFactsHash": "56773848C55EF17963DF27F39CA0D6764CBCB90F9B5B8990010826D60E54A82B"
+    },
+    {
+      "repository": "pydantic",
+      "commit": "ba830dc07550dd7a11f167cbf8b8b707712cd88e",
+      "languages": [
+        "python"
+      ],
+      "files": 451,
+      "before": {
+        "Unresolved": 3370,
+        "Ambiguous": 571,
+        "External": 1647,
+        "Resolved": 1455
+      },
+      "after": {
+        "Unresolved": 3370,
+        "Ambiguous": 571,
+        "External": 1647,
+        "Resolved": 1455
+      },
+      "beforeEdgeHash": "8D04C5B62BA6250A2DD5CC52DAB0009CB81D7BBCD5D9FBFBA275BA191758CE24",
+      "afterEdgeHash": "8D04C5B62BA6250A2DD5CC52DAB0009CB81D7BBCD5D9FBFBA275BA191758CE24",
+      "beforeFactsHash": "9A9693247B6E09824A875A30199ACB8F9F21FDAC3EC0DC48DCD7D7E0FDCD86D9",
+      "afterFactsHash": "9A9693247B6E09824A875A30199ACB8F9F21FDAC3EC0DC48DCD7D7E0FDCD86D9"
+    },
+    {
+      "repository": "spring-petclinic",
+      "commit": "818c4136ea971c21674525f9053de0d9c7ad8cfe",
+      "languages": [
+        "java"
+      ],
+      "files": 50,
+      "before": {
+        "Unresolved": 721,
+        "Resolved": 116
+      },
+      "after": {
+        "Unresolved": 721,
+        "Resolved": 116
+      },
+      "beforeEdgeHash": "05C8A1FA2409CE7A0C98380A5C0A86599FE712858A0E05681753C3D7321B9473",
+      "afterEdgeHash": "05C8A1FA2409CE7A0C98380A5C0A86599FE712858A0E05681753C3D7321B9473",
+      "beforeFactsHash": "CFD2E18D04DA18031968A80A1BB17964FADF504A23340BE5AEDD1967067A0CF0",
+      "afterFactsHash": "CFD2E18D04DA18031968A80A1BB17964FADF504A23340BE5AEDD1967067A0CF0"
+    },
+    {
+      "repository": "okio",
+      "commit": "e8dad1a9a86b96b04e51aa941e834b400114667c",
+      "languages": [
+        "kotlin"
+      ],
+      "files": 327,
+      "before": {
+        "Unresolved": 2651,
+        "Resolved": 1599
+      },
+      "after": {
+        "Unresolved": 2651,
+        "Resolved": 1599
+      },
+      "beforeEdgeHash": "7E6CAE02A8A4A3846D51A9E6EA2FAC02B9DC6A74289B130ACAA4C1D1BCCDC352",
+      "afterEdgeHash": "7E6CAE02A8A4A3846D51A9E6EA2FAC02B9DC6A74289B130ACAA4C1D1BCCDC352",
+      "beforeFactsHash": "85C88651855B57D7E011D5000E80B8756C660FED55C8BF2361E670E40F18270F",
+      "afterFactsHash": "85C88651855B57D7E011D5000E80B8756C660FED55C8BF2361E670E40F18270F"
+    },
+    {
+      "repository": "sinatra",
+      "commit": "cb22afd7902b566b6eaba6c4ea89739494a65d12",
+      "languages": [
+        "ruby"
+      ],
+      "files": 151,
+      "before": {
+        "Unresolved": 836,
+        "Resolved": 313
+      },
+      "after": {
+        "Unresolved": 836,
+        "Resolved": 313
+      },
+      "beforeEdgeHash": "DE5AD48F97F36301A45DE519BF87F53CD5242DA0812549994FC36B7843FA1AD5",
+      "afterEdgeHash": "DE5AD48F97F36301A45DE519BF87F53CD5242DA0812549994FC36B7843FA1AD5",
+      "beforeFactsHash": "FBD26898859ECE525E22426B158B05405634C6909365A13A0B3BA15C3397D866",
+      "afterFactsHash": "FBD26898859ECE525E22426B158B05405634C6909365A13A0B3BA15C3397D866"
+    },
+    {
+      "repository": "guzzle",
+      "commit": "93939470950a9b11e2e84204166ef5e048c55fe4",
+      "languages": [
+        "php"
+      ],
+      "files": 137,
+      "before": {
+        "Unresolved": 1149,
+        "Resolved": 723
+      },
+      "after": {
+        "Unresolved": 1149,
+        "Resolved": 723
+      },
+      "beforeEdgeHash": "7DFE120550BA4647186F61B8597F5115439B19E16DBC580C1C2E6C61EAB0D1AF",
+      "afterEdgeHash": "7DFE120550BA4647186F61B8597F5115439B19E16DBC580C1C2E6C61EAB0D1AF",
+      "beforeFactsHash": "E370B337B024B52208F38FE439585C4E42C6667612A361DB76B049E7CFD067FD",
+      "afterFactsHash": "E370B337B024B52208F38FE439585C4E42C6667612A361DB76B049E7CFD067FD"
+    },
+    {
+      "repository": "ripgrep",
+      "commit": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "languages": [
+        "rust"
+      ],
+      "files": 110,
+      "before": {
+        "Unresolved": 1700,
+        "Resolved": 819,
+        "Ambiguous": 1
+      },
+      "after": {
+        "Unresolved": 1700,
+        "Resolved": 819,
+        "Ambiguous": 1
+      },
+      "beforeEdgeHash": "3753AFC9E37E5B6A7B144E30D0CA4050EFF6FDCA3FD9640DE31F52027ED007A0",
+      "afterEdgeHash": "3753AFC9E37E5B6A7B144E30D0CA4050EFF6FDCA3FD9640DE31F52027ED007A0",
+      "beforeFactsHash": "7FC1A830DBEA82CAF7732DEC634120C3E6E2AB7FD1D2D9019CB955D5D701AE3D",
+      "afterFactsHash": "7FC1A830DBEA82CAF7732DEC634120C3E6E2AB7FD1D2D9019CB955D5D701AE3D"
+    }
+  ]
+}

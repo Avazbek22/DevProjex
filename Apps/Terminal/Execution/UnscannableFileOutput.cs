@@ -29,6 +29,7 @@ internal static class UnscannableFileOutput
 		FileContentClassification.TooLarge => "too-large",
 		FileContentClassification.Unreadable => "unreadable",
 		FileContentClassification.UnsupportedEncoding => "unsupported-encoding",
+		FileContentClassification.AccessDenied => "access-denied",
 		_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
 	};
 
@@ -61,6 +62,7 @@ internal static class UnscannableFileOutput
 		FileContentClassification.TooLarge => "Content.Redaction.Reason.TooLarge",
 		FileContentClassification.Unreadable => "Content.Classification.Unreadable",
 		FileContentClassification.UnsupportedEncoding => "Content.Redaction.Reason.UnsupportedEncoding",
+		FileContentClassification.AccessDenied => "Content.Classification.AccessDenied",
 		_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
 	};
 }

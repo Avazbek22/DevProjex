@@ -2,6 +2,14 @@ namespace DevProjex.Kernel;
 
 public static class ProcessEntryPointResolver
 {
+	public static string? ResolveSelfLaunchPath()
+	{
+		var appImagePath = Environment.GetEnvironmentVariable("APPIMAGE");
+		return !string.IsNullOrWhiteSpace(appImagePath) && File.Exists(appImagePath)
+			? appImagePath
+			: Environment.ProcessPath;
+	}
+
 	public static string? ResolveManagedAssemblyPath()
 	{
 		var assemblyName = Assembly.GetEntryAssembly()?.GetName().Name;

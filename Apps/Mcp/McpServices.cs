@@ -14,6 +14,7 @@ internal sealed class McpServices : IDisposable
 		IGitScopePathProvider gitScopePathProvider,
 		SecretRedactionSession redactionSession,
 		CodeCompressionSession compressionSession,
+		DependencyFactsEngine dependencyFactsEngine,
 		SecretRedactionOutputPreparer outputPreparer)
 	{
 		Planner = planner;
@@ -25,6 +26,7 @@ internal sealed class McpServices : IDisposable
 		GitScopePathProvider = gitScopePathProvider;
 		RedactionSession = redactionSession;
 		CompressionSession = compressionSession;
+		DependencyFactsEngine = dependencyFactsEngine;
 		OutputPreparer = outputPreparer;
 	}
 
@@ -37,6 +39,7 @@ internal sealed class McpServices : IDisposable
 	public IGitScopePathProvider GitScopePathProvider { get; }
 	public SecretRedactionSession RedactionSession { get; }
 	public CodeCompressionSession CompressionSession { get; }
+	public DependencyFactsEngine DependencyFactsEngine { get; }
 	public SecretRedactionOutputPreparer OutputPreparer { get; }
 
 	public static McpServices Create(
@@ -46,7 +49,8 @@ internal sealed class McpServices : IDisposable
 
 	internal static McpServices Create(
 		McpProjectRootJail roots,
-		Func<string>? appDataPathProvider = null)
+		Func<string>? appDataPathProvider = null,
+		DependencyFactsEngine? dependencyFactsEngine = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
@@ -101,6 +105,19 @@ internal sealed class McpServices : IDisposable
 			redactionSession.Dispose();
 			throw;
 		}
+		DependencyFactsEngine resolvedDependencyFactsEngine;
+		try
+		{
+			resolvedDependencyFactsEngine = dependencyFactsEngine ?? new DependencyFactsEngine(
+				new TreeSitterDependencyFactExtractor(guardedFileOpener.OpenRead),
+				new FileDependencyConfigurationProvider(guardedFileOpener.OpenRead));
+		}
+		catch
+		{
+			compressionSession.Dispose();
+			redactionSession.Dispose();
+			throw;
+		}
 		var analysis = new ProjectAnalysisService(
 			new ScanOptionsUseCase(scanner),
 			new BuildTreeUseCase(treeBuilder, treePresenter),
@@ -127,18 +144,88 @@ internal sealed class McpServices : IDisposable
 					preparedContentAnalyzer: preparedContentAnalyzer),
 				treeExport,
 				contentAnalyzer,
-				new ProjectSelectionResolver(profileStore, new PortableProjectProfileService().LoadAsync),
+				new ProjectSelectionResolver(
+					profileStore,
+					(path, token) => LoadPortableProfileAsync(guardedFileOpener, path, token)),
 				profileStore,
 				new GitScopePathProvider(gitPathComparisonSemanticsResolver),
 				redactionSession,
 				compressionSession,
+				resolvedDependencyFactsEngine,
 				new SecretRedactionOutputPreparer(contentAnalyzer, preparedContentAnalyzer));
 		}
 		catch
 		{
+			resolvedDependencyFactsEngine.Dispose();
 			compressionSession.Dispose();
 			redactionSession.Dispose();
 			throw;
+		}
+	}
+
+	private static async Task<ProjectSelectionSpec> LoadPortableProfileAsync(
+		McpRootJailFileStreamOpener guardedFileOpener,
+		string path,
+		CancellationToken cancellationToken)
+	{
+		var stagingDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "McpProfiles");
+		Directory.CreateDirectory(stagingDirectory);
+		var stagingPath = Path.Combine(stagingDirectory, $"{Guid.NewGuid():N}.json");
+		try
+		{
+			await using (var source = guardedFileOpener.OpenRead(
+				path,
+				16 * 1024,
+				FileShare.ReadWrite | FileShare.Delete,
+				asynchronous: true))
+			await using (var destination = new FileStream(
+				stagingPath,
+				FileMode.CreateNew,
+				FileAccess.Write,
+				FileShare.None,
+				16 * 1024,
+				FileOptions.Asynchronous | FileOptions.SequentialScan))
+			{
+				var buffer = new byte[16 * 1024];
+				long copied = 0;
+				try
+				{
+					while (true)
+					{
+						var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+						if (read == 0)
+							break;
+						copied += read;
+						if (copied > 4L * 1024 * 1024)
+							throw new PortableProjectProfileException(
+								"DPX-CLI-PROFILE-INVALID",
+								"The portable profile could not be read.");
+						await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+							.ConfigureAwait(false);
+					}
+				}
+				finally
+				{
+					System.Security.Cryptography.CryptographicOperations.ZeroMemory(buffer);
+				}
+			}
+			return await new PortableProjectProfileService()
+				.LoadAsync(stagingPath, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		finally
+		{
+			try
+			{
+				File.Delete(stagingPath);
+				Directory.Delete(stagingDirectory, recursive: false);
+			}
+			catch (IOException)
+			{
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
 		}
 	}
 
@@ -146,5 +233,6 @@ internal sealed class McpServices : IDisposable
 	{
 		RedactionSession.Dispose();
 		CompressionSession.Dispose();
+		DependencyFactsEngine.Dispose();
 	}
 }

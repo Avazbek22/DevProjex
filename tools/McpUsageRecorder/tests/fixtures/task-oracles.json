@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "tasks": [
+    {
+      "id": "sample",
+      "oracleCoverage": "complete",
+      "pathExtensions": ["cs"],
+      "requiredPaths": ["src/core.cs", "tests/core.test.cs"],
+      "optionalPaths": [],
+      "forbiddenPaths": [],
+      "requiredClaims": [
+        { "id": "retry-count", "terms": [["RetryAsync"], ["three times"]] }
+      ],
+      "requiredSymbols": [
+        { "id": "retry-method", "terms": ["RetryAsync"] }
+      ]
+    }
+  ]
+}

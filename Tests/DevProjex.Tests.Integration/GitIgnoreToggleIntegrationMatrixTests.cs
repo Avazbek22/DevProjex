@@ -94,8 +94,10 @@ public sealed class GitIgnoreToggleIntegrationMatrixTests
 			.Value
 			.ToHashSet(PathComparer.Default);
 
-		Assert.Equal(!useGitIgnore, treeRoots.Contains(".git"));
-		Assert.Equal(!useGitIgnore, scannedRoots.Contains(".git"));
+		// The administrative boundary is mode-independent: .git never surfaces,
+		// while lookalike names stay visible on both surfaces.
+		Assert.DoesNotContain(".git", treeRoots);
+		Assert.DoesNotContain(".git", scannedRoots);
 		Assert.Contains(".github", treeRoots);
 		Assert.Contains(".github", scannedRoots);
 		Assert.Contains(".git-owned", treeRoots);

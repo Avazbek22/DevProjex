@@ -1,4 +1,6 @@
 using DevProjex.Application.Compression;
+using DevProjex.Application.Context;
+using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.UI;
@@ -6,6 +8,38 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowCompressionPreviewPerformanceUiTests
 {
+	[AvaloniaFact]
+	public async Task UnavailableCompression_IsShownBesideTheToggleAndInStatus()
+	{
+		using var project = UiTestProject.CreateDefault();
+		using var unavailableSession = new CodeCompressionSession(
+			new TreeSitterCodeCompressor(new EmptyGrammarLibraryLocator()));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { CodeCompressionSession = unavailableSession },
+			startupSelection: ProjectSelectionSpec.Standard with { CompressCode = true });
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.SettingsCompressionNotice.Contains(
+					"No grammar libraries",
+					StringComparison.Ordinal),
+				"unavailable compression status to be published");
+
+			var option = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static candidate => candidate.Id == IgnoreOptionId.CompressCode);
+			Assert.Contains("unavailable", option.Label, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("Compression unavailable", viewModel.SettingsCompressionNotice, StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task StripBlankLinesCheckbox_IsDraftUntilApplyAndRestoresFullSourceWhenDisabled()
 	{
@@ -451,5 +485,13 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 			"_codeCompressionSnapshot",
 			System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
 		return field?.GetValue(window) as CodeCompressionSnapshot;
+	}
+
+	private sealed class EmptyGrammarLibraryLocator : IGrammarLibraryLocator
+	{
+		public string StrategyName => "empty UI test";
+		public IReadOnlyList<string> EnumerateLibraries() => [];
+		public string Resolve(string libraryBaseName) =>
+			throw new InvalidOperationException("An empty locator must not resolve a grammar.");
 	}
 }

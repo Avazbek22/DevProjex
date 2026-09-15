@@ -1,0 +1,14 @@
+{
+  "name": "csharp",
+  "edges": [
+    { "source": "Ambiguous.cs", "reference": "User", "status": "Ambiguous" },
+    { "source": "Partial.Consumer.cs", "reference": "PartialThing", "status": "Resolved", "target": "Partial.One.cs" },
+    { "source": "FileOne.cs", "reference": "Helper", "status": "Resolved", "target": "FileOne.cs" },
+    { "source": "FileTwo.cs", "reference": "Helper", "status": "Resolved", "target": "FileTwo.cs" },
+    { "source": "TypeParameter.cs", "reference": "User", "status": "Unresolved", "reasonContains": "shadows" },
+    { "source": "Contract.cs", "reference": "IOrphanContract", "status": "Resolved", "target": "Contract.cs" }
+  ],
+  "absentEdges": [
+    { "source": "Di.cs", "reference": "AddScoped" }
+  ]
+}

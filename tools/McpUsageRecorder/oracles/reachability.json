@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 1,
+  "repositories": [
+    {
+      "id": "httpx",
+      "url": "https://github.com/encode/httpx.git",
+      "commit": "26d48e0634e6ee9cdc0533996db289ce4b430177"
+    },
+    {
+      "id": "hono",
+      "url": "https://github.com/honojs/hono.git",
+      "commit": "eebdf7be39abf0a872671835ccce0c4f03ea497a"
+    },
+    {
+      "id": "serilog",
+      "url": "https://github.com/serilog/serilog.git",
+      "commit": "1b461379f4e218a939d5c94897df2a1dbbf90573"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "repository": "httpx",
+      "taskSummary": "Explain how redirect handling preserves or removes authorization across origins and scheme upgrades.",
+      "queries": [
+        { "pattern": "redirect", "rationale": "The task asks about redirect handling." },
+        { "pattern": "authorization", "rationale": "The task names the Authorization header." },
+        { "pattern": "same[- ]origin", "rationale": "The task asks about same-origin behavior." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*redirect*", "rationale": "Redirect is a task term usable as a filename filter." },
+        { "pattern": "**/*client*", "rationale": "The task is explicitly about client redirect handling." }
+      ],
+      "seeds": [
+        { "path": "httpx/_client.py", "discoveredBy": { "surface": "search_project", "input": "redirect" } }
+      ]
+    },
+    {
+      "id": "T2",
+      "repository": "httpx",
+      "taskSummary": "Locate synchronous and asynchronous HTTP transports, their proxy construction, documentation, and tests.",
+      "queries": [
+        { "pattern": "HTTPTransport", "rationale": "The task names the synchronous transport." },
+        { "pattern": "AsyncHTTPTransport", "rationale": "The task names the asynchronous transport." },
+        { "pattern": "proxy", "rationale": "The task asks how proxy transports are constructed." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*transport*", "rationale": "Transport is a task term usable as a filename filter." },
+        { "pattern": "**/*prox*", "rationale": "Proxy is a task term usable as a filename filter." }
+      ],
+      "seeds": [
+        { "path": "httpx/_transports/default.py", "discoveredBy": { "surface": "search_project", "input": "HTTPTransport" } }
+      ]
+    },
+    {
+      "id": "T3",
+      "repository": "httpx",
+      "taskSummary": "Explain where request extensions are merged and how per-request values take precedence.",
+      "queries": [
+        { "pattern": "build_request", "rationale": "The task names the request-building operation." },
+        { "pattern": "extensions", "rationale": "The task asks about request extensions." },
+        { "pattern": "merge", "rationale": "The task asks where values are merged." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*client*", "rationale": "The task asks about client-level and per-request state." },
+        { "pattern": "**/*extension*", "rationale": "Extensions is a task term usable as a filename filter." }
+      ],
+      "seeds": [
+        { "path": "httpx/_client.py", "discoveredBy": { "surface": "search_project", "input": "build_request" } }
+      ]
+    },
+    {
+      "id": "T4",
+      "repository": "hono",
+      "taskSummary": "Trace URL decoding for request paths and parameters, including invalid encoded sequences.",
+      "queries": [
+        { "pattern": "decode", "rationale": "The task asks about decoding." },
+        { "pattern": "getPath", "rationale": "The task names path extraction." },
+        { "pattern": "param", "rationale": "The task asks about route parameters." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*request*", "rationale": "Request is a task term usable as a filename filter." },
+        { "pattern": "**/*url*", "rationale": "URL is a task term usable as a filename filter." }
+      ],
+      "seeds": [
+        { "path": "src/request.ts", "discoveredBy": { "surface": "search_project", "input": "param" } }
+      ]
+    },
+    {
+      "id": "T5",
+      "repository": "hono",
+      "taskSummary": "Explain Context.json response typing through client types, middleware, and tests.",
+      "queries": [
+        { "pattern": "TypedResponse", "rationale": "The task names typed responses." },
+        { "pattern": "jsonRespond", "rationale": "The task asks about the JSON response helper." },
+        { "pattern": "Context.*json|[.]json[(]", "rationale": "The task names Context.json." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*context*", "rationale": "Context is a task term usable as a filename filter." },
+        { "pattern": "**/*types*", "rationale": "The task explicitly asks about types." },
+        { "pattern": "**/*cors*", "rationale": "The task names CORS middleware." },
+        { "pattern": "**/*bearer-auth*", "rationale": "The task names bearer-auth middleware." }
+      ],
+      "seeds": [
+        { "path": "src/context.ts", "discoveredBy": { "surface": "search_project", "input": "TypedResponse" } }
+      ]
+    },
+    {
+      "id": "T6",
+      "repository": "hono",
+      "taskSummary": "Identify implementation and test templates for a middleware and where distribution exports are registered.",
+      "queries": [
+        { "pattern": "method-not-allowed", "rationale": "The task names method-not-allowed as a template." },
+        { "pattern": "body-limit", "rationale": "The task names body-limit as a template." },
+        { "pattern": "powered-by", "rationale": "The task names powered-by as a template." },
+        { "pattern": "exports", "rationale": "The task asks about distribution export registration." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*method-not-allowed*", "rationale": "A named middleware can be used as a filename filter." },
+        { "pattern": "**/*body-limit*", "rationale": "A named middleware can be used as a filename filter." },
+        { "pattern": "**/*powered-by*", "rationale": "A named middleware can be used as a filename filter." },
+        { "pattern": "package.json", "rationale": "The task asks about package export registration." },
+        { "pattern": "jsr.json", "rationale": "The task asks about distribution export registration." }
+      ],
+      "seeds": []
+    },
+    {
+      "id": "T7",
+      "repository": "serilog",
+      "taskSummary": "Explain how source-context overrides choose the effective logging level and fall back to defaults.",
+      "queries": [
+        { "pattern": "GetEffectiveLevel", "rationale": "The task names effective-level selection." },
+        { "pattern": "SourceContext", "rationale": "The task asks about source-context overrides." },
+        { "pattern": "override", "rationale": "The task asks how overrides are selected." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*LevelOverride*", "rationale": "Level override is a task term usable as a filename filter." },
+        { "pattern": "**/*Logger*", "rationale": "The task is about logger level selection." }
+      ],
+      "seeds": [
+        { "path": "src/Serilog/Core/LevelOverrideMap.cs", "discoveredBy": { "surface": "search_project", "input": "GetEffectiveLevel" } }
+      ]
+    },
+    {
+      "id": "T8",
+      "repository": "serilog",
+      "taskSummary": "Map the enricher interface, implementations, aggregation, configuration, context, and tests.",
+      "queries": [
+        { "pattern": "ILogEventEnricher", "rationale": "The task names the enricher interface." },
+        { "pattern": "SafeAggregateEnricher", "rationale": "The task asks about safe aggregation." },
+        { "pattern": "LogContext", "rationale": "The task asks about context enrichment." },
+        { "pattern": "Enrich\\(", "rationale": "The task names the Enrich method." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*Enricher*", "rationale": "Enricher is a task term usable as a filename filter." },
+        { "pattern": "**/*LogContext*", "rationale": "LogContext is a task term usable as a filename filter." }
+      ],
+      "seeds": [
+        { "path": "src/Serilog/Core/ILogEventEnricher.cs", "discoveredBy": { "surface": "search_project", "input": "ILogEventEnricher" } }
+      ]
+    },
+    {
+      "id": "N1",
+      "repository": "serilog",
+      "taskSummary": "Find the scalar-conversion policy interface, all implementations, the call site, and conditional target behavior.",
+      "queries": [
+        { "pattern": "IScalarConversionPolicy", "rationale": "The task names the conversion-policy interface." },
+        { "pattern": "TryConvertToScalar", "rationale": "The task asks how scalar conversion is invoked." },
+        { "pattern": "PropertyValueConverter", "rationale": "The task names the conversion call site." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*ScalarConversionPolicy*", "rationale": "The named policy is usable as a filename filter." },
+        { "pattern": "**/*PropertyValueConverter*", "rationale": "The named call site is usable as a filename filter." }
+      ],
+      "seeds": [
+        { "path": "src/Serilog/Core/IScalarConversionPolicy.cs", "discoveredBy": { "surface": "search_project", "input": "IScalarConversionPolicy" } }
+      ]
+    },
+    {
+      "id": "N2",
+      "repository": "httpx",
+      "taskSummary": "Verify URL and URL-component length boundaries and the InvalidURL messages they produce.",
+      "queries": [
+        { "pattern": "65536", "rationale": "The task states the length boundary." },
+        { "pattern": "URL too long", "rationale": "The task quotes the whole-URL error." },
+        { "pattern": "URL component", "rationale": "The task quotes the component error." },
+        { "pattern": "InvalidURL", "rationale": "The task names the exception." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*url*", "rationale": "URL is a task term usable as a filename filter." }
+      ],
+      "seeds": [
+        { "path": "httpx/_urlparse.py", "discoveredBy": { "surface": "search_project", "input": "65536" } }
+      ]
+    },
+    {
+      "id": "N3",
+      "repository": "hono",
+      "taskSummary": "Trace route registration, dispatch, request handoff, and composed handler progress.",
+      "queries": [
+        { "pattern": "addRoute", "rationale": "The task names route registration." },
+        { "pattern": "dispatch", "rationale": "The task names dispatch." },
+        { "pattern": "matchResult", "rationale": "The task names the dispatch result." },
+        { "pattern": "compose", "rationale": "The task asks about composed handler progress." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*route*", "rationale": "Route is a task term usable as a filename filter." },
+        { "pattern": "**/*request*", "rationale": "Request is a task term usable as a filename filter." },
+        { "pattern": "**/*compose*", "rationale": "Compose is a task term usable as a filename filter." }
+      ],
+      "seeds": [
+        { "path": "src/hono-base.ts", "discoveredBy": { "surface": "search_project", "input": "addRoute" } },
+        { "path": "src/request.ts", "discoveredBy": { "surface": "get_tree", "input": "**/*request*" } },
+        { "path": "src/compose.ts", "discoveredBy": { "surface": "search_project", "input": "compose" } }
+      ]
+    },
+    {
+      "id": "N4",
+      "repository": "serilog",
+      "taskSummary": "Explain batching queue overflow, dropped events, nonblocking behavior, and failure notification paths.",
+      "queries": [
+        { "pattern": "BatchingOptions", "rationale": "The task names batching configuration." },
+        { "pattern": "ILoggingFailureListener", "rationale": "The task names the failure listener." },
+        { "pattern": "SelfLog", "rationale": "The task names the diagnostic fallback." },
+        { "pattern": "drop|discard", "rationale": "The task asks about dropped events." },
+        { "pattern": "backpressure", "rationale": "The task asks whether backpressure is applied." }
+      ],
+      "treePatterns": [
+        { "pattern": "**/*Batch*", "rationale": "Batching is a task term usable as a filename filter." },
+        { "pattern": "**/*LoggingFailure*", "rationale": "Failure notification is a task term usable as a filename filter." },
+        { "pattern": "**/*SelfLog*", "rationale": "SelfLog is a task term usable as a filename filter." }
+      ],
+      "seeds": [
+        { "path": "src/Serilog/Core/Sinks/Batching/BatchingSink.cs", "discoveredBy": { "surface": "search_project", "input": "drop|discard" } }
+      ]
+    }
+  ]
+}

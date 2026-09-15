@@ -1150,6 +1150,8 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Content);
+		if (optionId == IgnoreOptionId.CompressCode)
+			_compressionUnavailableNotified = false;
 		var selection = SetContentTransformation(EnsureSettingsDraft(), optionId, enabled);
 		PublishOptimisticSettings(selection, originatedFromCommandLine);
 	}
@@ -1162,6 +1164,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Content);
+		_compressionUnavailableNotified = false;
 		var selection = EnsureSettingsDraft() with
 		{
 			HideSecrets = enabled,
@@ -1744,6 +1747,13 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		if (!_services.HostCapabilities.HasDesktopApplication)
+		{
+			ShowError(
+				"DPX-DESKTOP-NOT-INCLUDED",
+				L("Terminal.Error.DesktopNotIncluded"));
+			return;
+		}
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Welcome.OpenDesktop"),
 			async token =>

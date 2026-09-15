@@ -1,0 +1,32 @@
+{
+  "name": "devprojex",
+  "version": "__VERSION__",
+  "description": "Turn a folder or repository into focused context for AI from the CLI, TUI, or MCP server.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Avazbek22/DevProjex.git"
+  },
+  "homepage": "https://github.com/Avazbek22/DevProjex",
+  "bin": {
+    "devprojex": "bin/devprojex.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin/devprojex.js",
+    "LICENSE"
+  ],
+  "optionalDependencies": {
+    "@devprojex/cli-win32-x64": "__VERSION__",
+    "@devprojex/cli-win32-arm64": "__VERSION__",
+    "@devprojex/cli-linux-x64": "__VERSION__",
+    "@devprojex/cli-linux-arm64": "__VERSION__",
+    "@devprojex/cli-darwin-x64": "__VERSION__",
+    "@devprojex/cli-darwin-arm64": "__VERSION__"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

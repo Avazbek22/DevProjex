@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Pipes;
 using System.Text;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
@@ -8,6 +9,7 @@ using DevProjex.Kernel.Models;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Tui;
+using DevProjex.Tests.Terminal.Host;
 using DevProjex.Tests.Terminal.Progress;
 
 namespace DevProjex.Tests.Terminal.ProgressHost;
@@ -16,6 +18,19 @@ internal static class Program
 {
 	public static int Main(string[] args)
 	{
+		// The shipped application refuses the local file transport unconditionally. This test host
+		// is the only executable that grants it, and only when a test asks for it in the child
+		// environment, so a synthetic local remote stays a test-protocol detail.
+		using RepositoryTransportPolicy.LocalFileTransportScope? transportPolicy =
+			TerminalTransportPolicyProtocol.IsLocalFileTransportRequested()
+				? RepositoryTransportPolicy.AllowLocalFileTransport()
+				: null;
+
+		// Runs an ordinary terminal command without the progress checkpoint observer, so a journey
+		// that only needs this host's transport grant does not have to configure checkpoints.
+		if (args is [TerminalTransportPolicyProtocol.TerminalCommandArgument, .. var terminalArguments])
+			return RunTerminalApplication(terminalArguments);
+
 		if (args is ["--pipe-flood"])
 		{
 			Console.Error.Write(new string('x', 1024 * 1024));
@@ -49,6 +64,8 @@ internal static class Program
 				.GetResult();
 			return CommandLineExitCodes.Success;
 		}
+		if (args is ["--profile-conflict", var conflictDataRoot, var pipeName, .. var commandArguments])
+			return RunProfileConflict(conflictDataRoot, pipeName, commandArguments);
 
 		if (string.Equals(
 			    Environment.GetEnvironmentVariable(
@@ -80,6 +97,60 @@ internal static class Program
 			.RunAsync(args, cancellation.Token)
 			.GetAwaiter()
 			.GetResult();
+	}
+
+	private static int RunTerminalApplication(string[] arguments)
+	{
+		var dataRoot = Environment.GetEnvironmentVariable(
+			InvocationEnvironment.InternalDataRootVariable);
+		if (string.IsNullOrWhiteSpace(dataRoot) ||
+		    !Path.IsPathFullyQualified(dataRoot))
+		{
+			Console.Error.WriteLine("The isolated terminal test data root is required.");
+			return CommandLineExitCodes.RuntimeError;
+		}
+
+		var environment = new InvocationEnvironment(hasAttachedConsole: true);
+		var services = new TerminalServiceFactory(() => dataRoot);
+		using var cancellation = TerminalCancellationCoordinator.Register();
+		return new TerminalApplication(environment, services, developerCommandRunner: null)
+			.RunAsync(arguments, cancellation.Token)
+			.GetAwaiter()
+			.GetResult();
+	}
+
+	private static int RunProfileConflict(
+		string dataRoot,
+		string pipeName,
+		string[] commandArguments)
+	{
+		ProfileCommandTestHooks.AfterVersionObserved.Value = (_, _) =>
+		{
+			using var barrier = new NamedPipeServerStream(
+				pipeName,
+				PipeDirection.InOut,
+				1,
+				PipeTransmissionMode.Byte,
+				PipeOptions.None);
+			barrier.WaitForConnection();
+			barrier.WriteByte(1);
+			barrier.Flush();
+			if (barrier.ReadByte() != 1)
+				throw new IOException("The profile conflict barrier was closed before release.");
+		};
+		try
+		{
+			var environment = new InvocationEnvironment(hasAttachedConsole: true);
+			var services = new TerminalServiceFactory(() => dataRoot);
+			return new TerminalApplication(environment, services, developerCommandRunner: null)
+				.RunAsync(commandArguments, CancellationToken.None)
+				.GetAwaiter()
+				.GetResult();
+		}
+		finally
+		{
+			ProfileCommandTestHooks.AfterVersionObserved.Value = null;
+		}
 	}
 
 	private static int HoldProcessTree(string lockPath, string readyPath)

@@ -583,6 +583,32 @@ output rather than partially transformed.
 As with every DevProjex transformation, a compressed project copy is intentionally
 not a byte-for-byte copy and may not build or run.
 
+## When grammars are unavailable
+
+An unsupported language, a parse that contains errors, and an unavailable grammar
+are different outcomes. An unsupported language is outside the selected
+transformation's language set. A parse or structural safety failure leaves that
+file complete without claiming that the grammar is missing. A missing, unreadable,
+ABI-incompatible, or invalid native grammar instead marks compression unavailable
+for that language; a delivery source with no discoverable grammars marks it
+unavailable for every language.
+
+Unavailable compression never produces a partial transformation: affected files
+stay complete. CLI `analyze` and `export context` write
+`DPX-COMPRESSION-UNAVAILABLE` to stderr with the grammar resource name or content
+directory and include the same warning in JSON diagnostics. It remains a successful
+command, including under `analyze --strict`, because the requested output is still
+complete and safe. MCP `analyze`, `pack_context`, and `get_file` append trusted
+`[Compression unavailable] ...` text outside project-data delimiters when their
+effective selection requests compression; `analyze` also returns a structured
+`compressionUnavailable` object. The Terminal Workspace shows a notification and
+an unavailable marker in its metrics line. The desktop app marks the compression
+switch and status text without opening a modal dialog.
+
+Content delivery remains fail-closed. If a shipped `grammars` directory exists but
+is incomplete, DevProjex does not fall back to embedded resources; the missing
+grammar is reported and the affected source stays complete.
+
 ## What to expect in numbers
 
 Savings depend on what a project contains. Measured on DevProjex's own C#

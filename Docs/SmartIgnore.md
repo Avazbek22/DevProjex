@@ -88,7 +88,7 @@ Smart Ignore and Git filtering solve different problems. Smart Ignore recognizes
 | Mode | Behavior |
 |---|---|
 | `none` | Does not apply Git-based filtering. |
-| `gitignore` | Applies reachable hierarchical `.gitignore` rules. |
+| `gitignore` | Applies repository-local ignore rules and repository boundaries, following the working-tree view of `git status`. |
 | `tracked` | Includes only paths returned by applicable Git indexes. |
 | `staged` | Includes files with staged changes. |
 | `changes` | Includes staged, unstaged, and non-ignored untracked files. |
@@ -102,21 +102,33 @@ radio rows and shows the active `diff:<REF>..<REF>` value as an additional row.
 Diff scopes are available through CLI, TUI, and MCP, but not Desktop. Changing the
 Git mode never changes Smart Ignore or an ordinary exclusion.
 
+Git-backed modes run through the fail-closed profiles in [Git process safety](Git-Safety.md). In particular, `changes` reports `DPX-GIT-UNSAFE-FILTER` with the driver name instead of executing a repository clean/process filter or presenting a non-equivalent raw comparison.
+
 ### `.gitignore` mode
 
-The `.gitignore` implementation supports nested rule scopes, negations, and ancestor rules from the owning repository or worktree root to the selected folder. An ignored directory is still traversed when a later negation may expose a descendant.
+The `.gitignore` implementation supports nested rule scopes, negations, and ancestor rules from the owning repository or worktree root to the selected folder. An ignored directory is still traversed when a later applicable negation may expose a descendant. Tracked files retain the existing index override.
+
+The owning repository is the nearest physical `.git` boundary at the selected root or above it. When opening a folder of projects with no owning repository, the first boundary reached in each subtree becomes its owner: sibling repositories are independent. Opening a worktree or a subdirectory inside a repository starts with that repository's root rule chain.
+
+A deeper directory with its own `.git` boundary is opaque unless its portable relative path is declared by `path = ...` in a `[submodule "..."]` section of the owner's `.gitmodules`. An opaque embedded repository is one untracked directory, as in `git status`: its files are never selected or recursively enumerated in `gitignore` or `tracked`. This includes manually cloned repositories, vendored clones, and worktrees nested inside an owning repository. It contributes one directory to the existing GitIgnore controller impact; `empty-folders` determines whether an empty node remains visible. A gitlink without a `.gitmodules` declaration is also embedded, even if the parent index records it.
+
+A declared path with its own boundary is a submodule and becomes the owner of its subtree. Its own `.gitignore`, `info/exclude`, and recursive `.gitmodules` apply; parent ignore patterns do not apply inside it. In `tracked`, only applicable owners and declared submodules supply indexes. A declared but uninitialized path without a boundary remains an ordinary directory, including an empty directory. `.gitmodules` is read once per owner per scan with the UTF-8 and source-size limits of `.gitignore`, and at most 8,192 distinct paths. Paths use `/`, may be quoted, and must be relative without empty, `.` or `..` segments; `url` and `branch` do not influence selection. An unreadable or invalid declaration cannot authorize traversal of a nested repository.
+
+Repository-local `info/exclude` is loaded before the root `.gitignore`, at the same root scope with lower precedence. A root negation overrides it, including `notes/` in `info/exclude` with `!notes/keep.md` in the root `.gitignore`. For a normal repository the source is `<root>/.git/info/exclude`. A `.git` file resolves its `gitdir:` target relative to the repository root; if that directory has `commondir`, its target is resolved relative to the Git directory and `<common-directory>/info/exclude` is read. Without `commondir`, including the usual submodule layout, the source is `<git-directory>/info/exclude`. Missing sources are empty. These sources and submodule declarations are read directly from files, without Git commands.
 
 The following boundaries are intentional:
 
-- an absent `.gitignore` is an active empty rule set, not a fallback to `none`;
-- the administrative entry named exactly `.git` remains excluded while Git filtering is active;
+- an absent `.gitignore` contributes no patterns and never falls back to `none`; repository boundaries and other applicable sources still apply;
+- the administrative entry named exactly `.git` remains excluded in every Git filtering mode, including `none`;
 - names such as `.github` and `.git-owned` are ordinary paths;
-- `.git/info/exclude` and global Git excludes are not read;
+- global Git excludes (`core.excludesFile`) are not read;
 - a symbolic link named `.gitignore` is not followed;
-- an unreadable `.gitignore` scope fails closed and produces the existing partial-access diagnostic instead of silently including uncertain paths;
+- an unreadable `.gitignore` or `info/exclude` scope fails closed and produces the existing partial-access diagnostic instead of silently including uncertain paths;
 - an initial UTF-8 BOM is supported; UTF-16 and UTF-32 files are not reinterpreted as valid rule sources.
 
 Repository-backed pattern comparison follows the effective Git `core.ignoreCase` value. On macOS, canonical Unicode comparison also follows `core.precomposeUnicode`. A standalone `.gitignore` outside a repository uses the host filesystem comparison policy.
+
+`none` and MCP `--unrestricted` expose files inside embedded repositories, subject to the ordinary selection and filesystem safety rules. The `.git` administrative area and reparse points remain excluded in every mode. This v5.2 behavior change adds no checkbox, option, exclusion token, diagnostic code, or MCP schema field; use `--git-mode none` to restore traversal of embedded repositories.
 
 ### Tracked-files-only mode
 

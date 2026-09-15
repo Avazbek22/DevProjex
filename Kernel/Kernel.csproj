@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Test hosts that arm RepositoryTransportPolicy for a synthetic local remote. No shipped
+         assembly is listed here, so product code cannot widen the accepted transport set. -->
     <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
+    <InternalsVisibleTo Include="DevProjex.Tests.Integration" />
+    <InternalsVisibleTo Include="DevProjex.Tests.Terminal" />
+    <InternalsVisibleTo Include="DevProjex.Tests.Terminal.ProgressHost" />
   </ItemGroup>
 </Project>

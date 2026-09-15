@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ValidationInfrastructureProject Condition="'$(ValidationInfrastructureProject)' == ''">../../Infrastructure/Infrastructure.csproj</ValidationInfrastructureProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(ValidationInfrastructureProject)" />
+  </ItemGroup>
+</Project>

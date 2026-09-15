@@ -7,16 +7,25 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class DocumentationExecutionRegressionTests
 {
-	[Fact]
-	public async Task PublishedDirectCommandExamplesExecuteWithoutMutatingSource()
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task PublishedDirectCommandExamplesExecuteWithoutMutatingSource(
+		bool useSeparateGitDirectory)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("source-project");
 		workspace.WriteFile("source-project/src/App.cs", "internal sealed class App {}\n");
 		workspace.WriteFile("source-project/README.md", "# Sample\n");
-		InitializeGitIndex(project);
+		var repositoryRoot = FindRepositoryRoot();
+		Assert.False(PathUtility.IsPathInside(workspace.Path, repositoryRoot));
+		InitializeGitIndex(
+			project,
+			useSeparateGitDirectory
+				? workspace.CreateDirectory("source-project.git")
+				: null);
 		var examples = await ExtractPublishedDirectExamplesAsync(
-			FindRepositoryRoot(),
+			repositoryRoot,
 			TestContext.Current.CancellationToken);
 		var uniqueCommands = examples
 			.Distinct(StringComparer.Ordinal)
@@ -32,16 +41,31 @@ public sealed class DocumentationExecutionRegressionTests
 				workspace.Path,
 				index);
 			var environment = new TestTerminalEnvironment();
+			var serviceFactory = new TerminalServiceFactory(
+				() => workspace.CreateDirectory($"app-data-{index}"));
 			var exitCode = await new TerminalApplication(
 					environment,
-					new TerminalServiceFactory(() => workspace.CreateDirectory($"app-data-{index}")))
+					serviceFactory)
 				.RunAsync(arguments, TestContext.Current.CancellationToken);
+			var failureDiagnostic =
+				exitCode != CommandLineExitCodes.Success ||
+				!string.IsNullOrEmpty(environment.StandardError)
+					? BuildCommandFailureDiagnostic(
+						uniqueCommands[index],
+						arguments,
+						environment.StandardError,
+						serviceFactory,
+						project,
+						before,
+						useSeparateGitDirectory)
+					: string.Empty;
 
 			Assert.True(
 				exitCode == CommandLineExitCodes.Success,
-				$"Documented command failed with exit code {exitCode}: " +
-				$"{uniqueCommands[index]}{Environment.NewLine}{environment.StandardError}");
-			Assert.Empty(environment.StandardError);
+				$"Documented command failed with exit code {exitCode}.\n{failureDiagnostic}");
+			Assert.True(
+				string.IsNullOrEmpty(environment.StandardError),
+				failureDiagnostic);
 			Assert.NotEmpty(environment.StandardOutput);
 			Assert.Equal(before, ComputeTreeFingerprint(project));
 			AssertObservableResult(
@@ -274,9 +298,54 @@ public sealed class DocumentationExecutionRegressionTests
 		return Convert.ToHexString(hash.GetHashAndReset());
 	}
 
-	private static void InitializeGitIndex(string project)
+	private static string BuildCommandFailureDiagnostic(
+		string documentedCommand,
+		IReadOnlyList<string> arguments,
+		string standardError,
+		TerminalServiceFactory serviceFactory,
+		string project,
+		string sourceFingerprintBeforeCommand,
+		bool useSeparateGitDirectory)
 	{
-		RunGit(project, "init", "--quiet");
+		using var services = serviceFactory.Create(AppLanguage.En);
+		var loaded = services.AnalysisService.Load(new ProjectAnalysisRequest(project));
+		var unavailablePaths = EnumerateAccessDeniedPaths(loaded.Tree.Root).ToArray();
+		return
+			$"Documented command failed or wrote stderr.\n" +
+			$"Git layout: {(useSeparateGitDirectory ? "separate git dir" : "in-tree .git")}\n" +
+			$"Documented: {documentedCommand}\n" +
+			$"Executed: devprojex {string.Join(' ', arguments.Select(QuoteArgument))}\n" +
+			$"Source fingerprint before command: {sourceFingerprintBeforeCommand}\n" +
+			$"Source fingerprint at diagnostic rescan: {ComputeTreeFingerprint(project)}\n" +
+			$"Full stderr:\n{standardError}\n" +
+			$"Access-denied paths from a diagnostic rescan ({unavailablePaths.Length}):\n" +
+			(unavailablePaths.Length == 0
+				? "<none observed during diagnostic rescan>"
+				: string.Join(Environment.NewLine, unavailablePaths));
+	}
+
+	private static IEnumerable<string> EnumerateAccessDeniedPaths(TreeNodeDescriptor node)
+	{
+		if (node.IsAccessDenied)
+			yield return node.FullPath;
+		foreach (var child in node.Children)
+		{
+			foreach (var path in EnumerateAccessDeniedPaths(child))
+				yield return path;
+		}
+	}
+
+	private static string QuoteArgument(string argument) =>
+		argument.Any(char.IsWhiteSpace)
+			? $"\"{argument.Replace("\"", "\\\"", StringComparison.Ordinal)}\""
+			: argument;
+
+	private static void InitializeGitIndex(string project, string? gitDirectory)
+	{
+		if (gitDirectory is null)
+			RunGit(project, "init", "--quiet");
+		else
+			RunGit(project, "init", "--quiet", $"--separate-git-dir={gitDirectory}");
 		RunGit(project, "add", "--all");
 	}
 

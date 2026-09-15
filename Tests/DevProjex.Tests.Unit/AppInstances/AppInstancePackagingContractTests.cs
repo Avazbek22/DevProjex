@@ -270,7 +270,11 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains("DevProjex.v$version.osx-arm64.app.tar.gz", releaseScript, StringComparison.Ordinal);
         Assert.Contains("New-UstarGzipArchive", releaseScript, StringComparison.Ordinal);
         Assert.Contains("Read-UstarGzipArchive", releaseScript, StringComparison.Ordinal);
-        Assert.Contains("-GitHubOnly:$GitHubArtifactsOnly", releaseScript, StringComparison.Ordinal);
+        // Channel selection intentionally replaces the former boolean-only copy boundary;
+        // -GitHubArtifactsOnly remains an input alias and is normalized before this call.
+        Assert.Contains("-channels $invocation.Channels", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("/p:EnableCompressionInSingleFile=false", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Test-ReleaseArtifacts.ps1", releaseScript, StringComparison.Ordinal);
         Assert.Contains("(Join-Path $sourceRoot \"artifacts\")", releaseScript, StringComparison.Ordinal);
         Assert.Contains("(Join-Path $sourceRoot \".artifacts\")", releaseScript, StringComparison.Ordinal);
         Assert.Contains("\"bin\"", releaseScript, StringComparison.Ordinal);
@@ -298,10 +302,10 @@ public sealed class AppInstancePackagingContractTests
             "Get-RelativePublishedPath -basePath $ridOutDir -publishedPath $_.FullName",
             releaseScript,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "Build-GitHubArtifactsInWorkspace -version $resolvedVersion -configuration \"Release\" -storePackageVersion $storePackageVersion",
-            releaseScript,
-            StringComparison.Ordinal);
+        Assert.Contains("Build-GitHubArtifactsInWorkspace `", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("-configuration \"Release\" `", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("-storePackageVersion $storePackageVersion `", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("-rids $invocation.Rids", releaseScript, StringComparison.Ordinal);
         Assert.DoesNotContain("\"/p:PublishTrimmed=true\"", releaseScript, StringComparison.Ordinal);
     }
 
@@ -323,20 +327,44 @@ public sealed class AppInstancePackagingContractTests
     }
 
     [Fact]
-    public void LinuxPackaging_DocumentsDevprojexPathCommandAndDesktopEntryUsesIt()
+    public void LinuxPackaging_UsesCanonicalAppIdMetadataAndDesktopEntry()
     {
         var repositoryRoot = ResolveRepositoryRoot();
         var readmePath = Path.Combine(repositoryRoot, "Packaging", "Linux", "README.md");
-        var desktopEntryPath = Path.Combine(repositoryRoot, "Packaging", "Linux", "devprojex.desktop");
+        var desktopEntryPath = Path.Combine(
+            repositoryRoot,
+            "Packaging",
+            "Linux",
+            "io.github.Avazbek22.DevProjex.desktop");
+        var metainfoPath = Path.Combine(
+            repositoryRoot,
+            "Packaging",
+            "Linux",
+            "io.github.Avazbek22.DevProjex.metainfo.xml");
 
         var readme = File.ReadAllText(readmePath);
         var desktopEntry = File.ReadAllText(desktopEntryPath);
+        var metainfo = XDocument.Load(metainfoPath);
 
         Assert.Contains($"/usr/local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"~/.local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"Exec={CommandLineExecutableAliases.UnixCommand} open %f", desktopEntry, StringComparison.Ordinal);
-        Assert.Contains($"Icon={CommandLineExecutableAliases.UnixCommand}", desktopEntry, StringComparison.Ordinal);
-        Assert.Contains("always open DevProjex Desktop", readme, StringComparison.Ordinal);
+        Assert.Contains("Icon=io.github.Avazbek22.DevProjex", desktopEntry, StringComparison.Ordinal);
+        Assert.Contains("graphical launcher opens", readme, StringComparison.Ordinal);
+        Assert.Contains("selected folder in DevProjex Desktop", readme, StringComparison.Ordinal);
+        Assert.Equal("io.github.Avazbek22.DevProjex", metainfo.Root?.Element("id")?.Value);
+        Assert.Equal(
+            "io.github.Avazbek22.DevProjex.desktop",
+            metainfo.Root?.Element("launchable")?.Value);
+        Assert.Equal(
+            CommandLineExecutableAliases.UnixCommand,
+            metainfo.Root?.Element("provides")?.Element("binary")?.Value);
+        Assert.InRange(metainfo.Root?.Element("summary")?.Value.Length ?? int.MaxValue, 1, 35);
+        Assert.False(File.Exists(Path.Combine(
+            repositoryRoot,
+            "Packaging",
+            "Linux",
+            "devprojex.desktop")));
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsPortableExecutable, readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, desktopEntry, StringComparison.Ordinal);
     }

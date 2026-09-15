@@ -262,6 +262,64 @@ public sealed class TerminalBrokenPipeRegressionTests
 		}
 	}
 
+	[Fact]
+	public async Task AnalyzeFailOnFindingsPreservesPolicyExitWhenStdoutConsumerClosesEarly()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/source.txt",
+			"token=ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\n");
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
+		using var process = new Process
+		{
+			StartInfo = new ProcessStartInfo
+			{
+				FileName = "dotnet",
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			}
+		};
+		foreach (var argument in new[]
+		         {
+			         applicationAssembly, "analyze", project, "--git-mode", "none",
+			         "--fail-on-findings", "--format", "json", "--plain", "-o", "-"
+		         })
+		{
+			process.StartInfo.ArgumentList.Add(argument);
+		}
+		process.StartInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
+		process.StartInfo.Environment[InvocationEnvironment.InternalDataRootVariable] =
+			workspace.CreateDirectory("app-data");
+		process.StartInfo.Environment["DOTNET_NOLOGO"] = "1";
+
+		Assert.True(process.Start());
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(30));
+		var standardErrorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+		try
+		{
+			var buffer = new char[1];
+			Assert.Equal(1, await process.StandardOutput.ReadAsync(buffer, timeout.Token));
+			process.StandardOutput.Dispose();
+			await process.WaitForExitAsync(timeout.Token);
+
+			Assert.Equal(CommandLineExitCodes.PolicyFailure, process.ExitCode);
+			Assert.Empty(await standardErrorTask);
+		}
+		finally
+		{
+			if (!process.HasExited)
+			{
+				process.Kill(entireProcessTree: true);
+				await process.WaitForExitAsync(CancellationToken.None);
+			}
+		}
+	}
+
 	private static async Task WriteLargeTextFileAsync(
 		string path,
 		int byteCount,

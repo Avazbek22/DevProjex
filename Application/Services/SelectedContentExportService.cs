@@ -429,9 +429,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				case FileContentClassification.Binary:
 					content = null;
 					break;
-				case FileContentClassification.TooLarge:
-				case FileContentClassification.Unreadable:
-				case FileContentClassification.UnsupportedEncoding:
+				case var classification when PreparedSecretFile.IsUnscannableClassification(classification):
 					break;
 				case FileContentClassification.Text when content is not null:
 					break;

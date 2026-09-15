@@ -1185,6 +1185,26 @@ internal static class UiTestDriver
 		await RaiseMenuItemClickAsync(item);
 	}
 
+	public static (bool Rule, bool File) GetBulkRedactionMenuVisibility(
+		VirtualizedPreviewTextControl textControl,
+		string occurrenceId)
+	{
+		var document = textControl.Document;
+		Assert.NotNull(document);
+		var redaction = document!.Redactions.First(span =>
+			string.Equals(span.OccurrenceId, occurrenceId, StringComparison.Ordinal));
+		InvokeRequiredPrivateMethod(textControl, "EnsureContextMenu");
+		var contextField = textControl.GetType().GetField(
+			"_contextDetectorRedaction",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(contextField);
+		contextField!.SetValue(textControl, redaction);
+		InvokeRequiredPrivateMethod(textControl, "PrepareBulkSecretMenuItems");
+		return (
+			GetRequiredPrivateField<MenuItem>(textControl, "_bulkRuleRedactionMenuItem").IsVisible,
+			GetRequiredPrivateField<MenuItem>(textControl, "_bulkFileRedactionMenuItem").IsVisible);
+	}
+
 	public static async Task RequestRedactionToggleAsync(MainWindow window, string occurrenceId)
 	{
 		var textControl = GetRequiredControl<VirtualizedPreviewTextControl>(window, "PreviewTextControl");
