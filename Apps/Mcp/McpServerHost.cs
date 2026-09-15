@@ -53,8 +53,8 @@ public static class McpServerHost
 			.Replace("Inline pack_context is limited to 50,000 characters; larger packs are stored. ", string.Empty,
 				StringComparison.Ordinal);
 		var body = searchBodyCharacters == 0 ? string.Empty :
-			$"One search declaration body: up to {searchBodyCharacters.ToString("N0", CultureInfo.InvariantCulture)} characters. ";
-		return prefix + body + common;
+			$" One search declaration body: up to {searchBodyCharacters.ToString("N0", CultureInfo.InvariantCulture)} characters.";
+		return prefix + common + body;
 	}
 
 	private static void ValidateSearchBodyCharacters(int limit)
