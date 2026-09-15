@@ -25,6 +25,7 @@ public sealed partial class McpServerProcessTests
 		})));
 
 		Assert.Contains("107:    string Needle()", text, StringComparison.Ordinal);
+		Assert.Contains("Sample.Needle 107-107", text, StringComparison.Ordinal);
 		Assert.Contains("matches written=101", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("symbol\":\"Sample.Configure\"", text, StringComparison.Ordinal);
 		Assert.InRange(SpotlightBody(text).Length, 1, 16_000);

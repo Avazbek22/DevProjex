@@ -1114,6 +1114,39 @@ The trusted `[Declaration body] shown=1/N` notice states how many other declarat
 separate reads. If the selected printed name identifies more than one declaration in its
 file, no body is guessed; the response says to use the listed inclusive range instead.
 
+#### Evidence-preserving placement checks
+
+The same real-server queries were compared on the Release build at
+`1faac5c637a31e500bc09ef6ce9a63cff605051a` and the placement implementation at
+`62432f5ed20147ae2a3acc25a4947af0c4441aa7`. Each used `context_lines: 3`,
+`max_results: 200`, default case-insensitive matching, and the same selection.
+File counts include every file with a numbered matching line, including documentation,
+not just files with supported declarations. Matching lines are counted in the match
+section, not counted twice when a body repeats one.
+
+| Pinned repository | Pattern | Distinct files before → after | Shown matches before → after | Body before → after |
+|---|---|---:|---:|---|
+| Serilog `49b5339ce85385dc52d4d8e8f2b8308becf23506` | `Emit` | 51 → 51 | 62 → 66 | `Serilog.Core.Sinks.AggregateSink.Emit` → omitted |
+| client_golang `3f5d6801b95618d04d5057edb1724b02aae69082` | `Observe` | 34 → 34 | 60 → 62 | `Summary.Observe` → omitted |
+| Zod `12e6272746eb79c9713f4818e85a15231bd368b6` | `parse` | 57 → 60 | 58 → 60 | `parseArgs` → omitted |
+
+These dense responses use their space for evidence rather than an extra body. No
+matching file was lost. In Zod, one previously shown matching line moved to the stored
+pack as the full-cap breadth allocation admitted more files; its exact numbered text
+was confirmed through `read_pack`. Retention limits and stored whole-file continuation
+are unchanged.
+
+Deterministic process fixtures also cover the last fitting exact-name hit: the previous
+placement returned 89 of 101 matching lines and gave the body to `Sample.Configure`;
+the fixed placement returns all 101, keeps `Sample.Needle` selected, and omits its body
+when it cannot fit. A separate 26-file fixture returns 26 files instead of 24, while a
+continuation fixture verifies that every retained matching address is present inline
+or in `read_pack`. Run these checks with:
+
+```powershell
+dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release -m:1 --filter "FullyQualifiedName~RealProcessPreservesTheExactNameMatchAtTheEndOfTheSearchSlice|FullyQualifiedName~RealProcessKeepsEveryMatchingFileWhenTheBodyWouldNeedItsSpace|FullyQualifiedName~RealProcessPrintsOverlappingDeclarationContextOnlyOnce|FullyQualifiedName~RealProcessBodyPlacementKeepsEveryRetainedMatchInlineOrInTheStoredPack"
+```
+
 One trusted constant closes it:
 
 ```text
