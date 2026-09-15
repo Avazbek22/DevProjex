@@ -11,7 +11,7 @@ public sealed partial class DependencyFactsEngine
 			if (import.IsWildcard)
 				return Edge(source, import, ResolutionStatus.Unresolved, null, "wildcard import is resolution context, not a dependency target", []);
 			if (!import.Specifier.StartsWith("_root_.", StringComparison.Ordinal) && source.ScalaValueScopes.Any(scope =>
-			    (scope.Name == import.Specifier.Split('.')[0] || scope.Name == "$unknown-binding") && scope.StartLine <= import.Site.Line && scope.EndLine >= import.Site.Line))
+				(scope.Name == import.Specifier.Split('.')[0] || scope.Name == "$unknown-binding") && scope.StartLine <= import.Site.Line && scope.EndLine >= import.Site.Line))
 				return Edge(source, import, ResolutionStatus.Unresolved, null, "Scala import qualifier binding is not proven", []);
 			return ScalaImportCandidates(source, import, LookupScalaImport(source, import.Specifier, import.ContainingDeclaration ?? string.Empty));
 		}
@@ -48,7 +48,7 @@ public sealed partial class DependencyFactsEngine
 			if (ScalaConfigurationFailure(source) is { } failure)
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, failure, []);
 			if (source.TypeParameterScopes.Any(parameter => parameter.Name == reference.Name &&
-			    parameter.StartIndex <= reference.SourceStartIndex && parameter.EndIndex >= reference.SourceStartIndex))
+				parameter.StartIndex <= reference.SourceStartIndex && parameter.EndIndex >= reference.SourceStartIndex))
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "type parameter shadows declarations", []);
 			var activeImports = source.ScalaImportDirectives.Where(directive =>
 				directive.ScopeStartIndex <= reference.SourceStartIndex && directive.ScopeEndIndex >= reference.SourceStartIndex).ToArray();
@@ -58,18 +58,18 @@ public sealed partial class DependencyFactsEngine
 			DeclarationFact[] candidates = [];
 			var head = reference.Name.Split('.')[0];
 			if (source.ScalaValueScopes.Any(scope => (scope.Name == head || scope.Name == "$unknown-binding") &&
-			    scope.StartIndex <= reference.SourceStartIndex && scope.EndIndex >= reference.SourceStartIndex))
+				scope.StartIndex <= reference.SourceStartIndex && scope.EndIndex >= reference.SourceStartIndex))
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "Scala type qualifier binding is not proven", []);
 			var imports = activeImports.Where(directive => (directive.Alias ?? directive.Specifier.Split('.')[^1]) == head).ToArray();
 			if (source.Declarations.Any(declaration => declaration.Identity.FileScope == source.Path &&
-			    declaration.Identity.SymbolKind is SymbolKind.Class or SymbolKind.Interface && declaration.Identity.QualifiedName.Split('.')[^1] == head))
+				declaration.Identity.SymbolKind is SymbolKind.Class or SymbolKind.Interface && declaration.Identity.QualifiedName.Split('.')[^1] == head))
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "Scala local type binding is not proven", []);
 			if (imports.Length > 0)
 			{
 				if (imports.Length > 1)
 					return Edge(source, reference, ResolutionStatus.Unresolved, null, "Scala import binding is not proven", []);
 				if (imports.Any(directive => !directive.Specifier.StartsWith("_root_.", StringComparison.Ordinal) && source.ScalaValueScopes.Any(scope =>
-				    (scope.Name == directive.Specifier.Split('.')[0] || scope.Name == "$unknown-binding") && scope.StartIndex <= directive.ScopeStartIndex && scope.EndIndex >= directive.ScopeStartIndex)))
+					(scope.Name == directive.Specifier.Split('.')[0] || scope.Name == "$unknown-binding") && scope.StartIndex <= directive.ScopeStartIndex && scope.EndIndex >= directive.ScopeStartIndex)))
 					return Edge(source, reference, ResolutionStatus.Unresolved, null, "Scala import qualifier binding is not proven", []);
 				candidates = imports.SelectMany(directive => LookupScalaImport(source,
 					directive.Specifier + reference.Name[head.Length..], directive.ContainingNamespace)).ToArray();

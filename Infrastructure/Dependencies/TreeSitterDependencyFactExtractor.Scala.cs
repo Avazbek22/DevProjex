@@ -9,7 +9,7 @@ public sealed partial class TreeSitterDependencyFactExtractor
 	{
 		var body = node.GetChildForField("body") ?? node.NamedChildren.LastOrDefault(static child => child.Type == "template_body");
 		if (body is null || body.Type != "indented_block" &&
-		    (body.Type != "template_body" || body.Children.FirstOrDefault()?.Type != ":")) return node;
+			(body.Type != "template_body" || body.Children.FirstOrDefault()?.Type != ":")) return node;
 		var last = body.NamedChildren.LastOrDefault(child =>
 			child.Type is not ("comment" or "block_comment") || child.StartPosition.Column > node.StartPosition.Column);
 		return last is null ? node : ScalaNavigationEnd(last);
@@ -26,7 +26,7 @@ public sealed partial class TreeSitterDependencyFactExtractor
 			{
 				if (sibling.StartIndex >= node.StartIndex) break;
 				if (sibling.Type == "package_clause" && sibling.GetChildForField("body") is null &&
-				    !sibling.NamedChildren.Any(static child => child.Type == "template_body") && sibling.GetChildForField("name") is { } name)
+					!sibling.NamedChildren.Any(static child => child.Type == "template_body") && sibling.GetChildForField("name") is { } name)
 					parts[checked((int)sibling.StartIndex)] = name.Text;
 			}
 		}
@@ -42,7 +42,8 @@ public sealed partial class TreeSitterDependencyFactExtractor
 			return CreateCapture(captureName, node, text, null, 0, false, false,
 				ReadScalaNamespace(node), ReadScalaImport(node, materialization), evidence: OneLineEvidence(text)) with
 			{
-				ScopeStartIndex = checked((int)node.EndIndex), ScopeEndIndex = checked((int)scope.EndIndex)
+				ScopeStartIndex = checked((int)node.EndIndex),
+				ScopeEndIndex = checked((int)scope.EndIndex)
 			};
 		}
 		if (captureName == "context.scala_parameter")
@@ -51,7 +52,8 @@ public sealed partial class TreeSitterDependencyFactExtractor
 			var text = materialization.Read(node);
 			return CreateCapture(captureName, node, text, text, 0, false, false, evidence: text) with
 			{
-				StartIndex = checked((int)owner.StartIndex), EndIndex = checked((int)owner.EndIndex)
+				StartIndex = checked((int)owner.StartIndex),
+				EndIndex = checked((int)owner.EndIndex)
 			};
 		}
 		if (captureName == "context.scala_value")
