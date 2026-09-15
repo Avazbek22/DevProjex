@@ -1065,7 +1065,8 @@ At most 20 are listed.
 
 The declaration body is selected without changing match order or the declaration list.
 Literal fragments of at least three characters are taken conservatively from the search
-pattern. A declaration name containing any fragment exactly wins first; otherwise a
+pattern. Exact ordinal equality with the full printed name or its last segment after
+a dot, colon, or navigation owner separator wins first. Otherwise a declaration name containing any fragment exactly wins; otherwise a
 name containing a fragment after case-folding and removing separators wins. Within the
 same name quality, the declaration containing the most distinct matched lines wins.
 The existing deterministic declaration order breaks the remaining ties. If the pattern
@@ -1087,7 +1088,8 @@ public LogEventLevel GetLevel(string source)
 
 The body comes from the same transformed snapshot that produced the match, so mandatory
 secret masking and configured private-data replacement have already run. Only this one
-body is included. It is limited to 1,800 characters; a cut body reports exactly how many
+body is included. It is limited to 3,000 characters within the unchanged 16,000-character
+search response budget; a cut body reports exactly how many
 declaration lines remain and prints the complete `get_file` arguments needed to read it.
 The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
 separate reads. If the selected printed name identifies more than one declaration in its

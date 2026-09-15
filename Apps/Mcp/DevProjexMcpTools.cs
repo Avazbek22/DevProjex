@@ -26,7 +26,7 @@ internal sealed class DevProjexMcpTools(
 	// context budget in one unpredictable call. The cap bounds that, and the totals line
 	// tells the caller how much it did not get.
 	private const int MaximumSearchContentCharacters = 16_000;
-	internal const int MaximumSearchDeclarationBodyCharacters = 1_800;
+	internal const int MaximumSearchDeclarationBodyCharacters = 3_000;
 	// A search that withholds matches keeps the rest of what it already scanned, so the caller can
 	// page it instead of running the same scan again. These bound what one session will hold for
 	// that: weaker matches are displaced as stronger evidence arrives, and the response says when
@@ -844,7 +844,7 @@ internal sealed class DevProjexMcpTools(
 		});
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap; read the rest with one batched get_file requests call.")]
+		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, patterns, and max_file_bytes. The best unique declaration includes up to 3,000 protected body characters within the same cap; read the rest with one batched get_file requests call.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>

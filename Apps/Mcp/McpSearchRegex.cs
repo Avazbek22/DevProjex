@@ -43,6 +43,16 @@ internal sealed class McpSearchRegex
 	public McpDeclarationBodyNameMatchQuality DeclarationBodyNameMatchQuality(string declaredName)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(declaredName);
+		var separator = declaredName.AsSpan().LastIndexOfAny('.', ':', '#');
+		var lastSegment = separator < 0 ? declaredName.AsSpan() : declaredName.AsSpan(separator + 1);
+		foreach (var term in declarationBodyLiteralTerms)
+		{
+			if (declaredName.Equals(term.Text, StringComparison.Ordinal) ||
+				lastSegment.Equals(term.Text, StringComparison.Ordinal))
+			{
+				return McpDeclarationBodyNameMatchQuality.Equal;
+			}
+		}
 		foreach (var term in declarationBodyLiteralTerms)
 		{
 			if (declaredName.Contains(term.Text, StringComparison.Ordinal))
@@ -405,5 +415,6 @@ internal enum McpDeclarationBodyNameMatchQuality
 {
 	None,
 	SeparatorInsensitive,
-	Exact
+	Exact,
+	Equal
 }

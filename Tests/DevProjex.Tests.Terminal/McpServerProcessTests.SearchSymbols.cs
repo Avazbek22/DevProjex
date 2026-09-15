@@ -585,7 +585,7 @@ public sealed partial class McpServerProcessTests
 			new Dictionary<string, object?> { ["pattern"] = "body-limit-marker", ["context_lines"] = 0 })));
 
 		var body = ExtractBestDeclarationBody(text);
-		Assert.InRange(body.Length, 1, 1_800);
+		Assert.InRange(body.Length, 1, 3_000);
 		var truncation = Regex.Match(
 			text,
 			@"\[Declaration body truncated: (?<remaining>[0-9]+) line\(s\) remain; call get_file with the arguments above\.\]",
