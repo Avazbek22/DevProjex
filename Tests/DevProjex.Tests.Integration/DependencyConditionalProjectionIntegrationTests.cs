@@ -27,13 +27,18 @@ public sealed class DependencyConditionalProjectionIntegrationTests
 		using var extractor = new TreeSitterDependencyFactExtractor();
 		var facts = Extract(extractor, source);
 		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
-		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name.EndsWith("." + expectedName, StringComparison.Ordinal));
+		var qualifiedName = expectedName == "Local" ? "Sample.Holder.Run.Local" : "Sample.Holder." + expectedName;
+		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name == qualifiedName);
 		Assert.Contains(facts.References, reference => reference.Name == "Target");
-		Assert.DoesNotContain(facts.References, reference => reference.Name == "Inside");
+		Assert.DoesNotContain(facts.References, reference => reference.Name.StartsWith("Inside", StringComparison.Ordinal));
+		var omittedStartLine = LineAt(source, source.IndexOf("#if", StringComparison.Ordinal));
+		var omittedEndLine = LineAt(source, source.LastIndexOf("#endif", StringComparison.Ordinal));
+		Assert.DoesNotContain(facts.References, reference => reference.Site.Line >= omittedStartLine && reference.Site.Line <= omittedEndLine);
+		Assert.DoesNotContain(facts.Declarations.SelectMany(declaration => declaration.DeclarationSites), site => site.Line >= omittedStartLine && site.Line <= omittedEndLine);
+		Assert.DoesNotContain(facts.NavigationDeclarations, declaration => declaration.StartLine >= omittedStartLine && declaration.EndLine <= omittedEndLine);
 		var partial = Assert.IsType<DependencyPartialParseDiagnostic>(facts.PartialParse);
 		Assert.Contains(partial.Ranges, range =>
-			range.StartLine == LineAt(source, source.IndexOf("#if", StringComparison.Ordinal)) &&
-			range.EndLine == LineAt(source, source.LastIndexOf("#endif", StringComparison.Ordinal)));
+			range.StartLine == omittedStartLine && range.EndLine == omittedEndLine);
 		Assert.Equal(1, partial.DroppedConstructs);
 		Assert.True(extractor.ParseCount <= 2, scenario);
 		Assert.Equal(facts.NavigationDeclarations,
