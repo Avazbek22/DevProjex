@@ -12,8 +12,10 @@ public sealed class DependencyConditionalProjectionIntegrationTests
 		{ "local function", "public void Run() { void Local(\n#if FEATURE\nInside first,\n#else\nInside second,\n#endif\nTarget last) { Target value; } }", "Local" },
 		{ "arguments", "public void Run() { Call(\n#if FEATURE\nInside.First,\n#else\nInside.Second,\n#endif\n0); Target value; }", "Run" },
 		{ "initializer", "public void Run() { var values = new[] {\n#if FEATURE\nInside.First,\n#else\nInside.Second,\n#endif\n0 }; Target value; }", "Run" },
+		{ "collection", "public void Run() { var values = new System.Collections.Generic.List<object> {\n#if FEATURE\nInside.First,\n#else\nInside.Second,\n#endif\n0 }; Target value; }", "Run" },
 		{ "members", "public\n#if FEATURE\nstatic\n#else\nreadonly\n#endif\nTarget Value; public void Run() { Target value; }", "Run" },
 		{ "attributes", "[Marker(\n#if FEATURE\ntypeof(Inside),\n#else\ntypeof(Inside),\n#endif\n0)] public void Run() { Target value; }", "Run" },
+		{ "attribute list", "[Marker,\n#if FEATURE\nInside,\n#else\nInside,\n#endif\nOther] public void Run() { Target value; }", "Run" },
 		{ "nested", "public void Run(\n#if OUTER\n#if INNER\nInside first,\n#else\nInside second,\n#endif\n#else\nInside third,\n#endif\nTarget last) { Target value; }", "Run" },
 		{ "elif", "public void Run(\n#if FIRST\nInside first,\n#elif SECOND\nInside second,\n#else\nInside third,\n#endif\nTarget last) { Target value; }", "Run" }
 	};
@@ -59,6 +61,19 @@ public sealed class DependencyConditionalProjectionIntegrationTests
 		Assert.Equal(source.IndexOf("public void Run", StringComparison.Ordinal), run.StartIndex);
 		Assert.Equal(source.IndexOf("}" + newline + "}", StringComparison.Ordinal) + 1, run.EndIndex);
 		Assert.DoesNotContain(facts.References, reference => reference.Name == "隐藏" || reference.Name == "Inside");
+	}
+
+	[Fact]
+	public void HealthyConditionalAttributeGroupsKeepTheirExistingUnknownConfigurationBindings()
+	{
+		var source = "class Holder {\n#if FEATURE\n[Inside]\n#else\n[Inside]\n#endif\n[Marker] public void Run() { Target value; } }";
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		var facts = Extract(extractor, source);
+		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name == "Holder.Run");
+		Assert.Contains(facts.References, reference => reference.Name == "Inside" &&
+			reference.Reason == "C# preprocessor configuration is not available");
+		Assert.Null(facts.PartialParse);
+		Assert.Equal(1, extractor.ParseCount);
 	}
 
 	[Fact]
