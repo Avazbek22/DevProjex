@@ -387,6 +387,44 @@ types, Python 3.12/3.13 standard-library module names, and Node 24 built-in modu
 and Node package dependencies are additional external evidence. Merely failing to find a name in the manifest never
 produces `External`.
 
+### Bash
+
+Bash (`.sh`, `.bash`) records named functions in both `name()` and `function name` forms for
+dependency facts and symbol navigation. `source path`, `. path`, direct script-path commands and
+`bash path` / `sh path` supply explicit file evidence. Literal relative paths are interpreted from
+the importing script's directory, never from the process working directory. Only targets already
+inside the allowed manifest can resolve; absolute paths remain unresolved.
+
+Variable expansion, command substitution, tilde expansion, globbing and escaped path expressions
+remain `Unresolved`: the index does not execute shell code or infer variable values. Commands found
+through `PATH`, such as `grep`, are not file dependencies. Interpreter flags and computed command
+names are not interpreted. Function calls do not create cross-file edges.
+
+### Scala
+
+Scala (`.scala`, `.sc`) contributes packages, objects, classes (including case classes), traits,
+named `def` declarations and top-level `val` declarations. Navigation retains the package and
+lexical owner chain; overloaded members have stable ordinal suffixes usable unchanged as symbol
+selectors. Braced and Scala 3 indented declarations use the bundled grammar's syntax boundaries;
+dedented trailing comments are outside the preceding declaration's navigation range.
+
+The nearest selected `build.sbt` or `build.sc` supplies project ownership without executing build
+code. Explicit imports include ordinary names, selector lists, `=>` / `as` renames and wildcard
+selectors. Package names and declared symbols identify targets in the manifest, including
+`src/main/scala` and `src/test/scala` layouts; main sources cannot resolve test-only declarations.
+Relative package qualification prefers lexical packages; `_root_` imports are absolute. More than
+one target file stays `Ambiguous`, while an excluded target remains `Unresolved` with no leaked path.
+
+Type positions resolve only through proven lexical declarations or explicit scoped imports. Type
+parameters, local values and aliases that make a qualifier uncertain are not guessed into package
+names. Wildcard imports and references whose binding depends on them remain `Unresolved` even when
+the current manifest contains one apparent candidate. Qualified type expressions without a proven
+import binding, local type bindings, unsupported selector syntax and comma-separated import clauses
+also remain unresolved. No implicit search, extension-method dispatch, inheritance-member binding,
+generated source, sbt settings evaluation or external-package execution is inferred. Missing or
+unavailable build ownership prevents cross-file resolution. Configuration changes invalidate
+resolution independently of source parsing.
+
 ## Extraction, limits, and diagnostics
 
 C#, TypeScript/TSX/JavaScript, Python, Go, Java, Rust, Kotlin, Ruby, PHP, C, and C++ adapters use shipped Tree-sitter grammars and embedded

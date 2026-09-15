@@ -12,7 +12,7 @@ using TreeSitter;
 
 namespace DevProjex.Infrastructure.Dependencies;
 
-public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor, IDependencyNavigationExtractor
+public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactExtractor, IDependencyNavigationExtractor
 {
 	private const int MaximumWorkers = 8;
 	private const int MaximumRetainedWorkersPerLanguage = 2;
@@ -626,7 +626,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		using var cursor = query.Execute(root);
 		var declarations = new List<NavigationDeclaration>();
 		var seen = new HashSet<(int Start, int End, NavigationSymbolKind Kind, string Name)>();
-		var javaNames = language is LanguageId.Java or LanguageId.Kotlin or LanguageId.Ruby or LanguageId.Php or LanguageId.Cpp
+		var javaNames = language is LanguageId.Java or LanguageId.Kotlin or LanguageId.Ruby or LanguageId.Php or LanguageId.Cpp or LanguageId.Scala
 			? new Dictionary<string, int>(StringComparer.Ordinal)
 			: null;
 		var visited = 0;
@@ -654,6 +654,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			else if (language == LanguageId.Php && capture.Node.Type == "namespace_definition")
 				fileScopedNamespace = name;
 			var owners = ReadNavigationOwners(capture.Node, language).ToList();
+			if (language == LanguageId.Scala && ReadScalaNamespace(capture.Node) is { Length: > 0 } scalaNamespace)
+				owners.Insert(0, scalaNamespace);
 			if (fileScopedNamespace is not null &&
 			    capture.Node.Type is not ("file_scoped_namespace_declaration" or "package_declaration" or "package_header" or "namespace_definition"))
 			{
@@ -674,7 +676,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					_ => $"{owner}::{name}"
 				}
 				: owner is null ? name : $"{owner}{separator}{name}";
-			if (javaNames is not null && capture.Node.Type is not ("package_declaration" or "package_header" or "namespace_definition"))
+			if (javaNames is not null && capture.Node.Type is not ("package_declaration" or "package_header" or "namespace_definition" or "package_clause"))
 			{
 				var ordinal = javaNames.GetValueOrDefault(qualifiedName) + 1;
 				javaNames[qualifiedName] = ordinal;
@@ -690,7 +692,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				_ => NavigationSymbolKind.Type
 			};
 			var start = checked((int)capture.Node.StartPosition.Row + 1);
-			var end = checked((int)capture.Node.EndPosition.Row + 1);
+			var navigationEnd = language == LanguageId.Scala ? ScalaNavigationEnd(capture.Node) : capture.Node;
+			var end = checked((int)navigationEnd.EndPosition.Row + 1);
 			if (seen.Add((checked((int)capture.Node.StartIndex), checked((int)capture.Node.EndIndex), kind, qualifiedName)))
 			{
 				declarations.Add(new NavigationDeclaration(
@@ -702,7 +705,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 					contentFingerprint)
 				{
 					StartIndex = checked((int)capture.Node.StartIndex),
-					EndIndex = checked((int)capture.Node.EndIndex)
+					EndIndex = checked((int)navigationEnd.EndIndex)
 				});
 			}
 		}
@@ -919,6 +922,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 
 	private static string? ReadNavigationName(Node node, LanguageId language)
 	{
+		if (language == LanguageId.Scala && node.Type == "val_definition")
+			return node.NamedChildren.FirstOrDefault(static child => child.Type == "identifier")?.Text;
 		if (language == LanguageId.Kotlin && node.Type == "function_declaration")
 			return KotlinFunctionName(node);
 		var named = node.GetChildForField("name") ?? node.GetChildForField("key");
@@ -1025,6 +1030,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 			"union_specifier" or "enum_specifier",
 		LanguageId.Cpp => nodeType is "namespace_definition" or "class_specifier" or
 			"struct_specifier" or "union_specifier" or "enum_specifier" or "function_definition",
+		LanguageId.Scala => nodeType is "class_definition" or "object_definition" or "trait_definition" or "function_definition" or "function_declaration",
 		_ => false
 	};
 
@@ -1139,6 +1145,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		Node node,
 		NodeTextMaterializationCounter materialization)
 	{
+		if (captureName.Contains(".scala_", StringComparison.Ordinal))
+			return CreateScalaCapture(captureName, node, materialization);
 		if (captureName == "context.type_parameters")
 		{
 			var owner = node.Parent;
@@ -1202,6 +1210,7 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		if (captureName.StartsWith("import.", StringComparison.Ordinal))
 		{
 			var importSyntax = CreateImportSyntax(captureName, node, materialization, moduleCallName);
+			if (captureName == "import.bash" && importSyntax is null) return null;
 			var importEvidence = CreateCompactImportEvidence(captureName, importSyntax);
 			return CreateCapture(captureName, node, importEvidence, null, 0, false, false,
 				FindImportOwner(captureName, node, materialization), importSyntax, evidence: importEvidence);
@@ -1343,6 +1352,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		string captureName,
 		DependencyImportSyntax? syntax)
 	{
+		if (captureName == "import.bash")
+			return OneLineEvidence($"{syntax?.Bindings.Single().Name} {syntax?.Specifier}");
 		if (captureName is "import.esm" or "import.export")
 			return OneLineEvidence($"{(captureName == "import.export" ? "export" : "import")} {syntax?.Specifier ?? string.Empty}");
 		if (captureName == "import.call")
@@ -1451,12 +1462,48 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		return null;
 	}
 
+	private static DependencyImportSyntax? ReadBashImport(Node node, NodeTextMaterializationCounter materialization)
+	{
+		var commandNode = node.GetChildForField("name");
+		if (commandNode is null) return null;
+		var command = materialization.Read(commandNode);
+		var arguments = node.GetChildrenForField("argument").ToArray();
+		Node? path;
+		if (command is "source" or ".")
+			path = arguments.FirstOrDefault();
+		else if (command is "bash" or "sh")
+		{
+			path = arguments.FirstOrDefault();
+			if (path is not null && materialization.Read(path) == "--") path = arguments.Skip(1).FirstOrDefault();
+			if (path is not null && materialization.Read(path).StartsWith('-')) return null;
+		}
+		else
+		{
+			if (!command.Contains('/')) return null;
+			path = commandNode.NamedChildren.FirstOrDefault() ?? commandNode;
+		}
+		if (path is null) return null;
+		var text = materialization.Read(path);
+		var literal = path.Type is "word" or "raw_string" ||
+			path.Type == "string" && path.NamedChildren.All(static child => child.Type == "string_content");
+		if (text.Length >= 2 && text[0] is '\'' or '"' && text[^1] == text[0])
+			text = text[1..^1];
+		// Escapes and unquoted expansion syntax are deliberately not evaluated.
+		literal &= !text.Contains('\\') &&
+			(path.Type == "raw_string" || !text.AsSpan().ContainsAny('$', '`', '~')) &&
+			(path.Type != "word" || !text.AsSpan().ContainsAny('*', '?', '['));
+		if (text.Length == 0) return null;
+		return new DependencyImportSyntax(text, 0, [new DependencyImportBinding(command, null)], literal);
+	}
+
 	private static DependencyImportSyntax? CreateImportSyntax(
 		string captureName,
 		Node node,
 		NodeTextMaterializationCounter materialization,
 		string? moduleCallName)
 	{
+		if (captureName == "import.bash")
+			return ReadBashImport(node, materialization);
 		if (captureName is "import.esm" or "import.export")
 		{
 			var source = node.GetChildForField("source");
@@ -1790,6 +1837,8 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 		".php" or ".phtml" => LanguageId.Php,
 		".c" or ".h" => LanguageId.C,
 		".cc" or ".cpp" or ".cxx" or ".hh" or ".hpp" or ".hxx" => LanguageId.Cpp,
+		".sh" or ".bash" => LanguageId.Bash,
+		".scala" or ".sc" => LanguageId.Scala,
 		_ => LanguageId.Unsupported
 	};
 
@@ -2135,7 +2184,9 @@ public sealed class TreeSitterDependencyFactExtractor : IDependencyFactExtractor
 				[LanguageId.Ruby] = new("tree-sitter-ruby", "tree_sitter_ruby", "ruby", new RubyDependencyLanguageAdapter()),
 				[LanguageId.Php] = new("tree-sitter-php", "tree_sitter_php", "php", new PhpDependencyLanguageAdapter()),
 				[LanguageId.C] = new("tree-sitter-c", "tree_sitter_c", "c", new CDependencyLanguageAdapter()),
-				[LanguageId.Cpp] = new("tree-sitter-cpp", "tree_sitter_cpp", "cpp", new CppDependencyLanguageAdapter())
+				[LanguageId.Cpp] = new("tree-sitter-cpp", "tree_sitter_cpp", "cpp", new CppDependencyLanguageAdapter()),
+				[LanguageId.Bash] = new("tree-sitter-bash", "tree_sitter_bash", "bash", new BashDependencyLanguageAdapter()),
+				[LanguageId.Scala] = new("tree-sitter-scala", "tree_sitter_scala", "scala", new ScalaDependencyLanguageAdapter())
 			};
 	}
 

@@ -15,6 +15,11 @@ public sealed class DependencyFactsDocumentationContractTests
 		Assert.Contains("**ExplicitImport**", dependencies, StringComparison.Ordinal);
 		Assert.Contains("**TypeReference**", dependencies, StringComparison.Ordinal);
 		Assert.Contains("**Ambiguous**", dependencies, StringComparison.Ordinal);
+		Assert.Contains("### Bash", dependencies, StringComparison.Ordinal);
+		Assert.Contains("### Scala", dependencies, StringComparison.Ordinal);
+		Assert.Contains("never from the process working directory", dependencies, StringComparison.Ordinal);
+		Assert.Contains("wildcard", dependencies, StringComparison.Ordinal);
+		Assert.Contains("build.sbt", commandLine, StringComparison.Ordinal);
 		Assert.Contains("Merely failing to find a name in the manifest never", dependencies, StringComparison.Ordinal);
 		Assert.Contains("2 Mi characters", dependencies, StringComparison.Ordinal);
 		Assert.Contains(

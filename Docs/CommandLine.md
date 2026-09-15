@@ -579,6 +579,12 @@ the dependency engine indexes the complete effective manifest produced by the se
 profile, roots, extensions, paths, Git mode, exclusions, and file-size limit. It never
 returns a candidate outside that manifest.
 
+Bash seed files record literal script-relative `source` / `.` connections; computed shell paths
+remain explicitly unresolved and commands found through `PATH` are not dependencies. Scala seeds
+record imports and type positions within selected `build.sbt` / `build.sc` ownership. Both languages
+use the same dependency engine as `related_files`; [Dependency Facts](Dependencies.md) describes
+their conservative binding and navigation rules.
+
 Specific options are:
 
 ```text

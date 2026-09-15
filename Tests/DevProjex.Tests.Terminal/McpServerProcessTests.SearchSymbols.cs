@@ -8,6 +8,24 @@ public sealed partial class McpServerProcessTests
 	public static TheoryData<string, string, string, string> MemberNavigationCases => new()
 	{
 		{
+			"Members.scala",
+			"package sample\nobject First { def run(): String = \"member-marker-a\" }\nobject Second { def run(): String = \"member-marker-b\" }\n// fallback-marker\n",
+			"sample.First.run",
+			"sample.Second.run"
+		},
+		{
+			"Indented.scala",
+			"package sample\nobject First:\n  def run(): String =\n    \"member-marker-a\"\nobject Second:\n  def run(): String =\n    \"member-marker-b\"\n// fallback-marker\n",
+			"sample.First.run",
+			"sample.Second.run"
+		},
+		{
+			"members.sh",
+			"first() { echo 'member-marker-a'; }\nfunction second { echo 'member-marker-b'; }\n# fallback-marker\n",
+			"first",
+			"second"
+		},
+		{
 			"Members.cs",
 			"namespace P;\nclass A { string Run() { return \"member-marker-a\"; } }\nclass B { string Run() { return \"member-marker-b\"; } }\n// fallback-marker\n",
 			"P.A.Run",

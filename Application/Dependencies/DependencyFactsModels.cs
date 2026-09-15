@@ -15,7 +15,9 @@ public enum LanguageId
 	Php,
 	C,
 	Cpp,
-	Unsupported
+	Unsupported,
+	Bash,
+	Scala
 }
 
 public enum SymbolKind
@@ -106,6 +108,18 @@ public sealed record CSharpUsingDirective(
 	int ScopeStartIndex,
 	int ScopeEndIndex);
 
+public sealed record ScalaImportDirective(
+	string Specifier,
+	string? Alias,
+	bool IsWildcard,
+	int ScopeStartIndex,
+	int ScopeEndIndex)
+{
+	public string ContainingNamespace { get; init; } = string.Empty;
+}
+
+public sealed record ScalaValueScope(string Name, int StartIndex, int EndIndex, int StartLine, int EndLine);
+
 public sealed record SymbolIdentity(
 	string ScopeId,
 	LanguageId LanguageId,
@@ -186,6 +200,8 @@ public sealed record FileFacts(
 	public IReadOnlyList<NavigationDeclaration> NavigationDeclarations { get; init; } = [];
 	public IReadOnlyList<TypeParameterScope> TypeParameterScopes { get; init; } = [];
 	public IReadOnlyList<CSharpUsingDirective> CSharpUsingDirectives { get; init; } = [];
+	public IReadOnlyList<ScalaImportDirective> ScalaImportDirectives { get; init; } = [];
+	public IReadOnlyList<ScalaValueScope> ScalaValueScopes { get; init; } = [];
 	public DependencyPartialParseDiagnostic? PartialParse { get; init; }
 }
 
