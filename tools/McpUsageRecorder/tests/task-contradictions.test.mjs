@@ -35,6 +35,8 @@ test('negation and rejection of a contradictory assertion do not assert it', () 
     'The assertion "65536 is rejected" is false.',
     '65536 is not rejected.',
     'Неверно, что 65536 is rejected.',
+    'Утверждение "65536 is rejected" неверно.',
+    '65536 is rejected — это неверно.',
   ]) {
     const result = evaluateTaskAnswer(task, `src/url.py tests/url.py. 65536 is accepted. ${denial}`);
     assert.equal(result.classification, 'complete', denial);

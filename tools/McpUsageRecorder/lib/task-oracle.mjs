@@ -212,7 +212,7 @@ function isForbiddenClaimAsserted(text, claim) {
     const before = normalized.slice(0, first);
     const after = normalized.slice(last);
     const deniedBefore = /\b(?:not(?! only\b)|never|false|incorrect|wrong|deny|reject|refute|contrary to)\b|(?:^|\s)(?:не|неверно|ложно|ошибочно|неправда)(?:\s|,|$)/iu.test(before);
-    const deniedAfter = /^["'”’\s,:-]*(?:is|was|would be|это)?\s*(?:false|incorrect|wrong|untrue|неверно|ложно|неправда)\b/iu.test(after);
+    const deniedAfter = /^["'”’\s,:–—-]*(?:is|was|would be|это)?\s*(?:false|incorrect|wrong|untrue|неверно|ложно|неправда)(?=$|[^\p{L}\p{N}_])/iu.test(after);
     return !deniedBefore && !deniedAfter;
   });
 }
