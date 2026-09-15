@@ -6,6 +6,33 @@ namespace DevProjex.Tests.Terminal;
 public sealed class RelatedCommandProcessTests
 {
 	[Fact]
+	public void ConditionalParameterProjectionReportsOnlyTheOmittedSourceLines()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Target.cs", "public class Target {}\n");
+		workspace.WriteFile("project/Consumer.cs",
+			"public class Consumer {\npublic void Run(\n#if FEATURE\nInside first,\n#else\nInside second,\n#endif\nTarget last) {}\n}\n");
+		var text = Run(workspace, "related", "Consumer.cs", "--project", project,
+			"--format", "text", "--git-mode", "none", "--exclude", "none");
+		var json = Run(workspace, "related", "Consumer.cs", "--project", project,
+			"--format", "json", "--git-mode", "none", "--exclude", "none");
+		Assert.Equal(0, text.ExitCode);
+		Assert.Equal(0, json.ExitCode);
+		Assert.Contains("Target.cs", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("[Dependency partial parse] path=Consumer.cs · dropped=1 · lines=3-7", text.StandardOutput, StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var diagnostic = Assert.Single(document.RootElement.GetProperty("coverage")
+			.GetProperty("partialParseDiagnostics").EnumerateArray());
+		Assert.Equal("Consumer.cs", diagnostic.GetProperty("path").GetString());
+		Assert.Equal(1, diagnostic.GetProperty("droppedConstructs").GetInt32());
+		var range = Assert.Single(diagnostic.GetProperty("ranges").EnumerateArray());
+		Assert.Equal(3, range.GetProperty("startLine").GetInt32());
+		Assert.Equal(7, range.GetProperty("endLine").GetInt32());
+	}
+
+	[Fact]
 	public void UnresolvedEvidenceIsExplicitInTextAndJsonOutput()
 	{
 		using var workspace = new TemporaryDirectory();
