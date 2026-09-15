@@ -327,7 +327,8 @@ public sealed partial class McpServerProcessTests
 			string project,
 			string dataRoot,
 			IReadOnlyList<string>? arguments = null,
-			bool allowFileGitTransport = false)
+			bool allowFileGitTransport = false,
+			IReadOnlyDictionary<string, string>? environment = null)
 		{
 			var startInfo = new ProcessStartInfo("dotnet")
 			{
@@ -351,6 +352,8 @@ public sealed partial class McpServerProcessTests
 			foreach (var argument in arguments ?? [])
 				startInfo.ArgumentList.Add(argument);
 			startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot;
+			foreach (var pair in environment ?? new Dictionary<string, string>())
+				startInfo.Environment[pair.Key] = pair.Value;
 			if (allowFileGitTransport)
 			{
 				startInfo.Environment[TerminalTransportPolicyProtocol.AllowLocalFileTransportVariable] =
