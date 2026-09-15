@@ -453,22 +453,31 @@ file. The partial-parse diagnostic reports how many constructions were dropped a
 ranges; no fact from a damaged region is published or guessed. C and C++ compression remains
 independent of dependency extraction.
 
-The C# grammar cannot represent a conditional-compilation block placed between an unconditional type
-base list and its opening brace. DevProjex does not choose a compilation symbol or combine the
-branches. It replaces that complete conditional region with position-preserving whitespace before
-the single parse, reports the region as omitted, and retains only declarations, references, and
-navigation names from the unconditional source around it. A type named only inside that region does
-not become a dependency.
+The C# grammar cannot represent conditional directives in some declaration and expression lists.
+The existing type-base-list projection removes its complete conditional region before parsing.
+For other positions, a damaged C# tree containing balanced conditional directives permits one
+additional parse: complete regions overlapping damaged constructions are replaced with whitespace,
+without choosing a symbol, evaluating a condition, or combining branches. Character offsets and
+every line break are preserved. The replacement is accepted only if syntax damage disappears or
+shrinks without reaching previously undamaged source. Remaining damaged constructions still fail
+closed. Directive-looking text in comments and literals is not removed; a region containing a
+type-parameter binder or splitting a generic argument list is not removed because its surviving
+uses could change meaning. A conditional branch continuing an outside type name with generic
+arguments or qualification is also retained. Such continuations bypass the early base-list
+shortcut; complete generic bases keep that shortcut and its independent conditional members.
+Every removed region is reported with its exact source-line range, and contributes no declaration,
+reference, or navigation name. Unconditional declarations around it retain their original ranges.
 
-Each supported source file is parsed once per content fingerprint. Both fact and navigation queries
-run against that same live tree before it is disposed; only compact facts remain. Files
+Each supported source file normally needs one parse per content fingerprint; only a damaged C# file
+can require the one additional attempt described above. Both fact and navigation queries run
+against the same accepted live tree before it is disposed; only compact facts remain. Files
 without an adapter are counted as unsupported instead of disappearing. Read, grammar, and query
 failures are counted separately as extraction failures.
 MCP search annotations and named reads operate on transformed text, whose line count can differ after
 multi-line replacement or compression. They therefore run the navigation query directly on the same
 bounded transformed snapshot that supplies the response, rather than combining its coordinates with
-a later read from disk. This path performs one parse for each annotated or named-read file and retains
-only the compact projection.
+a later read from disk. This path uses the same bounded C# retry rule for each annotated or named-read
+file and retains only the compact projection.
 The same per-file handling applies before language dispatch: if an unsupported file disappears or its
 metadata cannot be read after selection, it is reported as a transient extraction failure and is not
 retained in the facts cache; it does not abort the rest of the index.

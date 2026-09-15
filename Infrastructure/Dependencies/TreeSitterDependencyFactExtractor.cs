@@ -385,7 +385,8 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				ReadQuery(definition.QueryDirectory, "declarations.scm") + "\0" +
 				ReadQuery(definition.QueryDirectory, "references.scm") + "\0" +
 				ReadQuery(definition.QueryDirectory, "navigation.scm") + "\0" + DiagnosticErrorQuery));
-			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}";
+			var projectionIdentity = id == LanguageId.CSharp ? ":conditional-projection-v3" : string.Empty;
+			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}{projectionIdentity}";
 		});
 
 	public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) =>
@@ -408,15 +409,13 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 		cancellationToken.ThrowIfCancellationRequested();
 		var runtime = GetRuntime(language);
 		using var lease = runtime.Rent(_workerBudget);
-		var preparedParse = PrepareParseSource(language, source);
-		using var tree = lease.Parser.Parse(preparedParse.Source) ??
-			throw new InvalidOperationException("Tree-sitter returned no syntax tree.");
-		Interlocked.Increment(ref _parseCount);
+		using var tree = ParseWithConditionalProjection(lease.Parser, language, source, relativePath,
+			cancellationToken, out var omittedRegions);
 		var syntaxDamage = AnalyzeSyntaxDamage(
 			tree.RootNode,
 			relativePath,
 			cancellationToken,
-			preparedParse.OmittedRegions);
+			omittedRegions);
 		return CaptureNavigation(
 			runtime.Navigation,
 			tree.RootNode,
@@ -444,15 +443,13 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 			cancellationToken.ThrowIfCancellationRequested();
 			var runtime = GetRuntime(source.LanguageId);
 			using var lease = runtime.Rent(_workerBudget);
-			var preparedParse = PrepareParseSource(source.LanguageId, source.Source);
-			using var tree = lease.Parser.Parse(preparedParse.Source) ??
-				throw new InvalidOperationException("Tree-sitter returned no syntax tree.");
-			Interlocked.Increment(ref _parseCount);
+			using var tree = ParseWithConditionalProjection(lease.Parser, source.LanguageId, source.Source,
+				source.RelativePath, cancellationToken, out var omittedRegions);
 			var syntaxDamage = AnalyzeSyntaxDamage(
 				tree.RootNode,
 				source.RelativePath,
 				cancellationToken,
-				preparedParse.OmittedRegions);
+				omittedRegions);
 			var partialParse = syntaxDamage?.Diagnostic;
 			var (declarations, references, errorKinds, rawCaptureLimitExceeded) = CaptureFacts(
 				runtime.Facts,
@@ -801,7 +798,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 					break;
 				}
 			}
-			if (endLine < 0)
+			if (endLine < 0 || HasConditionalTypeContinuation(source, lines, index, endLine))
 				continue;
 
 			projected ??= source.ToCharArray();

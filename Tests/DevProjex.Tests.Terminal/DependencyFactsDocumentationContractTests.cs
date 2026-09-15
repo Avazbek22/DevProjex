@@ -39,6 +39,9 @@ public sealed class DependencyFactsDocumentationContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Import paths are not resolved", dependencies, StringComparison.Ordinal);
 		Assert.Contains("Coverage reports the number of dropped constructions", dependencies, StringComparison.Ordinal);
+		Assert.Contains("additional parse:", dependencies, StringComparison.Ordinal);
+		Assert.Contains("without choosing a symbol", dependencies, StringComparison.Ordinal);
+		Assert.Contains("Remaining damaged constructions still fail", dependencies, StringComparison.Ordinal);
 		Assert.Contains(
 			"Without an owning `tsconfig.json` or `jsconfig.json`, one narrow capability applies",
 			dependencies,
