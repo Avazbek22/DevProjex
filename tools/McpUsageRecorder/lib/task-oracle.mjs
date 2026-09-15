@@ -159,12 +159,25 @@ function validateTask(task) {
 
 function result(task, classification, namedPaths, missingPaths, missingClaims, missingSymbols,
   unexpectedPaths, contradictedClaims = []) {
+  const requiredEvidence = missingPaths.length + missingClaims.length + missingSymbols.length === 0
+    ? 'found' : 'missing';
+  const knownContradictions = unexpectedPaths.length + contradictedClaims.length > 0
+    ? 'detected' : 'not-detected';
   return {
     taskId: task.id,
     oracleCoverage: task.oracleCoverage,
     classification,
     complete: classification === 'complete',
     supported: classification === 'complete' || classification === 'incomplete',
+    requiredEvidence,
+    knownContradictions,
+    semanticCorrectness: 'requires-separate-check',
+    outcomeStatements: [
+      requiredEvidence === 'found' ? 'обязательные основания найдены' : 'обязательные основания найдены не полностью',
+      knownContradictions === 'detected' ? 'известное противоречие обнаружено' :
+        'ни одно из заданных запрещённых утверждений не обнаружено',
+      'содержательная правильность требует отдельной проверки',
+    ],
     namedPaths,
     missingPaths,
     missingClaims,
@@ -198,23 +211,30 @@ function normalizeClaimText(text) {
 function isForbiddenClaimAsserted(text, claim) {
   if (claim.match !== 'affirmative-phrase')
     return claim.terms.every(group => group.some(term => includesText(text, term)));
-  const clauses = text.split(/(?<=[.!?])\s+|[\r\n;]+|\b(?:but|however|но|однако)\b/iu);
+  const prose = text.replace(/```[^\n]*\n[\s\S]*?```|~~~[^\n]*\n[\s\S]*?~~~/gu, '')
+    .split(/\r?\n/).filter(line => !/^\s*>/u.test(line)).join('\n');
+  const assertions = prose.replace(/"[^"]*"|“[^”]*”|‘[^’]*’|(?<![\p{L}\p{N}])'[^']*'/gu,
+    (quotation, offset) => /^\s*(?:is|was)\s+(?:true|correct)(?=$|[^\p{L}\p{N}_])/iu
+      .test(normalizeClaimText(prose.slice(offset + quotation.length))) ? quotation : ' '.repeat(quotation.length));
+  const clauses = assertions.split(/(?<=[.!?])\s+|[\r\n;]+/u);
   return clauses.some(clause => {
     const normalized = normalizeClaimText(clause);
-    const positions = claim.terms.map(group => group.map(term => {
+    return claim.terms.every(group => group.some(term => {
       const phrase = normalizeClaimText(term);
-      return { start: normalized.indexOf(phrase), length: phrase.length };
-    }).filter(position => position.start >= 0));
-    if (positions.some(group => group.length === 0))
-      return false;
-    const first = Math.min(...positions.flat().map(position => position.start));
-    const last = Math.max(...positions.flat().map(position => position.start + position.length));
-    const before = normalized.slice(0, first);
-    const after = normalized.slice(last);
-    const deniedBefore = /\b(?:not(?! only\b)|never|false|incorrect|wrong|deny|reject|refute|contrary to)\b|(?:^|\s)(?:не|неверно|ложно|ошибочно|неправда)(?:\s|,|$)/iu.test(before);
-    const deniedAfter = /^["'”’\s,:–—-]*(?:is|was|would be|это)?\s*(?:false|incorrect|wrong|untrue|неверно|ложно|неправда)(?=$|[^\p{L}\p{N}_])/iu.test(after);
-    return !deniedBefore && !deniedAfter;
+      const pattern = new RegExp(`(?<![\\p{L}\\p{N}_])${escapePattern(phrase)}(?![\\p{L}\\p{N}_])`, 'gu');
+      return [...normalized.matchAll(pattern)].some(match => {
+        const before = normalized.slice(0, match.index);
+        const after = normalized.slice(match.index + match[0].length);
+        const deniedBefore = /(?:\b(?:not(?! only\b)|never)\s+|\b(?:not true|not the case|false|incorrect|wrong|untrue)\s+that\s+|\b(?:deny|denies|denied|reject|rejects|rejected|refute|refutes|refuted|contrary to)\s+(?:the\s+)?(?:(?:claim|assertion|statement|idea)\s+)?(?:that\s+)?|(?:^|\s)(?:неверно|ложно|ошибочно|неправда)[,:]?\s*(?:что\s*)?)["'“‘\s]*$/iu.test(before);
+        const deniedAfter = /^["'”’\s,:–—-]*(?:is|was|would be|это)?\s*(?:false|incorrect|wrong|untrue|неверно|ложно|неправда)(?=$|[^\p{L}\p{N}_])/iu.test(after);
+        return !deniedBefore && !deniedAfter;
+      });
+    }));
   });
+}
+
+function escapePattern(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function classificationRank(classification) {

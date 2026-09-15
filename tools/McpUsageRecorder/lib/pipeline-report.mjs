@@ -34,7 +34,11 @@ export async function buildPipelineReport(seriesDirectory, definition, baseDirec
   const table = accounting.arms.map(arm => {
     const sessions = records.filter(record => record.identity.arm === arm.arm);
     const classifications = evaluation.rows.map(row => ({ task: row.task, repetition: row.repetition,
-      classification: row.answers[arm.arm].classification }));
+      classification: row.answers[arm.arm].classification,
+      requiredEvidence: row.answers[arm.arm].requiredEvidence,
+      knownContradictions: row.answers[arm.arm].knownContradictions,
+      semanticCorrectness: row.answers[arm.arm].semanticCorrectness,
+      outcomeStatements: row.answers[arm.arm].outcomeStatements }));
     return {
       arm: arm.arm,
       productBuildSha: manifest.arms?.[arm.arm]?.productBuildSha ?? manifest.identity.productBuildSha,
@@ -113,7 +117,7 @@ export function formatPipelineTable(report) {
     ...report.table.map(row => `| ${row.arm} | ${row.modelTurns} | ${row.toolCalls} | ${row.usage.inputTokens} | ` +
       `${row.usage.cacheWriteTokens} | ${row.usage.cacheReadTokens} | ${row.usage.outputTokens} | ` +
       `${row.cost.amount} ${row.cost.currency} | ${row.wallDurationMs ?? 'unknown'} | ` +
-      `${row.oracle.map(item => `${item.task}/${item.repetition}:${item.classification}`).join(', ')} |`),
+      `${row.oracle.map(item => `${item.task}/${item.repetition}: ${item.outcomeStatements.join('; ')}`).join('<br>')} |`),
     '',
   ];
   for (const dimension of ['correctness', 'preference']) {

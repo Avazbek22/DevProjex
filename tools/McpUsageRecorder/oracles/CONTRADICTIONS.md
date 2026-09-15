@@ -20,12 +20,16 @@ were not used to select or revise these criteria.
 | N3 | Context performs router matching. | hono `src/hono-base.ts:408-438`: dispatch calls router.match before constructing Context with matchResult. |
 | N4 | BatchingSink.Emit waits for capacity or throws on a full queue. | serilog `Core/Sinks/Batching/BatchingSink.cs:86-105`: TryWrite is nonblocking; a full queue drops the event. Null-input validation is a separate case. |
 
-`affirmative-phrase` matches explicit proposition phrases within one clause.
-English/Russian denial prefixes and explicit false/incorrect suffixes suppress
-that proposition; a negation inserted inside a phrase cannot match it. Number
+`affirmative-phrase` checks each occurrence of a declared proposition independently.
+Only an adjacent English/Russian denial prefix or an explicit false/incorrect suffix suppresses
+that occurrence. Negation of another proposition in the same sentence does not suppress it;
+commas and conjunctions are not used as scope boundaries. Direct quotations, block quotations
+and fenced quoted text are not assertions unless a direct quotation is explicitly endorsed.
+A negation inserted inside a phrase cannot match it. Number
 group separators and simple Markdown emphasis are normalized. A bare path is not
 a causal assertion. Omission remains incomplete, not incorrect.
 
-This is not unrestricted natural-language entailment. Unlisted paraphrases,
+This is not unrestricted natural-language entailment. For example, “A URL of length 65536 fails
+validation” is an unlisted paraphrase and is not detected. Unlisted paraphrases,
 sarcasm, nested quotations, and complex negation remain unverified and require
 the separate two-order correctness assessment. Tool preference is independent.

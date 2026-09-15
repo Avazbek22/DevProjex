@@ -580,6 +580,11 @@ test('one pipeline command probes runs stores evaluates and analyzes saved sessi
     assert.equal(output.report.accounting.sessions, 2);
     assert.equal(output.report.evaluation.rows[0].answers.left.classification, 'complete');
     assert.equal(output.report.evaluation.rows[0].answers.right.classification, 'complete');
+    assert.equal(output.report.table[0].oracle[0].requiredEvidence, 'found');
+    assert.equal(output.report.table[0].oracle[0].knownContradictions, 'not-detected');
+    assert.equal(output.report.table[0].oracle[0].semanticCorrectness, 'requires-separate-check');
+    assert.ok(output.report.table[0].oracle[0].outcomeStatements.includes(
+      'ни одно из заданных запрещённых утверждений не обнаружено'));
     assert.equal(output.report.evaluation.rows[0].ordered.correctness.status, 'verdict');
     assert.equal(output.report.evaluation.rows[0].ordered.preference.status, 'disagreement');
     assert.equal(output.report.analysis.readingGroups[0].classification, 'known-section-unused');
