@@ -31,6 +31,9 @@ public sealed partial class McpServerProcessTests
 		// parameter by name instead of waiting for a total to cross a line.
 		var (delegationPayload, delegationInstructions) =
 			await MeasureConnectionPayloadAsync(["--allow-agent-exclusions"]);
+		TestContext.Current.TestOutputHelper?.WriteLine(
+			$"tools/list result: default={defaultPayload} characters; delegated={delegationPayload} characters; " +
+			$"instructions={instructions.Length} characters.");
 		Assert.Equal(ExclusionsParameterCost, delegationPayload - defaultPayload);
 		Assert.Equal(instructions, delegationInstructions);
 	}

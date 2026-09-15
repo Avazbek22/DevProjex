@@ -94,6 +94,9 @@ try {
 	$xunit = Join-Path $root 'xunit/TestResults/ui'
 	New-VsTestResult -Path (Join-Path $xunit 'ui.trx') -Total 433 -Executed 433
 	Test-Case -Name 'a run reported by the xunit trx writer' -ResultsPath $xunit -ShouldPass
+	$passedSummary = Join-Path $root 'passed/TestResults/unit'
+	New-VsTestResult -Path (Join-Path $passedSummary 'unit.trx') -Total 8 -Executed 8 -Outcome 'Passed'
+	Test-Case -Name 'a passed summary' -ResultsPath $passedSummary -ShouldPass
 
 	# --- rejected: the check must still catch a run that proves nothing ------------------------
 	$empty = Join-Path $root 'empty/TestResults/unit'
@@ -145,6 +148,22 @@ try {
 	$noOutcomes = Join-Path $root 'nooutcomes/TestResults/unit'
 	New-RawResult -Path (Join-Path $noOutcomes 'unit.trx') -Counters 'total="312" executed="312" passed="0" failed="0" error="0" timeout="0" aborted="0" notExecuted="312"'
 	Test-Case -Name 'tests counted as executed that reported no outcome' -ResultsPath $noOutcomes
+
+	$partialOutcomes = Join-Path $root 'partialoutcomes/TestResults/unit'
+	New-RawResult -Path (Join-Path $partialOutcomes 'unit.trx') -Counters 'total="12" executed="12" passed="1" failed="0"'
+	Test-Case -Name 'executed tests missing individual outcomes' -ResultsPath $partialOutcomes
+
+	$failedRun = Join-Path $root 'failed/TestResults/unit'
+	New-RawResult -Path (Join-Path $failedRun 'unit.trx') -Counters 'total="12" executed="12" passed="12" failed="0"' -Outcome 'Failed'
+	Test-Case -Name 'a failed run with a completed-looking count' -ResultsPath $failedRun
+
+	$abortedCounter = Join-Path $root 'abortedcounter/TestResults/unit'
+	New-RawResult -Path (Join-Path $abortedCounter 'unit.trx') -Counters 'total="12" executed="12" passed="11" aborted="1"'
+	Test-Case -Name 'an aborted test beneath a completed summary' -ResultsPath $abortedCounter
+
+	$unknownOutcome = Join-Path $root 'unknown/TestResults/unit'
+	New-RawResult -Path (Join-Path $unknownOutcome 'unit.trx') -Counters 'total="12" executed="12" passed="12" failed="0"' -Outcome 'Pending'
+	Test-Case -Name 'an unknown completion outcome' -ResultsPath $unknownOutcome
 
 	# --- accepted: neither skips nor an awkward byte makes a real run suspect ---------------
 	$skips = Join-Path $root 'skips/TestResults/unit'

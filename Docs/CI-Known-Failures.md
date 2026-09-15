@@ -24,8 +24,8 @@ with the reason, so that the cost of the move is recorded beside the failure tha
 
 ## 1. Progress notifications read before they arrive
 
-Two tests, the same scenario and the same assertion, failing on Windows and macOS across branches
-whose diffs cannot affect them.
+Two tests, the same scenario and the same assertion, failing on Windows, macOS and Linux across
+branches whose diffs cannot affect them.
 
 - `DevProjex.Tests.Terminal.McpServerProcessTests.RealProcessThrottlesDependencyProgressForTenThousandFiles`
   — `Tests/DevProjex.Tests.Terminal/McpServerProcessTests.BatchReads.cs:99`, failing assertion at line 118
@@ -49,9 +49,15 @@ a value previously seen only on its Integration sibling, which is what one would
 share a mechanism rather than a behaviour.
 Both tests pass locally, the Terminal one in about nine seconds.
 
-**Cause.** One test producing several different final values is the signature of a delivery race,
-and the code says why. The test passes an `IProgress<T>` into `CallToolAsync` and reads
-`progress.Values` the instant the call returns:
+**Cause.** The server's write order is correct. `McpProgressReporter.CompleteAsync` awaits its
+serialized pending notifications, including the forced terminal notification, before the tool
+returns. The race is in client-side observation: ModelContextProtocol 2.2.0 yields and dispatches
+incoming notifications and responses independently. Its convenience `CallToolAsync` progress
+overload disposes the temporary notification subscription when the response completes, before an
+already received notification necessarily reaches that subscription. A persistent subscription
+avoids that loss but does not make callback completion order equal transport order.
+
+The original assertions treated callback completion order as the server's sequence:
 
 ```csharp
 Assert.InRange(progress.Values.Count, 2, 20);
@@ -59,19 +65,36 @@ Assert.Equal(5f, progress.Values[0].Progress);
 Assert.Equal(100f, progress.Values[^1].Progress);
 ```
 
-A progress notification is a separate JSON-RPC message from the tool result, and nothing sequences
-the last notification before the result is observed. So the final `100` can still be in flight, and
-whatever the throttle last emitted stands in its place — `10.0065002`, `10.0150003`, `42.1534996`,
-all mid-scan values. When almost nothing has been dispatched yet, the count assertion fails instead.
-There is no poll and no wait: `[Fact(Timeout = 120_000)]` bounds the whole test, not the arrival of
-a notification. The test carries no `Category` trait, so no CI filter excludes it.
+Waiting only for the terminal callback did not finish the correction: an earlier callback can
+complete afterwards. `DelayedEarlierCallbackDoesNotChangeTheObservedProgressSequence` proves this
+with an event barrier, not a delay. The recorded stream contains `5`, `100`, then the tool result;
+the endpoint callbacks complete as `100`, `5`. Other notifications may arrive between them and
+are independently awaited as well. The old observation fails with `Expected: 5 · Actual: 100`
+even though the transport-order assertion passes.
 
-**Fixed under #382, pending a clean week.** The loss was measured to the side of the boundary it
-happens on: the server writes the terminal notification before the result of the call, so a value
-missing on the client was already on the wire and was lost on delivery. The test now waits for the
-terminal notification instead of assuming the return of the call means it has arrived, and the
-write order is pinned separately against the recorded transport. This entry closes once that has
-run clean for a week; until then the occurrences above stand as the record.
+**Closed.** Both large-manifest tests now take counts and ordered values from the recorded
+completed call. An explicit token-scoped subscription remains alive until all the recorded
+notifications have been delivered; the delivered multiset must equal the recorded one. The
+assertions still require 2–20 notifications, first exactly `5`, last exactly `100`, strictly
+increasing transport values, and every progress notification before the tool result. Terminal
+also rechecks the complete recording at EOF. No retry, skip, value tolerance, throttle or product
+timeout changed. Both whole-test limits and both delivery budgets are unchanged.
+
+The server guarantees notification-before-result **on the transport**. A client dispatching
+messages concurrently must not infer callback completion from a completed request; it must keep
+its subscription alive through delivery. The historical failures above remain recorded.
+
+Sequential local runs on Windows, .NET SDK 10.0.401, one exact test filter per invocation:
+
+| Test | Original observation | Completed-transport observation |
+|---|---|---|
+| `RealProcessThrottlesDependencyProgressForTenThousandFiles` | 20/20 passed | 20/20 passed |
+| `DependencyProgressForTenThousandFilesStaysThrottledAndKeepsEndpoints` | 20/20 passed | 20/20 passed |
+
+The ordinary local sample did not reproduce the historical failure. The event-barrier test did:
+it failed before the observation correction and passed after it, independently of machine speed.
+The unchanged whole-test limits are 120 seconds for Terminal and 60 seconds for Integration;
+their delivery limits remain 30 and 60 seconds respectively.
 
 ## 2. The runner enumerating zero tests
 
@@ -106,6 +129,18 @@ ignore`, so the missing `.trx` that is the exact signature of a failed enumerati
 silently. Reproduced locally by pointing a filter at a class that does not exist: `dotnet test`
 exits **0** and prints a `.trx` reading `total="0" executed="0"`.
 
+**Current verification.** On Windows with .NET SDK 10.0.401, Microsoft.NET.Test.Sdk 18.9.0,
+xUnit v3 3.2.2 and its VSTest adapter 3.1.5, a nonexistent exact filter still exits 0 and writes
+`outcome="Completed" total="0" executed="0"`. The result guard rejects it. A real
+`Category=TerminalCommand` test with an exact name is discovered and executed; the historical
+assembly-info JSON failure was not reproduced by that check. The no-match exit is runner behavior;
+accepting it without an executed-results check is our configuration defect, not proof that the
+assembly has no tests.
+
+The main `.NET CI` test jobs already had the guard at this baseline. The six filtered test steps
+in Release Validation did not. They now write separate TRX directories, preserve native test
+failure exits, and invoke the same guard immediately. Their results are uploaded even on failure.
+
 ## 3. A completed-looking summary for an aborted run
 
 | Run | Commit | Job | Test |
@@ -123,6 +158,24 @@ Passed!  - Failed:     0, Passed:  1471, Skipped:    37, Total:  1508, Duration:
 A literal `Passed!  - Failed:     0` line for a run the host crashed out of. The job failed on the
 exit code, but any check that read that line would have called it green. The crashing test is a
 close neighbour of the two in entry 1.
+
+**Current verification.** The versions above still produce a successful-looking console summary
+when one sibling test passes and another is stopped by `--blame-hang-timeout 3s` with dump type
+`none`: `Passed: 1`, `Failed: 0`, followed by the aborted-run notice. The native exit is 1, but the
+TRX reports `outcome="Failed"` with `executed="1" passed="1" failed="0"`. The original result
+guard accepted that exact TRX because it rejected only `Aborted`, `Error`, and `Timeout`.
+
+**Closed at the gate, not in the external reporter.** The guard accepts only `Completed` or
+`Passed`, requires individual outcome totals to equal executed tests, and rejects any failed,
+errored, timed-out, aborted or disconnected counter. The reproduced TRX and four added contradictory
+summary fixtures are rejected. Native failure exits are checked before the guard: neither a console
+word nor completed-looking counters can replace that status.
+
+The isolated Windows reproduction also left the xUnit executable child alive after Blame killed
+its test-host parent. That child held an inherited output pipe open while PowerShell collected
+`2>&1`; fixture cleanup terminated that exact child before the command's captured output finished.
+This is not a product server process. A harness capturing intentionally hanging external tests
+needs a bounded process-tree cleanup, and must not interpret the partial summary as completion.
 
 ## 4. A refreshed tree observed before it was published, macOS
 
@@ -204,9 +257,9 @@ entries come out of this list once the change has run clean for a week.
 
 ## What now fails that did not
 
-`Scripts/ci/Test-ExecutedTests.ps1` runs after each test step and fails the job when a results
-directory is absent, when no `.trx` was written, when a `.trx` reports an outcome of `Aborted`,
-`Error` or `Timeout`, or when the executed count is zero. Each results directory is judged on its
+`Scripts/ci/Test-ExecutedTests.ps1` runs after the `.NET CI` and Release Validation test steps and
+fails the job when a results directory is absent, when no `.trx` was written, when its outcome is
+anything other than `Completed` or `Passed`, or when the executed count is zero. Each results directory is judged on its
 own: a job that writes two of them has to have run something in each, because one full directory
 saying nothing about the other is how a suite that enumerated nothing would pass unnoticed.
 
@@ -215,10 +268,10 @@ either failure above: in entry 2 no `Passed!` or `Failed!` line was printed at a
 `Passed!` line was printed for a run that had been aborted.
 
 The check is itself checked. `Scripts/ci/Test-ExecutedTestsContract.ps1` runs in `prepare-matrix`
-and drives it in both directions against built fixtures: five runs it must accept and ten it must
-reject. A check that quietly became a no-op fails the ten; a check that stopped finding results —
+and drives it in both directions against built fixtures: six runs it must accept and fourteen it must
+reject. A check that quietly became a no-op fails the fourteen; a check that stopped locating results —
 which is what happened once, when a completed run of 433 tests was reported as empty because the
-UI suite writes its `.trx` elsewhere — fails the five. There is no state in which the check does
+UI suite writes its `.trx` elsewhere — fails the six. There is no state in which the check does
 nothing and that script still passes.
 
 The rejecting cases are there because each one was reachable. Every result file is judged on its
@@ -226,15 +279,16 @@ own and so is every results directory, because anything that adds up first lets 
 vouch for an empty one — which is the shape entry 2 actually had, a suite that enumerated nothing
 sitting beside one that had not. Only files written directly into the directory are read, because
 recursing found results left underneath it by an earlier run and counted them as this one's. And
-counters that contradict themselves are refused: more executed than exist, or tests counted as
-executed while none passed, failed, errored, timed out or aborted.
+counters that contradict themselves are refused: more executed than exist, or an executed count
+that differs from the sum of passed, failed, errored, timed-out and aborted tests. A successful
+completion label does not excuse unsuccessful counters beneath it.
 
-One limit is worth stating rather than leaving to be discovered. The `outcome` attribute is how a
-completed run admits it was cut short, and the two writers disagree on the vocabulary: the VSTest
-logger emits `Aborted` and `Error`, while the xUnit writer behind `--report-xunit-trx` emits
-neither, so only `Timeout` of the three is reachable for the UI suite. There an aborted host is
-caught by the step's own exit code instead, which is why the check runs only when the steps before
-it succeeded.
+One limit is worth stating rather than leaving to be discovered. Writers disagree on summary
+vocabulary: VSTest can label a crashed host `Aborted`, `Error`, or `Failed`, while the xUnit writer
+behind `--report-xunit-trx` uses different labels. The guard accepts only explicit successful
+outcomes. A host interrupted before its writer observes the interruption cannot promise that its
+artifact describes the interruption; native exit status remains mandatory, including for UI.
+The check supplements that status and runs only when the steps before it succeeded.
 
 That UI divergence is fixed at its cause rather than worked around. The UI suite runs on the
 Microsoft Testing Platform, so its `--results-directory` is passed after `--` to the test
