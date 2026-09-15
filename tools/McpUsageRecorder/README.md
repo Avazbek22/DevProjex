@@ -289,9 +289,15 @@ The path ends at its exact declared spelling; an adjacent `:line`, `:start-end`,
 the match. Either slash style is accepted. An undeclared bare filename such as `package.json`, or
 an undeclared path shown in prose or sample code, is ignored. Code formatting does not exempt a
 declared path: an exact declared token still counts. The
-deterministic oracle classifies each saved answer as complete, incomplete, incorrect, or empty and
-reports every missing, unexpected, or contradicted criterion. Tasks marked `partial` retain an
-explicit list of criteria that still require qualitative assessment.
+deterministic oracle retains the complete/incomplete/incorrect/empty coverage categories for
+comparison, but reports evidence and correctness separately: `requiredEvidence` is found/missing,
+`knownContradictions` is detected/not-detected, and `semanticCorrectness` is always
+requires-separate-check. The report prints «обязательные основания найдены» when applicable,
+«известное противоречие обнаружено» on a match, otherwise «ни одно из заданных запрещённых
+утверждений не обнаружено», and always «содержательная правильность требует отдельной проверки».
+Absence of a finite phrase match is not proof of semantic correctness, even for tasks whose
+declared oracle coverage is complete. Tasks marked `partial` also retain their specific list of
+criteria requiring qualitative assessment.
 
 Qualitative comparisons keep correctness and preference as separate dimensions. Each pair is
 assessed in both candidate orders. A verdict exists only when both orders map to the same candidate;

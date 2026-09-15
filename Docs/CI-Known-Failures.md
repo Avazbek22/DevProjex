@@ -255,6 +255,47 @@ cannot be read still backs off after the retry instead of being probed by every 
 entries come out of this list once the change has run clean for a week.
 
 
+## Blocking detector entry before generation invalidation
+
+[Run 34963511614, first attempt](https://github.com/Avazbek22/DevProjex/actions/runs/34963511614/attempts/1),
+commit `1faac5c637a31e500bc09ef6ce9a63cff605051a`, CI (Windows / Unit):
+`DevProjex.Tests.Unit.SecretRedactionCacheTests.ObsoleteScope_CannotRepopulateCacheOrPublishSnapshot(invalidation: ProjectSwitch)`.
+The result records `00:00:05.0100270` and `Assert.True() Failure`, `Expected: True`,
+`Actual: False`, at `SecretRedactionCacheTests.cs:line 521`.
+
+That assertion waits for detector entry. It runs before invalidating the generation, so the
+failure proves neither obsolete publication nor obsolete cache retention. The old observation
+recorded no worker status or exception. The exact historical delay cannot be distinguished
+between queued work, file input, and an unobserved early exception from that log. The second
+attempt passed this case in `00:00:00.0071284`; that does not establish stability.
+
+The test itself schedules the synchronous detector through `Task.Run` and synchronously waits
+for its signal. Its worker therefore depends on spare shared-pool capacity, and an early worker
+exception is indistinguishable from missing entry. Release was only on the successful path,
+leaving a late-starting detector blocked after an assertion failed. Three deterministic controls
+failed with that observation: the worker was pooled, an input exception became an entry timeout,
+and an assertion failure did not release the detector.
+
+The blocking fixture now starts on a dedicated worker with the default scheduler. File input is
+read before scheduling, and entry is awaited asynchronously together with worker completion.
+An early exception propagates directly; a successful worker without entry is rejected; a timeout
+includes both task states. A `finally` releases the detector, cancels operation-owned work, and
+awaits completion before disposing the fixture. Both tests sharing this detector use that lifecycle.
+Cancellation, successful entry, completion without entry, failure before entry, timeout diagnostics,
+and cleanup after assertion failure have explicit controls. The five-second entry budget and
+all generation/cache/publication assertions are unchanged. No product code, skip or retry changed.
+
+Sequential exact-filter runs on Windows, .NET SDK 10.0.401:
+
+| Case | Before | After |
+| --- | ---: | ---: |
+| `ObsoleteScope_CannotRepopulateCacheOrPublishSnapshot`, ProjectSwitch | 20/20 | 20/20 |
+| Same test, Disable and Reset | 20/20 each | 20/20 each |
+
+These isolated runs did not reproduce the historical stall. The shared-pool assumption and
+cleanup/diagnostic defects are corrected; the original machine-level cause remains unconfirmed.
+This entry does not declare the failure harmless or establish loaded-runner stability.
+
 ## What now fails that did not
 
 `Scripts/ci/Test-ExecutedTests.ps1` runs after the `.NET CI` and Release Validation test steps and
