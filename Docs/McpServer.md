@@ -9,6 +9,19 @@ server starts with `--allow-remote`.
 devprojex mcp --root /absolute/path/to/project
 ```
 
+The default `--tool-set full` publishes all eight tools, with unchanged instructions
+and responses. `--tool-set reduced` publishes exactly `list_projects`, `get_tree`,
+`search_project`, `related_files`, `get_file`, and `read_pack`; it omits `analyze`
+and `pack_context`. The set is fixed at startup, not changed during a session.
+Reduced instructions do not mention omitted tools. Calling an omitted tool returns
+the normal unknown-tool protocol error (`-32602`) naming that tool. `read_pack`
+continues to read retained search and dependency results in either set.
+
+The Release process measurement on Windows x64 gives 27,710 characters for the
+full `tools/list` result and 17,124 for reduced. These correspond to roughly
+6,928 and 4,281 tokens using the character/4 estimate, not model usage. Process
+budgets are 27,900 and 17,500 characters respectively.
+
 Repeat `--root` to expose more than one project. When no explicit root is given,
 DevProjex uses `DEVPROJEX_ROOT`, then `CLAUDE_PROJECT_DIR`, then the current
 directory. A `project` argument is optional only when the server has exactly one root.

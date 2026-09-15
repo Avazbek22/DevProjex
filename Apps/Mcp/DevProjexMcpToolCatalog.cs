@@ -9,7 +9,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string SearchHintKey = "anthropic/searchHint";
 	private readonly IReadOnlyList<McpServerTool> _tools;
 
-	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote, bool agentExclusions = false)
+	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote, bool agentExclusions = false,
+		McpToolSet toolSet = McpToolSet.Full)
 	{
 		ArgumentNullException.ThrowIfNull(target);
 		_tools =
@@ -23,6 +24,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote)
 		];
+		if (toolSet == McpToolSet.Reduced)
+			_tools = _tools.Where(tool => tool.ProtocolTool.Name is not ("analyze" or "pack_context")).ToArray();
 	}
 
 	public int Count => _tools.Count;

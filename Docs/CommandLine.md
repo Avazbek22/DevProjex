@@ -108,7 +108,12 @@ devprojex
 diagnostic workflows.
 
 `devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--exclude NAME ...] [--unrestricted] [--allow-agent-exclusions] [--hide-private-data] [--allow-remote]`
-starts the local read-only MCP stdio server. Secret redaction is mandatory; private-data
+starts the local read-only MCP stdio server. `--tool-set full|reduced` selects a
+startup-fixed catalog: `full` (default) has all eight tools; `reduced` has
+`list_projects`, `get_tree`, `search_project`, `related_files`, `get_file`, and
+`read_pack`, but not `analyze` or `pack_context`. Instructions match the selected
+set; retained search and dependency pages remain readable. Omitted tools return
+the normal unknown-tool error. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
 tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
 enables RepoCache-backed clone/acquire for MCP project tools without changing
