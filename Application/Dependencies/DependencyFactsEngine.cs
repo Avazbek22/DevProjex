@@ -8,7 +8,7 @@ using System.Text;
 
 namespace DevProjex.Application.Dependencies;
 
-public sealed class DependencyFactsEngine : IDisposable
+public sealed partial class DependencyFactsEngine : IDisposable
 {
 	private readonly IDependencyFactExtractor _extractor;
 	private readonly IDependencyConfigurationProvider _configurationProvider;
@@ -684,7 +684,9 @@ public sealed class DependencyFactsEngine : IDisposable
 		facts.GlobalAliases.Sum(pair => strings.Add(pair.Key) + strings.Add(pair.Value)) +
 		facts.TypeParameters.Sum(strings.Add) +
 		facts.TypeParameterScopes.Sum(scope => 40 + strings.Add(scope.Name)) +
-		facts.CSharpUsingDirectives.Sum(directive => 64 + strings.Add(directive.Target) + strings.Add(directive.Alias));
+		facts.CSharpUsingDirectives.Sum(directive => 64 + strings.Add(directive.Target) + strings.Add(directive.Alias)) +
+		facts.ScalaImportDirectives.Sum(directive => 64 + strings.Add(directive.Specifier) + strings.Add(directive.Alias) + strings.Add(directive.ContainingNamespace)) +
+		facts.ScalaValueScopes.Sum(scope => 48 + strings.Add(scope.Name));
 
 	private static long EstimateResolvedIndexBytes(ResolvedIndex index)
 	{
@@ -1186,7 +1188,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		}
 	}
 
-	private sealed class ResolverContext
+	private sealed partial class ResolverContext
 	{
 		private const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
 		private const string StaticUsingPrefix = "static::";
@@ -1321,6 +1323,7 @@ public sealed class DependencyFactsEngine : IDisposable
 				LanguageId.Java or LanguageId.Kotlin or LanguageId.Php => ResolveJavaImport(source, import),
 				LanguageId.C or LanguageId.Cpp => ResolveCImport(source, import),
 				LanguageId.Bash => ResolveBashImport(source, import),
+				LanguageId.Scala => ResolveScalaImport(source, import),
 				LanguageId.Rust => ResolveRustImport(source, import),
 				LanguageId.Ruby => ResolveRubyImport(source, import),
 				_ => Edge(source, import, ResolutionStatus.Unresolved, null,
@@ -2384,6 +2387,7 @@ public sealed class DependencyFactsEngine : IDisposable
 		{
 			if (!string.Equals(reference.Reason, "not resolved yet", StringComparison.Ordinal))
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, reference.Reason, []);
+			if (source.LanguageId == LanguageId.Scala) return ResolveScalaType(source, reference);
 			if (reference.Name == "<target-typed-new>")
 				return Edge(source, reference, ResolutionStatus.Unresolved, null, "target-typed new has no explicit type", []);
 			var simpleName = SimpleName(reference.Name);

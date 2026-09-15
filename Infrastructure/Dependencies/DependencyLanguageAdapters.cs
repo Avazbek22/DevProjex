@@ -19,7 +19,10 @@ internal sealed record DependencySyntaxCapture(
 	DependencyImportSyntax? ImportSyntax = null,
 	int CapturedNameStartIndex = -1,
 	string? Evidence = null,
-	int EndLine = -1);
+	int EndLine = -1,
+	string? LexicalNamespace = null,
+	int ScopeStartIndex = -1,
+	int ScopeEndIndex = -1);
 
 internal sealed record DependencyImportSyntax(
 	string Specifier,

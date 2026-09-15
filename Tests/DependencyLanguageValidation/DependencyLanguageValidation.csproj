@@ -4,8 +4,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <ValidationInfrastructureProject Condition="'$(ValidationInfrastructureProject)' == ''">../../Infrastructure/Infrastructure.csproj</ValidationInfrastructureProject>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../Infrastructure/Infrastructure.csproj" />
+    <ProjectReference Include="$(ValidationInfrastructureProject)" />
   </ItemGroup>
 </Project>

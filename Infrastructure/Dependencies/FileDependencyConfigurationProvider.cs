@@ -89,6 +89,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		var rubyConfigFiles = new List<string>();
 		var composerConfigFiles = new List<string>();
 		var cConfigFiles = new List<string>();
+		var scalaConfigFiles = new List<string>();
 		foreach (var path in manifest.Order(StringComparer.Ordinal))
 		{
 			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
@@ -101,6 +102,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 			    path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase)) rubyConfigFiles.Add(path);
 			if (Path.GetFileName(path).Equals("composer.json", StringComparison.OrdinalIgnoreCase)) composerConfigFiles.Add(path);
 			if (Path.GetFileName(path).Equals("CMakeLists.txt", StringComparison.OrdinalIgnoreCase)) cConfigFiles.Add(path);
+			if (Path.GetFileName(path) is "build.sbt" or "build.sc") scalaConfigFiles.Add(path);
 		}
 
 		Task<DependencyControlFileSnapshot> ReadSnapshotAsync(string path)
@@ -614,6 +616,19 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				ConfigurationDiagnostic = snapshot.Reason,
 				CIncludeDirectories = includeDirectories
 			});
+		}
+
+		foreach (var configPath in scalaConfigFiles)
+		{
+			var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
+			AddFingerprint(configPath, snapshot);
+			var scopeId = "scala:" + PortableRelative(root, configPath);
+			scopes.Add(new DependencyScopeDescriptor(scopeId, Path.GetDirectoryName(configPath)!, LanguageId.Scala,
+				[], null, false, new Dictionary<string, IReadOnlyList<string>>(), null, new HashSet<string>(), [], true)
+			{
+				ConfigurationState = snapshot.State, ConfigurationDiagnostic = snapshot.Reason
+			});
+			AddDiagnostic(configPath, snapshot.State, snapshot.Reason, scopeId);
 		}
 
 		MarkAmbiguousScopeOwnership(scopes, diagnostics, root);
