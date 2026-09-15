@@ -21,7 +21,9 @@ public sealed partial class McpServerProcessTests
 
 		var text = Normalize(AllProcessText(await CallAsync(server, "search_project", new Dictionary<string, object?>
 		{
-			["pattern"] = "Needle", ["context_lines"] = 0, ["max_results"] = 200
+			["pattern"] = "Needle",
+			["context_lines"] = 0,
+			["max_results"] = 200
 		})));
 
 		Assert.Contains("107:    string Needle()", text, StringComparison.Ordinal);
@@ -44,7 +46,9 @@ public sealed partial class McpServerProcessTests
 
 		var text = Normalize(AllProcessText(await CallAsync(server, "search_project", new Dictionary<string, object?>
 		{
-			["pattern"] = "Needle", ["context_lines"] = 0, ["max_results"] = 200
+			["pattern"] = "Needle",
+			["context_lines"] = 0,
+			["max_results"] = 200
 		})));
 
 		for (var index = 0; index < 25; index++)
@@ -68,7 +72,8 @@ public sealed partial class McpServerProcessTests
 
 		var text = Normalize(AllProcessText(await CallAsync(server, "search_project", new Dictionary<string, object?>
 		{
-			["pattern"] = "needle", ["context_lines"] = 3
+			["pattern"] = "needle",
+			["context_lines"] = 3
 		})));
 
 		Assert.Contains("6:        var marker", text, StringComparison.Ordinal);
@@ -92,7 +97,9 @@ public sealed partial class McpServerProcessTests
 
 		var text = Normalize(AllProcessText(await CallAsync(server, "search_project", new Dictionary<string, object?>
 		{
-			["pattern"] = "Needle", ["context_lines"] = 0, ["max_results"] = 200
+			["pattern"] = "Needle",
+			["context_lines"] = 0,
+			["max_results"] = 200
 		})));
 		var stored = Regex.Match(text, @"\[Search stored\] pack_id=([0-9a-f]+)", RegexOptions.CultureInvariant,
 			TimeSpan.FromSeconds(2));
