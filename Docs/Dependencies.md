@@ -296,7 +296,7 @@ the same file remain available.
 
 Go has one narrow capability: a package is a directory, so a name declared at the top level of
 one file is visible to its siblings without an import, and that is the relationship the adapter
-makes resolvable. Top-level functions, methods, and types remain available to navigation, while
+makes resolvable. Top-level functions, methods, types, variables, and constants remain available to navigation, while
 dependency type references resolve only to type declarations in the same directory. A name declared
 in two directories stays two declarations, so a reference never reaches
 across packages; it resolves to the one in its own directory or to nothing.
@@ -305,7 +305,7 @@ Everything else in Go is outside this capability and produces no resolved edge r
 one. Import paths are not resolved; literal paths remain explicit `Unresolved` evidence: `go.mod` is
 not read, a module path is not mapped to a directory,
 and vendor directories, build tags, import aliases, dot imports and `internal` visibility are not
-interpreted. Package-level `const` and `var` declarations are not yet importable names, and a
+interpreted. Package-level `const` and `var` declarations are navigable but are not yet importable names, and a
 named type is recorded as one declaration without distinguishing struct, interface and alias.
 Go needs no configuration file, so a Go file has no owning-configuration failure mode. A
 predeclared type such as `string` or `error` names no file and produces no reference, a
