@@ -6,7 +6,8 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyBashWorkingDirectoryIntegrationTests
 {
 	private const string WorkingDirectoryReason = "the Bash execution working directory is unknown";
-	private const string SourceSearchReason = "the Bash source search depends on unknown PATH and sourcepath settings";
+	private const string SourceSearchReason =
+		"the Bash execution working directory is unknown; PATH and sourcepath settings are also unknown";
 
 	public static TheoryData<string, bool, bool> RelativePathCases
 	{
@@ -33,7 +34,10 @@ public sealed class DependencyBashWorkingDirectoryIntegrationTests
 
 		var index = await engine.IndexAsync(fixture.Path, files, cancellationToken: TestContext.Current.CancellationToken);
 
-		AssertUnknownTarget(index, "./lib.sh", WorkingDirectoryReason);
+		var expectedCandidates = new List<string>();
+		if (inRoot) expectedCandidates.Add("lib.sh");
+		if (besideScript) expectedCandidates.Add("scripts/lib.sh");
+		AssertUnprovenTarget(index, "./lib.sh", WorkingDirectoryReason, expectedCandidates);
 	}
 
 	[Theory]
@@ -54,7 +58,10 @@ public sealed class DependencyBashWorkingDirectoryIntegrationTests
 
 		var index = await engine.IndexAsync(fixture.Path, [source, library, script], cancellationToken: TestContext.Current.CancellationToken);
 
-		AssertUnknownTarget(index, specifier, WorkingDirectoryReason);
+		var expectedCandidates = specifier == "../lib.sh"
+			? new[] { "lib.sh" }
+			: new[] { "scripts/other.sh" };
+		AssertUnprovenTarget(index, specifier, WorkingDirectoryReason, expectedCandidates);
 	}
 
 	[Theory]
@@ -71,7 +78,11 @@ public sealed class DependencyBashWorkingDirectoryIntegrationTests
 
 		var index = await engine.IndexAsync(fixture.Path, [source, rootLibrary, scriptLibrary, pathLibrary], cancellationToken: TestContext.Current.CancellationToken);
 
-		AssertUnknownTarget(index, "lib.sh", SourceSearchReason);
+		AssertUnprovenTarget(
+			index,
+			"lib.sh",
+			SourceSearchReason,
+			["lib.sh", "path/lib.sh", "scripts/lib.sh"]);
 	}
 
 	[Fact]
@@ -85,24 +96,37 @@ public sealed class DependencyBashWorkingDirectoryIntegrationTests
 
 		var index = await engine.IndexAsync(fixture.Path, [source, nearbyLibrary, runtimeLibrary], cancellationToken: TestContext.Current.CancellationToken);
 
-		AssertUnknownTarget(index, "./lib.sh", WorkingDirectoryReason);
+		AssertUnprovenTarget(
+			index,
+			"./lib.sh",
+			WorkingDirectoryReason,
+			["runtime/lib.sh", "scripts/lib.sh"]);
 	}
 
-	private static void AssertUnknownTarget(DependencyIndexSnapshot index, string specifier, string reason)
+	private static void AssertUnprovenTarget(
+		DependencyIndexSnapshot index,
+		string specifier,
+		string reason,
+		IReadOnlyList<string> expectedCandidates)
 	{
+		var expectedStatus = expectedCandidates.Count == 0
+			? ResolutionStatus.Unresolved
+			: ResolutionStatus.Ambiguous;
 		var source = Assert.Single(index.Files, file => file.Path == "scripts/main.sh");
 		Assert.Equal(DependencyFileStatus.Supported, source.Status);
 		var import = Assert.Single(source.Imports);
 		Assert.Equal(specifier, import.Specifier);
-		Assert.Equal(ResolutionStatus.Unresolved, import.Status);
+		Assert.Equal(expectedStatus, import.Status);
+		Assert.Null(import.Target);
+		Assert.Equal(expectedCandidates, import.Candidates);
 		Assert.Equal(reason, import.Reason);
 		Assert.Equal(1, import.Site.Line);
 		Assert.Contains(specifier, import.Site.Evidence, StringComparison.Ordinal);
 		var edge = Assert.Single(index.Edges);
 		Assert.Equal(EvidenceLayer.ExplicitImport, edge.Layer);
-		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Equal(expectedStatus, edge.Status);
 		Assert.Null(edge.Target);
-		Assert.Empty(edge.Candidates);
+		Assert.Equal(expectedCandidates, edge.Candidates);
 		Assert.Equal(reason, Assert.Single(edge.Reasons));
 	}
 
