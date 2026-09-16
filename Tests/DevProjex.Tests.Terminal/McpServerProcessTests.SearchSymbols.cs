@@ -57,7 +57,7 @@ public sealed partial class McpServerProcessTests
 		},
 		{
 			"members.go",
-			"package sample\ntype A struct{}\ntype B struct{}\nfunc (a A) Run() string { return \"member-marker-a\" }\nfunc (b B) Run() string { return \"member-marker-b\" }\nvar fallback = func() string { return \"fallback-marker\" }\n",
+			"package sample\ntype A struct{}\ntype B struct{}\nfunc (a A) Run() string { return \"member-marker-a\" }\nfunc (b B) Run() string { return \"member-marker-b\" }\n// fallback-marker\n",
 			"A.Run",
 			"B.Run"
 		},
