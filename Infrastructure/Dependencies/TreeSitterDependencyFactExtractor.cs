@@ -637,7 +637,13 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 		{
 			if ((visited++ & 255) == 0)
 				cancellationToken.ThrowIfCancellationRequested();
-			if (syntaxDamage is not null && IsCaptureAffectedBySyntaxDamage(capture.Node, root, syntaxDamage))
+			if (language == LanguageId.Go && capture.Node.Type == "identifier" &&
+				!IsGoPackageDeclaration(capture.Node, root))
+			{
+				continue;
+			}
+			var declarationNode = NavigationDeclarationNode(capture.Node, language);
+			if (syntaxDamage is not null && IsCaptureAffectedBySyntaxDamage(declarationNode, root, syntaxDamage))
 				continue;
 			var name = ReadNavigationName(capture.Node, language);
 			if (string.IsNullOrWhiteSpace(name))
@@ -650,7 +656,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				fileScopedNamespace = name;
 			else if (language == LanguageId.Php && capture.Node.Type == "namespace_definition")
 				fileScopedNamespace = name;
-			var owners = ReadNavigationOwners(capture.Node, language).ToList();
+			var owners = ReadNavigationOwners(declarationNode, language).ToList();
 			if (language == LanguageId.Scala && ReadScalaNamespace(capture.Node) is { Length: > 0 } scalaNamespace)
 				owners.Insert(0, scalaNamespace);
 			if (fileScopedNamespace is not null &&
@@ -688,10 +694,10 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				"navigation.module" => NavigationSymbolKind.Module,
 				_ => NavigationSymbolKind.Type
 			};
-			var start = checked((int)capture.Node.StartPosition.Row + 1);
-			var navigationEnd = language == LanguageId.Scala ? ScalaNavigationEnd(capture.Node) : capture.Node;
+			var start = checked((int)declarationNode.StartPosition.Row + 1);
+			var navigationEnd = language == LanguageId.Scala ? ScalaNavigationEnd(declarationNode) : declarationNode;
 			var end = checked((int)navigationEnd.EndPosition.Row + 1);
-			if (seen.Add((checked((int)capture.Node.StartIndex), checked((int)capture.Node.EndIndex), kind, qualifiedName)))
+			if (seen.Add((checked((int)declarationNode.StartIndex), checked((int)declarationNode.EndIndex), kind, qualifiedName)))
 			{
 				declarations.Add(new NavigationDeclaration(
 					qualifiedName,
@@ -701,7 +707,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 					end,
 					contentFingerprint)
 				{
-					StartIndex = checked((int)capture.Node.StartIndex),
+					StartIndex = checked((int)declarationNode.StartIndex),
 					EndIndex = checked((int)navigationEnd.EndIndex)
 				});
 			}
@@ -711,6 +717,28 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 			.ThenBy(static declaration => declaration.EndLine)
 			.ThenBy(static declaration => declaration.Name, StringComparer.Ordinal)
 			.ToArray();
+	}
+
+	private static Node NavigationDeclarationNode(Node capturedNode, LanguageId language)
+	{
+		if (language == LanguageId.Go && capturedNode.Type == "identifier" &&
+			capturedNode.Parent is { Type: "var_spec" or "const_spec" } specification)
+		{
+			return specification;
+		}
+		return capturedNode;
+	}
+
+	private static bool IsGoPackageDeclaration(Node capturedNode, Node root)
+	{
+		for (var current = capturedNode.Parent; current is not null && current != root; current = current.Parent)
+		{
+			if (current.Type is "function_declaration" or "method_declaration" or "func_literal")
+				return false;
+			if (current.Type is "var_declaration" or "const_declaration")
+				return current.Parent == root;
+		}
+		return false;
 	}
 
 	private static SyntaxDamageAnalysis? AnalyzeSyntaxDamage(
@@ -969,6 +997,8 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 
 		if (language == LanguageId.Go)
 		{
+			if (node.Type == "identifier" && node.Parent?.Type is "var_spec" or "const_spec")
+				return NormalizeNavigationName(node.Text);
 			if (node.Type == "short_var_declaration")
 				return FirstIdentifier(node.GetChildForField("left")?.Text);
 			if (node.Type is "field_declaration" or "var_spec")
