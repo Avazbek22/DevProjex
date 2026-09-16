@@ -513,8 +513,9 @@ Any shipped grammar can report `ERROR` or missing nodes for syntax it only parti
 engine drops every fact and navigation capture whose node or nearest named owner is damaged. It never
 repairs that construction or guesses a relationship from it. Independent constructions in the same
 file remain usable. Coverage reports the number of dropped constructions and up to 32 exact source
-line ranges per file; `[Dependency partial parse]` carries the same count and ranges in CLI text, and
-`coverage.partialParseDiagnostics` carries them in JSON. A file from which no substantive fact or
+line ranges per file; `[Dependency partial parse]` carries the same count and ranges in CLI text and
+MCP `related_files`, while `coverage.partialParseDiagnostics` carries them in CLI JSON. Both text
+surfaces place at most eight rows after relation output, within their existing response limits. A file from which no substantive fact or
 navigation name survives remains an extraction failure rather than an empty successful analysis.
 
 ## Caches and determinism

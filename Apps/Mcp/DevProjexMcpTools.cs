@@ -1152,7 +1152,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Finds statically evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project instead for text references, or get_file for content. Returns paths, evidence, resolution status, token estimates, language-limited coverage, configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, patterns, and max_file_bytes.")]
+		"Finds statically evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project instead for text references, or get_file for content. Returns paths, evidence, resolution status, token estimates, language-limited coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, patterns, and max_file_bytes.")]
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1217,7 +1217,14 @@ internal sealed class DevProjexMcpTools(
 				FormatSafeNoFactsNotice(related.Seeds),
 				noRelatedNotice);
 			using var relatedBody = new StringWriter(CultureInfo.InvariantCulture);
-			WriteRelatedFiles(relatedBody, related, direction, configurationData, coverage.ExtractionFailedFiles, cancellationToken);
+			WriteRelatedFiles(
+				relatedBody,
+				related,
+				direction,
+				configurationData,
+				coverage.ExtractionFailedFiles,
+				coverage.PartialParseDiagnostics,
+				cancellationToken);
 			var protectedBody = Projects.RedactSyntheticText(
 				plan,
 				resolvedSeeds[0],
@@ -1958,6 +1965,7 @@ internal sealed class DevProjexMcpTools(
 		DependencyDirection direction,
 		string? configurationData,
 		IReadOnlyList<string> extractionFailedFiles,
+		IReadOnlyList<DependencyPartialParseDiagnostic> partialParseDiagnostics,
 		CancellationToken cancellationToken)
 	{
 		var hasLine = false;
@@ -2002,6 +2010,27 @@ internal sealed class DevProjexMcpTools(
 			StartLine();
 			output.Write("[Dependency extraction failed] ");
 			output.Write(McpTextEscaping.EscapeSingleLine(path));
+		}
+		foreach (var diagnostic in partialParseDiagnostics.Take(8))
+		{
+			StartLine();
+			output.Write("[Dependency partial parse] path=");
+			output.Write(McpTextEscaping.EscapeSingleLine(diagnostic.Path));
+			output.Write(" · dropped=");
+			output.Write(diagnostic.DroppedConstructs.ToString(CultureInfo.InvariantCulture));
+			output.Write(" · lines=");
+			for (var index = 0; index < diagnostic.Ranges.Count; index++)
+			{
+				if (index > 0) output.Write(',');
+				var range = diagnostic.Ranges[index];
+				output.Write(range.StartLine.ToString(CultureInfo.InvariantCulture));
+				if (range.StartLine != range.EndLine)
+				{
+					output.Write('-');
+					output.Write(range.EndLine.ToString(CultureInfo.InvariantCulture));
+				}
+			}
+			if (diagnostic.RangesTruncated) output.Write(",...");
 		}
 	}
 

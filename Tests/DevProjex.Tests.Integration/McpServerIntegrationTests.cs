@@ -6272,6 +6272,52 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task RelatedFilesReportsPartialParseDiagnosticsAfterRelations()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Fixture.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		File.WriteAllText(Path.Combine(project, "Target.cs"), "public class Target {}\n");
+		File.WriteAllText(
+			Path.Combine(project, "Consumer.cs"),
+			"public class Consumer {\npublic void Run(\n#if FEATURE\nInside first,\n#else\nInside second,\n#endif\nTarget last) {}\n}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "Consumer.cs",
+				["direction"] = "dependencies"
+			});
+		var body = ExtractSpotlightBody(Text(result));
+		var relationOffset = body.IndexOf("Target.cs", StringComparison.Ordinal);
+		var diagnosticOffset = body.IndexOf(
+			"[Dependency partial parse] path=Consumer.cs · dropped=1 · lines=3-7",
+			StringComparison.Ordinal);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.True(relationOffset >= 0, body);
+		Assert.True(diagnosticOffset > relationOffset, body);
+	}
+
+	[Fact]
+	public async Task RelatedFilesOmitsPartialParseDiagnosticsForCleanManifest()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Main.cs"), "public class Main {}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = "Main.cs" });
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.DoesNotContain("[Dependency partial parse]", Text(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetFileConsumesTransformedTextWithoutPreparedFileIo()
 	{
 		using var workspace = new TemporaryDirectory();

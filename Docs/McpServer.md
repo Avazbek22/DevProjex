@@ -405,7 +405,10 @@ produced facts for a recognized language while unsupported files had no extracto
 Configuration state is summarized outside the block as `[Dependency configuration]
 problems=N · missing=A · corrupt=B · unsupported-semantics=C · affected-scopes=M`.
 At most eight `path · problem` rows plus an `and N more` row stay inside the
-untrusted block; parser reasons are not returned. `[Search scope] files=N` and the ordinary
+untrusted block; parser reasons are not returned. After relation rows, the same block includes
+up to eight `[Dependency partial parse] path=... · dropped=N · lines=...` rows when recognized
+syntax was discarded. No partial-parse row is added when the manifest has no discarded syntax,
+and the fixed response and stored-result limits still apply. `[Search scope] files=N` and the ordinary
 `[Effective filters]` trailer follow. `[Resolution] resolved=N · ambiguous=M ·
 unresolved=K · external=E` counts the selected-direction edges considered for the call.
 A seed without facts is a successful empty result with
