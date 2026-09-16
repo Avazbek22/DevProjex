@@ -132,7 +132,7 @@ internal static class RelatedOutputRenderer
 			var crossScope = file.CrossScope
 				? " — " + localization["Terminal.Related.CrossScope"]
 				: string.Empty;
-			var candidates = file.Candidates.Count > 1
+			var candidates = file.Status == ResolutionStatus.Ambiguous && file.Candidates.Count > 0
 				? " — " + localization.Format(
 					"Terminal.Related.Candidates",
 					string.Join(", ", file.Candidates.Select(TerminalTextEscaping.EscapeSingleLine)))

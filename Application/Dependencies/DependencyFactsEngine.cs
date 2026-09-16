@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -1190,6 +1191,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 	private sealed partial class ResolverContext
 	{
+		private const int MaximumBashSuffixCandidates = 32;
+		private const string BashWorkingDirectoryReason = "the Bash execution working directory is unknown";
+		private const string BashSearchPathReason =
+			"the Bash execution working directory is unknown; PATH and sourcepath settings are also unknown";
 		private const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
 		private const string StaticUsingPrefix = "static::";
 		private const string RubyExternalConstantReason = "Ruby constant is provided outside the project";
@@ -1204,6 +1209,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		private readonly string _root;
 		private readonly IReadOnlyDictionary<string, FileFacts> _files;
 		private readonly IReadOnlyDictionary<string, FileFacts> _manifestFiles;
+		private readonly IReadOnlyDictionary<string, string[]> _manifestPathsByFileName;
 		private readonly IReadOnlyList<DeclarationFact> _declarations;
 		private readonly IReadOnlyDictionary<SymbolLookupKey, DeclarationFact[]> _symbolsBySimpleName;
 		private readonly IReadOnlyDictionary<QualifiedSymbolLookupKey, DeclarationFact[]> _symbolsByQualifiedName;
@@ -1232,6 +1238,12 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			_diagnosticsEnabled = DependencyEngineDiagnostics.IsEnabled;
 			_files = files.ToDictionary(static file => file.Path, StringComparer.Ordinal);
 			_manifestFiles = files.ToDictionary(static file => file.Path, PathComparer);
+			_manifestPathsByFileName = files
+				.GroupBy(static file => PortableFileName(file.Path), StringComparer.Ordinal)
+				.ToDictionary(
+					static group => group.Key,
+					static group => group.Select(static file => file.Path).Order(StringComparer.Ordinal).ToArray(),
+					StringComparer.Ordinal);
 			_declarations = declarations;
 			DependencyEngineDiagnostics.RecordDictionaryBuild();
 			_symbolsBySimpleName = declarations
@@ -1336,9 +1348,56 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			if (Path.IsPathRooted(import.Specifier))
 				return Edge(source, import, ResolutionStatus.Unresolved, null, "absolute Bash paths are not project-relative evidence", []);
 			var reason = import.ImportedName is "source" or "." && !import.Specifier.Contains('/')
-				? "the Bash source search depends on unknown PATH and sourcepath settings"
-				: "the Bash execution working directory is unknown";
-			return Edge(source, import, ResolutionStatus.Unresolved, null, reason, []);
+				? BashSearchPathReason
+				: BashWorkingDirectoryReason;
+			var probe = ProbeBashSuffixCandidates(import.Specifier, MaximumBashSuffixCandidates);
+			if (probe.Total == 0)
+				return Edge(source, import, ResolutionStatus.Unresolved, null, reason, []);
+			if (probe.Total > probe.Candidates.Count)
+				reason += $"; showing {probe.Candidates.Count.ToString(CultureInfo.InvariantCulture)} of " +
+				          $"{probe.Total.ToString(CultureInfo.InvariantCulture)} suffix-matching manifest candidates";
+			return Edge(source, import, ResolutionStatus.Ambiguous, null, reason, probe.Candidates);
+		}
+
+		private BashCandidateProbe ProbeBashSuffixCandidates(string specifier, int maximumCandidates)
+		{
+			var suffix = NormalizeBashCandidateSuffix(specifier);
+			if (suffix is null || !_manifestPathsByFileName.TryGetValue(PortableFileName(suffix), out var sameName))
+				return new BashCandidateProbe([], 0);
+			var candidates = maximumCandidates > 0 ? new List<string>(Math.Min(maximumCandidates, sameName.Length)) : null;
+			var total = 0;
+			foreach (var path in sameName)
+			{
+				if (!string.Equals(path, suffix, StringComparison.Ordinal) &&
+				    !path.EndsWith('/' + suffix, StringComparison.Ordinal))
+					continue;
+				total++;
+				if (candidates is not null && candidates.Count < maximumCandidates)
+					candidates.Add(path);
+			}
+			return new BashCandidateProbe(candidates ?? [], total);
+		}
+
+		private static string? NormalizeBashCandidateSuffix(string specifier)
+		{
+			var segments = new List<string>();
+			foreach (var segment in specifier.Split('/'))
+			{
+				if (segment.Length == 0 || segment == ".") continue;
+				if (segment == "..")
+				{
+					if (segments.Count > 0) segments.RemoveAt(segments.Count - 1);
+					continue;
+				}
+				segments.Add(segment);
+			}
+			return segments.Count == 0 ? null : string.Join('/', segments);
+		}
+
+		private static string PortableFileName(string path)
+		{
+			var separator = path.LastIndexOf('/');
+			return separator < 0 ? path : path[(separator + 1)..];
 		}
 
 		private DependencyEdge ResolveCImport(FileFacts source, ImportFact import)
@@ -1554,6 +1613,19 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		public long EstimateResolutionWork(FileFacts source, int maximumWork)
 		{
 			long work = source.Imports.Count;
+			if (source.LanguageId == LanguageId.Bash)
+			{
+				foreach (var import in source.Imports)
+				{
+					if (!string.Equals(import.Reason, "not resolved yet", StringComparison.Ordinal) ||
+					    Path.IsPathRooted(import.Specifier))
+						continue;
+					var candidates = ProbeBashSuffixCandidates(import.Specifier, maximumCandidates: 0).Total;
+					work += candidates;
+					if (_diagnosticsEnabled) DependencyEngineDiagnostics.RecordResolverCandidateProbes(candidates);
+					if (work > maximumWork) return work;
+				}
+			}
 			foreach (var reference in source.References)
 			{
 				var name = SimpleName(reference.Name);
@@ -3140,6 +3212,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			string ModuleCondition,
 			bool NodeActive,
 			bool HasTypeScriptCustomConditions);
+		private readonly record struct BashCandidateProbe(
+			IReadOnlyList<string> Candidates,
+			int Total);
 		private enum PackageTargetSelectionKind
 		{
 			NoMatch,

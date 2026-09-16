@@ -6,7 +6,7 @@ namespace DevProjex.Tests.Integration;
 public sealed class DependencyBashIntegrationTests
 {
 	[Fact]
-	public async Task LiteralSourcesAndScriptCommandsRemainUnresolvedWithoutRuntimeDirectories()
+	public async Task LiteralSourcesAndScriptCommandsExposeOnlyAmbiguousManifestCandidates()
 	{
 		using var fixture = new TemporaryDirectory();
 		var source = fixture.CreateFile("scripts/main.sh", "source '../lib/common.sh'\n. \"../lib/other.bash\"\n./worker.sh\nbash ./worker.sh\ngrep value input\n");
@@ -20,14 +20,91 @@ public sealed class DependencyBashIntegrationTests
 		Assert.Equal(4, index.Files.Single(file => file.Path == "scripts/main.sh").Imports.Count);
 		Assert.All(index.Edges, edge =>
 		{
-			Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+			Assert.Equal(ResolutionStatus.Ambiguous, edge.Status);
 			Assert.Null(edge.Target);
-			Assert.Empty(edge.Candidates);
 			Assert.Equal("the Bash execution working directory is unknown", Assert.Single(edge.Reasons));
 		});
-		Assert.Contains(index.Edges, edge => edge.Reference == "../lib/common.sh");
-		Assert.Contains(index.Edges, edge => edge.Reference == "../lib/other.bash");
-		Assert.Equal(2, Assert.Single(index.Edges, edge => edge.Reference == "./worker.sh").Evidence.Count);
+		Assert.Equal(
+			new[] { "lib/common.sh" },
+			Assert.Single(index.Edges, edge => edge.Reference == "../lib/common.sh").Candidates);
+		Assert.Equal(
+			new[] { "lib/other.bash" },
+			Assert.Single(index.Edges, edge => edge.Reference == "../lib/other.bash").Candidates);
+		var workerEdge = Assert.Single(index.Edges, edge => edge.Reference == "./worker.sh");
+		Assert.Equal(new[] { "scripts/worker.sh" }, workerEdge.Candidates);
+		Assert.Equal(2, workerEdge.Evidence.Count);
+		Assert.DoesNotContain(index.Edges, edge => edge.Status == ResolutionStatus.Resolved);
+	}
+
+	[Fact]
+	public async Task SlashlessSourceListsAllSuffixCandidatesAndNamesRuntimeUncertainty()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("scripts/main.sh", "source helper.sh\n");
+		var first = fixture.CreateFile("one/helper.sh", ":\n");
+		var second = fixture.CreateFile("two/helper.sh", ":\n");
+		using var engine = CreateEngine();
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			[source, first, second],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var edge = Assert.Single(index.Edges);
+
+		Assert.Equal(ResolutionStatus.Ambiguous, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Equal(new[] { "one/helper.sh", "two/helper.sh" }, edge.Candidates);
+		Assert.Equal(
+			"the Bash execution working directory is unknown; PATH and sourcepath settings are also unknown",
+			Assert.Single(edge.Reasons));
+	}
+
+	[Fact]
+	public async Task SuffixCandidateListIsBoundedAndReportsTheOmittedCount()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("main.sh", "source ./shared.sh\n");
+		var manifest = new List<string> { source };
+		for (var index = 0; index < 40; index++)
+			manifest.Add(fixture.CreateFile($"roots/{index:D2}/shared.sh", ":\n"));
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var edge = Assert.Single(result.Edges);
+
+		Assert.Equal(ResolutionStatus.Ambiguous, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Equal(32, edge.Candidates.Count);
+		Assert.Equal("roots/00/shared.sh", edge.Candidates[0]);
+		Assert.Equal("roots/31/shared.sh", edge.Candidates[^1]);
+		Assert.Equal(
+			"the Bash execution working directory is unknown; showing 32 of 40 suffix-matching manifest candidates",
+			Assert.Single(edge.Reasons));
+	}
+
+	[Fact]
+	public async Task SuffixCandidateFanOutCountsTowardTheResolutionWorkLimit()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("main.sh", "source ./shared.sh\n");
+		var first = fixture.CreateFile("one/shared.sh", ":\n");
+		var second = fixture.CreateFile("two/shared.sh", ":\n");
+		using var engine = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(),
+			new FileDependencyConfigurationProvider(),
+			new DependencyFactsLimits(MaximumWorkPerIndex: 2));
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[source, first, second],
+			cancellationToken: TestContext.Current.CancellationToken);
+		var edge = Assert.Single(result.Edges, edge => edge.Source == "main.sh");
+
+		Assert.Equal("<limit>", edge.Reference);
+		Assert.Contains("index work limit exceeded", edge.Reasons);
 	}
 
 	[Theory]

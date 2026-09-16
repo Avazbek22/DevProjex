@@ -387,8 +387,9 @@ outside the effective selection returns the existing `DPX-MCP-PATH-NOT-FOUND` er
 The human-readable payload has `Dependencies` and `Dependents` sections according to
 `direction`. Each line contains a project-relative path, one or more evidence reasons
 separated by ` · `, a `resolved` or `ambiguous` status, an estimated token count, and
-an optional `cross-scope` marker. One ambiguous reference is one row with its complete
-candidate list. Self-file edges are omitted. For example:
+an optional `cross-scope` marker. One ambiguous reference is one row with its bounded
+candidate list; when Bash suffix matching exceeds its 32-path cap, the reason states how many
+matches are shown and how many exist. Self-file edges are omitted. For example:
 
 ```text
 Dependencies:
@@ -405,7 +406,10 @@ produced facts for a recognized language while unsupported files had no extracto
 Configuration state is summarized outside the block as `[Dependency configuration]
 problems=N · missing=A · corrupt=B · unsupported-semantics=C · affected-scopes=M`.
 At most eight `path · problem` rows plus an `and N more` row stay inside the
-untrusted block; parser reasons are not returned. `[Search scope] files=N` and the ordinary
+untrusted block; parser reasons are not returned. After relation rows, the same block includes
+up to eight `[Dependency partial parse] path=... · dropped=N · lines=...` rows when recognized
+syntax was discarded. No partial-parse row is added when the manifest has no discarded syntax,
+and the fixed response and stored-result limits still apply. `[Search scope] files=N` and the ordinary
 `[Effective filters]` trailer follow. `[Resolution] resolved=N · ambiguous=M ·
 unresolved=K · external=E` counts the selected-direction edges considered for the call.
 A seed without facts is a successful empty result with

@@ -392,11 +392,14 @@ produces `External`.
 Bash (`.sh`, `.bash`) records named functions in both `name()` and `function name` forms for
 dependency facts and symbol navigation. `source path`, `. path`, direct script-path commands and
 `bash path` / `sh path` supply explicit file evidence, not proof of a target. Relative paths depend
-on the execution working directory, which the index does not know. They remain `Unresolved` with
-that reason and no target or candidates, even when exactly one selected file matches a path from
-the repository root or the script's directory: those directories are not exhaustive runtime bases,
-and the selected manifest is not the runtime filesystem. A slashless `source` / `.` argument also
-depends on `PATH` and the `sourcepath` shell option; its unresolved reason names both settings.
+on the execution working directory, which the index does not know. They never become resolved.
+When selected manifest paths end in the literal normalized suffix, the reference is `Ambiguous`
+and reports up to 32 sorted possibilities without declaring any one of them a target. The reason
+still names the unknown working directory and reports when further suffix matches were omitted.
+With no suffix match it remains `Unresolved`. The repository root and the script's directory are
+not treated as runtime bases, and the selected manifest is not the runtime filesystem. A slashless
+`source` / `.` argument also depends on `PATH` and the `sourcepath` shell option; its reason names
+both settings as well as the unknown working directory.
 Absolute paths remain unresolved. No shell code is executed to establish a base.
 
 Variable expansion, command substitution, tilde expansion, globbing and escaped path expressions
@@ -513,8 +516,9 @@ Any shipped grammar can report `ERROR` or missing nodes for syntax it only parti
 engine drops every fact and navigation capture whose node or nearest named owner is damaged. It never
 repairs that construction or guesses a relationship from it. Independent constructions in the same
 file remain usable. Coverage reports the number of dropped constructions and up to 32 exact source
-line ranges per file; `[Dependency partial parse]` carries the same count and ranges in CLI text, and
-`coverage.partialParseDiagnostics` carries them in JSON. A file from which no substantive fact or
+line ranges per file; `[Dependency partial parse]` carries the same count and ranges in CLI text and
+MCP `related_files`, while `coverage.partialParseDiagnostics` carries them in CLI JSON. Both text
+surfaces place at most eight rows after relation output, within their existing response limits. A file from which no substantive fact or
 navigation name survives remains an extraction failure rather than an empty successful analysis.
 
 ## Caches and determinism
