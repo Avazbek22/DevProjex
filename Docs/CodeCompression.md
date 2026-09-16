@@ -570,6 +570,21 @@ Comment and blank-line stripping also extend coverage to 20 language packs in
 total: the 14 compression languages plus six comments-only packs — HTML, CSS,
 TOML, Bash, the XML project-file family, and YAML.
 
+## Vendored grammar provenance
+
+Vendored native grammars are built only from the source archives, toolchain, and
+per-platform settings pinned in `vendored-grammars.lock.json`. A grammar that
+needs an unreleased source correction carries a separate patch file under
+`tools/grammars/patches`. The manifest pins the patch SHA-256 and the patched
+source-file SHA-256; the build verifies both after unpacking the validated archive
+and before compilation. It also pins every resulting native binary by size and
+SHA-256.
+
+The YAML v0.7.2 scanner has one such patch. Its serializer starts an indentation
+record only when all four bytes of that record fit in Tree-sitter's 1,024-byte
+serialization buffer. No source branch or archive is substituted to carry this
+correction.
+
 ## Where it applies
 
 The same transformed content feeds every surface: token metrics, the live
