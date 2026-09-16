@@ -2061,7 +2061,7 @@ internal sealed class DevProjexMcpTools(
 			output.Write(file.EstimatedTokens.ToString(CultureInfo.InvariantCulture));
 			output.Write(" tokens");
 			if (file.CrossScope) output.Write(" — cross-scope");
-			if (file.Candidates.Count > 1)
+			if (file.Status == ResolutionStatus.Ambiguous && file.Candidates.Count > 0)
 			{
 				output.Write(" — candidates: ");
 				for (var index = 0; index < file.Candidates.Count; index++)

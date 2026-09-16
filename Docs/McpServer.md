@@ -387,8 +387,9 @@ outside the effective selection returns the existing `DPX-MCP-PATH-NOT-FOUND` er
 The human-readable payload has `Dependencies` and `Dependents` sections according to
 `direction`. Each line contains a project-relative path, one or more evidence reasons
 separated by ` · `, a `resolved` or `ambiguous` status, an estimated token count, and
-an optional `cross-scope` marker. One ambiguous reference is one row with its complete
-candidate list. Self-file edges are omitted. For example:
+an optional `cross-scope` marker. One ambiguous reference is one row with its bounded
+candidate list; when Bash suffix matching exceeds its 32-path cap, the reason states how many
+matches are shown and how many exist. Self-file edges are omitted. For example:
 
 ```text
 Dependencies:

@@ -18,7 +18,8 @@ public sealed class DependencyFactsDocumentationContractTests
 		Assert.Contains("### Bash", dependencies, StringComparison.Ordinal);
 		Assert.Contains("### Scala", dependencies, StringComparison.Ordinal);
 		Assert.Contains("the execution working directory, which the index does not know", dependencies, StringComparison.Ordinal);
-		Assert.Contains("even when exactly one selected file matches a path", dependencies, StringComparison.Ordinal);
+		Assert.Contains("reports up to 32 sorted possibilities without declaring any one of them a target", dependencies, StringComparison.Ordinal);
+		Assert.Contains("With no suffix match it remains `Unresolved`", dependencies, StringComparison.Ordinal);
 		Assert.Contains("depends on `PATH` and the `sourcepath` shell option", dependencies, StringComparison.Ordinal);
 		Assert.DoesNotContain("never from the process working directory", dependencies, StringComparison.Ordinal);
 		Assert.Contains("wildcard", dependencies, StringComparison.Ordinal);
@@ -49,6 +50,7 @@ public sealed class DependencyFactsDocumentationContractTests
 		Assert.Contains("exactly one of `index.ts`", dependencies, StringComparison.Ordinal);
 		Assert.Contains("related_files.path", mcp, StringComparison.Ordinal);
 		Assert.Contains("[Facts coverage]", mcp, StringComparison.Ordinal);
+		Assert.Contains("[Dependency partial parse]", mcp, StringComparison.Ordinal);
 		Assert.Contains("devprojex related <PATH>", commandLine, StringComparison.Ordinal);
 		Assert.Contains("v5.2 dependency-facts extension", version, StringComparison.Ordinal);
 		Assert.Contains("devprojex-related-files", output, StringComparison.Ordinal);
