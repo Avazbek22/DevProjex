@@ -6,6 +6,7 @@ using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Infrastructure.LiveContext;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
@@ -48,6 +49,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly TerminalBackgroundTaskTracker _backgroundTasks = new();
 	private readonly WorkspaceFocusModel _focus = new();
 	private readonly AsyncOperationCoordinator _operations;
+	private readonly TerminalSelectionProfilePersistenceCoordinator _selectionProfilePersistence;
+	private readonly LiveSessionRegistry _liveSessionRegistry = new();
 	private readonly TerminalExportDestinationHistory _exportDestinations = new();
 
 	private TerminalWorkspaceScreen _screen;
@@ -69,6 +72,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private int _workspacePersistencePending;
 	private bool _previewSearchInProgress;
 	private bool _compressionUnavailableNotified;
+	private IReadOnlyList<LiveSessionRecord> _liveSessions = [];
 
 	private TerminalWelcomeContext? _welcomeContext;
 	private RecentProjectsDb? _recentProjectsSnapshot;
@@ -174,6 +178,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_settingsPersistenceCts.Token);
 		_sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		_operations = new AsyncOperationCoordinator(_sessionCts.Token);
+		_selectionProfilePersistence = new TerminalSelectionProfilePersistenceCoordinator(
+			PersistLocalProfileAsync);
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
 		_terminalHeight = Math.Max(_environment.Height, initialScreen.Height);
@@ -187,6 +193,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_driverSizeChangedHandler = OnDriverSizeChanged;
 			driver.SizeChanged += _driverSizeChangedHandler;
 		}
+		_application.AddTimeout(LiveSessionRegistry.HeartbeatInterval, PollLiveSessions);
 	}
 
 	private void OnLanguageChanged(object? sender, EventArgs args)
@@ -229,7 +236,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 
 		var selectedKind = _welcomeList.SelectedItem is { } selected &&
-		                   selected >= 0 && selected < _welcomeRows.Count
+						   selected >= 0 && selected < _welcomeRows.Count
 			? _welcomeRows[selected].Action.Kind
 			: (TerminalWelcomeActionKind?)null;
 		var actions = BuildWelcomeActions(_welcomeContext);
@@ -344,6 +351,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	public async Task CompleteAsync()
 	{
 		await FlushPendingWorkspacePersistenceAsync().ConfigureAwait(false);
+		await _selectionProfilePersistence.FlushAsync().ConfigureAwait(false);
 		_stopping = true;
 		await _commandHistoryPersistence.CompleteAsync().ConfigureAwait(false);
 		_settingsPersistenceCts.CancelAfter(SettingsPersistenceShutdownBudget);
@@ -838,7 +846,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					await InvokeAsync(() =>
 					{
 						if (_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
-						    _screen == TerminalWorkspaceScreen.Workspace)
+							_screen == TerminalWorkspaceScreen.Workspace)
 						{
 							SetOperationStatus(
 								L("Toast.Git.CachedUpdateFailed"),
@@ -1228,7 +1236,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var persisted = _services.TerminalSettingsStore.LoadProjectSettings(state.Plan.SourceRoot);
 		if (persisted is not null)
 		{
-			state.RestoreSelectedRelativePaths(persisted.SelectedPaths);
 			state.RestoreExpandedRelativePaths(persisted.ExpandedPaths);
 			_previewView = Enum.IsDefined(persisted.PreviewView)
 				? persisted.PreviewView
@@ -1425,12 +1432,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		RefreshContextControls();
 		tree.SetFocus();
 		RefreshWorkspace();
+		RefreshLiveSessions(force: true);
 		ApplyWorkspaceLayout();
 		UpdateWorkspaceFocus();
 		CompleteRootTransition();
 		SchedulePreviewRefresh();
-		if (persisted is not null)
-			ScheduleSelectionProjection();
 	}
 
 	private void RefreshWorkspace()
@@ -1622,7 +1628,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
 				   $"~{tokens:N0} tok  " +
 				   $"{warningCount:N0} W  {errorCount:N0} E" +
-				   (compressionUnavailable ? "  C!" : string.Empty);
+				   (compressionUnavailable ? "  C!" : string.Empty) +
+				   (_liveSessions.Count > 0 ? "  Live context" : string.Empty);
 		}
 
 		var separator = _environment.SupportsUnicode ? PanelSeparator : " | ";
@@ -1637,6 +1644,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		};
 		if (compressionUnavailable)
 			parts.Add(L("Compression.Metrics.Unavailable"));
+		if (_liveSessions.Count > 0)
+			parts.Add(BuildLiveSessionIndicator(_liveSessions));
 		return string.Join(
 			separator,
 			parts);
@@ -1907,10 +1916,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			var list = GetControlSection(section).List;
 			var aggregate = GetAggregateControlSection(section).List;
 			var sectionIsActive = _activePane == TerminalWorkspacePane.Controls &&
-			                      section == _activeControlSection;
+								  section == _activeControlSection;
 			var aggregateIsActive = sectionIsActive && aggregate is not null &&
-			                        (aggregate.HasFocus ||
-			                         _activeAggregateControlSection == section);
+									(aggregate.HasFocus ||
+									 _activeAggregateControlSection == section);
 			if (list is not null)
 			{
 				list.SchemeName = sectionIsActive && !aggregateIsActive
@@ -2153,19 +2162,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_commandLine.RestoreInputFocus();
 			}
 			else switch (requestedFocus.Pane)
-			{
-				case TerminalWorkspacePane.Tree:
-					_tree?.SetFocus();
-					break;
-				case TerminalWorkspacePane.Preview:
-					_preview?.SetFocus();
-					break;
-				case TerminalWorkspacePane.Controls:
-					ActiveControlView?.SetFocus();
-					break;
-				default:
-					throw new ArgumentOutOfRangeException();
-			}
+				{
+					case TerminalWorkspacePane.Tree:
+						_tree?.SetFocus();
+						break;
+					case TerminalWorkspacePane.Preview:
+						_preview?.SetFocus();
+						break;
+					case TerminalWorkspacePane.Controls:
+						ActiveControlView?.SetFocus();
+						break;
+					default:
+						throw new ArgumentOutOfRangeException();
+				}
 			_focus.Restore(requestedFocus);
 		}
 		finally
@@ -2501,6 +2510,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_state.SelectAll();
 			RefreshWorkspace();
 			ScheduleSelectionProjection();
+			ScheduleLocalProfilePersistence();
 			return;
 		}
 		if (_tree.HasFocus && key == Key.U.WithCtrl)
@@ -2509,6 +2519,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_state.SelectNone();
 			RefreshWorkspace();
 			ScheduleSelectionProjection();
+			ScheduleLocalProfilePersistence();
 			return;
 		}
 		if (_tree.HasFocus && key.NoShift == Key.R)
@@ -2961,6 +2972,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_selectedTreePath = selectedPath;
 			RefreshWorkspace();
 			ScheduleSelectionProjection();
+			ScheduleLocalProfilePersistence();
 		}
 	}
 
@@ -3881,6 +3893,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_preferredGitMode = preferredGitMode;
 				ClearSettingsDraft();
 				RefreshWorkspace();
+				ScheduleLocalProfilePersistence();
+				TrackBackgroundTask(_selectionProfilePersistence.FlushAsync());
 				if (originatedFromCommandLine)
 					RefreshAppliedCommandResult();
 				SchedulePreviewRefresh();
@@ -4089,7 +4103,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					RefreshAppliedCommandResult();
 					var compressionAvailability = GetCurrentCompressionAvailability(state);
 					if (!_compressionUnavailableNotified &&
-					    compressionAvailability is { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason })
+						compressionAvailability is { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason })
 					{
 						_compressionUnavailableNotified = true;
 						ShowTransientStatus(NormalizeLocalizedText(
@@ -5330,6 +5344,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_sessionCts.Dispose();
 		_settingsPersistenceCts.Cancel();
 		_settingsPersistenceCts.Dispose();
+		_selectionProfilePersistence.Dispose();
 		_operationGate.Dispose();
 	}
 
@@ -5373,6 +5388,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return false;
 		}
 		FlushPendingWorkspacePersistence();
+		FlushLocalProfilePersistence();
 		leave();
 		return true;
 	}
@@ -5388,6 +5404,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (!Confirm(L("Terminal.Tui.Exit"), L("Terminal.Tui.ConfirmExit")))
 			return false;
 		FlushPendingWorkspacePersistence();
+		FlushLocalProfilePersistence();
 		RequestExit();
 		return true;
 	}

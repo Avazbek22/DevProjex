@@ -18,6 +18,7 @@ internal enum TerminalWorkspaceCommandVerb
 	Update,
 	Recent,
 	Profile,
+	Mcp,
 	Refresh,
 	Language,
 	Diagnostics,
@@ -61,6 +62,7 @@ internal enum TerminalWorkspaceCommandGrammar
 	Copy,
 	OptionalText,
 	Profile,
+	McpConnection,
 	Language,
 	Help,
 	None
@@ -247,6 +249,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			"profile save [name]",
 			"profile save \"Review Settings\"",
 			static (session, command) => session.ExecuteProfileCommand(command)),
+		Define(
+			TerminalWorkspaceCommandVerb.Mcp,
+			TerminalWorkspaceCommandGrammar.McpConnection,
+			"mcp",
+			"mcp [claude-code|codex|json] [live|standard]",
+			"mcp codex live",
+			static (session, command) => session.ExecuteMcpCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Refresh,
 			TerminalWorkspaceCommandGrammar.None,
