@@ -5,6 +5,7 @@ using DevProjex.Application.Context;
 using DevProjex.Application.Dependencies;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.Dependencies;
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Mcp;
@@ -202,6 +203,40 @@ public sealed partial class McpServerIntegrationTests
 
 		await server.DisposeAsync();
 		Assert.Empty(registry.ReadActive(project));
+	}
+
+	[Fact]
+	public async Task LiveContextReadsASelectionPersistedByTheWindowCoordinator()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		Directory.CreateDirectory(Path.Combine(project, "tests"));
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "class App {}\n");
+		File.WriteAllText(Path.Combine(project, "tests", "AppTests.cs"), "class AppTests {}\n");
+		var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
+		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
+		var delayRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var persistence = new TreeSelectionProfilePersistenceCoordinator(
+			(projectPath, selectedPaths, _) =>
+			{
+				var current = profileStore.LookupProfile(projectPath, TimeSpan.FromSeconds(1)).Profile ??
+							  new ProjectSelectionProfile([], [], []);
+				profileStore.SaveProfile(projectPath, current with { SelectedPaths = selectedPaths?.ToArray() });
+				return Task.CompletedTask;
+			},
+			cancellationToken => delayRelease.Task.WaitAsync(cancellationToken));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+
+		persistence.Schedule(project, ["tests"]);
+		await persistence.FlushAsync(TestContext.Current.CancellationToken);
+		var tree = AllText(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" }));
+
+		Assert.Contains("AppTests.cs", tree, StringComparison.Ordinal);
+		Assert.DoesNotContain("src/App.cs", tree, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", tree, StringComparison.Ordinal);
 	}
 
 	[Fact]

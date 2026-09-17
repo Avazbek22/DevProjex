@@ -113,6 +113,11 @@ internal sealed class McpLiveContextState(
 	{
 		ArgumentNullException.ThrowIfNull(result);
 		var active = invocation.Value;
+		if (active is { Roots.Count: 0 })
+		{
+			foreach (var root in roots.Roots)
+				_ = ReadProfile(root);
+		}
 		var observedRoots = active is { Roots.Count: > 0 }
 			? active.Roots.ToArray()
 			: roots.Roots.Select(PathUtility.Normalize).ToArray();
@@ -183,6 +188,7 @@ internal sealed class McpLiveContextState(
 		{
 			var previousRevision = state.Revision;
 			state.Revision++;
+			state.SelectedFileCount = null;
 			state.PendingChange = new PendingChange(
 				previousRevision,
 				BuildFrontierChanges(state.Frontier, frontier));

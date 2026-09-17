@@ -304,6 +304,58 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain("exclusions: empty-files", packText, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task RealProcessLiveContextRefreshesAStoredSelectionWithoutRestarting()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Inside.cs", "class Inside { const string Marker = \"inside-marker\"; }\n");
+		workspace.WriteFile("project/docs/Outside.cs", "class Outside { const string Marker = \"outside-marker\"; }\n");
+		var dataRoot = workspace.CreateDirectory("data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		store.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			arguments: ["--live"],
+			clientInfo: new Implementation { Name = "process-client", Version = "1.0" });
+		var initial = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var initialText = AllProcessText(initial);
+		Assert.Contains("Inside.cs", initialText, StringComparison.Ordinal);
+		Assert.DoesNotContain("Outside.cs", initialText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", initialText, StringComparison.Ordinal);
+
+		store.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["docs"]));
+		var refreshed = await server.Client.CallToolAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "outside-marker" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var refreshedText = AllProcessText(refreshed);
+		Assert.Contains("docs/Outside.cs", refreshedText, StringComparison.Ordinal);
+		Assert.DoesNotContain("src/Inside.cs", refreshedText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] changed since revision 1: +docs, -src", refreshedText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 2 · 1 files selected in the window", refreshedText, StringComparison.Ordinal);
+
+		var namedOutsideSelection = await server.Client.CallToolAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "src/Inside.cs" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		Assert.StartsWith(
+			"[Live context] src/Inside.cs is outside the current window selection; returned because you named it.",
+			AllProcessText(namedOutsideSelection),
+			StringComparison.Ordinal);
+	}
+
 	private static string AllProcessText(CallToolResult result) =>
 		string.Join(
 			"\n",
@@ -328,7 +380,8 @@ public sealed partial class McpServerProcessTests
 			string dataRoot,
 			IReadOnlyList<string>? arguments = null,
 			bool allowFileGitTransport = false,
-			IReadOnlyDictionary<string, string>? environment = null)
+			IReadOnlyDictionary<string, string>? environment = null,
+			Implementation? clientInfo = null)
 		{
 			var startInfo = new ProcessStartInfo("dotnet")
 			{
@@ -361,13 +414,13 @@ public sealed partial class McpServerProcessTests
 			}
 
 			var process = Process.Start(startInfo) ??
-			              throw new InvalidOperationException("MCP process did not start.");
+						  throw new InvalidOperationException("MCP process did not start.");
 			var error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
 			try
 			{
 				var client = await McpClient.CreateAsync(
 					new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
-					clientOptions: null,
+					clientOptions: clientInfo is null ? null : new McpClientOptions { ClientInfo = clientInfo },
 					loggerFactory: null,
 					TestContext.Current.CancellationToken);
 				return new ActualMcpProcess(process, client, error);

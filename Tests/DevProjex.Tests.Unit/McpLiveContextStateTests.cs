@@ -90,6 +90,21 @@ public sealed class McpLiveContextStateTests
 			StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void ResponseBeforePlanStillReportsTheCurrentRevision()
+	{
+		using var temporary = new TemporaryDirectory();
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => new SequenceProfileStore(Found(Profile(["src"]))),
+			TimeSpan.Zero);
+
+		using var invocation = state.BeginInvocation();
+		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("invalid request")));
+
+		Assert.Contains("[Live context] revision 1 · 0 files selected in the window", response, StringComparison.Ordinal);
+	}
+
 	private static ProjectSelectionProfile Profile(IReadOnlyCollection<string>? selectedPaths) =>
 		new([], [], [], SelectedPaths: selectedPaths);
 
