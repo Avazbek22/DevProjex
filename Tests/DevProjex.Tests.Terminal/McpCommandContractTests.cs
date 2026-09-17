@@ -37,6 +37,7 @@ public sealed class McpCommandContractTests
 		Assert.Contains("--root", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--hide-private-data", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--allow-remote", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--live", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--git-mode", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--exclude", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--unrestricted", environment.StandardOutput, StringComparison.Ordinal);

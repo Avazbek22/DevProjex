@@ -11,7 +11,8 @@ internal sealed class DevProjexMcpTools(
 	bool agentExclusions = false,
 	bool allowRemote = false,
 	IReadOnlySet<string>? remoteHosts = null,
-	int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
+	int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters,
+	McpLiveContextState? liveContext = null)
 {
 	private const int MaximumTreeLines = 2_000;
 	private const int MaximumTreeCharacters = 50_000;
@@ -114,12 +115,30 @@ internal sealed class DevProjexMcpTools(
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		ExecuteAsync(async () =>
+		ExecuteAsync(request, async () =>
 		{
 			_ = McpJsonArguments.Create(request.Params, EmptyArgumentNames);
 			var validatedRoots = roots.Roots
 				.Select(root => roots.ResolveProject(root))
 				.ToArray();
+			if (liveContext is not null)
+			{
+				foreach (var root in validatedRoots)
+				{
+					_ = await Projects.BuildPlanAsync(
+						root,
+						branch: null,
+						paths: null,
+						includePatterns: null,
+						excludePatterns: null,
+						profile: null,
+						trackedOnly: false,
+						gitScope: null,
+						maximumFileBytes: null,
+						cancellationToken,
+						includeOutputMetrics: false).ConfigureAwait(false);
+				}
+			}
 			var projectItems = validatedRoots
 				.Select(root => new
 				{
@@ -171,7 +190,7 @@ internal sealed class DevProjexMcpTools(
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		RunProjectAsync(async () =>
+		RunProjectAsync(request, async () =>
 		{
 			var arguments = McpJsonArguments.Create(request.Params, getTreeArgumentNames);
 			var format = ParseTreeFormat(arguments.OptionalString("format") ?? "markdown");
@@ -264,7 +283,7 @@ internal sealed class DevProjexMcpTools(
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		RunProjectAsync(async () =>
+		RunProjectAsync(request, async () =>
 		{
 			var operationProgress = new McpProgressReporter(request, cancellationToken);
 			operationProgress.Milestone(1, "selecting files");
@@ -509,7 +528,7 @@ internal sealed class DevProjexMcpTools(
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		RunProjectAsync(async () =>
+		RunProjectAsync(request, async () =>
 		{
 			var operationProgress = new McpProgressReporter(request, cancellationToken);
 			operationProgress.Milestone(1, "selecting files");
@@ -762,6 +781,7 @@ internal sealed class DevProjexMcpTools(
 								100,
 								$"writing pack {writtenFileCount}/{writtenFileCount}")
 							.ConfigureAwait(false);
+						liveContext?.RecordPackBuild(plan.SourceRoot, packId: null);
 						return McpToolResults.TextSuccess(inlineMessage, advertiseLargeResult: true);
 					}
 				}
@@ -803,6 +823,7 @@ internal sealed class DevProjexMcpTools(
 					.ConfigureAwait(false);
 				var response = McpToolResults.TextSuccess(message, advertiseLargeResult: true);
 				retainPack = true;
+				liveContext?.RecordPackBuild(plan.SourceRoot, pack.Id);
 				return response;
 			}
 			finally
@@ -817,10 +838,11 @@ internal sealed class DevProjexMcpTools(
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		ExecuteAsync(async () =>
+		ExecuteAsync(request, async () =>
 		{
 			var arguments = McpJsonArguments.Create(request.Params, ReadPackArgumentNames);
 			var packId = arguments.RequiredString("pack_id");
+			liveContext?.RefreshStoredResult(packId);
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var startColumn = arguments.OptionalInteger("start_column", 1, int.MaxValue);
@@ -849,7 +871,7 @@ internal sealed class DevProjexMcpTools(
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		RunProjectAsync(async () =>
+		RunProjectAsync(request, async () =>
 		{
 			var arguments = McpJsonArguments.Create(request.Params, searchArgumentNames);
 			var pattern = arguments.RequiredString("pattern", allowWhitespace: true);
@@ -1072,6 +1094,8 @@ internal sealed class DevProjexMcpTools(
 				? null
 				: await StoreWithheldMatchesAsync(withheld.ToString(), cancellationToken)
 					.ConfigureAwait(false);
+			if (storedSearch is not null)
+				liveContext?.RecordStoredResult(plan.SourceRoot, storedSearch.Id);
 			AppendWithheldDistribution(output, withheldByFile);
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional observed matches not shown; narrow the pattern or filters.]"
@@ -1156,7 +1180,7 @@ internal sealed class DevProjexMcpTools(
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		RunProjectAsync(async () =>
+		RunProjectAsync(request, async () =>
 		{
 			var arguments = McpJsonArguments.Create(request.Params, relatedArgumentNames);
 			var seeds = arguments.RequiredStringOrArray(
@@ -1255,6 +1279,7 @@ internal sealed class DevProjexMcpTools(
 				},
 				McpStoredResultKind.Related,
 				cancellationToken).ConfigureAwait(false);
+			liveContext?.RecordStoredResult(plan.SourceRoot, pack.Id);
 			return McpToolResults.TextSuccess(
 				$"Related-files result stored as '{pack.Id}' ({pack.Characters} characters). " +
 				"Call read_pack with this pack_id to read it.",
@@ -1266,7 +1291,7 @@ internal sealed class DevProjexMcpTools(
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		RunProjectAsync(async () =>
+		RunProjectAsync(request, async () =>
 		{
 			var arguments = McpJsonArguments.Create(request.Params, getFileArgumentNames);
 			var requestSet = McpGetFileRequestSet.Parse(arguments);
@@ -1301,7 +1326,8 @@ internal sealed class DevProjexMcpTools(
 				maximumFileBytes: null,
 				cancellationToken,
 				includeOutputMetrics: false,
-				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
+				exclusions: ParseExclusionsArgument(arguments),
+				allowNamedPathsOutsideSelection: liveContext is not null).ConfigureAwait(false);
 			var file = Projects.ResolveFile(plan, requestedPath);
 
 			TransformedTextFile? transformed = null;
@@ -1351,8 +1377,11 @@ internal sealed class DevProjexMcpTools(
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			var addressedPage = FormatFileReadHeader(relativePath, page) + page.Text;
+			var spotlighted = McpSpotlight.Wrap(addressedPage);
+			if (liveContext?.IsOutsideSelection(plan.SourceRoot, relativePath) == true)
+				spotlighted = FormatOutsideSelectionNotice(relativePath) + Environment.NewLine + spotlighted;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
-				McpSpotlight.Wrap(addressedPage),
+				spotlighted,
 				rangeNotice,
 				characterLimitNotice,
 				FormatCompressionUnavailable(inspected.CompressionSnapshot),
@@ -1370,7 +1399,9 @@ internal sealed class DevProjexMcpTools(
 		var plan = await Projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
 			arguments.OptionalString("branch"),
-			paths: null,
+			paths: liveContext is null
+				? null
+				: requestSet.Requests.Select(static item => item.Path).ToArray(),
 			includePatterns: null,
 			excludePatterns: null,
 			profile: arguments.OptionalString("profile"),
@@ -1379,7 +1410,8 @@ internal sealed class DevProjexMcpTools(
 			maximumFileBytes: null,
 			cancellationToken,
 			includeOutputMetrics: false,
-			exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
+			exclusions: ParseExclusionsArgument(arguments),
+			allowNamedPathsOutsideSelection: liveContext is not null).ConfigureAwait(false);
 
 		var resolvedRequests = new List<McpResolvedFileReadRequest>(requestSet.Requests.Count);
 		foreach (var item in requestSet.Requests)
@@ -1435,8 +1467,21 @@ internal sealed class DevProjexMcpTools(
 		}
 
 		var rendered = RenderBatchFileReads(resolvedRequests, transformed, cancellationToken);
+		var spotlighted = McpSpotlight.Wrap(rendered.Text);
+		if (liveContext is not null)
+		{
+			var outsideNotices = resolvedRequests
+				.Where(static item => item.PhysicalPath is not null)
+				.Select(item => McpProjectService.ToRelative(plan.SourceRoot, item.PhysicalPath!))
+				.Where(path => liveContext.IsOutsideSelection(plan.SourceRoot, path))
+				.Distinct(StringComparer.Ordinal)
+				.Select(FormatOutsideSelectionNotice)
+				.ToArray();
+			if (outsideNotices.Length > 0)
+				spotlighted = string.Join(Environment.NewLine, outsideNotices) + Environment.NewLine + spotlighted;
+		}
 		return McpToolResults.TextSuccess(AppendTrustedNotices(
-			McpSpotlight.Wrap(rendered.Text),
+			spotlighted,
 			rendered.Summary,
 			rendered.UnavailableNotice,
 			rendered.Continuations,
@@ -1446,6 +1491,10 @@ internal sealed class DevProjexMcpTools(
 				includeFilters: false,
 				new McpSelectionNoticeContext(HasPaths: true, HasPatterns: false))));
 	}
+
+	private static string FormatOutsideSelectionNotice(string relativePath) =>
+		$"[Live context] {McpTextEscaping.EscapeSingleLine(relativePath)} is outside the current window selection; " +
+		"returned because you named it. Tree, search, pack and related stay within the selection.";
 
 	private static McpBatchFileReadResult RenderBatchFileReads(
 		IReadOnlyList<McpResolvedFileReadRequest> requests,
@@ -1828,20 +1877,25 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	private Task<CallToolResult> RunProjectAsync(
+		RequestContext<CallToolRequestParams> request,
 		Func<Task<CallToolResult>> operation,
 		CancellationToken cancellationToken) =>
-		_projectOperation.RunAsync(() => RunAndConfirmServiceNoticesAsync(operation), cancellationToken);
+		_projectOperation.RunAsync(
+			() => RunAndConfirmServiceNoticesAsync(request, operation),
+			cancellationToken);
 
 	/// <summary>
 	/// Service notices count as reported only once they are in the text the caller receives.
 	/// A stored pack, a truncated diagnostic tail, or a failed call therefore leaves the memo
 	/// where it was, and the next response repeats the full set.
 	/// </summary>
-	private async Task<CallToolResult> RunAndConfirmServiceNoticesAsync(Func<Task<CallToolResult>> operation)
+	private async Task<CallToolResult> RunAndConfirmServiceNoticesAsync(
+		RequestContext<CallToolRequestParams> request,
+		Func<Task<CallToolResult>> operation)
 	{
 		try
 		{
-			var result = await ExecuteAsync(operation).ConfigureAwait(false);
+			var result = await ExecuteAsync(request, operation).ConfigureAwait(false);
 			serviceNotices.CommitDelivered(ResponseText(result));
 			return result;
 		}
@@ -1855,29 +1909,36 @@ internal sealed class DevProjexMcpTools(
 	private static string ResponseText(CallToolResult result) =>
 		string.Join('\n', result.Content.OfType<TextContentBlock>().Select(static block => block.Text));
 
-	private static async Task<CallToolResult> ExecuteAsync(Func<Task<CallToolResult>> operation)
+	private async Task<CallToolResult> ExecuteAsync(
+		RequestContext<CallToolRequestParams> request,
+		Func<Task<CallToolResult>> operation)
 	{
+		using var liveInvocation = liveContext?.BeginInvocation();
 		try
 		{
-			return await operation().ConfigureAwait(false);
+			var result = await operation().ConfigureAwait(false);
+			return liveContext?.AppendNotices(result) ?? result;
 		}
 		catch (McpToolException exception)
 		{
-			return McpToolResults.Error(exception);
+			var result = McpToolResults.Error(exception);
+			return liveContext?.AppendNotices(result) ?? result;
 		}
 		catch (PortableProjectProfileException exception)
 		{
 			// Profile validation carries curated user-facing text; surfacing it beats the
 			// opaque operation-failed fallback, but CLI error codes do not cross the MCP boundary.
-			return McpToolResults.Error(new McpToolException(
+			var result = McpToolResults.Error(new McpToolException(
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: {exception.Message}"));
+			return liveContext?.AppendNotices(result) ?? result;
 		}
 		catch (ProjectContextValidationException exception)
 		{
-			return McpToolResults.Error(new McpToolException(
+			var result = McpToolResults.Error(new McpToolException(
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: {exception.Message}"));
+			return liveContext?.AppendNotices(result) ?? result;
 		}
 		catch (OperationCanceledException)
 		{
@@ -1885,13 +1946,15 @@ internal sealed class DevProjexMcpTools(
 		}
 		catch (RegexMatchTimeoutException)
 		{
-			return McpToolResults.Error(new McpToolException(
+			var result = McpToolResults.Error(new McpToolException(
 				McpErrorCodes.InvalidPattern,
 				$"{McpErrorCodes.InvalidPattern}: regex evaluation exceeded 2 seconds; simplify the pattern and retry."));
+			return liveContext?.AppendNotices(result) ?? result;
 		}
 		catch (Exception exception)
 		{
-			return McpToolResults.Error(exception);
+			var result = McpToolResults.Error(exception);
+			return liveContext?.AppendNotices(result) ?? result;
 		}
 	}
 

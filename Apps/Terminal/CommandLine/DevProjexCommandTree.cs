@@ -111,6 +111,10 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.McpAllowRemote")
 		};
+		var live = new Option<bool>("--live")
+		{
+			Description = "Use the DevProjex window selection as the live baseline."
+		};
 		var remoteHosts = new Option<string[]>("--remote-hosts")
 		{
 			Description = "Allow only these comma-separated remote Git hosts when --allow-remote is enabled.",
@@ -167,6 +171,7 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(roots);
 		command.Options.Add(hidePrivateData);
 		command.Options.Add(allowRemote);
+		command.Options.Add(live);
 		command.Options.Add(remoteHosts);
 		command.Options.Add(gitMode);
 		command.Options.Add(toolSet);
@@ -179,7 +184,7 @@ public sealed class DevProjexCommandTree
 		command.Validators.Add(result =>
 		{
 			if (result.GetValue(unrestricted) &&
-			    (result.GetResult(exclude) is not null || result.GetResult(gitMode) is not null))
+				(result.GetResult(exclude) is not null || result.GetResult(gitMode) is not null))
 				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.UnrestrictedConflict")));
 		});
 		CliExamplesRegistry.Set(
@@ -230,7 +235,8 @@ public sealed class DevProjexCommandTree
 							? null
 							: parseResult.GetValue(remoteHosts) ?? [],
 						parseResult.GetValue(toolSet) == "reduced" ? McpToolSet.Reduced : McpToolSet.Full,
-						McpServerHost.ParseSearchBodyCharacters(parseResult.GetValue(searchBodyCharacters)))
+						McpServerHost.ParseSearchBodyCharacters(parseResult.GetValue(searchBodyCharacters)),
+						parseResult.GetValue(live))
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}
@@ -270,7 +276,7 @@ public sealed class DevProjexCommandTree
 					// The hidden legacy hide-secrets alias stays out of the server baseline:
 					// redaction is not an exclusion the MCP surface may reason about.
 					if (CliChoiceSets.Exclusion.TryParse(token.Value, out var value) &&
-					    value.Exclusion is not ProjectExclusion.HideSecrets)
+						value.Exclusion is not ProjectExclusion.HideSecrets)
 					{
 						values.Add(value);
 						continue;
@@ -282,7 +288,7 @@ public sealed class DevProjexCommandTree
 				}
 
 				if (values.Any(static value => value.IsNone) &&
-				    values.Any(static value => !value.IsNone))
+					values.Any(static value => !value.IsNone))
 				{
 					result.AddError(LocalizedParseError.Create(
 						_localization["Terminal.Validation.ExcludeNone"]));
@@ -730,15 +736,15 @@ public sealed class DevProjexCommandTree
 					L("Terminal.Validation.ForceRequiresFileOutput")));
 			}
 			if (CliParseValue.TryGet(result, maximumEstimatedTokens, out var maximumTokens) &&
-			    maximumTokens is < 1)
+				maximumTokens is < 1)
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.MaxTokens")));
 			}
 			if (CliParseValue.TryGet(result, rank, out var rankValue) &&
-			    rankValue is not null &&
-			    CliParseValue.TryGet(result, view, out var viewValue) &&
-			    viewValue == ProjectContextView.Tree)
+				rankValue is not null &&
+				CliParseValue.TryGet(result, view, out var viewValue) &&
+				viewValue == ProjectContextView.Tree)
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.RankRequiresContent")));
@@ -764,7 +770,7 @@ public sealed class DevProjexCommandTree
 			if (result.GetResult(detailFor) is not null)
 			{
 				if (CliParseValue.TryGet(result, view, out var detailView) &&
-				    detailView == ProjectContextView.Tree)
+					detailView == ProjectContextView.Tree)
 				{
 					result.AddError(LocalizedParseError.Create(
 						L("Terminal.Validation.DetailForRequiresContent")));
@@ -890,25 +896,25 @@ public sealed class DevProjexCommandTree
 					L("Terminal.Error.ForceNotSupported")));
 			}
 			if (outputKind == ProjectCopyExportFormat.Folder &&
-			    CliParseValue.TryGet(result, outputPath, out var folderDestination) &&
-			    folderDestination == "-")
+				CliParseValue.TryGet(result, outputPath, out var folderDestination) &&
+				folderDestination == "-")
 			{
 				result.AddError(LocalizedParseError.Create(
 					"DPX-CLI-FOLDER-STDOUT-NOT-SUPPORTED",
 					L("Terminal.Error.FolderStdoutNotSupported")));
 			}
 			if (result.GetValue(force) &&
-			    CliParseValue.TryGet(result, outputPath, out var forcedDestination) &&
-			    forcedDestination == "-")
+				CliParseValue.TryGet(result, outputPath, out var forcedDestination) &&
+				forcedDestination == "-")
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.ForceRequiresFileOutput")));
 			}
 			if (outputKind == ProjectCopyExportFormat.Zip &&
-			    CliParseValue.TryGet(result, outputPath, out var destination) &&
-			    destination is not null &&
-			    destination != "-" &&
-			    !destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+				CliParseValue.TryGet(result, outputPath, out var destination) &&
+				destination is not null &&
+				destination != "-" &&
+				!destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
 			{
 				result.AddError(LocalizedParseError.Create(
 					"DPX-CLI-ZIP-EXTENSION-REQUIRED",
@@ -1019,25 +1025,25 @@ public sealed class DevProjexCommandTree
 			if (result.GetValue(last) && result.GetResult(project) is not null)
 				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.LastProjectConflict")));
 			if (result.GetValue(last) &&
-			    HasExplicitSelectionOverride(result, selection))
+				HasExplicitSelectionOverride(result, selection))
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.LastSelectionConflict")));
 			}
 			if (result.GetValue(last) &&
-			    result.GetResult(branch) is { Implicit: false })
+				result.GetResult(branch) is { Implicit: false })
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.LastBranchConflict")));
 			}
 			if (CliParseValue.TryGet(result, filter, out var filterValue) &&
-			    filterValue is not null &&
-			    CliParseValue.TryGet(result, search, out var searchValue) &&
-			    searchValue is not null)
+				filterValue is not null &&
+				CliParseValue.TryGet(result, search, out var searchValue) &&
+				searchValue is not null)
 				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.FilterSearchConflict")));
 			if (result.GetResult(selection.GitMode) is { Implicit: false } &&
-			    CliParseValue.TryGet(result, selection.GitMode, out var desktopGitMode) &&
-			    desktopGitMode is { Mode: GitFilteringMode.Diff })
+				CliParseValue.TryGet(result, selection.GitMode, out var desktopGitMode) &&
+				desktopGitMode is { Mode: GitFilteringMode.Diff })
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.DesktopGitMode")));
@@ -2066,19 +2072,19 @@ public sealed class DevProjexCommandTree
 			var completionCommandLine =
 				parseResult.GetValue(commandLine) ?? string.Empty;
 			if (useBase64Transport &&
-			    !CompletionCommandLineTransport.TryDecodeBase64(
-				    completionCommandLine,
-				    out completionCommandLine))
+				!CompletionCommandLineTransport.TryDecodeBase64(
+					completionCommandLine,
+					out completionCommandLine))
 			{
 				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
 				return CommandLineExitCodes.UsageError;
 			}
 			if (!CompletionCursorPositionNormalizer.TryNormalize(
-				    completionCommandLine,
-				    parseResult.GetValue(position),
-				    parseResult.GetValue(positionUnit),
-				    out var completionPosition))
+					completionCommandLine,
+					parseResult.GetValue(position),
+					parseResult.GetValue(positionUnit),
+					out var completionPosition))
 			{
 				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
@@ -2088,9 +2094,9 @@ public sealed class DevProjexCommandTree
 			string? completionWorkingDirectory = null;
 			var encodedWorkingDirectory = parseResult.GetValue(workingDirectoryBase64);
 			if (encodedWorkingDirectory is not null &&
-			    !CompletionCommandLineTransport.TryDecodeBase64(
-				    encodedWorkingDirectory,
-				    out completionWorkingDirectory))
+				!CompletionCommandLineTransport.TryDecodeBase64(
+					encodedWorkingDirectory,
+					out completionWorkingDirectory))
 			{
 				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
@@ -2098,12 +2104,12 @@ public sealed class DevProjexCommandTree
 			}
 
 			foreach (var candidate in ContextAwareCompletionEngine.Complete(
-				         root,
-				         completionCommandLine,
-				         completionPosition,
-				         completionWorkingDirectory,
-				         parseResult.GetValue(bashCurrentWord),
-				         parseResult.GetResult(bashCurrentWord) is not null))
+						 root,
+						 completionCommandLine,
+						 completionPosition,
+						 completionWorkingDirectory,
+						 parseResult.GetValue(bashCurrentWord),
+						 parseResult.GetResult(bashCurrentWord) is not null))
 			{
 				if (useBase64Transport)
 				{
@@ -2378,8 +2384,8 @@ public sealed class DevProjexCommandTree
 		var requestedPath = context.ParseResult.GetValue(commandPath)?.ToList() ?? [];
 		var word = context.WordToComplete ?? string.Empty;
 		if (word.Length > 0 &&
-		    requestedPath.Count > 0 &&
-		    string.Equals(requestedPath[^1], word, StringComparison.Ordinal))
+			requestedPath.Count > 0 &&
+			string.Equals(requestedPath[^1], word, StringComparison.Ordinal))
 		{
 			requestedPath.RemoveAt(requestedPath.Count - 1);
 		}
@@ -2437,7 +2443,7 @@ public sealed class DevProjexCommandTree
 		LocalizationService localization)
 	{
 		if (result.Tokens.Count == 1 &&
-		    TryParseDurationToken(result.Tokens[0].Value, out var duration))
+			TryParseDurationToken(result.Tokens[0].Value, out var duration))
 		{
 			return duration;
 		}
@@ -2449,21 +2455,21 @@ public sealed class DevProjexCommandTree
 	private static bool TryParseDurationToken(string value, out TimeSpan duration)
 	{
 		if (TimeSpan.TryParse(
-			    value,
-			    System.Globalization.CultureInfo.InvariantCulture,
-			    out duration))
+				value,
+				System.Globalization.CultureInfo.InvariantCulture,
+				out duration))
 		{
 			return IsSupportedRequestTimeout(duration);
 		}
 		if (value.EndsWith('s') &&
-		    double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
-			    System.Globalization.CultureInfo.InvariantCulture, out var seconds))
+			double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
+				System.Globalization.CultureInfo.InvariantCulture, out var seconds))
 		{
 			return TryCreateDuration(seconds, out duration);
 		}
 		if (value.EndsWith('m') &&
-		    double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
-			    System.Globalization.CultureInfo.InvariantCulture, out var minutes))
+			double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
+				System.Globalization.CultureInfo.InvariantCulture, out var minutes))
 		{
 			return TryCreateDuration(minutes * 60d, out duration);
 		}
@@ -2474,8 +2480,8 @@ public sealed class DevProjexCommandTree
 	{
 		duration = default;
 		if (!double.IsFinite(seconds) ||
-		    seconds <= 0 ||
-		    seconds > TimeSpan.MaxValue.TotalSeconds)
+			seconds <= 0 ||
+			seconds > TimeSpan.MaxValue.TotalSeconds)
 		{
 			return false;
 		}

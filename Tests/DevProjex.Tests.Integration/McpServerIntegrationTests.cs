@@ -6,6 +6,7 @@ using DevProjex.Application.Dependencies;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Dependencies;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Mcp;
 using DevProjex.Tests.Mcp;
 using ModelContextProtocol;
@@ -29,6 +30,179 @@ public sealed partial class McpServerIntegrationTests
 		"related_files",
 		"get_file"
 	];
+
+	[Fact]
+	public async Task LiveContextRefreshesTheWindowSelectionAcrossAllTools()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		Directory.CreateDirectory(Path.Combine(project, "outside"));
+		File.WriteAllText(
+			Path.Combine(project, "src", "Inside.cs"),
+			"namespace Sample; class Inside { const string Marker = \"inside-marker\"; }\n");
+		File.WriteAllText(
+			Path.Combine(project, "src", "Large.cs"),
+			"namespace Sample; class Large { const string Value = \"" + new string('x', 60_000) + "\"; }\n");
+		File.WriteAllText(
+			Path.Combine(project, "outside", "Outside.cs"),
+			"namespace Sample; class Outside { const string Marker = \"outside-marker\"; }\n");
+		File.WriteAllText(Path.Combine(project, "outside", ".Hidden.cs"), "class Hidden {}\n");
+		var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
+		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
+
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles],
+			live: true);
+
+		var projects = AllText(await server.CallAsync("list_projects"));
+		Assert.Contains("[Live context] revision 1 · 2 files selected in the window", projects, StringComparison.Ordinal);
+
+		var tree = AllText(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" }));
+		Assert.Contains("Inside.cs", tree, StringComparison.Ordinal);
+		Assert.DoesNotContain("Outside.cs", tree, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1", tree, StringComparison.Ordinal);
+
+		var analysis = await server.CallAsync("analyze");
+		Assert.Equal(2, Structured(analysis).GetProperty("files").GetInt32());
+		Assert.Contains("[Live context] revision 1", AllText(analysis), StringComparison.Ordinal);
+
+		var search = AllText(await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "inside-marker" }));
+		Assert.Contains("Inside.cs", search, StringComparison.Ordinal);
+		Assert.DoesNotContain("Outside.cs", search, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1", search, StringComparison.Ordinal);
+
+		var related = AllText(await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = "src/Inside.cs" }));
+		Assert.Contains("[Live context] revision 1", related, StringComparison.Ordinal);
+
+		var outside = AllText(await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "outside/Outside.cs" }));
+		Assert.StartsWith(
+			"[Live context] outside/Outside.cs is outside the current window selection; returned because you named it. " +
+			"Tree, search, pack and related stay within the selection.",
+			outside,
+			StringComparison.Ordinal);
+		Assert.Contains("outside-marker", outside, StringComparison.Ordinal);
+		var filtered = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "outside/.Hidden.cs" });
+		Assert.True(filtered.IsError);
+		Assert.Contains(McpErrorCodes.PathNotFound, AllText(filtered), StringComparison.Ordinal);
+		Assert.DoesNotContain("returned because you named it", AllText(filtered), StringComparison.Ordinal);
+
+		var pack = AllText(await server.CallAsync("pack_context"));
+		var packId = Regex.Match(pack, "'(?<id>[a-f0-9]{48})'").Groups["id"].Value;
+		Assert.NotEmpty(packId);
+		Assert.Contains("[Live context] pack built at revision 1.", pack, StringComparison.Ordinal);
+
+		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["outside"]));
+		var page = AllText(await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId }));
+		Assert.Contains(
+			"[Live context] pack built at revision 1; window is at revision 2. " +
+			"Call pack_context again to include the current selection.",
+			page,
+			StringComparison.Ordinal);
+		Assert.Contains("[Live context] changed since revision 1: +outside, -src", page, StringComparison.Ordinal);
+
+		var rejected = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["path"] = "outside/Outside.cs",
+				["profile"] = "standard"
+			});
+		Assert.True(rejected.IsError);
+		Assert.Contains("live mode has one selection source", AllText(rejected), StringComparison.Ordinal);
+
+		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: []));
+		var empty = AllText(await server.CallAsync("get_tree"));
+		Assert.Contains("[Live context] the window selects no files", empty, StringComparison.Ordinal);
+		Assert.DoesNotContain("Inside.cs", empty, StringComparison.Ordinal);
+		Assert.DoesNotContain("Outside.cs", empty, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LiveContextMissingProfileUsesServerDefaultsAndSaysSo()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "App.cs"), "class App {}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+
+		var tree = AllText(await server.CallAsync("get_tree"));
+
+		Assert.Contains("App.cs", tree, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] no window selection saved for this root; using server defaults.",
+			tree,
+			StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", tree, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LiveContextTracksEachConfiguredRootSeparately()
+	{
+		using var workspace = new TemporaryDirectory();
+		var first = workspace.CreateDirectory("first");
+		var second = workspace.CreateDirectory("second");
+		File.WriteAllText(Path.Combine(first, "First.cs"), "class First {}\n");
+		File.WriteAllText(Path.Combine(second, "Second.cs"), "class Second {}\n");
+		var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
+		profileStore.SaveProfile(first, new ProjectSelectionProfile([], [], [], SelectedPaths: null));
+		profileStore.SaveProfile(second, new ProjectSelectionProfile([], [], [], SelectedPaths: []));
+		await using var server = await McpTestServer.StartAsync(
+			[first, second],
+			workspace.Path,
+			live: true);
+
+		var firstTree = AllText(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = "first" }));
+		var secondTree = AllText(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = "second" }));
+
+		Assert.Contains("revision 1 · 1 files selected in the window · root first", firstTree, StringComparison.Ordinal);
+		Assert.Contains("revision 1 · 0 files selected in the window · root second", secondTree, StringComparison.Ordinal);
+		Assert.Contains("the window selects no files", secondTree, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LiveContextSessionRecordUsesInitializationClientInfoAndIsRemovedOnShutdown()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "App.cs"), "class App {}\n");
+		var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			live: true,
+			clientInfo: new Implementation { Name = "integration-client", Version = "1.0" });
+		var registry = new LiveSessionRegistry(() => Path.Combine(workspace.Path, "app-data"));
+
+		var record = Assert.Single(registry.ReadActive(project));
+		Assert.False(
+			string.IsNullOrWhiteSpace(record.ClientName),
+			$"Recorded client name was '{record.ClientName ?? "<null>"}' and version was '{record.ClientVersion ?? "<null>"}'.");
+		Assert.False(
+			string.IsNullOrWhiteSpace(record.ClientVersion),
+			$"Recorded client name was '{record.ClientName ?? "<null>"}' and version was '{record.ClientVersion ?? "<null>"}'.");
+		Assert.Equal([PathUtility.Normalize(project)], record.Roots);
+
+		await server.DisposeAsync();
+		Assert.Empty(registry.ReadActive(project));
+	}
 
 	[Fact]
 	public void McpHostAcceptsOnlyPersistentGitModes()
@@ -8039,7 +8213,9 @@ public sealed partial class McpServerIntegrationTests
 			IReadOnlyCollection<ProjectExclusion>? exclusions = null,
 			bool agentExclusions = false,
 			DependencyFactsEngine? dependencyFactsEngine = null,
-			IReadOnlySet<string>? remoteHosts = null)
+			IReadOnlySet<string>? remoteHosts = null,
+			bool live = false,
+			Implementation? clientInfo = null)
 		{
 			return await StartAsync(
 				[project],
@@ -8052,7 +8228,9 @@ public sealed partial class McpServerIntegrationTests
 				exclusions,
 				agentExclusions,
 				dependencyFactsEngine,
-				remoteHosts);
+				remoteHosts,
+				live,
+				clientInfo);
 		}
 
 		public static async Task<McpTestServer> StartAsync(
@@ -8066,7 +8244,9 @@ public sealed partial class McpServerIntegrationTests
 			IReadOnlyCollection<ProjectExclusion>? exclusions = null,
 			bool agentExclusions = false,
 			DependencyFactsEngine? dependencyFactsEngine = null,
-			IReadOnlySet<string>? remoteHosts = null)
+			IReadOnlySet<string>? remoteHosts = null,
+			bool live = false,
+			Implementation? clientInfo = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -8093,7 +8273,8 @@ public sealed partial class McpServerIntegrationTests
 				gitMode,
 				exclusions,
 				agentExclusions,
-				remoteHosts);
+				remoteHosts,
+				live: live);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(
@@ -8101,7 +8282,9 @@ public sealed partial class McpServerIntegrationTests
 				recordingOutput);
 			var client = await McpClient.CreateAsync(
 				transport,
-				clientOptions: null,
+				clientOptions: clientInfo is null
+					? null
+					: new McpClientOptions { ClientInfo = clientInfo },
 				loggerFactory: null,
 				TestContext.Current.CancellationToken);
 			return new McpTestServer(
