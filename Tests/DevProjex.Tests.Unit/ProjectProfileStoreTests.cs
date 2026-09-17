@@ -92,6 +92,62 @@ public sealed class ProjectProfileStoreTests
 		Assert.All(roots, root => Assert.True(loaded.RootFolderStates![root]));
 	}
 
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void SelectedPathsRoundTripPreservesImplicitAndExplicitEmptySelection(bool implicitSelection)
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		IReadOnlyCollection<string>? selectedPaths = implicitSelection ? null : [];
+
+		store.SaveProfile(
+			projectPath,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: selectedPaths));
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		if (implicitSelection)
+			Assert.Null(loaded.SelectedPaths);
+		else
+			Assert.Empty(Assert.IsAssignableFrom<IReadOnlyCollection<string>>(loaded.SelectedPaths));
+	}
+
+	[Fact]
+	public async Task ProfileWithoutSelectedPathsLoadsAsImplicitFullTree()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		var normalizedProjectPath = Path.GetFullPath(projectPath);
+		var escapedProjectPath = JsonSerializer.Serialize(normalizedProjectPath);
+		var updatedUtc = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+		var profilePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(profilePath)!);
+		await File.WriteAllTextAsync(
+			profilePath,
+			$$"""
+			{
+			  "schemaVersion": 3,
+			  "profiles": {
+			    {{escapedProjectPath}}: {
+			      "selectedRootFolders": [],
+			      "selectedExtensions": [],
+			      "selectedIgnoreOptions": [],
+			      "rootFolderStates": {},
+			      "extensionStates": {},
+			      "ignoreOptionStates": {},
+			      "updatedUtc": "{{updatedUtc}}"
+			    }
+			  }
+			}
+			""",
+			TestContext.Current.CancellationToken);
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Null(loaded.SelectedPaths);
+	}
+
 	[Fact]
 	public void TrySaveProfileWithResult_WhenSelectionExceedsLimit_RejectsWithoutPersistingTruncatedProfile()
 	{

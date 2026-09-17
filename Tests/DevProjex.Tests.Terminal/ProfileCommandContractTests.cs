@@ -664,6 +664,54 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task ExportImportExportPreservesExplicitEmptySelection()
+	{
+		using var workspace = CreateWorkspace();
+		using var output = new TemporaryDirectory();
+		var source = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 2,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "hideSecrets": false,
+			    "hidePrivateData": false,
+			    "compressCode": false,
+			    "stripComments": false,
+			    "stripBlankLines": false
+			  }
+			}
+			""");
+		var exported = Path.Combine(output.Path, "explicit-empty.json");
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "import", source, workspace.Path, "--apply"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "export", workspace.Path,
+				"--profile", "local",
+				"-o", exported));
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+			exported,
+			TestContext.Current.CancellationToken));
+		Assert.Empty(document.RootElement.GetProperty("selection").GetProperty("selectedPaths").EnumerateArray());
+	}
+
+	[Fact]
 	public async Task LocalProfilePersistenceFailuresReturnRuntimeErrorAtCommandBoundary()
 	{
 		using var workspace = CreateWorkspace();
