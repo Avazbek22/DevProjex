@@ -20,7 +20,10 @@ public sealed class McpConnectionUiTests
 		"Menu.Mcp.Codex",
 		"Menu.Mcp.Json",
 		"Dialog.McpPath.Title",
-		"Dialog.McpPath.Body"
+		"Dialog.McpPath.Body",
+		"Dialog.LiveContext.Secrets.Title",
+		"Dialog.LiveContext.Secrets.Message",
+		"Dialog.LiveContext.Secrets.Apply"
 	];
 
 	[Fact]
@@ -117,6 +120,27 @@ public sealed class McpConnectionUiTests
 					$"{key} is empty in {Path.GetFileName(file)}.");
 			}
 		}
+	}
+
+	[Theory]
+	[InlineData(true, false, true, true)]
+	[InlineData(true, false, false, false)]
+	[InlineData(true, true, true, false)]
+	[InlineData(false, false, true, false)]
+	[InlineData(false, true, true, false)]
+	[InlineData(true, true, false, false)]
+	public void SecretProtectionConfirmation_OnlyGuardsLiveEnabledToDisabledTransition(
+		bool wasEnabled,
+		bool willBeEnabled,
+		bool hasLiveSession,
+		bool expected)
+	{
+		Assert.Equal(
+			expected,
+			MainWindow.ShouldConfirmSecretProtectionDisable(
+				wasEnabled,
+				willBeEnabled,
+				hasLiveSession));
 	}
 
 	private static LocalizationService CreateLocalization()

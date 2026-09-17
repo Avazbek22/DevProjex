@@ -638,6 +638,15 @@ public partial class MainWindow
 
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
+        if (ShouldConfirmSecretProtectionDisable(
+                _appliedHideSecretsEnabled,
+                _viewModel.HideSecretsOption?.IsChecked == true,
+                HasLiveSessionForCurrentProject()) &&
+            !await ConfirmSecretProtectionDisableAsync())
+        {
+            return;
+        }
+
         var activeOperationType = _statusOperations.GetActiveSnapshot().OperationType;
         if (!_viewModel.TryBeginApplySettings(activeOperationType))
             return;
@@ -648,6 +657,25 @@ public partial class MainWindow
     }
 
     internal Task LatestApplySettingsTask => _latestApplySettingsTask;
+
+    internal static bool ShouldConfirmSecretProtectionDisable(
+        bool protectionWasEnabled,
+        bool protectionWillBeEnabled,
+        bool hasLiveSession) =>
+        hasLiveSession && protectionWasEnabled && !protectionWillBeEnabled;
+
+    private bool HasLiveSessionForCurrentProject() =>
+        !string.IsNullOrWhiteSpace(_currentPath) &&
+        _liveSessionRegistry.ReadActive(_currentPath).Count > 0;
+
+    private Task<bool> ConfirmSecretProtectionDisableAsync() =>
+        MessageDialog.ShowConfirmationAsync(
+            this,
+            _localization["Dialog.LiveContext.Secrets.Title"],
+            _localization["Dialog.LiveContext.Secrets.Message"],
+            _localization["Dialog.LiveContext.Secrets.Apply"],
+            _localization["Dialog.Cancel"],
+            height: 230);
 
     private async Task ApplySettingsAsync()
     {
