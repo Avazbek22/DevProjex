@@ -345,6 +345,7 @@ public partial class MainWindow
             return;
         }
 
+        _treeSelectionProfiles.CancelPending();
         var result = _projectProfiles.ClearAllProfiles();
         _toastService.Show(_localization[ResolveResetDataResultLocalizationKey(result)]);
         e.Handled = true;
@@ -661,6 +662,7 @@ public partial class MainWindow
 
         try
         {
+            await _treeSelectionProfiles.FlushAsync(cancellationToken);
             await using var statusLease = SelectionRefreshStatusLease.StartApplyingSettings(
                 _viewModel,
                 _statusOperations,

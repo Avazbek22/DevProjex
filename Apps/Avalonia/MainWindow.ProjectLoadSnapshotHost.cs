@@ -1,5 +1,6 @@
 using DevProjex.Application.Models;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia;
 
@@ -116,9 +117,15 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             snapshot.TreeInput.CurrentPath,
             snapshot.SelectionSnapshot))
         {
-			return false;
+            return false;
         }
-		PrepareContentSessionsForPublishedProject(snapshot);
+        PrepareContentSessionsForPublishedProject(snapshot);
+        if (snapshot.ProfileTreeSelection is { } profileTreeSelection)
+        {
+            ProjectTreeUiState.RestoreProfileSelection(
+                snapshot.TreeRoot,
+                profileTreeSelection.SelectedPaths);
+        }
 
         // Project profiles are applied with option notifications suppressed. Publish the resolved
         // transformation state before post-load work starts, otherwise a persisted compression

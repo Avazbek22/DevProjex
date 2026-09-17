@@ -5,6 +5,64 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfilePersistenceCoordinatorTests
 {
 	[Fact]
+	public async Task SelectionPersist_WritesTheFrontierWithoutPublishingDraftFilters()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".md", false));
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+			viewModel.Extensions[0].IsChecked = false;
+			viewModel.Extensions[1].IsChecked = true;
+			var store = new RetryProfileStore(projectPath, failures: 0);
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession);
+
+			await persistence.PersistSelectedPathsAsync(
+				projectPath,
+				["src", "docs/api"],
+				TestContext.Current.CancellationToken);
+
+			var saved = store.SavedProfiles[Path.GetFullPath(projectPath)];
+			Assert.Equal([".cs"], saved.SelectedExtensions);
+			Assert.Equal(["src", "docs/api"], saved.SelectedPaths);
+		}
+	}
+
+	[Fact]
+	public async Task SelectionPersist_ExplicitFullTreeDoesNotRecaptureANewerProviderValue()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+			var store = new RetryProfileStore(projectPath, failures: 0);
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession,
+				selectedPathsProvider: static () => ["newer-selection"]);
+
+			await persistence.PersistSelectedPathsAsync(
+				projectPath,
+				selectedPaths: null,
+				TestContext.Current.CancellationToken);
+
+			Assert.Null(store.SavedProfiles[Path.GetFullPath(projectPath)].SelectedPaths);
+		}
+	}
+
+	[Fact]
 	public async Task Persist_UsesAppliedSelectionsWithoutWritingCurrentMarkedSecrets()
 	{
 		const string projectPath = @"C:\Project";

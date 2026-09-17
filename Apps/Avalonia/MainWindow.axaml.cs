@@ -1128,6 +1128,9 @@ public partial class MainWindow : Window
             return false;
         }
 
+        if (_viewModel.IsProjectLoaded)
+            await _treeSelectionProfiles.FlushAsync(_windowLifetimeCts?.Token ?? CancellationToken.None);
+
         var projectLoadFinalization = BeginProjectLoadFinalization();
         var previousSourceType = _viewModel.ProjectSourceType;
         var previousBranch = _viewModel.CurrentBranch;
@@ -1415,24 +1418,28 @@ public partial class MainWindow : Window
         _projectLoadTiming = timing;
 #endif
 
-		PersistentSecretMarksSnapshot? persistentMarks = null;
-		if (applyStoredProfile)
-		{
-			var runtimeGitMode = _selectionCoordinator.ActiveGitFilteringMode;
+        PersistentSecretMarksSnapshot? persistentMarks = null;
+        ProjectProfileTreeSelection? profileTreeSelection = null;
+        if (applyStoredProfile)
+        {
+            var runtimeGitMode = _selectionCoordinator.ActiveGitFilteringMode;
 			var profileSnapshot = await LoadProjectProfileWithRetryAsync(
 				_currentPath,
 				cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
 
-			if (profileSnapshot is { HasProfile: true, Profile: not null })
-			{
-				_selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
-			}
-			else if (profileSnapshot.Status == ProjectProfileLookupStatus.Missing)
-			{
-				_selectionCoordinator.ResetProjectProfileSelections(_currentPath);
-			}
-			_selectionCoordinator.RestoreMomentaryGitFilteringMode(runtimeGitMode);
+            if (profileSnapshot is { HasProfile: true, Profile: not null })
+            {
+                _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
+                profileTreeSelection = new ProjectProfileTreeSelection(
+                    profileSnapshot.Profile.SelectedPaths);
+            }
+            else if (profileSnapshot.Status == ProjectProfileLookupStatus.Missing)
+            {
+                _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
+                profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: null);
+            }
+            _selectionCoordinator.RestoreMomentaryGitFilteringMode(runtimeGitMode);
 
 			if (profileSnapshot is
 			    {
@@ -1445,11 +1452,12 @@ public partial class MainWindow : Window
 		}
 
 		return await _projectLoadSnapshotPipeline.ReloadAsync(
-			_currentPath,
-			preserveTreeState,
-			persistentMarks,
-			cancellationToken);
-	}
+            _currentPath,
+            preserveTreeState,
+            persistentMarks,
+            profileTreeSelection,
+            cancellationToken);
+    }
 
 	private async Task<ProjectProfileLoadSnapshot> LoadProjectProfileWithRetryAsync(
 		string projectPath,

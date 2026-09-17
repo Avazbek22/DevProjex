@@ -184,6 +184,10 @@ public partial class MainWindow
 
     private void OnDeactivated(object? sender, EventArgs e)
     {
+        ObserveDetachedTask(
+            _treeSelectionProfiles.FlushAsync(_windowLifetimeCts?.Token ?? CancellationToken.None),
+            "PersistTreeSelectionOnDeactivation");
+
         if (_awaitingSystemDialogActivation && _systemDialogActivationTcs is null)
         {
             _systemDialogActivationTcs =

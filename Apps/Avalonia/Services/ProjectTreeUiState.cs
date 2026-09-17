@@ -1,3 +1,5 @@
+using DevProjex.Application.Context;
+
 namespace DevProjex.Avalonia.Services;
 
 internal sealed class ProjectTreeSelectionSnapshot
@@ -319,6 +321,80 @@ internal sealed class ProjectTreePathResolution(
 
 internal static class ProjectTreeUiState
 {
+    public static IReadOnlyCollection<string>? CaptureProfileSelection(TreeNodeViewModel root)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+
+        var checkedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+        root.CollectCheckedPaths(checkedPaths);
+        if (root.IsChecked == true ||
+            checkedPaths.Count > 0 &&
+            ProjectTreeSelectionProjection.CoversWholeTree(root.Descriptor, checkedPaths))
+        {
+            return null;
+        }
+
+        return checkedPaths
+            .Select(path => ProjectSelectionPath.NormalizeRelative(
+                Path.GetRelativePath(root.FullPath, path)))
+            .OrderBy(static path => path, ProjectTreePathIdentity.CanonicalComparer)
+            .ToArray();
+    }
+
+    public static TreeSelectionRestoreResult RestoreProfileSelection(
+        TreeNodeViewModel root,
+        IReadOnlyCollection<string>? selectedPaths)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+
+        if (selectedPaths is null)
+        {
+            root.SetCheckedForTreeStateRestore(true);
+            return new TreeSelectionRestoreResult(Applied: true, MissingCheckedPathCount: 0);
+        }
+
+        root.SetCheckedForTreeStateRestore(false);
+        if (selectedPaths.Count == 0)
+            return new TreeSelectionRestoreResult(Applied: true, MissingCheckedPathCount: 0);
+
+        var fullPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+        foreach (var selectedPath in selectedPaths)
+        {
+            if (string.IsNullOrWhiteSpace(selectedPath) || Path.IsPathRooted(selectedPath))
+                continue;
+
+            var fullPath = Path.GetFullPath(selectedPath, root.FullPath);
+            if (IsSameOrDescendantPath(fullPath, root.FullPath))
+                fullPaths.Add(fullPath);
+        }
+
+        var resolution = ResolvePaths(root, fullPaths);
+        var ancestors = new HashSet<TreeNodeViewModel>();
+        var missing = 0;
+        foreach (var fullPath in fullPaths)
+        {
+            if (!resolution.TryGetNode(fullPath, out var node))
+            {
+                missing++;
+                continue;
+            }
+
+            node.SetCheckedForTreeStateRestore(true);
+            for (var ancestor = node.Parent; ancestor is not null; ancestor = ancestor.Parent)
+                ancestors.Add(ancestor);
+        }
+
+        var orderedAncestors = ancestors.OrderByDescending(static node => node.Depth).ToArray();
+        foreach (var ancestor in orderedAncestors)
+            ancestor.RecalculateCheckedStateForTreeRestore();
+
+        return new TreeSelectionRestoreResult(
+            Applied: true,
+            MissingCheckedPathCount: missing,
+            resolution.InspectedChildCount,
+            orderedAncestors.Length);
+    }
+
     public static ProjectTreeExpansionSnapshot? CaptureExpansion(
         string projectPath,
         IList<TreeNodeViewModel> roots)
