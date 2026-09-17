@@ -179,6 +179,16 @@ Apply command. Rapid changes are coalesced into the latest requested state;
 batch-oriented workflows belong to direct CLI commands rather than a second
 commit model inside the TUI.
 
+The checked-tree frontier is also the local project profile used by Desktop and
+MCP Live Context. TUI restores it when the project opens, writes the latest
+frontier after two seconds of selection inactivity, and flushes it before leaving
+the workspace or exiting. Fully checked, fully unchecked, and mixed trees retain
+the distinct null, empty-array, and minimal-frontier semantics. Parameter changes
+are written after their successful immediate refresh. Expansion, focus, Preview
+view, and format remain TUI presentation state and do not alter the shared focus.
+When an MCP live session exists for the open root, the status line shows
+`Live context (<client>)`, or a localized session count when more than one is active.
+
 When filtering changes which options are available, a newly discovered option is
 selected by default. An option already seen during the session keeps its explicit
 checked or unchecked state if it disappears and later returns. This is the same
@@ -240,6 +250,7 @@ inline ghost suffix as soon as a token can be completed:
 | `update` | get updates for the cloned repository |
 | `recent` | open recent projects and repositories |
 | `profile save [name]` | save the current settings as a portable profile |
+| `mcp [claude-code\|codex\|json] [live\|standard]` | show a connection fragment for the open project; defaults to `claude-code live` |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
 | `diagnostics` | show every diagnostic in a scrollable overlay |

@@ -130,6 +130,30 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void LiveContextDocumentationPinsFocusRevisionsAndConnectionSurfaces()
+	{
+		var rootPath = FindRepositoryRoot();
+		var server = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
+		var profiles = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-Profiles.md"));
+		var terminal = File.ReadAllText(Path.Combine(rootPath, "Docs", "TerminalWorkspace.md"));
+		var commandLine = File.ReadAllText(Path.Combine(rootPath, "Docs", "CommandLine.md"));
+		var normalizedServer = Regex.Replace(server, @"\s+", " ");
+		var normalizedProfiles = Regex.Replace(profiles, @"\s+", " ");
+		var normalizedTerminal = Regex.Replace(terminal, @"\s+", " ");
+		var normalizedCommandLine = Regex.Replace(commandLine, @"\s+", " ");
+
+		Assert.Contains("Checked nodes are focus", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 16", server, StringComparison.Ordinal);
+		Assert.Contains("pack built at revision 14", server, StringComparison.Ordinal);
+		Assert.Contains("live context across WSL is not supported yet", server, StringComparison.Ordinal);
+		Assert.Contains("an empty array selects nothing", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains("writes the latest frontier after two seconds", normalizedTerminal, StringComparison.Ordinal);
+		Assert.Contains("mcp [claude-code\\|codex\\|json]", terminal, StringComparison.Ordinal);
+		Assert.Contains("devprojex mcp connect", normalizedCommandLine, StringComparison.Ordinal);
+		Assert.Contains("moving that file requires copying the fragment again", normalizedCommandLine, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void McpAgentErgonomicsAreSpecifiedInServerAndVersionContracts()
 	{
 		var rootPath = FindRepositoryRoot();

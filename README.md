@@ -206,6 +206,17 @@ devprojex mcp --root /path/to/project
 
 For Claude Code it's one command: `claude mcp add devprojex -- devprojex mcp --root .`
 
+**Live context** connects an MCP session to the checked tree in an open DevProjex
+window through the shared local project profile. The **MCP** menu, between File
+and Git, copies Live context or Standard setup for Claude Code, Codex, or another
+JSON client; if the terminal command needs PATH setup, a follow-up dialog offers
+the platform-appropriate action without changing the copied fragment. The window
+title names an active client or session count, tree choices are restored on reopen,
+and disabling secret protection while a live session exists requires confirmation.
+Directly named readable files can still be returned with an explicit outside-focus
+notice, while tree, search, analysis, dependency, and pack operations stay within
+the checked focus and all configured filters remain enforced.
+
 Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`. `related_files` answers "what does this file actually use, and who uses it" from a static dependency index over up to 16 seed files, so following a thread never widens the selection. `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
 
 The server enforces hard security boundaries on top of DevProjex's read-only design:

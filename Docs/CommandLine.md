@@ -65,6 +65,7 @@ for the documented exit-`1` launcher diagnostic.
 devprojex
 ├── tui
 ├── mcp
+│   └── connect
 ├── open
 ├── analyze
 ├── related
@@ -107,7 +108,7 @@ devprojex
 `dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
 diagnostic workflows.
 
-`devprojex mcp [--root PATH ...] [--git-mode none|gitignore|tracked] [--exclude NAME ...] [--unrestricted] [--allow-agent-exclusions] [--hide-private-data] [--allow-remote]`
+`devprojex mcp [--root PATH ...] [--live] [--git-mode none|gitignore|tracked] [--exclude NAME ...] [--unrestricted] [--allow-agent-exclusions] [--hide-private-data] [--allow-remote]`
 starts the local read-only MCP stdio server. `--search-body-chars off|N` sets the
 search declaration-body character limit: `N` must be an integer from 1 to 16,000,
 defaulting to 1,800; `off` disables bodies but keeps declaration ranges and matches.
@@ -142,6 +143,21 @@ Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then
 `CLAUDE_PROJECT_DIR`, then the current directory. See
 [McpServer.md](McpServer.md) for its security model, tools, and client
 configuration.
+
+`--live` rereads the local profile saved by the open DevProjex window before
+every call. Checked paths become the shared focus for tree, search, analysis,
+dependency, and pack operations; filters and mandatory protection remain the
+ceiling. A directly named readable file can still be returned with an explicit
+outside-focus notice. Without `--live`, server behavior is unchanged.
+
+`devprojex mcp connect [PROJECT] --client claude-code|codex|json --mode
+live|standard` prints a ready-to-use connection fragment. The project defaults
+to the current directory, the client to `claude-code`, and the mode to `live`.
+The command embeds the absolute installed executable path: winget and portable
+ZIP installations retain it while their installation directory stays fixed;
+the Store uses `%LOCALAPPDATA%\Microsoft\WindowsApps\devprojex.exe`; a macOS
+application uses its path inside the `.app` bundle. An AppImage uses the current
+AppImage path, so moving that file requires copying the fragment again.
 
 Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. `--language CODE` localizes human-readable help,
