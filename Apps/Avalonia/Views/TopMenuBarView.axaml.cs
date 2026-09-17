@@ -73,6 +73,8 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? UpdateOpenRepositoryRequested;
     public event EventHandler<AutomaticUpdateCheckChangedEventArgs>? AutomaticUpdateCheckChanged;
     public event EventHandler<RoutedEventArgs>? TerminalCommandSetupRequested;
+    public event EventHandler<McpConnectionRequestedEventArgs>? McpConnectionRequested;
+    public event EventHandler<RoutedEventArgs>? McpDocumentationRequested;
     public event EventHandler<RoutedEventArgs>? HelpCloseRequested;
     public event EventHandler<RoutedEventArgs>? AboutRequested;
     public event EventHandler<RoutedEventArgs>? AboutCloseRequested;
@@ -367,6 +369,33 @@ public partial class TopMenuBarView : UserControl
 
     private void OnTerminalCommandSetup(object? sender, RoutedEventArgs e)
         => TerminalCommandSetupRequested?.Invoke(sender, e);
+
+    private void OnMcpLiveClaudeCode(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.ClaudeCode, McpConnectionMode.Live);
+
+    private void OnMcpLiveCodex(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.Codex, McpConnectionMode.Live);
+
+    private void OnMcpLiveJson(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.Json, McpConnectionMode.Live);
+
+    private void OnMcpStandardClaudeCode(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.ClaudeCode, McpConnectionMode.Standard);
+
+    private void OnMcpStandardCodex(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.Codex, McpConnectionMode.Standard);
+
+    private void OnMcpStandardJson(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.Json, McpConnectionMode.Standard);
+
+    private void OnMcpDocumentation(object? sender, RoutedEventArgs e) =>
+        McpDocumentationRequested?.Invoke(sender, e);
+
+    private void RequestMcpConnection(
+        object? sender,
+        McpConnectionClient client,
+        McpConnectionMode mode) =>
+        McpConnectionRequested?.Invoke(sender, new McpConnectionRequestedEventArgs(client, mode));
 
     private void OnAbout(object? sender, RoutedEventArgs e) => AboutRequested?.Invoke(sender, e);
 

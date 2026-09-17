@@ -140,6 +140,49 @@
         </MenuItem>
         <MenuItem Header="{Binding MenuFileExit}" Click="OnExit" />
       </MenuItem>
+      <MenuItem Name="McpMenuItem"
+                Header="{Binding MenuMcp}"
+                AutomationProperties.Name="{Binding MenuMcp}">
+        <MenuItem Name="McpLiveMenuItem"
+                  Header="{Binding MenuMcpLiveContext}"
+                  IsEnabled="{Binding IsProjectLoaded}"
+                  AutomationProperties.Name="{Binding MenuMcpLiveContext}">
+          <MenuItem Name="McpLiveClaudeCodeMenuItem"
+                    Header="{Binding MenuMcpClaudeCode}"
+                    AutomationProperties.Name="{Binding MenuMcpClaudeCode}"
+                    Click="OnMcpLiveClaudeCode" />
+          <MenuItem Name="McpLiveCodexMenuItem"
+                    Header="{Binding MenuMcpCodex}"
+                    AutomationProperties.Name="{Binding MenuMcpCodex}"
+                    Click="OnMcpLiveCodex" />
+          <MenuItem Name="McpLiveJsonMenuItem"
+                    Header="{Binding MenuMcpJson}"
+                    AutomationProperties.Name="{Binding MenuMcpJson}"
+                    Click="OnMcpLiveJson" />
+        </MenuItem>
+        <MenuItem Name="McpStandardMenuItem"
+                  Header="{Binding MenuMcpStandard}"
+                  IsEnabled="{Binding IsProjectLoaded}"
+                  AutomationProperties.Name="{Binding MenuMcpStandard}">
+          <MenuItem Name="McpStandardClaudeCodeMenuItem"
+                    Header="{Binding MenuMcpClaudeCode}"
+                    AutomationProperties.Name="{Binding MenuMcpClaudeCode}"
+                    Click="OnMcpStandardClaudeCode" />
+          <MenuItem Name="McpStandardCodexMenuItem"
+                    Header="{Binding MenuMcpCodex}"
+                    AutomationProperties.Name="{Binding MenuMcpCodex}"
+                    Click="OnMcpStandardCodex" />
+          <MenuItem Name="McpStandardJsonMenuItem"
+                    Header="{Binding MenuMcpJson}"
+                    AutomationProperties.Name="{Binding MenuMcpJson}"
+                    Click="OnMcpStandardJson" />
+        </MenuItem>
+        <Separator />
+        <MenuItem Name="McpDocumentationMenuItem"
+                  Header="{Binding MenuMcpDocumentation}"
+                  AutomationProperties.Name="{Binding MenuMcpDocumentation}"
+                  Click="OnMcpDocumentation" />
+      </MenuItem>
       <MenuItem Name="GitMenuItem" Header="Git" IsEnabled="{Binding CanChangeProjectTree}">
         <MenuItem Header="{Binding MenuGitClone}" Click="OnGitClone" />
         <MenuItem Name="GitBranchMenuItem"
