@@ -1085,5 +1085,6 @@
   "Terminal.Tui.Welcome.RecentProject.Description": "打開這個最近的專案。",
   "Terminal.Validation.BooleanOptionConflict": "{0}不能與{1}合併。",
   "Terminal.Value.No": "否",
-  "Terminal.Value.Yes": "是"
+  "Terminal.Value.Yes": "是",
+  "LiveContext.Title.Sessions": "{0} 個工作階段"
 }

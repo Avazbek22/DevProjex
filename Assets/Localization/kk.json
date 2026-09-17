@@ -1091,5 +1091,6 @@
   "Terminal.Tui.Welcome.RecentProject.Description": "Осы соңғы жобаны ашу.",
   "Terminal.Validation.BooleanOptionConflict": "{0} {1}-пен біріктірілмейді.",
   "Terminal.Value.No": "жоқ",
-  "Terminal.Value.Yes": "иә"
+  "Terminal.Value.Yes": "иә",
+  "LiveContext.Title.Sessions": "{0} сеанс"
 }

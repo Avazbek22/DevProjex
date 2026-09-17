@@ -1085,5 +1085,6 @@
   "Terminal.Tui.Welcome.RecentProject.Description": "打开此最近的项目。",
   "Terminal.Validation.BooleanOptionConflict": "{0} 不能与 {1} 结合使用。",
   "Terminal.Value.No": "否",
-  "Terminal.Value.Yes": "是"
+  "Terminal.Value.Yes": "是",
+  "LiveContext.Title.Sessions": "{0} 个会话"
 }

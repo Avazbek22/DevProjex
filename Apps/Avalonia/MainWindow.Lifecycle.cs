@@ -186,6 +186,7 @@ public partial class MainWindow
                 _previewBar.SizeChanged -= OnPreviewBarSizeChanged;
             DetachRecentMenuHandlers();
             DetachTreeFontMenuHandlers();
+			StopLiveSessionObservation();
 			_secretRedactionSession.SnapshotPublished -= OnSecretRedactionSnapshotPublished;
 			_codeCompressionSession.SnapshotPublished -= OnCodeCompressionSnapshotPublished;
 			_secretRedactionSession.Reset();

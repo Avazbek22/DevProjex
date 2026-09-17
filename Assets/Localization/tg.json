@@ -1091,5 +1091,6 @@
   "Terminal.Tui.Welcome.RecentProject.Description": "Ин лоиҳаи охиринро кушоед.",
   "Terminal.Validation.BooleanOptionConflict": "{0} бо {1} омехта карда намешавад.",
   "Terminal.Value.No": "не",
-  "Terminal.Value.Yes": "ҳа"
+  "Terminal.Value.Yes": "ҳа",
+  "LiveContext.Title.Sessions": "{0} ҷаласа"
 }

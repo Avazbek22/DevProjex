@@ -1091,5 +1091,6 @@
   "Terminal.Tui.Welcome.RecentProject.Description": "Открыть этот недавний проект.",
   "Terminal.Validation.BooleanOptionConflict": "{0} нельзя сочетать с {1}.",
   "Terminal.Value.No": "нет",
-  "Terminal.Value.Yes": "да"
+  "Terminal.Value.Yes": "да",
+  "LiveContext.Title.Sessions": "{0} сессии"
 }

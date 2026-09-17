@@ -1091,5 +1091,6 @@
   "Terminal.Tui.Welcome.RecentProject.Description": "Ushbu so'nggi loyihani oching.",
   "Terminal.Validation.BooleanOptionConflict": "{0} {1} bilan birlashtirilmaydi.",
   "Terminal.Value.No": "yo‘q",
-  "Terminal.Value.Yes": "ha"
+  "Terminal.Value.Yes": "ha",
+  "LiveContext.Title.Sessions": "{0} seans"
 }

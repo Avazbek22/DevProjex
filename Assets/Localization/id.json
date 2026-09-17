@@ -1085,5 +1085,6 @@
   "Terminal.Tui.Welcome.RecentProject.Description": "Buka proyek terbaru ini.",
   "Terminal.Validation.BooleanOptionConflict": "{0} tidak dapat digabungkan dengan {1}.",
   "Terminal.Value.No": "tidak",
-  "Terminal.Value.Yes": "ya"
+  "Terminal.Value.Yes": "ya",
+  "LiveContext.Title.Sessions": "{0} sesi"
 }

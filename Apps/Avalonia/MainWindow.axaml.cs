@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Avalonia.Platform.Storage;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.TerminalCommands;
 using AppViewSettings = DevProjex.Infrastructure.ThemePresets.AppViewSettings;
 
@@ -1991,11 +1992,14 @@ public partial class MainWindow : Window
         bool isGitMode,
         string? currentRepositoryUrl,
         string? currentBranch,
-        string? currentProjectDisplayName)
+		string? currentProjectDisplayName,
+		IReadOnlyList<LiveSessionRecord> liveSessions,
+		string? multipleSessionsText)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
             return MainWindowViewModel.BaseTitle;
 
+		string title;
         if (isGitMode && !string.IsNullOrEmpty(currentRepositoryUrl))
         {
             var displayRepositoryUrl = RepositoryWebPathPresentationService.NormalizeForDisplay(currentRepositoryUrl);
@@ -2007,24 +2011,43 @@ public partial class MainWindow : Window
             var branchDisplay = !string.IsNullOrEmpty(currentBranch)
                 ? $" [{currentBranch}]"
                 : string.Empty;
-            return $"{MainWindowViewModel.BaseTitle} - {displayRepositoryUrl}{branchDisplay}";
+			title = $"{MainWindowViewModel.BaseTitle} - {displayRepositoryUrl}{branchDisplay}";
         }
+		else
+		{
+			var displayPath = !string.IsNullOrEmpty(currentProjectDisplayName)
+				? currentProjectDisplayName
+				: currentPath;
+			title = $"{MainWindowViewModel.BaseTitle} - {displayPath}";
+		}
 
-        var displayPath = !string.IsNullOrEmpty(currentProjectDisplayName)
-            ? currentProjectDisplayName
-            : currentPath;
-
-        return $"{MainWindowViewModel.BaseTitle} - {displayPath}";
+		return liveSessions.Count switch
+		{
+			0 => title,
+			1 => $"{title} · Live context ({LiveSessionRegistry.FormatClientName(liveSessions[0].ClientName)})",
+			_ => $"{title} · Live context ({multipleSessionsText ?? liveSessions.Count.ToString(CultureInfo.InvariantCulture)})"
+		};
     }
 
     private void UpdateTitle()
     {
+		RefreshLiveSessionSnapshot();
+		ApplyWindowTitle();
+	}
+
+	private void ApplyWindowTitle()
+	{
+		var multipleSessionsText = _liveSessions.Count > 1
+			? _localization.Format("LiveContext.Title.Sessions", _liveSessions.Count)
+			: null;
         _viewModel.Title = BuildWindowTitle(
             _currentPath,
             _viewModel.IsGitMode,
             _currentRepositoryUrl,
             _viewModel.CurrentBranch,
-            _currentProjectDisplayName);
+			_currentProjectDisplayName,
+			_liveSessions,
+			multipleSessionsText);
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
@@ -2035,7 +2058,11 @@ public partial class MainWindow : Window
             _viewModel.IsGitMode,
             _currentRepositoryUrl,
             _viewModel.CurrentBranch,
-            _currentProjectDisplayName);
+			_currentProjectDisplayName,
+			_liveSessions,
+			_liveSessions.Count > 1
+				? _localization.Format("LiveContext.Title.Sessions", _liveSessions.Count)
+				: null);
         var totalElapsed = loadingElapsed + analysisElapsed;
         var timingSuffix =
             $"[{FormatSeconds(loadingElapsed)} + {FormatSeconds(analysisElapsed)} = {FormatSeconds(totalElapsed)}]";

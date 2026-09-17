@@ -1435,6 +1435,7 @@ public partial class MainWindow
         Closed += OnWindowClosed;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
+		StartLiveSessionObservation();
 
         _elevationAttempted = startupOptions.ElevationAttempted ||
                               _desktopStartupRequest?.ElevationAttempted == true;

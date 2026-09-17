@@ -1085,5 +1085,6 @@
   "Terminal.Tui.Welcome.RecentProject.Description": "이 최근 프로젝트를 열기.",
   "Terminal.Validation.BooleanOptionConflict": "{0}은(는) {1}과(와) 결합할 수 없습니다.",
   "Terminal.Value.No": "아니요",
-  "Terminal.Value.Yes": "예"
+  "Terminal.Value.Yes": "예",
+  "LiveContext.Title.Sessions": "{0}개 세션"
 }

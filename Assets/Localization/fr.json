@@ -1091,5 +1091,6 @@
   "Terminal.Tui.Welcome.RecentProject.Description": "Ouvrez ce projet récent.",
   "Terminal.Validation.BooleanOptionConflict": "{0} ne peut pas être combiné avec {1}.",
   "Terminal.Value.No": "non",
-  "Terminal.Value.Yes": "oui"
+  "Terminal.Value.Yes": "oui",
+  "LiveContext.Title.Sessions": "{0} sessions"
 }

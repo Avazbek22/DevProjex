@@ -24,7 +24,7 @@ public sealed class LiveSessionRegistry(
 	private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 	private readonly Func<int, DateTimeOffset?> processStart = processStartProvider ?? TryGetProcessStartUtc;
 
-	public string DirectoryPath => Path.Combine(stateRoot(), "DevProjex", "live-sessions");
+	public string DirectoryPath => Path.Combine(stateRoot(), "live-sessions");
 
 	public LiveSessionWriter Start(IReadOnlyList<string> roots) =>
 		new(
@@ -42,12 +42,22 @@ public sealed class LiveSessionRegistry(
 	public IReadOnlyList<LiveSessionRecord> ReadActive(string? projectRoot = null)
 	{
 		var directory = DirectoryPath;
-		if (!Directory.Exists(directory))
+		string[] paths;
+		try
+		{
+			if (!Directory.Exists(directory))
+				return [];
+			paths = Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
 			return [];
+		}
 
 		var now = clock.GetUtcNow();
+		var normalizedProjectRoot = TryNormalize(projectRoot);
 		var records = new List<LiveSessionRecord>();
-		foreach (var path in Directory.EnumerateFiles(directory, "*.json", SearchOption.TopDirectoryOnly))
+		foreach (var path in paths)
 		{
 			var record = TryRead(path);
 			if (record is null || !IsAlive(record, now))
@@ -55,9 +65,9 @@ public sealed class LiveSessionRegistry(
 				TryDelete(path);
 				continue;
 			}
-			if (projectRoot is null || record.Roots.Any(root => PathComparer.Default.Equals(
-				PathUtility.Normalize(root),
-				PathUtility.Normalize(projectRoot))))
+			if (normalizedProjectRoot is null || record.Roots.Any(root => PathComparer.Default.Equals(
+				TryNormalize(root),
+				normalizedProjectRoot)))
 			{
 				records.Add(record);
 			}
@@ -108,12 +118,29 @@ public sealed class LiveSessionRegistry(
 			var info = new FileInfo(path);
 			if (!info.Exists || info.Length is <= 0 or > MaximumRecordBytes)
 				return null;
-			return JsonSerializer.Deserialize(
+			var record = JsonSerializer.Deserialize(
 				File.ReadAllText(path),
 				InfrastructureJsonSerializerContext.Default.LiveSessionRecord);
+			return record is { Roots: not null } && record.Roots.Count <= 256
+				? record
+				: null;
 		}
 		catch (Exception exception) when (exception is
 			   IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
+		{
+			return null;
+		}
+	}
+
+	private static string? TryNormalize(string? path)
+	{
+		if (string.IsNullOrWhiteSpace(path))
+			return null;
+		try
+		{
+			return PathUtility.Normalize(path);
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
 		{
 			return null;
 		}
@@ -226,7 +253,18 @@ public sealed class LiveSessionWriter : IAsyncDisposable, IDisposable
 		{
 			using var timer = new PeriodicTimer(LiveSessionRegistry.HeartbeatInterval);
 			while (await timer.WaitForNextTickAsync(cancellation.Token).ConfigureAwait(false))
-				WriteHeartbeat();
+			{
+				try
+				{
+					WriteHeartbeat();
+				}
+				catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+				{
+					Trace.TraceWarning(
+						"Live context heartbeat could not be written: {0}",
+						exception.GetType().Name);
+				}
+			}
 		}
 		catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
 		{

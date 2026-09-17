@@ -5,6 +5,17 @@ namespace DevProjex.Tests.Unit;
 public sealed class LiveSessionRegistryTests
 {
 	[Fact]
+	public void DirectoryPath_IsDirectlyUnderTheStateRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var registry = new LiveSessionRegistry(() => workspace.Path);
+
+		Assert.Equal(
+			Path.Combine(workspace.Path, "live-sessions"),
+			registry.DirectoryPath);
+	}
+
+	[Fact]
 	public async Task WriterPublishesClientAndRemovesRecordOnDispose()
 	{
 		using var temporary = new TemporaryDirectory();
