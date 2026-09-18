@@ -191,11 +191,8 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 			 request.ExecutablePath.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)))
 		{
 			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-			startInfo.ArgumentList.Add("/d");
-			startInfo.ArgumentList.Add("/v:off");
-			startInfo.ArgumentList.Add("/s");
-			startInfo.ArgumentList.Add("/c");
-			startInfo.ArgumentList.Add(BuildWindowsCommand(request.ExecutablePath, request.Arguments));
+			var command = BuildWindowsCommand(request.ExecutablePath, request.Arguments);
+			startInfo.Arguments = $"/d /v:off /s /c \"{command}\"";
 			return startInfo;
 		}
 

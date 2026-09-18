@@ -38,6 +38,37 @@ public sealed class McpConnectionServiceTests
 		Assert.Equal(expected, locator.Find("codex"));
 	}
 
+	[Fact]
+	public async Task ProcessRunner_ExecutesWindowsCommandShimFromQuotedPath()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var shimDirectory = Path.Combine(temp.Path, "client tools Юникод");
+		Directory.CreateDirectory(shimDirectory);
+		var shimPath = Path.Combine(shimDirectory, "probe.cmd");
+		await File.WriteAllTextAsync(
+			shimPath,
+			"@echo off\r\necho %~1\r\necho %~2\r\necho %~3\r\n",
+			TestContext.Current.CancellationToken);
+		var runner = new McpConnectionProcessRunner();
+
+		var result = await runner.RunAsync(
+			new McpConnectionProcessRequest(
+				shimPath,
+				["alpha", "root with spaces Юникод", @"C:\path\with\slashes"],
+				temp.Path,
+				TimeSpan.FromSeconds(10)),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.Succeeded, result.CombinedOutput);
+		Assert.Equal(
+			["alpha", "root with spaces Юникод", @"C:\path\with\slashes"],
+			result.StandardOutput
+				.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+	}
+
 	[Theory]
 	[InlineData((int)McpConnectionClient.ClaudeCode, "claude")]
 	[InlineData((int)McpConnectionClient.Codex, "codex")]
