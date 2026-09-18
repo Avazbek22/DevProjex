@@ -87,6 +87,93 @@ public sealed class LiveSessionRegistryTests
 		Assert.False(File.Exists(writer.Path));
 	}
 
+	[Fact]
+	public async Task ReaderKeepsRecordWhenItIsTemporarilyLocked()
+	{
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var registry = new LiveSessionRegistry(
+			() => temporary.Path,
+			new MutableTimeProvider(started.AddSeconds(1)),
+			_ => started);
+		await using var writer = registry.Start(42, started, [temporary.Path]);
+
+		using (new FileStream(writer.Path, FileMode.Open, FileAccess.Read, FileShare.None))
+		{
+			Assert.Empty(registry.ReadActive());
+			Assert.True(File.Exists(writer.Path));
+		}
+
+		Assert.Single(registry.ReadActive());
+	}
+
+	[Fact]
+	public void ReaderRemovesMalformedRecord()
+	{
+		using var temporary = new TemporaryDirectory();
+		var registry = new LiveSessionRegistry(() => temporary.Path);
+		Directory.CreateDirectory(registry.DirectoryPath);
+		var path = Path.Combine(registry.DirectoryPath, "42.json");
+		File.WriteAllBytes(path, [0x7B, 0x22, 0xFF, 0x22, 0x3A, 0x31, 0x7D]);
+
+		Assert.Empty(registry.ReadActive());
+		Assert.False(File.Exists(path));
+	}
+
+	[Fact]
+	public void ReaderRemovesOversizedRecordWithoutDeserializingIt()
+	{
+		using var temporary = new TemporaryDirectory();
+		var registry = new LiveSessionRegistry(() => temporary.Path);
+		Directory.CreateDirectory(registry.DirectoryPath);
+		var path = Path.Combine(registry.DirectoryPath, "42.json");
+		File.WriteAllBytes(path, new byte[(64 * 1024) + 1]);
+
+		Assert.Empty(registry.ReadActive());
+		Assert.False(File.Exists(path));
+	}
+
+	[Fact]
+	public async Task WriterRetriesAfterSessionDirectoryBecomesWritable()
+	{
+		using var temporary = new TemporaryDirectory();
+		var unavailableRoot = temporary.CreateFile("blocked", "not a directory");
+		var stateRoot = unavailableRoot;
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var registry = new LiveSessionRegistry(
+			() => stateRoot,
+			new MutableTimeProvider(started.AddSeconds(1)),
+			_ => started);
+		await using var writer = registry.Start(42, started, [temporary.Path]);
+
+		writer.UpdateClient("sample-client", "2.4.1");
+		Assert.Empty(registry.ReadActive());
+
+		stateRoot = temporary.CreateFolder("available");
+		writer.WriteHeartbeat();
+
+		var record = Assert.Single(registry.ReadActive(temporary.Path));
+		Assert.Equal("sample-client", record.ClientName);
+		Assert.Equal("2.4.1", record.ClientVersion);
+	}
+
+	[Fact]
+	public async Task ReaderKeepsHeartbeatAtTheStaleBoundary()
+	{
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var clock = new MutableTimeProvider(started);
+		var registry = new LiveSessionRegistry(
+			() => temporary.Path,
+			clock,
+			_ => started);
+		await using var writer = registry.Start(42, started, [temporary.Path]);
+
+		clock.Advance(LiveSessionRegistry.StaleHeartbeatAge);
+
+		Assert.Single(registry.ReadActive());
+	}
+
 	[Theory]
 	[InlineData("claude-code", "Claude Code")]
 	[InlineData("codex", "Codex")]
