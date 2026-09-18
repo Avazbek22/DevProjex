@@ -150,6 +150,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"-x",
 		"--as",
 		"--branch",
+		"--client",
 		"--color",
 		// export context intentionally adds this repeatable required-value option: per-file detail
 		// overrides of the form "<glob>=<full|compact|signatures>".
@@ -168,6 +169,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--limit",
 		"--max-file-bytes",
 		"--max-tokens",
+		"--mode",
 		"--output",
 		"--profile",
 		"--progress",
@@ -252,7 +254,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		foreach (var (command, path) in EnumeratePublicCommands(root))
 		{
 			foreach (var option in command.Options.Where(static option =>
-				         !option.Hidden))
+						 !option.Hidden))
 			{
 				foreach (var identifier in new[] { option.Name }.Concat(option.Aliases))
 				{
@@ -388,8 +390,8 @@ public sealed class EmptyEqualsParserRegressionTests
 		foreach (var child in command.Subcommands.Where(static child => !child.Hidden))
 		{
 			foreach (var result in EnumeratePublicCommands(
-				         child,
-				         [.. path, child.Name]))
+						 child,
+						 [.. path, child.Name]))
 			{
 				yield return result;
 			}
