@@ -25,7 +25,14 @@ internal sealed class McpLiveContextState(
 	public McpLiveProfileSnapshot ReadProfile(string projectRoot)
 	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
-		var lookup = profileStore().LookupProfile(normalizedRoot, profileLookupTimeout);
+		var configuredRoot = roots.ResolveConfiguredRoot(normalizedRoot);
+		var store = profileStore();
+		var lookup = store.LookupProfile(configuredRoot, profileLookupTimeout);
+		if (lookup.Status == ProjectProfileLookupStatus.Missing &&
+			!PathComparer.Default.Equals(configuredRoot, normalizedRoot))
+		{
+			lookup = store.LookupProfile(normalizedRoot, profileLookupTimeout);
+		}
 		lock (sync)
 		{
 			if (!states.TryGetValue(normalizedRoot, out var state))

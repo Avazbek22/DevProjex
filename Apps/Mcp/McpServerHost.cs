@@ -174,7 +174,7 @@ public static class McpServerHost
 			? new McpLiveContextState(rootRegistry, () => services.Value.ProfileStore)
 			: null;
 		await using var liveSession = live
-			? new LiveSessionRegistry(appDataPathProvider).Start(rootRegistry.Roots)
+			? new LiveSessionRegistry(appDataPathProvider).Start(rootRegistry.ConfiguredRoots)
 			: null;
 		await using var packs = new McpPackRegistry(tempRoot);
 		var projectService = new Lazy<McpProjectService>(

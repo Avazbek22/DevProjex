@@ -326,6 +326,28 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootRegistryRetainsConfiguredSpellingForLiveState()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var alias = Path.Combine(workspace.Path, "project-alias");
+		CreateDirectoryAliasOrSkip(alias, project);
+		try
+		{
+			var registry = new McpRootRegistry([alias]);
+			var physicalRoot = Assert.Single(registry.Roots);
+
+			Assert.Equal(Path.GetFullPath(alias), Assert.Single(registry.ConfiguredRoots));
+			Assert.Equal(Path.GetFullPath(alias), registry.ResolveConfiguredRoot(physicalRoot));
+		}
+		finally
+		{
+			if (Directory.Exists(alias))
+				Directory.Delete(alias);
+		}
+	}
+
+	[Fact]
 	public void RootJailDirectoryHandleResolvesTheCanonicalRootPath()
 	{
 		using var workspace = new TemporaryDirectory();

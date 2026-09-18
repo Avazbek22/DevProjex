@@ -3,6 +3,7 @@ namespace DevProjex.Mcp;
 public sealed class McpRootRegistry
 {
 	private readonly IReadOnlyList<string> _roots;
+	private readonly IReadOnlyList<string> _configuredRoots;
 	private readonly Dictionary<string, List<string>> _lexicalRootsByPhysical;
 	private readonly Dictionary<string, List<string>> _rootsByName;
 
@@ -10,6 +11,7 @@ public sealed class McpRootRegistry
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		var normalized = new List<string>();
+		var configured = new List<string>();
 		var lexicalRootsByPhysical = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 		foreach (var root in roots)
 		{
@@ -19,7 +21,10 @@ public sealed class McpRootRegistry
 			var physical = McpRootJailFileStreamOpener.ResolveDirectoryPath(
 				ResolvePhysicalExistingPath(root, requireDirectory: true));
 			if (!normalized.Contains(physical, StringComparer.Ordinal))
+			{
 				normalized.Add(physical);
+				configured.Add(lexicalRoot);
+			}
 			AddLexicalRoot(lexicalRootsByPhysical, physical, lexicalRoot);
 			AddLexicalRoot(lexicalRootsByPhysical, physical, physical);
 		}
@@ -27,6 +32,7 @@ public sealed class McpRootRegistry
 		if (normalized.Count == 0)
 			throw new ArgumentException("At least one existing MCP root is required.", nameof(roots));
 		_roots = normalized.AsReadOnly();
+		_configuredRoots = configured.AsReadOnly();
 		_lexicalRootsByPhysical = lexicalRootsByPhysical;
 		_rootsByName = normalized
 			.GroupBy(GetProjectName, StringComparer.Ordinal)
@@ -37,6 +43,17 @@ public sealed class McpRootRegistry
 	}
 
 	public IReadOnlyList<string> Roots => _roots;
+	internal IReadOnlyList<string> ConfiguredRoots => _configuredRoots;
+
+	internal string ResolveConfiguredRoot(string physicalRoot)
+	{
+		for (var index = 0; index < _roots.Count; index++)
+		{
+			if (StringComparer.Ordinal.Equals(_roots[index], physicalRoot))
+				return _configuredRoots[index];
+		}
+		return physicalRoot;
+	}
 
 	public string ResolveProject(string? project)
 	{
