@@ -1,3 +1,4 @@
+using DevProjex.Application.Context;
 using DevProjex.Mcp;
 using ModelContextProtocol.Protocol;
 
@@ -41,6 +42,130 @@ public sealed class McpLiveContextStateTests
 			Assert.Equal(2, state.ReadProfile(temporary.Path).Revision);
 			var repeated = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
 			Assert.DoesNotContain("changed since", repeated, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void ProfileIsReadOncePerInvocationAndAgainOnTheNextInvocation()
+	{
+		using var temporary = new TemporaryDirectory();
+		var store = new SequenceProfileStore(
+			Found(Profile(["src"])),
+			Found(Profile(["tests"])));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		using (state.BeginInvocation())
+		{
+			state.RefreshProfile(temporary.Path);
+			var repeated = state.ReadProfile(temporary.Path);
+
+			Assert.Equal(1, repeated.Revision);
+			Assert.Equal(["src"], repeated.Profile!.SelectedPaths);
+			Assert.Equal(1, store.LookupCount);
+		}
+
+		using (state.BeginInvocation())
+		{
+			var changed = state.ReadProfile(temporary.Path);
+
+			Assert.Equal(2, changed.Revision);
+			Assert.Equal(["tests"], changed.Profile!.SelectedPaths);
+			Assert.Equal(2, store.LookupCount);
+		}
+	}
+
+	[Fact]
+	public async Task ParallelProfileReadsWithinOneInvocationShareOneLookup()
+	{
+		using var temporary = new TemporaryDirectory();
+		var store = new SequenceProfileStore(Found(Profile(["src"])));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		using (state.BeginInvocation())
+		{
+			var reads = Enumerable.Range(0, 8)
+				.Select(_ => Task.Run(() => state.ReadProfile(temporary.Path)))
+				.ToArray();
+			var snapshots = await Task.WhenAll(reads);
+
+			Assert.All(snapshots, snapshot => Assert.Equal(["src"], snapshot.Profile!.SelectedPaths));
+			Assert.Equal(1, store.LookupCount);
+		}
+	}
+
+	[Fact]
+	public void SelectedFileCountIsRetainedUntilTheProfileRevisionChanges()
+	{
+		using var temporary = new TemporaryDirectory();
+		var store = new SequenceProfileStore(
+			Found(Profile(["src"])),
+			Found(Profile(["src"])),
+			Found(Profile(["tests"])));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		using (state.BeginInvocation())
+		{
+			var revision = state.ReadProfile(temporary.Path).Revision;
+			Assert.False(state.HasSelectedFileCount(temporary.Path, revision));
+			state.RecordPlan(temporary.Path, Plan(temporary.Path, 3));
+			Assert.True(state.HasSelectedFileCount(temporary.Path, revision));
+		}
+
+		using (state.BeginInvocation())
+		{
+			var revision = state.ReadProfile(temporary.Path).Revision;
+			Assert.True(state.HasSelectedFileCount(temporary.Path, revision));
+		}
+
+		using (state.BeginInvocation())
+		{
+			var revision = state.ReadProfile(temporary.Path).Revision;
+			Assert.False(state.HasSelectedFileCount(temporary.Path, revision));
+		}
+	}
+
+	[Fact]
+	public void APlanFromAnOlderConcurrentRevisionCannotReplaceTheCurrentCount()
+	{
+		using var temporary = new TemporaryDirectory();
+		var store = new SequenceProfileStore(
+			Found(Profile(["src"])),
+			Found(Profile(["tests"])),
+			Found(Profile(["tests"])));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		using (state.BeginInvocation())
+		{
+			var firstRevision = state.ReadProfile(temporary.Path).Revision;
+			using (state.BeginInvocation())
+			{
+				var currentRevision = state.ReadProfile(temporary.Path).Revision;
+				state.RecordPlan(temporary.Path, Plan(temporary.Path, 2));
+				Assert.True(state.HasSelectedFileCount(temporary.Path, currentRevision));
+			}
+
+			state.RecordPlan(temporary.Path, Plan(temporary.Path, 7));
+			Assert.False(state.HasSelectedFileCount(temporary.Path, firstRevision));
+		}
+
+		using (state.BeginInvocation())
+		{
+			var currentRevision = state.ReadProfile(temporary.Path).Revision;
+			Assert.True(state.HasSelectedFileCount(temporary.Path, currentRevision));
+			var response = Text(state.AppendNotices(new CallToolResult { Content = [] }));
+			Assert.Contains("revision 2 · 2 files selected", response, StringComparison.Ordinal);
 		}
 	}
 
@@ -188,12 +313,43 @@ public sealed class McpLiveContextStateTests
 	private static ProjectProfileLookupResult Found(ProjectSelectionProfile profile) =>
 		new(ProjectProfileLookupStatus.Found, profile);
 
+	private static ProjectContextPlan Plan(string root, int fileCount)
+	{
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		var analysis = new ProjectAnalysisReport(
+			ProjectAnalysisReport.CurrentSchemaVersion,
+			DateTimeOffset.UnixEpoch,
+			root,
+			new ProjectAnalysisSelectionReport([], [], []),
+			new ProjectAnalysisInventoryReport([], [], new ProjectTreeSummaryReport(1, fileCount, 0)),
+			new ProjectAnalysisOutputMetricsReport(ProjectOutputMetricsReport.Empty, ProjectOutputMetricsReport.Empty),
+			new ProjectAnalysisTimingReport(0, 0, 0),
+			new ProjectAnalysisDiagnosticsReport(false, false, []));
+		return new ProjectContextPlan(
+			root,
+			ProjectSelectionSpec.Standard,
+			[],
+			[],
+			[],
+			[],
+			tree,
+			tree,
+			new HashSet<string>(PathComparer.Default),
+			Enumerable.Range(0, fileCount).Select(index => Path.Combine(root, $"File{index}.cs")).ToArray(),
+			[root],
+			analysis,
+			[],
+			new ProjectContextGitReadiness(GitFilteringMode.None, 0, false),
+			"live-context-state");
+	}
+
 	private static string Text(CallToolResult result) =>
 		string.Join('\n', result.Content.OfType<TextContentBlock>().Select(static block => block.Text));
 
 	private sealed class SequenceProfileStore(params ProjectProfileLookupResult[] results) : IProjectProfileStore
 	{
 		private int index;
+		public int LookupCount => Volatile.Read(ref index);
 
 		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout) =>
 			results[Math.Min(Interlocked.Increment(ref index) - 1, results.Length - 1)];

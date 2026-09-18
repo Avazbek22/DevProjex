@@ -125,6 +125,9 @@ internal sealed class DevProjexMcpTools(
 			{
 				foreach (var root in validatedRoots)
 				{
+					var revision = liveContext.RefreshProfile(root);
+					if (liveContext.HasSelectedFileCount(root, revision))
+						continue;
 					_ = await Projects.BuildPlanAsync(
 						root,
 						branch: null,
