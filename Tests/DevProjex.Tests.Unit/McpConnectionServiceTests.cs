@@ -129,6 +129,10 @@ public sealed class McpConnectionServiceTests
 		"claude",
 		"No local-scoped MCP server found with name: devprojex")]
 	[InlineData(
+		(int)McpConnectionClient.ClaudeCode,
+		"claude",
+		"No MCP server named \"devprojex\" in local scope")]
+	[InlineData(
 		(int)McpConnectionClient.Codex,
 		"codex",
 		"No MCP server named 'devprojex' found.")]

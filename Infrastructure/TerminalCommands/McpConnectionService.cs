@@ -717,9 +717,13 @@ public sealed class McpConnectionService : IMcpConnectionService
 			.Select(static line => line.TrimEnd('.'))
 			.Any(line => client switch
 			{
-				McpConnectionClient.ClaudeCode => line.Equals(
-					"No local-scoped MCP server found with name: devprojex",
-					StringComparison.OrdinalIgnoreCase),
+				McpConnectionClient.ClaudeCode =>
+					line.Equals(
+						"No local-scoped MCP server found with name: devprojex",
+						StringComparison.OrdinalIgnoreCase) ||
+					line.Equals(
+						"No MCP server named \"devprojex\" in local scope",
+						StringComparison.OrdinalIgnoreCase),
 				McpConnectionClient.Codex =>
 					line.Equals(
 						"No MCP server named 'devprojex' found",
