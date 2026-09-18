@@ -54,20 +54,30 @@ outside that focus; its content starts with:
 
 A path hidden by the effective filters still returns
 `DPX-MCP-PATH-NOT-FOUND`. The same rule applies to scalar and batched reads.
-Every live response ends with the current per-root revision and selected file
-count; a multi-root server also names the root:
+Every live response ends with the current per-root revision and the selected
+file count from the latest plan built for that root. Before the first plan is
+built, the count is `0`; a multi-root server also names the root:
 
 ```text
 [Live context] revision 16 · 128 files selected in the window
 [Live context] revision 16 · 128 files selected in the window · root project-name
 ```
 
-The first successful response after the saved profile changes also reports the
-frontier delta, limited to five paths:
+The first response after the saved profile changes, including an error result,
+also reports the frontier delta, limited to five paths. Added paths and removed
+paths are each written in ordinal order:
 
 ```text
-[Live context] changed since revision 14: +tests, +docs/api, -src/legacy
-[Live context] changed since revision 14: +tests, +docs/api, -src/legacy and 4 more
+[Live context] changed since revision 14: +docs/api, +tests, -src/legacy
+[Live context] changed since revision 14: +docs/api, +tests, -src/legacy and 4 more
+```
+
+A transition away from the full-tree state uses `-all`; a transition back to
+the full tree uses `+all`:
+
+```text
+[Live context] changed since revision 14: -all, +docs/api, +tests
+[Live context] changed since revision 14: -src/legacy, +all
 ```
 
 Revision 1 is the first profile read in a server session. It advances whenever
@@ -82,12 +92,15 @@ treated as an ordinary empty project:
 [Live context] the window selects no files; tick files in the DevProjex window.
 ```
 
-If the profile is temporarily unreadable or locked, the server retains the last
-successful snapshot and adds:
+If the profile is locked, malformed, otherwise unreadable, or uses an unsupported
+future schema, the server retains the last successful snapshot and adds:
 
 ```text
 [Live context] saved window selection could not be read; using revision 16. Retry this call.
 ```
+
+If the first read fails before any successful snapshot exists, the server uses
+server defaults at revision 1 and reports the same retry line.
 
 `pack_context` records the revision used to build a pack:
 

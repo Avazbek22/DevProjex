@@ -186,8 +186,10 @@ the workspace or exiting. Fully checked, fully unchecked, and mixed trees retain
 the distinct null, empty-array, and minimal-frontier semantics. Parameter changes
 are written after their successful immediate refresh. Expansion, focus, Preview
 view, and format remain TUI presentation state and do not alter the shared focus.
-When an MCP live session exists for the open root, the status line shows
-`Live context (<client>)`, or a localized session count when more than one is active.
+When an MCP live session exists for the open root and the terminal is at least
+80 columns wide, the status line shows `Live context (<client>)`, or a localized
+session count when more than one is active. Below 80 columns the compact status
+shows only `Live context`.
 
 When filtering changes which options are available, a newly discovered option is
 selected by default. An option already seen during the session keeps its explicit
