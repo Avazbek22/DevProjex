@@ -98,6 +98,7 @@ internal sealed class McpProjectService(
 				? MergeExclusions(ServerExclusions, exclusions)
 				: exclusions ?? (string.IsNullOrEmpty(profile) ? ServerExclusions : null);
 		ProjectSelectionSpec selection;
+		int? liveProfileRevision = null;
 		if (liveContext is null)
 		{
 			selection = await services.SelectionResolver
@@ -115,6 +116,7 @@ internal sealed class McpProjectService(
 		else
 		{
 			var liveSnapshot = liveContext.ReadProfile(projectRoot);
+			liveProfileRevision = liveSnapshot.Revision;
 			if (liveSnapshot.Profile is { } localProfile)
 			{
 				var local = ProjectSelectionAdapter.FromLegacyProfile(
@@ -173,14 +175,17 @@ internal sealed class McpProjectService(
 		}
 
 		var request = new ProjectContextRequest(projectRoot, selection, source.Identity);
-		// Local profiles carry complete checkbox maps in storage outside the watched project root.
-		// Rebuild them until that store can supply a coherent revision for the cache key.
+		var hasCoherentProfileRevision =
+			profileReference.Kind != ProjectProfileSourceKind.Local || liveProfileRevision is not null;
+		// Explicit local profiles remain uncached because their store has no coherent revision.
+		// Live context supplies one after rereading the profile on every invocation.
 		var plan = await BuildBasePlanAsync(
 			request,
 			includeOutputMetrics,
 			allowInventoryReuse:
 				parsedScope is null &&
-				profileReference.Kind != ProjectProfileSourceKind.Local,
+				hasCoherentProfileRevision,
+			liveProfileRevision,
 			cancellationToken).ConfigureAwait(false);
 		liveContext?.RecordPlan(projectRoot, plan);
 		if (allowNamedPathsOutsideSelection && liveContext is not null)
@@ -213,7 +218,7 @@ internal sealed class McpProjectService(
 		}
 		ValidateRequestedPathCasing(plan, requested, tolerateMissingPaths);
 		var allowProjectionReuse = parsedScope is null &&
-								   profileReference.Kind != ProjectProfileSourceKind.Local &&
+								   hasCoherentProfileRevision &&
 								   maximumFileBytes is null &&
 								   CanMonitorRepositoryState(projectRoot);
 		var projectionKey = new McpProjectionCacheKey(
@@ -378,6 +383,7 @@ internal sealed class McpProjectService(
 		ProjectContextRequest request,
 		bool includeOutputMetrics,
 		bool allowInventoryReuse,
+		int? liveProfileRevision,
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
@@ -394,7 +400,8 @@ internal sealed class McpProjectService(
 			var key = new McpInventoryCacheKey(
 				PathUtility.Normalize(request.ProjectPath),
 				BuildSelectionIdentity(request),
-				includeOutputMetrics);
+				includeOutputMetrics,
+				liveProfileRevision);
 			var created = new CachedInventoryEntry(
 				Interlocked.Increment(ref cacheGeneration),
 				new Lazy<Task<CachedInventoryPlan>>(
@@ -1535,7 +1542,8 @@ internal sealed class McpProjectService(
 	private readonly record struct McpInventoryCacheKey(
 		string ProjectRoot,
 		string SelectionIdentity,
-		bool IncludeOutputMetrics);
+		bool IncludeOutputMetrics,
+		int? LiveProfileRevision);
 
 	private readonly record struct McpProjectionCacheKey(
 		int BasePlanIdentity,
