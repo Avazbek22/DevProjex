@@ -1,5 +1,6 @@
 using DevProjex.Terminal.Tui;
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.LiveContext;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -31,7 +32,8 @@ public sealed record TerminalServices(
 	SecretRedactionSession SecretRedactionSession,
 	CodeCompressionSession CodeCompressionSession,
 	DependencyFactsEngine DependencyFactsEngine,
-	SecretRedactionOutputPreparer SecretRedactionOutputPreparer) : IDisposable
+	SecretRedactionOutputPreparer SecretRedactionOutputPreparer,
+	LiveSessionRegistry LiveSessionRegistry) : IDisposable
 {
 	private OwnedLifetime? _ownedLifetime;
 

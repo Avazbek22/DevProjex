@@ -1,4 +1,5 @@
 using DevProjex.Terminal.Tui;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.Secrets;
 using DevProjex.Application.Secrets;
@@ -189,7 +190,10 @@ public sealed class TerminalServiceFactory(
 				SecretRedactionSession: secretRedactionSession,
 				CodeCompressionSession: codeCompressionSession,
 				DependencyFactsEngine: dependencyFactsEngine,
-				SecretRedactionOutputPreparer: new SecretRedactionOutputPreparer(contentAnalyzer))
+				SecretRedactionOutputPreparer: new SecretRedactionOutputPreparer(contentAnalyzer),
+				LiveSessionRegistry: appDataPathProvider is null
+					? new LiveSessionRegistry()
+					: new LiveSessionRegistry(resolvedAppDataPathProvider))
 				.AttachOwnedLifetime();
 		}
 		catch

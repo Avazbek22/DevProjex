@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Infrastructure.LiveContext;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -11,6 +12,47 @@ public sealed class TerminalProcessCollection
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalPtyJourneyTests
 {
+	[Fact(Timeout = 60_000)]
+	public async Task LiveSessionStatusAndConnectionCommandAreVisible()
+	{
+		using var workspace = CreateProject();
+		LiveSessionWriter? liveSession = null;
+		try
+		{
+			await using var terminal = await TerminalPtyHarness.StartAsync(
+				workspace.Path,
+				["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+				cancellationToken: TestContext.Current.CancellationToken,
+				initializeDataRoot: root =>
+				{
+					liveSession = new LiveSessionRegistry(() => root).Start([workspace.Path]);
+					liveSession.UpdateClient("sample-client", "1.0");
+				});
+
+			await terminal.WaitForScreenAsync(
+				"Live context (sample-client)",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.SendAsync(":mcp json live\r", TestContext.Current.CancellationToken);
+			var fragment = await terminal.WaitForScreenAsync(
+				"mcpServers",
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains("--live", fragment, StringComparison.Ordinal);
+			Assert.Contains(workspace.Path, fragment, StringComparison.Ordinal);
+
+			await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+			await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(
+				CommandLineExitCodes.Success,
+				await terminal.WaitForExitAsync(
+					cancellationToken: TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			if (liveSession is not null)
+				await liveSession.DisposeAsync();
+		}
+	}
+
 	[Fact(Timeout = 60_000)]
 	public async Task ImmediateExitFlushesThePendingWorkspaceSelection()
 	{
