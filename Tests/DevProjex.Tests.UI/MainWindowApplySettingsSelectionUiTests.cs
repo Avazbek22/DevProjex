@@ -105,6 +105,9 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         try
         {
             await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+            var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            Assert.True(root.IsChecked);
+            root.IsChecked = false;
             Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
 
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
@@ -265,6 +268,7 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         {
             await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             var oldRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            oldRoot.IsChecked = false;
             oldRoot.IsExpanded = true;
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
             var sourcePath = Path.Combine(project.RootPath, "src");
@@ -294,6 +298,7 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         {
             var sourcePath = Path.Combine(project.RootPath, "src");
             var oldRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            oldRoot.IsChecked = false;
             var source = FindRequiredDirectChild(oldRoot, "src");
             source.IsChecked = true;
             source.IsExpanded = true;
@@ -469,8 +474,8 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 
             var secondRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
             Assert.True(PathComparer.Default.Equals(secondProject.RootPath, secondRoot.FullPath));
-            Assert.False(secondRoot.IsChecked);
-            Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
+            Assert.True(secondRoot.IsChecked);
+            Assert.Equal([secondProject.RootPath], UiTestDriver.GetCheckedTreePaths(window));
             Assert.False(FindRequiredDirectChild(secondRoot, "src").IsExpanded);
         }
         finally

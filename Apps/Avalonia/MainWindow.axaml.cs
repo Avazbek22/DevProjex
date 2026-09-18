@@ -1432,13 +1432,17 @@ public partial class MainWindow : Window
             if (profileSnapshot is { HasProfile: true, Profile: not null })
             {
                 _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
-                profileTreeSelection = new ProjectProfileTreeSelection(
-                    profileSnapshot.Profile.SelectedPaths);
+                if (!preserveTreeState)
+                {
+                    profileTreeSelection = new ProjectProfileTreeSelection(
+                        profileSnapshot.Profile.SelectedPaths);
+                }
             }
             else if (profileSnapshot.Status == ProjectProfileLookupStatus.Missing)
             {
                 _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
-                profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: null);
+                if (!preserveTreeState)
+                    profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: null);
             }
             _selectionCoordinator.RestoreMomentaryGitFilteringMode(runtimeGitMode);
 

@@ -122,9 +122,10 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         PrepareContentSessionsForPublishedProject(snapshot);
         if (snapshot.ProfileTreeSelection is { } profileTreeSelection)
         {
-            ProjectTreeUiState.RestoreProfileSelection(
-                snapshot.TreeRoot,
-                profileTreeSelection.SelectedPaths);
+            ApplyTreeSelectionWithoutPublishing(() =>
+                ProjectTreeUiState.RestoreProfileSelection(
+                    snapshot.TreeRoot,
+                    profileTreeSelection.SelectedPaths));
         }
 
         // Project profiles are applied with option notifications suppressed. Publish the resolved
