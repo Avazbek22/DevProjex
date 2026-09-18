@@ -7,6 +7,44 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalServiceFactoryTests
 {
+	[Theory]
+	[InlineData(null)]
+	[InlineData("")]
+	[InlineData("relative-data")]
+	public void UnsafeEnvironmentDataRootFallsBackToPlatformLocations(string? value)
+	{
+		var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+		{
+			[InvocationEnvironment.InternalDataRootVariable] = value
+		};
+
+		var factory = TerminalServiceFactory.FromEnvironment(
+			variables,
+			TerminalHostCapabilities.Headless);
+
+		Assert.Null(factory.AppDataPathProvider);
+	}
+
+	[Fact]
+	public void EnvironmentDataRootRejectsMissingDirectoriesAndFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var file = workspace.WriteFile("data-file", "content");
+		foreach (var value in new[] { Path.Combine(workspace.Path, "missing"), file })
+		{
+			var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				[InvocationEnvironment.InternalDataRootVariable] = value
+			};
+
+			var factory = TerminalServiceFactory.FromEnvironment(
+				variables,
+				TerminalHostCapabilities.Headless);
+
+			Assert.Null(factory.AppDataPathProvider);
+		}
+	}
+
 	[Fact]
 	public void EnvironmentDataRootConfiguresHeadlessServices()
 	{

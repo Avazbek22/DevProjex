@@ -109,6 +109,8 @@ try {
 
 async function validateNativeSamples(repository, root, scan, server, workspaceRoot, allowUnchecked) {
   const dataRoot = join(workspaceRoot, 'data', repository.id);
+  await mkdir(dataRoot, { recursive: true });
+  await mkdir(join(dataRoot, 'cli'), { recursive: true });
   const mcp = await startMcpReachabilityClient(serverCommand(server, root, dataRoot), 300_000);
   try {
     const reports = [];

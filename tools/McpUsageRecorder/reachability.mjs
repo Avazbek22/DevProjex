@@ -33,6 +33,8 @@ try {
   const serverPath = options.server
     ? resolve(options.server)
     : await publishServer(workspace);
+  for (const repository of registry.repositories)
+    await mkdir(join(workspace, 'data', repository.id), { recursive: true });
   const result = await analyzeReachability(
     registry,
     oracles,

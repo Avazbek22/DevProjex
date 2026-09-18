@@ -5,6 +5,35 @@ namespace DevProjex.Tests.Unit;
 public sealed class UserDataPathResolverTests
 {
 	[Fact]
+	public void InternalDataRootAcceptsOnlyAnExistingFullyQualifiedDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		var directory = workspace.CreateFolder("isolated");
+		var file = workspace.CreateFile("not-a-directory", "content");
+		var missing = Path.Combine(workspace.Path, "missing");
+
+		Assert.Equal(
+			Path.GetFullPath(directory),
+			UserDataPathResolver.ResolveInternalDataRoot(directory),
+			PathComparer.Default);
+		Assert.Null(UserDataPathResolver.ResolveInternalDataRoot("relative"));
+		Assert.Null(UserDataPathResolver.ResolveInternalDataRoot(missing));
+		Assert.False(Directory.Exists(missing));
+		Assert.Null(UserDataPathResolver.ResolveInternalDataRoot(file));
+		Assert.Null(UserDataPathResolver.ResolveInternalDataRoot(null));
+		Assert.Null(UserDataPathResolver.ResolveInternalDataRoot(string.Empty));
+		Assert.Null(UserDataPathResolver.ResolveInternalDataRoot("   "));
+	}
+
+	[Fact]
+	public void InternalDataRootIgnoresInvalidPathCharacters()
+	{
+		var invalidPath = Path.GetPathRoot(Path.GetTempPath()) + "invalid\0path";
+
+		Assert.Null(UserDataPathResolver.ResolveInternalDataRoot(invalidPath));
+	}
+
+	[Fact]
 	public void ExistingPlatformPathIsUsedWithoutDirectoryVerification()
 	{
 		var expected = Path.Combine(Path.GetTempPath(), "dpx-config");

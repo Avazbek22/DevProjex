@@ -17,14 +17,11 @@ public sealed class TerminalServiceFactory(
 	{
 		ArgumentNullException.ThrowIfNull(variables);
 		ArgumentNullException.ThrowIfNull(hostCapabilities);
-		if (!variables.TryGetValue(InvocationEnvironment.InternalDataRootVariable, out var value) ||
-			string.IsNullOrWhiteSpace(value) ||
-			!Path.IsPathFullyQualified(value))
-		{
+		variables.TryGetValue(InvocationEnvironment.InternalDataRootVariable, out var value);
+		var dataRoot = UserDataPathResolver.ResolveInternalDataRoot(value);
+		if (dataRoot is null)
 			return new TerminalServiceFactory(hostCapabilities: hostCapabilities);
-		}
 
-		var dataRoot = Path.GetFullPath(value);
 		return new TerminalServiceFactory(() => dataRoot, hostCapabilities);
 	}
 

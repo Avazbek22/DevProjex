@@ -172,6 +172,8 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("server defaults at revision 1", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("an empty array selects nothing", normalizedProfiles, StringComparison.Ordinal);
 		Assert.Contains("selectedPathsSemanticsVersion: 1", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains("existing, fully qualified directory", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains("not a supported user setting", normalizedProfiles, StringComparison.Ordinal);
 		Assert.Contains(
 			"In a batched read, that range is reported as `unavailable — outside effective selection`",
 			normalizedServer,

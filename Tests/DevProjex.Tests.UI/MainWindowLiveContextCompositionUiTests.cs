@@ -12,7 +12,11 @@ public sealed class MainWindowLiveContextCompositionUiTests
 	{
 		using var project = UiTestProject.CreateDefault();
 		var captureRoot = Path.Combine(project.AppDataPath, "capture");
-		var internalRoot = Path.Combine(project.AppDataPath, "internal");
+		var internalRoot = Directory.CreateDirectory(
+			Path.Combine(project.AppDataPath, "internal")).FullName;
+		var missingRoot = Path.Combine(project.AppDataPath, "missing");
+		var fileRoot = Path.Combine(project.AppDataPath, "data-file");
+		File.WriteAllText(fileRoot, "content");
 		var capture = new StoreScreenshotCaptureRequest(
 			project.RootPath,
 			project.AppDataPath,
@@ -28,12 +32,20 @@ public sealed class MainWindowLiveContextCompositionUiTests
 		var relativeProvider = AvaloniaCompositionRoot.ResolveAppDataPathProvider(
 			storeCaptureRequest: null,
 			_ => "relative-root");
+		var missingProvider = AvaloniaCompositionRoot.ResolveAppDataPathProvider(
+			storeCaptureRequest: null,
+			_ => missingRoot);
+		var fileProvider = AvaloniaCompositionRoot.ResolveAppDataPathProvider(
+			storeCaptureRequest: null,
+			_ => fileRoot);
 
 		Assert.NotNull(captureProvider);
 		Assert.Equal(Path.GetFullPath(captureRoot), captureProvider());
 		Assert.NotNull(internalProvider);
 		Assert.Equal(Path.GetFullPath(internalRoot), internalProvider());
 		Assert.Null(relativeProvider);
+		Assert.Null(missingProvider);
+		Assert.Null(fileProvider);
 	}
 
 	[AvaloniaFact]

@@ -193,6 +193,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 		if (OperatingSystem.IsWindows() && !variables.ContainsKey("NO_COLOR"))
 			variables["NO_COLOR"] = string.Empty;
+		Directory.CreateDirectory(variables["DEVPROJEX_INTERNAL_DATA_ROOT"]);
 		initializeDataRoot?.Invoke(variables["DEVPROJEX_INTERNAL_DATA_ROOT"]);
 		var (host, commandLine, startupInput) = CreateShellCommand(
 			binary,

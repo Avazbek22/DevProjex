@@ -120,6 +120,12 @@ descendants discovered under it on the next tree build. Portable `profile import
 --apply` and local `profile show` preserve the same three states without collapsing
 null and an empty array.
 
+`DEVPROJEX_INTERNAL_DATA_ROOT` is reserved for isolated runs and tests that need a
+separate location for `project-profiles.json`. It is honored only when it names an
+existing, fully qualified directory; invalid values are ignored and no directory is
+created. This is not a supported user setting, and its behavior is not guaranteed
+between DevProjex versions.
+
 Local schema-version 3 records written by current versions include
 `selectedPathsSemanticsVersion: 1` on each project entry. This marker distinguishes
 the current explicit-empty meaning of `selectedPaths: []` from unmarked v5.1 local

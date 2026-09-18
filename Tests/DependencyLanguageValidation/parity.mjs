@@ -11,6 +11,8 @@ const assembly = resolve('Apps/TerminalHost/bin/Release/net10.0/devprojex.dll');
 const scan = JSON.parse(await readFile(scanPath, 'utf8'));
 const capture = promisify(execFile);
 await mkdir(dataPath, { recursive: true });
+await mkdir(join(dataPath, 'mcp'), { recursive: true });
+await mkdir(join(dataPath, 'cli'), { recursive: true });
 const client = await startMcpReachabilityClient({ command: 'dotnet', args: [assembly, 'mcp', '--root', root],
   cwd: root, env: { DEVPROJEX_INTERNAL_DATA_ROOT: join(dataPath, 'mcp') } }, 300_000);
 const samples = [];

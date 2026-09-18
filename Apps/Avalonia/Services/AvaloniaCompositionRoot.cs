@@ -18,8 +18,6 @@ namespace DevProjex.Avalonia.Services;
 
 public static class AvaloniaCompositionRoot
 {
-    private const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
-
     public static AvaloniaAppServices CreateDefault(DesktopStartupOptions options)
         => CreateDefault(
             options,
@@ -44,21 +42,12 @@ public static class AvaloniaCompositionRoot
             return () => captureRoot;
         }
 
-        var candidate = (environmentProvider ?? Environment.GetEnvironmentVariable)(InternalDataRootVariable);
-        if (string.IsNullOrWhiteSpace(candidate))
+        var candidate = (environmentProvider ?? Environment.GetEnvironmentVariable)(
+            UserDataPathResolver.InternalDataRootVariable);
+        var isolatedRoot = UserDataPathResolver.ResolveInternalDataRoot(candidate);
+        if (isolatedRoot is null)
             return null;
-
-        try
-        {
-            if (!Path.IsPathFullyQualified(candidate))
-                return null;
-            var isolatedRoot = Path.GetFullPath(candidate);
-            return () => isolatedRoot;
-        }
-        catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
-        {
-            return null;
-        }
+        return () => isolatedRoot;
     }
 
     private static AvaloniaAppServices CreateDefaultCore(
