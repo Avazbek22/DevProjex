@@ -162,6 +162,19 @@ public sealed class McpConnectionUiTests
 		}
 	}
 
+	[Fact]
+	public void SecretProtectionMessages_StateThatMcpResponsesRemainRedacted()
+	{
+		foreach (var file in Directory.GetFiles(GetLocalizationDirectory(), "*.json"))
+		{
+			using var document = JsonDocument.Parse(File.ReadAllText(file));
+			var message = document.RootElement
+				.GetProperty("Dialog.LiveContext.Secrets.Message")
+				.GetString();
+			Assert.Contains("MCP", message, StringComparison.Ordinal);
+		}
+	}
+
 	[Theory]
 	[InlineData(true, false, true, true)]
 	[InlineData(true, false, false, false)]

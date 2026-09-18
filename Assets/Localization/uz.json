@@ -153,7 +153,7 @@
   "Dialog.McpPath.Title": "Terminal buyrug‘i",
   "Dialog.McpPath.Body": "Ulanish parchasi nusxalandi va tayyor. devprojex'dan terminalda ham foydalanish uchun buyruqni PATH'ga qo‘shing.",
   "Dialog.LiveContext.Secrets.Title": "Sirlar himoyasi o‘chirilsinmi?",
-  "Dialog.LiveContext.Secrets.Message": "Ulangan seans ushbu oynaga ergashadi. Qo‘llangandan so‘ng tanlangan fayllardagi sirlarni ko‘ra oladi.",
+  "Dialog.LiveContext.Secrets.Message": "Bu oynadagi ko‘rish va eksport uchun sirlar himoyasini o‘chiradi. MCP javoblarida sirlar yashirilgan holda qoladi.",
   "Dialog.LiveContext.Secrets.Apply": "Himoyasiz qo‘llash",
   "Dialog.TerminalCommand.Title": "Terminalda ishga tushirish",
   "Dialog.TerminalCommand.AutomaticPrompt.Body": "devprojex buyrug‘i terminalda ishlasinmi?\n\nSiz interaktiv terminal ish maydoni, skriptlar va CI uchun to‘g‘ridan-to‘g‘ri CLI buyruqlari hamda AI agentlar uchun mahalliy MCP serveriga ega bo‘lasiz.\n\nIlova devprojex buyrug‘ini foydalanuvchi hisobingizning PATH o‘zgaruvchisiga qo‘shadi. Shundan so‘ng yangi terminal oynasini ochib, boshlash uchun devprojex yoki buyruqlar sharhini ko‘rish uchun devprojex --help buyrug‘ini bajaring.",

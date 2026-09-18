@@ -153,7 +153,7 @@
   "Dialog.McpPath.Title": "终端命令",
   "Dialog.McpPath.Body": "连接片段已复制并可用。若还要在终端中使用 devprojex，请将命令添加到 PATH。",
   "Dialog.LiveContext.Secrets.Title": "关闭机密保护？",
-  "Dialog.LiveContext.Secrets.Message": "已连接的会话会跟随此窗口。应用后，它可以看到所选文件中的机密。",
+  "Dialog.LiveContext.Secrets.Message": "这会关闭窗口预览和导出中的机密保护。MCP 响应仍会进行遮盖。",
   "Dialog.LiveContext.Secrets.Apply": "不保护并应用",
   "Dialog.TerminalCommand.Title": "从终端运行",
   "Dialog.TerminalCommand.AutomaticPrompt.Body": "使devprojex命令在终端中可用？\n\n您可以获得交互式终端工作区、用于脚本和CI的直接CLI命令以及用于AI代理的本地MCP服务器。\n\n该应用程序会将devprojex命令添加到您的用户帐户的PATH中。之后，打开一个新的终端窗口并运行devprojex以开始使用，或devprojex --help以获取命令概述。",

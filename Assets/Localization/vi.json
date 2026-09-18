@@ -153,7 +153,7 @@
   "Dialog.McpPath.Title": "Lệnh thiết bị đầu cuối",
   "Dialog.McpPath.Body": "Đoạn kết nối đã được sao chép và sẵn sàng. Để dùng devprojex trong thiết bị đầu cuối, hãy thêm lệnh vào PATH.",
   "Dialog.LiveContext.Secrets.Title": "Tắt bảo vệ bí mật?",
-  "Dialog.LiveContext.Secrets.Message": "Phiên đã kết nối đi theo cửa sổ này. Sau khi áp dụng, phiên có thể thấy bí mật trong các tệp đã chọn.",
+  "Dialog.LiveContext.Secrets.Message": "Thao tác này tắt bảo vệ bí mật trong bản xem trước và nội dung xuất của cửa sổ. Phản hồi MCP vẫn được che.",
   "Dialog.LiveContext.Secrets.Apply": "Áp dụng không bảo vệ",
   "Dialog.TerminalCommand.Title": "Chạy từ thiết bị đầu cuối",
   "Dialog.TerminalCommand.AutomaticPrompt.Body": "Làm cho lệnh devprojex có sẵn trong terminal?\n\nBạn nhận được Không gian làm việc đầu cuối tương tác, các lệnh CLI trực tiếp cho tập lệnh và CI cũng như máy chủ MCP cục bộ cho các tác nhân AI.\n\nỨng dụng sẽ thêm lệnh devprojex vào PATH cho tài khoản người dùng của bạn. Sau đó, hãy mở một cửa sổ terminal mới và chạy devprojex để bắt đầu hoặc devprojex --help để biết tổng quan về lệnh.",

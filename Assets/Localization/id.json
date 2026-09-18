@@ -153,7 +153,7 @@
   "Dialog.McpPath.Title": "Perintah terminal",
   "Dialog.McpPath.Body": "Fragmen koneksi telah disalin dan siap. Untuk menggunakan devprojex di terminal, tambahkan perintah ke PATH.",
   "Dialog.LiveContext.Secrets.Title": "Matikan perlindungan rahasia?",
-  "Dialog.LiveContext.Secrets.Message": "Sesi yang terhubung mengikuti jendela ini. Setelah diterapkan, sesi dapat melihat rahasia dalam file yang dipilih.",
+  "Dialog.LiveContext.Secrets.Message": "Ini menonaktifkan perlindungan rahasia untuk pratinjau dan ekspor jendela. Respons MCP tetap disamarkan.",
   "Dialog.LiveContext.Secrets.Apply": "Terapkan tanpa perlindungan",
   "Dialog.TerminalCommand.Title": "Jalankan dari terminal",
   "Dialog.TerminalCommand.AutomaticPrompt.Body": "Jadikan perintah devprojex tersedia di terminal?\n\nAnda mendapatkan Terminal Workspace interaktif, perintah CLI langsung untuk skrip dan CI, dan server MCP lokal untuk agen AI.\n\nAplikasi ini akan menambahkan perintah devprojex ke PATH untuk akun pengguna Anda. Setelah itu, buka jendela terminal baru dan jalankan devprojex untuk memulai, atau devprojex --help untuk ikhtisar perintah.",

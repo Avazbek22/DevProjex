@@ -153,7 +153,7 @@
   "Dialog.McpPath.Title": "Terminalbefehl",
   "Dialog.McpPath.Body": "Das Verbindungsfragment wurde kopiert und ist einsatzbereit. Um devprojex auch im Terminal zu verwenden, fügen Sie den Befehl zu PATH hinzu.",
   "Dialog.LiveContext.Secrets.Title": "Schutz geheimer Daten deaktivieren?",
-  "Dialog.LiveContext.Secrets.Message": "Die verbundene Sitzung folgt diesem Fenster. Nach dem Anwenden kann sie geheime Daten in ausgewählten Dateien sehen.",
+  "Dialog.LiveContext.Secrets.Message": "Dadurch wird der Schutz geheimer Daten für Vorschau und Export des Fensters deaktiviert. MCP-Antworten bleiben maskiert.",
   "Dialog.LiveContext.Secrets.Apply": "Ohne Schutz anwenden",
   "Dialog.TerminalCommand.Title": "Im Terminal ausführen",
   "Dialog.TerminalCommand.AutomaticPrompt.Body": "Den Befehl devprojex im Terminal verfügbar machen?\n\nSie erhalten den interaktiven Terminal-Arbeitsbereich, direkte CLI-Befehle für Skripte und CI sowie einen lokalen MCP-Server für KI-Agenten.\n\nDie App fügt den Befehl devprojex für Ihr Benutzerkonto zu PATH hinzu. Öffnen Sie danach ein neues Terminalfenster und führen Sie devprojex aus, um zu beginnen, oder devprojex --help für eine Befehlsübersicht.",
