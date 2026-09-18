@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "The client command timed out.",
   "Mcp.Connect.CommandFailed": "{0} could not be connected: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "The previous {0} connection was removed, but the new connection could not be added: {1}. Use the manual configuration below.",
+  "Mcp.Connect.ManualFallbackHint": "Use the manual configuration below.",
+  "Mcp.Connect.OutputIncomplete": "Some client output is unavailable because an output stream remained open.",
   "Dialog.LiveContext.Secrets.Title": "Turn off secret protection?",
   "Dialog.LiveContext.Secrets.Message": "This turns off secret protection for window previews and exports. MCP responses remain redacted.",
   "Dialog.LiveContext.Secrets.Apply": "Apply without protection",

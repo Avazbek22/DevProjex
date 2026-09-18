@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "Zeitüberschreitung beim Client-Befehl.",
   "Mcp.Connect.CommandFailed": "{0} konnte nicht verbunden werden: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "Die vorherige {0}-Verbindung wurde entfernt, aber die neue Verbindung konnte nicht hinzugefügt werden: {1}. Verwenden Sie die manuelle Konfiguration unten.",
+  "Mcp.Connect.ManualFallbackHint": "Verwenden Sie die manuelle Konfiguration unten.",
+  "Mcp.Connect.OutputIncomplete": "Ein Teil der Clientausgabe ist nicht verfügbar, weil ein Ausgabestream geöffnet blieb.",
   "Dialog.LiveContext.Secrets.Title": "Schutz geheimer Daten deaktivieren?",
   "Dialog.LiveContext.Secrets.Message": "Dadurch wird der Schutz geheimer Daten für Vorschau und Export des Fensters deaktiviert. MCP-Antworten bleiben maskiert.",
   "Dialog.LiveContext.Secrets.Apply": "Ohne Schutz anwenden",

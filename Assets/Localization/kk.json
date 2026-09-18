@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "Клиент пәрменінің күту уақыты аяқталды.",
   "Mcp.Connect.CommandFailed": "{0} қосу мүмкін болмады: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "Алдыңғы {0} қосылымы жойылды, бірақ жаңасын қосу мүмкін болмады: {1}. Төмендегі қолмен конфигурациялауды пайдаланыңыз.",
+  "Mcp.Connect.ManualFallbackHint": "Төмендегі қолмен конфигурациялауды пайдаланыңыз.",
+  "Mcp.Connect.OutputIncomplete": "Шығыс ағыны ашық қалғандықтан, клиент шығысының бір бөлігі қолжетімсіз.",
   "Dialog.LiveContext.Secrets.Title": "Құпияларды қорғауды өшіру керек пе?",
   "Dialog.LiveContext.Secrets.Message": "Бұл терезенің алдын ала қарауы мен экспорттарында құпияларды қорғауды өшіреді. MCP жауаптарында құпиялар жасырылған күйде қалады.",
   "Dialog.LiveContext.Secrets.Apply": "Қорғаусыз қолдану",

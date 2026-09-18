@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "클라이언트 명령 시간이 초과되었습니다.",
   "Mcp.Connect.CommandFailed": "{0}을(를) 연결할 수 없습니다: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "이전 {0} 연결은 제거되었지만 새 연결을 추가하지 못했습니다: {1}. 아래의 수동 구성을 사용하세요.",
+  "Mcp.Connect.ManualFallbackHint": "아래의 수동 구성을 사용하세요.",
+  "Mcp.Connect.OutputIncomplete": "출력 스트림이 열린 상태로 남아 있어 일부 클라이언트 출력을 사용할 수 없습니다.",
   "Dialog.LiveContext.Secrets.Title": "비밀 보호를 끄시겠습니까?",
   "Dialog.LiveContext.Secrets.Message": "이렇게 하면 창 미리 보기와 내보내기에서 비밀 보호가 꺼집니다. MCP 응답에서는 계속 마스킹됩니다.",
   "Dialog.LiveContext.Secrets.Apply": "보호 없이 적용",

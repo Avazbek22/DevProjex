@@ -17,7 +17,8 @@ internal sealed record McpConnectionProcessResult(
 	string StandardOutput,
 	string StandardError,
 	bool TimedOut = false,
-	string? StartError = null)
+	string? StartError = null,
+	bool OutputIncomplete = false)
 {
 	public bool Succeeded => ExitCode == 0 && !TimedOut && StartError is null;
 
@@ -145,14 +146,15 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 			if (!process.Start())
 				return new McpConnectionProcessResult(null, string.Empty, string.Empty, StartError: string.Empty);
 
+			using var outputReadCancellation = new CancellationTokenSource();
 			var standardOutput = BoundedTextReader.ReadAsync(
 				process.StandardOutput,
 				MaximumOutputCharacters,
-				CancellationToken.None);
+				outputReadCancellation.Token);
 			var standardError = BoundedTextReader.ReadAsync(
 				process.StandardError,
 				MaximumOutputCharacters,
-				CancellationToken.None);
+				outputReadCancellation.Token);
 			using var timeout = new CancellationTokenSource(request.Timeout);
 			using var linked = CancellationTokenSource.CreateLinkedTokenSource(
 				cancellationToken,
@@ -164,21 +166,31 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 			}
 			catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 			{
-				var output = await ReadCompletedOutputAsync(standardOutput).ConfigureAwait(false);
-				var error = await ReadCompletedOutputAsync(standardError).ConfigureAwait(false);
+				var output = await ReadCompletedOutputAsync(
+					standardOutput,
+					outputReadCancellation).ConfigureAwait(false);
+				var error = await ReadCompletedOutputAsync(
+					standardError,
+					outputReadCancellation).ConfigureAwait(false);
 				return new McpConnectionProcessResult(
 					null,
-					FormatOutput(output, "stdout"),
-					FormatOutput(error, "stderr"),
-					TimedOut: true);
+					FormatOutput(output.Result, "stdout"),
+					FormatOutput(error.Result, "stderr"),
+					TimedOut: true,
+					OutputIncomplete: !output.Completed || !error.Completed);
 			}
 
-			var output = await standardOutput.ConfigureAwait(false);
-			var error = await standardError.ConfigureAwait(false);
+			var output = await ReadCompletedOutputAsync(
+				standardOutput,
+				outputReadCancellation).ConfigureAwait(false);
+			var error = await ReadCompletedOutputAsync(
+				standardError,
+				outputReadCancellation).ConfigureAwait(false);
 			return new McpConnectionProcessResult(
 				process.ExitCode,
-				FormatOutput(output, "stdout"),
-				FormatOutput(error, "stderr"));
+				FormatOutput(output.Result, "stdout"),
+				FormatOutput(error.Result, "stderr"),
+				OutputIncomplete: !output.Completed || !error.Completed);
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
@@ -202,16 +214,40 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 		}
 	}
 
-	private static async Task<BoundedTextReadResult> ReadCompletedOutputAsync(
-		Task<BoundedTextReadResult> output)
+	private static async Task<CompletedOutputRead> ReadCompletedOutputAsync(
+		Task<BoundedTextReadResult> output,
+		CancellationTokenSource outputReadCancellation)
 	{
 		try
 		{
-			return await output.WaitAsync(OutputCloseTimeout).ConfigureAwait(false);
+			return new CompletedOutputRead(
+				await output.WaitAsync(OutputCloseTimeout).ConfigureAwait(false),
+				Completed: true);
 		}
-		catch (Exception exception) when (exception is IOException or ObjectDisposedException or TimeoutException)
+		catch (TimeoutException)
 		{
-			return default;
+			outputReadCancellation.Cancel();
+			try
+			{
+				await output.WaitAsync(OutputCloseTimeout).ConfigureAwait(false);
+			}
+			catch (Exception exception) when (exception is
+					   IOException or
+					   ObjectDisposedException or
+					   OperationCanceledException or
+					   TimeoutException)
+			{
+				// The process outcome is already known; a descendant may still own the pipe.
+			}
+			return new CompletedOutputRead(default, Completed: false);
+		}
+		catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+		{
+			return new CompletedOutputRead(default, Completed: false);
+		}
+		catch (OperationCanceledException) when (outputReadCancellation.IsCancellationRequested)
+		{
+			return new CompletedOutputRead(default, Completed: false);
 		}
 	}
 
@@ -264,6 +300,10 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 
 		return string.Join(' ', placeholders);
 	}
+
+	private readonly record struct CompletedOutputRead(
+		BoundedTextReadResult Result,
+		bool Completed);
 }
 
 internal enum McpProjectConfigurationError
@@ -312,7 +352,7 @@ internal sealed class McpProjectConfigurationWriter
 			return Failure(targetPath, McpProjectConfigurationError.InvalidData);
 		if (File.Exists(directory))
 			return Failure(targetPath, McpProjectConfigurationError.ResourceUnavailable);
-		if (File.Exists(targetPath) && IsSymbolicLink(targetPath))
+		if (IsSymbolicLink(targetPath))
 			return Failure(targetPath, McpProjectConfigurationError.InvalidData);
 
 		JsonObject root;
@@ -402,20 +442,29 @@ internal sealed class McpProjectConfigurationWriter
 		var fullPath = Path.GetFullPath(path);
 		if (!PathUtility.IsPathInside(fullPath, projectRoot) ||
 			IsSymbolicLink(directory) ||
-			File.Exists(fullPath) && IsSymbolicLink(fullPath))
+			IsSymbolicLink(fullPath))
 			throw new IOException("The client configuration destination is no longer inside the project root.");
 		return fullPath;
 	}
 
 	private static bool IsSymbolicLink(string path)
 	{
+		return IsSymbolicLink(new FileInfo(path)) ||
+			   IsSymbolicLink(new DirectoryInfo(path));
+	}
+
+	private static bool IsSymbolicLink(FileSystemInfo entry)
+	{
 		try
 		{
-			FileSystemInfo entry = Directory.Exists(path)
-				? new DirectoryInfo(path)
-				: new FileInfo(path);
-			return entry.LinkTarget is not null ||
+			if (entry.LinkTarget is not null)
+				return true;
+			return entry.Exists &&
 				   (entry.Attributes & FileAttributes.ReparsePoint) != 0;
+		}
+		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+		{
+			return false;
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
@@ -521,7 +570,7 @@ public sealed class McpConnectionService : IMcpConnectionService
 			request.ProjectRoot,
 			cancellationToken).ConfigureAwait(false);
 		AppendOutput(output, "remove", remove);
-		var missingServer = IsMissingServer(remove);
+		var missingServer = IsMissingServer(request.Client, remove);
 		var replaced = remove.Succeeded && !missingServer;
 		if (!remove.Succeeded && !missingServer)
 			return CreateProcessFailure(request, remove, output, manual, previousConnectionRemoved: false);
@@ -560,10 +609,10 @@ public sealed class McpConnectionService : IMcpConnectionService
 		{
 			return new McpConnectionResult(
 				McpConnectionStatus.InvalidConfiguration,
-				_localization.Format(
-					"Mcp.Connect.ProjectConfigurationFailed",
-					DisplayName(request.Client),
-					ProjectConfigurationErrorText(result.Error)),
+				WithManualFallback(_localization.Format(
+						"Mcp.Connect.ProjectConfigurationFailed",
+						DisplayName(request.Client),
+						ProjectConfigurationErrorText(result.Error))),
 				ManualConfiguration: manual,
 				TargetPath: result.TargetPath);
 		}
@@ -602,12 +651,18 @@ public sealed class McpConnectionService : IMcpConnectionService
 			: processResult.StartError ?? processResult.CombinedOutput;
 		if (string.IsNullOrWhiteSpace(detail))
 			detail = _localization["Mcp.Connect.UnknownError"];
-		var messageKey = previousConnectionRemoved
-			? "Mcp.Connect.CommandFailedAfterRemoval"
-			: "Mcp.Connect.CommandFailed";
+		var message = previousConnectionRemoved
+			? _localization.Format(
+				"Mcp.Connect.CommandFailedAfterRemoval",
+				DisplayName(request.Client),
+				detail)
+			: WithManualFallback(_localization.Format(
+				"Mcp.Connect.CommandFailed",
+				DisplayName(request.Client),
+				detail));
 		return new McpConnectionResult(
 			status,
-			_localization.Format(messageKey, DisplayName(request.Client), detail),
+			message,
 			ManualConfiguration: manual,
 			CommandOutput: string.Join(Environment.NewLine, output));
 	}
@@ -634,19 +689,36 @@ public sealed class McpConnectionService : IMcpConnectionService
 				ClientCommandTimeout),
 			cancellationToken);
 
-	private static bool IsMissingServer(McpConnectionProcessResult result)
+	private static bool IsMissingServer(
+		McpConnectionClient client,
+		McpConnectionProcessResult result)
 	{
 		if (result.TimedOut || result.StartError is not null)
 			return false;
-		var text = result.CombinedOutput;
-		return text.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
-			   text.Contains("does not exist", StringComparison.OrdinalIgnoreCase) ||
-			   text.Contains("no MCP server", StringComparison.OrdinalIgnoreCase) ||
-			   text.Contains("no local-scoped MCP server", StringComparison.OrdinalIgnoreCase) ||
-			   text.Contains("No server named", StringComparison.OrdinalIgnoreCase);
+
+		return result.CombinedOutput
+			.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+			.Select(static line => line.StartsWith("Error: ", StringComparison.OrdinalIgnoreCase)
+				? line[7..]
+				: line)
+			.Select(static line => line.TrimEnd('.'))
+			.Any(line => client switch
+			{
+				McpConnectionClient.ClaudeCode => line.Equals(
+					"No local-scoped MCP server found with name: devprojex",
+					StringComparison.OrdinalIgnoreCase),
+				McpConnectionClient.Codex =>
+					line.Equals(
+						"No MCP server named 'devprojex' found",
+						StringComparison.OrdinalIgnoreCase) ||
+					line.Equals(
+						"No server named devprojex",
+						StringComparison.OrdinalIgnoreCase),
+				_ => false
+			});
 	}
 
-	private static void AppendOutput(
+	private void AppendOutput(
 		ICollection<string> output,
 		string operation,
 		McpConnectionProcessResult result)
@@ -654,7 +726,12 @@ public sealed class McpConnectionService : IMcpConnectionService
 		var text = result.CombinedOutput;
 		if (text.Length > 0)
 			output.Add($"{operation}: {text}");
+		if (result.OutputIncomplete)
+			output.Add(_localization["Mcp.Connect.OutputIncomplete"]);
 	}
+
+	private string WithManualFallback(string message) =>
+		$"{message} {_localization["Mcp.Connect.ManualFallbackHint"]}";
 
 	private static string DisplayName(McpConnectionClient client) => client switch
 	{

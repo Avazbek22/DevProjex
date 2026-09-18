@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "Lệnh của ứng dụng đã hết thời gian chờ.",
   "Mcp.Connect.CommandFailed": "Không thể kết nối {0}: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "Kết nối {0} trước đó đã bị xóa, nhưng không thể thêm kết nối mới: {1}. Hãy dùng cấu hình thủ công bên dưới.",
+  "Mcp.Connect.ManualFallbackHint": "Hãy dùng cấu hình thủ công bên dưới.",
+  "Mcp.Connect.OutputIncomplete": "Một phần đầu ra của ứng dụng khách không khả dụng vì luồng đầu ra vẫn mở.",
   "Dialog.LiveContext.Secrets.Title": "Tắt bảo vệ bí mật?",
   "Dialog.LiveContext.Secrets.Message": "Thao tác này tắt bảo vệ bí mật trong bản xem trước và nội dung xuất của cửa sổ. Phản hồi MCP vẫn được che.",
   "Dialog.LiveContext.Secrets.Apply": "Áp dụng không bảo vệ",

@@ -41,6 +41,8 @@ public sealed class McpConnectionUiTests
 		"Mcp.Connect.CommandTimedOut",
 		"Mcp.Connect.CommandFailed",
 		"Mcp.Connect.CommandFailedAfterRemoval",
+		"Mcp.Connect.ManualFallbackHint",
+		"Mcp.Connect.OutputIncomplete",
 		"Terminal.Command.McpConnect",
 		"Terminal.Option.McpClient",
 		"Terminal.Option.McpConnectionMode",
@@ -166,14 +168,17 @@ public sealed class McpConnectionUiTests
 		Assert.All(connectItems, static item => Assert.False(item.IsEnabled));
 
 		var live = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpLiveContextMenuItem"));
+		var documentation = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpDocumentationMenuItem"));
 		var liveCheckBox = Assert.IsType<CheckBox>(live.Header);
 		Assert.False(live.IsEnabled);
+		Assert.False(documentation.IsEnabled);
 		Assert.True(liveCheckBox.IsChecked);
 		Assert.Equal(viewModel.MenuMcpLiveContext, AutomationProperties.GetName(live));
 		Assert.Equal(viewModel.MenuMcpLiveContext, AutomationProperties.GetName(liveCheckBox));
 		viewModel.IsProjectLoaded = true;
 		Assert.All(connectItems, static item => Assert.True(item.IsEnabled));
 		Assert.True(live.IsEnabled);
+		Assert.True(documentation.IsEnabled);
 
 		McpConnectionRequestedEventArgs? requested = null;
 		view.McpConnectionRequested += (_, args) => requested = args;

@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "Вақти фармони мизоҷ гузашт.",
   "Mcp.Connect.CommandFailed": "{0}-ро пайваст кардан нашуд: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "Пайвасти қаблии {0} нест карда шуд, аммо пайвасти навро илова кардан нашуд: {1}. Танзимоти дастии зерро истифода баред.",
+  "Mcp.Connect.ManualFallbackHint": "Танзимоти дастии зерро истифода баред.",
+  "Mcp.Connect.OutputIncomplete": "Як қисми барориши муштарӣ дастнорас аст, зеро ҷараёни барориш кушода монд.",
   "Dialog.LiveContext.Secrets.Title": "Муҳофизати сирҳо хомӯш шавад?",
   "Dialog.LiveContext.Secrets.Message": "Ин муҳофизати сирҳоро барои пешнамоиш ва содироти равзана хомӯш мекунад. Дар ҷавобҳои MCP сирҳо ниқобшуда мемонанд.",
   "Dialog.LiveContext.Secrets.Apply": "Бе муҳофизат татбиқ кардан",

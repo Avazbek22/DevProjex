@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "Истекло время ожидания команды клиента.",
   "Mcp.Connect.CommandFailed": "Не удалось подключить {0}: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "Предыдущее подключение {0} удалено, но новое добавить не удалось: {1}. Используйте ручную конфигурацию ниже.",
+  "Mcp.Connect.ManualFallbackHint": "Используйте ручную конфигурацию ниже.",
+  "Mcp.Connect.OutputIncomplete": "Часть вывода клиента недоступна, потому что поток вывода остался открытым.",
   "Dialog.LiveContext.Secrets.Title": "Отключить защиту секретов?",
   "Dialog.LiveContext.Secrets.Message": "Это отключит защиту секретов в предпросмотре и экспорте окна. Ответы MCP останутся замаскированными.",
   "Dialog.LiveContext.Secrets.Apply": "Применить без защиты",

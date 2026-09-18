@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "クライアント コマンドがタイムアウトしました。",
   "Mcp.Connect.CommandFailed": "{0} に接続できませんでした: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "以前の {0} 接続は削除されましたが、新しい接続を追加できませんでした: {1}。以下の手動構成を使用してください。",
+  "Mcp.Connect.ManualFallbackHint": "以下の手動構成を使用してください。",
+  "Mcp.Connect.OutputIncomplete": "出力ストリームが開いたままのため、クライアント出力の一部を取得できません。",
   "Dialog.LiveContext.Secrets.Title": "シークレット保護を無効にしますか?",
   "Dialog.LiveContext.Secrets.Message": "これにより、ウィンドウのプレビューとエクスポートでシークレット保護が無効になります。MCP の応答では引き続きマスクされます。",
   "Dialog.LiveContext.Secrets.Apply": "保護なしで適用",

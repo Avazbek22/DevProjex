@@ -182,6 +182,7 @@
         </MenuItem>
         <MenuItem Name="McpDocumentationMenuItem"
                   Header="{Binding MenuMcpDocumentation}"
+                  IsEnabled="{Binding IsProjectLoaded}"
                   AutomationProperties.Name="{Binding MenuMcpDocumentation}"
                   Click="OnMcpDocumentation" />
       </MenuItem>

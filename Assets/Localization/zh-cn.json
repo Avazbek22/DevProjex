@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "客户端命令超时。",
   "Mcp.Connect.CommandFailed": "无法连接 {0}：{1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "之前的 {0} 连接已移除，但无法添加新连接：{1}。请使用下面的手动配置。",
+  "Mcp.Connect.ManualFallbackHint": "请使用下面的手动配置。",
+  "Mcp.Connect.OutputIncomplete": "由于输出流保持打开状态，部分客户端输出不可用。",
   "Dialog.LiveContext.Secrets.Title": "关闭机密保护？",
   "Dialog.LiveContext.Secrets.Message": "这会关闭窗口预览和导出中的机密保护。MCP 响应仍会进行遮盖。",
   "Dialog.LiveContext.Secrets.Apply": "不保护并应用",

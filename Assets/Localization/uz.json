@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "Mijoz buyrug‘ining kutish vaqti tugadi.",
   "Mcp.Connect.CommandFailed": "{0}'ni ulab bo‘lmadi: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "Avvalgi {0} ulanishi olib tashlandi, ammo yangisini qo‘shib bo‘lmadi: {1}. Quyidagi qo‘lda sozlashdan foydalaning.",
+  "Mcp.Connect.ManualFallbackHint": "Quyidagi qo‘lda sozlashdan foydalaning.",
+  "Mcp.Connect.OutputIncomplete": "Chiqish oqimi ochiq qolganligi sababli mijoz chiqishining bir qismi mavjud emas.",
   "Dialog.LiveContext.Secrets.Title": "Sirlar himoyasi o‘chirilsinmi?",
   "Dialog.LiveContext.Secrets.Message": "Bu oynadagi ko‘rish va eksport uchun sirlar himoyasini o‘chiradi. MCP javoblarida sirlar yashirilgan holda qoladi.",
   "Dialog.LiveContext.Secrets.Apply": "Himoyasiz qo‘llash",

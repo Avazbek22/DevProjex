@@ -357,13 +357,13 @@ internal sealed partial class TerminalWorkspaceSession
 				.Load()
 				.ViewSettings
 				.IsMcpLiveContextEnabled;
-		var executablePath = McpConnectionExecutablePathResolver.Resolve(
-			_services.TerminalCommandSetupService.Probe(),
-			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+			var executablePath = McpConnectionExecutablePathResolver.Resolve(
+				_services.TerminalCommandSetupService.Probe(),
+				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 			var request = new McpConnectionRequest(
-			client,
+				client,
 				useLiveContext ? McpConnectionMode.Live : McpConnectionMode.Standard,
-			executablePath,
+				executablePath,
 				Path.GetFullPath(projectRoot));
 			var result = await _services.McpConnectionService
 				.ConnectAsync(request, operationCts.Token)

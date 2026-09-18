@@ -124,16 +124,23 @@ public sealed class McpConnectionServiceTests
 	}
 
 	[Theory]
-	[InlineData((int)McpConnectionClient.ClaudeCode, "claude")]
-	[InlineData((int)McpConnectionClient.Codex, "codex")]
+	[InlineData(
+		(int)McpConnectionClient.ClaudeCode,
+		"claude",
+		"No local-scoped MCP server found with name: devprojex")]
+	[InlineData(
+		(int)McpConnectionClient.Codex,
+		"codex",
+		"No MCP server named 'devprojex' found.")]
 	public async Task Connect_CommandLineClient_RemovesThenAddsWithExactArguments(
 		int clientValue,
-		string commandName)
+		string commandName,
+		string missingServerMessage)
 	{
 		using var project = new TemporaryDirectory();
 		var client = (McpConnectionClient)clientValue;
 		var runner = new RecordingProcessRunner(
-			new McpConnectionProcessResult(1, string.Empty, "No server named devprojex"),
+			new McpConnectionProcessResult(1, string.Empty, missingServerMessage),
 			new McpConnectionProcessResult(0, "added", string.Empty));
 		var (service, clientExecutable) = CreateCommandLineService(project.Path, commandName, runner);
 		var devProjexExecutable = Path.Combine(project.Path, "DevProjex.exe");
@@ -162,7 +169,7 @@ public sealed class McpConnectionServiceTests
 				"mcp", "add", "devprojex", "--", devProjexExecutable,
 				"mcp", "--root", project.Path, "--live"
 			]);
-		Assert.Contains("remove: No server named devprojex", result.CommandOutput, StringComparison.Ordinal);
+		Assert.Contains($"remove: {missingServerMessage}", result.CommandOutput, StringComparison.Ordinal);
 		Assert.Contains("add: added", result.CommandOutput, StringComparison.Ordinal);
 	}
 
@@ -211,6 +218,27 @@ public sealed class McpConnectionServiceTests
 	}
 
 	[Fact]
+	public async Task Connect_CommandLineClient_DoesNotTreatUnrelatedNotFoundErrorAsMissingServer()
+	{
+		using var project = new TemporaryDirectory();
+		var runner = new RecordingProcessRunner(
+			new McpConnectionProcessResult(127, string.Empty, "node: not found"));
+		var (service, _) = CreateCommandLineService(project.Path, "claude", runner);
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.ClaudeCode,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.ProcessFailed, result.Status);
+		Assert.Single(runner.Requests);
+		Assert.Contains("node: not found", result.UserMessage, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task Connect_CommandLineClient_ReturnsManualFallbackWhenClientIsNotFound()
 	{
 		using var project = new TemporaryDirectory();
@@ -243,7 +271,7 @@ public sealed class McpConnectionServiceTests
 	{
 		using var project = new TemporaryDirectory();
 		var runner = new RecordingProcessRunner(
-			new McpConnectionProcessResult(1, string.Empty, "not found"),
+			new McpConnectionProcessResult(1, string.Empty, "No MCP server named 'devprojex' found."),
 			new McpConnectionProcessResult(5, "partial output", "permission denied"));
 		var (service, _) = CreateCommandLineService(project.Path, "codex", runner);
 
@@ -259,7 +287,36 @@ public sealed class McpConnectionServiceTests
 		Assert.True(result.RequiresManualConfiguration);
 		Assert.Contains("partial output", result.CommandOutput, StringComparison.Ordinal);
 		Assert.Contains("permission denied", result.CommandOutput, StringComparison.Ordinal);
+		Assert.Contains("Use manual configuration", result.UserMessage, StringComparison.Ordinal);
 		Assert.Equal(2, runner.Requests.Count);
+	}
+
+	[Fact]
+	public async Task Connect_CommandLineClient_ReportsIncompleteCapturedOutput()
+	{
+		using var project = new TemporaryDirectory();
+		var runner = new RecordingProcessRunner(
+			new McpConnectionProcessResult(
+				1,
+				string.Empty,
+				"No MCP server named 'devprojex' found."),
+			new McpConnectionProcessResult(
+				0,
+				"added",
+				string.Empty,
+				OutputIncomplete: true));
+		var (service, _) = CreateCommandLineService(project.Path, "codex", runner);
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Codex,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.Connected, result.Status);
+		Assert.Contains("Output incomplete", result.CommandOutput, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -438,6 +495,7 @@ public sealed class McpConnectionServiceTests
 		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
 		Assert.True(result.RequiresManualConfiguration);
 		Assert.Contains("Invalid data", result.UserMessage, StringComparison.Ordinal);
+		Assert.Contains("Use manual configuration", result.UserMessage, StringComparison.Ordinal);
 		Assert.Equal(
 			before,
 			await File.ReadAllBytesAsync(
@@ -564,6 +622,38 @@ public sealed class McpConnectionServiceTests
 	}
 
 	[Fact]
+	public async Task Connect_ProjectClient_DanglingSymbolicLinkConfigurationRemainsUntouched()
+	{
+		using var project = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var configurationDirectory = project.CreateDirectory(".cursor");
+		var missingTarget = Path.Combine(outside.Path, "missing.json");
+		var targetPath = Path.Combine(configurationDirectory, "mcp.json");
+		try
+		{
+			File.CreateSymbolicLink(targetPath, missingTarget);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return;
+		}
+		var linkTarget = new FileInfo(targetPath).LinkTarget;
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Cursor,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
+		Assert.Equal(linkTarget, new FileInfo(targetPath).LinkTarget);
+		Assert.False(File.Exists(missingTarget));
+	}
+
+	[Fact]
 	public async Task Connect_Json_ReturnsManualConfigurationAndDesktopPaths()
 	{
 		using var project = new TemporaryDirectory();
@@ -666,6 +756,8 @@ public sealed class McpConnectionServiceTests
 			["Mcp.Connect.ClientNotFound"] = "{0} not found",
 			["Mcp.Connect.CommandFailed"] = "{0}: {1}",
 			["Mcp.Connect.CommandFailedAfterRemoval"] = "Previous {0} connection removed: {1}",
+			["Mcp.Connect.ManualFallbackHint"] = "Use manual configuration",
+			["Mcp.Connect.OutputIncomplete"] = "Output incomplete",
 			["Mcp.Connect.CommandTimedOut"] = "Command timed out",
 			["Mcp.Connect.UnknownError"] = "Unknown error",
 			["Mcp.Connect.ProjectConfigurationFailed"] = "{0}: {1}",

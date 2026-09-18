@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "Waktu perintah klien habis.",
   "Mcp.Connect.CommandFailed": "{0} tidak dapat dihubungkan: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "Koneksi {0} sebelumnya telah dihapus, tetapi koneksi baru tidak dapat ditambahkan: {1}. Gunakan konfigurasi manual di bawah ini.",
+  "Mcp.Connect.ManualFallbackHint": "Gunakan konfigurasi manual di bawah ini.",
+  "Mcp.Connect.OutputIncomplete": "Sebagian keluaran klien tidak tersedia karena aliran keluaran tetap terbuka.",
   "Dialog.LiveContext.Secrets.Title": "Matikan perlindungan rahasia?",
   "Dialog.LiveContext.Secrets.Message": "Ini menonaktifkan perlindungan rahasia untuk pratinjau dan ekspor jendela. Respons MCP tetap disamarkan.",
   "Dialog.LiveContext.Secrets.Apply": "Terapkan tanpa perlindungan",

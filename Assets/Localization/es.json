@@ -169,6 +169,8 @@
     "Mcp.Connect.CommandTimedOut": "Se agotó el tiempo de espera del comando del cliente.",
     "Mcp.Connect.CommandFailed": "No se pudo conectar {0}: {1}",
     "Mcp.Connect.CommandFailedAfterRemoval": "Se eliminó la conexión anterior de {0}, pero no se pudo añadir la nueva: {1}. Usa la configuración manual que aparece a continuación.",
+    "Mcp.Connect.ManualFallbackHint": "Usa la configuración manual que aparece a continuación.",
+    "Mcp.Connect.OutputIncomplete": "Parte de la salida del cliente no está disponible porque un flujo de salida permaneció abierto.",
     "Dialog.LiveContext.Secrets.Title":  "¿Desactivar la protección de secretos?",
     "Dialog.LiveContext.Secrets.Message":  "Esto desactiva la protección de secretos en la vista previa y las exportaciones de la ventana. Las respuestas de MCP permanecen enmascaradas.",
     "Dialog.LiveContext.Secrets.Apply":  "Aplicar sin protección",

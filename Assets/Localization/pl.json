@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "Przekroczono limit czasu polecenia klienta.",
   "Mcp.Connect.CommandFailed": "Nie udało się połączyć {0}: {1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "Poprzednie połączenie {0} zostało usunięte, ale nie udało się dodać nowego: {1}. Użyj poniższej konfiguracji ręcznej.",
+  "Mcp.Connect.ManualFallbackHint": "Użyj poniższej konfiguracji ręcznej.",
+  "Mcp.Connect.OutputIncomplete": "Część danych wyjściowych klienta jest niedostępna, ponieważ strumień wyjściowy pozostał otwarty.",
   "Dialog.LiveContext.Secrets.Title": "Wyłączyć ochronę sekretów?",
   "Dialog.LiveContext.Secrets.Message": "Wyłącza to ochronę sekretów w podglądzie i eksporcie okna. Odpowiedzi MCP pozostają zamaskowane.",
   "Dialog.LiveContext.Secrets.Apply": "Zastosuj bez ochrony",

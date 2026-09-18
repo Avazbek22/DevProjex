@@ -1492,7 +1492,7 @@ winget and ZIP paths remain stable while their installation directory is unchang
 the macOS path remains stable while the `.app` bundle stays in place. AppImage
 configurations name the AppImage itself, so moving it requires reconnecting.
 
-The Desktop menu is available only with an open project. **Connect Claude Code**
+The Desktop connection items are enabled only with an open project. **Connect Claude Code**
 and **Connect Codex** invoke the installed client command without opening a console,
 capture its output, and replace an existing `devprojex` entry. Claude Code stores the
 entry in the project-local scope selected by its working directory; Codex stores it

@@ -169,6 +169,8 @@
   "Mcp.Connect.CommandTimedOut": "用戶端命令逾時。",
   "Mcp.Connect.CommandFailed": "無法連接 {0}：{1}",
   "Mcp.Connect.CommandFailedAfterRemoval": "先前的 {0} 連線已移除，但無法加入新連線：{1}。請使用下方的手動設定。",
+  "Mcp.Connect.ManualFallbackHint": "請使用下方的手動設定。",
+  "Mcp.Connect.OutputIncomplete": "由於輸出資料流仍保持開啟，部分用戶端輸出無法取得。",
   "Dialog.LiveContext.Secrets.Title": "關閉機密保護？",
   "Dialog.LiveContext.Secrets.Message": "這會關閉視窗預覽和匯出中的機密保護。MCP 回應仍會遮罩機密。",
   "Dialog.LiveContext.Secrets.Apply": "不保護並套用",
