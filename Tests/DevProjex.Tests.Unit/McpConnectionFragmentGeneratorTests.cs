@@ -104,11 +104,11 @@ public sealed class McpConnectionFragmentGeneratorTests
 	{
 		var mode = (McpConnectionMode)modeValue;
 		foreach (var client in new[]
-				 {
-					 McpConnectionClient.Cursor,
-					 McpConnectionClient.VsCode,
-					 McpConnectionClient.Json
-				 })
+		         {
+			         McpConnectionClient.Cursor,
+			         McpConnectionClient.VsCode,
+			         McpConnectionClient.Json
+		         })
 		{
 			var fragment = McpConnectionFragmentGenerator.Generate(
 				client,

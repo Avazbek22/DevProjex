@@ -450,12 +450,12 @@ internal sealed class AppearanceSettingsController(
     private static AvaloniaThemeVariant ToRequestedThemeVariant(
         ThemePresetSelectionMode mode,
         ThemePresetVariant effectiveTheme) => mode switch
-        {
-            ThemePresetSelectionMode.System => AvaloniaThemeVariant.Default,
-            _ => effectiveTheme == ThemePresetVariant.Dark
-                ? AvaloniaThemeVariant.Dark
-                : AvaloniaThemeVariant.Light
-        };
+    {
+        ThemePresetSelectionMode.System => AvaloniaThemeVariant.Default,
+        _ => effectiveTheme == ThemePresetVariant.Dark
+            ? AvaloniaThemeVariant.Dark
+            : AvaloniaThemeVariant.Light
+    };
 
     private ThemePresetVariant? ResolveSystemTheme()
     {

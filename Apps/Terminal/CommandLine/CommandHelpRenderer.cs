@@ -123,8 +123,8 @@ public sealed class CommandHelpRenderer(
 	{
 		var segments = new Stack<string>();
 		for (var current = command;
-			 current is not RootCommand;
-			 current = current.Parents.OfType<Command>().First())
+		     current is not RootCommand;
+		     current = current.Parents.OfType<Command>().First())
 		{
 			segments.Push(current.Name);
 		}

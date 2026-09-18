@@ -93,21 +93,21 @@ public static class AvaloniaCompositionRoot
         var filterSelectionService = new FilterOptionSelectionService();
         var treeExportService = new TreeExportService();
         var fileContentAnalyzer = new FileContentAnalyzer();
-        var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
-        var persistentSecretIdentity = new PersistentSecretIdentityProvider(appDataPathProvider);
-        var secretRedactionSession = SecretRedactionSession.CreateWithPrivateData(
-            new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService),
-            new PrivateDataDetector(),
-            projectProfileStore,
-            persistentSecretIdentity);
-        var codeCompressionSession = CodeCompressionFactory.CreateSession();
+		var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
+		var persistentSecretIdentity = new PersistentSecretIdentityProvider(appDataPathProvider);
+		var secretRedactionSession = SecretRedactionSession.CreateWithPrivateData(
+			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService),
+			new PrivateDataDetector(),
+			projectProfileStore,
+			persistentSecretIdentity);
+		var codeCompressionSession = CodeCompressionFactory.CreateSession();
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
         var projectCopyExportService = new ProjectCopyExportService(
-            new ProjectCopyExportPlanBuilder(),
-            fileContentAnalyzer,
-            secretRedactionSession,
-            codeCompressionSession);
+			new ProjectCopyExportPlanBuilder(),
+			fileContentAnalyzer,
+			secretRedactionSession,
+			codeCompressionSession);
         var projectAnalysisService = new ProjectAnalysisService(
             scanOptionsUseCase,
             buildTreeUseCase,
@@ -175,7 +175,7 @@ public static class AvaloniaCompositionRoot
             ToastService: toastService,
             IconStore: iconStore,
             GitRepositoryService: gitRepositoryService,
-            GitScopePathProvider: new GitScopePathProvider(),
+			GitScopePathProvider: new GitScopePathProvider(),
             RepoCacheService: repoCacheService,
             ZipDownloadService: zipDownloadService,
             FileContentAnalyzer: fileContentAnalyzer,
@@ -185,9 +185,9 @@ public static class AvaloniaCompositionRoot
             TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService,
             SessionMetricsRecorder: sessionMetricsRecorder,
-            SecretRedactionSession: secretRedactionSession,
-            CodeCompressionSession: codeCompressionSession,
-            ProjectPathLauncher: projectPathLauncher,
+			SecretRedactionSession: secretRedactionSession,
+			CodeCompressionSession: codeCompressionSession,
+			ProjectPathLauncher: projectPathLauncher,
             LiveSessionRegistry: liveSessionRegistry);
     }
 }
