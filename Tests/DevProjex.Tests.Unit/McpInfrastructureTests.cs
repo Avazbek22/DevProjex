@@ -1785,6 +1785,39 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task PackLiveContextMetadataFollowsStoredResultLifetime()
+	{
+		using var workspace = new TemporaryDirectory();
+		var time = new MutablePackTimeProvider(new DateTimeOffset(2026, 9, 18, 0, 0, 0, TimeSpan.Zero));
+		using var registry = new McpPackRegistry(
+			workspace.Path,
+			time,
+			maximumPackBytes: 8,
+			maximumSessionBytes: 12);
+		var first = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[6], token),
+			TestContext.Current.CancellationToken);
+		var firstContext = new McpStoredResultContext("root-a", 3);
+		registry.RecordLiveContext(first.Id, firstContext);
+		time.Advance();
+		var second = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[6], token),
+			TestContext.Current.CancellationToken);
+		var secondContext = new McpStoredResultContext("root-b", 4);
+		registry.RecordLiveContext(second.Id, secondContext);
+		time.Advance();
+
+		_ = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[6], token),
+			TestContext.Current.CancellationToken);
+
+		Assert.Null(registry.GetLiveContext(first.Id));
+		Assert.Equal(secondContext, registry.GetLiveContext(second.Id));
+		registry.Remove(second.Id);
+		Assert.Null(registry.GetLiveContext(second.Id));
+	}
+
+	[Fact]
 	public async Task TextPageReaderHonorsLineAndCharacterCapsWithoutLoadingWholeStream()
 	{
 		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("one\r\ntwo\rthree\nfour\nfive"));

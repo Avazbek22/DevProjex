@@ -839,7 +839,9 @@ internal sealed class DevProjexMcpTools(
 					.ConfigureAwait(false);
 				var response = McpToolResults.TextSuccess(message, advertiseLargeResult: true);
 				retainPack = true;
-				liveContext?.RecordPackBuild(plan.SourceRoot, pack.Id);
+				var storedContext = liveContext?.RecordPackBuild(plan.SourceRoot, pack.Id);
+				if (storedContext is not null)
+					packs.RecordLiveContext(pack.Id, storedContext);
 				return response;
 			}
 			finally
@@ -858,12 +860,12 @@ internal sealed class DevProjexMcpTools(
 		{
 			var arguments = McpJsonArguments.Create(request.Params, ReadPackArgumentNames);
 			var packId = arguments.RequiredString("pack_id");
-			liveContext?.RefreshStoredResult(packId);
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var startColumn = arguments.OptionalInteger("start_column", 1, int.MaxValue);
 			ValidateLineRange(start, end);
 			await using var packLease = packs.OpenReadDocument(packId);
+			liveContext?.RefreshStoredResult(packs.GetLiveContext(packId));
 			var pack = packLease.Document;
 			var page = await ReadFilePageAsync(
 					pack,
@@ -1111,7 +1113,11 @@ internal sealed class DevProjexMcpTools(
 				: await StoreWithheldMatchesAsync(withheld.ToString(), cancellationToken)
 					.ConfigureAwait(false);
 			if (storedSearch is not null)
-				liveContext?.RecordStoredResult(plan.SourceRoot, storedSearch.Id);
+			{
+				var storedContext = liveContext?.RecordStoredResult(plan.SourceRoot);
+				if (storedContext is not null)
+					packs.RecordLiveContext(storedSearch.Id, storedContext);
+			}
 			AppendWithheldDistribution(output, withheldByFile);
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional observed matches not shown; narrow the pattern or filters.]"
@@ -1295,7 +1301,9 @@ internal sealed class DevProjexMcpTools(
 				},
 				McpStoredResultKind.Related,
 				cancellationToken).ConfigureAwait(false);
-			liveContext?.RecordStoredResult(plan.SourceRoot, pack.Id);
+			var storedContext = liveContext?.RecordStoredResult(plan.SourceRoot);
+			if (storedContext is not null)
+				packs.RecordLiveContext(pack.Id, storedContext);
 			return McpToolResults.TextSuccess(
 				$"Related-files result stored as '{pack.Id}' ({pack.Characters} characters). " +
 				"Call read_pack with this pack_id to read it.",

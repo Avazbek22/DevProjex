@@ -12,7 +12,6 @@ internal sealed class McpLiveContextState(
 	private static readonly TimeSpan DefaultLookupTimeout = TimeSpan.FromMilliseconds(250);
 	private readonly AsyncLocal<InvocationState?> invocation = new();
 	private readonly Dictionary<string, RootState> states = new(PathComparer.Default);
-	private readonly Dictionary<string, StoredResultState> storedResults = new(StringComparer.Ordinal);
 	private readonly object sync = new();
 	private readonly TimeSpan profileLookupTimeout = lookupTimeout ?? DefaultLookupTimeout;
 
@@ -121,38 +120,36 @@ internal sealed class McpLiveContextState(
 	public bool IsOutsideSelection(string projectRoot, string relativePath) =>
 		invocation.Value?.OutsidePaths.Contains(BuildPathIdentity(projectRoot, relativePath)) == true;
 
-	public void RecordPackBuild(string projectRoot, string? packId)
+	public McpStoredResultContext? RecordPackBuild(string projectRoot, string? packId)
 	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
 		lock (sync)
 		{
 			if (!states.TryGetValue(normalizedRoot, out var state))
-				return;
-			if (!string.IsNullOrEmpty(packId))
-				storedResults[packId] = new StoredResultState(normalizedRoot, state.Revision);
+				return null;
 			invocation.Value?.AdditionalNotices.Add(
 				$"[Live context] pack built at revision {state.Revision}.");
+			return string.IsNullOrEmpty(packId)
+				? null
+				: new McpStoredResultContext(normalizedRoot, state.Revision);
 		}
 	}
 
-	public void RecordStoredResult(string projectRoot, string packId)
+	public McpStoredResultContext? RecordStoredResult(string projectRoot)
 	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
 		lock (sync)
 		{
-			if (states.TryGetValue(normalizedRoot, out var state))
-				storedResults[packId] = new StoredResultState(normalizedRoot, state.Revision);
+			return states.TryGetValue(normalizedRoot, out var state)
+				? new McpStoredResultContext(normalizedRoot, state.Revision)
+				: null;
 		}
 	}
 
-	public void RefreshStoredResult(string packId)
+	public void RefreshStoredResult(McpStoredResultContext? stored)
 	{
-		StoredResultState stored;
-		lock (sync)
-		{
-			if (!storedResults.TryGetValue(packId, out stored!))
-				return;
-		}
+		if (stored is null)
+			return;
 
 		var current = ReadCurrentProfile(stored.Root);
 		if (current.Revision == stored.Revision)
@@ -421,7 +418,6 @@ internal sealed class McpLiveContextState(
 	}
 
 	private sealed record PendingChange(int PreviousRevision, IReadOnlyList<string> Changes);
-	private sealed record StoredResultState(string Root, int Revision);
 }
 
 internal sealed record McpLiveProfileSnapshot(

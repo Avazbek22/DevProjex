@@ -215,6 +215,22 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		TryDeletePackFile(entry.Document.Path);
 	}
 
+	internal void RecordLiveContext(string packId, McpStoredResultContext context)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		lock (_sync)
+		{
+			if (_packs.TryGetValue(packId, out var entry))
+				entry.LiveContext = context;
+		}
+	}
+
+	internal McpStoredResultContext? GetLiveContext(string packId)
+	{
+		lock (_sync)
+			return _packs.TryGetValue(packId, out var entry) ? entry.LiveContext : null;
+	}
+
 	public string Resolve(string packId) => ResolveDocument(packId).Path;
 
 	internal McpPackDocument ResolveDocument(string packId)
@@ -678,6 +694,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		public DateTimeOffset LastReadUtc { get; set; } = createdUtc;
 		public int ActiveReaders { get; set; }
 		public McpStoredResultKind Kind { get; } = kind;
+		public McpStoredResultContext? LiveContext { get; set; }
 	}
 
 	private sealed class PackReservation(McpPackRegistry owner) : IDisposable
@@ -935,6 +952,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		int Lines,
 		McpPackLineCheckpoint[] LineCheckpoints);
 }
+
+internal sealed record McpStoredResultContext(string Root, int Revision);
 
 internal readonly record struct McpPackLineCheckpoint(int LineNumber, long ByteOffset);
 
