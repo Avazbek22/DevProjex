@@ -32,7 +32,27 @@ public sealed class McpConnectionServiceTests
 		{
 			Platform = TerminalCommandHostPlatform.Linux,
 			PathVariableProvider = () => temp.Path,
-			FileExists = path => string.Equals(path, expected, StringComparison.Ordinal)
+			FileExists = path => string.Equals(path, expected, StringComparison.Ordinal),
+			IsExecutable = path => string.Equals(path, expected, StringComparison.Ordinal)
+		});
+
+		Assert.Equal(expected, locator.Find("codex"));
+	}
+
+	[Fact]
+	public void ExecutableLocator_SkipsNonExecutableUnixCandidate()
+	{
+		const string firstDirectory = "client-a";
+		const string secondDirectory = "client-b";
+		var first = Path.GetFullPath(Path.Combine(firstDirectory, "codex"));
+		var expected = Path.GetFullPath(Path.Combine(secondDirectory, "codex"));
+		var locator = new McpClientExecutableLocator(new McpClientExecutableLocatorOptions
+		{
+			Platform = TerminalCommandHostPlatform.Linux,
+			PathVariableProvider = () => $"{firstDirectory}:{secondDirectory}",
+			FileExists = path => path.Equals(first, StringComparison.Ordinal) ||
+								 path.Equals(expected, StringComparison.Ordinal),
+			IsExecutable = path => path.Equals(expected, StringComparison.Ordinal)
 		});
 
 		Assert.Equal(expected, locator.Find("codex"));
@@ -50,23 +70,57 @@ public sealed class McpConnectionServiceTests
 		var shimPath = Path.Combine(shimDirectory, "probe.cmd");
 		await File.WriteAllTextAsync(
 			shimPath,
-			"@echo off\r\necho %~1\r\necho %~2\r\necho %~3\r\n",
+			"@echo off\r\necho %~1\r\necho %~2\r\necho %~3\r\necho %~4\r\necho %~5\r\n",
 			TestContext.Current.CancellationToken);
 		var runner = new McpConnectionProcessRunner();
+		var arguments = new[]
+		{
+			"alpha",
+			"root with spaces Юникод",
+			@"C:\path\with\slashes",
+			@"C:\100%\%PATH%\root",
+			"ampersand & caret ^ parentheses () exclamation !"
+		};
 
 		var result = await runner.RunAsync(
 			new McpConnectionProcessRequest(
 				shimPath,
-				["alpha", "root with spaces Юникод", @"C:\path\with\slashes"],
+				arguments,
 				temp.Path,
 				TimeSpan.FromSeconds(10)),
 			TestContext.Current.CancellationToken);
 
 		Assert.True(result.Succeeded, result.CombinedOutput);
 		Assert.Equal(
-			["alpha", "root with spaces Юникод", @"C:\path\with\slashes"],
+			arguments,
 			result.StandardOutput
 				.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+	}
+
+	[Fact]
+	public async Task ProcessRunner_TimeoutPreservesCapturedOutput()
+	{
+		using var temp = new TemporaryDirectory();
+		string executable;
+		IReadOnlyList<string> arguments;
+		if (OperatingSystem.IsWindows())
+		{
+			executable = temp.CreateFile("wait.cmd", "@echo off\r\necho before-timeout\r\nset /p DPX_WAIT=\r\n");
+			arguments = [];
+		}
+		else
+		{
+			executable = "/bin/sh";
+			arguments = ["-c", "printf 'before-timeout\\n'; read dpx_wait"];
+		}
+		var runner = new McpConnectionProcessRunner();
+
+		var result = await runner.RunAsync(
+			new McpConnectionProcessRequest(executable, arguments, temp.Path, TimeSpan.FromSeconds(1)),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.TimedOut);
+		Assert.Contains("before-timeout", result.StandardOutput, StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -209,6 +263,49 @@ public sealed class McpConnectionServiceTests
 	}
 
 	[Fact]
+	public async Task Connect_CommandLineClient_ReportsRemovalWhenReplacementAddFails()
+	{
+		using var project = new TemporaryDirectory();
+		var runner = new RecordingProcessRunner(
+			new McpConnectionProcessResult(0, "removed", string.Empty),
+			new McpConnectionProcessResult(5, string.Empty, "permission denied"));
+		var (service, _) = CreateCommandLineService(project.Path, "claude", runner);
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.ClaudeCode,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.ProcessFailed, result.Status);
+		Assert.Equal("Previous Claude Code connection removed: permission denied", result.UserMessage);
+		Assert.True(result.RequiresManualConfiguration);
+	}
+
+	[Fact]
+	public async Task Connect_CommandLineClient_ReportsProcessStartFailure()
+	{
+		using var project = new TemporaryDirectory();
+		var runner = new RecordingProcessRunner(
+			new McpConnectionProcessResult(null, string.Empty, string.Empty, StartError: "cannot start"));
+		var (service, _) = CreateCommandLineService(project.Path, "codex", runner);
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Codex,
+				McpConnectionMode.Standard,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.ProcessFailed, result.Status);
+		Assert.Contains("cannot start", result.UserMessage, StringComparison.Ordinal);
+		Assert.True(result.RequiresManualConfiguration);
+	}
+
+	[Fact]
 	public async Task Connect_CommandLineClient_ReportsTimeoutWithoutRunningAdd()
 	{
 		using var project = new TemporaryDirectory();
@@ -340,12 +437,130 @@ public sealed class McpConnectionServiceTests
 
 		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
 		Assert.True(result.RequiresManualConfiguration);
+		Assert.Contains("Invalid data", result.UserMessage, StringComparison.Ordinal);
 		Assert.Equal(
 			before,
 			await File.ReadAllBytesAsync(
 				targetPath,
 				TestContext.Current.CancellationToken));
 		AssertNoTemporaryFiles(Path.GetDirectoryName(targetPath)!);
+	}
+
+	[Theory]
+	[InlineData("{ // keep this comment\n  \"mcpServers\": {}\n}\n")]
+	[InlineData("{\n  \"mcpServers\": {},\n}\n")]
+	public async Task Connect_ProjectClient_JsonExtensionsRemainByteForByteUntouched(string existing)
+	{
+		using var project = new TemporaryDirectory();
+		var targetPath = project.CreateFile(Path.Combine(".cursor", "mcp.json"), existing);
+		var before = await File.ReadAllBytesAsync(targetPath, TestContext.Current.CancellationToken);
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Cursor,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
+		Assert.Equal(before, await File.ReadAllBytesAsync(targetPath, TestContext.Current.CancellationToken));
+	}
+
+	[Theory]
+	[InlineData("[]")]
+	[InlineData("{ \"mcpServers\": [] }")]
+	public async Task Connect_ProjectClient_InvalidJsonShapeRemainsByteForByteUntouched(string existing)
+	{
+		using var project = new TemporaryDirectory();
+		var targetPath = project.CreateFile(Path.Combine(".cursor", "mcp.json"), existing);
+		var before = await File.ReadAllBytesAsync(targetPath, TestContext.Current.CancellationToken);
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Cursor,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
+		Assert.Equal(before, await File.ReadAllBytesAsync(targetPath, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task Connect_ProjectClient_MissingRootReturnsManualFallback()
+	{
+		using var temp = new TemporaryDirectory();
+		var missingRoot = Path.Combine(temp.Path, "missing-project");
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.VsCode,
+				McpConnectionMode.Standard,
+				Path.Combine(temp.Path, "DevProjex.exe"),
+				missingRoot),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
+		Assert.True(result.RequiresManualConfiguration);
+		Assert.Contains("Resource unavailable", result.UserMessage, StringComparison.Ordinal);
+		Assert.False(Directory.Exists(missingRoot));
+	}
+
+	[Fact]
+	public async Task Connect_ProjectClient_OccupiedConfigurationDirectoryReturnsManualFallback()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile(".cursor", "occupied");
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Cursor,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
+		Assert.True(result.RequiresManualConfiguration);
+		Assert.Contains("Resource unavailable", result.UserMessage, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Connect_ProjectClient_SymbolicLinkConfigurationRemainsUntouched()
+	{
+		using var project = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var configurationDirectory = project.CreateDirectory(".cursor");
+		var outsidePath = outside.CreateFile("mcp.json", "{ \"outside\": true }");
+		var targetPath = Path.Combine(configurationDirectory, "mcp.json");
+		try
+		{
+			File.CreateSymbolicLink(targetPath, outsidePath);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return;
+		}
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Cursor,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
+		Assert.Equal("{ \"outside\": true }", await File.ReadAllTextAsync(
+			outsidePath,
+			TestContext.Current.CancellationToken));
 	}
 
 	[Fact]
@@ -450,12 +665,17 @@ public sealed class McpConnectionServiceTests
 			["Mcp.Connect.Codex.Updated"] = "Codex updated",
 			["Mcp.Connect.ClientNotFound"] = "{0} not found",
 			["Mcp.Connect.CommandFailed"] = "{0}: {1}",
+			["Mcp.Connect.CommandFailedAfterRemoval"] = "Previous {0} connection removed: {1}",
 			["Mcp.Connect.CommandTimedOut"] = "Command timed out",
 			["Mcp.Connect.UnknownError"] = "Unknown error",
 			["Mcp.Connect.ProjectConfigurationFailed"] = "{0}: {1}",
 			["Mcp.Connect.ProjectConfigurationUpdated"] = "{0}: {1}; restart {2}",
 			["Mcp.Connect.RestartClient"] = "Restart {0}",
-			["Mcp.Connect.ManualConfiguration"] = "Manual configuration"
+			["Mcp.Connect.ManualConfiguration"] = "Manual configuration",
+			["Desktop.Error.ResourceUnavailable"] = "Resource unavailable",
+			["Desktop.Error.InvalidData"] = "Invalid data",
+			["Desktop.Error.AccessDenied"] = "Access denied",
+			["Desktop.Error.OperationFailed"] = "Operation failed"
 		};
 		return new LocalizationService(
 			new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>

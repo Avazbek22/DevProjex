@@ -47,6 +47,27 @@ internal sealed record McpClientExecutableLocatorOptions
 	public Func<string?> PathExtensionsProvider { get; init; } =
 		() => Environment.GetEnvironmentVariable("PATHEXT");
 	public Func<string, bool> FileExists { get; init; } = File.Exists;
+	public Func<string, bool> IsExecutable { get; init; } = IsExecutableFile;
+
+	private static bool IsExecutableFile(string path)
+	{
+		if (OperatingSystem.IsWindows())
+			return true;
+
+		try
+		{
+			const UnixFileMode executeBits =
+				UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+			return (File.GetUnixFileMode(path) & executeBits) != 0;
+		}
+		catch (Exception exception) when (exception is
+				   IOException or
+				   UnauthorizedAccessException or
+				   PlatformNotSupportedException)
+		{
+			return false;
+		}
+	}
 }
 
 internal sealed class McpClientExecutableLocator(McpClientExecutableLocatorOptions? options = null)
@@ -73,7 +94,8 @@ internal sealed class McpClientExecutableLocator(McpClientExecutableLocatorOptio
 				try
 				{
 					var candidate = Path.GetFullPath(Path.Combine(directory, commandName + suffix));
-					if (_options.FileExists(candidate))
+					if (_options.FileExists(candidate) &&
+						(_options.Platform == TerminalCommandHostPlatform.Windows || _options.IsExecutable(candidate)))
 						return candidate;
 				}
 				catch (Exception exception) when (exception is
@@ -108,6 +130,7 @@ internal sealed class McpClientExecutableLocator(McpClientExecutableLocatorOptio
 internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 {
 	private const int MaximumOutputCharacters = 64 * 1024;
+	private static readonly TimeSpan OutputCloseTimeout = TimeSpan.FromSeconds(1);
 
 	public async Task<McpConnectionProcessResult> RunAsync(
 		McpConnectionProcessRequest request,
@@ -120,7 +143,7 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 			var startInfo = CreateStartInfo(request);
 			process = new Process { StartInfo = startInfo };
 			if (!process.Start())
-				return new McpConnectionProcessResult(null, string.Empty, string.Empty, StartError: "The client process did not start.");
+				return new McpConnectionProcessResult(null, string.Empty, string.Empty, StartError: string.Empty);
 
 			var standardOutput = BoundedTextReader.ReadAsync(
 				process.StandardOutput,
@@ -141,16 +164,21 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 			}
 			catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 			{
-				await BoundedTextReader.ObserveCompletionAsync(standardOutput, standardError).ConfigureAwait(false);
-				return new McpConnectionProcessResult(null, string.Empty, string.Empty, TimedOut: true);
+				var output = await ReadCompletedOutputAsync(standardOutput).ConfigureAwait(false);
+				var error = await ReadCompletedOutputAsync(standardError).ConfigureAwait(false);
+				return new McpConnectionProcessResult(
+					null,
+					FormatOutput(output, "stdout"),
+					FormatOutput(error, "stderr"),
+					TimedOut: true);
 			}
 
 			var output = await standardOutput.ConfigureAwait(false);
 			var error = await standardError.ConfigureAwait(false);
 			return new McpConnectionProcessResult(
 				process.ExitCode,
-				output.ExceededLimit ? "[stdout exceeded 65536 characters]" : output.Text,
-				error.ExceededLimit ? "[stderr exceeded 65536 characters]" : error.Text);
+				FormatOutput(output, "stdout"),
+				FormatOutput(error, "stderr"));
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
@@ -174,6 +202,24 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 		}
 	}
 
+	private static async Task<BoundedTextReadResult> ReadCompletedOutputAsync(
+		Task<BoundedTextReadResult> output)
+	{
+		try
+		{
+			return await output.WaitAsync(OutputCloseTimeout).ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is IOException or ObjectDisposedException or TimeoutException)
+		{
+			return default;
+		}
+	}
+
+	private static string FormatOutput(BoundedTextReadResult output, string streamName) =>
+		output.ExceededLimit
+			? $"[{streamName} exceeded {MaximumOutputCharacters} characters]"
+			: output.Text ?? string.Empty;
+
 	private static ProcessStartInfo CreateStartInfo(McpConnectionProcessRequest request)
 	{
 		var startInfo = new ProcessStartInfo
@@ -191,7 +237,7 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 			 request.ExecutablePath.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)))
 		{
 			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-			var command = BuildWindowsCommand(request.ExecutablePath, request.Arguments);
+			var command = BuildWindowsCommand(startInfo, request.ExecutablePath, request.Arguments);
 			startInfo.Arguments = $"/d /v:off /s /c \"{command}\"";
 			return startInfo;
 		}
@@ -203,27 +249,37 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 	}
 
 	private static string BuildWindowsCommand(
+		ProcessStartInfo startInfo,
 		string executablePath,
 		IReadOnlyList<string> arguments)
 	{
-		var values = new[] { executablePath }.Concat(arguments);
-		return string.Join(' ', values.Select(QuoteWindowsCommandArgument));
-	}
+		var values = new[] { executablePath }.Concat(arguments).ToArray();
+		var placeholders = new string[values.Length];
+		for (var index = 0; index < values.Length; index++)
+		{
+			var variable = $"DEVPROJEX_MCP_COMMAND_VALUE_{index}";
+			startInfo.Environment[variable] = values[index];
+			placeholders[index] = $"\"%{variable}%\"";
+		}
 
-	private static string QuoteWindowsCommandArgument(string value)
-	{
-		var escaped = value
-			.Replace("%", "%%", StringComparison.Ordinal)
-			.Replace("\"", "\"\"", StringComparison.Ordinal);
-		return $"\"{escaped}\"";
+		return string.Join(' ', placeholders);
 	}
+}
+
+internal enum McpProjectConfigurationError
+{
+	None,
+	ResourceUnavailable,
+	InvalidData,
+	AccessDenied,
+	OperationFailed
 }
 
 internal sealed record McpProjectConfigurationWriteResult(
 	bool Succeeded,
 	bool Replaced,
 	string TargetPath,
-	string? Error = null);
+	McpProjectConfigurationError Error = McpProjectConfigurationError.None);
 
 internal sealed class McpProjectConfigurationWriter
 {
@@ -240,7 +296,7 @@ internal sealed class McpProjectConfigurationWriter
 	{
 		var projectRoot = PathUtility.Normalize(request.ProjectRoot);
 		if (!Directory.Exists(projectRoot))
-			return Failure(projectRoot, "The project root does not exist.");
+			return Failure(projectRoot, McpProjectConfigurationError.ResourceUnavailable);
 
 		var (directoryName, fileName, containerName) = request.Client switch
 		{
@@ -251,11 +307,13 @@ internal sealed class McpProjectConfigurationWriter
 		var directory = Path.Combine(projectRoot, directoryName);
 		var targetPath = Path.Combine(directory, fileName);
 		if (!PathUtility.IsPathInside(targetPath, projectRoot))
-			return Failure(targetPath, "The client configuration path is outside the project root.");
+			return Failure(targetPath, McpProjectConfigurationError.InvalidData);
 		if (Directory.Exists(directory) && IsSymbolicLink(directory))
-			return Failure(targetPath, "The client configuration directory is a symbolic link.");
+			return Failure(targetPath, McpProjectConfigurationError.InvalidData);
 		if (File.Exists(directory))
-			return Failure(targetPath, "The client configuration directory path is occupied by a file.");
+			return Failure(targetPath, McpProjectConfigurationError.ResourceUnavailable);
+		if (File.Exists(targetPath) && IsSymbolicLink(targetPath))
+			return Failure(targetPath, McpProjectConfigurationError.InvalidData);
 
 		JsonObject root;
 		if (File.Exists(targetPath))
@@ -264,20 +322,21 @@ internal sealed class McpProjectConfigurationWriter
 			{
 				var file = new FileInfo(targetPath);
 				if (file.Length > MaximumConfigurationBytes)
-					return Failure(targetPath, "The existing client configuration is too large to merge safely.");
+					return Failure(targetPath, McpProjectConfigurationError.InvalidData);
 				var text = await File.ReadAllTextAsync(targetPath, cancellationToken).ConfigureAwait(false);
-				root = JsonNode.Parse(
-					text,
-					nodeOptions: null,
-					documentOptions: new JsonDocumentOptions
-					{
-						AllowTrailingCommas = true,
-						CommentHandling = JsonCommentHandling.Skip
-					}) as JsonObject ?? throw new JsonException("The root value is not an object.");
+				root = JsonNode.Parse(text) as JsonObject ?? throw new JsonException();
 			}
-			catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
+			catch (JsonException)
 			{
-				return Failure(targetPath, $"The existing client configuration could not be read: {exception.Message}");
+				return Failure(targetPath, McpProjectConfigurationError.InvalidData);
+			}
+			catch (UnauthorizedAccessException)
+			{
+				return Failure(targetPath, McpProjectConfigurationError.AccessDenied);
+			}
+			catch (IOException)
+			{
+				return Failure(targetPath, McpProjectConfigurationError.ResourceUnavailable);
 			}
 		}
 		else
@@ -297,7 +356,7 @@ internal sealed class McpProjectConfigurationWriter
 		}
 		else
 		{
-			return Failure(targetPath, $"The '{containerName}' property is not an object.");
+			return Failure(targetPath, McpProjectConfigurationError.InvalidData);
 		}
 
 		var replaced = servers.ContainsKey("devprojex");
@@ -308,9 +367,9 @@ internal sealed class McpProjectConfigurationWriter
 			projectRoot);
 		var generatedRoot = JsonNode.Parse(printable)!.AsObject();
 		servers["devprojex"] = generatedRoot[containerName]!["devprojex"]!.DeepClone();
-		Directory.CreateDirectory(directory);
 		try
 		{
+			Directory.CreateDirectory(directory);
 			await AtomicFileOutput.WriteAsync(
 				targetPath,
 				overwrite: true,
@@ -323,19 +382,27 @@ internal sealed class McpProjectConfigurationWriter
 				path => ValidateDestination(projectRoot, directory, path)).ConfigureAwait(false);
 			return new McpProjectConfigurationWriteResult(true, replaced, targetPath);
 		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		catch (UnauthorizedAccessException)
 		{
-			return Failure(targetPath, exception.Message);
+			return Failure(targetPath, McpProjectConfigurationError.AccessDenied);
+		}
+		catch (IOException)
+		{
+			return Failure(targetPath, McpProjectConfigurationError.OperationFailed);
 		}
 	}
 
-	private static McpProjectConfigurationWriteResult Failure(string path, string error) =>
+	private static McpProjectConfigurationWriteResult Failure(
+		string path,
+		McpProjectConfigurationError error) =>
 		new(false, false, path, error);
 
 	private static string ValidateDestination(string projectRoot, string directory, string path)
 	{
 		var fullPath = Path.GetFullPath(path);
-		if (!PathUtility.IsPathInside(fullPath, projectRoot) || IsSymbolicLink(directory))
+		if (!PathUtility.IsPathInside(fullPath, projectRoot) ||
+			IsSymbolicLink(directory) ||
+			File.Exists(fullPath) && IsSymbolicLink(fullPath))
 			throw new IOException("The client configuration destination is no longer inside the project root.");
 		return fullPath;
 	}
@@ -344,7 +411,11 @@ internal sealed class McpProjectConfigurationWriter
 	{
 		try
 		{
-			return new DirectoryInfo(path).LinkTarget is not null;
+			FileSystemInfo entry = Directory.Exists(path)
+				? new DirectoryInfo(path)
+				: new FileInfo(path);
+			return entry.LinkTarget is not null ||
+				   (entry.Attributes & FileAttributes.ReparsePoint) != 0;
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
@@ -453,7 +524,7 @@ public sealed class McpConnectionService : IMcpConnectionService
 		var missingServer = IsMissingServer(remove);
 		var replaced = remove.Succeeded && !missingServer;
 		if (!remove.Succeeded && !missingServer)
-			return CreateProcessFailure(request, remove, output, manual);
+			return CreateProcessFailure(request, remove, output, manual, previousConnectionRemoved: false);
 
 		var arguments = new List<string>
 		{
@@ -468,7 +539,7 @@ public sealed class McpConnectionService : IMcpConnectionService
 			cancellationToken).ConfigureAwait(false);
 		AppendOutput(output, "add", add);
 		if (!add.Succeeded)
-			return CreateProcessFailure(request, add, output, manual);
+			return CreateProcessFailure(request, add, output, manual, previousConnectionRemoved: replaced);
 
 		var status = replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected;
 		return new McpConnectionResult(
@@ -492,7 +563,7 @@ public sealed class McpConnectionService : IMcpConnectionService
 				_localization.Format(
 					"Mcp.Connect.ProjectConfigurationFailed",
 					DisplayName(request.Client),
-					result.Error ?? _localization["Mcp.Connect.UnknownError"]),
+					ProjectConfigurationErrorText(result.Error)),
 				ManualConfiguration: manual,
 				TargetPath: result.TargetPath);
 		}
@@ -520,7 +591,8 @@ public sealed class McpConnectionService : IMcpConnectionService
 		McpConnectionRequest request,
 		McpConnectionProcessResult processResult,
 		IReadOnlyList<string> output,
-		string manual)
+		string manual,
+		bool previousConnectionRemoved)
 	{
 		var status = processResult.TimedOut
 			? McpConnectionStatus.TimedOut
@@ -530,12 +602,24 @@ public sealed class McpConnectionService : IMcpConnectionService
 			: processResult.StartError ?? processResult.CombinedOutput;
 		if (string.IsNullOrWhiteSpace(detail))
 			detail = _localization["Mcp.Connect.UnknownError"];
+		var messageKey = previousConnectionRemoved
+			? "Mcp.Connect.CommandFailedAfterRemoval"
+			: "Mcp.Connect.CommandFailed";
 		return new McpConnectionResult(
 			status,
-			_localization.Format("Mcp.Connect.CommandFailed", DisplayName(request.Client), detail),
+			_localization.Format(messageKey, DisplayName(request.Client), detail),
 			ManualConfiguration: manual,
 			CommandOutput: string.Join(Environment.NewLine, output));
 	}
+
+	private string ProjectConfigurationErrorText(McpProjectConfigurationError error) => error switch
+	{
+		McpProjectConfigurationError.ResourceUnavailable => _localization["Desktop.Error.ResourceUnavailable"],
+		McpProjectConfigurationError.InvalidData => _localization["Desktop.Error.InvalidData"],
+		McpProjectConfigurationError.AccessDenied => _localization["Desktop.Error.AccessDenied"],
+		McpProjectConfigurationError.OperationFailed => _localization["Desktop.Error.OperationFailed"],
+		_ => _localization["Mcp.Connect.UnknownError"]
+	};
 
 	private Task<McpConnectionProcessResult> RunClientCommandAsync(
 		string executablePath,

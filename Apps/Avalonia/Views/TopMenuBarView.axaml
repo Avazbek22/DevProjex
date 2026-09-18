@@ -170,6 +170,7 @@
                   Click="OnMcpOtherClients" />
         <Separator />
         <MenuItem Name="McpLiveContextMenuItem"
+                  IsEnabled="{Binding IsProjectLoaded}"
                   Click="OnToggleMcpLiveContext"
                   AutomationProperties.Name="{Binding MenuMcpLiveContext}">
           <MenuItem.Header>

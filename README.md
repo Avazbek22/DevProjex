@@ -18,7 +18,7 @@ DevProjex turns any folder or codebase into clean, ready-to-use context for AI c
 
 Choose what you need in an interactive file tree, check the result in a live preview, then export it as **ASCII, Markdown, JSON, or XML**. Need more than text? Export a real copy of your project — a clean **folder or ZIP file** — with the same filters applied.
 
-> 🔒 **Read-only and telemetry-free by design.** DevProjex does not upload your project contents or collect telemetry.
+> 🔒 **Read-only analysis and telemetry-free by design.** DevProjex does not upload your project contents or collect telemetry.
 
 ---
 
@@ -267,9 +267,11 @@ See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool refer
 
 ## Safety boundaries 🛡️
 
-DevProjex keeps your source projects read-only, with clear limits on what it does:
+DevProjex keeps normal processing and MCP tools read-only. The only write inside an
+opened project is an explicit **Connect Cursor** or **Connect VS Code** action, which
+atomically creates or updates `.cursor/mcp.json` or `.vscode/mcp.json`:
 
-* Does not edit, rename, move, or delete files in the opened source project
+* Does not otherwise edit, rename, move, or delete files in the opened source project
 * Does not commit, merge, push, or switch branches in the source repository opened from the user's filesystem. Branch operations are limited to application-owned cached clones.
 * Does not include binary file contents in text or AI-context output; redaction rules do not scan binary data
 * Writes generated files and project copies only to destinations you choose, outside the source project

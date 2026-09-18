@@ -1503,8 +1503,10 @@ DevProjex reports the error and presents the configuration for manual installati
 **Other clients…** presents the generic `mcpServers` JSON and the standard Claude
 Desktop configuration paths on Windows and macOS.
 
-A missing command or failed client process uses the same manual-configuration window;
-its Copy button is the fallback instead of a partial automatic change. The optional
+A missing command or failed client process uses the same manual-configuration window.
+If removing an existing Claude Code or Codex entry succeeds but adding its replacement
+fails, the previous entry has already been removed; the result states this and presents
+the manual configuration below. The optional
 PATH prompt appears only after a successful connection: Windows can install or repair
 the command, while macOS and Linux show the shell-profile line to copy. Dismissing that
 prompt does not suppress future checks. The title shows the live client name or active-session count. If a
