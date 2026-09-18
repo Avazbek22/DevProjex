@@ -18,8 +18,8 @@ public sealed class TerminalServiceFactory(
 		ArgumentNullException.ThrowIfNull(variables);
 		ArgumentNullException.ThrowIfNull(hostCapabilities);
 		if (!variables.TryGetValue(InvocationEnvironment.InternalDataRootVariable, out var value) ||
-		    string.IsNullOrWhiteSpace(value) ||
-		    !Path.IsPathFullyQualified(value))
+			string.IsNullOrWhiteSpace(value) ||
+			!Path.IsPathFullyQualified(value))
 		{
 			return new TerminalServiceFactory(hostCapabilities: hostCapabilities);
 		}
