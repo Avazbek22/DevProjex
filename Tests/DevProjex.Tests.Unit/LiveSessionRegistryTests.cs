@@ -72,6 +72,21 @@ public sealed class LiveSessionRegistryTests
 		Assert.False(File.Exists(writer.Path));
 	}
 
+	[Fact]
+	public async Task ReaderRemovesRecordWhenProcessIdentityCannotBeRead()
+	{
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var registry = new LiveSessionRegistry(
+			() => temporary.Path,
+			new MutableTimeProvider(started.AddSeconds(1)),
+			_ => throw new System.ComponentModel.Win32Exception());
+		await using var writer = registry.Start(42, started, [temporary.Path]);
+
+		Assert.Empty(registry.ReadActive());
+		Assert.False(File.Exists(writer.Path));
+	}
+
 	[Theory]
 	[InlineData("claude-code", "Claude Code")]
 	[InlineData("codex", "Codex")]

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using DevProjex.Infrastructure.Persistence;
@@ -150,7 +151,17 @@ public sealed class LiveSessionRegistry(
 	{
 		if (record.Pid <= 0 || now - record.HeartbeatUtc > StaleHeartbeatAge)
 			return false;
-		var observedStart = processStart(record.Pid);
+		DateTimeOffset? observedStart;
+		try
+		{
+			observedStart = processStart(record.Pid);
+		}
+		catch (Exception exception) when (exception is
+			   ArgumentException or InvalidOperationException or NotSupportedException or
+			   UnauthorizedAccessException or Win32Exception)
+		{
+			return false;
+		}
 		return observedStart is not null &&
 			   Math.Abs((observedStart.Value - record.ProcessStartUtc).TotalSeconds) < 1;
 	}
@@ -169,7 +180,8 @@ public sealed class LiveSessionRegistry(
 			return new DateTimeOffset(process.StartTime.ToUniversalTime(), TimeSpan.Zero);
 		}
 		catch (Exception exception) when (exception is
-			   ArgumentException or InvalidOperationException or NotSupportedException)
+			   ArgumentException or InvalidOperationException or NotSupportedException or
+			   UnauthorizedAccessException or Win32Exception)
 		{
 			return null;
 		}
