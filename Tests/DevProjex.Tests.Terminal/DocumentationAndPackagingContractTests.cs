@@ -167,6 +167,8 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Before the first plan is built, the count is `0`", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("locked, malformed, otherwise unreadable", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("unsupported future schema", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("no usable backup is available", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("A usable backup initializes revision 1 instead", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("server defaults at revision 1", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("an empty array selects nothing", normalizedProfiles, StringComparison.Ordinal);
 		Assert.Contains("selectedPathsSemanticsVersion: 1", normalizedProfiles, StringComparison.Ordinal);

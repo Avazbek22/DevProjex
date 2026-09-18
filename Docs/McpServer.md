@@ -101,8 +101,9 @@ future schema, the server retains the last successful snapshot and adds:
 [Live context] saved window selection could not be read; using revision 16. Retry this call.
 ```
 
-If the first read fails before any successful snapshot exists, the server uses
-server defaults at revision 1 and reports the same retry line.
+If the first read fails before any successful snapshot exists and no usable
+backup is available, the server uses server defaults at revision 1 and reports
+the same retry line. A usable backup initializes revision 1 instead.
 
 `pack_context` records the revision used to build a pack:
 
