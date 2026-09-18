@@ -181,7 +181,7 @@ public sealed class TerminalReleaseContractRegressionTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 
 		var contextArguments = ParseArgumentVector(
 			TerminalWorkspaceController.BuildEquivalentContextCommand(

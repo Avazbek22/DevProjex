@@ -98,7 +98,7 @@ public sealed class MainWindowApplySettingsSelectionUiTests
     }
 
     [AvaloniaFact]
-    public async Task StructuralApply_EmptySelectionKeepsSelectAllSemantics()
+	public async Task StructuralApply_UncheckedTreeKeepsWholeTreeSemantics()
     {
         using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
@@ -106,8 +106,7 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         {
             await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
-            Assert.True(root.IsChecked);
-            root.IsChecked = false;
+			Assert.False(root.IsChecked);
             Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
 
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
@@ -474,8 +473,8 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 
             var secondRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
             Assert.True(PathComparer.Default.Equals(secondProject.RootPath, secondRoot.FullPath));
-            Assert.True(secondRoot.IsChecked);
-            Assert.Equal([secondProject.RootPath], UiTestDriver.GetCheckedTreePaths(window));
+			Assert.False(secondRoot.IsChecked);
+			Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
             Assert.False(FindRequiredDirectChild(secondRoot, "src").IsExpanded);
         }
         finally

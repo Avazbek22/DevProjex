@@ -573,7 +573,7 @@ public sealed class TerminalSettingsStateContractTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Single(state.Plan.IncludedFiles);
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 		await controller.ReprojectSelectionAsync(
 			state,
 			TestContext.Current.CancellationToken);
@@ -596,8 +596,8 @@ public sealed class TerminalSettingsStateContractTests
 		await controller.ReprojectSelectionAsync(
 			state,
 			TestContext.Current.CancellationToken);
-		Assert.Empty(state.Plan.IncludedFiles);
-		Assert.True(state.IsEffectiveRootUnchecked);
+		Assert.Single(state.Plan.IncludedFiles);
+		Assert.False(state.IsEffectiveRootUnchecked);
 	}
 
 	[Fact]
@@ -620,6 +620,7 @@ public sealed class TerminalSettingsStateContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
+		state.SelectAll();
 
 		var hiddenIndex = state.VisibleRows
 			.Select((row, index) => (row, index))

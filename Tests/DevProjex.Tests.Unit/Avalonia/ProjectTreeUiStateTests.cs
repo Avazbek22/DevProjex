@@ -5,20 +5,21 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class ProjectTreeUiStateTests
 {
 	[Fact]
-	public void ProfileSelection_RoundTripsFullEmptyAndFolderFrontiers()
+	public void ProfileSelection_UsesUncheckedTreeForBroadAndEmptyFrontiers()
 	{
 		var descriptor = CreateProjectDescriptor();
 
 		var full = BuildTree(descriptor);
 		ProjectTreeUiState.RestoreProfileSelection(full, selectedPaths: null);
 		Assert.Null(ProjectTreeUiState.CaptureProfileSelection(full));
-		Assert.True(full.IsChecked);
+		Assert.False(full.IsChecked);
+		Assert.All(full.Children, static node => Assert.False(node.IsChecked));
 
 		var empty = BuildTree(descriptor);
 		ProjectTreeUiState.RestoreProfileSelection(empty, []);
-		Assert.Empty(Assert.IsAssignableFrom<IReadOnlyCollection<string>>(
-			ProjectTreeUiState.CaptureProfileSelection(empty)));
+		Assert.Null(ProjectTreeUiState.CaptureProfileSelection(empty));
 		Assert.False(empty.IsChecked);
+		Assert.All(empty.Children, static node => Assert.False(node.IsChecked));
 
 		var partial = BuildTree(descriptor);
 		var result = ProjectTreeUiState.RestoreProfileSelection(partial, ["src"]);

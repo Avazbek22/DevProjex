@@ -171,6 +171,14 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("A usable backup initializes revision 1 instead", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("server defaults at revision 1", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("an empty array selects nothing", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains(
+			"Both surfaces display null and an empty array as an unchecked tree",
+			normalizedProfiles,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Desktop and Terminal Workspace do not produce an empty array",
+			normalizedProfiles,
+			StringComparison.Ordinal);
 		Assert.Contains("selectedPathsSemanticsVersion: 1", normalizedProfiles, StringComparison.Ordinal);
 		Assert.Contains("existing, fully qualified directory", normalizedProfiles, StringComparison.Ordinal);
 		Assert.Contains("not a supported user setting", normalizedProfiles, StringComparison.Ordinal);
@@ -179,6 +187,10 @@ public sealed class DocumentationAndPackagingContractTests
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains("writes the latest frontier after two seconds", normalizedTerminal, StringComparison.Ordinal);
+		Assert.Contains(
+			"A missing or null frontier starts with no check marks",
+			normalizedTerminal,
+			StringComparison.Ordinal);
 		Assert.Contains("Below 80 columns the compact status shows only `Live context`", normalizedTerminal, StringComparison.Ordinal);
 		Assert.Contains("mcp [claude-code\\|codex\\|json]", terminal, StringComparison.Ordinal);
 		Assert.Contains("devprojex mcp connect", normalizedCommandLine, StringComparison.Ordinal);

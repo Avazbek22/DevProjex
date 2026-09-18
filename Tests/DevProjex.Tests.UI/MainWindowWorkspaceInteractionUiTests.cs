@@ -5,6 +5,7 @@ using Avalonia.Media;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Kernel.Abstractions;
 using System.Reflection;
@@ -594,7 +595,74 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 		{
 			await UiTestDriver.CloseWindowAsync(reopenedWindow);
 		}
-    }
+	}
+
+	[AvaloniaFact]
+	public async Task Startup_WithoutSavedProfile_LeavesTheTreeUnchecked()
+	{
+		var appDataPath = Path.Combine(
+			workspace.Project.AppDataPath,
+			Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(appDataPath);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath);
+
+		try
+		{
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			Assert.False(root.IsChecked);
+			Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task Startup_WithExplicitEmptyProfile_WaitsForAUserChangeBeforeCanonicalizingIt()
+	{
+		var appDataPath = Path.Combine(
+			workspace.Project.AppDataPath,
+			Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(appDataPath);
+		var store = new ProjectProfileStore(() => appDataPath);
+		store.SaveProfile(
+			workspace.Project.RootPath,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: []));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath);
+
+		try
+		{
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			Assert.False(root.IsChecked);
+			Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
+			var restored = store.LookupProfile(
+				workspace.Project.RootPath,
+				TimeSpan.FromSeconds(1));
+			Assert.Equal(ProjectProfileLookupStatus.Found, restored.Status);
+			Assert.Empty(restored.Profile!.SelectedPaths!);
+
+			root.IsChecked = true;
+			root.IsChecked = false;
+			await GetRequiredPrivateField<TreeSelectionProfilePersistenceCoordinator>(
+				window,
+				"_treeSelectionProfiles").FlushAsync(TestContext.Current.CancellationToken);
+
+			var persisted = store.LookupProfile(
+				workspace.Project.RootPath,
+				TimeSpan.FromSeconds(1));
+			Assert.Equal(ProjectProfileLookupStatus.Found, persisted.Status);
+			Assert.Null(persisted.Profile!.SelectedPaths);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
 
 	[AvaloniaFact]
 	public async Task Startup_WithPersistentlyLockedProfile_CompletesWithNoFilesSelected()
@@ -703,10 +771,8 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 		try
 		{
 			var root = Assert.Single(UiTestDriver.GetViewModel(reopenedWindow).TreeNodes);
-			Assert.True(root.IsChecked);
-			Assert.Equal(
-				[workspace.Project.RootPath],
-				UiTestDriver.GetCheckedTreePaths(reopenedWindow));
+			Assert.False(root.IsChecked);
+			Assert.Empty(UiTestDriver.GetCheckedTreePaths(reopenedWindow));
 		}
 		finally
 		{

@@ -1018,6 +1018,7 @@ public sealed class TerminalWorkspaceContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
+		state.SelectAll();
 		var clearedIndex = state.VisibleRows
 			.Select((row, index) => (row, index))
 			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "cleared.cs")
@@ -1047,6 +1048,7 @@ public sealed class TerminalWorkspaceContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
+		state.SelectAll();
 		var sourceIndex = state.VisibleRows
 			.Select((row, index) => (row, index))
 			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "src")
@@ -1064,6 +1066,55 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.Contains(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "kept.cs");
 		Assert.Contains(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "new.cs");
 		Assert.DoesNotContain(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "cleared.cs");
+	}
+
+	[Fact]
+	public async Task LocalWorkspaceWithoutAProfileStartsUncheckedWithWholeTreeSemantics()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[0].CheckState);
+		Assert.Null(state.BuildSelection().SelectedPaths);
+		Assert.Single(state.Plan.IncludedFiles);
+		Assert.False(services.LocalProfileStore.TryLoadProfile(workspace.Path, out _));
+	}
+
+	[Fact]
+	public async Task ExplicitEmptyLocalProfileStaysEmptyUntilTheTreeChanges()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		services.LocalProfileStore.SaveProfile(
+			workspace.Path,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: []));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[0].CheckState);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+		Assert.True(services.LocalProfileStore.TryLoadProfile(workspace.Path, out var restored));
+		Assert.Empty(restored.SelectedPaths!);
+
+		state.ToggleSelection(0);
+		state.ToggleSelection(0);
+
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[0].CheckState);
+		Assert.Null(state.BuildSelection().SelectedPaths);
 	}
 
 	[Fact]
@@ -1221,7 +1272,7 @@ public sealed class TerminalWorkspaceContractTests
 			TestContext.Current.CancellationToken);
 		Assert.Single(state.Plan.IncludedFiles);
 
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 		await controller.ReprojectSelectionAsync(state, TestContext.Current.CancellationToken);
 		Assert.Empty(services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan)!);
 		workspace.WriteFile("Second.cs", "class Second {}\n");
@@ -1508,6 +1559,7 @@ public sealed class TerminalWorkspaceContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
+		state.SelectAll();
 		var outerIndex = state.VisibleRows
 			.Select((row, index) => (row, index))
 			.Single(item => item.row.Node.DisplayName == "Outer.txt")
@@ -1553,7 +1605,7 @@ public sealed class TerminalWorkspaceContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 		var candidate = GitScopeSelection.WithMode(
 			state.BuildSelection(),
 			GitFilteringMode.Staged);
