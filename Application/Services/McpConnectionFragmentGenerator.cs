@@ -8,6 +8,8 @@ public enum McpConnectionClient
 {
 	ClaudeCode,
 	Codex,
+	Cursor,
+	VsCode,
 	Json
 }
 
@@ -38,6 +40,8 @@ public static class McpConnectionFragmentGenerator
 		{
 			McpConnectionClient.ClaudeCode => BuildClaudeCode(mode, executablePath, projectRoot),
 			McpConnectionClient.Codex => BuildCodex(mode, executablePath, projectRoot),
+			McpConnectionClient.Cursor => BuildJson(mode, executablePath, projectRoot),
+			McpConnectionClient.VsCode => BuildVsCode(mode, executablePath, projectRoot),
 			McpConnectionClient.Json => BuildJson(mode, executablePath, projectRoot),
 			_ => throw new ArgumentOutOfRangeException(nameof(client), client, null)
 		};
@@ -82,6 +86,29 @@ public static class McpConnectionFragmentGenerator
 			{
 				devprojex = new
 				{
+					command = executablePath,
+					args = BuildArguments(mode, projectRoot)
+				}
+			}
+		};
+		return JsonSerializer.Serialize(payload, new JsonSerializerOptions
+		{
+			Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+		});
+	}
+
+	private static string BuildVsCode(
+		McpConnectionMode mode,
+		string executablePath,
+		string projectRoot)
+	{
+		var payload = new
+		{
+			servers = new
+			{
+				devprojex = new
+				{
+					type = "stdio",
 					command = executablePath,
 					args = BuildArguments(mode, projectRoot)
 				}
