@@ -208,7 +208,7 @@ public sealed class ProjectProfileDefensiveValidationTests
 		var writer = new ProjectProfileStore(() => appData);
 		var reader = new ProjectProfileStore(() => appData);
 		writer.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src/0"]));
-		var failures = new ConcurrentQueue<ProjectProfileLookupStatus>();
+		var invalidStatuses = new ConcurrentQueue<ProjectProfileLookupStatus>();
 
 		var writes = Task.Run(() =>
 		{
@@ -224,13 +224,23 @@ public sealed class ProjectProfileDefensiveValidationTests
 			for (var index = 0; index < 100; index++)
 			{
 				var result = reader.LookupProfile(project, TimeSpan.FromSeconds(1));
-				if (result.Status != ProjectProfileLookupStatus.Found)
-					failures.Enqueue(result.Status);
+				if (result.Status == ProjectProfileLookupStatus.Found)
+				{
+					var selectedPath = Assert.Single(result.Profile!.SelectedPaths!);
+					Assert.StartsWith("src/", selectedPath, StringComparison.Ordinal);
+				}
+				else if (result.Status != ProjectProfileLookupStatus.TemporarilyUnavailable)
+				{
+					invalidStatuses.Enqueue(result.Status);
+				}
 			}
 		}, TestContext.Current.CancellationToken);
 
 		await Task.WhenAll(writes, reads);
-		Assert.Empty(failures);
+		Assert.Empty(invalidStatuses);
+		var final = reader.LookupProfile(project, TimeSpan.FromSeconds(1));
+		Assert.Equal(ProjectProfileLookupStatus.Found, final.Status);
+		Assert.Equal(["src/100"], final.Profile!.SelectedPaths);
 		Assert.Empty(Directory.EnumerateFiles(
 			Path.GetDirectoryName(writer.GetPath())!,
 			"*.tmp",
