@@ -5268,7 +5268,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				"Click to run the check again.",
 				viewModel.SettingsSecretsNotice);
 
-			Assert.Single(viewModel.TreeNodes).IsExpanded = true;
+			var root = Assert.Single(viewModel.TreeNodes);
+			root.IsChecked = false;
+			root.IsExpanded = true;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 			var srcCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
 			await UiTestDriver.ClickAsync(window, srcCheckBox);

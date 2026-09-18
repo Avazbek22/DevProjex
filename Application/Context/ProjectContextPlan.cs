@@ -9,6 +9,13 @@ public enum ContextDiagnosticSeverity
 	Error
 }
 
+public enum ProjectPathSelectionState
+{
+	InsideSelection,
+	OutsideSelection,
+	HiddenByFilters
+}
+
 public sealed record ContextDiagnostic(
 	string Code,
 	ContextDiagnosticSeverity Severity,

@@ -1598,12 +1598,13 @@ public sealed class MainWindowCoordinatorRefactorTests
         var pipeline = new ProjectLoadSnapshotPipeline(host);
 
         await pipeline.ReloadAsync(
-            @"C:\Project",
-            preserveTreeState,
+			@"C:\Project",
+			preserveTreeState,
 			persistentMarks: null,
-            TestContext.Current.CancellationToken);
+			profileTreeSelection: null,
+			TestContext.Current.CancellationToken);
 
-        Assert.Equal(
+		Assert.Equal(
             [
                 ProjectLoadSnapshotHostCall.BuildSelectionSnapshot,
                 ProjectLoadSnapshotHostCall.CreateTreeInput,
@@ -1634,12 +1635,13 @@ public sealed class MainWindowCoordinatorRefactorTests
         var pipeline = new ProjectLoadSnapshotPipeline(host);
 
         await pipeline.ReloadAsync(
-            @"C:\Project",
-            preserveTreeState: false,
+			@"C:\Project",
+			preserveTreeState: false,
 			persistentMarks: null,
-            TestContext.Current.CancellationToken);
+			profileTreeSelection: null,
+			TestContext.Current.CancellationToken);
 
-        Assert.Equal(
+		Assert.Equal(
             [ProjectLoadSnapshotHostCall.BuildSelectionSnapshot],
             host.Calls);
         Assert.Equal(0, host.BuildTreeCount);
@@ -1661,6 +1663,7 @@ public sealed class MainWindowCoordinatorRefactorTests
 			@"C:\Project",
 			preserveTreeState: false,
 			persistentMarks: null,
+			profileTreeSelection: null,
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, host.ApplyCount);
@@ -2442,9 +2445,10 @@ public sealed class MainWindowCoordinatorRefactorTests
 			TreeRefreshInput,
 			BuildTreeResult,
 			CancellationToken,
-			TreeNodeViewModel>? BuildViewModelHandler { get; set; }
+			TreeNodeViewModel>? BuildViewModelHandler
+		{ get; set; }
 
-        public int BuildTreeCount { get; private set; }
+		public int BuildTreeCount { get; private set; }
 
         public int ApplyCount { get; private set; }
 

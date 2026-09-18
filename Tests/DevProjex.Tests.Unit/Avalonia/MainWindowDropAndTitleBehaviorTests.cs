@@ -1,3 +1,5 @@
+using DevProjex.Infrastructure.LiveContext;
+
 namespace DevProjex.Tests.Unit.Avalonia;
 
 using global::Avalonia.Input;
@@ -82,7 +84,9 @@ public sealed class MainWindowDropAndTitleBehaviorTests
     {
         var method = GetPrivateStaticMethod("BuildWindowTitle");
 
-        var title = (string)method.Invoke(null, [null, false, null, null, null])!;
+		var title = (string)method.Invoke(
+			null,
+			[null, false, null, null, null, Array.Empty<LiveSessionRecord>(), null])!;
 
         Assert.Equal(MainWindowViewModel.BaseTitle, title);
     }
@@ -98,7 +102,9 @@ public sealed class MainWindowDropAndTitleBehaviorTests
             true,
             "https://github.com/user/repo.git?tab=readme#top",
             "main",
-            null
+			null,
+			Array.Empty<LiveSessionRecord>(),
+			null
         ])!;
 
         Assert.Equal($"{MainWindowViewModel.BaseTitle} - https://github.com/user/repo [main]", title);
@@ -115,7 +121,9 @@ public sealed class MainWindowDropAndTitleBehaviorTests
             true,
             "https://user:super-secret@[invalid/repo",
             "main",
-            "repo"
+			"repo",
+			Array.Empty<LiveSessionRecord>(),
+			null
         ])!;
 
         Assert.Equal($"{MainWindowViewModel.BaseTitle} - repo [main]", title);
@@ -133,7 +141,9 @@ public sealed class MainWindowDropAndTitleBehaviorTests
             false,
             null,
             null,
-            "DevProjex"
+			"DevProjex",
+			Array.Empty<LiveSessionRecord>(),
+			null
         ])!;
 
         Assert.Equal($"{MainWindowViewModel.BaseTitle} - DevProjex", title);
@@ -151,11 +161,58 @@ public sealed class MainWindowDropAndTitleBehaviorTests
             false,
             null,
             null,
-            null
+			null,
+			Array.Empty<LiveSessionRecord>(),
+			null
         ])!;
 
         Assert.Equal($"{MainWindowViewModel.BaseTitle} - {projectPath}", title);
     }
+
+	[Fact]
+	public void BuildWindowTitle_OneLiveSessionNamesTheClient()
+	{
+		var method = GetPrivateStaticMethod("BuildWindowTitle");
+		var title = (string)method.Invoke(null,
+		[
+			@"C:\Projects\Sample",
+			false,
+			null,
+			null,
+			"Sample",
+			new[] { CreateSession(42, "claude-code") },
+			null
+		])!;
+
+		Assert.EndsWith(" · Live context (Claude Code)", title, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void BuildWindowTitle_MultipleLiveSessionsUseTheLocalizedCount()
+	{
+		var method = GetPrivateStaticMethod("BuildWindowTitle");
+		var title = (string)method.Invoke(null,
+		[
+			@"C:\Projects\Sample",
+			false,
+			null,
+			null,
+			"Sample",
+			new[] { CreateSession(42, "claude-code"), CreateSession(43, "codex") },
+			"2 sessions"
+		])!;
+
+		Assert.EndsWith(" · Live context (2 sessions)", title, StringComparison.Ordinal);
+	}
+
+	private static LiveSessionRecord CreateSession(int pid, string clientName) =>
+		new(
+			pid,
+			DateTimeOffset.UnixEpoch.AddSeconds(pid),
+			clientName,
+			"1.0",
+			[@"C:\Projects\Sample"],
+			DateTimeOffset.UtcNow);
 
     private static MethodInfo GetPrivateStaticMethod(string name)
     {

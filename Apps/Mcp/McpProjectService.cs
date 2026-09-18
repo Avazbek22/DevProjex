@@ -14,7 +14,8 @@ internal sealed class McpProjectService(
 	IReadOnlyCollection<ProjectExclusion>? serverExclusions = null,
 	bool agentExclusions = false,
 	Func<string, CancellationToken, ValueTask>? inventoryBuilt = null,
-	Action<string>? effectiveFileSizeRead = null) : IDisposable
+	Action<string>? effectiveFileSizeRead = null,
+	McpLiveContextState? liveContext = null) : IDisposable
 {
 	internal const int MaximumRequestedPaths = 256;
 	internal const int MaximumRequestedPathLength = 4096;
@@ -55,7 +56,8 @@ internal sealed class McpProjectService(
 		CancellationToken cancellationToken,
 		bool includeOutputMetrics = true,
 		IReadOnlyList<ProjectExclusion>? exclusions = null,
-		bool tolerateMissingPaths = false)
+		bool tolerateMissingPaths = false,
+		bool allowNamedPathsOutsideSelection = false)
 	{
 		using var selectionStage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Selection);
 		var parsedScope = ParseGitScope(gitScope);
@@ -68,9 +70,21 @@ internal sealed class McpProjectService(
 			.ConfigureAwait(false);
 		var projectRoot = source.Root;
 		var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
-		var profileReference = ResolveProfile(projectRoot, profile);
+		if (liveContext is not null &&
+			!string.IsNullOrEmpty(profile) &&
+			!profile.Equals("local", StringComparison.Ordinal))
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: live mode has one selection source; omit 'profile' or use 'local'.");
+		}
+		var profileReference = liveContext is null
+			? ResolveProfile(projectRoot, profile)
+			: ProjectProfileReference.Local;
 		var baselineGitMode = trackedOnly
 			? GitFilteringMode.TrackedFilesOnly
+			: liveContext is not null
+				? ServerGitMode
 			: string.IsNullOrEmpty(profile)
 				? serverGitMode
 				: null;
@@ -80,18 +94,58 @@ internal sealed class McpProjectService(
 		// a startup line the server default applies, never the desktop standard set: that set
 		// was designed for a person who can see what a checkbox hides.
 		IReadOnlyCollection<ProjectExclusion>? baselineExclusions =
-			exclusions ?? (string.IsNullOrEmpty(profile) ? ServerExclusions : null);
-		var selection = await services.SelectionResolver
-			.ResolveAsync(
-				projectRoot,
-				profileReference,
-				new ProjectSelectionSpec(
-					GitMode: baselineGitMode,
-					Exclusions: baselineExclusions,
-					HideSecrets: true,
-					HidePrivateData: hidePrivateData),
-				cancellationToken)
-			.ConfigureAwait(false);
+			liveContext is not null
+				? MergeExclusions(ServerExclusions, exclusions)
+				: exclusions ?? (string.IsNullOrEmpty(profile) ? ServerExclusions : null);
+		ProjectSelectionSpec selection;
+		int? liveProfileRevision = null;
+		if (liveContext is null)
+		{
+			selection = await services.SelectionResolver
+				.ResolveAsync(
+					projectRoot,
+					profileReference,
+					new ProjectSelectionSpec(
+						GitMode: baselineGitMode,
+						Exclusions: baselineExclusions,
+						HideSecrets: true,
+						HidePrivateData: hidePrivateData),
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
+		else
+		{
+			var liveSnapshot = liveContext.ReadProfile(projectRoot);
+			liveProfileRevision = liveSnapshot.Revision;
+			if (liveSnapshot.Profile is { } localProfile)
+			{
+				var local = ProjectSelectionAdapter.FromLegacyProfile(
+					localProfile,
+					ProjectProfileReference.Local);
+				selection = services.SelectionResolver.ResolveLocalSnapshot(
+					localProfile,
+					new ProjectSelectionSpec(
+						GitMode: StrictestGitMode(local.GitMode, baselineGitMode),
+						Exclusions: MergeExclusions(local.Exclusions, baselineExclusions),
+						HideSecrets: true,
+						HidePrivateData: local.HidePrivateData == true || hidePrivateData));
+			}
+			else
+			{
+				profileReference = ProjectProfileReference.Standard;
+				selection = await services.SelectionResolver
+					.ResolveAsync(
+						projectRoot,
+						profileReference,
+						new ProjectSelectionSpec(
+							GitMode: baselineGitMode,
+							Exclusions: baselineExclusions,
+							HideSecrets: true,
+							HidePrivateData: hidePrivateData),
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
+		}
 		if (parsedScope is { } narrowingScope)
 		{
 			selection = GitScopeSelection.WithMode(
@@ -102,8 +156,8 @@ internal sealed class McpProjectService(
 		}
 		var marks = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await services.RedactionSession
-			    .EnsurePersistentIdentityReadyAsync(marks, cancellationToken)
-			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+				.EnsurePersistentIdentityReadyAsync(marks, cancellationToken)
+				.ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
 		{
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
@@ -121,15 +175,26 @@ internal sealed class McpProjectService(
 		}
 
 		var request = new ProjectContextRequest(projectRoot, selection, source.Identity);
-		// Local profiles carry complete checkbox maps in storage outside the watched project root.
-		// Rebuild them until that store can supply a coherent revision for the cache key.
+		var hasCoherentProfileRevision =
+			profileReference.Kind != ProjectProfileSourceKind.Local || liveProfileRevision is not null;
+		// Explicit local profiles remain uncached because their store has no coherent revision.
+		// Live context supplies one after rereading the profile on every invocation.
 		var plan = await BuildBasePlanAsync(
 			request,
 			includeOutputMetrics,
 			allowInventoryReuse:
 				parsedScope is null &&
-				profileReference.Kind != ProjectProfileSourceKind.Local,
+				hasCoherentProfileRevision,
+			liveProfileRevision,
 			cancellationToken).ConfigureAwait(false);
+		liveContext?.RecordPlan(projectRoot, plan);
+		if (allowNamedPathsOutsideSelection && liveContext is not null)
+		{
+			plan = await ExpandNamedPathsOutsideSelectionAsync(
+				plan,
+				requested,
+				cancellationToken).ConfigureAwait(false);
+		}
 		if ((trackedOnly || parsedScope is not null) && !plan.GitReadiness.HasRepositoryBoundary)
 		{
 			var constraint = (trackedOnly, parsedScope is not null) switch
@@ -153,9 +218,9 @@ internal sealed class McpProjectService(
 		}
 		ValidateRequestedPathCasing(plan, requested, tolerateMissingPaths);
 		var allowProjectionReuse = parsedScope is null &&
-		                           profileReference.Kind != ProjectProfileSourceKind.Local &&
-		                           maximumFileBytes is null &&
-		                           CanMonitorRepositoryState(projectRoot);
+								   hasCoherentProfileRevision &&
+								   maximumFileBytes is null &&
+								   CanMonitorRepositoryState(projectRoot);
 		var projectionKey = new McpProjectionCacheKey(
 			RuntimeHelpers.GetHashCode(plan),
 			BuildProjectionIdentity(
@@ -164,8 +229,8 @@ internal sealed class McpProjectService(
 				excludePatterns,
 				maximumFileBytes));
 		if (allowProjectionReuse &&
-		    projectionCache.TryGetValue(projectionKey, out var cachedProjection) &&
-		    ReferenceEquals(cachedProjection.BasePlan, plan))
+			projectionCache.TryGetValue(projectionKey, out var cachedProjection) &&
+			ReferenceEquals(cachedProjection.BasePlan, plan))
 		{
 			// The immutable projection only contains paths from the validated base plan. Content
 			// consumers still open every source through the root-jail handle validator.
@@ -284,10 +349,41 @@ internal sealed class McpProjectService(
 		return final;
 	}
 
+	private async Task<ProjectContextPlan> ExpandNamedPathsOutsideSelectionAsync(
+		ProjectContextPlan plan,
+		RequestedPathSelection requested,
+		CancellationToken cancellationToken)
+	{
+		var visibleRequestedPaths = new List<string>(requested.Tokens.Count);
+		var hasOutsidePath = false;
+		foreach (var token in requested.Tokens)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (token.ResolvedPath is not { } path || token.IsDirectory)
+				continue;
+			var state = ProjectContextPlanner.ClassifyPath(plan, path);
+			if (state == ProjectPathSelectionState.HiddenByFilters)
+				continue;
+			var relativePath = ToRelative(plan.SourceRoot, path);
+			visibleRequestedPaths.Add(relativePath);
+			if (state != ProjectPathSelectionState.OutsideSelection)
+				continue;
+			hasOutsidePath = true;
+			liveContext!.RecordOutsideSelection(plan.SourceRoot, relativePath);
+		}
+		if (!hasOutsidePath)
+			return plan;
+
+		return await services.Planner
+			.ReprojectSelectionAsync(plan, visibleRequestedPaths, cancellationToken)
+			.ConfigureAwait(false);
+	}
+
 	private async Task<ProjectContextPlan> BuildBasePlanAsync(
 		ProjectContextRequest request,
 		bool includeOutputMetrics,
 		bool allowInventoryReuse,
+		int? liveProfileRevision,
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
@@ -304,7 +400,8 @@ internal sealed class McpProjectService(
 			var key = new McpInventoryCacheKey(
 				PathUtility.Normalize(request.ProjectPath),
 				BuildSelectionIdentity(request),
-				includeOutputMetrics);
+				includeOutputMetrics,
+				liveProfileRevision);
 			var created = new CachedInventoryEntry(
 				Interlocked.Increment(ref cacheGeneration),
 				new Lazy<Task<CachedInventoryPlan>>(
@@ -316,10 +413,10 @@ internal sealed class McpProjectService(
 					if (inventoryBuilt is not null)
 						await inventoryBuilt(request.ProjectPath, cancellationToken).ConfigureAwait(false);
 					var builtCoherently = controlStampsBeforeBuild is not null &&
-					                      controlStampsBeforeBuild.All(static stamp => stamp.IsCurrent()) &&
-					                      ObservedControlFilesAreCurrent(built.ObservedControlFiles) &&
-					                      monitor.Revision == revisionBeforeBuild &&
-					                      monitor.IsReliable;
+										  controlStampsBeforeBuild.All(static stamp => stamp.IsCurrent()) &&
+										  ObservedControlFilesAreCurrent(built.ObservedControlFiles) &&
+										  monitor.Revision == revisionBeforeBuild &&
+										  monitor.IsReliable;
 					var stamps = CapturePlanStamps(built);
 					return new CachedInventoryPlan(
 						built,
@@ -344,13 +441,13 @@ internal sealed class McpProjectService(
 			}
 			var beforeValidation = monitor.Revision;
 			var isCurrent = cached.BuiltCoherently &&
-			                cached.Stamps is not null &&
-			                cached.Revision == beforeValidation &&
-			                cached.Stamps.All(static stamp => stamp.IsCurrent()) &&
-			                ObservedControlFilesAreCurrent(cached.Plan.ObservedControlFiles) &&
-			                monitor.Revision == beforeValidation &&
-			                monitor.IsReliable &&
-			                !cached.Plan.HasErrors;
+							cached.Stamps is not null &&
+							cached.Revision == beforeValidation &&
+							cached.Stamps.All(static stamp => stamp.IsCurrent()) &&
+							ObservedControlFilesAreCurrent(cached.Plan.ObservedControlFiles) &&
+							monitor.Revision == beforeValidation &&
+							monitor.IsReliable &&
+							!cached.Plan.HasErrors;
 			if (isCurrent)
 				return cached.Plan;
 
@@ -375,8 +472,8 @@ internal sealed class McpProjectService(
 				sizes[path] = Math.Max(0, new FileInfo(path).Length);
 			}
 			catch (Exception exception) when (exception is
-			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
-			       NotSupportedException or ArgumentException)
+				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+				   NotSupportedException or ArgumentException)
 			{
 				sizes[path] = 0;
 			}
@@ -426,8 +523,8 @@ internal sealed class McpProjectService(
 			return stamps;
 		}
 		catch (Exception exception) when (exception is
-		       IOException or UnauthorizedAccessException or System.Security.SecurityException or
-		       NotSupportedException or ArgumentException)
+			   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+			   NotSupportedException or ArgumentException)
 		{
 			return null;
 		}
@@ -443,15 +540,15 @@ internal sealed class McpProjectService(
 				var file = new FileInfo(observed.Path);
 				file.Refresh();
 				if (file.Exists != observed.Exists ||
-				    file.Exists && (file.Length != observed.Length ||
-				                    file.LastWriteTimeUtc.Ticks != observed.LastWriteTimeUtcTicks))
+					file.Exists && (file.Length != observed.Length ||
+									file.LastWriteTimeUtc.Ticks != observed.LastWriteTimeUtcTicks))
 				{
 					return false;
 				}
 			}
 			catch (Exception exception) when (exception is
-			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
-			       NotSupportedException or ArgumentException)
+				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+				   NotSupportedException or ArgumentException)
 			{
 				return false;
 			}
@@ -471,9 +568,9 @@ internal sealed class McpProjectService(
 			var metadataPath = Path.Combine(projectRoot, ".git");
 			Add(metadataPath, expectDirectory: Directory.Exists(metadataPath));
 			if (GitRepositoryBoundaryProbe.TryResolveMetadataDirectories(
-				    projectRoot,
-				    out var gitDirectory,
-				    out var commonDirectory))
+					projectRoot,
+					out var gitDirectory,
+					out var commonDirectory))
 			{
 				Add(Path.Combine(gitDirectory, "index"), expectDirectory: false);
 				Add(Path.Combine(gitDirectory, "HEAD"), expectDirectory: false);
@@ -491,8 +588,8 @@ internal sealed class McpProjectService(
 			}
 		}
 		catch (Exception exception) when (exception is
-		       IOException or UnauthorizedAccessException or System.Security.SecurityException or
-		       NotSupportedException or ArgumentException)
+			   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+			   NotSupportedException or ArgumentException)
 		{
 			return null;
 		}
@@ -630,7 +727,7 @@ internal sealed class McpProjectService(
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (MatchesRequested(path, requested.Paths, requested.Directories) &&
-			    globs.Includes(ToRelative(projectRoot, path)))
+				globs.Includes(ToRelative(projectRoot, path)))
 			{
 				selectedFiles.Add(path);
 			}
@@ -647,8 +744,8 @@ internal sealed class McpProjectService(
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				if (MatchesRequested(path, requested.Paths, requested.Directories) &&
-				    !directoriesWithIncludedFiles.Contains(path) &&
-				    globs.IncludesDirectory(ToRelative(projectRoot, path)))
+					!directoriesWithIncludedFiles.Contains(path) &&
+					globs.IncludesDirectory(ToRelative(projectRoot, path)))
 					projectionPaths.Add(path);
 			}
 		}
@@ -668,7 +765,7 @@ internal sealed class McpProjectService(
 			directories.Add(projectRoot);
 			var directory = Path.GetDirectoryName(file);
 			while (!string.IsNullOrEmpty(directory) &&
-			       !StringComparer.Ordinal.Equals(directory, projectRoot))
+				   !StringComparer.Ordinal.Equals(directory, projectRoot))
 			{
 				if (!directories.Add(directory))
 					break;
@@ -775,10 +872,10 @@ internal sealed class McpProjectService(
 				$"{GitScopeSelection.MaximumTokenLength} characters; use staged, changes, or a shorter diff:<ref>..<ref> range.");
 		}
 		var matchesPublishedSyntax = value is "staged" or "changes" ||
-		                             value.StartsWith(GitScopeSelection.DiffPrefix, StringComparison.Ordinal);
+									 value.StartsWith(GitScopeSelection.DiffPrefix, StringComparison.Ordinal);
 		if (!matchesPublishedSyntax ||
-		    !GitScopeSelection.TryParse(value, out var mode, out var diffRange) ||
-		    !GitScopeSelection.IsMomentary(mode))
+			!GitScopeSelection.TryParse(value, out var mode, out var diffRange) ||
+			!GitScopeSelection.IsMomentary(mode))
 		{
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
@@ -897,7 +994,7 @@ internal sealed class McpProjectService(
 		ArgumentException.ThrowIfNullOrWhiteSpace(identityPath);
 		ArgumentNullException.ThrowIfNull(content);
 		var redaction = CreateTransformationContext(plan).Redaction ??
-		                throw new InvalidOperationException("MCP text redaction is unavailable.");
+						throw new InvalidOperationException("MCP text redaction is unavailable.");
 		var scope = redaction.BeginOutput([identityPath], cancellationToken);
 		var result = scope.Redact(identityPath, content, cancellationToken).Text;
 		_ = scope.Complete();
@@ -915,7 +1012,7 @@ internal sealed class McpProjectService(
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (!ranking.SourceVersions.TryGetValue(Path.GetFullPath(path), out var expected) ||
-			    !await expected.IsCurrentAsync(path, cancellationToken).ConfigureAwait(false))
+				!await expected.IsCurrentAsync(path, cancellationToken).ConfigureAwait(false))
 			{
 				throw new McpToolException(
 					McpErrorCodes.ProjectUnavailable,
@@ -1058,7 +1155,7 @@ internal sealed class McpProjectService(
 			using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)
 				.ConfigureAwait(false);
 			if (!document.RootElement.TryGetProperty("profiles", out var profiles) ||
-			    profiles.ValueKind != JsonValueKind.Object)
+				profiles.ValueKind != JsonValueKind.Object)
 			{
 				return new McpLocalProfileCatalog(new HashSet<string>(PathComparer.Default), "unavailable");
 			}
@@ -1089,8 +1186,8 @@ internal sealed class McpProjectService(
 	private ProjectProfileReference ResolveProfile(string projectRoot, string? profile)
 	{
 		if (string.IsNullOrEmpty(profile) ||
-		    (OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(profile)) ||
-		    profile.Equals("standard", StringComparison.Ordinal))
+			(OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(profile)) ||
+			profile.Equals("standard", StringComparison.Ordinal))
 			return ProjectProfileReference.Standard;
 		if (profile.Equals("local", StringComparison.Ordinal))
 			return ProjectProfileReference.Local;
@@ -1115,6 +1212,26 @@ internal sealed class McpProjectService(
 		}
 		return new ProjectProfileReference(ProjectProfileSourceKind.Portable, path);
 	}
+
+	private static GitFilteringMode? StrictestGitMode(
+		GitFilteringMode? profileMode,
+		GitFilteringMode? serverMode)
+	{
+		if (profileMode == GitFilteringMode.TrackedFilesOnly || serverMode == GitFilteringMode.TrackedFilesOnly)
+			return GitFilteringMode.TrackedFilesOnly;
+		if (profileMode == GitFilteringMode.RespectGitIgnore || serverMode == GitFilteringMode.RespectGitIgnore)
+			return GitFilteringMode.RespectGitIgnore;
+		return profileMode ?? serverMode;
+	}
+
+	private static IReadOnlyCollection<ProjectExclusion> MergeExclusions(
+		IReadOnlyCollection<ProjectExclusion>? profileExclusions,
+		IReadOnlyCollection<ProjectExclusion>? serverBaseline) =>
+		(profileExclusions ?? [])
+		.Concat(serverBaseline ?? [])
+		.Distinct()
+		.OrderBy(static exclusion => (int)exclusion)
+		.ToArray();
 
 	private RequestedPathSelection ResolveRequestedPaths(
 		string projectRoot,
@@ -1337,8 +1454,8 @@ internal sealed class McpProjectService(
 			for (; index < path.Length; index++)
 			{
 				if (path[index] == '\\' &&
-				    index + 1 < path.Length &&
-				    IsAsciiPunctuation(path[index + 1]))
+					index + 1 < path.Length &&
+					IsAsciiPunctuation(path[index + 1]))
 				{
 					continue;
 				}
@@ -1425,7 +1542,8 @@ internal sealed class McpProjectService(
 	private readonly record struct McpInventoryCacheKey(
 		string ProjectRoot,
 		string SelectionIdentity,
-		bool IncludeOutputMetrics);
+		bool IncludeOutputMetrics,
+		int? LiveProfileRevision);
 
 	private readonly record struct McpProjectionCacheKey(
 		int BasePlanIdentity,
@@ -1498,11 +1616,11 @@ internal sealed class McpProjectService(
 			{
 				var current = Capture(Path, ExpectDirectory);
 				return current == this &&
-				       (!Exists || current.Attributes.HasFlag(FileAttributes.Directory) == ExpectDirectory);
+					   (!Exists || current.Attributes.HasFlag(FileAttributes.Directory) == ExpectDirectory);
 			}
 			catch (Exception exception) when (exception is
-			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
-			       NotSupportedException or ArgumentException)
+				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+				   NotSupportedException or ArgumentException)
 			{
 				return false;
 			}
@@ -1537,16 +1655,16 @@ internal sealed class McpProjectService(
 				{
 					IncludeSubdirectories = true,
 					NotifyFilter = NotifyFilters.FileName |
-					               NotifyFilters.DirectoryName |
-					               NotifyFilters.Attributes |
-					               NotifyFilters.Size |
-					               NotifyFilters.LastWrite |
-					               NotifyFilters.Security
+								   NotifyFilters.DirectoryName |
+								   NotifyFilters.Attributes |
+								   NotifyFilters.Size |
+								   NotifyFilters.LastWrite |
+								   NotifyFilters.Security
 				});
 			}
 			catch (Exception exception) when (exception is
-			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
-			       PlatformNotSupportedException or ArgumentException)
+				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+				   PlatformNotSupportedException or ArgumentException)
 			{
 				return null;
 			}

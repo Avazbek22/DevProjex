@@ -32,6 +32,83 @@ devprojex mcp --root /absolute/path/to/project --search-body-chars 1800
 devprojex mcp --root /absolute/path/to/project --search-body-chars 3000
 ```
 
+## Live Context
+
+`devprojex mcp --root /absolute/path/to/project --live` makes the local profile
+saved by the open DevProjex window the baseline for every call. The server rereads
+that profile on every tool invocation, so changing checked tree nodes or applied
+filters takes effect on the next call without restarting the MCP session. Checked
+nodes are focus; extensions, ignores, Git scope, the root jail, allowlists, and
+mandatory secret protection remain ceilings. Explicit `paths` and globs can only
+narrow the saved focus. `profile: "local"` is equivalent to omitting `profile`;
+portable and standard profile selections fail with `DPX-MCP-INVALID-ARGUMENTS`
+because live mode has one selection source.
+
+Tree, search, pack, analysis, and dependency results stay inside the checked
+selection. A named `get_file` path that passes the effective filters may be read
+outside that focus; its content starts with:
+
+```text
+[Live context] <path> is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.
+```
+
+A path hidden by the effective filters still returns
+`DPX-MCP-PATH-NOT-FOUND`. The same rule applies to scalar and batched reads.
+Every live response ends with the current per-root revision and selected file
+count; a multi-root server also names the root:
+
+```text
+[Live context] revision 16 · 128 files selected in the window
+[Live context] revision 16 · 128 files selected in the window · root project-name
+```
+
+The first successful response after the saved profile changes also reports the
+frontier delta, limited to five paths:
+
+```text
+[Live context] changed since revision 14: +tests, +docs/api, -src/legacy
+[Live context] changed since revision 14: +tests, +docs/api, -src/legacy and 4 more
+```
+
+Revision 1 is the first profile read in a server session. It advances whenever
+the saved frontier, extensions, ignores, Git mode, transformations, or saved
+secret marks change. Revisions are maintained independently for each configured
+root. A missing or explicitly empty selection is reported rather than silently
+treated as an ordinary empty project:
+
+```text
+[Live context] no window selection saved for this root; using server defaults.
+[Live context] no window selection saved for this root; using server defaults. If the DevProjex window runs on Windows, live context across WSL is not supported yet.
+[Live context] the window selects no files; tick files in the DevProjex window.
+```
+
+If the profile is temporarily unreadable or locked, the server retains the last
+successful snapshot and adds:
+
+```text
+[Live context] saved window selection could not be read; using revision 16. Retry this call.
+```
+
+`pack_context` records the revision used to build a pack:
+
+```text
+[Live context] pack built at revision 14.
+```
+
+`read_pack` never rebuilds content implicitly. After the selection changes it
+adds:
+
+```text
+[Live context] pack built at revision 14; window is at revision 16. Call pack_context again to include the current selection.
+```
+
+These trusted lines supplement rather than replace `[Search boundary]`,
+`[Resolution]`, `[Dependency partial parse]`, and `[Effective filters]`.
+The server records a live-session heartbeat under the application state root in
+`live-sessions/<pid>.json`. Desktop and Terminal remove records whose process
+identity no longer matches or whose heartbeat is older than 15 seconds; a
+healthy server updates every 5 seconds and removes its record on normal exit.
+
 The Release process measurement on Windows x64 gives 27,710 characters for the
 full `tools/list` result and 17,049 for reduced. These correspond to roughly
 6,928 and 4,262 tokens using the character/4 estimate, not model usage. Process
@@ -1389,6 +1466,20 @@ detail level is unchanged, byte for byte.
 
 The `devprojex` command must be on `PATH`; otherwise use its absolute executable
 path. Replace `/absolute/path/to/project` in the examples.
+
+Desktop's **MCP** menu, Terminal Workspace's `mcp` command, and
+`devprojex mcp connect` use one fragment generator and embed the absolute installed
+executable path. Select Live context to include `--live`, or Standard to retain the
+ordinary server baseline. The Store fragment uses the stable WindowsApps alias;
+winget and ZIP paths remain stable while their installation directory is unchanged;
+the macOS path remains stable while the `.app` bundle stays in place. AppImage
+fragments name the AppImage itself, so moving it requires copying a new fragment.
+In Desktop, the menu is available only with an open project. Copying succeeds before
+any optional PATH prompt: Windows can install or repair the command, while macOS and
+Linux show the shell-profile line to copy. Dismissing that prompt does not suppress
+future checks. The title shows the live client name or active-session count. If a
+live session exists, applying a transition from enabled to disabled secret protection
+requires confirmation; other settings and sessions in Standard mode do not add it.
 
 ### Claude Code
 

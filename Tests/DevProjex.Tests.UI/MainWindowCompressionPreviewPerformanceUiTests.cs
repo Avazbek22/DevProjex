@@ -392,6 +392,7 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 				"compression counts for the complete project selection");
 
 			var rootNode = Assert.Single(viewModel.TreeNodes);
+			rootNode.IsChecked = false;
 			rootNode.IsExpanded = true;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 			var srcCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");

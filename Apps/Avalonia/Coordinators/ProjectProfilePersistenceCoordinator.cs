@@ -16,9 +16,10 @@ public sealed class ProjectProfilePersistenceCoordinator(
     SelectionSyncCoordinator selectionCoordinator,
     IProjectProfileStore profileStore,
     SecretRedactionSession secretRedactionSession,
-	Func<string?>? activeProjectPathProvider = null)
+    Func<string?>? activeProjectPathProvider = null,
+    Func<IReadOnlyCollection<string>?>? selectedPathsProvider = null)
 {
-	private static readonly TimeSpan GuiLookupTimeout = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan GuiLookupTimeout = TimeSpan.FromMilliseconds(200);
     private readonly PendingProjectProfileWriteQueue _pendingWrites = new(profileStore);
 	private readonly PersistentSecretMarkDeltaWriter? _markWriter =
 		profileStore is IPersistentSecretMarkStore markStore
@@ -48,12 +49,34 @@ public sealed class ProjectProfilePersistenceCoordinator(
 				DateTimeOffset.UtcNow,
 				CanPersistNormalizedPath,
 				cancellationToken)
-			.ConfigureAwait(false);
+            .ConfigureAwait(false);
     }
 
-	public async Task<PersistentSecretMarkWriteResult> ApplyMarkDeltaAsync(
-		string? currentPath,
-		PersistentSecretMarkDelta delta,
+    public async Task PersistSelectedPathsAsync(
+        string? currentPath,
+        IReadOnlyCollection<string>? selectedPaths,
+        CancellationToken cancellationToken = default)
+    {
+        if (!CanPersist(currentPath))
+            return;
+
+        var profile = CaptureProfileForSelectionWrite(currentPath!, selectedPaths);
+        if (profile is null)
+            return;
+
+        await _pendingWrites
+            .PersistAsync(
+                currentPath!,
+                profile,
+                DateTimeOffset.UtcNow,
+                CanPersistNormalizedPath,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<PersistentSecretMarkWriteResult> ApplyMarkDeltaAsync(
+        string? currentPath,
+        PersistentSecretMarkDelta delta,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(delta);
@@ -265,13 +288,35 @@ public sealed class ProjectProfilePersistenceCoordinator(
 	private readonly record struct ProfileLoadState(ProjectProfileLookupStatus Status, long Revision);
 	private readonly record struct ProfileLoadAttempt(
 		long Revision,
-		bool HadPrevious,
-		ProfileLoadState Previous);
+        bool HadPrevious,
+        ProfileLoadState Previous);
 
-    private ProjectSelectionProfile CaptureCurrentProfile(string currentPath)
+    private ProjectSelectionProfile? CaptureProfileForSelectionWrite(
+        string currentPath,
+        IReadOnlyCollection<string>? selectedPaths)
     {
-		var candidate = selectionCoordinator.SnapshotAppliedSelectionForPersistence();
-		var applied = candidate is not null && candidate.IsForProject(currentPath)
+        if (selectionCoordinator.IsSelectionStateCompleteForPersistence)
+            return CaptureCurrentProfile(
+                currentPath,
+                selectedPaths,
+                hasSelectedPathsOverride: true);
+
+        var lookup = profileStore.LookupProfile(currentPath, GuiLookupTimeout);
+        return lookup is { Status: ProjectProfileLookupStatus.Found, Profile: not null }
+            ? ProjectSelectionProfileBuilder.Clone(lookup.Profile) with
+            {
+                SelectedPaths = selectedPaths?.ToArray()
+            }
+            : null;
+    }
+
+    private ProjectSelectionProfile CaptureCurrentProfile(
+        string currentPath,
+        IReadOnlyCollection<string>? selectedPaths = null,
+        bool hasSelectedPathsOverride = false)
+    {
+        var candidate = selectionCoordinator.SnapshotAppliedSelectionForPersistence();
+        var applied = candidate is not null && candidate.IsForProject(currentPath)
 			? candidate
 			: null;
 		var appliedIgnoreStates = applied is null
@@ -289,10 +334,13 @@ public sealed class ProjectProfilePersistenceCoordinator(
             cachedExtensionStates: applied?.ExtensionOptionStates ??
                                    selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
 			cachedIgnoreOptionStates: persistedIgnoreStates,
-			selectedIgnoreOptions: applied is null
-				? selectionCoordinator.GetPersistableSelectedIgnoreOptionIds()
-				: selectionCoordinator.GetPersistableSelectedIgnoreOptionIds(applied.SelectedIgnoreOptions),
-			extensionComparer: StringComparer.OrdinalIgnoreCase);
+            selectedIgnoreOptions: applied is null
+                ? selectionCoordinator.GetPersistableSelectedIgnoreOptionIds()
+                : selectionCoordinator.GetPersistableSelectedIgnoreOptionIds(applied.SelectedIgnoreOptions),
+            extensionComparer: StringComparer.OrdinalIgnoreCase,
+            selectedPaths: hasSelectedPathsOverride
+                ? selectedPaths
+                : selectedPathsProvider?.Invoke());
     }
 }
 

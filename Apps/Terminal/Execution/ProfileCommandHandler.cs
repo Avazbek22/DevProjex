@@ -313,7 +313,7 @@ public sealed class ProfileCommandHandler(
 			rootStates,
 			extensionStates,
 			ignoreStates,
-			plan.Selection.SelectedPaths?.ToArray() ?? []);
+			plan.Selection.SelectedPaths?.ToArray());
 	}
 
 	internal string BuildText(ProjectSelectionSpec selection)

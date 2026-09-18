@@ -109,6 +109,17 @@ Schema-v2 semantics:
 - `stripBlankLines` independently removes unprotected whitespace-only source lines from output;
 - Exclusions contain only known path-filter tokens.
 
+The local `project-profiles.json` store uses the same `selectedPaths` semantics:
+an omitted or null value selects the full effective tree, an empty array selects
+nothing, and a non-empty array is the saved selection frontier. `profile show`
+renders these states as `all`, `none`, and the ordered path list respectively.
+Desktop and Terminal Workspace both restore this frontier when a project opens.
+A fully checked tree is stored as null, a fully unchecked tree as an empty array,
+and a mixed tree as its minimal checked frontier; a checked directory covers new
+descendants discovered under it on the next tree build. Portable `profile import
+--apply` and local `profile show` preserve the same three states without collapsing
+null and an empty array.
+
 The reader also accepts schema version 1 profiles written by v5.1. In schema v1,
 an omitted or null `selectedPaths` and an empty `selectedPaths` array all mean the
 full effective tree; only a non-empty array narrows the selection. This preserves

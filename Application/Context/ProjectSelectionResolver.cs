@@ -24,6 +24,30 @@ public sealed class ProjectSelectionResolver(
 				cancellationToken).ConfigureAwait(false),
 			_ => throw new ArgumentOutOfRangeException(nameof(profile), profile.Kind, null)
 		};
+		return ResolveBaseline(baseline, profile, overrides);
+	}
+
+	internal ProjectSelectionSpec ResolveLocalSnapshot(
+		ProjectSelectionProfile profile,
+		ProjectSelectionSpec overrides)
+	{
+		ArgumentNullException.ThrowIfNull(profile);
+		ArgumentNullException.ThrowIfNull(overrides);
+
+		var snapshot = ProjectSelectionProfileBuilder.Clone(profile);
+		var source = ProjectProfileReference.Local;
+		var baseline = ProjectSelectionAdapter.FromLegacyProfile(snapshot, source) with
+		{
+			LocalProfileState = new LocalProjectSelectionState(snapshot)
+		};
+		return ResolveBaseline(baseline, source, overrides);
+	}
+
+	private static ProjectSelectionSpec ResolveBaseline(
+		ProjectSelectionSpec baseline,
+		ProjectProfileReference profile,
+		ProjectSelectionSpec overrides)
+	{
 
 		var (resolvedExclusions, hideSecrets) = ResolveExclusions(baseline, overrides);
 		var resolved = baseline with
@@ -102,12 +126,12 @@ public sealed class ProjectSelectionResolver(
 					RootsOverridden = overrides.Roots is not null,
 					ExtensionsOverridden = overrides.Extensions is not null,
 					IgnoreOptionsOverridden = overrides.GitMode is not null ||
-					                          overrides.Exclusions is not null ||
-					                          overrides.HideSecrets is not null ||
-					                          overrides.HidePrivateData is not null ||
-					                          overrides.CompressCode is not null ||
-						                          overrides.StripComments is not null ||
-						                          overrides.StripBlankLines is not null
+											  overrides.Exclusions is not null ||
+											  overrides.HideSecrets is not null ||
+											  overrides.HidePrivateData is not null ||
+											  overrides.CompressCode is not null ||
+												  overrides.StripComments is not null ||
+												  overrides.StripBlankLines is not null
 				}
 			};
 		}
@@ -161,21 +185,21 @@ public sealed class ProjectSelectionResolver(
 
 	private static ProjectContextValidationException CreateLocalProfileFailure(
 		ProjectProfileLookupStatus status) => status switch
-	{
-		ProjectProfileLookupStatus.Missing => new ProjectContextValidationException(
-			"DPX-CLI-PROFILE-NOT-FOUND",
-			"No local profile exists for this project."),
-		ProjectProfileLookupStatus.TemporarilyUnavailable => new ProjectContextValidationException(
-			"DPX-CLI-PROFILE-BUSY",
-			"The local profile store is temporarily unavailable; retry the command."),
-		ProjectProfileLookupStatus.InvalidStorage => new ProjectContextValidationException(
-			"DPX-CLI-PROFILE-CORRUPT",
-			"The local profile store is corrupt and must be recovered before use."),
-		ProjectProfileLookupStatus.UnsupportedFutureSchema => new ProjectContextValidationException(
-			"DPX-CLI-PROFILE-FUTURE-SCHEMA",
-			"The local profile store was written by a newer incompatible version."),
-		_ => new ProjectContextValidationException(
-			"DPX-CLI-PROFILE-INVALID",
-			"The local profile request is invalid.")
-	};
+		{
+			ProjectProfileLookupStatus.Missing => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-NOT-FOUND",
+				"No local profile exists for this project."),
+			ProjectProfileLookupStatus.TemporarilyUnavailable => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-BUSY",
+				"The local profile store is temporarily unavailable; retry the command."),
+			ProjectProfileLookupStatus.InvalidStorage => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-CORRUPT",
+				"The local profile store is corrupt and must be recovered before use."),
+			ProjectProfileLookupStatus.UnsupportedFutureSchema => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-FUTURE-SCHEMA",
+				"The local profile store was written by a newer incompatible version."),
+			_ => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-INVALID",
+				"The local profile request is invalid.")
+		};
 }

@@ -14,7 +14,7 @@ internal sealed class PersistedProjectProfile
 		new(ProjectTreePathIdentity.CanonicalComparer);
 	public Dictionary<string, bool> ExtensionStates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 	public Dictionary<IgnoreOptionId, bool> IgnoreOptionStates { get; set; } = [];
-	public List<string> SelectedPaths { get; set; } = [];
+	public List<string>? SelectedPaths { get; set; }
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	public List<MarkedSecretProfileEntry>? MarkedSecrets { get; set; }
 	public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;

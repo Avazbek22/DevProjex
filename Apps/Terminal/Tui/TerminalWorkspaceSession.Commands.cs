@@ -40,7 +40,7 @@ internal sealed partial class TerminalWorkspaceSession
 				TerminalWorkspaceCommandAvailability.Always => true,
 				TerminalWorkspaceCommandAvailability.GitClone => IsGitCloneCommandAvailable(),
 				_ => _screen == TerminalWorkspaceScreen.Workspace &&
-				     _state is not null && !HasActiveOperation
+					 _state is not null && !HasActiveOperation
 			},
 			command => definition.Handler(this, command),
 			definition.Availability == TerminalWorkspaceCommandAvailability.GitClone
@@ -60,7 +60,7 @@ internal sealed partial class TerminalWorkspaceSession
 		if (command.Target == "git")
 		{
 			if (!GitScopeSelection.TryParse(command.Text, out var gitMode, out var diffRange) ||
-			    !IsGitModeAvailable(gitMode))
+				!IsGitModeAvailable(gitMode))
 			{
 				return InvalidCommandExecution();
 			}
@@ -320,6 +320,39 @@ internal sealed partial class TerminalWorkspaceSession
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
+	internal TerminalWorkspaceCommandExecutionResult ExecuteMcpCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null)
+			return InvalidCommandExecution();
+
+		var client = command.Target switch
+		{
+			"claude-code" => McpConnectionClient.ClaudeCode,
+			"codex" => McpConnectionClient.Codex,
+			"json" => McpConnectionClient.Json,
+			_ => throw new ArgumentOutOfRangeException(nameof(command), command.Target, null)
+		};
+		var mode = command.Text == "standard"
+			? McpConnectionMode.Standard
+			: McpConnectionMode.Live;
+		var executablePath = McpConnectionExecutablePathResolver.Resolve(
+			_services.TerminalCommandSetupService.Probe(),
+			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+		var fragment = McpConnectionFragmentGenerator.Generate(
+			client,
+			mode,
+			executablePath,
+			_state.Plan.SourceRoot);
+		ShowScrollableOverlay(
+			L("Terminal.Tui.Command.Mcp.Title"),
+			fragment,
+			TerminalWorkspaceTheme.Dialog,
+			preferredWidth: 96,
+			preferredHeight: 14);
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
 	internal TerminalWorkspaceCommandExecutionResult ExecuteRefreshCommand(
 		TerminalWorkspaceCommand command)
 	{
@@ -486,9 +519,9 @@ internal sealed partial class TerminalWorkspaceSession
 			: BuildWorkspaceActionRegistry().Execute(parse.Command!);
 		AppLanguage? persistedLanguage = null;
 		if (parse.Command!.Definition.Verb == TerminalWorkspaceCommandVerb.Language &&
-		    parse.Command.Text is { } languageCode &&
-		    result.Status == TerminalWorkspaceCommandExecutionStatus.Success &&
-		    AppLanguageUtility.TryParseCode(languageCode, out var language))
+			parse.Command.Text is { } languageCode &&
+			result.Status == TerminalWorkspaceCommandExecutionStatus.Success &&
+			AppLanguageUtility.TryParseCode(languageCode, out var language))
 		{
 			persistedLanguage = language;
 		}
@@ -522,8 +555,8 @@ internal sealed partial class TerminalWorkspaceSession
 		if (!historyChanged && language is null)
 			return;
 		if (_commandHistoryPersistence.Enqueue(
-			    _commandHistory.Entries.ToArray(),
-			    language) is { } saveTask)
+				_commandHistory.Entries.ToArray(),
+				language) is { } saveTask)
 		{
 			TrackBackgroundTask(saveTask);
 		}

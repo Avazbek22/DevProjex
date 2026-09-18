@@ -825,9 +825,10 @@ public partial class MainWindow
     private readonly RefreshTreePipeline _refreshPipeline;
     private readonly ProjectTextOutputPipeline _textOutputPipeline;
     private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
+    private readonly TreeSelectionProfilePersistenceCoordinator _treeSelectionProfiles;
     private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
     private readonly TaskbarProgressCoordinator _taskbarProgress;
-	private readonly Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
+    private readonly Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
 		_desktopControlServerFactory;
     private readonly SemaphoreSlim _desktopInteractionGate = new(1, 1);
 	private readonly TaskCompletionSource<bool> _shutdownCompletion =
@@ -1108,10 +1109,17 @@ public partial class MainWindow
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(
 			_viewModel,
-			_selectionCoordinator,
-			services.ProjectProfileStore,
-			_secretRedactionSession,
-			() => _currentPath);
+            _selectionCoordinator,
+            services.ProjectProfileStore,
+            _secretRedactionSession,
+            () => _currentPath,
+            CaptureProfileSelectionFrontier);
+        _treeSelectionProfiles = new TreeSelectionProfilePersistenceCoordinator(
+            (projectPath, selectedPaths, cancellationToken) =>
+                _projectProfiles.PersistSelectedPathsAsync(
+                    projectPath,
+                    selectedPaths,
+                    cancellationToken));
         _taskbarProgress = new TaskbarProgressCoordinator(
             _viewModel,
             services.TaskbarProgressService);
@@ -1427,6 +1435,7 @@ public partial class MainWindow
         Closed += OnWindowClosed;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
+		StartLiveSessionObservation();
 
         _elevationAttempted = startupOptions.ElevationAttempted ||
                               _desktopStartupRequest?.ElevationAttempted == true;

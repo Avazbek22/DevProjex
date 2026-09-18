@@ -37,7 +37,8 @@ public static class McpServerHost
 	}
 
 	internal static string BuildInstructions(int rootCount, McpToolSet toolSet = McpToolSet.Full,
-		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
+		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters,
+		bool live = false)
 	{
 		ValidateToolSet(toolSet);
 		ValidateSearchBodyCharacters(searchBodyCharacters);
@@ -54,7 +55,12 @@ public static class McpServerHost
 				StringComparison.Ordinal);
 		var body = searchBodyCharacters == 0 ? string.Empty :
 			$" One search declaration body: up to {searchBodyCharacters.ToString("N0", CultureInfo.InvariantCulture)} characters.";
-		return prefix + common + body;
+		var liveContext = live
+			? " Live context uses the selection saved by the DevProjex window as the baseline. " +
+			  "Every response reports its revision. Named files remain readable outside that selection; " +
+			  "tree, search, pack, analysis, and related-file results remain inside it."
+			: string.Empty;
+		return prefix + common + body + liveContext;
 	}
 
 	private static void ValidateSearchBodyCharacters(int limit)
@@ -77,7 +83,8 @@ public static class McpServerHost
 		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
 		bool agentExclusions = false,
 		CancellationToken cancellationToken = default,
-		McpToolSet toolSet = McpToolSet.Full) =>
+		McpToolSet toolSet = McpToolSet.Full,
+		bool live = false) =>
 		RunWithStandardStreamsAsync(
 			roots,
 			hidePrivateData,
@@ -88,7 +95,8 @@ public static class McpServerHost
 			appDataPathProvider: null,
 			cancellationToken,
 			remoteHosts: null,
-			toolSet: toolSet);
+			toolSet: toolSet,
+			live: live);
 
 	internal static Task RunWithStandardStreamsAsync(
 		IReadOnlyList<string> roots,
@@ -101,7 +109,8 @@ public static class McpServerHost
 		CancellationToken cancellationToken,
 		IReadOnlyCollection<string>? remoteHosts = null,
 		McpToolSet toolSet = McpToolSet.Full,
-		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
+		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters,
+		bool live = false)
 	{
 		ValidateGitMode(gitMode);
 		ValidateExclusions(exclusions);
@@ -119,7 +128,8 @@ public static class McpServerHost
 			agentExclusions: agentExclusions,
 			remoteHosts: normalizedRemoteHosts,
 			toolSet: toolSet,
-			searchBodyCharacters: searchBodyCharacters);
+			searchBodyCharacters: searchBodyCharacters,
+			live: live);
 	}
 
 	internal static async Task RunWithStreamsAsync(
@@ -138,7 +148,8 @@ public static class McpServerHost
 		bool agentExclusions = false,
 		IReadOnlySet<string>? remoteHosts = null,
 		McpToolSet toolSet = McpToolSet.Full,
-		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
+		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters,
+		bool live = false)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
@@ -159,6 +170,12 @@ public static class McpServerHost
 		var services = new Lazy<McpServices>(
 			() => servicesFactory?.Invoke(rootJail) ?? McpServices.Create(rootJail, appDataPathProvider),
 			LazyThreadSafetyMode.ExecutionAndPublication);
+		var liveContext = live
+			? new McpLiveContextState(rootRegistry, () => services.Value.ProfileStore)
+			: null;
+		await using var liveSession = live
+			? new LiveSessionRegistry(appDataPathProvider).Start(rootRegistry.ConfiguredRoots)
+			: null;
 		await using var packs = new McpPackRegistry(tempRoot);
 		var projectService = new Lazy<McpProjectService>(
 			() =>
@@ -170,7 +187,8 @@ public static class McpServerHost
 					hidePrivateData,
 					gitMode,
 					exclusions,
-					agentExclusions);
+					agentExclusions,
+					liveContext: liveContext);
 				return created;
 			},
 			LazyThreadSafetyMode.ExecutionAndPublication);
@@ -181,13 +199,14 @@ public static class McpServerHost
 			agentExclusions,
 			allowRemote,
 			remoteHosts,
-			searchBodyCharacters);
+			searchBodyCharacters,
+			liveContext);
 		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions, toolSet, searchBodyCharacters);
 
 		var builder = Host.CreateApplicationBuilder([]);
 		builder.Logging.ClearProviders();
 		builder.Services.AddSingleton(packs);
-		builder.Services.AddMcpServer(options =>
+		var serverBuilder = builder.Services.AddMcpServer(options =>
 			{
 				options.ServerInfo = new Implementation
 				{
@@ -195,11 +214,33 @@ public static class McpServerHost
 					Title = "DevProjex",
 					Version = ResolveVersion()
 				};
-				options.ServerInstructions = BuildInstructions(rootRegistry.Roots.Count, toolSet, searchBodyCharacters);
+				options.ServerInstructions = BuildInstructions(
+					rootRegistry.Roots.Count,
+					toolSet,
+					searchBodyCharacters,
+					live);
 			})
 			.WithStreamServerTransport(input, output)
-			.WithTools<DevProjexMcpToolCatalog>(catalog)
-			.WithRequestFilters(filters => filters.AddListToolsFilter(next => async (request, token) =>
+			.WithTools<DevProjexMcpToolCatalog>(catalog);
+		if (liveSession is not null)
+		{
+			serverBuilder.WithMessageFilters(filters => filters.AddIncomingFilter(next => async (context, token) =>
+			{
+				if (context.JsonRpcMessage is JsonRpcRequest { Context.ClientInfo: { } requestClient })
+				{
+					liveSession.UpdateClient(requestClient.Name, requestClient.Version);
+				}
+				else if (context.JsonRpcMessage is JsonRpcRequest { Method: "initialize", Params: { } parameters })
+				{
+					var client = parameters
+						.Deserialize<InitializeRequestParams>(McpJsonUtilities.DefaultOptions)?
+						.ClientInfo;
+					liveSession.UpdateClient(client?.Name, client?.Version);
+				}
+				await next(context, token).ConfigureAwait(false);
+			}));
+		}
+		serverBuilder.WithRequestFilters(filters => filters.AddListToolsFilter(next => async (request, token) =>
 			{
 				var result = await next(request, token).ConfigureAwait(false);
 				result.Tools = result.Tools

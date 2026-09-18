@@ -624,6 +624,16 @@ function Assert-StoreExecutionAliasManifestContract(
     Assert-Condition (Test-Path $manifestPath) "Store manifest was not found: $manifestPath"
 
     [xml]$manifest = Get-Content -Path $manifestPath
+	$desktop6Namespace = "http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+	$fileSystemVirtualization = @($manifest.SelectNodes("//*[local-name()='FileSystemWriteVirtualization' and namespace-uri()='$desktop6Namespace']"))
+	Assert-Condition ($fileSystemVirtualization.Count -eq 1) "Store package must declare exactly one desktop6:FileSystemWriteVirtualization element."
+	Assert-Condition ([string]$fileSystemVirtualization[0].InnerText -eq "disabled") "Store file-system write virtualization must stay disabled so packaged and unpackaged processes share project profiles."
+	$unvirtualizedCapabilities = @($manifest.SelectNodes("//*[local-name()='Capability' and @Name='unvirtualizedResources']"))
+	Assert-Condition ($unvirtualizedCapabilities.Count -eq 1) "Store package must declare the unvirtualizedResources capability required by desktop6:FileSystemWriteVirtualization."
+	$targetDeviceFamily = @($manifest.SelectNodes("//*[local-name()='TargetDeviceFamily' and @Name='Windows.Desktop']"))
+	Assert-Condition ($targetDeviceFamily.Count -eq 1) "Store package must declare exactly one Windows.Desktop target."
+	$minimumVersion = [System.Version]::Parse([string]$targetDeviceFamily[0].GetAttribute("MinVersion"))
+	Assert-Condition ($minimumVersion -ge [System.Version]::new(10, 0, 18362, 0)) "desktop6:FileSystemWriteVirtualization requires Windows 10 version 1903 / build 18362 or newer."
     $applications = @($manifest.SelectNodes("//*[local-name()='Application']"))
     Assert-Condition ($applications.Count -eq 1) "Store package must expose exactly one Application. Found: $($applications.Count)."
 

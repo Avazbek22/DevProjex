@@ -11,6 +11,8 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] AggregateTargets = ["types", "exclusions", "content"];
 	private static readonly string[] ExportTargets = ["context", "zip", "folder"];
 	private static readonly string[] ProfileTargets = ["save"];
+	private static readonly string[] McpClients = ["claude-code", "codex", "json"];
+	private static readonly string[] McpModes = ["live", "standard"];
 	private static readonly IReadOnlyList<string> LanguageCodes = CliChoiceSets.Language.Tokens;
 
 	private static readonly IReadOnlyList<string> SetTargets =
@@ -68,6 +70,9 @@ internal sealed class TerminalWorkspaceCommandParser
 			[TerminalWorkspaceCommandGrammar.Profile] = new(
 				static (definition, tokens, _) => ParseProfile(definition, tokens),
 				CompleteProfile),
+			[TerminalWorkspaceCommandGrammar.McpConnection] = new(
+				static (definition, tokens, _) => ParseMcpConnection(definition, tokens),
+				CompleteMcpConnection),
 			[TerminalWorkspaceCommandGrammar.Language] = new(
 				static (definition, tokens, _) => ParseLanguage(definition, tokens),
 				CompleteLanguage),
@@ -261,12 +266,12 @@ internal sealed class TerminalWorkspaceCommandParser
 		out string? diffRange)
 	{
 		var isPublishedValue = value.Equals("off", StringComparison.OrdinalIgnoreCase) ||
-		                       value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
-		                       value.Equals("gitignore", StringComparison.OrdinalIgnoreCase) ||
-		                       value.Equals("tracked", StringComparison.OrdinalIgnoreCase) ||
-		                       value.Equals("staged", StringComparison.OrdinalIgnoreCase) ||
-		                       value.Equals("changes", StringComparison.OrdinalIgnoreCase) ||
-		                       value.StartsWith(GitScopeSelection.DiffPrefix, StringComparison.OrdinalIgnoreCase);
+							   value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+							   value.Equals("gitignore", StringComparison.OrdinalIgnoreCase) ||
+							   value.Equals("tracked", StringComparison.OrdinalIgnoreCase) ||
+							   value.Equals("staged", StringComparison.OrdinalIgnoreCase) ||
+							   value.Equals("changes", StringComparison.OrdinalIgnoreCase) ||
+							   value.StartsWith(GitScopeSelection.DiffPrefix, StringComparison.OrdinalIgnoreCase);
 		if (isPublishedValue && GitScopeSelection.TryParse(value, out mode, out diffRange))
 			return true;
 
@@ -470,6 +475,23 @@ internal sealed class TerminalWorkspaceCommandParser
 			Text: tokens.Count == 3 ? tokens[2].Value : null));
 	}
 
+	private static TerminalWorkspaceCommandParseResult ParseMcpConnection(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count > 3)
+			return Unexpected(tokens[3]);
+		if (tokens.Count >= 2 && !Contains(McpClients, tokens[1].Value))
+			return Unknown(tokens[1], McpClients);
+		if (tokens.Count == 3 && !Contains(McpModes, tokens[2].Value))
+			return Unknown(tokens[2], McpModes);
+
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Target: tokens.Count >= 2 ? Normalize(tokens[1].Value, McpClients) : "claude-code",
+			Text: tokens.Count == 3 ? Normalize(tokens[2].Value, McpModes) : "live"));
+	}
+
 	private static TerminalWorkspaceCommandParseResult ParseHelp(
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
@@ -523,7 +545,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		{
 			0 => new CompletionCandidateSource(SetTargets),
 			1 when tokens.Count > 1 &&
-			       string.Equals(tokens[1].Value, "git", StringComparison.OrdinalIgnoreCase) =>
+				   string.Equals(tokens[1].Value, "git", StringComparison.OrdinalIgnoreCase) =>
 				new CompletionCandidateSource(GitModeValues),
 			1 => new CompletionCandidateSource(ToggleValues),
 			_ => default
@@ -601,6 +623,18 @@ internal sealed class TerminalWorkspaceCommandParser
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
 		argumentIndex == 0 ? new CompletionCandidateSource(ProfileTargets) : default;
+
+	private static CompletionCandidateSource CompleteMcpConnection(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex switch
+		{
+			0 => new CompletionCandidateSource(McpClients),
+			1 => new CompletionCandidateSource(McpModes),
+			_ => default
+		};
 
 	private static CompletionCandidateSource CompleteLanguage(
 		int argumentIndex,
@@ -738,7 +772,7 @@ internal sealed class TerminalWorkspaceCommandParser
 	{
 		var quote = openingQuote;
 		if (quote is null && candidate.Any(static character =>
-		    char.IsWhiteSpace(character) || character is '\'' or '"'))
+			char.IsWhiteSpace(character) || character is '\'' or '"'))
 		{
 			quote = candidate.Contains('"') && !candidate.Contains('\'') ? '\'' : '"';
 		}

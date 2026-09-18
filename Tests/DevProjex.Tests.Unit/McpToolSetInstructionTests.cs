@@ -22,4 +22,16 @@ public sealed class McpToolSetInstructionTests
 		Assert.Contains("50,000 characters", reduced, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED", reduced, StringComparison.Ordinal);
 	}
+
+	[Fact]
+	public void LiveInstructionsDescribeTheWindowBaselineOnlyWhenEnabled()
+	{
+		var standard = McpServerHost.BuildInstructions(1);
+		var live = McpServerHost.BuildInstructions(1, live: true);
+
+		Assert.DoesNotContain("Live context", standard, StringComparison.Ordinal);
+		Assert.Contains("Live context uses the selection saved by the DevProjex window as the baseline", live, StringComparison.Ordinal);
+		Assert.Contains("Every response reports its revision", live, StringComparison.Ordinal);
+		Assert.Contains("Named files remain readable outside that selection", live, StringComparison.Ordinal);
+	}
 }

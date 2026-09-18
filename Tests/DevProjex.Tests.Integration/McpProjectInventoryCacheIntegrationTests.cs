@@ -70,6 +70,43 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		Assert.Equal(buildsAfterInitial + 1, buildCount);
 	}
 
+	[Fact]
+	public async Task LiveContextReusesAnUnchangedRevisionAndRebuildsAfterProfileChange()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/src/Inside.cs", "inside\n");
+		workspace.CreateFile("project/tests/Outside.cs", "outside\n");
+		var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
+		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
+		var buildCount = 0;
+		await using var harness = CreateHarness(
+			project,
+			(_, _) =>
+			{
+				Interlocked.Increment(ref buildCount);
+				return ValueTask.CompletedTask;
+			},
+			live: true);
+
+		var initial = await BuildAsync(harness.Service);
+		var buildsAfterInitial = buildCount;
+		var unchanged = await BuildAsync(harness.Service);
+
+		Assert.True(HasFile(initial, "src/Inside.cs"));
+		Assert.False(HasFile(initial, "tests/Outside.cs"));
+		Assert.Same(initial, unchanged);
+		Assert.Equal(buildsAfterInitial, buildCount);
+
+		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["tests"]));
+		var changed = await BuildAsync(harness.Service);
+
+		Assert.False(HasFile(changed, "src/Inside.cs"));
+		Assert.True(HasFile(changed, "tests/Outside.cs"));
+		Assert.NotSame(initial, changed);
+		Assert.True(buildCount > buildsAfterInitial);
+	}
+
 	[Fact(Timeout = 30_000)]
 	public async Task BuildPlan_NestedIgnoreChangedAfterItWasReadCannotBePublishedWithDelayedWatcherDelivery()
 	{
@@ -319,7 +356,8 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	private static CacheHarness CreateHarness(
 		string project,
 		Func<string, CancellationToken, ValueTask>? inventoryBuilt = null,
-		Action<string>? effectiveFileSizeRead = null)
+		Action<string>? effectiveFileSizeRead = null,
+		bool live = false)
 	{
 		var registry = new McpRootRegistry([project]);
 		var sources = new McpProjectSourceResolver(
@@ -337,7 +375,10 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 			hidePrivateData: false,
 			serverGitMode: GitFilteringMode.RespectGitIgnore,
 			inventoryBuilt: inventoryBuilt,
-			effectiveFileSizeRead: effectiveFileSizeRead);
+			effectiveFileSizeRead: effectiveFileSizeRead,
+			liveContext: live
+				? new McpLiveContextState(registry, () => services.ProfileStore)
+				: null);
 		return new CacheHarness(service, services, sources);
 	}
 
