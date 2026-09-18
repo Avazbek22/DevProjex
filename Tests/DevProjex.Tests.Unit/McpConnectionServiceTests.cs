@@ -594,7 +594,7 @@ public sealed class McpConnectionServiceTests
 	{
 		using var project = new TemporaryDirectory();
 		using var outside = new TemporaryDirectory();
-		var configurationDirectory = project.CreateDirectory(".cursor");
+		var configurationDirectory = project.CreateFolder(".cursor");
 		var outsidePath = outside.CreateFile("mcp.json", "{ \"outside\": true }");
 		var targetPath = Path.Combine(configurationDirectory, "mcp.json");
 		try
@@ -626,7 +626,7 @@ public sealed class McpConnectionServiceTests
 	{
 		using var project = new TemporaryDirectory();
 		using var outside = new TemporaryDirectory();
-		var configurationDirectory = project.CreateDirectory(".cursor");
+		var configurationDirectory = project.CreateFolder(".cursor");
 		var missingTarget = Path.Combine(outside.Path, "missing.json");
 		var targetPath = Path.Combine(configurationDirectory, "mcp.json");
 		try

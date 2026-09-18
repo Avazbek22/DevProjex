@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json.Nodes;
 using DevProjex.Application.Services;
@@ -166,18 +167,18 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 			}
 			catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 			{
-				var output = await ReadCompletedOutputAsync(
+				var timedOutOutput = await ReadCompletedOutputAsync(
 					standardOutput,
 					outputReadCancellation).ConfigureAwait(false);
-				var error = await ReadCompletedOutputAsync(
+				var timedOutError = await ReadCompletedOutputAsync(
 					standardError,
 					outputReadCancellation).ConfigureAwait(false);
 				return new McpConnectionProcessResult(
 					null,
-					FormatOutput(output.Result, "stdout"),
-					FormatOutput(error.Result, "stderr"),
+					FormatOutput(timedOutOutput.Result, "stdout"),
+					FormatOutput(timedOutError.Result, "stderr"),
 					TimedOut: true,
-					OutputIncomplete: !output.Completed || !error.Completed);
+					OutputIncomplete: !timedOutOutput.Completed || !timedOutError.Completed);
 			}
 
 			var output = await ReadCompletedOutputAsync(
@@ -294,11 +295,23 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 		for (var index = 0; index < values.Length; index++)
 		{
 			var variable = $"DEVPROJEX_MCP_COMMAND_VALUE_{index}";
-			startInfo.Environment[variable] = values[index];
+			startInfo.Environment[variable] = EscapeWindowsCommandExpansion(values[index]);
 			placeholders[index] = $"\"%{variable}%\"";
 		}
 
 		return string.Join(' ', placeholders);
+	}
+
+	private static string EscapeWindowsCommandExpansion(string value)
+	{
+		var builder = new StringBuilder(value.Length);
+		foreach (var character in value)
+		{
+			if (character is '^' or '&' or '|' or '<' or '>' or '(' or ')')
+				builder.Append('^');
+			builder.Append(character);
+		}
+		return builder.ToString();
 	}
 
 	private readonly record struct CompletedOutputRead(
