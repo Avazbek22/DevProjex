@@ -26,12 +26,12 @@ public sealed class McpConnectionServiceTests
 	[Fact]
 	public void ExecutableLocator_FindsExtensionlessUnixShim()
 	{
-		using var temp = new TemporaryDirectory();
-		var expected = Path.GetFullPath(Path.Combine(temp.Path, "codex"));
+		const string directory = "/client-tools";
+		var expected = Path.GetFullPath(Path.Combine(directory, "codex"));
 		var locator = new McpClientExecutableLocator(new McpClientExecutableLocatorOptions
 		{
 			Platform = TerminalCommandHostPlatform.Linux,
-			PathVariableProvider = () => temp.Path,
+			PathVariableProvider = () => directory,
 			FileExists = path => string.Equals(path, expected, StringComparison.Ordinal),
 			IsExecutable = path => string.Equals(path, expected, StringComparison.Ordinal)
 		});
@@ -67,10 +67,17 @@ public sealed class McpConnectionServiceTests
 		using var temp = new TemporaryDirectory();
 		var shimDirectory = Path.Combine(temp.Path, "client tools Юникод");
 		Directory.CreateDirectory(shimDirectory);
+		var probePath = Path.Combine(shimDirectory, "probe.ps1");
+		await File.WriteAllTextAsync(
+			probePath,
+			"[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\r\n" +
+			"foreach ($value in $args) { [Console]::Out.WriteLine($value) }\r\n",
+			TestContext.Current.CancellationToken);
 		var shimPath = Path.Combine(shimDirectory, "probe.cmd");
 		await File.WriteAllTextAsync(
 			shimPath,
-			"@echo off\r\necho %~1\r\necho %~2\r\necho %~3\r\necho %~4\r\necho %~5\r\n",
+			"@echo off\r\n" +
+			"pwsh -NoLogo -NoProfile -NonInteractive -File \"%~dp0probe.ps1\" %*\r\n",
 			TestContext.Current.CancellationToken);
 		var runner = new McpConnectionProcessRunner();
 		var arguments = new[]

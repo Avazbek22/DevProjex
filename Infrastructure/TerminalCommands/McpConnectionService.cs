@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json.Nodes;
 using DevProjex.Application.Services;
@@ -275,7 +274,7 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 		{
 			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
 			var command = BuildWindowsCommand(startInfo, request.ExecutablePath, request.Arguments);
-			startInfo.Arguments = $"/d /v:off /s /c \"{command}\"";
+			startInfo.Arguments = $"/d /v:on /s /c \"{command}\"";
 			return startInfo;
 		}
 
@@ -295,24 +294,16 @@ internal sealed class McpConnectionProcessRunner : IMcpConnectionProcessRunner
 		for (var index = 0; index < values.Length; index++)
 		{
 			var variable = $"DEVPROJEX_MCP_COMMAND_VALUE_{index}";
-			startInfo.Environment[variable] = EscapeWindowsCommandExpansion(values[index]);
-			placeholders[index] = $"\"%{variable}%\"";
+			startInfo.Environment[variable] = EscapeWindowsDelayedExpansion(values[index]);
+			placeholders[index] = $"\"!{variable}!\"";
 		}
 
 		return string.Join(' ', placeholders);
 	}
 
-	private static string EscapeWindowsCommandExpansion(string value)
-	{
-		var builder = new StringBuilder(value.Length);
-		foreach (var character in value)
-		{
-			if (character is '^' or '&' or '|' or '<' or '>' or '(' or ')')
-				builder.Append('^');
-			builder.Append(character);
-		}
-		return builder.ToString();
-	}
+	private static string EscapeWindowsDelayedExpansion(string value) =>
+		value.Replace("^", "^^", StringComparison.Ordinal)
+			.Replace("!", "^!", StringComparison.Ordinal);
 
 	private readonly record struct CompletedOutputRead(
 		BoundedTextReadResult Result,
