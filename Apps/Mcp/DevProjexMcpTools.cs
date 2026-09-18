@@ -150,12 +150,25 @@ internal sealed class DevProjexMcpTools(
 					type = McpProjectService.IsGitRepository(root) ? "git-repository" : "local-folder"
 				})
 				.ToArray();
+			var profileRootIdentities = validatedRoots
+				.Select(root => new
+				{
+					Physical = root,
+					Configured = roots.ResolveConfiguredRoot(root)
+				})
+				.ToArray();
+			var profileLookupRoots = profileRootIdentities
+				.SelectMany(static identity => new[] { identity.Configured, identity.Physical })
+				.Distinct(PathComparer.Default)
+				.ToArray();
 			var profileCatalog = await Projects
-				.ReadLocalProfileCatalogAsync(validatedRoots, cancellationToken)
+				.ReadLocalProfileCatalogAsync(profileLookupRoots, cancellationToken)
 				.ConfigureAwait(false);
-			var profiles = validatedRoots
-				.Where(profileCatalog.ProjectRoots.Contains)
-				.Select(root => new { project = root, name = "local" })
+			var profiles = profileRootIdentities
+				.Where(identity =>
+					profileCatalog.ProjectRoots.Contains(identity.Configured) ||
+					profileCatalog.ProjectRoots.Contains(identity.Physical))
+				.Select(identity => new { project = identity.Physical, name = "local" })
 				.ToArray();
 			// The baseline is server-wide, so the first call in the recommended sequence is
 			// where an agent learns which filters shape every later answer and whether it

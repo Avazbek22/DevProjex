@@ -180,6 +180,72 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task LiveContextUsesProfileSavedForConfiguredDirectoryAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		Directory.CreateDirectory(Path.Combine(project, "tests"));
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "class App {}\n");
+		File.WriteAllText(Path.Combine(project, "tests", "AppTests.cs"), "class AppTests {}\n");
+		var alias = Path.Combine(workspace.Path, "project-alias");
+		CreateDirectoryAliasOrSkip(alias, project);
+		try
+		{
+			var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
+			profileStore.SaveProfile(
+				alias,
+				new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
+			await using (var server = await McpTestServer.StartAsync(alias, workspace.Path, live: true))
+			{
+				var tree = AllText(await server.CallAsync(
+					"get_tree",
+					new Dictionary<string, object?> { ["format"] = "text" }));
+
+				Assert.Contains("App.cs", tree, StringComparison.Ordinal);
+				Assert.DoesNotContain("AppTests.cs", tree, StringComparison.Ordinal);
+				Assert.Contains("[Live context] revision 1 · 1 files selected", tree, StringComparison.Ordinal);
+			}
+		}
+		finally
+		{
+			if (Directory.Exists(alias))
+				Directory.Delete(alias);
+		}
+	}
+
+	[Fact]
+	public async Task ListProjectsReportsLocalProfileSavedForConfiguredDirectoryAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "App.cs"), "class App {}\n");
+		var alias = Path.Combine(workspace.Path, "project-alias");
+		CreateDirectoryAliasOrSkip(alias, project);
+		try
+		{
+			var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
+			profileStore.SaveProfile(alias, new ProjectSelectionProfile([], [], []));
+			await using (var server = await McpTestServer.StartAsync(alias, workspace.Path))
+			{
+				var listed = Structured(await server.CallAsync("list_projects"));
+				var profile = Assert.Single(listed.GetProperty("profiles").EnumerateArray());
+				var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(
+					project,
+					requireDirectory: true);
+
+				Assert.Equal("local", profile.GetProperty("name").GetString());
+				Assert.Equal(physicalProject, profile.GetProperty("project").GetString());
+			}
+		}
+		finally
+		{
+			if (Directory.Exists(alias))
+				Directory.Delete(alias);
+		}
+	}
+
+	[Fact]
 	public async Task LiveContextSessionRecordUsesInitializationClientInfoAndIsRemovedOnShutdown()
 	{
 		using var workspace = new TemporaryDirectory();
