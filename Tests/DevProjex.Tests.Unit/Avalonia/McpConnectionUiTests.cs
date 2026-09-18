@@ -74,6 +74,46 @@ public sealed class McpConnectionUiTests
 	}
 
 	[AvaloniaFact]
+	public void PathPromptDialog_SizesToLocalizedContent_WithAndWithoutCommand()
+	{
+		var owner = new Window();
+		try
+		{
+			foreach (var command in new[] { string.Empty, "export PATH=\"$HOME/.local/bin:$PATH\"" })
+			{
+				var content = new McpConnectionPathDialogContent(
+					"Lệnh thiết bị đầu cuối",
+					"Đoạn kết nối đã được sao chép và sẵn sàng. Để dùng devprojex trong thiết bị đầu cuối, hãy thêm lệnh vào PATH.",
+					command,
+					"Sao chép lệnh",
+					"Thiết lập",
+					"Để sau",
+					McpConnectionPathAction.None);
+				var completion = new TaskCompletionSource<McpConnectionPathAction>(
+					TaskCreationOptions.RunContinuationsAsynchronously);
+				var window = McpConnectionPathDialog.CreateDialogWindow(owner, content, completion);
+
+				try
+				{
+					Assert.Equal(SizeToContent.Height, window.SizeToContent);
+					Assert.True(double.IsNaN(window.Height));
+					var panel = Assert.IsType<StackPanel>(window.Content);
+					panel.Measure(new Size(540, double.PositiveInfinity));
+					Assert.True(panel.DesiredSize.Height > 0);
+				}
+				finally
+				{
+					window.Close();
+				}
+			}
+		}
+		finally
+		{
+			owner.Close();
+		}
+	}
+
+	[AvaloniaFact]
 	public void Menu_IsBetweenFileAndGitAndPublishesTheRequestedFormat()
 	{
 		var localization = CreateLocalization();

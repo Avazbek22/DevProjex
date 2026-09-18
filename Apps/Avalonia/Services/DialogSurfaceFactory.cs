@@ -41,7 +41,7 @@ internal static class DialogSurfaceFactory
         DialogSurfaceBrushes brushes,
         Control content,
         double width,
-        double height,
+        double? height,
         double? minWidth = null,
         double? minHeight = null)
     {
@@ -49,7 +49,6 @@ internal static class DialogSurfaceFactory
         {
             Title = title,
             Width = width,
-            Height = height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
             RequestedThemeVariant = themeVariant,
@@ -58,6 +57,11 @@ internal static class DialogSurfaceFactory
             Background = brushes.Background ?? Brushes.Transparent,
             Content = content
         };
+
+        if (height is not null)
+            dialog.Height = height.Value;
+        else
+            dialog.SizeToContent = SizeToContent.Height;
 
         if (minWidth is not null)
             dialog.MinWidth = minWidth.Value;

@@ -669,13 +669,12 @@ public partial class MainWindow
         _liveSessionRegistry.ReadActive(_currentPath).Count > 0;
 
     private Task<bool> ConfirmSecretProtectionDisableAsync() =>
-        MessageDialog.ShowConfirmationAsync(
+        MessageDialog.ShowContentSizedConfirmationAsync(
             this,
             _localization["Dialog.LiveContext.Secrets.Title"],
             _localization["Dialog.LiveContext.Secrets.Message"],
             _localization["Dialog.LiveContext.Secrets.Apply"],
-            _localization["Dialog.Cancel"],
-            height: 230);
+            _localization["Dialog.Cancel"]);
 
     private async Task ApplySettingsAsync()
     {

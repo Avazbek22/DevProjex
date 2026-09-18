@@ -57,6 +57,61 @@ public sealed class MessageDialogBehaviorTests
         Assert.False(result);
     }
 
+    [AvaloniaFact]
+    public void CreateConfirmationWindow_LiveContextVariant_SizesToLongLocalizedContent()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var window = MessageDialog.CreateConfirmationWindow(
+            owner: null,
+            title: "Schutz geheimer Daten deaktivieren?",
+            message: "Die verbundene Sitzung folgt diesem Fenster. Nach dem Anwenden kann sie geheime Daten in ausgewählten Dateien sehen.",
+            confirmButtonText: "Anwenden",
+            cancelButtonText: "Abbrechen",
+            width: 520,
+            height: 230,
+            fitContentHeight: true,
+            completion: completion);
+
+        try
+        {
+            Assert.Equal(SizeToContent.Height, window.SizeToContent);
+            Assert.True(double.IsNaN(window.Height));
+            var panel = Assert.IsType<DockPanel>(window.Content);
+            panel.Measure(new Size(520, double.PositiveInfinity));
+            Assert.True(panel.DesiredSize.Height > 0);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void CreateConfirmationWindow_ExistingDialogsKeepFixedHeight()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var window = MessageDialog.CreateConfirmationWindow(
+            owner: null,
+            title: "Confirm",
+            message: "Continue?",
+            confirmButtonText: "Continue",
+            cancelButtonText: "Cancel",
+            width: 520,
+            height: 260,
+            fitContentHeight: false,
+            completion: completion);
+
+        try
+        {
+            Assert.Equal(SizeToContent.Manual, window.SizeToContent);
+            Assert.Equal(260, window.Height);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     private static Control InvokeBuildConfirmationContent(
         string message,
         string confirmButtonText,
