@@ -240,6 +240,54 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task LiveContextReadsCoherentProfilesWhileTheWindowStoreIsWriting()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		Directory.CreateDirectory(Path.Combine(project, "docs"));
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "class App {}\n");
+		File.WriteAllText(Path.Combine(project, "docs", "Guide.cs"), "class Guide {}\n");
+		var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
+		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+		var initial = AllText(await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" }));
+		Assert.Contains("App.cs", initial, StringComparison.Ordinal);
+		Assert.DoesNotContain("Guide.cs", initial, StringComparison.Ordinal);
+		var writerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var writes = 0;
+		var writer = Task.Run(async () =>
+		{
+			writerStarted.TrySetResult();
+			for (var index = 0; index < 200; index++)
+			{
+				var selectedPath = Interlocked.Increment(ref writes) % 2 == 0 ? "src" : "docs";
+				profileStore.SaveProfile(
+					project,
+					new ProjectSelectionProfile([], [], [], SelectedPaths: [selectedPath]));
+				await Task.Yield();
+			}
+		}, TestContext.Current.CancellationToken);
+
+		await writerStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		for (var index = 0; index < 25; index++)
+		{
+			var tree = AllText(await server.CallAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["format"] = "text" }));
+			var containsSource = tree.Contains("App.cs", StringComparison.Ordinal);
+			var containsDocs = tree.Contains("Guide.cs", StringComparison.Ordinal);
+			Assert.True(containsSource ^ containsDocs, tree);
+			Assert.Contains("[Live context] revision ", tree, StringComparison.Ordinal);
+		}
+		await writer.WaitAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(200, Volatile.Read(ref writes));
+	}
+
+	[Fact]
 	public void McpHostAcceptsOnlyPersistentGitModes()
 	{
 		GitFilteringMode?[] accepted =
