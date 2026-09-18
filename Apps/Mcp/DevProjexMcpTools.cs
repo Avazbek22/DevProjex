@@ -125,6 +125,9 @@ internal sealed class DevProjexMcpTools(
 			{
 				foreach (var root in validatedRoots)
 				{
+					var revision = liveContext.RefreshProfile(root);
+					if (liveContext.HasSelectedFileCount(root, revision))
+						continue;
 					_ = await Projects.BuildPlanAsync(
 						root,
 						branch: null,
@@ -147,12 +150,25 @@ internal sealed class DevProjexMcpTools(
 					type = McpProjectService.IsGitRepository(root) ? "git-repository" : "local-folder"
 				})
 				.ToArray();
+			var profileRootIdentities = validatedRoots
+				.Select(root => new
+				{
+					Physical = root,
+					Configured = roots.ResolveConfiguredRoot(root)
+				})
+				.ToArray();
+			var profileLookupRoots = profileRootIdentities
+				.SelectMany(static identity => new[] { identity.Configured, identity.Physical })
+				.Distinct(PathComparer.Default)
+				.ToArray();
 			var profileCatalog = await Projects
-				.ReadLocalProfileCatalogAsync(validatedRoots, cancellationToken)
+				.ReadLocalProfileCatalogAsync(profileLookupRoots, cancellationToken)
 				.ConfigureAwait(false);
-			var profiles = validatedRoots
-				.Where(profileCatalog.ProjectRoots.Contains)
-				.Select(root => new { project = root, name = "local" })
+			var profiles = profileRootIdentities
+				.Where(identity =>
+					profileCatalog.ProjectRoots.Contains(identity.Configured) ||
+					profileCatalog.ProjectRoots.Contains(identity.Physical))
+				.Select(identity => new { project = identity.Physical, name = "local" })
 				.ToArray();
 			// The baseline is server-wide, so the first call in the recommended sequence is
 			// where an agent learns which filters shape every later answer and whether it
@@ -823,7 +839,9 @@ internal sealed class DevProjexMcpTools(
 					.ConfigureAwait(false);
 				var response = McpToolResults.TextSuccess(message, advertiseLargeResult: true);
 				retainPack = true;
-				liveContext?.RecordPackBuild(plan.SourceRoot, pack.Id);
+				var storedContext = liveContext?.RecordPackBuild(plan.SourceRoot, pack.Id);
+				if (storedContext is not null)
+					packs.RecordLiveContext(pack.Id, storedContext);
 				return response;
 			}
 			finally
@@ -842,12 +860,12 @@ internal sealed class DevProjexMcpTools(
 		{
 			var arguments = McpJsonArguments.Create(request.Params, ReadPackArgumentNames);
 			var packId = arguments.RequiredString("pack_id");
-			liveContext?.RefreshStoredResult(packId);
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var startColumn = arguments.OptionalInteger("start_column", 1, int.MaxValue);
 			ValidateLineRange(start, end);
 			await using var packLease = packs.OpenReadDocument(packId);
+			liveContext?.RefreshStoredResult(packs.GetLiveContext(packId));
 			var pack = packLease.Document;
 			var page = await ReadFilePageAsync(
 					pack,
@@ -1095,7 +1113,11 @@ internal sealed class DevProjexMcpTools(
 				: await StoreWithheldMatchesAsync(withheld.ToString(), cancellationToken)
 					.ConfigureAwait(false);
 			if (storedSearch is not null)
-				liveContext?.RecordStoredResult(plan.SourceRoot, storedSearch.Id);
+			{
+				var storedContext = liveContext?.RecordStoredResult(plan.SourceRoot);
+				if (storedContext is not null)
+					packs.RecordLiveContext(storedSearch.Id, storedContext);
+			}
 			AppendWithheldDistribution(output, withheldByFile);
 			var additionalMatchesNotice = totalMatches > shownMatches
 				? $"[{totalMatches - shownMatches} additional observed matches not shown; narrow the pattern or filters.]"
@@ -1279,7 +1301,9 @@ internal sealed class DevProjexMcpTools(
 				},
 				McpStoredResultKind.Related,
 				cancellationToken).ConfigureAwait(false);
-			liveContext?.RecordStoredResult(plan.SourceRoot, pack.Id);
+			var storedContext = liveContext?.RecordStoredResult(plan.SourceRoot);
+			if (storedContext is not null)
+				packs.RecordLiveContext(pack.Id, storedContext);
 			return McpToolResults.TextSuccess(
 				$"Related-files result stored as '{pack.Id}' ({pack.Characters} characters). " +
 				"Call read_pack with this pack_id to read it.",

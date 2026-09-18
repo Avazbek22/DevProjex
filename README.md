@@ -211,7 +211,7 @@ window through the shared local project profile. The **MCP** menu, between File
 and Git, copies Live context or Standard setup for Claude Code, Codex, or another
 JSON client; if the terminal command needs PATH setup, a follow-up dialog offers
 the platform-appropriate action without changing the copied fragment. The window
-title names an active client or session count, tree choices are restored on reopen,
+title names an active client or session count, saved focused paths are restored on reopen,
 and disabling secret protection while a live session exists requires confirmation.
 Directly named readable files can still be returned with an explicit outside-focus
 notice, while tree, search, analysis, dependency, and pack operations stay within

@@ -114,11 +114,31 @@ an omitted or null value selects the full effective tree, an empty array selects
 nothing, and a non-empty array is the saved selection frontier. `profile show`
 renders these states as `all`, `none`, and the ordered path list respectively.
 Desktop and Terminal Workspace both restore this frontier when a project opens.
-A fully checked tree is stored as null, a fully unchecked tree as an empty array,
-and a mixed tree as its minimal checked frontier; a checked directory covers new
-descendants discovered under it on the next tree build. Portable `profile import
---apply` and local `profile show` preserve the same three states without collapsing
-null and an empty array.
+Both surfaces display null and an empty array as an unchecked tree, preserving the
+Desktop convention that no checked nodes means the full effective tree. Restoring a
+profile does not write it back. After a user changes the tree, a checked root or no
+checked nodes is stored as null, while a mixed tree is stored as its minimal checked
+frontier; Desktop and Terminal Workspace do not produce an empty array. An explicit
+empty array loaded from CLI or a portable profile remains intact until the next tree
+action. A checked directory covers new descendants discovered under it on the next
+tree build. `profile import --apply` and `profile show` continue to preserve and show
+the underlying null, empty-array, and non-empty-list meanings.
+
+`DEVPROJEX_INTERNAL_DATA_ROOT` is reserved for isolated runs and tests that need a
+separate location for `project-profiles.json`. It is honored only when it names an
+existing, fully qualified directory; invalid values are ignored and no directory is
+created. This is not a supported user setting, and its behavior is not guaranteed
+between DevProjex versions.
+
+Local schema-version 3 records written by current versions include
+`selectedPathsSemanticsVersion: 1` on each project entry. This marker distinguishes
+the current explicit-empty meaning of `selectedPaths: []` from unmarked v5.1 local
+records, where the same array meant the full tree. Current readers therefore load an
+unmarked empty array as the legacy full-tree state and add the marker on the next
+save. A v5.1 executable ignores the marker and can read either representation without
+failing, but it still interprets a current explicit-empty array as the full tree and
+drops the marker if it rewrites the entry. Do not edit an explicitly empty current
+selection with v5.1 when that distinction must be preserved.
 
 The reader also accepts schema version 1 profiles written by v5.1. In schema v1,
 an omitted or null `selectedPaths` and an empty `selectedPaths` array all mean the

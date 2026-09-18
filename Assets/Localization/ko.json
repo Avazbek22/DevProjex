@@ -153,7 +153,7 @@
   "Dialog.McpPath.Title": "터미널 명령",
   "Dialog.McpPath.Body": "연결 조각이 복사되어 준비되었습니다. 터미널에서도 devprojex를 사용하려면 명령을 PATH에 추가하세요.",
   "Dialog.LiveContext.Secrets.Title": "비밀 보호를 끄시겠습니까?",
-  "Dialog.LiveContext.Secrets.Message": "연결된 세션은 이 창을 따릅니다. 적용 후 선택한 파일의 비밀을 볼 수 있습니다.",
+  "Dialog.LiveContext.Secrets.Message": "이렇게 하면 창 미리 보기와 내보내기에서 비밀 보호가 꺼집니다. MCP 응답에서는 계속 마스킹됩니다.",
   "Dialog.LiveContext.Secrets.Apply": "보호 없이 적용",
   "Dialog.TerminalCommand.Title": "터미널에서 실행",
   "Dialog.TerminalCommand.AutomaticPrompt.Body": "devprojex 명령을 터미널에서 사용할 수 있도록 하시겠습니까?\n\n대화형 터미널 작업 공간, 스크립트 및 CI 용 직접 CLI 명령, AI 에이전트용 로컬 MCP 서버를 얻을 수 있습니다.\n\n앱은 사용자 계정의 PATH 에 devprojex 명령을 추가합니다. 그런 다음 새 터미널 창을 열고 devprojex 실행하여 시작하거나 devprojex --help 실행하여 명령 개요를 확인하세요.",

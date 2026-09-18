@@ -328,7 +328,6 @@ internal static class ProjectTreeUiState
         var checkedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         root.CollectCheckedPaths(checkedPaths);
         if (root.IsChecked == true ||
-            checkedPaths.Count > 0 &&
             ProjectTreeSelectionProjection.CoversWholeTree(root.Descriptor, checkedPaths))
         {
             return null;
@@ -347,14 +346,8 @@ internal static class ProjectTreeUiState
     {
         ArgumentNullException.ThrowIfNull(root);
 
-        if (selectedPaths is null)
-        {
-            root.SetCheckedForTreeStateRestore(true);
-            return new TreeSelectionRestoreResult(Applied: true, MissingCheckedPathCount: 0);
-        }
-
         root.SetCheckedForTreeStateRestore(false);
-        if (selectedPaths.Count == 0)
+        if (selectedPaths is null or { Count: 0 })
             return new TreeSelectionRestoreResult(Applied: true, MissingCheckedPathCount: 0);
 
         var fullPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);

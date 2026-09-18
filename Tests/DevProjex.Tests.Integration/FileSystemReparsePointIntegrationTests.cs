@@ -7,6 +7,36 @@ namespace DevProjex.Tests.Integration;
 public sealed class FileSystemReparsePointIntegrationTests
 {
 	[Fact]
+	public async Task SelectedPathThroughAliasOutsideRoot_IsReportedAsMissing()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectRoot = temp.CreateDirectory("selected-project");
+		var outside = temp.CreateDirectory("selected-outside");
+		temp.CreateFile("selected-outside/secret.txt", "outside");
+		var aliasPath = Path.Combine(projectRoot, "linked");
+		var aliasCreated = OperatingSystem.IsWindows()
+			? TryCreateDirectoryJunction(aliasPath, outside)
+			: TryCreateDirectorySymlink(aliasPath, outside);
+		if (!aliasCreated)
+			Assert.Skip("Directory aliases are unavailable in this test environment.");
+
+		var plan = await new ProjectContextPlanner(CreateProjectAnalysisService())
+			.BuildAsync(
+				new ProjectContextRequest(
+					projectRoot,
+					new ProjectSelectionSpec(
+						SelectedPaths: ["linked/secret.txt"],
+						GitMode: GitFilteringMode.None,
+						Exclusions: [])),
+				TestContext.Current.CancellationToken);
+
+		Assert.Empty(plan.IncludedFiles);
+		var warning = Assert.Single(plan.Diagnostics);
+		Assert.Equal("DPX-SELECTION-PATH-MISSING", warning.Code);
+		Assert.Equal("linked/secret.txt", warning.Path);
+	}
+
+	[Fact]
 	public async Task PreparedPassThroughFile_ReplacedByDirectoryAlias_DoesNotReadTheExternalTarget()
 	{
 		const string externalContent = "prepared-pass-through-must-not-read-external-content";
@@ -244,8 +274,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 		Directory.CreateDirectory(Path.Combine(temp.Path, "real", "nested"));
 
 		if (!TryCreateDirectorySymlink(
-			    Path.Combine(temp.Path, "real", "nested", "linked-external"),
-			    Path.Combine(temp.Path, "external")))
+				Path.Combine(temp.Path, "real", "nested", "linked-external"),
+				Path.Combine(temp.Path, "external")))
 		{
 			Assert.Skip("Directory symbolic links are unavailable in this test environment.");
 		}
@@ -279,8 +309,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 		using var temp = new TemporaryDirectory();
 
 		if (!TryCreateDanglingDirectorySymlink(
-			    Path.Combine(temp.Path, "dangling"),
-			    Path.Combine(temp.Path, "missing-target")))
+				Path.Combine(temp.Path, "dangling"),
+				Path.Combine(temp.Path, "missing-target")))
 		{
 			Assert.Skip("Dangling directory symbolic links are unavailable in this test environment.");
 		}
@@ -310,8 +340,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 		temp.CreateFile("target/generated.ts", "export {}");
 
 		if (!TryCreateDirectoryJunction(
-			    Path.Combine(temp.Path, "junction"),
-			    Path.Combine(temp.Path, "target")))
+				Path.Combine(temp.Path, "junction"),
+				Path.Combine(temp.Path, "target")))
 		{
 			Assert.Skip("The test environment did not allow creating a Windows junction.");
 		}
@@ -343,8 +373,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 		temp.CreateFile("runtime.log", "ignored root log");
 
 		if (!TryCreateFileSymlink(
-			    Path.Combine(temp.Path, ".gitignore"),
-			    Path.Combine(temp.Path, "gitignore-target")))
+				Path.Combine(temp.Path, ".gitignore"),
+				Path.Combine(temp.Path, "gitignore-target")))
 		{
 			Assert.Skip("File symbolic links are unavailable in this test environment.");
 		}
@@ -467,7 +497,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 		{
 			Directory.CreateSymbolicLink(linkPath, targetPath);
 			return Directory.Exists(linkPath) &&
-			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+				   File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
 		{
@@ -561,8 +591,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 			}
 
 			return process.ExitCode == 0 &&
-			       Directory.Exists(linkPath) &&
-			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+				   Directory.Exists(linkPath) &&
+				   File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch
 		{

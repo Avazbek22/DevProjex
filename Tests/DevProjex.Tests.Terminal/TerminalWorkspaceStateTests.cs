@@ -67,10 +67,11 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
-	public void CompleteSelectionUsesCanonicalEmptySelectedPaths()
+	public void UncheckedTreeUsesCanonicalNullSelectedPaths()
 	{
 		using var state = new TerminalWorkspaceState(CreatePlan());
 
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[0].CheckState);
 		Assert.Empty(state.BuildSelectedRelativePaths());
 		Assert.Null(state.BuildSelection().SelectedPaths);
 		Assert.Equal(2, state.SelectedFileCount);
@@ -78,7 +79,7 @@ public sealed class TerminalWorkspaceStateTests
 
 		state.SelectNone();
 
-		Assert.Empty(state.BuildSelection().SelectedPaths!);
+		Assert.Null(state.BuildSelection().SelectedPaths);
 	}
 
 	[Fact]
@@ -94,6 +95,7 @@ public sealed class TerminalWorkspaceStateTests
 			tree,
 			[upperPath, lowerPath],
 			[root]));
+		state.SelectAll();
 
 		Assert.Equal(2, state.SelectedFileCount);
 
@@ -115,8 +117,9 @@ public sealed class TerminalWorkspaceStateTests
 		using var state = new TerminalWorkspaceState(CreatePlan());
 		Assert.Equal(["."], state.BuildPersistedSelectedRelativePaths());
 
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 		Assert.Empty(state.BuildPersistedSelectedRelativePaths());
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
 
 		state.RestoreSelectedRelativePaths(["src"]);
 		Assert.Equal(["src"], state.BuildPersistedSelectedRelativePaths());
@@ -125,6 +128,77 @@ public sealed class TerminalWorkspaceStateTests
 		state.RestoreSelectedRelativePaths(["."]);
 		Assert.Equal(["."], state.BuildPersistedSelectedRelativePaths());
 		Assert.Equal(2, state.SelectedFileCount);
+
+		state.SelectNone();
+		Assert.Equal(["."], state.BuildPersistedSelectedRelativePaths());
+		Assert.Null(state.BuildSelection().SelectedPaths);
+	}
+
+	[Fact]
+	public void PlanReplacementDropsMissingSelectionFrontierWithoutBroadeningSelection()
+	{
+		var initialPlan = CreatePlan();
+		using var state = new TerminalWorkspaceState(
+			initialPlan,
+			["src/a.cs", "src/b.cs"]);
+		var root = initialPlan.SourceRoot;
+		var surviving = Node(root, "src/a.cs", isDirectory: false);
+		var unrelated = Node(root, "src/new.cs", isDirectory: false);
+		var source = Node(root, "src", isDirectory: true, surviving, unrelated);
+		var firstReplacement = new TreeNodeDescriptor(
+			"project",
+			root,
+			true,
+			false,
+			"folder",
+			[source]);
+
+		state.ReplacePlan(CreatePlan(
+			firstReplacement,
+			[surviving.FullPath],
+			[root, source.FullPath]));
+
+		Assert.Equal(["src/a.cs"], state.BuildSelectedPathFrontier());
+		Assert.Equal(["src/a.cs"], state.BuildSelection().SelectedPaths);
+		Assert.DoesNotContain(unrelated.FullPath, state.Plan.IncludedFiles);
+
+		var secondReplacement = new TreeNodeDescriptor(
+			"project",
+			root,
+			true,
+			false,
+			"folder",
+			[Node(root, "src", isDirectory: true, unrelated)]);
+		state.ReplacePlan(CreatePlan(secondReplacement, [], [root]));
+
+		Assert.Empty(state.BuildSelectedPathFrontier()!);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+	}
+
+	[Fact]
+	public void PlanReplacementKeepsASurvivingFolderFrontierForNewDescendants()
+	{
+		var initialPlan = CreatePlan();
+		using var state = new TerminalWorkspaceState(initialPlan, ["src"]);
+		var root = initialPlan.SourceRoot;
+		var existing = Node(root, "src/a.cs", isDirectory: false);
+		var added = Node(root, "src/new.cs", isDirectory: false);
+		var source = Node(root, "src", isDirectory: true, existing, added);
+		var replacement = new TreeNodeDescriptor(
+			"project",
+			root,
+			true,
+			false,
+			"folder",
+			[source]);
+
+		state.ReplacePlan(CreatePlan(
+			replacement,
+			[existing.FullPath, added.FullPath],
+			[root, source.FullPath]));
+
+		Assert.Equal(["src"], state.BuildSelectedPathFrontier());
+		Assert.Equal([existing.FullPath, added.FullPath], state.Plan.IncludedFiles);
 	}
 
 	[Fact]
@@ -136,7 +210,7 @@ public sealed class TerminalWorkspaceStateTests
 			["."],
 			TerminalWorkspaceController.BuildDesktopSelection(state).SelectedPaths);
 
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 
 		Assert.Empty(
 			TerminalWorkspaceController.BuildDesktopSelection(state).SelectedPaths!);
@@ -146,6 +220,7 @@ public sealed class TerminalWorkspaceStateTests
 	public void DeselectingDirectoryBuildsMinimalSiblingSelection()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());
+		state.SelectAll();
 		var sourceRow = FindRow(state, "src");
 
 		state.ToggleSelection(sourceRow);
@@ -159,6 +234,7 @@ public sealed class TerminalWorkspaceStateTests
 	public void EmptyDirectoryCanBeDeselectedAndReselected()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());
+		state.SelectAll();
 		var emptyRow = FindRow(state, "empty");
 
 		state.ToggleSelection(emptyRow);
@@ -174,6 +250,7 @@ public sealed class TerminalWorkspaceStateTests
 	public void PartialSelectionSetsAncestorsIndeterminate()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());
+		state.SelectAll();
 		state.Expand(FindRow(state, "src"));
 		state.ToggleSelection(FindRow(state, "a.cs"));
 
@@ -188,6 +265,7 @@ public sealed class TerminalWorkspaceStateTests
 	public void RepeatedLeafTogglesKeepAncestorStatesAndFolderCountsExact()
 	{
 		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.SelectAll();
 		state.Expand(FindRow(state, "src"));
 		var firstFileRow = FindRow(state, "a.cs");
 		var secondFileRow = FindRow(state, "b.cs");
@@ -250,15 +328,15 @@ public sealed class TerminalWorkspaceStateTests
 	public void KeyboardOrMouseActivationTogglesOnlyAValidVisibleRow()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());
-		var initialSelection = state.SelectedFileCount;
+		var initialState = state.VisibleRows[0].CheckState;
 
 		Assert.False(TerminalWorkspace.TryToggleTreeRow(state, selectedRow: null));
 		Assert.False(TerminalWorkspace.TryToggleTreeRow(state, selectedRow: -1));
 		Assert.False(TerminalWorkspace.TryToggleTreeRow(state, selectedRow: state.VisibleRows.Count));
-		Assert.Equal(initialSelection, state.SelectedFileCount);
+		Assert.Equal(initialState, state.VisibleRows[0].CheckState);
 
 		Assert.True(TerminalWorkspace.TryToggleTreeRow(state, selectedRow: 0));
-		Assert.NotEqual(initialSelection, state.SelectedFileCount);
+		Assert.NotEqual(initialState, state.VisibleRows[0].CheckState);
 	}
 
 	[Fact]
@@ -442,10 +520,12 @@ public sealed class TerminalWorkspaceStateTests
 			IsAccessDenied: false,
 			"folder",
 			[selectedDirectory, unselectedFile]);
-		using var state = new TerminalWorkspaceState(CreatePlan(
-			tree,
-			includedFiles,
-			[rootPath, selectedPath]));
+		using var state = new TerminalWorkspaceState(
+			CreatePlan(
+				tree,
+				includedFiles,
+				[rootPath, selectedPath]),
+			["selected"]);
 
 		var selectedRelativePaths = state.BuildSelectedRelativePaths();
 
@@ -496,10 +576,12 @@ public sealed class TerminalWorkspaceStateTests
 			"folder",
 			[tree]);
 
-		using var state = new TerminalWorkspaceState(CreatePlan(
-			tree,
-			includedFiles: [targetPath],
-			includedFolders: []));
+		using var state = new TerminalWorkspaceState(
+			CreatePlan(
+				tree,
+				includedFiles: [targetPath],
+				includedFolders: []),
+			["target.cs"]);
 
 		Assert.Equal(["target.cs"], state.BuildSelectedRelativePaths());
 		state.ApplyTreeFilter("target.cs");
@@ -534,7 +616,8 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.Equal("a.cs", state.VisibleRows[revealed].Node.DisplayName);
 
 		state.SelectNone();
-		Assert.Equal(0, state.SelectedFileCount);
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[0].CheckState);
+		Assert.Equal(2, state.SelectedFileCount);
 		state.SelectAll();
 		Assert.Equal(2, state.SelectedFileCount);
 

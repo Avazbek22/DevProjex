@@ -71,20 +71,30 @@ internal static class McpConnectionPathDialog
         ArgumentNullException.ThrowIfNull(content);
         var completion = new TaskCompletionSource<McpConnectionPathAction>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var dialog = CreateDialogWindow(owner, content, completion);
+        dialog.Closed += (_, _) => completion.TrySetResult(McpConnectionPathAction.None);
+        _ = dialog.ShowDialog(owner);
+        return await completion.Task.ConfigureAwait(false);
+    }
+
+    internal static Window CreateDialogWindow(
+        Window owner,
+        McpConnectionPathDialogContent content,
+        TaskCompletionSource<McpConnectionPathAction> completion)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(completion);
         var theme = DialogSurfaceFactory.ResolveThemeVariant(owner);
         var brushes = DialogSurfaceFactory.ResolveBrushes(owner, theme);
-        var dialog = DialogSurfaceFactory.CreateWindow(
+        return DialogSurfaceFactory.CreateWindow(
             content.Title,
             theme,
             brushes,
             BuildContent(owner, content, completion),
             width: 540,
-            height: string.IsNullOrWhiteSpace(content.Command) ? 190 : 250,
-            minWidth: 440,
-            minHeight: 180);
-        dialog.Closed += (_, _) => completion.TrySetResult(McpConnectionPathAction.None);
-        _ = dialog.ShowDialog(owner);
-        return await completion.Task.ConfigureAwait(false);
+            height: null,
+            minWidth: 440);
     }
 
     private static Control BuildContent(

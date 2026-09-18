@@ -153,7 +153,7 @@
   "Dialog.McpPath.Title": "Commande de terminal",
   "Dialog.McpPath.Body": "Le fragment de connexion est copié et prêt. Pour utiliser aussi devprojex dans un terminal, ajoutez la commande au PATH.",
   "Dialog.LiveContext.Secrets.Title": "Désactiver la protection des secrets ?",
-  "Dialog.LiveContext.Secrets.Message": "La session connectée suit cette fenêtre. Après application, elle pourra voir les secrets dans les fichiers sélectionnés.",
+  "Dialog.LiveContext.Secrets.Message": "Cela désactive la protection des secrets dans l’aperçu et les exports de la fenêtre. Les réponses MCP restent masquées.",
   "Dialog.LiveContext.Secrets.Apply": "Appliquer sans protection",
   "Dialog.TerminalCommand.Title": "Exécuter dans le terminal",
   "Dialog.TerminalCommand.AutomaticPrompt.Body": "Rendre la commande devprojex disponible dans le terminal ?\n\nVous bénéficiez de l’espace de travail interactif du terminal, de commandes CLI directes pour les scripts et la CI, ainsi que d’un serveur MCP local pour les agents IA.\n\nL’application ajoutera la commande devprojex au PATH de votre compte utilisateur. Ouvrez ensuite une nouvelle fenêtre de terminal et exécutez devprojex pour commencer, ou devprojex --help pour obtenir un aperçu des commandes.",

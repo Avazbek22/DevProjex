@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.Text;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
+using DevProjex.Infrastructure.Persistence;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Models;
 using DevProjex.Terminal.CommandLine;
@@ -76,10 +77,9 @@ internal static class Program
 			return RunSignalCheckpointProtocol();
 		}
 
-		var dataRoot = Environment.GetEnvironmentVariable(
-			InvocationEnvironment.InternalDataRootVariable);
-		if (string.IsNullOrWhiteSpace(dataRoot) ||
-		    !Path.IsPathFullyQualified(dataRoot))
+		var dataRoot = UserDataPathResolver.ResolveInternalDataRoot(
+			Environment.GetEnvironmentVariable(InvocationEnvironment.InternalDataRootVariable));
+		if (dataRoot is null)
 		{
 			Console.Error.WriteLine("The isolated terminal test data root is required.");
 			return CommandLineExitCodes.RuntimeError;
@@ -101,10 +101,9 @@ internal static class Program
 
 	private static int RunTerminalApplication(string[] arguments)
 	{
-		var dataRoot = Environment.GetEnvironmentVariable(
-			InvocationEnvironment.InternalDataRootVariable);
-		if (string.IsNullOrWhiteSpace(dataRoot) ||
-		    !Path.IsPathFullyQualified(dataRoot))
+		var dataRoot = UserDataPathResolver.ResolveInternalDataRoot(
+			Environment.GetEnvironmentVariable(InvocationEnvironment.InternalDataRootVariable));
+		if (dataRoot is null)
 		{
 			Console.Error.WriteLine("The isolated terminal test data root is required.");
 			return CommandLineExitCodes.RuntimeError;

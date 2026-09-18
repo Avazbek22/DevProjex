@@ -1,8 +1,8 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
 ┌┤  PROJECT TREE├─────────────────────────────────────┐┌┤> CONTEXT PREVIEW · Content · ASCII · /LargeMarker060 (1/1)├──┐
-│v [x] <PROJECT>               ││                                                              ▲│
-│  > [x] src                                          ││                                                              ·│
+│v [ ] <PROJECT>               ││                                                              ▲│
+│  > [ ] src                                          ││                                                              ·│
 │                                                     ││src/File118.cs:                                               ·│
 │                                                     ││                                                              ·│
 │                                                     ││internal sealed class LargeMarker118 { }                      ·│

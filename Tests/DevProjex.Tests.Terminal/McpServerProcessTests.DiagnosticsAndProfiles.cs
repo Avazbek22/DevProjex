@@ -356,6 +356,184 @@ public sealed partial class McpServerProcessTests
 			StringComparison.Ordinal);
 	}
 
+	[Fact(Timeout = 60_000)]
+	public async Task RealProcessLiveContextKeepsTheLastSelectionWhileTheProfileIsLockedAndRecoversAfterUnlock()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Inside.cs", "class Inside { }\n");
+		workspace.WriteFile("project/docs/Outside.cs", "class Outside { }\n");
+		var dataRoot = workspace.CreateDirectory("data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		Assert.True(store.TrySaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			arguments: ["--live"],
+			clientInfo: new Implementation { Name = "process-client", Version = "1.0" });
+		var initial = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var initialText = AllProcessText(initial);
+		Assert.Contains("Inside.cs", initialText, StringComparison.Ordinal);
+		Assert.DoesNotContain("Outside.cs", initialText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", initialText, StringComparison.Ordinal);
+
+		await using (var held = new FileStream(
+			store.GetPath(),
+			FileMode.Open,
+			FileAccess.ReadWrite,
+			FileShare.None))
+		{
+			try
+			{
+				using var probe = File.OpenRead(store.GetPath());
+				Assert.Skip("Exclusive file sharing is not enforced by this platform and file system.");
+			}
+			catch (IOException)
+			{
+			}
+
+			using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+			timeout.CancelAfter(TimeSpan.FromSeconds(5));
+			var locked = await server.Client.CallToolAsync(
+				"get_tree",
+				new Dictionary<string, object?> { ["format"] = "text" },
+				progress: null,
+				options: null,
+				timeout.Token);
+			var lockedText = AllProcessText(locked);
+
+			Assert.Contains("Inside.cs", lockedText, StringComparison.Ordinal);
+			Assert.DoesNotContain("Outside.cs", lockedText, StringComparison.Ordinal);
+			Assert.Contains(
+				"[Live context] saved window selection could not be read; using revision 1. Retry this call.",
+				lockedText,
+				StringComparison.Ordinal);
+			Assert.Contains(
+				"[Live context] revision 1 · 1 files selected in the window",
+				lockedText,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain("changed since revision", lockedText, StringComparison.Ordinal);
+		}
+
+		Assert.True(store.TrySaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["docs"])));
+		var recovered = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var recoveredText = AllProcessText(recovered);
+
+		Assert.Contains("Outside.cs", recoveredText, StringComparison.Ordinal);
+		Assert.DoesNotContain("Inside.cs", recoveredText, StringComparison.Ordinal);
+		Assert.DoesNotContain("could not be read", recoveredText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] changed since revision 1: +docs, -src", recoveredText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 2 · 1 files selected in the window", recoveredText, StringComparison.Ordinal);
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task RealProcessLiveContextReportsRecoveryFromTheProfileBackup()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Inside.cs", "class Inside { }\n");
+		workspace.WriteFile("project/docs/Outside.cs", "class Outside { }\n");
+		var dataRoot = workspace.CreateDirectory("data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		Assert.True(store.TrySaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+		File.WriteAllText(store.GetPath(), "{\"schemaVersion\":3,\"profiles\":");
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			arguments: ["--live"],
+			clientInfo: new Implementation { Name = "process-client", Version = "1.0" });
+		var recovered = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var recoveredText = AllProcessText(recovered);
+
+		Assert.Contains("Inside.cs", recoveredText, StringComparison.Ordinal);
+		Assert.DoesNotContain("Outside.cs", recoveredText, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] saved window selection could not be read; using revision 1. Retry this call.",
+			recoveredText,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] revision 1 · 1 files selected in the window",
+			recoveredText,
+			StringComparison.Ordinal);
+
+		var afterRepair = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("could not be read", AllProcessText(afterRepair), StringComparison.Ordinal);
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task RealProcessLiveContextTreatsProfileRemovalAsARevisionChangeToServerDefaults()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Inside.cs", "class Inside { }\n");
+		workspace.WriteFile("project/docs/Outside.cs", "class Outside { }\n");
+		var dataRoot = workspace.CreateDirectory("data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		Assert.True(store.TrySaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			arguments: ["--live"],
+			clientInfo: new Implementation { Name = "process-client", Version = "1.0" });
+		var initial = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var initialText = AllProcessText(initial);
+		Assert.Contains("Inside.cs", initialText, StringComparison.Ordinal);
+		Assert.DoesNotContain("Outside.cs", initialText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", initialText, StringComparison.Ordinal);
+
+		Assert.Equal(ProjectProfileClearStatus.Cleared, store.ClearAllProfiles());
+		var afterReset = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var afterResetText = AllProcessText(afterReset);
+
+		Assert.Contains("Inside.cs", afterResetText, StringComparison.Ordinal);
+		Assert.Contains("Outside.cs", afterResetText, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] no window selection saved for this root; using server defaults.",
+			afterResetText,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] changed since revision 1: -src, +all",
+			afterResetText,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] revision 2 · 2 files selected in the window",
+			afterResetText,
+			StringComparison.Ordinal);
+	}
+
 	private static string AllProcessText(CallToolResult result) =>
 		string.Join(
 			"\n",

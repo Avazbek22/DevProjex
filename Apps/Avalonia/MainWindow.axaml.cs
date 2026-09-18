@@ -1444,6 +1444,11 @@ public partial class MainWindow : Window
                 if (!preserveTreeState)
                     profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: null);
             }
+			else if (profileSnapshot.Status == ProjectProfileLookupStatus.TemporarilyUnavailable &&
+			         !preserveTreeState)
+			{
+				profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: []);
+			}
             _selectionCoordinator.RestoreMomentaryGitFilteringMode(runtimeGitMode);
 
 			if (profileSnapshot is
@@ -1468,17 +1473,8 @@ public partial class MainWindow : Window
 		string projectPath,
 		CancellationToken cancellationToken)
 	{
-		var retryDelay = TimeSpan.FromMilliseconds(100);
-		while (true)
-		{
-			var snapshot = await _projectProfiles
-				.LoadSnapshotAsync(projectPath, cancellationToken);
-			if (snapshot.Status != ProjectProfileLookupStatus.TemporarilyUnavailable)
-				return snapshot;
-
-			await Task.Delay(retryDelay, cancellationToken);
-			retryDelay = TimeSpan.FromMilliseconds(Math.Min(retryDelay.TotalMilliseconds * 2, 1000));
-		}
+		return await _projectProfiles
+			.LoadSnapshotWithRetryAsync(projectPath, cancellationToken);
 	}
 
     /// <summary>

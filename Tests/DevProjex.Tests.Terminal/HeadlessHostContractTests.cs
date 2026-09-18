@@ -74,8 +74,9 @@ public sealed class HeadlessHostContractTests
 		startInfo.ArgumentList.Add("mcp");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
-		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] =
-			workspace.CreateDirectory("data");
+		startInfo.ArgumentList.Add("--live");
+		var dataRoot = workspace.CreateDirectory("data");
+		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = dataRoot;
 
 		using var process = Process.Start(startInfo) ??
 		                    throw new InvalidOperationException("Headless MCP process did not start.");
@@ -84,17 +85,27 @@ public sealed class HeadlessHostContractTests
 		timeout.CancelAfter(TimeSpan.FromMinutes(2));
 		await using (var client = await McpClient.CreateAsync(
 			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
-			clientOptions: null,
+			new McpClientOptions
+			{
+				ClientInfo = new Implementation { Name = "headless-contract", Version = "1" }
+			},
 			loggerFactory: null,
 			timeout.Token))
 		{
 			var tools = await client.ListToolsAsync(options: null, timeout.Token);
 			Assert.Contains(tools, static tool => tool.Name == "get_tree");
+			var sessionPath = Path.Combine(dataRoot, "live-sessions", $"{process.Id}.json");
+			Assert.True(File.Exists(sessionPath));
+			using var session = JsonDocument.Parse(await File.ReadAllTextAsync(
+				sessionPath,
+				TestContext.Current.CancellationToken));
+			Assert.Equal("headless-contract", session.RootElement.GetProperty("ClientName").GetString());
 		}
 
 		process.StandardInput.Close();
 		await process.WaitForExitAsync(timeout.Token).WaitAsync(TimeSpan.FromSeconds(15), timeout.Token);
 		Assert.Equal(0, process.ExitCode);
+		Assert.False(File.Exists(Path.Combine(dataRoot, "live-sessions", $"{process.Id}.json")));
 		Assert.True(string.IsNullOrWhiteSpace(await standardError));
 	}
 

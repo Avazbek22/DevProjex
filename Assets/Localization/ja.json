@@ -153,7 +153,7 @@
   "Dialog.McpPath.Title": "ターミナル コマンド",
   "Dialog.McpPath.Body": "接続フラグメントはコピー済みです。ターミナルでも devprojex を使うには、コマンドを PATH に追加してください。",
   "Dialog.LiveContext.Secrets.Title": "シークレット保護を無効にしますか?",
-  "Dialog.LiveContext.Secrets.Message": "接続中のセッションはこのウィンドウに従います。適用後、選択したファイル内のシークレットが見えるようになります。",
+  "Dialog.LiveContext.Secrets.Message": "これにより、ウィンドウのプレビューとエクスポートでシークレット保護が無効になります。MCP の応答では引き続きマスクされます。",
   "Dialog.LiveContext.Secrets.Apply": "保護なしで適用",
   "Dialog.TerminalCommand.Title": "ターミナルから実行",
   "Dialog.TerminalCommand.AutomaticPrompt.Body": "devprojexコマンドをターミナルで使用できるようにしますか?\n\nインタラクティブなターミナル ワークスペース、スクリプトとCI用の直接CLIコマンド、およびAIエージェント用のローカルMCPサーバーを利用できます。\n\nアプリは、ユーザー アカウントのPATHにdevprojexコマンドを追加します。その後、新しいターミナル ウィンドウを開いてdevprojexを実行して開始するか、devprojex --helpを実行してコマンドの概要を確認します。",

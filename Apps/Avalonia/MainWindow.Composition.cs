@@ -1030,6 +1030,7 @@ public partial class MainWindow
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
         _terminalCommandSetupService = services.TerminalCommandSetupService;
+        _liveSessionRegistry = services.LiveSessionRegistry;
 		_desktopControlServerFactory = services.DesktopControlServerFactory;
         _sessionMetrics = services.SessionMetricsRecorder;
 		_backgroundTasks = new BackgroundTaskRegistry(

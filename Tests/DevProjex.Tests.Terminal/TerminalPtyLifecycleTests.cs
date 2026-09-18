@@ -470,11 +470,11 @@ public sealed class TerminalPtyLifecycleTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.WaitForScreenAsync(
-			$"[x] {projectName}",
+			$"[ ] {projectName}",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var rootRow = FindVisibleTreeRow(
 			terminal.CaptureScreen(),
-			$"[x] {projectName}");
+			$"[ ] {projectName}");
 		Assert.True(rootRow >= 0);
 
 		await terminal.SendMouseClickAsync(
@@ -484,8 +484,8 @@ public sealed class TerminalPtyLifecycleTests
 		await Task.Delay(1_000, TestContext.Current.CancellationToken);
 
 		var screen = terminal.CaptureScreen();
-		Assert.Contains($"[x] {projectName}", screen, StringComparison.Ordinal);
-		Assert.DoesNotContain($"[ ] {projectName}", screen, StringComparison.Ordinal);
+		Assert.Contains($"[ ] {projectName}", screen, StringComparison.Ordinal);
+		Assert.DoesNotContain($"[x] {projectName}", screen, StringComparison.Ordinal);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Exit DevProjex Terminal?",

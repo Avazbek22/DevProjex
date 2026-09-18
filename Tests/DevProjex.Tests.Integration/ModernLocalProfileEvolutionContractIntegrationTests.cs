@@ -233,6 +233,7 @@ public sealed class ModernLocalProfileEvolutionContractIntegrationTests
 			state,
 			[".cs"],
 			TestContext.Current.CancellationToken);
+		state.SelectAll();
 		var sourceRow = state.VisibleRows
 			.Select((row, index) => (row, index))
 			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "src");

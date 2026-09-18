@@ -48,10 +48,13 @@ public static class McpConnectionFragmentGenerator
 		string executablePath,
 		string projectRoot)
 	{
+		Func<string, string> quoteArgument = IsWindowsAbsolutePath(executablePath)
+			? QuotePowerShellArgument
+			: QuotePosixShellArgument;
 		var builder = new StringBuilder("claude mcp add devprojex -- ");
-		builder.Append(QuoteCommandArgument(executablePath));
+		builder.Append(quoteArgument(executablePath));
 		builder.Append(" mcp --root ");
-		builder.Append(QuoteCommandArgument(projectRoot));
+		builder.Append(quoteArgument(projectRoot));
 		if (mode == McpConnectionMode.Live)
 			builder.Append(" --live");
 		return builder.ToString();
@@ -95,11 +98,23 @@ public static class McpConnectionFragmentGenerator
 			? ["mcp", "--root", projectRoot, "--live"]
 			: ["mcp", "--root", projectRoot];
 
-	private static string QuoteCommandArgument(string value)
+	private static string QuotePowerShellArgument(string value)
 	{
-		if (value.Contains('"'))
-			throw new ArgumentException("Connection fragment paths cannot contain a double quote.");
+		if (value.IndexOfAny(['"', '$', '`']) >= 0)
+			return $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
 		return $"\"{value}\"";
+	}
+
+	private static string QuotePosixShellArgument(string value)
+	{
+		var builder = new StringBuilder(value.Length + 2).Append('"');
+		foreach (var character in value)
+		{
+			if (character is '\\' or '"' or '$' or '`')
+				builder.Append('\\');
+			builder.Append(character);
+		}
+		return builder.Append('"').ToString();
 	}
 
 	private static string ToTomlString(string value)
@@ -124,6 +139,9 @@ public static class McpConnectionFragmentGenerator
 
 	private static bool IsAbsolutePath(string value) =>
 		value[0] == '/' ||
+		IsWindowsAbsolutePath(value);
+
+	private static bool IsWindowsAbsolutePath(string value) =>
 		value.StartsWith("\\\\", StringComparison.Ordinal) ||
 		value.Length >= 3 &&
 		char.IsAsciiLetter(value[0]) &&

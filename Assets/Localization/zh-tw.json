@@ -153,7 +153,7 @@
   "Dialog.McpPath.Title": "終端機命令",
   "Dialog.McpPath.Body": "連線片段已複製並可使用。若還要在終端機中使用 devprojex，請將命令加入 PATH。",
   "Dialog.LiveContext.Secrets.Title": "關閉機密保護？",
-  "Dialog.LiveContext.Secrets.Message": "已連線的工作階段會跟隨此視窗。套用後，它可以看到所選檔案中的機密。",
+  "Dialog.LiveContext.Secrets.Message": "這會關閉視窗預覽和匯出中的機密保護。MCP 回應仍會遮罩機密。",
   "Dialog.LiveContext.Secrets.Apply": "不保護並套用",
   "Dialog.TerminalCommand.Title": "從終端運行",
   "Dialog.TerminalCommand.AutomaticPrompt.Body": "使devprojex指令在終端機中可用？\n\n您可以獲得互動式終端工作區、用於腳本和CI的直接CLI命令以及用於AI代理的本機MCP伺服器。\n\n該應用程式會將devprojex命令新增至您的用戶帳戶的PATH。之後，開啟新的終端視窗並執行devprojex以開始使用，或devprojex --help以取得命令概述。",

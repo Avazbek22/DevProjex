@@ -1,11 +1,76 @@
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.Persistence;
+using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalServiceFactoryTests
 {
+	[Theory]
+	[InlineData(null)]
+	[InlineData("")]
+	[InlineData("relative-data")]
+	public void UnsafeEnvironmentDataRootFallsBackToPlatformLocations(string? value)
+	{
+		var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+		{
+			[InvocationEnvironment.InternalDataRootVariable] = value
+		};
+
+		var factory = TerminalServiceFactory.FromEnvironment(
+			variables,
+			TerminalHostCapabilities.Headless);
+
+		Assert.Null(factory.AppDataPathProvider);
+	}
+
+	[Fact]
+	public void EnvironmentDataRootRejectsMissingDirectoriesAndFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var file = workspace.WriteFile("data-file", "content");
+		foreach (var value in new[] { Path.Combine(workspace.Path, "missing"), file })
+		{
+			var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				[InvocationEnvironment.InternalDataRootVariable] = value
+			};
+
+			var factory = TerminalServiceFactory.FromEnvironment(
+				variables,
+				TerminalHostCapabilities.Headless);
+
+			Assert.Null(factory.AppDataPathProvider);
+		}
+	}
+
+	[Fact]
+	public void EnvironmentDataRootConfiguresHeadlessServices()
+	{
+		using var workspace = new TemporaryDirectory();
+		var dataRoot = workspace.CreateDirectory("isolated-data");
+		var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+		{
+			[InvocationEnvironment.InternalDataRootVariable] = dataRoot
+		};
+
+		var factory = TerminalServiceFactory.FromEnvironment(
+			variables,
+			TerminalHostCapabilities.Headless);
+		using var services = factory.Create(AppLanguage.En);
+
+		Assert.False(factory.HostCapabilities.HasDesktopApplication);
+		Assert.Equal(
+			Path.Combine(dataRoot, "live-sessions"),
+			services.LiveSessionRegistry.DirectoryPath,
+			PathComparer.Default);
+		Assert.Equal(
+			Path.Combine(dataRoot, "DevProjex", "project-profiles.json"),
+			Assert.IsType<ProjectProfileStore>(services.LocalProfileStore).GetPath(),
+			PathComparer.Default);
+	}
+
 	[Fact]
 	public void DefaultServicesSeparateConfigurationStateAndCacheRoots()
 	{

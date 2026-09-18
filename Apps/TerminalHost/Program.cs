@@ -12,10 +12,12 @@ internal static class Program
 			ConfigureUtf8StandardStreams();
 
 		using var cancellation = TerminalCancellationCoordinator.Register();
+		var environment = new InvocationEnvironment(hasAttachedConsole: true);
 		return new TerminalApplication(
-				new InvocationEnvironment(hasAttachedConsole: true),
-				new TerminalServiceFactory(
-					hostCapabilities: TerminalHostCapabilities.Headless),
+				environment,
+				TerminalServiceFactory.FromEnvironment(
+					environment.Variables,
+					TerminalHostCapabilities.Headless),
 				developerCommandRunner: null)
 			.RunAsync(args, cancellation.Token)
 			.GetAwaiter()

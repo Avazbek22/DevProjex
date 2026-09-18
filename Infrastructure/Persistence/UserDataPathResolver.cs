@@ -10,6 +10,31 @@ internal enum UserDataDirectoryKind
 
 public static class UserDataPathResolver
 {
+	public const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
+
+	public static string? ResolveInternalDataRoot(string? candidate)
+	{
+		if (string.IsNullOrWhiteSpace(candidate))
+			return null;
+
+		try
+		{
+			if (!Path.IsPathFullyQualified(candidate))
+				return null;
+			var resolved = Path.GetFullPath(candidate);
+			return Directory.Exists(resolved) ? resolved : null;
+		}
+		catch (Exception exception) when (exception is
+			   ArgumentException or
+			   NotSupportedException or
+			   IOException or
+			   UnauthorizedAccessException or
+			   System.Security.SecurityException)
+		{
+			return null;
+		}
+	}
+
 	public static string GetConfigurationRoot() =>
 		Resolve(
 			UserDataDirectoryKind.Configuration,

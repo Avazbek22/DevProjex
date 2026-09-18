@@ -60,8 +60,14 @@ public sealed class LiveSessionRegistry(
 		var records = new List<LiveSessionRecord>();
 		foreach (var path in paths)
 		{
-			var record = TryRead(path);
-			if (record is null || !IsAlive(record, now))
+			var record = TryRead(path, out var invalid);
+			if (record is null)
+			{
+				if (invalid)
+					TryDelete(path);
+				continue;
+			}
+			if (!IsAlive(record, now))
 			{
 				TryDelete(path);
 				continue;
@@ -110,24 +116,65 @@ public sealed class LiveSessionRegistry(
 		}
 	}
 
-	internal void Delete(int pid) => TryDelete(GetPath(pid));
-
-	private LiveSessionRecord? TryRead(string path)
+	internal bool TryWrite(LiveSessionRecord record)
 	{
 		try
 		{
-			var info = new FileInfo(path);
-			if (!info.Exists || info.Length is <= 0 or > MaximumRecordBytes)
-				return null;
-			var record = JsonSerializer.Deserialize(
-				File.ReadAllText(path),
-				InfrastructureJsonSerializerContext.Default.LiveSessionRecord);
-			return record is { Roots: not null } && record.Roots.Count <= 256
-				? record
-				: null;
+			Write(record);
+			return true;
 		}
-		catch (Exception exception) when (exception is
-			   IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			Trace.TraceWarning(
+				"Live context session could not be written: {0}",
+				exception.GetType().Name);
+			return false;
+		}
+	}
+
+	internal void Delete(int pid) => TryDelete(GetPath(pid));
+
+	private LiveSessionRecord? TryRead(string path, out bool invalid)
+	{
+		invalid = false;
+		try
+		{
+			using var stream = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				bufferSize: 4096,
+				FileOptions.SequentialScan);
+			if (stream.Length is <= 0 or > MaximumRecordBytes)
+			{
+				invalid = true;
+				return null;
+			}
+
+			var bytes = new byte[(int)stream.Length];
+			stream.ReadExactly(bytes);
+			if (stream.ReadByte() >= 0)
+			{
+				invalid = true;
+				return null;
+			}
+
+			var record = JsonSerializer.Deserialize(
+				bytes,
+				InfrastructureJsonSerializerContext.Default.LiveSessionRecord);
+			if (record is { Roots: not null } && record.Roots.Count <= 256)
+				return record;
+
+			invalid = true;
+			return null;
+		}
+		catch (Exception exception) when (exception is JsonException or NotSupportedException)
+		{
+			invalid = true;
+			return null;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
 			return null;
 		}
@@ -222,7 +269,7 @@ public sealed class LiveSessionWriter : IAsyncDisposable, IDisposable
 			ClientVersion: null,
 			roots.Select(PathUtility.Normalize).Distinct(PathComparer.Default).ToArray(),
 			registry.UtcNow);
-		registry.Write(record);
+		registry.TryWrite(record);
 		heartbeat = RunHeartbeatAsync();
 	}
 
@@ -244,7 +291,7 @@ public sealed class LiveSessionWriter : IAsyncDisposable, IDisposable
 				ClientVersion = version,
 				HeartbeatUtc = registry.UtcNow
 			};
-			registry.Write(record);
+			registry.TryWrite(record);
 		}
 	}
 
@@ -255,7 +302,7 @@ public sealed class LiveSessionWriter : IAsyncDisposable, IDisposable
 			if (Volatile.Read(ref disposed) != 0)
 				return;
 			record = record with { HeartbeatUtc = registry.UtcNow };
-			registry.Write(record);
+			registry.TryWrite(record);
 		}
 	}
 

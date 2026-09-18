@@ -143,11 +143,55 @@ public sealed class DocumentationAndPackagingContractTests
 		var normalizedCommandLine = Regex.Replace(commandLine, @"\s+", " ");
 
 		Assert.Contains("Checked nodes are focus", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 16", server, StringComparison.Ordinal);
-		Assert.Contains("pack built at revision 14", server, StringComparison.Ordinal);
-		Assert.Contains("live context across WSL is not supported yet", server, StringComparison.Ordinal);
+		string[] liveContextOutputContracts =
+		[
+			"[Live context] <path> is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.",
+			"[Live context] revision 16 · 128 files selected in the window",
+			"[Live context] revision 16 · 128 files selected in the window · root project-name",
+			"[Live context] changed since revision 14: +docs/api, +tests, -src/legacy",
+			"[Live context] changed since revision 14: +docs/api, +tests, -src/legacy and 4 more",
+			"[Live context] changed since revision 14: selection settings changed",
+			"[Live context] changed since revision 14: -all, +docs/api, +tests",
+			"[Live context] changed since revision 14: -src/legacy, +all",
+			"[Live context] no window selection saved for this root; using server defaults.",
+			"[Live context] no window selection saved for this root; using server defaults. If the DevProjex window runs on Windows, live context across WSL is not supported yet.",
+			"[Live context] the window selects no files; tick files in the DevProjex window.",
+			"[Live context] saved window selection could not be read; using revision 16. Retry this call.",
+			"[Live context] pack built at revision 14.",
+			"[Live context] pack built at revision 14; window is at revision 16. Call pack_context again to include the current selection."
+		];
+		foreach (var outputContract in liveContextOutputContracts)
+			Assert.Contains(outputContract, server, StringComparison.Ordinal);
+		Assert.Contains("including an error result", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("latest plan built for that root", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("Before the first plan is built, the count is `0`", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("locked, malformed, otherwise unreadable", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("unsupported future schema", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("no usable backup is available", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("A usable backup initializes revision 1 instead", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("server defaults at revision 1", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("an empty array selects nothing", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains(
+			"Both surfaces display null and an empty array as an unchecked tree",
+			normalizedProfiles,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Desktop and Terminal Workspace do not produce an empty array",
+			normalizedProfiles,
+			StringComparison.Ordinal);
+		Assert.Contains("selectedPathsSemanticsVersion: 1", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains("existing, fully qualified directory", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains("not a supported user setting", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains(
+			"In a batched read, that range is reported as `unavailable — outside effective selection`",
+			normalizedServer,
+			StringComparison.Ordinal);
 		Assert.Contains("writes the latest frontier after two seconds", normalizedTerminal, StringComparison.Ordinal);
+		Assert.Contains(
+			"A missing or null frontier starts with no check marks",
+			normalizedTerminal,
+			StringComparison.Ordinal);
+		Assert.Contains("Below 80 columns the compact status shows only `Live context`", normalizedTerminal, StringComparison.Ordinal);
 		Assert.Contains("mcp [claude-code\\|codex\\|json]", terminal, StringComparison.Ordinal);
 		Assert.Contains("devprojex mcp connect", normalizedCommandLine, StringComparison.Ordinal);
 		Assert.Contains("moving that file requires copying the fragment again", normalizedCommandLine, StringComparison.Ordinal);

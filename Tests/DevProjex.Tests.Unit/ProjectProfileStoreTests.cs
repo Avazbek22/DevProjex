@@ -517,6 +517,24 @@ public sealed class ProjectProfileStoreTests
 	}
 
 	[Fact]
+	public void SaveProfile_ProjectPathWithUnicodeAndSpacesRoundTrips()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("проект с пробелами");
+		var store = CreateStore(temporary.Path);
+		var profile = new ProjectSelectionProfile(
+			SelectedRootFolders: ["исходники"],
+			SelectedExtensions: [".cs"],
+			SelectedIgnoreOptions: [],
+			SelectedPaths: ["исходники/Главный файл.cs"]);
+
+		store.SaveProfile(projectPath, profile);
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Equal(["исходники/Главный файл.cs"], loaded.SelectedPaths);
+	}
+
+	[Fact]
 	public void SaveProfile_TwoDifferentProjects_DoNotMixSelections()
 	{
 		var tempRoot = CreateTempDirectory();

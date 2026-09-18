@@ -61,19 +61,24 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
 
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
-        PendingSelectionWrite? pending;
+        CancellationTokenSource? delayCancellation;
         lock (_sync)
         {
-            _delayCts?.Cancel();
-            _delayCts?.Dispose();
+            delayCancellation = _delayCts;
             _delayCts = null;
-            pending = _pending;
-            _pending = null;
             _version = checked(_version + 1);
         }
 
-        if (pending is not null)
-            await PersistAsync(pending, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            delayCancellation?.Cancel();
+        }
+        finally
+        {
+            delayCancellation?.Dispose();
+        }
+
+        await PersistPendingAsync(expectedVersion: null, cancellationToken).ConfigureAwait(false);
     }
 
     public bool Flush(TimeSpan timeout)
@@ -114,22 +119,9 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
             return;
         }
 
-        PendingSelectionWrite? pending;
-        lock (_sync)
-        {
-            if (_disposed != 0 || version != _version || _pending?.Version != version)
-                return;
-
-            pending = _pending;
-            _pending = null;
-        }
-
-        if (pending is null)
-            return;
-
         try
         {
-            await PersistAsync(pending, cancellationToken).ConfigureAwait(false);
+            await PersistPendingAsync(version, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -142,17 +134,35 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
         }
     }
 
-    private async Task PersistAsync(
-        PendingSelectionWrite pending,
+    private async Task PersistPendingAsync(
+        long? expectedVersion,
         CancellationToken cancellationToken)
     {
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            PendingSelectionWrite? pending;
+            lock (_sync)
+            {
+                pending = _pending;
+                if (_disposed != 0 ||
+                    pending is null ||
+                    (expectedVersion.HasValue && pending.Version != expectedVersion.Value))
+                {
+                    return;
+                }
+            }
+
             await _persistAsync(
                 pending.ProjectPath,
                 pending.SelectedPaths,
                 cancellationToken).ConfigureAwait(false);
+
+            lock (_sync)
+            {
+                if (_pending?.Version == pending.Version)
+                    _pending = null;
+            }
         }
         finally
         {

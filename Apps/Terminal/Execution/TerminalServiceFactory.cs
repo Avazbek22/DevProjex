@@ -1,4 +1,5 @@
 using DevProjex.Terminal.Tui;
+using DevProjex.Terminal.CommandLine;
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.Secrets;
@@ -10,6 +11,20 @@ public sealed class TerminalServiceFactory(
 	Func<string>? appDataPathProvider = null,
 	TerminalHostCapabilities? hostCapabilities = null)
 {
+	public static TerminalServiceFactory FromEnvironment(
+		IReadOnlyDictionary<string, string?> variables,
+		TerminalHostCapabilities hostCapabilities)
+	{
+		ArgumentNullException.ThrowIfNull(variables);
+		ArgumentNullException.ThrowIfNull(hostCapabilities);
+		variables.TryGetValue(InvocationEnvironment.InternalDataRootVariable, out var value);
+		var dataRoot = UserDataPathResolver.ResolveInternalDataRoot(value);
+		if (dataRoot is null)
+			return new TerminalServiceFactory(hostCapabilities: hostCapabilities);
+
+		return new TerminalServiceFactory(() => dataRoot, hostCapabilities);
+	}
+
 	private readonly Func<AppLanguage, TerminalServices>? _servicesProvider;
 	private readonly Action? _fullServiceCreationObserver;
 	private readonly IGitRepositoryService? _gitRepositoryService;

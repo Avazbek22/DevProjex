@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using DevProjex.Application.Selection;
 
@@ -11,7 +12,6 @@ internal sealed class McpLiveContextState(
 	private static readonly TimeSpan DefaultLookupTimeout = TimeSpan.FromMilliseconds(250);
 	private readonly AsyncLocal<InvocationState?> invocation = new();
 	private readonly Dictionary<string, RootState> states = new(PathComparer.Default);
-	private readonly Dictionary<string, StoredResultState> storedResults = new(StringComparer.Ordinal);
 	private readonly object sync = new();
 	private readonly TimeSpan profileLookupTimeout = lookupTimeout ?? DefaultLookupTimeout;
 
@@ -24,7 +24,45 @@ internal sealed class McpLiveContextState(
 
 	public McpLiveProfileSnapshot ReadProfile(string projectRoot)
 	{
+		var snapshot = ReadCurrentProfile(projectRoot);
+		return snapshot with
+		{
+			Profile = snapshot.Profile is null
+				? null
+				: ProjectSelectionProfileBuilder.Clone(snapshot.Profile)
+		};
+	}
+
+	public int RefreshProfile(string projectRoot) => ReadCurrentProfile(projectRoot).Revision;
+
+	public bool HasSelectedFileCount(string projectRoot, int revision)
+	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
+		lock (sync)
+			return states.TryGetValue(normalizedRoot, out var state) &&
+				   state.Revision == revision &&
+				   state.SelectedFileCount.HasValue;
+	}
+
+	private McpLiveProfileSnapshot ReadCurrentProfile(string projectRoot)
+	{
+		var normalizedRoot = PathUtility.Normalize(projectRoot);
+		var active = invocation.Value;
+		if (active is not null)
+		{
+			return active.Profiles.GetOrAdd(
+				normalizedRoot,
+				root => new Lazy<McpLiveProfileSnapshot>(
+					() => ReadProfileFromStore(root, active),
+					LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+		}
+		return ReadProfileFromStore(normalizedRoot, active: null);
+	}
+
+	private McpLiveProfileSnapshot ReadProfileFromStore(
+		string normalizedRoot,
+		InvocationState? active)
+	{
 		var configuredRoot = roots.ResolveConfiguredRoot(normalizedRoot);
 		var store = profileStore();
 		var lookup = store.LookupProfile(configuredRoot, profileLookupTimeout);
@@ -42,12 +80,13 @@ internal sealed class McpLiveContextState(
 			}
 
 			ApplyLookup(state, lookup);
-			invocation.Value?.Roots.Add(normalizedRoot);
-			return new McpLiveProfileSnapshot(
-				state.Profile is null ? null : ProjectSelectionProfileBuilder.Clone(state.Profile),
+			active?.Roots.Add(normalizedRoot);
+			var snapshot = new McpLiveProfileSnapshot(
+				state.Profile,
 				state.Revision,
 				state.IsMissing,
 				state.ReadFailure is not null);
+			return snapshot;
 		}
 	}
 
@@ -55,12 +94,18 @@ internal sealed class McpLiveContextState(
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
+		var active = invocation.Value;
 		lock (sync)
 		{
-			if (!states.TryGetValue(normalizedRoot, out var state))
+			if (!states.TryGetValue(normalizedRoot, out var state) ||
+				active is null ||
+				!active.Profiles.TryGetValue(normalizedRoot, out var profile) ||
+				!profile.IsValueCreated ||
+				profile.Value is not { } current ||
+				current.Revision != state.Revision)
 				return;
 			state.SelectedFileCount = plan.IncludedFiles.Count;
-			invocation.Value?.Roots.Add(normalizedRoot);
+			active.Roots.Add(normalizedRoot);
 		}
 	}
 
@@ -75,40 +120,38 @@ internal sealed class McpLiveContextState(
 	public bool IsOutsideSelection(string projectRoot, string relativePath) =>
 		invocation.Value?.OutsidePaths.Contains(BuildPathIdentity(projectRoot, relativePath)) == true;
 
-	public void RecordPackBuild(string projectRoot, string? packId)
+	public McpStoredResultContext? RecordPackBuild(string projectRoot, string? packId)
 	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
 		lock (sync)
 		{
 			if (!states.TryGetValue(normalizedRoot, out var state))
-				return;
-			if (!string.IsNullOrEmpty(packId))
-				storedResults[packId] = new StoredResultState(normalizedRoot, state.Revision);
+				return null;
 			invocation.Value?.AdditionalNotices.Add(
 				$"[Live context] pack built at revision {state.Revision}.");
+			return string.IsNullOrEmpty(packId)
+				? null
+				: new McpStoredResultContext(normalizedRoot, state.Revision);
 		}
 	}
 
-	public void RecordStoredResult(string projectRoot, string packId)
+	public McpStoredResultContext? RecordStoredResult(string projectRoot)
 	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
 		lock (sync)
 		{
-			if (states.TryGetValue(normalizedRoot, out var state))
-				storedResults[packId] = new StoredResultState(normalizedRoot, state.Revision);
+			return states.TryGetValue(normalizedRoot, out var state)
+				? new McpStoredResultContext(normalizedRoot, state.Revision)
+				: null;
 		}
 	}
 
-	public void RefreshStoredResult(string packId)
+	public void RefreshStoredResult(McpStoredResultContext? stored)
 	{
-		StoredResultState stored;
-		lock (sync)
-		{
-			if (!storedResults.TryGetValue(packId, out stored!))
-				return;
-		}
+		if (stored is null)
+			return;
 
-		var current = ReadProfile(stored.Root);
+		var current = ReadCurrentProfile(stored.Root);
 		if (current.Revision == stored.Revision)
 			return;
 		invocation.Value?.AdditionalNotices.Add(
@@ -123,7 +166,7 @@ internal sealed class McpLiveContextState(
 		if (active is { Roots.Count: 0 })
 		{
 			foreach (var root in roots.Roots)
-				_ = ReadProfile(root);
+				_ = ReadCurrentProfile(root);
 		}
 		var observedRoots = active is { Roots.Count: > 0 }
 			? active.Roots.ToArray()
@@ -153,17 +196,22 @@ internal sealed class McpLiveContextState(
 
 	private static void ApplyLookup(RootState state, ProjectProfileLookupResult lookup)
 	{
+		if (lookup.RecoveryStatus is not null && state.HasSuccessfulSnapshot)
+		{
+			state.ReadFailure = lookup.RecoveryStatus;
+			return;
+		}
 		if (lookup.Status is ProjectProfileLookupStatus.Found && lookup.Profile is not null)
 		{
 			var profile = ProjectSelectionProfileBuilder.Clone(lookup.Profile);
 			ApplySuccessfulSnapshot(state, profile, isMissing: false);
-			state.ReadFailure = null;
+			state.ReadFailure = lookup.RecoveryStatus;
 			return;
 		}
 		if (lookup.Status == ProjectProfileLookupStatus.Missing)
 		{
 			ApplySuccessfulSnapshot(state, profile: null, isMissing: true);
-			state.ReadFailure = null;
+			state.ReadFailure = lookup.RecoveryStatus;
 			return;
 		}
 
@@ -196,15 +244,17 @@ internal sealed class McpLiveContextState(
 			var previousRevision = state.Revision;
 			state.Revision++;
 			state.SelectedFileCount = null;
+			var frontierChanges = BuildFrontierChanges(state.Frontier, frontier);
 			state.PendingChange = new PendingChange(
 				previousRevision,
-				BuildFrontierChanges(state.Frontier, frontier));
+				frontierChanges.Count == 0 ? ["selection settings changed"] : frontierChanges);
 			state.Fingerprint = fingerprint;
 			state.Frontier = frontier;
 		}
 
 		state.Profile = profile;
 		state.IsMissing = isMissing;
+		state.HasSuccessfulSnapshot = true;
 	}
 
 	private static string BuildFingerprint(ProjectSelectionProfile profile)
@@ -341,6 +391,7 @@ internal sealed class McpLiveContextState(
 		public string[]? Frontier { get; set; }
 		public ProjectSelectionProfile? Profile { get; set; }
 		public bool IsMissing { get; set; }
+		public bool HasSuccessfulSnapshot { get; set; }
 		public ProjectProfileLookupStatus? ReadFailure { get; set; }
 		public int? SelectedFileCount { get; set; }
 		public PendingChange? PendingChange { get; set; }
@@ -348,6 +399,8 @@ internal sealed class McpLiveContextState(
 
 	private sealed class InvocationState
 	{
+		public ConcurrentDictionary<string, Lazy<McpLiveProfileSnapshot>> Profiles { get; } =
+			new(PathComparer.Default);
 		public HashSet<string> Roots { get; } = new(PathComparer.Default);
 		public HashSet<string> OutsidePaths { get; } = new(StringComparer.Ordinal);
 		public List<string> AdditionalNotices { get; } = [];
@@ -365,7 +418,6 @@ internal sealed class McpLiveContextState(
 	}
 
 	private sealed record PendingChange(int PreviousRevision, IReadOnlyList<string> Changes);
-	private sealed record StoredResultState(string Root, int Revision);
 }
 
 internal sealed record McpLiveProfileSnapshot(

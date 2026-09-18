@@ -1094,16 +1094,20 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 	}
 
-	private static IReadOnlyDictionary<string, string> CreateSharedSettingsEnvironment(
-		string root) => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+	private static IReadOnlyDictionary<string, string> CreateSharedSettingsEnvironment(string root)
 	{
-		["DEVPROJEX_INTERNAL_DATA_ROOT"] = Path.Combine(root, "devprojex"),
-		["XDG_CONFIG_HOME"] = Path.Combine(root, "config"),
-		["XDG_DATA_HOME"] = Path.Combine(root, "data"),
-		["XDG_CACHE_HOME"] = Path.Combine(root, "cache"),
-		["APPDATA"] = Path.Combine(root, "roaming"),
-		["LOCALAPPDATA"] = Path.Combine(root, "local")
-	};
+		var dataRoot = Path.Combine(root, "devprojex");
+		Directory.CreateDirectory(dataRoot);
+		return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+		{
+			["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot,
+			["XDG_CONFIG_HOME"] = Path.Combine(root, "config"),
+			["XDG_DATA_HOME"] = Path.Combine(root, "data"),
+			["XDG_CACHE_HOME"] = Path.Combine(root, "cache"),
+			["APPDATA"] = Path.Combine(root, "roaming"),
+			["LOCALAPPDATA"] = Path.Combine(root, "local")
+		};
+	}
 
 	private static void Verify(string name, string screen, string projectPath) =>
 		TerminalScreenSnapshot.Verify(
