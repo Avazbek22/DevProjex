@@ -597,6 +597,57 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
 	[AvaloniaFact]
+	public async Task Startup_WithPersistentlyLockedProfile_CompletesWithNoFilesSelected()
+	{
+		var store = new ControllableProjectProfileStore { IsUnavailable = true };
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { ProjectProfileStore = store });
+
+		try
+		{
+			Assert.True(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+			Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
+			Assert.Equal(4, store.LookupCount);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task Refresh_WithLockedProfile_PreservesTheCurrentTreeSelection()
+	{
+		var store = new ControllableProjectProfileStore
+		{
+			Profile = new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])
+		};
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { ProjectProfileStore = store });
+
+		try
+		{
+			var selectedPaths = UiTestDriver.GetCheckedTreePaths(window);
+			Assert.EndsWith(
+				$"{Path.DirectorySeparatorChar}src",
+				Assert.Single(selectedPaths),
+				StringComparison.OrdinalIgnoreCase);
+			store.IsUnavailable = true;
+
+			await UiTestDriver.RefreshProjectAsync(window);
+
+			Assert.Equal(selectedPaths, UiTestDriver.GetCheckedTreePaths(window));
+			Assert.Equal(5, store.LookupCount);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ResetData_KeepsTheCurrentTreeAndReopensWithTheDefaultSelection()
 	{
 		var appDataPath = Path.Combine(
@@ -1412,6 +1463,48 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         Assert.NotNull(method);
         method.Invoke(window, []);
     }
+
+	private sealed class ControllableProjectProfileStore : IProjectProfileStore
+	{
+		private int _lookupCount;
+
+		public bool IsUnavailable { get; set; }
+		public ProjectSelectionProfile? Profile { get; set; }
+		public int LookupCount => Volatile.Read(ref _lookupCount);
+
+		public bool EnsureStorageExists() => true;
+
+		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout)
+		{
+			Interlocked.Increment(ref _lookupCount);
+			return IsUnavailable
+				? new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.TemporarilyUnavailable,
+					null)
+				: Profile is null
+					? new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null)
+					: new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, Profile);
+		}
+
+		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+		{
+			profile = null!;
+			return false;
+		}
+
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile) => false;
+
+		public bool TrySaveProfile(
+			string localProjectPath,
+			ProjectSelectionProfile profile,
+			DateTimeOffset updatedUtc) => false;
+
+		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		{
+		}
+
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
+	}
 
 	private static T GetRequiredPrivateField<T>(MainWindow window, string fieldName)
 	{

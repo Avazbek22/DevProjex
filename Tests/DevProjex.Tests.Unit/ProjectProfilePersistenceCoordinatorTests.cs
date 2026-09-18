@@ -370,7 +370,7 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 	}
 
 	[Fact]
-	public async Task TemporaryProfileLookup_BlocksPersistUntilAProfileLoadsSuccessfully()
+	public async Task TemporaryProfileLookup_ReloadsBeforePersisting()
 	{
 		const string projectPath = @"C:\Project";
 		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
@@ -394,14 +394,125 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 				projectPath,
 				TestContext.Current.CancellationToken);
 			await persistence.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);
-			var found = await persistence.LoadSnapshotAsync(
-				projectPath,
-				TestContext.Current.CancellationToken);
-			await persistence.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);
 
 			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, unavailable.Status);
-			Assert.True(found.HasProfile);
+			Assert.Equal(2, store.LookupCount);
 			Assert.Equal(1, store.SaveCount);
+		}
+	}
+
+	[Fact]
+	public async Task ProfileLoadRetry_StopsAfterTheConfiguredAttempts()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			var store = new StatusProfileStore(
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.TemporarilyUnavailable, null),
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.TemporarilyUnavailable, null),
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.TemporarilyUnavailable, null));
+			var observedDelays = new List<TimeSpan>();
+			var retryDelays = new[]
+			{
+				TimeSpan.FromMilliseconds(10),
+				TimeSpan.FromMilliseconds(20)
+			};
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession,
+				profileLoadDelay: (delay, _) =>
+				{
+					observedDelays.Add(delay);
+					return Task.CompletedTask;
+				},
+				profileLoadRetryDelays: retryDelays);
+
+			var snapshot = await persistence.LoadSnapshotWithRetryAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, snapshot.Status);
+			Assert.Equal(3, store.LookupCount);
+			Assert.Equal(retryDelays, observedDelays.ToArray());
+		}
+	}
+
+	[Fact]
+	public async Task ProfileLoadRetry_ReturnsTheFirstAvailableSnapshot()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			var profile = new ProjectSelectionProfile([], [".cs"], [], SelectedPaths: ["src"]);
+			var store = new StatusProfileStore(
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.TemporarilyUnavailable, null),
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, profile));
+			var delayCount = 0;
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession,
+				profileLoadDelay: (_, _) =>
+				{
+					Interlocked.Increment(ref delayCount);
+					return Task.CompletedTask;
+				},
+				profileLoadRetryDelays: [TimeSpan.FromMilliseconds(10)]);
+
+			var snapshot = await persistence.LoadSnapshotWithRetryAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+
+			Assert.True(snapshot.HasProfile);
+			Assert.Equal(["src"], snapshot.Profile!.SelectedPaths);
+			Assert.Equal(2, store.LookupCount);
+			Assert.Equal(1, delayCount);
+		}
+	}
+
+	[Fact]
+	public async Task SelectionPersist_RecoversAfterTheInitialProfileLockClears()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+			var existing = new ProjectSelectionProfile([], [".json"], [], SelectedPaths: ["old"]);
+			var store = new StatusProfileStore(
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.TemporarilyUnavailable, null),
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.TemporarilyUnavailable, null),
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, existing));
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession,
+				profileLoadDelay: static (_, _) => Task.CompletedTask,
+				profileLoadRetryDelays: [TimeSpan.Zero]);
+
+			var unavailable = await persistence.LoadSnapshotWithRetryAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			await persistence.PersistSelectedPathsAsync(
+				projectPath,
+				["src"],
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, unavailable.Status);
+			Assert.Equal(3, store.LookupCount);
+			Assert.Equal(1, store.SaveCount);
+			Assert.Equal([".json"], store.SavedProfile!.SelectedExtensions);
+			Assert.Equal(["src"], store.SavedProfile.SelectedPaths);
 		}
 	}
 
@@ -967,14 +1078,20 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 	{
 		private readonly Queue<ProjectProfileLookupResult> _lookups = new(lookups);
 
+		public int LookupCount { get; private set; }
 		public int SaveCount { get; private set; }
+		public ProjectSelectionProfile? SavedProfile { get; private set; }
 
-		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout) =>
-			_lookups.Dequeue();
+		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout)
+		{
+			LookupCount++;
+			return _lookups.Dequeue();
+		}
 
 		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
 		{
 			SaveCount++;
+			SavedProfile = ProjectSelectionProfileBuilder.Clone(profile);
 			return true;
 		}
 

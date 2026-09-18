@@ -17,10 +17,22 @@ public sealed class ProjectProfilePersistenceCoordinator(
     IProjectProfileStore profileStore,
     SecretRedactionSession secretRedactionSession,
     Func<string?>? activeProjectPathProvider = null,
-    Func<IReadOnlyCollection<string>?>? selectedPathsProvider = null)
+    Func<IReadOnlyCollection<string>?>? selectedPathsProvider = null,
+	Func<TimeSpan, CancellationToken, Task>? profileLoadDelay = null,
+	IReadOnlyList<TimeSpan>? profileLoadRetryDelays = null)
 {
     private static readonly TimeSpan GuiLookupTimeout = TimeSpan.FromMilliseconds(200);
+	private static readonly TimeSpan[] DefaultProfileLoadRetryDelays =
+	[
+		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(100)),
+		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(200)),
+		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(400))
+	];
     private readonly PendingProjectProfileWriteQueue _pendingWrites = new(profileStore);
+	private readonly Func<TimeSpan, CancellationToken, Task> _profileLoadDelay =
+		profileLoadDelay ?? Task.Delay;
+	private readonly IReadOnlyList<TimeSpan> _profileLoadRetryDelays =
+		profileLoadRetryDelays ?? DefaultProfileLoadRetryDelays;
 	private readonly PersistentSecretMarkDeltaWriter? _markWriter =
 		profileStore is IPersistentSecretMarkStore markStore
 			? new PersistentSecretMarkDeltaWriter(markStore)
@@ -47,7 +59,8 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		string? currentPath,
 		CancellationToken cancellationToken = default)
 	{
-		if (!CanPersist(currentPath) || !selectionCoordinator.IsSelectionStateCompleteForPersistence)
+		var readiness = await PreparePersistenceAsync(currentPath, cancellationToken).ConfigureAwait(false);
+		if (!readiness.CanPersist || !selectionCoordinator.IsSelectionStateCompleteForPersistence)
             return;
 
         var profile = CaptureCurrentProfile(currentPath!);
@@ -66,10 +79,16 @@ public sealed class ProjectProfilePersistenceCoordinator(
         IReadOnlyCollection<string>? selectedPaths,
         CancellationToken cancellationToken = default)
     {
-        if (!CanPersist(currentPath))
+		var readiness = await PreparePersistenceAsync(currentPath, cancellationToken).ConfigureAwait(false);
+		if (!readiness.CanPersist)
             return;
 
-        var profile = CaptureProfileForSelectionWrite(currentPath!, selectedPaths);
+		var profile = readiness.RecoveredSnapshot?.Profile is { } recoveredProfile
+			? ProjectSelectionProfileBuilder.Clone(recoveredProfile) with
+			{
+				SelectedPaths = selectedPaths?.ToArray()
+			}
+			: CaptureProfileForSelectionWrite(currentPath!, selectedPaths);
         if (profile is null)
             return;
 
@@ -89,7 +108,8 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(delta);
-		if (!CanPersist(currentPath) || _markWriter is null)
+		var readiness = await PreparePersistenceAsync(currentPath, cancellationToken).ConfigureAwait(false);
+		if (!readiness.CanPersist || _markWriter is null)
 		{
 			return new PersistentSecretMarkWriteResult(
 				PersistentSecretMarkStoreStatus.InvalidProjectPath,
@@ -157,7 +177,12 @@ public sealed class ProjectProfilePersistenceCoordinator(
 			cancellationToken.ThrowIfCancellationRequested();
 			if (result.Status is not (ProjectProfileLookupStatus.Found or ProjectProfileLookupStatus.Missing))
 			{
-				CompleteLoad(normalizedPath, attempt.Revision, result.Status, successfulSnapshot: null);
+				CompleteLoad(
+					normalizedPath,
+					attempt.Revision,
+					result.Status,
+					successfulSnapshot: null,
+					retryPersistenceLoad: result.Status == ProjectProfileLookupStatus.TemporarilyUnavailable);
 				return new ProjectProfileLoadSnapshot(result.Status, null, null);
 			}
 			if (result.RecoveryStatus is not null && attempt.Previous.SuccessfulSnapshot is { } previousSnapshot)
@@ -205,6 +230,27 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		}
     }
 
+	public async Task<ProjectProfileLoadSnapshot> LoadSnapshotWithRetryAsync(
+		string? currentPath,
+		CancellationToken cancellationToken)
+	{
+		ProjectProfileLoadSnapshot snapshot = default;
+		for (var attempt = 0; attempt <= _profileLoadRetryDelays.Count; attempt++)
+		{
+			snapshot = await LoadSnapshotAsync(currentPath, cancellationToken).ConfigureAwait(false);
+			if (snapshot.Status != ProjectProfileLookupStatus.TemporarilyUnavailable ||
+			    attempt == _profileLoadRetryDelays.Count)
+			{
+				return snapshot;
+			}
+
+			await _profileLoadDelay(_profileLoadRetryDelays[attempt], cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		return snapshot;
+	}
+
 	private async ValueTask<PersistentSecretMarksLoadResult> LoadPersistentMarksAsync(
 		string normalizedPath,
 		ProjectSelectionProfile? profile,
@@ -243,11 +289,34 @@ public sealed class ProjectProfilePersistenceCoordinator(
         return !string.IsNullOrWhiteSpace(currentPath);
     }
 
-	private bool CanPersist(string? currentPath)
+	private async Task<ProfilePersistenceReadiness> PreparePersistenceAsync(
+		string? currentPath,
+		CancellationToken cancellationToken)
 	{
 		if (!IsApplicable(currentPath))
-			return false;
-		return CanPersistNormalizedPath(Path.GetFullPath(currentPath!));
+			return default;
+
+		var normalizedPath = Path.GetFullPath(currentPath!);
+		if (CanPersistNormalizedPath(normalizedPath))
+			return new ProfilePersistenceReadiness(true, null);
+		if (!ShouldRetryProfileLoadForPersistence(normalizedPath))
+			return default;
+
+		var snapshot = await LoadSnapshotWithRetryAsync(normalizedPath, cancellationToken)
+			.ConfigureAwait(false);
+		return snapshot.Status is ProjectProfileLookupStatus.Found or ProjectProfileLookupStatus.Missing &&
+		       CanPersistNormalizedPath(normalizedPath)
+			? new ProfilePersistenceReadiness(true, snapshot)
+			: default;
+	}
+
+	private bool ShouldRetryProfileLoadForPersistence(string normalizedPath)
+	{
+		lock (_loadStateSync)
+		{
+			return _loadStates.TryGetValue(normalizedPath, out var state) &&
+			       state.RetryPersistenceLoad;
+		}
 	}
 
 	private bool CanPersistNormalizedPath(string normalizedPath)
@@ -269,7 +338,8 @@ public sealed class ProjectProfilePersistenceCoordinator(
 			_loadStates[normalizedPath] = new ProfileLoadState(
 				ProjectProfileLookupStatus.TemporarilyUnavailable,
 				revision,
-				previous.SuccessfulSnapshot);
+				previous.SuccessfulSnapshot,
+				RetryPersistenceLoad: false);
 			return new ProfileLoadAttempt(revision, hadPrevious, previous);
 		}
 	}
@@ -278,7 +348,8 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		string normalizedPath,
 		long revision,
 		ProjectProfileLookupStatus status,
-		ProjectProfileLoadSnapshot? successfulSnapshot)
+		ProjectProfileLoadSnapshot? successfulSnapshot,
+		bool retryPersistenceLoad = false)
 	{
 		lock (_loadStateSync)
 		{
@@ -288,7 +359,8 @@ public sealed class ProjectProfilePersistenceCoordinator(
 				_loadStates[normalizedPath] = new ProfileLoadState(
 					status,
 					revision,
-					successfulSnapshot ?? current.SuccessfulSnapshot);
+					successfulSnapshot ?? current.SuccessfulSnapshot,
+					retryPersistenceLoad);
 			}
 		}
 	}
@@ -312,11 +384,15 @@ public sealed class ProjectProfilePersistenceCoordinator(
 	private readonly record struct ProfileLoadState(
 		ProjectProfileLookupStatus Status,
 		long Revision,
-		ProjectProfileLoadSnapshot? SuccessfulSnapshot);
+		ProjectProfileLoadSnapshot? SuccessfulSnapshot,
+		bool RetryPersistenceLoad);
 	private readonly record struct ProfileLoadAttempt(
 		long Revision,
         bool HadPrevious,
         ProfileLoadState Previous);
+	private readonly record struct ProfilePersistenceReadiness(
+		bool CanPersist,
+		ProjectProfileLoadSnapshot? RecoveredSnapshot);
 
     private ProjectSelectionProfile? CaptureProfileForSelectionWrite(
         string currentPath,
