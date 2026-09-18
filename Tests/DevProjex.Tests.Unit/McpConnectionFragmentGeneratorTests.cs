@@ -329,7 +329,7 @@ public sealed class McpConnectionFragmentGeneratorTests
 							  "[Console]::Out.Write((ConvertTo-Json -Compress -Depth 4 -InputObject $results))";
 		var command = fragments[0].Split(' ', 2, StringSplitOptions.RemoveEmptyEntries)[0];
 		var result = await RunShellAsync(
-			"powershell.exe",
+			"pwsh",
 			["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
 			JsonSerializer.Serialize(new { command, fragments }));
 		return JsonSerializer.Deserialize<string[][]>(result) ?? [];
@@ -370,8 +370,22 @@ public sealed class McpConnectionFragmentGeneratorTests
 							throw new InvalidOperationException($"Could not start {executable}.");
 		var standardOutput = process.StandardOutput.ReadToEndAsync();
 		var standardError = process.StandardError.ReadToEndAsync();
-		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-		await process.WaitForExitAsync(timeout.Token);
+		try
+		{
+			await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		}
+		catch (OperationCanceledException)
+		{
+			try
+			{
+				if (!process.HasExited)
+					process.Kill(entireProcessTree: true);
+			}
+			catch (InvalidOperationException)
+			{
+			}
+			throw;
+		}
 		var error = await standardError;
 		Assert.True(process.ExitCode == 0, $"{executable} exited with {process.ExitCode}: {error}");
 		return await standardOutput;
