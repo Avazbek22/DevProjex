@@ -255,7 +255,7 @@ inline ghost suffix as soon as a token can be completed:
 | `update` | get updates for the cloned repository |
 | `recent` | open recent projects and repositories |
 | `profile save [name]` | save the current settings as a portable profile |
-| `mcp [claude-code\|codex\|json] [live\|standard]` | show a connection fragment for the open project; defaults to `claude-code live` |
+| `mcp connect <claude-code\|codex\|cursor\|vscode\|json>` | connect the selected MCP client to the open project; `json` shows the manual configuration |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
 | `diagnostics` | show every diagnostic in a scrollable overlay |
@@ -286,6 +286,14 @@ available, an interactive terminal receives a complete OSC 52 clipboard sequence
 Oversized OSC 52 payloads are never truncated; the command reports an error and
 directs the user to `export` instead. A view or format supplied to `copy` applies
 only to that operation.
+
+`mcp connect` uses the shared application **Live context** preference, which is on
+by default. Turning that preference off makes subsequent TUI connections use the
+standard MCP server mode. The connection runs asynchronously; its localized result
+appears both in the workspace status line and in a scrollable output panel. A
+missing command-line client or another failure shows the same reason together with
+the manual fallback configuration. Cursor and VS Code update their project files;
+the other client behaviors match `devprojex mcp connect`.
 
 Left/Right, Home/End, Backspace, and Delete edit the line. Esc cancels it,
 Enter executes it, and Up/Down traverses command history. The newest 50 commands

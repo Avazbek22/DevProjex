@@ -4189,11 +4189,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		FocusPane(panes[nextIndex]);
 	}
 
-	private void ShowTransientStatus(string text)
+	private void ShowTransientStatus(
+		string text,
+		string schemeName = TerminalWorkspaceTheme.Success)
 	{
 		CancelTransientStatus();
 		var statusCts = _operations.Start(WorkspaceOperationKind.TransientStatus);
-		SetOperationStatus(text, TerminalWorkspaceTheme.Success);
+		SetOperationStatus(text, schemeName);
 		TrackOperation(
 			WorkspaceOperationKind.TransientStatus,
 			statusCts,

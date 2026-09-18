@@ -2,6 +2,7 @@ using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.TerminalCommands;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -69,6 +70,11 @@ public sealed class TerminalServiceFactoryTests
 			Path.Combine(dataRoot, "DevProjex", "project-profiles.json"),
 			Assert.IsType<ProjectProfileStore>(services.LocalProfileStore).GetPath(),
 			PathComparer.Default);
+		Assert.Equal(
+			Path.Combine(dataRoot, "DevProjex", "user-settings.json"),
+			services.UserSettingsStore.GetPath(),
+			PathComparer.Default);
+		Assert.IsType<McpConnectionService>(services.McpConnectionService);
 	}
 
 	[Fact]

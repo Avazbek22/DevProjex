@@ -253,69 +253,109 @@ public sealed class DevProjexCommandTree
 
 	private Command BuildMcpConnectCommand()
 	{
-		var command = new Command("connect", "Print an MCP client connection fragment.");
+		var command = new Command("connect", L("Terminal.Command.McpConnect"));
 		var project = ProjectArgument();
 		var client = new Option<string>("--client")
 		{
-			Description = "Choose claude-code, codex, or json.",
+			Description = L("Terminal.Option.McpClient"),
 			HelpName = "CLIENT",
 			DefaultValueFactory = _ => "claude-code"
 		};
 		var mode = new Option<string>("--mode")
 		{
-			Description = "Choose live window selection or standard server behavior.",
+			Description = L("Terminal.Option.McpConnectionMode"),
 			HelpName = "live|standard",
 			DefaultValueFactory = _ => "live"
 		};
-		client.CompletionSources.Add(["claude-code", "codex", "json"]);
+		var print = new Option<bool>("--print")
+		{
+			Description = L("Terminal.Option.McpPrint")
+		};
+		client.CompletionSources.Add(["claude-code", "codex", "cursor", "vscode", "json"]);
 		mode.CompletionSources.Add(["live", "standard"]);
 		client.Validators.Add(result =>
 		{
-			if (result.GetValueOrDefault<string>() is not ("claude-code" or "codex" or "json"))
-				result.AddError("--client must be claude-code, codex, or json.");
+			if (result.GetValueOrDefault<string>() is not
+				("claude-code" or "codex" or "cursor" or "vscode" or "json"))
+			{
+				result.AddError(L("Terminal.Validation.McpClient"));
+			}
 		});
 		mode.Validators.Add(result =>
 		{
 			if (result.GetValueOrDefault<string>() is not ("live" or "standard"))
-				result.AddError("--mode must be live or standard.");
+				result.AddError(L("Terminal.Validation.McpConnectionMode"));
 		});
 		command.Arguments.Add(project);
 		command.Options.Add(client);
 		command.Options.Add(mode);
+		command.Options.Add(print);
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp connect . --client claude-code --mode live",
-			"devprojex mcp connect . --client codex --mode standard",
-			"devprojex mcp connect . --client json --mode live");
+			"devprojex mcp connect . --client cursor --mode standard",
+			"devprojex mcp connect . --client vscode --print");
 		command.SetAction((parseResult, cancellationToken) =>
 			CommandExecution.RunAsync(
 				environment,
 				_output.Get(parseResult),
 				() => RunWithServicesAsync(
 					parseResult,
-					services =>
+					async services =>
 					{
 						var executablePath = McpConnectionExecutablePathResolver.Resolve(
 							services.TerminalCommandSetupService.Probe(),
 							Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-						var fragment = McpConnectionFragmentGenerator.Generate(
+						var request = new McpConnectionRequest(
 							ParseConnectionClient(parseResult.GetValue(client)),
 							parseResult.GetValue(mode) == "live"
 								? McpConnectionMode.Live
 								: McpConnectionMode.Standard,
 							executablePath,
 							Path.GetFullPath(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory()));
-						environment.Output.WriteLine(fragment);
-						return Task.FromResult(CommandLineExitCodes.Success);
+						if (parseResult.GetValue(print))
+						{
+							environment.Output.WriteLine(
+								services.McpConnectionService.CreatePrintableConfiguration(request));
+							return CommandLineExitCodes.Success;
+						}
+
+						var result = await services.McpConnectionService
+							.ConnectAsync(request, cancellationToken)
+							.ConfigureAwait(false);
+						return WriteMcpConnectionResult(result);
 					}),
 				_localization));
 		return command;
+	}
+
+	private int WriteMcpConnectionResult(McpConnectionResult result)
+	{
+		TerminalTextEscaping.WriteSingleLine(environment.Output, result.UserMessage);
+		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
+			TerminalTextEscaping.WriteSingleLine(environment.Output, result.CommandOutput);
+		if (result.SuggestedConfigPaths is not null)
+		{
+			foreach (var path in result.SuggestedConfigPaths)
+				TerminalTextEscaping.WriteSingleLine(environment.Output, path);
+		}
+		if (!string.IsNullOrWhiteSpace(result.ManualConfiguration))
+			environment.Output.WriteLine(result.ManualConfiguration);
+
+		return result.Status is
+			McpConnectionStatus.Connected or
+			McpConnectionStatus.Updated or
+			McpConnectionStatus.ManualConfiguration
+			? CommandLineExitCodes.Success
+			: CommandLineExitCodes.RuntimeError;
 	}
 
 	private static McpConnectionClient ParseConnectionClient(string? value) => value switch
 	{
 		"claude-code" => McpConnectionClient.ClaudeCode,
 		"codex" => McpConnectionClient.Codex,
+		"cursor" => McpConnectionClient.Cursor,
+		"vscode" => McpConnectionClient.VsCode,
 		"json" => McpConnectionClient.Json,
 		_ => throw new ArgumentException("Unsupported MCP connection client.", nameof(value))
 	};

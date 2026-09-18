@@ -326,31 +326,116 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state is null)
 			return InvalidCommandExecution();
 
-		var client = command.Target switch
+		McpConnectionClient? client = command.Target switch
 		{
 			"claude-code" => McpConnectionClient.ClaudeCode,
 			"codex" => McpConnectionClient.Codex,
+			"cursor" => McpConnectionClient.Cursor,
+			"vscode" => McpConnectionClient.VsCode,
 			"json" => McpConnectionClient.Json,
-			_ => throw new ArgumentOutOfRangeException(nameof(command), command.Target, null)
+			_ => null
 		};
-		var mode = command.Text == "standard"
-			? McpConnectionMode.Standard
-			: McpConnectionMode.Live;
-		var executablePath = McpConnectionExecutablePathResolver.Resolve(
-			_services.TerminalCommandSetupService.Probe(),
-			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-		var fragment = McpConnectionFragmentGenerator.Generate(
-			client,
-			mode,
-			executablePath,
-			_state.Plan.SourceRoot);
+		if (client is null)
+			return InvalidCommandExecution();
+
+		var projectRoot = _state.Plan.SourceRoot;
+		var operationCts = ReplaceActiveOperation();
+		TrackActiveOperation(Task.Run(
+			() => ConnectMcpClientAsync(client.Value, projectRoot, operationCts),
+			CancellationToken.None));
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private async Task ConnectMcpClientAsync(
+		McpConnectionClient client,
+		string projectRoot,
+		CancellationTokenSource operationCts)
+	{
+		try
+		{
+			var useLiveContext = _services.UserSettingsStore
+				.Load()
+				.ViewSettings
+				.IsMcpLiveContextEnabled;
+			var executablePath = McpConnectionExecutablePathResolver.Resolve(
+				_services.TerminalCommandSetupService.Probe(),
+				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+			var request = new McpConnectionRequest(
+				client,
+				useLiveContext ? McpConnectionMode.Live : McpConnectionMode.Standard,
+				executablePath,
+				Path.GetFullPath(projectRoot));
+			var result = await _services.McpConnectionService
+				.ConnectAsync(request, operationCts.Token)
+				.ConfigureAwait(false);
+
+			await InvokeAsync(() =>
+			{
+				if (_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
+					_screen == TerminalWorkspaceScreen.Workspace)
+				{
+					ShowMcpConnectionResult(result);
+				}
+				return true;
+			}).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
+		{
+		}
+		catch
+		{
+			await InvokeAsync(() =>
+			{
+				if (_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
+					_screen == TerminalWorkspaceScreen.Workspace)
+				{
+					ShowMcpConnectionResult(new McpConnectionResult(
+						McpConnectionStatus.ProcessFailed,
+						L("Mcp.Connect.UnknownError")));
+				}
+				return true;
+			}).ConfigureAwait(false);
+		}
+		finally
+		{
+			ReleaseActiveOperation(operationCts);
+		}
+	}
+
+	private void ShowMcpConnectionResult(McpConnectionResult result)
+	{
+		var isExpectedOutcome = result.Succeeded ||
+			result.Status == McpConnectionStatus.ManualConfiguration;
+		var statusScheme = isExpectedOutcome
+			? TerminalWorkspaceTheme.Success
+			: TerminalWorkspaceTheme.Warning;
+		ShowTransientStatus(result.UserMessage, statusScheme);
 		ShowScrollableOverlay(
 			L("Terminal.Tui.Command.Mcp.Title"),
-			fragment,
-			TerminalWorkspaceTheme.Dialog,
+			BuildMcpConnectionOutput(result),
+			isExpectedOutcome ? TerminalWorkspaceTheme.Dialog : TerminalWorkspaceTheme.Warning,
 			preferredWidth: 96,
-			preferredHeight: 14);
-		return TerminalWorkspaceCommandExecutionResult.Deferred();
+			preferredHeight: 20);
+		ShowTransientStatus(result.UserMessage, statusScheme);
+	}
+
+	private static string BuildMcpConnectionOutput(McpConnectionResult result)
+	{
+		var sections = new List<string>
+		{
+			TerminalTextEscaping.EscapeSingleLine(result.UserMessage)
+		};
+		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
+			sections.Add(TerminalTextEscaping.EscapeSingleLine(result.CommandOutput));
+		if (result.SuggestedConfigPaths is not null)
+		{
+			sections.Add(string.Join(
+				Environment.NewLine,
+				result.SuggestedConfigPaths.Select(TerminalTextEscaping.EscapeSingleLine)));
+		}
+		if (!string.IsNullOrWhiteSpace(result.ManualConfiguration))
+			sections.Add(result.ManualConfiguration);
+		return string.Join(Environment.NewLine + Environment.NewLine, sections);
 	}
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteRefreshCommand(

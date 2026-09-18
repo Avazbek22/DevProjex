@@ -192,9 +192,13 @@ public sealed class DocumentationAndPackagingContractTests
 			normalizedTerminal,
 			StringComparison.Ordinal);
 		Assert.Contains("Below 80 columns the compact status shows only `Live context`", normalizedTerminal, StringComparison.Ordinal);
-		Assert.Contains("mcp [claude-code\\|codex\\|json]", terminal, StringComparison.Ordinal);
+		Assert.Contains(
+			"mcp connect <claude-code\\|codex\\|cursor\\|vscode\\|json>",
+			terminal,
+			StringComparison.Ordinal);
 		Assert.Contains("devprojex mcp connect", normalizedCommandLine, StringComparison.Ordinal);
-		Assert.Contains("moving that file requires copying the fragment again", normalizedCommandLine, StringComparison.Ordinal);
+		Assert.Contains("Add `--print` to make no client or project changes", normalizedCommandLine, StringComparison.Ordinal);
+		Assert.Contains("moving that file requires printing or connecting again", normalizedCommandLine, StringComparison.Ordinal);
 	}
 
 	[Fact]

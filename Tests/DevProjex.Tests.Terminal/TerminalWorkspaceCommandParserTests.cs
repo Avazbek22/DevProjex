@@ -117,29 +117,32 @@ public sealed class TerminalWorkspaceCommandParserTests
 	}
 
 	[Theory]
-	[InlineData("mcp", "claude-code", "live")]
-	[InlineData("mcp codex", "codex", "live")]
-	[InlineData("mcp json standard", "json", "standard")]
+	[InlineData("mcp connect claude-code", "claude-code")]
+	[InlineData("mcp CONNECT Codex", "codex")]
+	[InlineData("mcp connect cursor", "cursor")]
+	[InlineData("mcp connect vscode", "vscode")]
+	[InlineData("mcp connect json", "json")]
 	internal void Parse_McpConnectionUsesExplicitStableChoices(
 		string text,
-		string expectedClient,
-		string expectedMode)
+		string expectedClient)
 	{
 		var result = _parser.Parse(text, Context);
 
 		Assert.True(result.IsSuccess, result.Error?.ToString());
 		Assert.Equal(expectedClient, result.Command!.Target);
-		Assert.Equal(expectedMode, result.Command.Text);
+		Assert.Null(result.Command.Text);
 	}
 
 	[Fact]
-	public void CompletionOffersMcpClientsAndModes()
+	public void CompletionOffersMcpConnectAndClients()
 	{
-		var clients = _parser.GetCompletion("mcp ", 4, Context);
-		var modes = _parser.GetCompletion("mcp codex ", 10, Context);
+		var action = _parser.GetCompletion("mcp ", 4, Context);
+		var clients = _parser.GetCompletion("mcp connect ", 12, Context);
 
-		Assert.Equal(["claude-code", "codex", "json"], clients.Candidates.Select(static item => item.Token));
-		Assert.Equal(["live", "standard"], modes.Candidates.Select(static item => item.Token));
+		Assert.Equal(["connect"], action.Candidates.Select(static item => item.Token));
+		Assert.Equal(
+			["claude-code", "codex", "cursor", "vscode", "json"],
+			clients.Candidates.Select(static item => item.Token));
 	}
 
 	[Fact]
@@ -379,8 +382,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["recent", TerminalWorkspaceCommandVerb.Recent],
 		["profile save", TerminalWorkspaceCommandVerb.Profile],
 		["profile save \"My Name\"", TerminalWorkspaceCommandVerb.Profile],
-		["mcp", TerminalWorkspaceCommandVerb.Mcp],
-		["mcp codex live", TerminalWorkspaceCommandVerb.Mcp],
+		["mcp connect claude-code", TerminalWorkspaceCommandVerb.Mcp],
+		["mcp connect codex", TerminalWorkspaceCommandVerb.Mcp],
 		["refresh", TerminalWorkspaceCommandVerb.Refresh],
 		["language", TerminalWorkspaceCommandVerb.Language],
 		["language zh-cn", TerminalWorkspaceCommandVerb.Language],
@@ -412,8 +415,11 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["recent now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 7, (string?)null],
 		["profile", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, "save"],
 		["profile load", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "save"],
-		["mcp unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "codex"],
-		["mcp codex maybe", TerminalWorkspaceCommandErrorCode.UnknownToken, 10, "live"],
+		["mcp", TerminalWorkspaceCommandErrorCode.MissingArgument, 3, "connect"],
+		["mcp unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "connect"],
+		["mcp connect", TerminalWorkspaceCommandErrorCode.MissingArgument, 11, "codex"],
+		["mcp connect unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 12, "json"],
+		["mcp connect codex live", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 18, (string?)null],
 		["refresh now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 8, (string?)null],
 		["language klingon", TerminalWorkspaceCommandErrorCode.UnknownLanguage, 9, "en"],
 		["language ru extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 12, (string?)null],

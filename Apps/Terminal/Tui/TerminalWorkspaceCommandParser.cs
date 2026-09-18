@@ -11,8 +11,8 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] AggregateTargets = ["types", "exclusions", "content"];
 	private static readonly string[] ExportTargets = ["context", "zip", "folder"];
 	private static readonly string[] ProfileTargets = ["save"];
-	private static readonly string[] McpClients = ["claude-code", "codex", "json"];
-	private static readonly string[] McpModes = ["live", "standard"];
+	private static readonly string[] McpTargets = ["connect"];
+	private static readonly string[] McpClients = ["claude-code", "codex", "cursor", "vscode", "json"];
 	private static readonly IReadOnlyList<string> LanguageCodes = CliChoiceSets.Language.Tokens;
 
 	private static readonly IReadOnlyList<string> SetTargets =
@@ -481,15 +481,18 @@ internal sealed class TerminalWorkspaceCommandParser
 	{
 		if (tokens.Count > 3)
 			return Unexpected(tokens[3]);
-		if (tokens.Count >= 2 && !Contains(McpClients, tokens[1].Value))
-			return Unknown(tokens[1], McpClients);
-		if (tokens.Count == 3 && !Contains(McpModes, tokens[2].Value))
-			return Unknown(tokens[2], McpModes);
+		if (tokens.Count < 2)
+			return Missing(tokens, McpTargets);
+		if (!Contains(McpTargets, tokens[1].Value))
+			return Unknown(tokens[1], McpTargets);
+		if (tokens.Count < 3)
+			return Missing(tokens, McpClients);
+		if (!Contains(McpClients, tokens[2].Value))
+			return Unknown(tokens[2], McpClients);
 
 		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
 			definition,
-			Target: tokens.Count >= 2 ? Normalize(tokens[1].Value, McpClients) : "claude-code",
-			Text: tokens.Count == 3 ? Normalize(tokens[2].Value, McpModes) : "live"));
+			Target: Normalize(tokens[2].Value, McpClients)));
 	}
 
 	private static TerminalWorkspaceCommandParseResult ParseHelp(
@@ -631,8 +634,9 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandParseContext context) =>
 		argumentIndex switch
 		{
-			0 => new CompletionCandidateSource(McpClients),
-			1 => new CompletionCandidateSource(McpModes),
+			0 => new CompletionCandidateSource(McpTargets),
+			1 when tokens.Count > 1 && Contains(McpTargets, tokens[1].Value) =>
+				new CompletionCandidateSource(McpClients),
 			_ => default
 		};
 

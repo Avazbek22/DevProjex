@@ -150,14 +150,27 @@ dependency, and pack operations; filters and mandatory protection remain the
 ceiling. A directly named readable file can still be returned with an explicit
 outside-focus notice. Without `--live`, server behavior is unchanged.
 
-`devprojex mcp connect [PROJECT] --client claude-code|codex|json --mode
-live|standard` prints a ready-to-use connection fragment. The project defaults
-to the current directory, the client to `claude-code`, and the mode to `live`.
-The command embeds the absolute installed executable path: winget and portable
-ZIP installations retain it while their installation directory stays fixed;
-the Store uses `%LOCALAPPDATA%\Microsoft\WindowsApps\devprojex.exe`; a macOS
-application uses its path inside the `.app` bundle. An AppImage uses the current
-AppImage path, so moving that file requires copying the fragment again.
+`devprojex mcp connect [PROJECT] --client
+claude-code|codex|cursor|vscode|json --mode live|standard` connects the selected
+client and prints a human-readable result. The project defaults to the current
+directory, the client to `claude-code`, and the mode to `live`.
+
+Claude Code receives a project-local `claude mcp remove`/`mcp add` sequence.
+Codex receives the equivalent global `codex mcp` replacement. Cursor updates
+`.cursor/mcp.json`, and VS Code updates `.vscode/mcp.json`; both project files
+preserve every server other than `devprojex` and are replaced atomically. Invalid
+existing JSON is preserved and reported instead of being overwritten. `json`
+prints the manual `mcpServers` configuration and the usual Claude Desktop paths.
+If a command-line client is not installed or a connection fails, the result
+includes the manual command or configuration to use instead.
+
+Add `--print` to make no client or project changes and print only the connection
+fragment, matching the earlier behavior. Every fragment embeds the absolute
+installed executable path: winget and portable ZIP installations retain it while
+their installation directory stays fixed; the Store uses
+`%LOCALAPPDATA%\Microsoft\WindowsApps\devprojex.exe`; a macOS application uses
+its path inside the `.app` bundle. An AppImage uses the current AppImage path, so
+moving that file requires printing or connecting again.
 
 Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. `--language CODE` localizes human-readable help,

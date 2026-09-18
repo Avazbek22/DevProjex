@@ -253,8 +253,8 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandVerb.Mcp,
 			TerminalWorkspaceCommandGrammar.McpConnection,
 			"mcp",
-			"mcp [claude-code|codex|json] [live|standard]",
-			"mcp codex live",
+			"mcp connect <claude-code|codex|cursor|vscode|json>",
+			"mcp connect codex",
 			static (session, command) => session.ExecuteMcpCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Refresh,
