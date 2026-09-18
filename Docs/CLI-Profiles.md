@@ -120,6 +120,16 @@ descendants discovered under it on the next tree build. Portable `profile import
 --apply` and local `profile show` preserve the same three states without collapsing
 null and an empty array.
 
+Local schema-version 3 records written by current versions include
+`selectedPathsSemanticsVersion: 1` on each project entry. This marker distinguishes
+the current explicit-empty meaning of `selectedPaths: []` from unmarked v5.1 local
+records, where the same array meant the full tree. Current readers therefore load an
+unmarked empty array as the legacy full-tree state and add the marker on the next
+save. A v5.1 executable ignores the marker and can read either representation without
+failing, but it still interprets a current explicit-empty array as the full tree and
+drops the marker if it rewrites the entry. Do not edit an explicitly empty current
+selection with v5.1 when that distinction must be preserved.
+
 The reader also accepts schema version 1 profiles written by v5.1. In schema v1,
 an omitted or null `selectedPaths` and an empty `selectedPaths` array all mean the
 full effective tree; only a non-empty array narrows the selection. This preserves

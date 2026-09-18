@@ -10,6 +10,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	IPersistentSecretMarkStore
 {
 	private const int CurrentSchemaVersion = 3;
+	private const int CurrentSelectedPathsSemanticsVersion = 1;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
 	private static readonly DateTimeOffset MaximumSafeProfileTimestamp = DateTimeOffset.MaxValue.AddDays(-1);
@@ -333,36 +334,65 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 					ProjectProfileLookupStatus.InvalidStorage,
 					null);
 			}
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			var primaryStatus = LoadFromPath(
+				fileSet.PrimaryPath,
+				out var primaryDb,
+				out var primaryRequiresRewrite);
+			var backupStatus = LoadFromPath(
+				fileSet.BackupPath,
+				out var backupDb,
+				out var backupRequiresRewrite);
+			if (primaryStatus == ProfileDocumentLoadStatus.FutureSchema ||
+				backupStatus == ProfileDocumentLoadStatus.FutureSchema)
 			{
 				return new ProjectProfileLookupResult(
 					ProjectProfileLookupStatus.UnsupportedFutureSchema,
 					null);
 			}
-			if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+			if (primaryStatus == ProfileDocumentLoadStatus.TemporarilyUnavailable)
 			{
-				if (primaryRequiresRewrite)
+				return new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.TemporarilyUnavailable,
+					null);
+			}
+			if (primaryStatus == ProfileDocumentLoadStatus.Loaded)
+			{
+				if (primaryRequiresRewrite && !primaryDb.ContainsInvalidEntries)
 					TrySaveInternal(fileSet, primaryDb);
-				return ResolveLookup(
+				var primaryLookup = ResolveLookup(
 					primaryDb,
 					normalizedPath,
 					fileSet,
 					RemainingTimeout(startedTimestamp, lockTimeout));
+				if (primaryLookup.Status == ProjectProfileLookupStatus.InvalidStorage &&
+					backupStatus == ProfileDocumentLoadStatus.Loaded)
+				{
+					var recovered = ResolveLookup(
+						backupDb,
+						normalizedPath,
+						fileSet,
+						RemainingTimeout(startedTimestamp, lockTimeout));
+					if (recovered.Status == ProjectProfileLookupStatus.Found)
+						return recovered;
+				}
+				return primaryLookup;
 			}
-
-			if (TryLoadFromPath(
-					fileSet.BackupPath,
-					out var backupDb,
-					out var backupRequiresRewrite))
+			if (backupStatus == ProfileDocumentLoadStatus.TemporarilyUnavailable)
 			{
-				TrySaveInternal(fileSet, backupDb);
+				return new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.TemporarilyUnavailable,
+					null);
+			}
+			if (backupStatus == ProfileDocumentLoadStatus.Loaded)
+			{
+				if (!backupDb.ContainsInvalidEntries)
+					TrySaveInternal(fileSet, backupDb);
 				return ResolveLookup(
 					backupDb,
 					normalizedPath,
 					fileSet,
 					RemainingTimeout(startedTimestamp, lockTimeout));
 			}
-
 			var status = File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath)
 				? ProjectProfileLookupStatus.InvalidStorage
 				: ProjectProfileLookupStatus.Missing;
@@ -421,6 +451,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		JsonStoreFileSet selectionFileSet,
 		TimeSpan lockTimeout)
 	{
+		if (database.InvalidProfilePaths.Contains(normalizedPath))
+		{
+			return new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.InvalidStorage,
+				null);
+		}
 		if (!database.Profiles.TryGetValue(normalizedPath, out var entry) || entry is null)
 		{
 			return new ProjectProfileLookupResult(
@@ -498,10 +534,17 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private bool TryLoadForMutation(JsonStoreFileSet fileSet, out ProjectProfileDb database)
 	{
-		if (TryLoadFromPath(fileSet.PrimaryPath, out database, out _))
-			return true;
-		if (TryLoadFromPath(fileSet.BackupPath, out database, out _))
-			return true;
+		var primaryStatus = LoadFromPath(fileSet.PrimaryPath, out database, out _);
+		if (primaryStatus == ProfileDocumentLoadStatus.Loaded)
+			return !database.ContainsInvalidEntries;
+		if (primaryStatus == ProfileDocumentLoadStatus.TemporarilyUnavailable)
+			return false;
+
+		var backupStatus = LoadFromPath(fileSet.BackupPath, out database, out _);
+		if (backupStatus == ProfileDocumentLoadStatus.Loaded)
+			return !database.ContainsInvalidEntries;
+		if (backupStatus == ProfileDocumentLoadStatus.TemporarilyUnavailable)
+			return false;
 		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
 		{
 			database = null!;
@@ -516,6 +559,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	{
 		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
+			if (primaryDb.ContainsInvalidEntries)
+				return false;
 			if (primaryRequiresRewrite || !File.Exists(fileSet.BackupPath))
 				return TrySaveInternal(fileSet, primaryDb);
 
@@ -523,7 +568,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 
 		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
+		{
+			if (backupDb.ContainsInvalidEntries)
+				return false;
 			return TrySaveInternal(fileSet, backupDb);
+		}
 
 		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
 			return false;
@@ -555,6 +604,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	{
 		db.SchemaVersion = CurrentSchemaVersion;
 		db.Profiles ??= new Dictionary<string, PersistedProjectProfile>(PathComparer.Default);
+		db.InvalidProfilePaths ??= new HashSet<string>(PathComparer.Default);
 
 		var normalized = new Dictionary<string, PersistedProjectProfile>(PathComparer.Default);
 		foreach (var (key, value) in db.Profiles)
@@ -585,6 +635,9 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		profile.IgnoreOptionStates ??= [];
 		profile.MarkedSecrets ??= [];
+		if (profile.SelectedPathsSemanticsVersion == 0 && profile.SelectedPaths is { Count: 0 })
+			profile.SelectedPaths = null;
+		profile.SelectedPathsSemanticsVersion = CurrentSelectedPathsSemanticsVersion;
 
 		profile.SelectedRootFolders = profile.SelectedRootFolders
 			.Where(IsValidStoredPath)
@@ -714,6 +767,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			ExtensionStates = extensionStates,
 			IgnoreOptionStates = ignoreOptionStates,
 			SelectedPaths = selectedPaths,
+			SelectedPathsSemanticsVersion = CurrentSelectedPathsSemanticsVersion,
 			MarkedSecrets = null,
 			UpdatedUtc = NormalizeProfileTimestamp(updatedUtc)
 		};
@@ -988,13 +1042,19 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
-	private static bool TryLoadFromPath(string path, out ProjectProfileDb db, out bool requiresRewrite)
+	private static bool TryLoadFromPath(string path, out ProjectProfileDb db, out bool requiresRewrite) =>
+		LoadFromPath(path, out db, out requiresRewrite) == ProfileDocumentLoadStatus.Loaded;
+
+	private static ProfileDocumentLoadStatus LoadFromPath(
+		string path,
+		out ProjectProfileDb db,
+		out bool requiresRewrite)
 	{
 		db = CreateDefaultDb();
 		requiresRewrite = false;
 
 		if (!File.Exists(path))
-			return false;
+			return ProfileDocumentLoadStatus.Missing;
 
 		try
 		{
@@ -1009,20 +1069,32 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				new JsonDocumentOptions { MaxDepth = 64 },
 				out var document))
 			{
-				return false;
+				return ProfileDocumentLoadStatus.Invalid;
 			}
 			using (document)
 			{
+				if (IsFutureSchema(document.RootElement))
+					return ProfileDocumentLoadStatus.FutureSchema;
 				if (!TryParseDatabase(document.RootElement, out db, out requiresRewrite))
-					return false;
-				return true;
+					return ProfileDocumentLoadStatus.Invalid;
+				return ProfileDocumentLoadStatus.Loaded;
 			}
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return ProfileDocumentLoadStatus.TemporarilyUnavailable;
 		}
 		catch
 		{
-			return false;
+			return ProfileDocumentLoadStatus.Invalid;
 		}
 	}
+
+	private static bool IsFutureSchema(JsonElement root) =>
+		root.ValueKind == JsonValueKind.Object &&
+		root.TryGetProperty("schemaVersion", out var schema) &&
+		(schema.TryGetInt64(out var signed) && signed > CurrentSchemaVersion ||
+		 schema.TryGetUInt64(out var unsigned) && unsigned > CurrentSchemaVersion);
 
 	private static bool IsValidStoredString(string? value) =>
 		!string.IsNullOrWhiteSpace(value) &&
@@ -1058,11 +1130,20 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			return false;
 
 		var profiles = new Dictionary<string, PersistedProjectProfile>(PathComparer.Default);
+		var invalidProfilePaths = new HashSet<string>(PathComparer.Default);
+		var containsInvalidEntries = false;
 		foreach (var property in profilesElement.EnumerateObject())
 		{
-			if (!TryNormalizePath(property.Name, out var normalizedPath) ||
-				!TryParseProfile(property.Value, sourceSchemaVersion, out var profile))
+			if (!TryNormalizePath(property.Name, out var normalizedPath))
 			{
+				containsInvalidEntries = true;
+				requiresRewrite = true;
+				continue;
+			}
+			if (!TryParseProfile(property.Value, sourceSchemaVersion, out var profile))
+			{
+				containsInvalidEntries = true;
+				invalidProfilePaths.Add(normalizedPath);
 				requiresRewrite = true;
 				continue;
 			}
@@ -1074,13 +1155,24 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			new ProjectProfileDb
 			{
 				SchemaVersion = sourceSchemaVersion,
-				Profiles = profiles
+				Profiles = profiles,
+				InvalidProfilePaths = invalidProfilePaths,
+				ContainsInvalidEntries = containsInvalidEntries
 			},
 			sourceSchemaVersion);
 		PruneProfiles(database);
 		requiresRewrite |= sourceSchemaVersion != CurrentSchemaVersion ||
 						   profiles.Count != database.Profiles.Count;
 		return true;
+	}
+
+	private enum ProfileDocumentLoadStatus
+	{
+		Missing,
+		Loaded,
+		Invalid,
+		FutureSchema,
+		TemporarilyUnavailable
 	}
 
 	private static bool TryParseProfile(
@@ -1100,6 +1192,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			node.Remove("markedSecrets");
 			var parsed = node.Deserialize<PersistedProjectProfile>(SerializerOptions);
 			if (parsed is null)
+				return false;
+			if (parsed.SelectedPathsSemanticsVersion is < 0 or > CurrentSelectedPathsSemanticsVersion)
 				return false;
 
 			var marks = new List<MarkedSecretProfileEntry>();

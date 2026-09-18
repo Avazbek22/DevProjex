@@ -1080,7 +1080,21 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		foreach (var input in selectedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var relativePath = ProjectSelectionPath.NormalizeRelative(input);
+			string relativePath;
+			try
+			{
+				relativePath = ProjectSelectionPath.NormalizeRelative(input);
+			}
+			catch (ProjectContextValidationException exception) when (
+				exception.Code == ProjectSelectionPath.InvalidPathCode)
+			{
+				diagnostics.Add(new ContextDiagnostic(
+					MissingSelectedPathCode,
+					ContextDiagnosticSeverity.Warning,
+					"Selected path is not present in the effective project tree.",
+					input));
+				continue;
+			}
 			if (relativePath.Length == 0)
 			{
 				explicitSelectionHadMatch = true;

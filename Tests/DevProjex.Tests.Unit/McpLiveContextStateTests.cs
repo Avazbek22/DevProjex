@@ -44,13 +44,16 @@ public sealed class McpLiveContextStateTests
 		}
 	}
 
-	[Fact]
-	public void UnreadableProfileKeepsLastSuccessfulRevision()
+	[Theory]
+	[InlineData(ProjectProfileLookupStatus.TemporarilyUnavailable)]
+	[InlineData(ProjectProfileLookupStatus.InvalidStorage)]
+	[InlineData(ProjectProfileLookupStatus.UnsupportedFutureSchema)]
+	public void UnreadableProfileKeepsLastSuccessfulRevision(ProjectProfileLookupStatus failureStatus)
 	{
 		using var temporary = new TemporaryDirectory();
 		var store = new SequenceProfileStore(
 			Found(Profile(["src"])),
-			new ProjectProfileLookupResult(ProjectProfileLookupStatus.TemporarilyUnavailable, null));
+			new ProjectProfileLookupResult(failureStatus, null));
 		var state = new McpLiveContextState(
 			new McpRootRegistry([temporary.Path]),
 			() => store,
@@ -67,6 +70,43 @@ public sealed class McpLiveContextStateTests
 			Assert.NotNull(snapshot.Profile);
 			var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
 			Assert.Contains("saved window selection could not be read; using revision 1. Retry this call.", response, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void LockedProfileFileKeepsTheLastSuccessfulSnapshotAndReportsRetry()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var appData = temporary.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([project]),
+			() => store,
+			TimeSpan.FromMilliseconds(100));
+
+		using (state.BeginInvocation())
+		{
+			var initial = state.ReadProfile(project);
+			Assert.Equal(["src"], initial.Profile!.SelectedPaths);
+			Assert.Equal(1, initial.Revision);
+		}
+
+		using var held = new FileStream(store.GetPath(), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+		using (state.BeginInvocation())
+		{
+			var locked = state.ReadProfile(project);
+			Assert.Equal(["src"], locked.Profile!.SelectedPaths);
+			Assert.Equal(1, locked.Revision);
+			Assert.True(locked.IsReadFailure);
+			var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+			Assert.Contains(
+				"[Live context] saved window selection could not be read; using revision 1. Retry this call.",
+				response,
+				StringComparison.Ordinal);
 		}
 	}
 
@@ -88,6 +128,43 @@ public sealed class McpLiveContextStateTests
 			"[Live context] the window selects no files; tick files in the DevProjex window.",
 			response,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RemovedProfileReportsTheDefaultExpansionAsARevisionChange()
+	{
+		using var temporary = new TemporaryDirectory();
+		var store = new SequenceProfileStore(
+			Found(Profile(["src"])),
+			new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			_ = state.AppendNotices(McpToolResults.TextSuccess("initial"));
+		}
+
+		using (state.BeginInvocation())
+		{
+			var snapshot = state.ReadProfile(temporary.Path);
+			var response = Text(state.AppendNotices(McpToolResults.TextSuccess("after reset")));
+
+			Assert.Equal(2, snapshot.Revision);
+			Assert.True(snapshot.IsMissing);
+			Assert.Null(snapshot.Profile);
+			Assert.Contains(
+				"[Live context] no window selection saved for this root; using server defaults.",
+				response,
+				StringComparison.Ordinal);
+			Assert.Contains(
+				"[Live context] changed since revision 1: -src, +all",
+				response,
+				StringComparison.Ordinal);
+		}
 	}
 
 	[Fact]

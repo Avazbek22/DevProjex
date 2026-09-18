@@ -143,10 +143,24 @@ public sealed class DocumentationAndPackagingContractTests
 		var normalizedCommandLine = Regex.Replace(commandLine, @"\s+", " ");
 
 		Assert.Contains("Checked nodes are focus", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 16", server, StringComparison.Ordinal);
-		Assert.Contains("pack built at revision 14", server, StringComparison.Ordinal);
-		Assert.Contains("live context across WSL is not supported yet", server, StringComparison.Ordinal);
+		string[] liveContextOutputContracts =
+		[
+			"[Live context] <path> is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.",
+			"[Live context] revision 16 · 128 files selected in the window",
+			"[Live context] revision 16 · 128 files selected in the window · root project-name",
+			"[Live context] changed since revision 14: +tests, +docs/api, -src/legacy",
+			"[Live context] changed since revision 14: +tests, +docs/api, -src/legacy and 4 more",
+			"[Live context] no window selection saved for this root; using server defaults.",
+			"[Live context] no window selection saved for this root; using server defaults. If the DevProjex window runs on Windows, live context across WSL is not supported yet.",
+			"[Live context] the window selects no files; tick files in the DevProjex window.",
+			"[Live context] saved window selection could not be read; using revision 16. Retry this call.",
+			"[Live context] pack built at revision 14.",
+			"[Live context] pack built at revision 14; window is at revision 16. Call pack_context again to include the current selection."
+		];
+		foreach (var outputContract in liveContextOutputContracts)
+			Assert.Contains(outputContract, server, StringComparison.Ordinal);
 		Assert.Contains("an empty array selects nothing", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains("selectedPathsSemanticsVersion: 1", normalizedProfiles, StringComparison.Ordinal);
 		Assert.Contains("writes the latest frontier after two seconds", normalizedTerminal, StringComparison.Ordinal);
 		Assert.Contains("mcp [claude-code\\|codex\\|json]", terminal, StringComparison.Ordinal);
 		Assert.Contains("devprojex mcp connect", normalizedCommandLine, StringComparison.Ordinal);
