@@ -49,11 +49,7 @@ public sealed class App : global::Avalonia.Application
                 StoreScreenshotCapture: storeCaptureRequest,
                 ElevationAttempted: desktopRequest?.ElevationAttempted == true);
 
-            var services = AvaloniaCompositionRoot.CreateDefault(
-                startupOptions,
-                storeCaptureRequest is null
-                    ? null
-                    : () => storeCaptureRequest.AppDataDirectory);
+            var services = AvaloniaCompositionRoot.CreateDefault(startupOptions);
             desktop.MainWindow = new MainWindow(
                 startupOptions,
                 services);

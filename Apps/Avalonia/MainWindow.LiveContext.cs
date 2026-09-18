@@ -5,7 +5,7 @@ namespace DevProjex.Avalonia;
 public partial class MainWindow
 {
     private static readonly TimeSpan LiveSessionPollingInterval = TimeSpan.FromSeconds(5);
-    private readonly LiveSessionRegistry _liveSessionRegistry = new();
+    private readonly LiveSessionRegistry _liveSessionRegistry;
     private IReadOnlyList<LiveSessionRecord> _liveSessions = [];
     private FileSystemWatcher? _liveSessionWatcher;
     private DispatcherTimer? _liveSessionPollingTimer;

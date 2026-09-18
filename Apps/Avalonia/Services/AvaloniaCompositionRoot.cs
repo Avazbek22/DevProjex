@@ -1,6 +1,7 @@
 using DevProjex.Infrastructure.Elevation;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.Git;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.AppInstances;
@@ -11,13 +12,18 @@ using DevProjex.Infrastructure.TerminalCommands;
 using DevProjex.Infrastructure.Updates;
 using DevProjex.Infrastructure.Secrets;
 using DevProjex.Infrastructure.Compression;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Avalonia.Services;
 
 public static class AvaloniaCompositionRoot
 {
+    private const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
+
     public static AvaloniaAppServices CreateDefault(DesktopStartupOptions options)
-        => CreateDefault(options, appDataPathProvider: null);
+        => CreateDefault(
+            options,
+            ResolveAppDataPathProvider(options.StoreScreenshotCapture));
 
     public static AvaloniaAppServices CreateDefault(
         DesktopStartupOptions options,
@@ -26,6 +32,33 @@ public static class AvaloniaCompositionRoot
         ArgumentNullException.ThrowIfNull(options);
         var language = options.OpenRequest?.Language ?? AppLanguageUtility.DetectSystemLanguage();
         return CreateDefaultCore(language, options.EffectiveSessionMetrics, appDataPathProvider);
+    }
+
+    internal static Func<string>? ResolveAppDataPathProvider(
+        StoreScreenshotCaptureRequest? storeCaptureRequest,
+        Func<string, string?>? environmentProvider = null)
+    {
+        if (storeCaptureRequest is not null)
+        {
+            var captureRoot = Path.GetFullPath(storeCaptureRequest.AppDataDirectory);
+            return () => captureRoot;
+        }
+
+        var candidate = (environmentProvider ?? Environment.GetEnvironmentVariable)(InternalDataRootVariable);
+        if (string.IsNullOrWhiteSpace(candidate))
+            return null;
+
+        try
+        {
+            if (!Path.IsPathFullyQualified(candidate))
+                return null;
+            var isolatedRoot = Path.GetFullPath(candidate);
+            return () => isolatedRoot;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static AvaloniaAppServices CreateDefaultCore(
@@ -96,6 +129,7 @@ public static class AvaloniaCompositionRoot
             fileContentAnalyzer);
         var terminalCommandSetupService = new TerminalCommandSetupService();
         var localAppDataProvider = appDataPathProvider ?? UserDataPathResolver.GetStateRoot;
+        var liveSessionRegistry = new LiveSessionRegistry(localAppDataProvider);
         var sessionMetricsRecorder = sessionMetrics.Enabled
             ? new SessionMetricsRecorder(sessionMetrics, localAppDataProvider)
             : SessionMetricsRecorder.Disabled;
@@ -162,6 +196,7 @@ public static class AvaloniaCompositionRoot
             SessionMetricsRecorder: sessionMetricsRecorder,
 			SecretRedactionSession: secretRedactionSession,
 			CodeCompressionSession: codeCompressionSession,
-			ProjectPathLauncher: projectPathLauncher);
+			ProjectPathLauncher: projectPathLauncher,
+            LiveSessionRegistry: liveSessionRegistry);
     }
 }
