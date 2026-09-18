@@ -23,6 +23,14 @@ public static class McpServerHost
 		"A get_tree response has at most 2,000 lines. Inline pack_context is limited to 50,000 characters; larger packs are stored. " +
 		"Each read_pack page has at most 1,000 lines or 50,000 characters. In globs, " +
 		"* stays within one path segment; **/ matches at any depth.";
+	private const string FullLiveContextInstructions =
+		" Live context uses the selection saved by the DevProjex window as the baseline. " +
+		"Every response reports its revision. Named files remain readable outside that selection; " +
+		"tree, search, pack, analysis, and related-file results remain inside it.";
+	private const string ReducedLiveContextInstructions =
+		" Live context uses the selection saved by the DevProjex window as the baseline. " +
+		"Every response reports its revision. Named files remain readable outside that selection; " +
+		"tree, search, and related-file results remain inside it.";
 
 	internal const int MaximumSearchBodyCharacters = 16_000;
 
@@ -56,9 +64,7 @@ public static class McpServerHost
 		var body = searchBodyCharacters == 0 ? string.Empty :
 			$" One search declaration body: up to {searchBodyCharacters.ToString("N0", CultureInfo.InvariantCulture)} characters.";
 		var liveContext = live
-			? " Live context uses the selection saved by the DevProjex window as the baseline. " +
-			  "Every response reports its revision. Named files remain readable outside that selection; " +
-			  "tree, search, pack, analysis, and related-file results remain inside it."
+			? toolSet == McpToolSet.Full ? FullLiveContextInstructions : ReducedLiveContextInstructions
 			: string.Empty;
 		return prefix + common + body + liveContext;
 	}
