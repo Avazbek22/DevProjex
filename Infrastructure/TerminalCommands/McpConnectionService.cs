@@ -450,8 +450,9 @@ public sealed class McpConnectionService : IMcpConnectionService
 			request.ProjectRoot,
 			cancellationToken).ConfigureAwait(false);
 		AppendOutput(output, "remove", remove);
-		var replaced = remove.Succeeded;
-		if (!remove.Succeeded && !IsMissingServer(remove))
+		var missingServer = IsMissingServer(remove);
+		var replaced = remove.Succeeded && !missingServer;
+		if (!remove.Succeeded && !missingServer)
 			return CreateProcessFailure(request, remove, output, manual);
 
 		var arguments = new List<string>

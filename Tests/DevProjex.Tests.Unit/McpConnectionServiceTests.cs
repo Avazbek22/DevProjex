@@ -136,6 +136,27 @@ public sealed class McpConnectionServiceTests
 	}
 
 	[Fact]
+	public async Task Connect_Codex_MissingServerWithZeroExitCodeReportsNewConnection()
+	{
+		using var project = new TemporaryDirectory();
+		var runner = new RecordingProcessRunner(
+			new McpConnectionProcessResult(0, "No MCP server named 'devprojex' found.", string.Empty),
+			new McpConnectionProcessResult(0, "Added global MCP server 'devprojex'.", string.Empty));
+		var (service, _) = CreateCommandLineService(project.Path, "codex", runner);
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Codex,
+				McpConnectionMode.Standard,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.Connected, result.Status);
+		Assert.False(result.Replaced);
+	}
+
+	[Fact]
 	public async Task Connect_CommandLineClient_ReturnsManualFallbackWhenClientIsNotFound()
 	{
 		using var project = new TemporaryDirectory();
