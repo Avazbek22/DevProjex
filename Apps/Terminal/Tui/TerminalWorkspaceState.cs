@@ -172,6 +172,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		_checkStates.Clear();
 		_expandedPaths.Clear();
 		IndexTree(plan.EffectiveTree, parentPath: null);
+		DropUnavailablePathsFromSelectionFrontier();
 		foreach (var file in plan.IncludedFiles)
 			_selectedFiles.Add(file);
 		foreach (var directory in plan.IncludedFolders)
@@ -188,6 +189,59 @@ public sealed class TerminalWorkspaceState : IDisposable
 		UpdatePathOptionStates(plan);
 		RebuildVisibleRows();
 		SetPreviewText(BuildTreePreview());
+	}
+
+	private void DropUnavailablePathsFromSelectionFrontier()
+	{
+		if (_selectedPathFrontier is not { Count: > 0 } selectedPathFrontier)
+			return;
+
+		var survivingPaths = new List<string>(selectedPathFrontier.Count);
+		HashSet<string>? unavailablePaths = null;
+		foreach (var selectedPath in selectedPathFrontier)
+		{
+			if (TryResolvePersistedPath(selectedPath, out var fullPath) &&
+				_nodesByPath.ContainsKey(fullPath))
+			{
+				survivingPaths.Add(selectedPath);
+				continue;
+			}
+
+			(unavailablePaths ??= new HashSet<string>(
+				ProjectTreePathIdentity.CanonicalComparer)).Add(selectedPath);
+		}
+
+		_selectedPathFrontier = survivingPaths;
+		if (unavailablePaths is null)
+			return;
+
+		foreach (var knownPath in _pathOptionStates.Keys.ToArray())
+		{
+			if (HasRelativeAncestor(knownPath, unavailablePaths))
+				_pathOptionStates.Remove(knownPath);
+		}
+	}
+
+	private static bool HasRelativeAncestor(
+		string path,
+		IReadOnlySet<string> candidates)
+	{
+		if (candidates.Contains(string.Empty))
+			return true;
+
+		var current = path;
+		while (current.Length > 0)
+		{
+			if (candidates.Contains(current))
+				return true;
+
+			var separator = current.LastIndexOf('/');
+			if (separator < 0)
+				break;
+			current = current[..separator];
+		}
+
+		return false;
 	}
 
 	public IReadOnlyDictionary<string, bool> BuildExtensionOptionStates(

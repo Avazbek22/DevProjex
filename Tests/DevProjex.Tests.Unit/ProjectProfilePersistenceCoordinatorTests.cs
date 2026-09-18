@@ -212,6 +212,25 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 	}
 
 	[Fact]
+	public void ClearAllProfiles_DropsPendingWritesBeforeTheShutdownFlush()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var store = new RetryProfileStore(project, failures: 1);
+		var queue = new PendingProjectProfileWriteQueue(store);
+		queue.Persist(project, CreateProfile(".cs"), DateTimeOffset.UtcNow);
+		Assert.Equal(1, queue.Count);
+
+		var result = queue.ClearAllProfiles();
+		var flush = queue.Flush(TimeSpan.FromSeconds(1));
+
+		Assert.Equal(ProjectProfileClearStatus.Cleared, result);
+		Assert.Equal(0, queue.Count);
+		Assert.Equal(0, flush.Attempted);
+		Assert.Empty(store.SavedProfiles);
+	}
+
+	[Fact]
 	public async Task PendingWrites_DoNotFlushAProjectBlockedByProfileLoading()
 	{
 		using var workspace = new TemporaryDirectory();

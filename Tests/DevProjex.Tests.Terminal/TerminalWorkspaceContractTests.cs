@@ -1067,6 +1067,95 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task RefreshDropsDisappearingProfilePathsWithoutSelectingTheirReplacement()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/first.cs", "class First {}");
+		workspace.WriteFile("src/second.cs", "class Second {}");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		services.LocalProfileStore.SaveProfile(
+			workspace.Path,
+			new ProjectSelectionProfile(
+				[],
+				[],
+				[],
+				SelectedPaths: ["src/first.cs", "src/second.cs"]));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(2, state.Plan.IncludedFiles.Count);
+
+		File.Delete(Path.Combine(workspace.Path, "src", "second.cs"));
+		workspace.WriteFile("src/replacement.cs", "class Replacement {}");
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Equal(["src/first.cs"], state.BuildSelectedPathFrontier());
+		Assert.Equal(["src/first.cs"], state.BuildSelection().SelectedPaths);
+		Assert.Equal("first.cs", Path.GetFileName(Assert.Single(state.Plan.IncludedFiles)));
+		Assert.True(services.LocalProfileStore.TryLoadProfile(workspace.Path, out var stored));
+		Assert.Equal(
+			["src/first.cs", "src/second.cs"],
+			stored.SelectedPaths);
+
+		File.Delete(Path.Combine(workspace.Path, "src", "first.cs"));
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Empty(state.BuildSelectedPathFrontier()!);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+		Assert.Empty(state.Plan.IncludedFiles);
+
+		workspace.WriteFile("src/first.cs", "class FirstAgain {}");
+		workspace.WriteFile("src/second.cs", "class SecondAgain {}");
+		var refreshRequest = controller.CaptureStructuralRefresh(
+			state,
+			state.BuildSelection());
+		Assert.Empty(refreshRequest.SelectedPathFrontier!);
+		var refreshResult = await controller.BuildStructuralRefreshAsync(
+			refreshRequest,
+			TestContext.Current.CancellationToken);
+		Assert.Empty(refreshResult.Plan.IncludedFiles);
+		TerminalWorkspaceController.ApplyStructuralRefresh(state, refreshResult);
+
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+	}
+
+	[Fact]
+	public async Task RefreshDropsADisappearingFolderFrontierBeforeTheFolderReturns()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("selected/first.cs", "class First {}");
+		workspace.WriteFile("outside/keep.cs", "class Keep {}");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		services.LocalProfileStore.SaveProfile(
+			workspace.Path,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["selected"]));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		Directory.Delete(Path.Combine(workspace.Path, "selected"), recursive: true);
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Empty(state.BuildSelectedPathFrontier()!);
+		Assert.Empty(state.Plan.IncludedFiles);
+
+		workspace.WriteFile("selected/returned.cs", "class Returned {}");
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+		Assert.True(services.LocalProfileStore.TryLoadProfile(workspace.Path, out var stored));
+		Assert.Equal(["selected"], stored.SelectedPaths);
+	}
+
+	[Fact]
 	public async Task EmptyMomentaryGitScopeRetainsBroadSelectionAcrossRefresh()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))

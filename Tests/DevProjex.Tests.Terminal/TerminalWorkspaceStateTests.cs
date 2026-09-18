@@ -128,6 +128,73 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void PlanReplacementDropsMissingSelectionFrontierWithoutBroadeningSelection()
+	{
+		var initialPlan = CreatePlan();
+		using var state = new TerminalWorkspaceState(
+			initialPlan,
+			["src/a.cs", "src/b.cs"]);
+		var root = initialPlan.SourceRoot;
+		var surviving = Node(root, "src/a.cs", isDirectory: false);
+		var unrelated = Node(root, "src/new.cs", isDirectory: false);
+		var source = Node(root, "src", isDirectory: true, surviving, unrelated);
+		var firstReplacement = new TreeNodeDescriptor(
+			"project",
+			root,
+			true,
+			false,
+			"folder",
+			[source]);
+
+		state.ReplacePlan(CreatePlan(
+			firstReplacement,
+			[surviving.FullPath],
+			[root, source.FullPath]));
+
+		Assert.Equal(["src/a.cs"], state.BuildSelectedPathFrontier());
+		Assert.Equal(["src/a.cs"], state.BuildSelection().SelectedPaths);
+		Assert.DoesNotContain(unrelated.FullPath, state.Plan.IncludedFiles);
+
+		var secondReplacement = new TreeNodeDescriptor(
+			"project",
+			root,
+			true,
+			false,
+			"folder",
+			[Node(root, "src", isDirectory: true, unrelated)]);
+		state.ReplacePlan(CreatePlan(secondReplacement, [], [root]));
+
+		Assert.Empty(state.BuildSelectedPathFrontier()!);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+	}
+
+	[Fact]
+	public void PlanReplacementKeepsASurvivingFolderFrontierForNewDescendants()
+	{
+		var initialPlan = CreatePlan();
+		using var state = new TerminalWorkspaceState(initialPlan, ["src"]);
+		var root = initialPlan.SourceRoot;
+		var existing = Node(root, "src/a.cs", isDirectory: false);
+		var added = Node(root, "src/new.cs", isDirectory: false);
+		var source = Node(root, "src", isDirectory: true, existing, added);
+		var replacement = new TreeNodeDescriptor(
+			"project",
+			root,
+			true,
+			false,
+			"folder",
+			[source]);
+
+		state.ReplacePlan(CreatePlan(
+			replacement,
+			[existing.FullPath, added.FullPath],
+			[root, source.FullPath]));
+
+		Assert.Equal(["src"], state.BuildSelectedPathFrontier());
+		Assert.Equal([existing.FullPath, added.FullPath], state.Plan.IncludedFiles);
+	}
+
+	[Fact]
 	public void DesktopSelectionPreservesWholeTreeAndExplicitEmptyIntent()
 	{
 		using var state = new TerminalWorkspaceState(CreatePlan());

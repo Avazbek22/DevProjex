@@ -32,7 +32,16 @@ public sealed class ProjectProfilePersistenceCoordinator(
 
     public bool EnsureStorageExists() => profileStore.EnsureStorageExists();
 
-    public ProjectProfileClearStatus ClearAllProfiles() => profileStore.ClearAllProfiles();
+    public ProjectProfileClearStatus ClearAllProfiles()
+    {
+        var result = _pendingWrites.ClearAllProfiles();
+        if (result != ProjectProfileClearStatus.Cleared)
+            return result;
+
+        lock (_loadStateSync)
+            _loadStates.Clear();
+        return result;
+    }
 
 	public async Task PersistIfNeededAsync(
 		string? currentPath,
@@ -427,6 +436,22 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
 
 	public void Flush(Func<string, bool>? canPersist = null) =>
 		_ = Flush(DefaultFlushTimeout, canPersist);
+
+    public ProjectProfileClearStatus ClearAllProfiles()
+    {
+        _gate.Wait();
+        try
+        {
+            var result = profileStore.ClearAllProfiles();
+            if (result == ProjectProfileClearStatus.Cleared)
+                _pending.Clear();
+            return result;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
 	public ProjectProfileFlushResult Flush(
 		TimeSpan timeout,

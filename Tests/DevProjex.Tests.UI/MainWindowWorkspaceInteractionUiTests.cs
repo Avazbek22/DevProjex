@@ -497,7 +497,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
     [AvaloniaFact]
-    public async Task AnimationMenu_StatusAndToolPreferences_PersistAcrossWindows()
+    public async Task AnimationMenu_PersistsPreferencesAndResetPreservesProjectSelection()
     {
         var appDataPath = Path.Combine(
             workspace.Project.AppDataPath,
@@ -532,6 +532,13 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Assert.False(viewModel.IsToolAnimationEnabled);
             Assert.False(Assert.IsType<CheckBox>(statusMenu.Header).IsChecked);
             Assert.False(Assert.IsType<CheckBox>(toolMenu.Header).IsChecked);
+
+			var root = Assert.Single(viewModel.TreeNodes);
+			root.IsChecked = false;
+			var selectedFolder = Assert.Single(
+				root.Children,
+				static node => string.Equals(node.DisplayName, "src", StringComparison.Ordinal));
+			selectedFolder.IsChecked = true;
         }
         finally
         {
@@ -546,6 +553,8 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             var restored = UiTestDriver.GetViewModel(secondWindow);
             Assert.False(restored.IsStatusMetricsAnimationEnabled);
             Assert.False(restored.IsToolAnimationEnabled);
+			var selectedPath = Path.Combine(workspace.Project.RootPath, "src");
+			Assert.Equal([selectedPath], UiTestDriver.GetCheckedTreePaths(secondWindow));
 
             var resetMethod = typeof(MainWindow).GetMethod(
                 "ResetThemeSettings",
@@ -558,6 +567,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Assert.True(restored.IsStatusMetricsAnimationEnabled);
             Assert.True(restored.IsToolAnimationEnabled);
             Assert.False(restored.IsCompactMode);
+			Assert.Equal([selectedPath], UiTestDriver.GetCheckedTreePaths(secondWindow));
             using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(
                 appDataPath,
                 "DevProjex",
@@ -568,9 +578,86 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         }
         finally
         {
-            await UiTestDriver.CloseWindowAsync(secondWindow);
+			await UiTestDriver.CloseWindowAsync(secondWindow, cleanupAppData: false);
         }
+
+		var reopenedWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			Assert.Equal(
+				[Path.Combine(workspace.Project.RootPath, "src")],
+				UiTestDriver.GetCheckedTreePaths(reopenedWindow));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(reopenedWindow);
+		}
     }
+
+	[AvaloniaFact]
+	public async Task ResetData_KeepsTheCurrentTreeAndReopensWithTheDefaultSelection()
+	{
+		var appDataPath = Path.Combine(
+			workspace.Project.AppDataPath,
+			Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(appDataPath);
+		var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath);
+		var selectedPath = Path.Combine(workspace.Project.RootPath, "src");
+		try
+		{
+			var root = Assert.Single(UiTestDriver.GetViewModel(firstWindow).TreeNodes);
+			root.IsChecked = false;
+			Assert.Single(
+				root.Children,
+				static node => string.Equals(node.DisplayName, "src", StringComparison.Ordinal))
+				.IsChecked = true;
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+		}
+
+		var resetWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			Assert.Equal([selectedPath], UiTestDriver.GetCheckedTreePaths(resetWindow));
+			GetRequiredPrivateField<TreeSelectionProfilePersistenceCoordinator>(
+				resetWindow,
+				"_treeSelectionProfiles").CancelPending();
+			var result = GetRequiredPrivateField<ProjectProfilePersistenceCoordinator>(
+				resetWindow,
+				"_projectProfiles").ClearAllProfiles();
+
+			Assert.Equal(ProjectProfileClearStatus.Cleared, result);
+			Assert.Equal([selectedPath], UiTestDriver.GetCheckedTreePaths(resetWindow));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(resetWindow, cleanupAppData: false);
+		}
+
+		var reopenedWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			var root = Assert.Single(UiTestDriver.GetViewModel(reopenedWindow).TreeNodes);
+			Assert.True(root.IsChecked);
+			Assert.Equal(
+				[workspace.Project.RootPath],
+				UiTestDriver.GetCheckedTreePaths(reopenedWindow));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(reopenedWindow);
+		}
+	}
 
     [AvaloniaFact]
     public async Task RecentProjects_AreFlushedOnClose_WhenImmediateSaveFails()
@@ -1325,6 +1412,15 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         Assert.NotNull(method);
         method.Invoke(window, []);
     }
+
+	private static T GetRequiredPrivateField<T>(MainWindow window, string fieldName)
+	{
+		var field = typeof(MainWindow).GetField(
+			fieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<T>(field.GetValue(window));
+	}
 
     private static void AssertMatricesClose(Matrix expected, Matrix actual)
     {
