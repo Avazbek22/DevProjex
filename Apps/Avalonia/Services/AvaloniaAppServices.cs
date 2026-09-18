@@ -35,24 +35,26 @@ public sealed record AvaloniaAppServices(
     IToastService ToastService,
     IIconStore IconStore,
     IGitRepositoryService GitRepositoryService,
-	IGitScopePathProvider GitScopePathProvider,
+    IGitScopePathProvider GitScopePathProvider,
     IRepoCacheService RepoCacheService,
     IZipDownloadService ZipDownloadService,
     IFileContentAnalyzer FileContentAnalyzer,
     ProjectAnalysisService ProjectAnalysisService,
     IApplicationUpdateService ApplicationUpdateService,
+    IMcpConnectionService McpConnectionService,
     ITerminalCommandSetupService TerminalCommandSetupService,
     ITaskbarProgressService TaskbarProgressService,
     SessionMetricsRecorder SessionMetricsRecorder,
-	SecretRedactionSession SecretRedactionSession,
-	CodeCompressionSession CodeCompressionSession,
-	IProjectPathLauncher ProjectPathLauncher,
+    SecretRedactionSession SecretRedactionSession,
+    CodeCompressionSession CodeCompressionSession,
+    IProjectPathLauncher ProjectPathLauncher,
     LiveSessionRegistry LiveSessionRegistry)
 {
-	internal Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
-		DesktopControlServerFactory { get; init; } = static (handler, projectPath, cancellationToken) =>
-			DesktopControlServer.StartAsync(
-				handler,
-				projectPath,
-				cancellationToken: cancellationToken);
+    internal Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
+        DesktopControlServerFactory
+    { get; init; } = static (handler, projectPath, cancellationToken) =>
+            DesktopControlServer.StartAsync(
+                handler,
+                projectPath,
+                cancellationToken: cancellationToken);
 }

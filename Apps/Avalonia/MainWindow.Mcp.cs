@@ -9,6 +9,7 @@ public partial class MainWindow
 {
     private async void OnMcpConnectionRequested(object? sender, McpConnectionRequestedEventArgs e)
     {
+        McpConnectionRequest? request = null;
         try
         {
             if (string.IsNullOrWhiteSpace(_currentPath) || !_viewModel.IsProjectLoaded)
@@ -18,25 +19,79 @@ public partial class MainWindow
             var executablePath = McpConnectionExecutablePathResolver.Resolve(
                 snapshot,
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-            var fragment = McpConnectionFragmentGenerator.Generate(
+            request = new McpConnectionRequest(
                 e.Client,
-                e.Mode,
+                _viewModel.IsMcpLiveContextEnabled
+                    ? McpConnectionMode.Live
+                    : McpConnectionMode.Standard,
                 executablePath,
                 Path.GetFullPath(_currentPath));
-            await SetClipboardTextAsync(fragment);
-            _toastService.Show(_localization["Toast.Copy.Preview"]);
-            await ShowMcpConnectionPathPromptAsync(snapshot);
+            var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+            var result = await _mcpConnectionService.ConnectAsync(request, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (result.Succeeded)
+            {
+                _toastService.Show(result.UserMessage);
+                await ShowMcpConnectionPathPromptAsync(snapshot);
+                return;
+            }
+
+            await ShowMcpManualConfigurationAsync(result, request);
+        }
+        catch (OperationCanceledException) when (_windowLifetimeCts?.IsCancellationRequested == true)
+        {
+            // Window shutdown owns cancellation of an in-flight connection.
         }
         catch (Exception exception)
         {
-            await ShowErrorAsync(ResolveDesktopExceptionMessage(exception));
+            if (request is null)
+            {
+                await ShowErrorAsync(ResolveDesktopExceptionMessage(exception));
+                return;
+            }
+
+            var result = new McpConnectionResult(
+                McpConnectionStatus.ProcessFailed,
+                ResolveDesktopExceptionMessage(exception),
+                ManualConfiguration: TryCreatePrintableConfiguration(request));
+            await ShowMcpManualConfigurationAsync(result, request);
         }
+    }
+
+    private void OnToggleMcpLiveContext(object? sender, RoutedEventArgs e)
+    {
+        _appearanceSettings.ToggleMcpLiveContext();
+        e.Handled = true;
     }
 
     private void OnMcpDocumentationRequested(object? sender, RoutedEventArgs e)
     {
         OpenExternalLink(ProjectLinks.McpDocumentationUrl);
         e.Handled = true;
+    }
+
+    private async Task ShowMcpManualConfigurationAsync(
+        McpConnectionResult result,
+        McpConnectionRequest request)
+    {
+        var content = McpManualConfigurationDialog.CreateContent(
+            _localization,
+            result,
+            TryCreatePrintableConfiguration(request));
+        await McpManualConfigurationDialog.ShowAsync(this, content);
+    }
+
+    private string TryCreatePrintableConfiguration(McpConnectionRequest request)
+    {
+        try
+        {
+            return _mcpConnectionService.CreatePrintableConfiguration(request);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private async Task ShowMcpConnectionPathPromptAsync(TerminalCommandSetupSnapshot snapshot)
