@@ -57,6 +57,65 @@ public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 	}
 
 	[Fact]
+	public async Task Flush_WaitsForSelectionWriteThatStartedAfterTheDelay()
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			async (_, _, cancellationToken) =>
+			{
+				writeStarted.TrySetResult();
+				await releaseWrite.Task.WaitAsync(cancellationToken);
+			},
+			delay.WaitAsync);
+
+		coordinator.Schedule(@"C:\Project", ["src"]);
+		await delay.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
+		delay.Release();
+		await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		var flush = coordinator.FlushAsync(TestContext.Current.CancellationToken);
+		Assert.False(flush.IsCompleted);
+		releaseWrite.TrySetResult();
+		await flush;
+	}
+
+	[Fact]
+	public async Task ConcurrentFlush_RetriesSelectionWhenTheFirstWriteIsCanceled()
+	{
+		var delay = new ControlledDelay();
+		var firstWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var writes = new List<IReadOnlyCollection<string>?>();
+		using var firstCancellation = new CancellationTokenSource();
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			async (_, selectedPaths, cancellationToken) =>
+			{
+				writes.Add(selectedPaths);
+				if (writes.Count == 1)
+				{
+					firstWriteStarted.TrySetResult();
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				}
+			},
+			delay.WaitAsync);
+
+		coordinator.Schedule(@"C:\Project", ["src"]);
+		await delay.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
+		var firstFlush = coordinator.FlushAsync(firstCancellation.Token);
+		await firstWriteStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		var secondFlush = coordinator.FlushAsync(TestContext.Current.CancellationToken);
+		Assert.False(secondFlush.IsCompleted);
+		firstCancellation.Cancel();
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstFlush);
+		await secondFlush;
+
+		Assert.Equal(2, writes.Count);
+		Assert.All(writes, selectedPaths => Assert.Equal(["src"], selectedPaths));
+	}
+
+	[Fact]
 	public async Task CancelPending_DoesNotWriteTheSelection()
 	{
 		var delay = new ControlledDelay();
