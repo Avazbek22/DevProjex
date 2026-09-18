@@ -70,10 +70,12 @@ public sealed class McpInfrastructureTests
 				typeof(IReadOnlyCollection<ProjectExclusion>),
 				typeof(bool),
 				typeof(CancellationToken),
-				typeof(McpToolSet)
+				typeof(McpToolSet),
+				typeof(bool)
 			],
 			method.GetParameters().Select(static parameter => parameter.ParameterType));
-		Assert.Equal(McpToolSet.Full, method.GetParameters()[^1].DefaultValue);
+		Assert.Equal(McpToolSet.Full, method.GetParameters()[^2].DefaultValue);
+		Assert.Equal(false, method.GetParameters()[^1].DefaultValue);
 	}
 
 	[Fact]
@@ -129,13 +131,13 @@ public sealed class McpInfrastructureTests
 	{
 		var ranking = new TopFileRanking(capacity: 3);
 		foreach (var item in new[]
-		         {
-			         ("z.cs", 10L),
-			         ("b.cs", 30L),
-			         ("a.cs", 30L),
-			         ("c.cs", 20L),
-			         ("ignored.cs", 1L)
-		         })
+				 {
+					 ("z.cs", 10L),
+					 ("b.cs", 30L),
+					 ("a.cs", 30L),
+					 ("c.cs", 20L),
+					 ("ignored.cs", 1L)
+				 })
 		{
 			ranking.Add(item.Item1, item.Item2);
 		}
@@ -459,9 +461,9 @@ public sealed class McpInfrastructureTests
 			ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath }
 		});
 		if (process is null ||
-		    !process.WaitForExit(TimeSpan.FromSeconds(5)) ||
-		    process.ExitCode != 0 ||
-		    !Directory.Exists(linkPath))
+			!process.WaitForExit(TimeSpan.FromSeconds(5)) ||
+			process.ExitCode != 0 ||
+			!Directory.Exists(linkPath))
 		{
 			try
 			{
