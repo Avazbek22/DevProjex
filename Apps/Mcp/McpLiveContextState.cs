@@ -199,17 +199,22 @@ internal sealed class McpLiveContextState(
 
 	private static void ApplyLookup(RootState state, ProjectProfileLookupResult lookup)
 	{
+		if (lookup.RecoveryStatus is not null && state.HasSuccessfulSnapshot)
+		{
+			state.ReadFailure = lookup.RecoveryStatus;
+			return;
+		}
 		if (lookup.Status is ProjectProfileLookupStatus.Found && lookup.Profile is not null)
 		{
 			var profile = ProjectSelectionProfileBuilder.Clone(lookup.Profile);
 			ApplySuccessfulSnapshot(state, profile, isMissing: false);
-			state.ReadFailure = null;
+			state.ReadFailure = lookup.RecoveryStatus;
 			return;
 		}
 		if (lookup.Status == ProjectProfileLookupStatus.Missing)
 		{
 			ApplySuccessfulSnapshot(state, profile: null, isMissing: true);
-			state.ReadFailure = null;
+			state.ReadFailure = lookup.RecoveryStatus;
 			return;
 		}
 
@@ -242,15 +247,17 @@ internal sealed class McpLiveContextState(
 			var previousRevision = state.Revision;
 			state.Revision++;
 			state.SelectedFileCount = null;
+			var frontierChanges = BuildFrontierChanges(state.Frontier, frontier);
 			state.PendingChange = new PendingChange(
 				previousRevision,
-				BuildFrontierChanges(state.Frontier, frontier));
+				frontierChanges.Count == 0 ? ["selection settings changed"] : frontierChanges);
 			state.Fingerprint = fingerprint;
 			state.Frontier = frontier;
 		}
 
 		state.Profile = profile;
 		state.IsMissing = isMissing;
+		state.HasSuccessfulSnapshot = true;
 	}
 
 	private static string BuildFingerprint(ProjectSelectionProfile profile)
@@ -387,6 +394,7 @@ internal sealed class McpLiveContextState(
 		public string[]? Frontier { get; set; }
 		public ProjectSelectionProfile? Profile { get; set; }
 		public bool IsMissing { get; set; }
+		public bool HasSuccessfulSnapshot { get; set; }
 		public ProjectProfileLookupStatus? ReadFailure { get; set; }
 		public int? SelectedFileCount { get; set; }
 		public PendingChange? PendingChange { get; set; }

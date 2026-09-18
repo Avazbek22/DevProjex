@@ -438,6 +438,51 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact(Timeout = 60_000)]
+	public async Task RealProcessLiveContextReportsRecoveryFromTheProfileBackup()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Inside.cs", "class Inside { }\n");
+		workspace.WriteFile("project/docs/Outside.cs", "class Outside { }\n");
+		var dataRoot = workspace.CreateDirectory("data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		Assert.True(store.TrySaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+		File.WriteAllText(store.GetPath(), "{\"schemaVersion\":3,\"profiles\":");
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			arguments: ["--live"],
+			clientInfo: new Implementation { Name = "process-client", Version = "1.0" });
+		var recovered = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var recoveredText = AllProcessText(recovered);
+
+		Assert.Contains("Inside.cs", recoveredText, StringComparison.Ordinal);
+		Assert.DoesNotContain("Outside.cs", recoveredText, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] saved window selection could not be read; using revision 1. Retry this call.",
+			recoveredText,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] revision 1 · 1 files selected in the window",
+			recoveredText,
+			StringComparison.Ordinal);
+
+		var afterRepair = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("could not be read", AllProcessText(afterRepair), StringComparison.Ordinal);
+	}
+
+	[Fact(Timeout = 60_000)]
 	public async Task RealProcessLiveContextTreatsProfileRemovalAsARevisionChangeToServerDefaults()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -150,6 +150,7 @@ public sealed class DocumentationAndPackagingContractTests
 			"[Live context] revision 16 · 128 files selected in the window · root project-name",
 			"[Live context] changed since revision 14: +docs/api, +tests, -src/legacy",
 			"[Live context] changed since revision 14: +docs/api, +tests, -src/legacy and 4 more",
+			"[Live context] changed since revision 14: selection settings changed",
 			"[Live context] changed since revision 14: -all, +docs/api, +tests",
 			"[Live context] changed since revision 14: -src/legacy, +all",
 			"[Live context] no window selection saved for this root; using server defaults.",
@@ -169,6 +170,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("server defaults at revision 1", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("an empty array selects nothing", normalizedProfiles, StringComparison.Ordinal);
 		Assert.Contains("selectedPathsSemanticsVersion: 1", normalizedProfiles, StringComparison.Ordinal);
+		Assert.Contains(
+			"In a batched read, that range is reported as `unavailable — outside effective selection`",
+			normalizedServer,
+			StringComparison.Ordinal);
 		Assert.Contains("writes the latest frontier after two seconds", normalizedTerminal, StringComparison.Ordinal);
 		Assert.Contains("Below 80 columns the compact status shows only `Live context`", normalizedTerminal, StringComparison.Ordinal);
 		Assert.Contains("mcp [claude-code\\|codex\\|json]", terminal, StringComparison.Ordinal);

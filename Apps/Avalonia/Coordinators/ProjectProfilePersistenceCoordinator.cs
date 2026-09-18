@@ -157,8 +157,17 @@ public sealed class ProjectProfilePersistenceCoordinator(
 			cancellationToken.ThrowIfCancellationRequested();
 			if (result.Status is not (ProjectProfileLookupStatus.Found or ProjectProfileLookupStatus.Missing))
 			{
-				CompleteLoad(normalizedPath, attempt.Revision, result.Status);
+				CompleteLoad(normalizedPath, attempt.Revision, result.Status, successfulSnapshot: null);
 				return new ProjectProfileLoadSnapshot(result.Status, null, null);
+			}
+			if (result.RecoveryStatus is not null && attempt.Previous.SuccessfulSnapshot is { } previousSnapshot)
+			{
+				CompleteLoad(
+					normalizedPath,
+					attempt.Revision,
+					previousSnapshot.Status,
+					previousSnapshot);
+				return previousSnapshot;
 			}
 
 			var marksResult = await LoadPersistentMarksAsync(
@@ -169,7 +178,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
 			if (!marksResult.Succeeded || marksResult.Snapshot is null)
 			{
 				var unavailableStatus = MapMarkStoreStatus(marksResult.Status);
-				CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus);
+				CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus, successfulSnapshot: null);
 				return new ProjectProfileLoadSnapshot(unavailableStatus, null, null);
 			}
 			var identityAvailability = await secretRedactionSession
@@ -181,12 +190,13 @@ public sealed class ProjectProfilePersistenceCoordinator(
 				                        PersistentSecretIdentityAvailability.TemporarilyUnavailable
 					? ProjectProfileLookupStatus.TemporarilyUnavailable
 					: ProjectProfileLookupStatus.InvalidStorage;
-				CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus);
+				CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus, successfulSnapshot: null);
 				return new ProjectProfileLoadSnapshot(unavailableStatus, null, null);
 			}
 
-			CompleteLoad(normalizedPath, attempt.Revision, result.Status);
-			return new ProjectProfileLoadSnapshot(result.Status, result.Profile, marksResult.Snapshot);
+			var snapshot = new ProjectProfileLoadSnapshot(result.Status, result.Profile, marksResult.Snapshot);
+			CompleteLoad(normalizedPath, attempt.Revision, result.Status, snapshot);
+			return snapshot;
 		}
 		catch
 		{
@@ -258,7 +268,8 @@ public sealed class ProjectProfilePersistenceCoordinator(
 			var revision = checked(++_nextLoadRevision);
 			_loadStates[normalizedPath] = new ProfileLoadState(
 				ProjectProfileLookupStatus.TemporarilyUnavailable,
-				revision);
+				revision,
+				previous.SuccessfulSnapshot);
 			return new ProfileLoadAttempt(revision, hadPrevious, previous);
 		}
 	}
@@ -266,14 +277,18 @@ public sealed class ProjectProfilePersistenceCoordinator(
 	private void CompleteLoad(
 		string normalizedPath,
 		long revision,
-		ProjectProfileLookupStatus status)
+		ProjectProfileLookupStatus status,
+		ProjectProfileLoadSnapshot? successfulSnapshot)
 	{
 		lock (_loadStateSync)
 		{
 			if (_loadStates.TryGetValue(normalizedPath, out var current) &&
 			    current.Revision == revision)
 			{
-				_loadStates[normalizedPath] = new ProfileLoadState(status, revision);
+				_loadStates[normalizedPath] = new ProfileLoadState(
+					status,
+					revision,
+					successfulSnapshot ?? current.SuccessfulSnapshot);
 			}
 		}
 	}
@@ -294,7 +309,10 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		}
 	}
 
-	private readonly record struct ProfileLoadState(ProjectProfileLookupStatus Status, long Revision);
+	private readonly record struct ProfileLoadState(
+		ProjectProfileLookupStatus Status,
+		long Revision,
+		ProjectProfileLoadSnapshot? SuccessfulSnapshot);
 	private readonly record struct ProfileLoadAttempt(
 		long Revision,
         bool HadPrevious,

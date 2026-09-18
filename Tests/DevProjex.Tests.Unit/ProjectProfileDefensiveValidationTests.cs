@@ -58,6 +58,7 @@ public sealed class ProjectProfileDefensiveValidationTests
 			.LookupProfile(project, TimeSpan.FromSeconds(1));
 
 		Assert.Equal(ProjectProfileLookupStatus.Found, lookup.Status);
+		Assert.Null(lookup.RecoveryStatus);
 		Assert.Equal(["src"], lookup.Profile!.SelectedPaths);
 	}
 
@@ -101,6 +102,7 @@ public sealed class ProjectProfileDefensiveValidationTests
 		var lookup = store.LookupProfile(project, TimeSpan.FromSeconds(1));
 
 		Assert.Equal(ProjectProfileLookupStatus.Found, lookup.Status);
+		Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, lookup.RecoveryStatus);
 		Assert.Equal(["src"], lookup.Profile!.SelectedPaths);
 	}
 
@@ -325,7 +327,27 @@ public sealed class ProjectProfileDefensiveValidationTests
 			.LookupProfile(project, TimeSpan.FromSeconds(1));
 
 		Assert.Equal(ProjectProfileLookupStatus.Found, lookup.Status);
+		Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, lookup.RecoveryStatus);
 		Assert.Equal([".cs"], lookup.Profile!.SelectedExtensions.ToArray());
+	}
+
+	[Fact]
+	public void TruncatedPrimaryWithNoMatchingBackupEntryReportsDegradedDefaults()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var otherProject = workspace.CreateFolder("other");
+		var appData = workspace.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		store.SaveProfile(otherProject, new ProjectSelectionProfile([], [".cs"], []));
+		File.WriteAllText(store.GetPath(), "{\"schemaVersion\":3,\"profiles\":");
+
+		var lookup = new ProjectProfileStore(() => appData)
+			.LookupProfile(project, TimeSpan.FromSeconds(1));
+
+		Assert.Equal(ProjectProfileLookupStatus.Missing, lookup.Status);
+		Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, lookup.RecoveryStatus);
+		Assert.Null(lookup.Profile);
 	}
 
 	[Fact]

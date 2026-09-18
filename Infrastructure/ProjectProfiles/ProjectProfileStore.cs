@@ -373,7 +373,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 						fileSet,
 						RemainingTimeout(startedTimestamp, lockTimeout));
 					if (recovered.Status == ProjectProfileLookupStatus.Found)
-						return recovered;
+						return recovered with { RecoveryStatus = primaryLookup.Status };
 				}
 				return primaryLookup;
 			}
@@ -387,11 +387,14 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			{
 				if (!backupDb.ContainsInvalidEntries)
 					TrySaveInternal(fileSet, backupDb);
-				return ResolveLookup(
+				var recovered = ResolveLookup(
 					backupDb,
 					normalizedPath,
 					fileSet,
 					RemainingTimeout(startedTimestamp, lockTimeout));
+				return recovered.Status is ProjectProfileLookupStatus.Found or ProjectProfileLookupStatus.Missing
+					? recovered with { RecoveryStatus = ProjectProfileLookupStatus.InvalidStorage }
+					: recovered;
 			}
 			var status = File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath)
 				? ProjectProfileLookupStatus.InvalidStorage

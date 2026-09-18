@@ -13,4 +13,7 @@ public enum ProjectProfileLookupStatus
 public sealed record ProjectProfileLookupResult(
 	ProjectProfileLookupStatus Status,
 	ProjectSelectionProfile? Profile,
-	DateTimeOffset? UpdatedUtc = null);
+	DateTimeOffset? UpdatedUtc = null)
+{
+	public ProjectProfileLookupStatus? RecoveryStatus { get; init; }
+}

@@ -52,8 +52,9 @@ outside that focus; its content starts with:
 [Live context] <path> is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.
 ```
 
-A path hidden by the effective filters still returns
-`DPX-MCP-PATH-NOT-FOUND`. The same rule applies to scalar and batched reads.
+A scalar path hidden by the effective filters still returns
+`DPX-MCP-PATH-NOT-FOUND`. In a batched read, that range is reported as
+`unavailable — outside effective selection` while the remaining ranges continue.
 Every live response ends with the current per-root revision and the selected
 file count from the latest plan built for that root. Before the first plan is
 built, the count is `0`; a multi-root server also names the root:
@@ -70,6 +71,7 @@ paths are each written in ordinal order:
 ```text
 [Live context] changed since revision 14: +docs/api, +tests, -src/legacy
 [Live context] changed since revision 14: +docs/api, +tests, -src/legacy and 4 more
+[Live context] changed since revision 14: selection settings changed
 ```
 
 A transition away from the full-tree state uses `-all`; a transition back to

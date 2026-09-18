@@ -406,6 +406,142 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 	}
 
 	[Fact]
+	public async Task FirstBackupReadLoadsTheSnapshotAndKeepsWindowPersistenceAvailable()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+			var profile = new ProjectSelectionProfile([], [".cs"], [], SelectedPaths: ["src"]);
+			var recovered = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, profile)
+			{
+				RecoveryStatus = ProjectProfileLookupStatus.InvalidStorage
+			};
+			var store = new StatusProfileStore(
+				recovered,
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, profile));
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession);
+
+			var backup = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			await persistence.PersistSelectedPathsAsync(
+				projectPath,
+				["src/Inside.cs"],
+				TestContext.Current.CancellationToken);
+			Assert.Equal(1, store.SaveCount);
+			var primary = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			await persistence.PersistSelectedPathsAsync(
+				projectPath,
+				["src/New.cs"],
+				TestContext.Current.CancellationToken);
+
+			Assert.True(backup.HasProfile);
+			Assert.Equal(["src"], backup.Profile!.SelectedPaths);
+			Assert.True(primary.HasProfile);
+			Assert.Equal(2, store.SaveCount);
+		}
+	}
+
+	[Fact]
+	public async Task BackupReadAfterASuccessfulLoadReusesTheCurrentWindowSnapshot()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+			var current = new ProjectSelectionProfile([], [".cs"], [], SelectedPaths: ["src"]);
+			var stale = new ProjectSelectionProfile([], [".md"], [], SelectedPaths: ["docs"]);
+			var recovered = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, stale)
+			{
+				RecoveryStatus = ProjectProfileLookupStatus.InvalidStorage
+			};
+			var store = new StatusProfileStore(
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, current),
+				recovered,
+				recovered,
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, current));
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession);
+
+			var initial = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			var firstFailure = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			var repeatedFailure = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			await persistence.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);
+			Assert.Equal(1, store.SaveCount);
+			var repaired = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			await persistence.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);
+
+			Assert.Equal(["src"], initial.Profile!.SelectedPaths);
+			Assert.Equal(["src"], firstFailure.Profile!.SelectedPaths);
+			Assert.Equal(["src"], repeatedFailure.Profile!.SelectedPaths);
+			Assert.True(repaired.HasProfile);
+			Assert.Equal(2, store.SaveCount);
+		}
+	}
+
+	[Fact]
+	public async Task MissingBackupEntryAfterASuccessfulLoadReusesTheCurrentWindowSnapshot()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+			var current = new ProjectSelectionProfile([], [".cs"], [], SelectedPaths: ["src"]);
+			var recoveredMissing = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null)
+			{
+				RecoveryStatus = ProjectProfileLookupStatus.InvalidStorage
+			};
+			var store = new StatusProfileStore(
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, current),
+				recoveredMissing);
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession);
+
+			_ = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			var degraded = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			await persistence.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);
+
+			Assert.Equal(ProjectProfileLookupStatus.Found, degraded.Status);
+			Assert.Equal(["src"], degraded.Profile!.SelectedPaths);
+			Assert.Equal(1, store.SaveCount);
+		}
+	}
+
+	[Fact]
 	public async Task ProfileLookupInProgress_BlocksPersistBeforeTheStoreReturnsAStatus()
 	{
 		const string projectPath = @"C:\Project";
