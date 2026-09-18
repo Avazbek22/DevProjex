@@ -148,16 +148,23 @@ public sealed class McpConnectionFragmentGeneratorTests
 	public async Task Generate_ClaudeCodeRoundTripsThroughTheNativeShell(int modeValue)
 	{
 		var mode = (McpConnectionMode)modeValue;
-		foreach (var (executable, root) in NativeShellPathCases())
-		{
-			var fragment = McpConnectionFragmentGenerator.Generate(
+		var pathCases = NativeShellPathCases().ToArray();
+		var fragments = pathCases
+			.Select(pathCase => McpConnectionFragmentGenerator.Generate(
 				McpConnectionClient.ClaudeCode,
 				mode,
-				executable,
-				root);
-			var parsed = OperatingSystem.IsWindows()
-				? await ParseWithPowerShellAsync(fragment)
-				: await ParseWithPosixShellAsync(fragment);
+				pathCase.Executable,
+				pathCase.Root))
+			.ToArray();
+		var parsedFragments = OperatingSystem.IsWindows()
+			? await ParseWithPowerShellAsync(fragments)
+			: await ParseWithPosixShellAsync(fragments);
+
+		Assert.Equal(pathCases.Length, parsedFragments.Count);
+		for (var index = 0; index < pathCases.Length; index++)
+		{
+			var (executable, root) = pathCases[index];
+			var parsed = parsedFragments[index];
 
 			Assert.Equal(["mcp", "add", "devprojex"], parsed.Take(3));
 			var connectionArguments = parsed.Skip(3).ToList();
@@ -289,19 +296,35 @@ public sealed class McpConnectionFragmentGeneratorTests
 			actualArguments.Skip(3).Select(static value => value ?? string.Empty));
 	}
 
-	private static async Task<string[]> ParseWithPowerShellAsync(string fragment)
+	private static async Task<IReadOnlyList<string[]>> ParseWithPowerShellAsync(
+		IReadOnlyList<string> fragments)
 	{
-		const string script = "function claude { [Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($args))) }; " +
-							  "Invoke-Expression $env:DPX_CONNECTION_FRAGMENT";
+		const string script = "$payload = ConvertFrom-Json $env:DPX_CONNECTION_FRAGMENT; " +
+							  "Set-Item -Path ('Function:' + $payload.command) " +
+							  "-Value { $script:capturedArgs = @($args) }; " +
+							  "$results = [System.Collections.Generic.List[object]]::new(); " +
+							  "foreach ($fragment in $payload.fragments) { " +
+							  "$script:capturedArgs = $null; " +
+							  "Invoke-Expression $fragment; " +
+							  "$results.Add([object[]]$script:capturedArgs) }; " +
+							  "[Console]::Out.Write((ConvertTo-Json -Compress -Depth 4 -InputObject $results))";
+		var command = fragments[0].Split(' ', 2, StringSplitOptions.RemoveEmptyEntries)[0];
 		var result = await RunShellAsync(
 			"powershell.exe",
 			["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-			fragment);
-		return JsonSerializer.Deserialize<string[]>(result) ?? [];
+			JsonSerializer.Serialize(new { command, fragments }));
+		return JsonSerializer.Deserialize<string[][]>(result) ?? [];
 	}
 
-	private static Task<string[]> ParseWithPosixShellAsync(string fragment) =>
-		RunPosixShellAsync(fragment);
+	private static async Task<IReadOnlyList<string[]>> ParseWithPosixShellAsync(
+		IReadOnlyList<string> fragments)
+	{
+		var results = new List<string[]>(fragments.Count);
+		foreach (var fragment in fragments)
+			results.Add(await RunPosixShellAsync(fragment));
+
+		return results;
+	}
 
 	private static async Task<string[]> RunPosixShellAsync(string fragment)
 	{

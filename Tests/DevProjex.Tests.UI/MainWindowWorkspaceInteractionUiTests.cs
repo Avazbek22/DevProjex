@@ -634,12 +634,16 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 				$"{Path.DirectorySeparatorChar}src",
 				Assert.Single(selectedPaths),
 				StringComparison.OrdinalIgnoreCase);
+			var lookupCountBeforeRefresh = store.LookupCount;
 			store.IsUnavailable = true;
 
 			await UiTestDriver.RefreshProjectAsync(window);
+			await store.WaitForLookupCountAsync(
+				lookupCountBeforeRefresh + 4,
+				TestContext.Current.CancellationToken);
 
 			Assert.Equal(selectedPaths, UiTestDriver.GetCheckedTreePaths(window));
-			Assert.Equal(5, store.LookupCount);
+			Assert.Equal(lookupCountBeforeRefresh + 4, store.LookupCount);
 		}
 		finally
 		{
@@ -1467,6 +1471,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 	private sealed class ControllableProjectProfileStore : IProjectProfileStore
 	{
 		private int _lookupCount;
+		private TaskCompletionSource _lookupChanged = CreateLookupCompletion();
 
 		public bool IsUnavailable { get; set; }
 		public ProjectSelectionProfile? Profile { get; set; }
@@ -1477,6 +1482,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout)
 		{
 			Interlocked.Increment(ref _lookupCount);
+			Interlocked.Exchange(ref _lookupChanged, CreateLookupCompletion()).TrySetResult();
 			return IsUnavailable
 				? new ProjectProfileLookupResult(
 					ProjectProfileLookupStatus.TemporarilyUnavailable,
@@ -1503,7 +1509,22 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 		{
 		}
 
+		public async Task WaitForLookupCountAsync(int expectedCount, CancellationToken cancellationToken)
+		{
+			while (LookupCount < expectedCount)
+			{
+				var lookupChanged = _lookupChanged.Task;
+				if (LookupCount >= expectedCount)
+					return;
+
+				await lookupChanged.WaitAsync(cancellationToken);
+			}
+		}
+
 		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
+
+		private static TaskCompletionSource CreateLookupCompletion() =>
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
 	}
 
 	private static T GetRequiredPrivateField<T>(MainWindow window, string fieldName)
