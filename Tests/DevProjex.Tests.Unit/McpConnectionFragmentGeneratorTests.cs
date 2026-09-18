@@ -1,10 +1,38 @@
+using System.Diagnostics;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.TerminalCommands;
+using Tomlyn;
+using Tomlyn.Model;
 
 namespace DevProjex.Tests.Unit;
 
 public sealed class McpConnectionFragmentGeneratorTests
 {
+	public static TheoryData<int, string, string> StructuredFragmentCases
+	{
+		get
+		{
+			var cases = new TheoryData<int, string, string>();
+			foreach (var mode in Enum.GetValues<McpConnectionMode>())
+			{
+				foreach (var (executable, root) in PathCases())
+					cases.Add((int)mode, executable, root);
+			}
+			return cases;
+		}
+	}
+
+	public static TheoryData<int> SetupStates
+	{
+		get
+		{
+			var states = new TheoryData<int>();
+			foreach (var state in Enum.GetValues<TerminalCommandSetupState>())
+				states.Add((int)state);
+			return states;
+		}
+	}
+
 	[Theory]
 	[InlineData((int)McpConnectionClient.ClaudeCode, (int)McpConnectionMode.Live)]
 	[InlineData((int)McpConnectionClient.ClaudeCode, (int)McpConnectionMode.Standard)]
@@ -62,6 +90,89 @@ public sealed class McpConnectionFragmentGeneratorTests
 	}
 
 	[Theory]
+	[MemberData(nameof(StructuredFragmentCases))]
+	public void Generate_JsonRoundTripsEveryPathCharacter(
+		int modeValue,
+		string executable,
+		string root)
+	{
+		var mode = (McpConnectionMode)modeValue;
+		var fragment = McpConnectionFragmentGenerator.Generate(
+			McpConnectionClient.Json,
+			mode,
+			executable,
+			root);
+
+		using var document = JsonDocument.Parse(fragment);
+		var server = document.RootElement.GetProperty("mcpServers").GetProperty("devprojex");
+		AssertConnection(
+			server.GetProperty("command").GetString(),
+			server.GetProperty("args").EnumerateArray().Select(static value => value.GetString()).ToArray(),
+			mode,
+			executable,
+			root);
+	}
+
+	[Theory]
+	[MemberData(nameof(StructuredFragmentCases))]
+	public void Generate_TomlRoundTripsEveryPathCharacter(
+		int modeValue,
+		string executable,
+		string root)
+	{
+		var mode = (McpConnectionMode)modeValue;
+		var fragment = McpConnectionFragmentGenerator.Generate(
+			McpConnectionClient.Codex,
+			mode,
+			executable,
+			root);
+		var model = Assert.IsType<TomlTable>(TomlSerializer.Deserialize<TomlTable>(fragment));
+		var servers = Assert.IsType<TomlTable>(model["mcp_servers"]);
+		var server = Assert.IsType<TomlTable>(servers["devprojex"]);
+		var arguments = Assert.IsType<TomlArray>(server["args"])
+			.Cast<object>()
+			.Select(static value => Assert.IsType<string>(value))
+			.Cast<string?>()
+			.ToArray();
+		AssertConnection(
+			Assert.IsType<string>(server["command"]),
+			arguments,
+			mode,
+			executable,
+			root);
+	}
+
+	[Theory]
+	[InlineData((int)McpConnectionMode.Standard)]
+	[InlineData((int)McpConnectionMode.Live)]
+	public async Task Generate_ClaudeCodeRoundTripsThroughTheNativeShell(int modeValue)
+	{
+		var mode = (McpConnectionMode)modeValue;
+		foreach (var (executable, root) in NativeShellPathCases())
+		{
+			var fragment = McpConnectionFragmentGenerator.Generate(
+				McpConnectionClient.ClaudeCode,
+				mode,
+				executable,
+				root);
+			var parsed = OperatingSystem.IsWindows()
+				? await ParseWithPowerShellAsync(fragment)
+				: await ParseWithPosixShellAsync(fragment);
+
+			Assert.Equal(["mcp", "add", "devprojex"], parsed.Take(3));
+			var connectionArguments = parsed.Skip(3).ToList();
+			if (connectionArguments.FirstOrDefault() == "--")
+				connectionArguments.RemoveAt(0);
+			AssertConnection(
+				connectionArguments[0],
+				connectionArguments.Skip(1).Cast<string?>().ToArray(),
+				mode,
+				executable,
+				root);
+		}
+	}
+
+	[Theory]
 	[InlineData("DevProjex.exe", "/project")]
 	[InlineData("/opt/DevProjex", "project")]
 	public void Generate_RejectsRelativePaths(string executable, string root)
@@ -102,6 +213,126 @@ public sealed class McpConnectionFragmentGeneratorTests
 			McpConnectionExecutablePathResolver.Resolve(
 				snapshot,
 				(TerminalCommandHostPlatform)platformValue));
+	}
+
+	[Theory]
+	[MemberData(nameof(SetupStates))]
+	public void Resolve_PreservesTheCurrentArtifactForEveryNonStoreState(int stateValue)
+	{
+		const string targetPath = "/opt/devprojex/DevProjex";
+		var state = (TerminalCommandSetupState)stateValue;
+		var snapshot = Snapshot(state, targetPath);
+
+		Assert.Equal(
+			targetPath,
+			McpConnectionExecutablePathResolver.Resolve(
+				snapshot,
+				TerminalCommandHostPlatform.Other));
+	}
+
+	[Theory]
+	[MemberData(nameof(SetupStates))]
+	public void Resolve_RejectsEveryStateWithoutAnArtifactPathOutsideTheWindowsStore(int stateValue)
+	{
+		var state = (TerminalCommandSetupState)stateValue;
+		var snapshot = Snapshot(state, targetExecutablePath: null);
+
+		var exception = Assert.Throws<InvalidOperationException>(() =>
+			McpConnectionExecutablePathResolver.Resolve(
+				snapshot,
+				TerminalCommandHostPlatform.Other));
+
+		Assert.Contains("executable path is unavailable", exception.Message, StringComparison.Ordinal);
+	}
+
+	private static IEnumerable<(string Executable, string Root)> PathCases()
+	{
+		yield return (@"C:\Program Files\DevProjex\DevProjex.exe", @"C:\Projects\My Project");
+		yield return ("/opt/Приложения/DevProjex", "/Проекты/Мой проект");
+		yield return ("/opt/quo\"te'd/DevProjex", "/projects/quo\"te'd/root");
+		yield return (@"/opt/back\slash/DevProjex", @"/projects/back\slash/root");
+		yield return ("/opt/$release/DevProjex", "/projects/$release/root");
+		yield return ("/opt/100%/DevProjex", "/projects/100%/root");
+		yield return ("/" + new string('e', 249), "/" + new string('r', 249));
+	}
+
+	private static IEnumerable<(string Executable, string Root)> NativeShellPathCases()
+	{
+		if (!OperatingSystem.IsWindows())
+			return PathCases().Where(static value => value.Executable.StartsWith('/'));
+
+		return
+		[
+			(@"C:\Program Files\DevProjex\DevProjex.exe", @"C:\Projects\My Project"),
+			(@"C:\Приложения\DevProjex.exe", @"C:\Проекты\Мой проект"),
+			("C:\\quo\"te'd\\DevProjex.exe", "C:\\quo\"te'd\\root"),
+			(@"C:\back\slash\DevProjex.exe", @"C:\back\slash\root"),
+			(@"C:\$release\DevProjex.exe", @"C:\$release\root"),
+			(@"C:\100%\DevProjex.exe", @"C:\100%\root"),
+			("C:\\" + new string('e', 247), "C:\\" + new string('r', 247))
+		];
+	}
+
+	private static void AssertConnection(
+		string? actualExecutable,
+		IReadOnlyList<string?> actualArguments,
+		McpConnectionMode mode,
+		string expectedExecutable,
+		string expectedRoot)
+	{
+		Assert.Equal(expectedExecutable, actualExecutable);
+		Assert.Equal("mcp", actualArguments[0]);
+		Assert.Equal("--root", actualArguments[1]);
+		Assert.Equal(expectedRoot, actualArguments[2]);
+		Assert.Equal(
+			mode == McpConnectionMode.Live ? ["--live"] : [],
+			actualArguments.Skip(3).Select(static value => value ?? string.Empty));
+	}
+
+	private static async Task<string[]> ParseWithPowerShellAsync(string fragment)
+	{
+		const string script = "function claude { [Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($args))) }; " +
+							  "Invoke-Expression $env:DPX_CONNECTION_FRAGMENT";
+		var result = await RunShellAsync(
+			"powershell.exe",
+			["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+			fragment);
+		return JsonSerializer.Deserialize<string[]>(result) ?? [];
+	}
+
+	private static Task<string[]> ParseWithPosixShellAsync(string fragment) =>
+		RunPosixShellAsync(fragment);
+
+	private static async Task<string[]> RunPosixShellAsync(string fragment)
+	{
+		const string script = "claude() { printf '%s\\n' \"$@\"; }; eval \"$DPX_CONNECTION_FRAGMENT\"";
+		var result = await RunShellAsync("/bin/sh", ["-c", script], fragment);
+		return result.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+	}
+
+	private static async Task<string> RunShellAsync(
+		string executable,
+		IEnumerable<string> arguments,
+		string fragment)
+	{
+		var startInfo = new ProcessStartInfo(executable)
+		{
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		startInfo.Environment["DPX_CONNECTION_FRAGMENT"] = fragment;
+		using var process = Process.Start(startInfo) ??
+							throw new InvalidOperationException($"Could not start {executable}.");
+		var standardOutput = process.StandardOutput.ReadToEndAsync();
+		var standardError = process.StandardError.ReadToEndAsync();
+		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+		await process.WaitForExitAsync(timeout.Token);
+		var error = await standardError;
+		Assert.True(process.ExitCode == 0, $"{executable} exited with {process.ExitCode}: {error}");
+		return await standardOutput;
 	}
 
 	private static TerminalCommandSetupSnapshot Snapshot(
