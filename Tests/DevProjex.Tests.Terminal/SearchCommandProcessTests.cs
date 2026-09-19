@@ -130,6 +130,7 @@ public sealed class SearchCommandProcessTests
 			{
 			    public string Run() =>
 			        "needle value";
+			    public string Call() => Run();
 			}
 			""");
 		return project;

@@ -115,6 +115,7 @@ public sealed class SearchCommandHandler(
 			IReadOnlyList<NavigationDeclaration>? navigation = null;
 			McpSearchDeclarationPreviewCache? declarationPreviews = null;
 			var priorityState = new McpSearchFilePriorityState();
+			var acceptedMatches = 0;
 			var scan = McpSearchTextScanner.ScanEach(
 				file.Content,
 				regex,
@@ -127,6 +128,14 @@ public sealed class SearchCommandHandler(
 						relative,
 						file.Content,
 						token);
+					if (request.Mode == SearchMode.Symbols &&
+						!navigation.Any(declaration =>
+							declaration.StartLine == match.MatchLineNumber &&
+							SymbolNameMatches(declaration.Name, request.Pattern)))
+					{
+						return;
+					}
+					acceptedMatches++;
 					if (request.SearchBodyCharacters > 0)
 					{
 						declarationPreviews ??= new McpSearchDeclarationPreviewCache(
@@ -150,8 +159,11 @@ public sealed class SearchCommandHandler(
 						declarationPreviews);
 				},
 				token);
-			totalMatches += scan.TotalMatches;
-			if (scan.TotalMatches > 0)
+			var effectiveMatches = request.Mode == SearchMode.Symbols
+				? acceptedMatches
+				: scan.TotalMatches;
+			totalMatches += effectiveMatches;
+			if (effectiveMatches > 0)
 			{
 				matchingFiles++;
 				var annotatedFiles = candidates.SelectFilesForAnnotation(
@@ -304,9 +316,26 @@ public sealed class SearchCommandHandler(
 		SearchMode.Regex => pattern,
 		SearchMode.Text => Regex.Escape(pattern),
 		SearchMode.Symbols =>
-			$"(?<![\\p{{L}}\\p{{N}}_]){Regex.Escape(pattern)}(?![\\p{{L}}\\p{{N}}_])",
+			$"(?<![\\p{{L}}\\p{{N}}_]){Regex.Escape(LastSymbolSegment(pattern))}(?![\\p{{L}}\\p{{N}}_])",
 		_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
 	};
+
+	private static bool SymbolNameMatches(string declaredName, string requestedName)
+	{
+		if (declaredName.Equals(requestedName, StringComparison.OrdinalIgnoreCase))
+			return true;
+		return !requestedName.Contains('.') &&
+			   !requestedName.Contains('#') &&
+			   !requestedName.Contains('/') &&
+			   !requestedName.Contains(':') &&
+			   LastSymbolSegment(declaredName).Equals(requestedName, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static string LastSymbolSegment(string name)
+	{
+		var separator = name.LastIndexOfAny(['.', '#', '/', ':']);
+		return separator >= 0 ? name[(separator + 1)..] : name;
+	}
 
 	private static long ResolveFileSize(ProjectContextPlan plan, string path)
 	{
