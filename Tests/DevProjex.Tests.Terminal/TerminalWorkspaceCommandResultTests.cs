@@ -37,7 +37,7 @@ public sealed class TerminalWorkspaceCommandResultTests
 		Assert.Contains("path: src/private", result, StringComparison.Ordinal);
 		Assert.Contains("info [DPX-PROJECT-SELECTION-WARNING]", result, StringComparison.Ordinal);
 		Assert.Contains("value: legacy value", result, StringComparison.Ordinal);
-}
+	}
 
 	[Theory]
 	[InlineData(AppLanguage.En, "more than 256 files")]

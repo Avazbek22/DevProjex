@@ -5381,16 +5381,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				var severity = diagnostic.Severity switch
 				{
-				ContextDiagnosticSeverity.Error => localization["Terminal.Label.Error"],
-				ContextDiagnosticSeverity.Warning => localization["Terminal.Label.Warning"],
-				_ => localization["Terminal.Label.Info"]
+					ContextDiagnosticSeverity.Error => localization["Terminal.Label.Error"],
+					ContextDiagnosticSeverity.Warning => localization["Terminal.Label.Warning"],
+					_ => localization["Terminal.Label.Info"]
 				};
 				var message = ContextDiagnosticRenderer.ResolveMessage(
 				localization,
 					diagnostic);
-			var pathLabel = diagnostic.Code == "DPX-PROJECT-SELECTION-WARNING"
-				? localization["Terminal.Label.Value"]
-				: localization["Terminal.Label.Path"];
+				var pathLabel = diagnostic.Code == "DPX-PROJECT-SELECTION-WARNING"
+					? localization["Terminal.Label.Value"]
+					: localization["Terminal.Label.Path"];
 				var path = string.IsNullOrWhiteSpace(diagnostic.Path)
 					? string.Empty
 				: $"\n{pathLabel}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}";

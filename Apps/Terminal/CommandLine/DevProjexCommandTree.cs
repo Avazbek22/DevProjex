@@ -345,7 +345,7 @@ public sealed class DevProjexCommandTree
 							.ConnectAsync(request, cancellationToken)
 							.ConfigureAwait(false);
 						if (!parseResult.GetValue(open) || !result.Succeeded)
-						return WriteMcpConnectionResult(result);
+							return WriteMcpConnectionResult(result);
 
 						var launchResult = await services.McpClientLaunchService
 							.OpenAsync(new McpClientLaunchRequest(connectionClient, request.ProjectRoot), cancellationToken)

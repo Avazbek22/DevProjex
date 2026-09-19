@@ -299,6 +299,6 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 			cancellationToken.ThrowIfCancellationRequested();
 			Requests.Add(request);
 			return Task.FromResult(resultFactory(request));
-}
+		}
 	}
 }

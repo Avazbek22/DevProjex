@@ -491,18 +491,18 @@ internal sealed class TerminalWorkspaceCommandParser
 	{
 		if (tokens.Count >= 2 && Contains(McpTargets, tokens[1].Value))
 		{
-		if (tokens.Count > 3)
-			return Unexpected(tokens[3]);
-		if (tokens.Count < 3)
-			return Missing(tokens, McpClients);
-		if (!Contains(McpClients, tokens[2].Value))
-			return Unknown(tokens[2], McpClients);
+			if (tokens.Count > 3)
+				return Unexpected(tokens[3]);
+			if (tokens.Count < 3)
+				return Missing(tokens, McpClients);
+			if (!Contains(McpClients, tokens[2].Value))
+				return Unknown(tokens[2], McpClients);
 
-		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
-			definition,
-				Target: Normalize(tokens[2].Value, McpClients),
-				McpAction: TerminalWorkspaceMcpAction.Connect));
-	}
+			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+				definition,
+					Target: Normalize(tokens[2].Value, McpClients),
+					McpAction: TerminalWorkspaceMcpAction.Connect));
+		}
 
 		if (tokens.Count > 3)
 			return Unexpected(tokens[3]);
