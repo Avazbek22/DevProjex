@@ -107,7 +107,8 @@ internal sealed class McpLiveContextState(
 				profile.Value is not { } current ||
 				current.Revision != state.Revision)
 				return;
-			state.PendingChange = ClassifyPendingChange(state.Root, state.PendingChange, plan.EffectiveTree);
+			state.EffectiveTree = plan.EffectiveTree;
+			state.PendingChange = ClassifyPendingChange(state.Root, state.PendingChange, state.EffectiveTree);
 			state.SelectedFileCount = plan.IncludedFiles.Count;
 			active.Roots.Add(normalizedRoot);
 		}
@@ -280,9 +281,10 @@ internal sealed class McpLiveContextState(
 			state.Revision++;
 			state.SelectedFileCount = null;
 			var frontierChanges = BuildFrontierChanges(state.Frontier, frontier);
-			state.PendingChange = new PendingChange(
-				previousRevision,
-				frontierChanges);
+			state.PendingChange = ClassifyPendingChange(
+				state.Root,
+				new PendingChange(previousRevision, frontierChanges),
+				state.EffectiveTree);
 			state.Fingerprint = fingerprint;
 			state.Frontier = frontier;
 		}
@@ -388,9 +390,11 @@ internal sealed class McpLiveContextState(
 	private static PendingChange? ClassifyPendingChange(
 		string root,
 		PendingChange? pendingChange,
-		TreeNodeDescriptor effectiveTree)
+		TreeNodeDescriptor? effectiveTree)
 	{
-		if (pendingChange is null || pendingChange.Changes.All(static change => change.Path is null))
+		if (pendingChange is null ||
+			effectiveTree is null ||
+			pendingChange.Changes.All(static change => change.Path is null))
 			return pendingChange;
 
 		var remainingPaths = pendingChange.Changes
@@ -541,6 +545,7 @@ internal sealed class McpLiveContextState(
 		public bool HasSuccessfulSnapshot { get; set; }
 		public ProjectProfileLookupStatus? ReadFailure { get; set; }
 		public int? SelectedFileCount { get; set; }
+		public TreeNodeDescriptor? EffectiveTree { get; set; }
 		public PendingChange? PendingChange { get; set; }
 	}
 

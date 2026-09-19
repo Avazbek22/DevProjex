@@ -152,12 +152,6 @@ public sealed class McpLiveContextStateTests
 			() => store,
 			TimeSpan.Zero);
 
-		using (state.BeginInvocation())
-		{
-			_ = state.ReadProfile(temporary.Path);
-			_ = state.AppendNotices(McpToolResults.TextSuccess("initial"));
-		}
-
 		var effectiveTree = new TreeNodeDescriptor(
 			"project",
 			temporary.Path,
@@ -184,6 +178,12 @@ public sealed class McpLiveContextStateTests
 		{
 			_ = state.ReadProfile(temporary.Path);
 			state.RecordPlan(temporary.Path, Plan(temporary.Path, 1, effectiveTree));
+			_ = state.AppendNotices(McpToolResults.TextSuccess("initial"));
+		}
+
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
 			var response = Text(state.AppendNotices(McpToolResults.TextSuccess("changed")));
 
 			Assert.Contains(
