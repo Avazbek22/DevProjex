@@ -117,6 +117,12 @@ internal sealed class McpProjectService(
 		{
 			var liveSnapshot = liveContext.ReadProfile(projectRoot);
 			liveProfileRevision = liveSnapshot.Revision;
+			if (liveSnapshot.IsReadFailure && !liveSnapshot.HasSuccessfulSnapshot)
+			{
+				throw new McpToolException(
+					McpErrorCodes.ProjectUnavailable,
+					$"{McpErrorCodes.ProjectUnavailable}: saved window selection is temporarily unreadable and no earlier snapshot is available; retry this call.");
+			}
 			if (liveSnapshot.Profile is { } localProfile)
 			{
 				var local = ProjectSelectionAdapter.FromLegacyProfile(
@@ -161,7 +167,8 @@ internal sealed class McpProjectService(
 		{
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
-				$"{McpErrorCodes.InvalidArguments}: the selected profile's persistent redaction identity is unavailable; use profile 'standard'.");
+				$"{McpErrorCodes.InvalidArguments}: the selected profile's persistent redaction identity is unavailable; " +
+				PersistentRedactionIdentityRemedy(liveContext is not null));
 		}
 		if (profileReference.Kind == ProjectProfileSourceKind.Local)
 		{
@@ -1212,6 +1219,10 @@ internal sealed class McpProjectService(
 		}
 		return new ProjectProfileReference(ProjectProfileSourceKind.Portable, path);
 	}
+
+	internal static string PersistentRedactionIdentityRemedy(bool live) => live
+		? "retry with 'profile' omitted or set to 'local' after persistent secret storage is available."
+		: "use profile 'standard'.";
 
 	private static GitFilteringMode? StrictestGitMode(
 		GitFilteringMode? profileMode,

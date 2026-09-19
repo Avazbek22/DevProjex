@@ -88,7 +88,7 @@ public sealed partial class McpServerIntegrationTests
 			"get_file",
 			new Dictionary<string, object?> { ["path"] = "outside/Outside.cs" }));
 		Assert.StartsWith(
-			"[Live context] outside/Outside.cs is outside the current window selection; returned because you named it. " +
+			"[Live context] the named path is outside the current window selection; returned because you named it. " +
 			"Tree, search, pack and related stay within the selection.",
 			outside,
 			StringComparison.Ordinal);
@@ -114,7 +114,7 @@ public sealed partial class McpServerIntegrationTests
 			"Call pack_context again to include the current selection.",
 			page,
 			StringComparison.Ordinal);
-		Assert.Contains("[Live context] changed since revision 1: +outside, -src", page, StringComparison.Ordinal);
+		Assert.Contains("[Live context] changed since revision 1: +1 folder, -1 folder", page, StringComparison.Ordinal);
 
 		var rejected = await server.CallAsync(
 			"get_file",
@@ -174,8 +174,10 @@ public sealed partial class McpServerIntegrationTests
 			"get_tree",
 			new Dictionary<string, object?> { ["project"] = "second" }));
 
-		Assert.Contains("revision 1 · 1 files selected in the window · root first", firstTree, StringComparison.Ordinal);
-		Assert.Contains("revision 1 · 0 files selected in the window · root second", secondTree, StringComparison.Ordinal);
+		Assert.Contains("revision 1 · 1 files selected in the window · root 1 of 2", firstTree, StringComparison.Ordinal);
+		Assert.Contains("revision 1 · 0 files selected in the window · root 2 of 2", secondTree, StringComparison.Ordinal);
+		Assert.Contains("Live context root 1 name:" + Environment.NewLine + "first", firstTree, StringComparison.Ordinal);
+		Assert.Contains("Live context root 2 name:" + Environment.NewLine + "second", secondTree, StringComparison.Ordinal);
 		Assert.Contains("the window selects no files", secondTree, StringComparison.Ordinal);
 	}
 

@@ -7,7 +7,8 @@ namespace DevProjex.Mcp;
 internal sealed class McpLiveContextState(
 	McpRootRegistry roots,
 	Func<IProjectProfileStore> profileStore,
-	TimeSpan? lookupTimeout = null)
+	TimeSpan? lookupTimeout = null,
+	McpToolSet toolSet = McpToolSet.Full)
 {
 	private static readonly TimeSpan DefaultLookupTimeout = TimeSpan.FromMilliseconds(250);
 	private readonly AsyncLocal<InvocationState?> invocation = new();
@@ -67,6 +68,7 @@ internal sealed class McpLiveContextState(
 		var store = profileStore();
 		var lookup = store.LookupProfile(configuredRoot, profileLookupTimeout);
 		if (lookup.Status == ProjectProfileLookupStatus.Missing &&
+			lookup.RecoveryStatus is null &&
 			!PathComparer.Default.Equals(configuredRoot, normalizedRoot))
 		{
 			lookup = store.LookupProfile(normalizedRoot, profileLookupTimeout);
@@ -85,7 +87,8 @@ internal sealed class McpLiveContextState(
 				state.Profile,
 				state.Revision,
 				state.IsMissing,
-				state.ReadFailure is not null);
+				state.ReadFailure is not null,
+				state.HasSuccessfulSnapshot);
 			return snapshot;
 		}
 	}
@@ -104,6 +107,8 @@ internal sealed class McpLiveContextState(
 				profile.Value is not { } current ||
 				current.Revision != state.Revision)
 				return;
+			state.EffectiveTree = plan.EffectiveTree;
+			state.PendingChange = ClassifyPendingChange(state.Root, state.PendingChange, state.EffectiveTree);
 			state.SelectedFileCount = plan.IncludedFiles.Count;
 			active.Roots.Add(normalizedRoot);
 		}
@@ -131,17 +136,17 @@ internal sealed class McpLiveContextState(
 				$"[Live context] pack built at revision {state.Revision}.");
 			return string.IsNullOrEmpty(packId)
 				? null
-				: new McpStoredResultContext(normalizedRoot, state.Revision);
+				: new McpStoredResultContext(normalizedRoot, state.Revision, McpStoredResultKind.Pack);
 		}
 	}
 
-	public McpStoredResultContext? RecordStoredResult(string projectRoot)
+	public McpStoredResultContext? RecordStoredResult(string projectRoot, McpStoredResultKind kind)
 	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
 		lock (sync)
 		{
 			return states.TryGetValue(normalizedRoot, out var state)
-				? new McpStoredResultContext(normalizedRoot, state.Revision)
+				? new McpStoredResultContext(normalizedRoot, state.Revision, kind)
 				: null;
 		}
 	}
@@ -154,9 +159,13 @@ internal sealed class McpLiveContextState(
 		var current = ReadCurrentProfile(stored.Root);
 		if (current.Revision == stored.Revision)
 			return;
+		var refreshTool = McpStoredResultAdvice.RefreshTool(toolSet, stored.Kind);
+		var advice = refreshTool is null
+			? string.Empty
+			: $" Call {refreshTool} again to include the current selection.";
 		invocation.Value?.AdditionalNotices.Add(
-			$"[Live context] pack built at revision {stored.Revision}; window is at revision {current.Revision}. " +
-			"Call pack_context again to include the current selection.");
+			$"[Live context] {McpStoredResultAdvice.ResultName(stored.Kind)} built at revision {stored.Revision}; " +
+			$"window is at revision {current.Revision}.{advice}");
 	}
 
 	public CallToolResult AppendNotices(CallToolResult result)
@@ -172,25 +181,52 @@ internal sealed class McpLiveContextState(
 			? active.Roots.ToArray()
 			: roots.Roots.Select(PathUtility.Normalize).ToArray();
 		var notices = new List<string>();
+		var untrustedDetails = new List<string>();
 		lock (sync)
 		{
 			if (active is not null)
 				notices.AddRange(active.AdditionalNotices);
-			foreach (var root in observedRoots.Order(ProjectTreePathIdentity.CanonicalComparer))
+			var configuredRoots = roots.Roots
+				.Select(PathUtility.Normalize)
+				.Distinct(PathComparer.Default)
+				.Order(ProjectTreePathIdentity.CanonicalComparer)
+				.ToArray();
+			var dynamicRoots = observedRoots
+				.Where(root => !configuredRoots.Contains(root, PathComparer.Default))
+				.Distinct(PathComparer.Default)
+				.Order(ProjectTreePathIdentity.CanonicalComparer);
+			var noticeRoots = configuredRoots.Concat(dynamicRoots).ToArray();
+			var orderedRoots = observedRoots.Order(ProjectTreePathIdentity.CanonicalComparer).ToArray();
+			foreach (var root in orderedRoots)
 			{
 				if (!states.TryGetValue(root, out var state))
 					continue;
-				AppendRootNotices(notices, state, roots.Roots.Count > 1);
+				var rootIndex = Array.FindIndex(
+					noticeRoots,
+					candidate => PathComparer.Default.Equals(candidate, root)) + 1;
+				AppendRootNotices(
+					notices,
+					untrustedDetails,
+					state,
+					noticeRoots.Length > 1,
+					rootIndex,
+					noticeRoots.Length);
 			}
 		}
-		if (notices.Count == 0)
+		if (notices.Count == 0 && untrustedDetails.Count == 0)
 			return result;
 
-		result.Content =
-		[
-			.. result.Content,
-			new TextContentBlock { Text = string.Join(Environment.NewLine, notices) }
-		];
+		var content = result.Content.ToList();
+		if (untrustedDetails.Count > 0)
+		{
+			content.Add(new TextContentBlock
+			{
+				Text = McpSpotlight.Wrap(string.Join(Environment.NewLine, untrustedDetails))
+			});
+		}
+		if (notices.Count > 0)
+			content.Add(new TextContentBlock { Text = string.Join(Environment.NewLine, notices) });
+		result.Content = content;
 		return result;
 	}
 
@@ -208,7 +244,7 @@ internal sealed class McpLiveContextState(
 			state.ReadFailure = lookup.RecoveryStatus;
 			return;
 		}
-		if (lookup.Status == ProjectProfileLookupStatus.Missing)
+		if (lookup.Status == ProjectProfileLookupStatus.Missing && lookup.RecoveryStatus is null)
 		{
 			ApplySuccessfulSnapshot(state, profile: null, isMissing: true);
 			state.ReadFailure = lookup.RecoveryStatus;
@@ -222,7 +258,7 @@ internal sealed class McpLiveContextState(
 			state.IsMissing = true;
 			state.Fingerprint = "missing";
 		}
-		state.ReadFailure = lookup.Status;
+		state.ReadFailure = lookup.RecoveryStatus ?? lookup.Status;
 	}
 
 	private static void ApplySuccessfulSnapshot(
@@ -245,9 +281,10 @@ internal sealed class McpLiveContextState(
 			state.Revision++;
 			state.SelectedFileCount = null;
 			var frontierChanges = BuildFrontierChanges(state.Frontier, frontier);
-			state.PendingChange = new PendingChange(
-				previousRevision,
-				frontierChanges.Count == 0 ? ["selection settings changed"] : frontierChanges);
+			state.PendingChange = ClassifyPendingChange(
+				state.Root,
+				new PendingChange(previousRevision, frontierChanges),
+				state.EffectiveTree);
 			state.Fingerprint = fingerprint;
 			state.Frontier = frontier;
 		}
@@ -319,30 +356,94 @@ internal sealed class McpLiveContextState(
 			.ToArray();
 	}
 
-	private static IReadOnlyList<string> BuildFrontierChanges(string[]? before, string[]? after)
+	private static IReadOnlyList<FrontierChange> BuildFrontierChanges(
+		string[]? before,
+		string[]? after)
 	{
 		if (before is null && after is null)
 			return [];
 		if (before is null)
-			return ["-all", .. (after ?? []).Select(static path => $"+{path}")];
+			return
+			[
+				new FrontierChange(Added: false, FrontierChangeKind.All, Path: null),
+				.. (after ?? []).Select(path => CreatePathChange(path, added: true))
+			];
 		if (after is null)
-			return [.. before.Select(static path => $"-{path}"), "+all"];
+			return
+			[
+				.. before.Select(path => CreatePathChange(path, added: false)),
+				new FrontierChange(Added: true, FrontierChangeKind.All, Path: null)
+			];
 
 		var previous = before.ToHashSet(StringComparer.Ordinal);
 		var current = after.ToHashSet(StringComparer.Ordinal);
 		return current.Except(previous, StringComparer.Ordinal).Order(StringComparer.Ordinal)
-			.Select(static path => $"+{path}")
+			.Select(path => CreatePathChange(path, added: true))
 			.Concat(previous.Except(current, StringComparer.Ordinal).Order(StringComparer.Ordinal)
-				.Select(static path => $"-{path}"))
+				.Select(path => CreatePathChange(path, added: false)))
 			.ToArray();
 	}
 
-	private static void AppendRootNotices(List<string> notices, RootState state, bool includeRoot)
+	private static FrontierChange CreatePathChange(string path, bool added) =>
+		new(added, FrontierChangeKind.Path, path);
+
+	private static PendingChange? ClassifyPendingChange(
+		string root,
+		PendingChange? pendingChange,
+		TreeNodeDescriptor? effectiveTree)
+	{
+		if (pendingChange is null ||
+			effectiveTree is null ||
+			pendingChange.Changes.All(static change => change.Path is null))
+			return pendingChange;
+
+		var remainingPaths = pendingChange.Changes
+			.Where(static change => change.Path is not null)
+			.Select(static change => change.Path!)
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
+		var kindsByPath = new Dictionary<string, FrontierChangeKind>(ProjectTreePathIdentity.CanonicalComparer);
+		var pendingNodes = new Stack<TreeNodeDescriptor>();
+		pendingNodes.Push(effectiveTree);
+		while (remainingPaths.Count > 0 && pendingNodes.TryPop(out var node))
+		{
+			var relativePath = Path.GetRelativePath(root, node.FullPath).Replace('\\', '/');
+			if (remainingPaths.Remove(relativePath) &&
+				!relativePath.Equals(".", StringComparison.Ordinal) &&
+				!Path.IsPathRooted(relativePath) &&
+				!relativePath.Equals("..", StringComparison.Ordinal) &&
+				!relativePath.StartsWith("../", StringComparison.Ordinal))
+			{
+				kindsByPath[relativePath] = node.IsDirectory
+					? FrontierChangeKind.Folder
+					: FrontierChangeKind.File;
+			}
+
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				pendingNodes.Push(node.Children[index]);
+		}
+
+		var classified = pendingChange.Changes
+			.Select(change => change.Path is not null && kindsByPath.TryGetValue(change.Path, out var kind)
+				? change with { Kind = kind }
+				: change)
+			.ToArray();
+		return pendingChange with { Changes = classified };
+	}
+
+	private static void AppendRootNotices(
+		List<string> notices,
+		List<string> untrustedDetails,
+		RootState state,
+		bool includeRoot,
+		int rootIndex,
+		int rootCount)
 	{
 		if (state.ReadFailure is not null)
 		{
-			notices.Add(
-				$"[Live context] saved window selection could not be read; using revision {state.Revision}. Retry this call.");
+			var message = state.HasSuccessfulSnapshot
+				? $"[Live context] saved window selection could not be read; using revision {state.Revision}. Retry this call."
+				: "[Live context] saved window selection could not be read; retry this call.";
+			notices.Add(message);
 		}
 		else if (state.IsMissing)
 		{
@@ -360,17 +461,67 @@ internal sealed class McpLiveContextState(
 
 		if (state.PendingChange is { } changed)
 		{
-			var shown = changed.Changes.Take(5).ToArray();
-			var remaining = changed.Changes.Count - shown.Length;
-			var suffix = remaining > 0 ? $" and {remaining} more" : string.Empty;
-			notices.Add(
-				$"[Live context] changed since revision {changed.PreviousRevision}: {string.Join(", ", shown)}{suffix}");
+			if (changed.Changes.Count == 0)
+			{
+				notices.Add(
+					$"[Live context] changed since revision {changed.PreviousRevision}: selection settings changed");
+			}
+			else
+			{
+				var shownPaths = changed.Changes.Where(static change => change.Path is not null).Take(5).ToArray();
+				var remainingPaths = changed.Changes.Count(static change => change.Path is not null) - shownPaths.Length;
+				var suffix = remainingPaths > 0
+					? $" · {shownPaths.Length} names shown, {remainingPaths} more"
+					: string.Empty;
+				notices.Add(
+					$"[Live context] changed since revision {changed.PreviousRevision}: {FormatChangeSummary(changed.Changes)}{suffix}");
+				if (shownPaths.Length > 0)
+				{
+					untrustedDetails.Add(
+						$"Live context changed paths since revision {changed.PreviousRevision}:" + Environment.NewLine +
+						string.Join(
+							Environment.NewLine,
+							shownPaths.Select(static change =>
+								(change.Added ? "+" : "-") + McpTextEscaping.EscapeSingleLine(change.Path!))));
+				}
+			}
 			state.PendingChange = null;
 		}
 
 		var count = state.SelectedFileCount?.ToString(CultureInfo.InvariantCulture) ?? "0";
-		var rootSuffix = includeRoot ? $" · root {McpRootRegistry.GetProjectName(state.Root)}" : string.Empty;
+		var rootSuffix = includeRoot ? $" · root {rootIndex} of {rootCount}" : string.Empty;
 		notices.Add($"[Live context] revision {state.Revision} · {count} files selected in the window{rootSuffix}");
+		if (includeRoot)
+		{
+			untrustedDetails.Add(
+				$"Live context root {rootIndex} name:" + Environment.NewLine +
+				McpTextEscaping.EscapeSingleLine(McpRootRegistry.GetProjectName(state.Root)));
+		}
+	}
+
+	private static string FormatChangeSummary(IReadOnlyList<FrontierChange> changes)
+	{
+		var parts = new List<string>();
+		var written = new HashSet<(bool Added, FrontierChangeKind Kind)>();
+		foreach (var change in changes)
+		{
+			if (change.Kind == FrontierChangeKind.All)
+			{
+				parts.Add(change.Added ? "+all" : "-all");
+				continue;
+			}
+			if (!written.Add((change.Added, change.Kind)))
+				continue;
+			var count = changes.Count(candidate => candidate.Added == change.Added && candidate.Kind == change.Kind);
+			var name = change.Kind switch
+			{
+				FrontierChangeKind.File => count == 1 ? "file" : "files",
+				FrontierChangeKind.Folder => count == 1 ? "folder" : "folders",
+				_ => count == 1 ? "path" : "paths"
+			};
+			parts.Add($"{(change.Added ? '+' : '-')}{count} {name}");
+		}
+		return string.Join(", ", parts);
 	}
 
 	private static bool IsWslMount(string path) =>
@@ -394,6 +545,7 @@ internal sealed class McpLiveContextState(
 		public bool HasSuccessfulSnapshot { get; set; }
 		public ProjectProfileLookupStatus? ReadFailure { get; set; }
 		public int? SelectedFileCount { get; set; }
+		public TreeNodeDescriptor? EffectiveTree { get; set; }
 		public PendingChange? PendingChange { get; set; }
 	}
 
@@ -417,11 +569,22 @@ internal sealed class McpLiveContextState(
 		}
 	}
 
-	private sealed record PendingChange(int PreviousRevision, IReadOnlyList<string> Changes);
+	private enum FrontierChangeKind
+	{
+		All,
+		File,
+		Folder,
+		Path
+	}
+
+	private sealed record FrontierChange(bool Added, FrontierChangeKind Kind, string? Path);
+
+	private sealed record PendingChange(int PreviousRevision, IReadOnlyList<FrontierChange> Changes);
 }
 
 internal sealed record McpLiveProfileSnapshot(
 	ProjectSelectionProfile? Profile,
 	int Revision,
 	bool IsMissing,
-	bool IsReadFailure);
+	bool IsReadFailure,
+	bool HasSuccessfulSnapshot);

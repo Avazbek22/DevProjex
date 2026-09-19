@@ -1797,13 +1797,13 @@ public sealed class McpInfrastructureTests
 		var first = await registry.CreateAsync(
 			async (stream, token) => await stream.WriteAsync(new byte[6], token),
 			TestContext.Current.CancellationToken);
-		var firstContext = new McpStoredResultContext("root-a", 3);
+		var firstContext = new McpStoredResultContext("root-a", 3, McpStoredResultKind.Pack);
 		registry.RecordLiveContext(first.Id, firstContext);
 		time.Advance();
 		var second = await registry.CreateAsync(
 			async (stream, token) => await stream.WriteAsync(new byte[6], token),
 			TestContext.Current.CancellationToken);
-		var secondContext = new McpStoredResultContext("root-b", 4);
+		var secondContext = new McpStoredResultContext("root-b", 4, McpStoredResultKind.Pack);
 		registry.RecordLiveContext(second.Id, secondContext);
 		time.Advance();
 

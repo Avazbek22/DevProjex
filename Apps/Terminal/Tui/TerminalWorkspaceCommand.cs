@@ -283,7 +283,7 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandVerb.Profile,
 			TerminalWorkspaceCommandGrammar.Profile,
 			"profile",
-			"profile <save|load|show|reset> ...",
+			"profile save [name] | profile load <name|path> | profile show | profile reset",
 			"profile show",
 			static (session, command) => session.ExecuteProfileCommand(command)),
 		Define(

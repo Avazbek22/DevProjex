@@ -11,7 +11,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote, bool agentExclusions = false,
 		McpToolSet toolSet = McpToolSet.Full,
-		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters)
+		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters,
+		bool live = false)
 	{
 		ArgumentNullException.ThrowIfNull(target);
 		_tools =
@@ -39,6 +40,15 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 				var schema = tool.ProtocolTool.InputSchema.GetRawText()
 					.Replace("pack_context, search_project, or related_files", "search_project or related_files", StringComparison.Ordinal)
 					.Replace("; analyze echoes the result.", ".", StringComparison.Ordinal);
+				tool.ProtocolTool.InputSchema = ParseSchema(schema);
+			}
+		}
+		if (live)
+		{
+			foreach (var tool in _tools)
+			{
+				var schema = tool.ProtocolTool.InputSchema.GetRawText()
+					.Replace(StandardProfileDescription, LiveProfileDescription, StringComparison.Ordinal);
 				tool.ProtocolTool.InputSchema = ParseSchema(schema);
 			}
 		}
@@ -223,6 +233,12 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "description": "Selection profile: standard uses all eight exclusion toggles plus gitignore; local uses the desktop profile listed by list_projects.profiles; otherwise give a portable profile path inside the project."
 	}
 	""";
+
+	private const string StandardProfileDescription =
+		"Selection profile: standard uses all eight exclusion toggles plus gitignore; local uses the desktop profile listed by list_projects.profiles; otherwise give a portable profile path inside the project.";
+
+	private const string LiveProfileDescription =
+		"Selection profile in live mode: omit it or use local; standard and portable profiles are rejected because the window profile is the only selection source.";
 
 	private const string CompactDetailProperty = """
 	"detail": {

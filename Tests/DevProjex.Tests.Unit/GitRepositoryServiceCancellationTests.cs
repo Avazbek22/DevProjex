@@ -58,10 +58,10 @@ public sealed class GitRepositoryServiceCancellationTests
         {
             await childReady.Task
                 .WaitAsync(ProcessTreeStartupTimeout, TestContext.Current.CancellationToken);
-            childProcessId = int.Parse(
-                await File.ReadAllTextAsync(readyPath, TestContext.Current.CancellationToken),
-                NumberStyles.None,
-                CultureInfo.InvariantCulture);
+            childProcessId = await ReadProcessIdAsync(
+                readyPath,
+                process,
+                TestContext.Current.CancellationToken);
             Assert.Throws<IOException>(() =>
             {
                 using var _ = new FileStream(
@@ -98,6 +98,40 @@ public sealed class GitRepositoryServiceCancellationTests
             if (childProcessId is { } processId)
                 await TerminateTestProcessAsync(processId, entireProcessTree: false);
         }
+    }
+
+    private static async Task<int> ReadProcessIdAsync(
+        string path,
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.StartNew();
+        while (started.Elapsed < ProcessTreeStartupTimeout)
+        {
+            try
+            {
+                var text = await File.ReadAllTextAsync(path, cancellationToken);
+                if (int.TryParse(
+                        text,
+                        NumberStyles.None,
+                        CultureInfo.InvariantCulture,
+                        out var processId))
+                {
+                    return processId;
+                }
+            }
+            catch (IOException) when (!process.HasExited)
+            {
+                // Windows can publish the rename notification before releasing the destination handle.
+            }
+
+            if (process.HasExited)
+                throw new InvalidOperationException("The Git cancellation process exited before publishing its child process ID.");
+
+            await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
+        }
+
+        throw new TimeoutException($"The Git cancellation process ID could not be read: {path}");
     }
 
     private static int? TryReadProcessId(string path)

@@ -63,6 +63,48 @@ public sealed partial class McpServerProcessTests
 		await CompletePublishedMcpAsync(process, error, output);
 	}
 
+	[Theory]
+	[InlineData("full", false)]
+	[InlineData("full", true)]
+	[InlineData("reduced", false)]
+	[InlineData("reduced", true)]
+	public async Task RealProcessProfileSchemaMatchesTheServerMode(string toolSet, bool live)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/App.cs", "internal sealed class App;\n");
+		var arguments = new List<string> { "--tool-set", toolSet };
+		if (live)
+			arguments.Add("--live");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"),
+			arguments);
+
+		var tools = await server.Client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
+		var descriptions = tools
+			.Select(static tool => tool.ProtocolTool.InputSchema.GetProperty("properties"))
+			.Where(static properties => properties.TryGetProperty("profile", out _))
+			.Select(static properties => properties.GetProperty("profile").GetProperty("description").GetString())
+			.ToArray();
+
+		Assert.NotEmpty(descriptions);
+		foreach (var description in descriptions)
+		{
+			Assert.NotNull(description);
+			if (live)
+			{
+				Assert.Contains("omit it or use local", description, StringComparison.Ordinal);
+				Assert.Contains("standard and portable profiles are rejected", description, StringComparison.Ordinal);
+			}
+			else
+			{
+				Assert.Contains("standard uses", description, StringComparison.Ordinal);
+				Assert.Contains("portable profile path", description, StringComparison.Ordinal);
+			}
+		}
+	}
+
 	[Fact]
 	public async Task RealProcessReadsSearchAndRelatedStoredPagesWithTheReducedToolSet()
 	{

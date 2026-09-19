@@ -32,9 +32,15 @@ public sealed class McpLiveContextStateTests
 			Assert.Equal(2, state.ReadProfile(temporary.Path).Revision);
 			var changed = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
 			Assert.Contains(
-				"[Live context] changed since revision 1: +docs/api, +tests, -src",
+				"[Live context] changed since revision 1: +2 paths, -1 path",
 				changed,
 				StringComparison.Ordinal);
+			Assert.Contains("+docs/api", changed, StringComparison.Ordinal);
+			Assert.Contains("+tests", changed, StringComparison.Ordinal);
+			Assert.Contains("-src", changed, StringComparison.Ordinal);
+			AssertMarkerIsInsideUntrustedData(changed, "docs/api");
+			AssertMarkerIsInsideUntrustedData(changed, "tests");
+			AssertMarkerIsInsideUntrustedData(changed, "src");
 		}
 
 		using (state.BeginInvocation())
@@ -131,6 +137,81 @@ public sealed class McpLiveContextStateTests
 			var revision = state.ReadProfile(temporary.Path).Revision;
 			Assert.False(state.HasSelectedFileCount(temporary.Path, revision));
 		}
+	}
+
+	[Fact]
+	public void ChangedPathKindsComeOnlyFromTheEffectivePlanTree()
+	{
+		using var temporary = new TemporaryDirectory();
+		_ = temporary.CreateFolder("not-in-plan");
+		var store = new SequenceProfileStore(
+			Found(Profile(["old-selection"])),
+			Found(Profile(["not-in-plan", "virtual-folder", "virtual.cs"])));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		var effectiveTree = new TreeNodeDescriptor(
+			"project",
+			temporary.Path,
+			true,
+			false,
+			"folder",
+			[
+				new TreeNodeDescriptor(
+					"virtual-folder",
+					Path.Combine(temporary.Path, "virtual-folder"),
+					true,
+					false,
+					"folder",
+					[]),
+				new TreeNodeDescriptor(
+					"virtual.cs",
+					Path.Combine(temporary.Path, "virtual.cs"),
+					false,
+					false,
+					"csharp",
+					[])
+			]);
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			state.RecordPlan(temporary.Path, Plan(temporary.Path, 1, effectiveTree));
+			_ = state.AppendNotices(McpToolResults.TextSuccess("initial"));
+		}
+
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			var response = Text(state.AppendNotices(McpToolResults.TextSuccess("changed")));
+
+			Assert.Contains(
+				"[Live context] changed since revision 1: +1 path, +1 folder, +1 file, -1 path",
+				response,
+				StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void DynamicRootUsesAPositiveOrdinalAcrossConfiguredAndObservedRoots()
+	{
+		using var temporary = new TemporaryDirectory();
+		var first = temporary.CreateFolder("configured-a");
+		var second = temporary.CreateFolder("configured-b");
+		var dynamicRoot = temporary.CreateFolder("dynamic-z");
+		var state = new McpLiveContextState(
+			new McpRootRegistry([first, second]),
+			() => new SequenceProfileStore(Found(Profile(null))),
+			TimeSpan.Zero);
+
+		using var invocation = state.BeginInvocation();
+		_ = state.ReadProfile(dynamicRoot);
+		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+
+		Assert.DoesNotContain("root 0 of", response, StringComparison.Ordinal);
+		Assert.Contains("root 3 of 3", response, StringComparison.Ordinal);
+		AssertMarkerIsInsideUntrustedData(response, "dynamic-z");
 	}
 
 	[Fact]
@@ -285,7 +366,7 @@ public sealed class McpLiveContextStateTests
 	}
 
 	[Fact]
-	public void MissingBackupEntryUsesDefaultsAndReportsTheDegradedRead()
+	public void MissingBackupEntryReportsAnUnreadableInitialSnapshot()
 	{
 		using var temporary = new TemporaryDirectory();
 		var recoveredMissing = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null)
@@ -303,7 +384,55 @@ public sealed class McpLiveContextStateTests
 
 		Assert.True(snapshot.IsMissing);
 		Assert.True(snapshot.IsReadFailure);
-		Assert.Contains("saved window selection could not be read; using revision 1", response, StringComparison.Ordinal);
+		Assert.False(snapshot.HasSuccessfulSnapshot);
+		Assert.Contains(
+			"[Live context] saved window selection could not be read; retry this call.",
+			response,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("using revision", response, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RecoveredMissingProfileDoesNotFallThroughToThePhysicalRootAlias()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var alias = Path.Combine(temporary.Path, "project-alias");
+		try
+		{
+			Directory.CreateSymbolicLink(alias, project);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return;
+		}
+
+		try
+		{
+			var recoveredMissing = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null)
+			{
+				RecoveryStatus = ProjectProfileLookupStatus.InvalidStorage
+			};
+			var store = new SequenceProfileStore(
+				recoveredMissing,
+				Found(Profile(["unexpected-second-lookup"])));
+			var roots = new McpRootRegistry([alias]);
+			var state = new McpLiveContextState(roots, () => store, TimeSpan.Zero);
+
+			using var invocation = state.BeginInvocation();
+			var snapshot = state.ReadProfile(Assert.Single(roots.Roots));
+
+			Assert.Equal(1, store.LookupCount);
+			Assert.True(snapshot.IsReadFailure);
+			Assert.False(snapshot.HasSuccessfulSnapshot);
+			Assert.Null(snapshot.Profile);
+		}
+		finally
+		{
+			if (Directory.Exists(alias))
+				Directory.Delete(alias);
+		}
 	}
 
 	[Fact]
@@ -423,9 +552,10 @@ public sealed class McpLiveContextStateTests
 				response,
 				StringComparison.Ordinal);
 			Assert.Contains(
-				"[Live context] changed since revision 1: -src, +all",
+				"[Live context] changed since revision 1: -1 path, +all",
 				response,
 				StringComparison.Ordinal);
+			AssertMarkerIsInsideUntrustedData(response, "src");
 		}
 	}
 
@@ -450,9 +580,12 @@ public sealed class McpLiveContextStateTests
 	private static ProjectProfileLookupResult Found(ProjectSelectionProfile profile) =>
 		new(ProjectProfileLookupStatus.Found, profile);
 
-	private static ProjectContextPlan Plan(string root, int fileCount)
+	private static ProjectContextPlan Plan(
+		string root,
+		int fileCount,
+		TreeNodeDescriptor? effectiveTree = null)
 	{
-		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		var tree = effectiveTree ?? new TreeNodeDescriptor("project", root, true, false, "folder", []);
 		var analysis = new ProjectAnalysisReport(
 			ProjectAnalysisReport.CurrentSchemaVersion,
 			DateTimeOffset.UnixEpoch,
@@ -482,6 +615,15 @@ public sealed class McpLiveContextStateTests
 
 	private static string Text(CallToolResult result) =>
 		string.Join('\n', result.Content.OfType<TextContentBlock>().Select(static block => block.Text));
+
+	private static void AssertMarkerIsInsideUntrustedData(string text, string marker)
+	{
+		var start = text.IndexOf("<untrusted-data-", StringComparison.Ordinal);
+		var markerIndex = text.IndexOf(marker, StringComparison.Ordinal);
+		var end = text.IndexOf("</untrusted-data-", StringComparison.Ordinal);
+		Assert.True(start >= 0 && markerIndex > start && end > markerIndex, text);
+		Assert.Equal(markerIndex, text.LastIndexOf(marker, StringComparison.Ordinal));
+	}
 
 	private sealed class SequenceProfileStore(params ProjectProfileLookupResult[] results) : IProjectProfileStore
 	{

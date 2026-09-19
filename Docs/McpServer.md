@@ -37,49 +37,68 @@ devprojex mcp --root /absolute/path/to/project --search-body-chars 3000
 `devprojex mcp --root /absolute/path/to/project --live` makes the local profile
 saved by the open DevProjex window the baseline for every call. The server rereads
 that profile on every tool invocation, so changing checked tree nodes or applied
-filters takes effect on the next call without restarting the MCP session. Checked
-nodes are focus; extensions, ignores, Git scope, the root jail, allowlists, and
-mandatory secret protection remain ceilings. Explicit `paths` and globs can only
-narrow the saved focus. `profile: "local"` is equivalent to omitting `profile`;
-portable and standard profile selections fail with `DPX-MCP-INVALID-ARGUMENTS`
-because live mode has one selection source.
+filters takes effect on the next call without restarting the MCP session. Three
+rules stay separate: Checked nodes are focus for selection-wide tools;
+extensions, ignores, Git scope, the root jail, allowlists, and mandatory secret
+protection remain the **access boundaries**; and **saved results** stay pinned to
+the revision that created them until the originating tool rebuilds them. Explicit
+`paths` and globs can only narrow the saved focus. `profile: "local"` is equivalent
+to omitting `profile`; portable and standard profile selections fail with
+`DPX-MCP-INVALID-ARGUMENTS` because live mode has one selection source.
 
 Tree, search, pack, analysis, and dependency results stay inside the checked
 selection. A named `get_file` path that passes the effective filters may be read
-outside that focus; its content starts with:
+outside that focus. The fixed notice remains trusted, while the requested path
+stays in the existing untrusted file header:
 
 ```text
-[Live context] <path> is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.
+[Live context] the named path is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.
 ```
+
+A batch uses the same wording with a count, for example
+`[Live context] 2 named paths are outside ...`; it never repeats those paths in
+trusted text.
 
 A scalar path hidden by the effective filters still returns
 `DPX-MCP-PATH-NOT-FOUND`. In a batched read, that range is reported as
 `unavailable — outside effective selection` while the remaining ranges continue.
 Every live response ends with the current per-root revision and the selected
 file count from the latest plan built for that root. Before the first plan is
-built, the count is `0`; a multi-root server also names the root:
+built, the count is `0`. A multi-root server identifies the root by a stable
+ordinal in trusted text and places its project-controlled name in an untrusted
+data block:
 
 ```text
 [Live context] revision 16 · 128 files selected in the window
-[Live context] revision 16 · 128 files selected in the window · root project-name
+[Live context] revision 16 · 128 files selected in the window · root 1 of 2
+
+Live context root 1 name:
+project-name
 ```
 
 The first response after the saved profile changes, including an error result,
-also reports the frontier delta, limited to five paths. Added paths and removed
-paths are each written in ordinal order:
+also reports the frontier delta. Trusted text contains only counts and fixed
+selection kinds; up to five added or removed names are written in ordinal order
+inside a separate untrusted data block. If more names changed, the trusted line
+reports how many names were shown and how many remain:
 
 ```text
-[Live context] changed since revision 14: +docs/api, +tests, -src/legacy
-[Live context] changed since revision 14: +docs/api, +tests, -src/legacy and 4 more
+[Live context] changed since revision 14: +2 folders, -1 file
+[Live context] changed since revision 14: +7 folders, -2 files · 5 names shown, 4 more
 [Live context] changed since revision 14: selection settings changed
+
+Live context changed paths since revision 14:
++docs/api
++tests
+-src/legacy
 ```
 
 A transition away from the full-tree state uses `-all`; a transition back to
 the full tree uses `+all`:
 
 ```text
-[Live context] changed since revision 14: -all, +docs/api, +tests
-[Live context] changed since revision 14: -src/legacy, +all
+[Live context] changed since revision 14: -all, +2 folders
+[Live context] changed since revision 14: -1 folder, +all
 ```
 
 Revision 1 is the first profile read in a server session. It advances whenever
@@ -102,8 +121,16 @@ future schema, the server retains the last successful snapshot and adds:
 ```
 
 If the first read fails before any successful snapshot exists and no usable
-backup is available, the server uses server defaults at revision 1 and reports
-the same retry line. A usable backup initializes revision 1 instead.
+backup is available, the tool fails with `DPX-MCP-PROJECT-UNAVAILABLE`, advises
+the caller to retry, and does not silently use server defaults. Its live notice is:
+
+```text
+[Live context] saved window selection could not be read; retry this call.
+```
+
+A usable backup initializes revision 1 instead. A genuinely absent profile is
+different: it uses server defaults and emits the documented `no window selection
+saved` line.
 
 `pack_context` records the revision used to build a pack:
 
@@ -112,14 +139,23 @@ the same retry line. A usable backup initializes revision 1 instead.
 ```
 
 `read_pack` never rebuilds content implicitly. After the selection changes it
-adds:
+names the tool that created the stored result, if that tool exists in the active
+catalog. Full-set examples are:
 
 ```text
 [Live context] pack built at revision 14; window is at revision 16. Call pack_context again to include the current selection.
+[Live context] search result built at revision 14; window is at revision 16. Call search_project again to include the current selection.
+[Live context] related-files result built at revision 14; window is at revision 16. Call related_files again to include the current selection.
 ```
 
+The reduced set never recommends its omitted `pack_context` tool; an old pack
+notice then reports the revision mismatch without an unavailable next call.
+
 These trusted lines supplement rather than replace `[Search boundary]`,
-`[Resolution]`, `[Dependency partial parse]`, and `[Effective filters]`.
+`[Resolution]`, `[Dependency partial parse]`, and `[Effective filters]`. Trusted
+live lines contain only fixed words, revision and count values, and fixed enum
+states. Root names, file and folder names, and paths remain inside the same
+randomized untrusted-data boundary used for other project-controlled text.
 The server records a live-session heartbeat under the application state root in
 `live-sessions/<pid>.json`. Desktop and Terminal remove records whose process
 identity no longer matches or whose heartbeat is older than 15 seconds; a
@@ -368,7 +404,10 @@ batched `get_file` call instead of several single reads; see
   visibility only, never the redaction pass.
 - Large packs are kept in an application-owned temporary session directory. Pack
   ids are random, valid only in the current server process, and removed at exit.
-  After a server restart, call `pack_context` again to create a new id.
+  After a server restart, rerun the tool that created the stored result to create
+  a new id: `pack_context` for context packs, `search_project` for saved searches,
+  or `related_files` for saved dependency results. `pack_context` is unavailable
+  in the reduced tool set.
   Stale session directories older than 24 hours are scavenged at startup. A
   stored pack is limited to 200 MiB and all packs in one server session are
   limited to 1 GiB. To place a new pack within the session limit, the server evicts
@@ -1413,9 +1452,11 @@ actionable error instead of returning an empty result.
 `diff:<ref>..<ref>` on `get_tree`, `analyze`, `pack_context`, and
 `search_project`, and `related_files`. It intersects the server/profile baseline and therefore cannot
 re-enable paths excluded by `tracked_only` or a tracked profile. Staged selects
-index changes; changes adds unstaged and non-ignored untracked paths; diff uses
-two Git references. The complete value is limited to 4,096 characters. File
-content always comes from the current working tree.
+paths changed in the index; changes selects staged, unstaged, and non-ignored
+untracked paths; diff selects paths changed between two Git references. These
+scopes use Git only to select paths: every existing file's content comes from the
+current working tree, never from index or reference blobs. The complete value is
+limited to 4,096 characters.
 Deleted paths are omitted with a `DPX-GIT-STATE-DELETED` warning. A non-Git
 project or unavailable/invalid Git state returns an actionable tool error.
 
@@ -1681,7 +1722,7 @@ mount the project read-only, and run the container with a read-only root filesys
 For Claude Code:
 
 ```shell
-claude mcp add devprojex-docker -- docker run --rm -i --read-only --tmpfs /tmp -v /absolute/path/to/project:/project:ro ghcr.io/avazbek22/devprojex mcp --root /project
+claude mcp add devprojex-docker -- docker run --rm -i --read-only --tmpfs /tmp -v /absolute/path/to/project:/project:ro ghcr.io/avazbek22/devprojex mcp --root /project --git-mode none
 ```
 
 For Claude Desktop or Cursor, add this entry to `mcpServers`:
@@ -1690,7 +1731,7 @@ For Claude Desktop or Cursor, add this entry to `mcpServers`:
 {
   "devprojex-docker": {
     "command": "docker",
-    "args": ["run", "--rm", "-i", "--read-only", "--tmpfs", "/tmp", "-v", "/absolute/path/to/project:/project:ro", "ghcr.io/avazbek22/devprojex", "mcp", "--root", "/project"]
+    "args": ["run", "--rm", "-i", "--read-only", "--tmpfs", "/tmp", "-v", "/absolute/path/to/project:/project:ro", "ghcr.io/avazbek22/devprojex", "mcp", "--root", "/project", "--git-mode", "none"]
   }
 }
 ```
@@ -1703,7 +1744,7 @@ For Visual Studio Code, place the equivalent entry in `.vscode/mcp.json`:
     "devprojex-docker": {
       "type": "stdio",
       "command": "docker",
-      "args": ["run", "--rm", "-i", "--read-only", "--tmpfs", "/tmp", "-v", "${workspaceFolder}:/project:ro", "ghcr.io/avazbek22/devprojex", "mcp", "--root", "/project"]
+      "args": ["run", "--rm", "-i", "--read-only", "--tmpfs", "/tmp", "-v", "${workspaceFolder}:/project:ro", "ghcr.io/avazbek22/devprojex", "mcp", "--root", "/project", "--git-mode", "none"]
     }
   }
 }
@@ -1714,7 +1755,7 @@ For OpenAI Codex, add:
 ```toml
 [mcp_servers.devprojex_docker]
 command = "docker"
-args = ["run", "--rm", "-i", "--read-only", "--tmpfs", "/tmp", "-v", "/absolute/path/to/project:/project:ro", "ghcr.io/avazbek22/devprojex", "mcp", "--root", "/project"]
+args = ["run", "--rm", "-i", "--read-only", "--tmpfs", "/tmp", "-v", "/absolute/path/to/project:/project:ro", "ghcr.io/avazbek22/devprojex", "mcp", "--root", "/project", "--git-mode", "none"]
 ```
 
 MCP traffic uses stdout exclusively. If startup fails, diagnostics are written

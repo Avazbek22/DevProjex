@@ -4,11 +4,6 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class CommandParityContractTests
 {
-	private static readonly DateOnly ExpectedTuiParityDate = new(2026, 10, 19);
-	private static readonly IReadOnlySet<string> ExpectedTuiOperations = new HashSet<string>(
-		["open", "select", "profile load", "profile show", "profile reset", "related"],
-		StringComparer.Ordinal);
-
 	[Fact]
 	public void DocumentedParityNamesMatchThePublishedCommandCatalogs()
 	{
@@ -26,9 +21,6 @@ public sealed class CommandParityContractTests
 			ValidateCliCell(cli, row[3]);
 			ValidateTuiCell(tui, row[2]);
 		}
-		Assert.All(
-			ExpectedTuiOperations,
-			expected => Assert.Contains(rows.Items, row => CellOperations(row[2]).Contains(expected)));
 	}
 
 	private static void ValidateCliCell(Command root, string cell)
@@ -59,14 +51,8 @@ public sealed class CommandParityContractTests
 			var parsed = parser.Parse(operation);
 			if (parsed.IsSuccess || parsed.Error?.Code == TerminalWorkspaceCommandErrorCode.MissingArgument)
 				continue;
-			if (!ExpectedTuiOperations.Contains(operation))
-			{
-				throw new Xunit.Sdk.XunitException(
-					$"Docs/CommandLine.md names missing TUI operation '{operation}'.");
-			}
-			Assert.True(
-				DateOnly.FromDateTime(DateTime.UtcNow) <= ExpectedTuiParityDate,
-				$"Expected TUI operation '{operation}' is still absent after {ExpectedTuiParityDate:yyyy-MM-dd}.");
+			throw new Xunit.Sdk.XunitException(
+				$"Docs/CommandLine.md names missing TUI operation '{operation}'.");
 		}
 	}
 

@@ -148,11 +148,11 @@ a non-root user. Mount project input read-only by default:
 ```bash
 docker run --rm -i --read-only --tmpfs /tmp \
   -v "$PWD:/project:ro" \
-  ghcr.io/avazbek22/devprojex mcp --root /project
+  ghcr.io/avazbek22/devprojex mcp --root /project --git-mode none
 
 docker run --rm --read-only --tmpfs /tmp \
   -v "$PWD:/project:ro" \
-  ghcr.io/avazbek22/devprojex analyze /project --findings --fail-on-findings
+  ghcr.io/avazbek22/devprojex analyze /project --git-mode none --findings --fail-on-findings
 ```
 
 Use an explicit version tag for reproducible automation, for example
@@ -160,8 +160,8 @@ Use an explicit version tag for reproducible automation, for example
 tag only after a release workflow has published it. Alpine and other musl hosts
 are not supported.
 
-Because the minimal image has no Git executable, use `--git-mode none` for project
-selection inside the container. Tracked, staged, changes, and diff scopes, Git
+The examples pass `--git-mode none` because the minimal image intentionally has no
+Git executable. Tracked, staged, changes, and diff scopes, Git
 history ranking, and remote clone workflows are unavailable there; requesting a
 Git-backed scope fails with `DPX-GIT-STATE-UNAVAILABLE` instead of silently
 returning a complete-looking result; tracked-index selection uses the equally

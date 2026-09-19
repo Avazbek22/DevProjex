@@ -196,15 +196,15 @@ request-scoped choice rather than a standalone command.
 | Open project | direct action | `open` | `open` | none by design |
 | Select files | direct action | `select` | `--select` | `paths` |
 | Load profile | direct action | `profile load` | `--profile` | `profile` |
-| Show profile | direct action | `profile show` | `profile show` | `list_projects` |
+| Show profile | direct action | `profile show` | `profile show` | none by design |
 | Reset profile | direct action | `profile reset` | `profile reset` | none by design |
 | Save profile | direct action | `profile save` | `profile save` | none by design |
 | Search | direct action | `search` | `search` | `search_project` |
 | Related files | none by design | `related` | `related` | `related_files` |
 | Analyze | direct action | `analyze` | `analyze` | `analyze` |
 | Export context | direct action | `export` | `export context` | `pack_context` |
-| Connect MCP client | none by design | `mcp connect` | `mcp connect` | none by design |
-| Diagnostics | direct action | `diagnostics` | `doctor` | none by design |
+| Connect MCP client | MCP menu | `mcp connect` | `mcp connect` | none by design |
+| Diagnostics | none by design | `diagnostics` | `doctor` | none by design |
 
 ## Version
 
@@ -284,8 +284,9 @@ available in direct CLI commands, Terminal Workspace, and MCP, but not Desktop.
 The Git scope narrows the effective profile selection before file-size limits.
 Git subprocess isolation, network boundaries, and the `DPX-GIT-UNSAFE-FILTER` refusal are specified in [Git process safety](Git-Safety.md).
 Smart Ignore, Exclusions, explicit selected paths, extensions, and globs still
-apply. Selected content always comes from the current working tree, including
-when a staged file has newer unstaged edits.
+apply. `staged`, `changes`, and `diff:<REF>..<REF>` use Git only to choose paths;
+every existing file's content is read from the current working tree, never from
+the index or reference blobs, so a staged file includes newer unstaged edits.
 
 Deleted paths and rename sources do not enter the package because they no longer
 exist in the working tree. DevProjex reports their count with

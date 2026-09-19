@@ -28,6 +28,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	private readonly FileStream _sessionLease;
 	private readonly long _maximumPackBytes;
 	private readonly long _maximumSessionBytes;
+	private readonly McpToolSet _toolSet;
 	private readonly object _sync = new();
 	private readonly CancellationTokenSource _scavengeCancellation = new();
 	private readonly Task _scavengeTask;
@@ -36,8 +37,11 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	private bool _disposed;
 	private Task? _disposeTask;
 
-	public McpPackRegistry(string? tempRoot = null, TimeProvider? timeProvider = null)
-		: this(tempRoot, timeProvider, MaximumPackBytes, MaximumSessionBytes)
+	public McpPackRegistry(
+		string? tempRoot = null,
+		TimeProvider? timeProvider = null,
+		McpToolSet toolSet = McpToolSet.Full)
+		: this(tempRoot, timeProvider, MaximumPackBytes, MaximumSessionBytes, toolSet: toolSet)
 	{
 	}
 
@@ -47,12 +51,14 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		long maximumPackBytes,
 		long maximumSessionBytes,
 		Action<string>? onSessionDirectoryCreated = null,
-		Func<CancellationToken, Task>? scavengeOperation = null)
+		Func<CancellationToken, Task>? scavengeOperation = null,
+		McpToolSet toolSet = McpToolSet.Full)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPackBytes);
 		ArgumentOutOfRangeException.ThrowIfLessThan(maximumSessionBytes, maximumPackBytes);
 		_maximumPackBytes = maximumPackBytes;
 		_maximumSessionBytes = maximumSessionBytes;
+		_toolSet = toolSet;
 		TimeProvider = timeProvider ?? TimeProvider.System;
 		var productDirectory = ResolveProductDirectory(
 			tempRoot,
@@ -102,8 +108,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		string? userName)
 	{
 		if (tempRoot is null &&
-		    !string.IsNullOrWhiteSpace(xdgRuntimeDirectory) &&
-		    Path.IsPathFullyQualified(xdgRuntimeDirectory))
+			!string.IsNullOrWhiteSpace(xdgRuntimeDirectory) &&
+			Path.IsPathFullyQualified(xdgRuntimeDirectory))
 		{
 			return Path.Combine(Path.GetFullPath(xdgRuntimeDirectory), "DevProjex");
 		}
@@ -153,17 +159,17 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		{
 			var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
 			var path = Path.Combine(_sessionDirectory, id + ".pack");
-			var reservation = new PackReservation(this);
+			var reservation = new PackReservation(this, kind);
 			try
 			{
 				PackTextMetrics metrics;
 				await using (var stream = OpenPrivateFile(
-					             path,
-					             FileMode.CreateNew,
-					             FileAccess.Write,
-					             FileShare.None,
-					             64 * 1024,
-					             FileOptions.Asynchronous | FileOptions.SequentialScan))
+								 path,
+								 FileMode.CreateNew,
+								 FileAccess.Write,
+								 FileShare.None,
+								 64 * 1024,
+								 FileOptions.Asynchronous | FileOptions.SequentialScan))
 				{
 					await using var bounded = new QuotaWriteStream(stream, reservation);
 					await writer(bounded, cancellationToken).ConfigureAwait(false);
@@ -457,7 +463,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 
 		var directoryAttributes = File.GetAttributes(directory);
 		if (!directoryAttributes.HasFlag(FileAttributes.Directory) ||
-		    directoryAttributes.HasFlag(FileAttributes.ReparsePoint))
+			directoryAttributes.HasFlag(FileAttributes.ReparsePoint))
 		{
 			return false;
 		}
@@ -467,7 +473,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			return false;
 		var leaseAttributes = File.GetAttributes(leasePath);
 		return !leaseAttributes.HasFlag(FileAttributes.Directory) &&
-		       !leaseAttributes.HasFlag(FileAttributes.ReparsePoint);
+			   !leaseAttributes.HasFlag(FileAttributes.ReparsePoint);
 	}
 
 	private static bool IsLowerHexDigit(char value) =>
@@ -542,7 +548,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			Options = options
 		};
 		if (!OperatingSystem.IsWindows() && mode is
-		    FileMode.CreateNew or FileMode.Create or FileMode.OpenOrCreate or FileMode.Append)
+			FileMode.CreateNew or FileMode.Create or FileMode.OpenOrCreate or FileMode.Append)
 			streamOptions.UnixCreateMode = PrivateFileMode;
 		var stream = new FileStream(path, streamOptions);
 		try
@@ -558,14 +564,14 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		}
 	}
 
-	private static McpToolException Expired(bool quotaEvicted = false) =>
+	private McpToolException Expired(bool quotaEvicted = false) =>
 		Expired(McpStoredResultKind.Pack, quotaEvicted);
 
 	/// <summary>
 	/// Names the tool that produced the missing id, so a caller is told how to obtain that kind of
 	/// result again rather than how to obtain a pack.
 	/// </summary>
-	private static McpToolException Expired(McpStoredResultKind kind, bool quotaEvicted)
+	private McpToolException Expired(McpStoredResultKind kind, bool quotaEvicted)
 	{
 		var subject = kind switch
 		{
@@ -573,26 +579,25 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			McpStoredResultKind.Related => "related-files result",
 			_ => "pack"
 		};
-		var remedy = kind switch
-		{
-			McpStoredResultKind.Search => "search_project",
-			McpStoredResultKind.Related => "related_files",
-			_ => "pack_context"
-		};
+		var remedy = McpStoredResultAdvice.RefreshTool(_toolSet, kind);
 		return new McpToolException(
 			McpErrorCodes.PackExpired,
-			$"{McpErrorCodes.PackExpired}: {subject} expired or belongs to another server session; " +
-			$"call {remedy} again." +
+			$"{McpErrorCodes.PackExpired}: {subject} expired or belongs to another server session" +
+			(remedy is null ? "." : $"; call {remedy} again.") +
 			(quotaEvicted
 				? $" The {subject} was evicted to satisfy the session quota."
 				: string.Empty));
 	}
 
-	private static McpToolException TooLarge() =>
-		new(
+	private McpToolException TooLarge(McpStoredResultKind kind)
+	{
+		var retryTool = McpStoredResultAdvice.RefreshTool(_toolSet, kind);
+		var retry = retryTool is null ? "retry the request." : $"call {retryTool} again.";
+		return new McpToolException(
 			McpErrorCodes.PackTooLarge,
-			$"{McpErrorCodes.PackTooLarge}: pack storage limit exceeded. Narrow paths or include/exclude patterns, " +
-			"use a lower detail level, or enable tracked_only, then call pack_context again.");
+			$"{McpErrorCodes.PackTooLarge}: stored-result limit exceeded. Narrow paths or patterns, " +
+			$"reduce the requested output, then {retry}");
+	}
 
 	private void Reserve(PackReservation reservation, int count)
 	{
@@ -603,7 +608,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		{
 			ObjectDisposedException.ThrowIf(_disposed, this);
 			if (count > _maximumPackBytes - reservation.Bytes)
-				throw TooLarge();
+				throw TooLarge(reservation.Kind);
 			while (count > _maximumSessionBytes - _allocatedBytes)
 			{
 				var victim = _packs
@@ -612,7 +617,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 					.ThenBy(static item => item.Key, StringComparer.Ordinal)
 					.FirstOrDefault();
 				if (victim.Value is null)
-					throw TooLarge();
+					throw TooLarge(reservation.Kind);
 				_packs.Remove(victim.Key);
 				_allocatedBytes -= victim.Value.Document.Bytes;
 				reservation.EvictedPackCount++;
@@ -697,13 +702,14 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		public McpStoredResultContext? LiveContext { get; set; }
 	}
 
-	private sealed class PackReservation(McpPackRegistry owner) : IDisposable
+	private sealed class PackReservation(McpPackRegistry owner, McpStoredResultKind kind) : IDisposable
 	{
 		private bool _committed;
 		private bool _disposed;
 
 		public long Bytes { get; private set; }
 		public int EvictedPackCount { get; set; }
+		public McpStoredResultKind Kind { get; } = kind;
 
 		public void Reserve(int count) => owner.Reserve(this, count);
 
@@ -953,7 +959,10 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		McpPackLineCheckpoint[] LineCheckpoints);
 }
 
-internal sealed record McpStoredResultContext(string Root, int Revision);
+internal sealed record McpStoredResultContext(
+	string Root,
+	int Revision,
+	McpStoredResultKind Kind);
 
 internal readonly record struct McpPackLineCheckpoint(int LineNumber, long ByteOffset);
 
