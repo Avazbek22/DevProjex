@@ -15,7 +15,7 @@ public sealed class CommandParityContractTests
 		var repository = PublishedApplicationLocator.FindRepositoryRoot();
 		var rows = ReadRows(Path.Combine(repository, "Docs", "CommandLine.md"));
 		var cli = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
-		var tui = PublishedTuiOperations();
+		var tui = new TerminalWorkspaceCommandParser();
 
 		Assert.Equal(
 			["Action", "GUI", "TUI", "CLI", "MCP"],
@@ -52,11 +52,12 @@ public sealed class CommandParityContractTests
 		}
 	}
 
-	private static void ValidateTuiCell(IReadOnlySet<string> published, string cell)
+	private static void ValidateTuiCell(TerminalWorkspaceCommandParser parser, string cell)
 	{
 		foreach (var operation in CellOperations(cell))
 		{
-			if (published.Contains(operation))
+			var parsed = parser.Parse(operation);
+			if (parsed.IsSuccess || parsed.Error?.Code == TerminalWorkspaceCommandErrorCode.MissingArgument)
 				continue;
 			if (!ExpectedTuiOperations.Contains(operation))
 			{
@@ -67,27 +68,6 @@ public sealed class CommandParityContractTests
 				DateOnly.FromDateTime(DateTime.UtcNow) <= ExpectedTuiParityDate,
 				$"Expected TUI operation '{operation}' is still absent after {ExpectedTuiParityDate:yyyy-MM-dd}.");
 		}
-	}
-
-	private static IReadOnlySet<string> PublishedTuiOperations()
-	{
-		var result = new HashSet<string>(StringComparer.Ordinal);
-		foreach (var definition in TerminalWorkspaceCommandCatalog.All)
-		{
-			result.Add(definition.Token);
-			foreach (var alternative in definition.Syntax.Split('|', StringSplitOptions.TrimEntries))
-			{
-				var syntax = alternative.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-				if (syntax.Length > 1 &&
-					syntax[0] == definition.Token &&
-					!syntax[1].StartsWith('<') &&
-					!syntax[1].StartsWith('['))
-				{
-					result.Add($"{definition.Token} {syntax[1]}");
-				}
-			}
-		}
-		return result;
 	}
 
 	private static IReadOnlyList<Command> EnumerateCommands(Command root)
