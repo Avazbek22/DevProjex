@@ -115,53 +115,67 @@ public sealed class SearchCommandHandler(
 			IReadOnlyList<NavigationDeclaration>? navigation = null;
 			McpSearchDeclarationPreviewCache? declarationPreviews = null;
 			var priorityState = new McpSearchFilePriorityState();
-			var acceptedMatches = 0;
-			var scan = McpSearchTextScanner.ScanEach(
-				file.Content,
-				regex,
-				ContextLines,
-				file.ReplacementRanges,
-				match =>
+			void AcceptMatch(McpSearchMatchContext match)
+			{
+				navigation ??= McpSearchSymbols.CaptureNavigation(
+					services.DependencyFactsEngine,
+					relative,
+					file.Content,
+					token);
+				if (request.SearchBodyCharacters > 0)
 				{
-					navigation ??= McpSearchSymbols.CaptureNavigation(
-						services.DependencyFactsEngine,
+					declarationPreviews ??= new McpSearchDeclarationPreviewCache(
 						relative,
 						file.Content,
-						token);
-					if (request.Mode == SearchMode.Symbols &&
-						!navigation.Any(declaration =>
-							declaration.StartLine == match.MatchLineNumber &&
-							SymbolNameMatches(declaration.Name, request.Pattern)))
-					{
-						return;
-					}
-					acceptedMatches++;
-					if (request.SearchBodyCharacters > 0)
-					{
-						declarationPreviews ??= new McpSearchDeclarationPreviewCache(
-							relative,
-							file.Content,
-							navigation,
-							request.SearchBodyCharacters,
-							token);
-					}
-					DevProjexMcpTools.AddSearchCandidates(
-						candidates,
-						relative,
-						file.Path,
-						file.Content,
-						[match],
 						navigation,
-						regex,
-						ContextLines,
-						explicitScope: plan.Selection.SelectedPaths is { Count: > 0 },
-						priorityState,
-						declarationPreviews);
-				},
-				token);
-			var effectiveMatches = request.Mode == SearchMode.Symbols
-				? acceptedMatches
-				: scan.TotalMatches;
+						request.SearchBodyCharacters,
+						token);
+				}
+				DevProjexMcpTools.AddSearchCandidates(
+					candidates,
+					relative,
+					file.Path,
+					file.Content,
+					[match],
+					navigation,
+					regex,
+					ContextLines,
+					explicitScope: plan.Selection.SelectedPaths is { Count: > 0 },
+					priorityState,
+					declarationPreviews);
+			}
+
+			int effectiveMatches;
+			if (request.Mode == SearchMode.Symbols)
+			{
+				navigation = McpSearchSymbols.CaptureNavigation(
+					services.DependencyFactsEngine,
+					relative,
+					file.Content,
+					token);
+				var declarationMatches = McpSearchSymbols.FindNamedDeclarationMatches(
+					file.Content,
+					regex,
+					ContextLines,
+					file.ReplacementRanges,
+					navigation,
+					request.Pattern,
+					token);
+				foreach (var match in declarationMatches)
+					AcceptMatch(match);
+				effectiveMatches = declarationMatches.Count;
+			}
+			else
+			{
+				var scan = McpSearchTextScanner.ScanEach(
+					file.Content,
+					regex,
+					ContextLines,
+					file.ReplacementRanges,
+					AcceptMatch,
+					token);
+				effectiveMatches = scan.TotalMatches;
+			}
 			totalMatches += effectiveMatches;
 			if (effectiveMatches > 0)
 			{
@@ -319,17 +333,6 @@ public sealed class SearchCommandHandler(
 			$"(?<![\\p{{L}}\\p{{N}}_]){Regex.Escape(LastSymbolSegment(pattern))}(?![\\p{{L}}\\p{{N}}_])",
 		_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
 	};
-
-	private static bool SymbolNameMatches(string declaredName, string requestedName)
-	{
-		if (declaredName.Equals(requestedName, StringComparison.OrdinalIgnoreCase))
-			return true;
-		return !requestedName.Contains('.') &&
-			   !requestedName.Contains('#') &&
-			   !requestedName.Contains('/') &&
-			   !requestedName.Contains(':') &&
-			   LastSymbolSegment(declaredName).Equals(requestedName, StringComparison.OrdinalIgnoreCase);
-	}
 
 	private static string LastSymbolSegment(string name)
 	{

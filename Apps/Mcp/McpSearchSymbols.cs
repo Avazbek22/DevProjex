@@ -18,6 +18,100 @@ internal static class McpSearchSymbols
 	/// </summary>
 	public const int MaximumAnnotatedFiles = 64;
 
+	private static NavigationDeclaration? FindNamedDeclarationAtLine(
+		IReadOnlyList<NavigationDeclaration> declarations,
+		int line,
+		string requestedName)
+	{
+		ArgumentNullException.ThrowIfNull(declarations);
+		ArgumentNullException.ThrowIfNull(requestedName);
+		NavigationDeclaration? best = null;
+		foreach (var declaration in declarations)
+		{
+			if (line < declaration.StartLine || line > declaration.EndLine ||
+				!NameMatches(declaration.Name, requestedName))
+			{
+				continue;
+			}
+
+			if (best is null ||
+				declaration.EndLine - declaration.StartLine < best.EndLine - best.StartLine ||
+				declaration.EndLine - declaration.StartLine == best.EndLine - best.StartLine &&
+				declaration.EndIndex - declaration.StartIndex < best.EndIndex - best.StartIndex)
+			{
+				best = declaration;
+			}
+		}
+		return best;
+	}
+
+	public static IReadOnlyList<McpSearchMatchContext> FindNamedDeclarationMatches(
+		string content,
+		McpSearchRegex regex,
+		int contextLines,
+		IReadOnlyList<TransformedTextRange> protectedRanges,
+		IReadOnlyList<NavigationDeclaration> declarations,
+		string requestedName,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(content);
+		ArgumentNullException.ThrowIfNull(regex);
+		ArgumentNullException.ThrowIfNull(protectedRanges);
+		ArgumentNullException.ThrowIfNull(declarations);
+		ArgumentNullException.ThrowIfNull(requestedName);
+		ArgumentOutOfRangeException.ThrowIfNegative(contextLines);
+
+		var matching = declarations
+			.Where(declaration => NameMatches(declaration.Name, requestedName))
+			.ToArray();
+		if (matching.Length == 0)
+			return [];
+
+		var contexts = new Dictionary<NavigationDeclaration, McpSearchMatchContext>();
+		McpSearchTextScanner.ScanEach(
+			content,
+			regex,
+			contextLines,
+			protectedRanges,
+			match =>
+			{
+				var declaration = FindNamedDeclarationAtLine(
+					matching,
+					match.MatchLineNumber,
+					requestedName);
+				if (declaration is not null)
+					contexts.TryAdd(declaration, match);
+			},
+			cancellationToken);
+
+		if (contexts.Count < matching.Length)
+		{
+			var lines = ReadLineRanges(content, cancellationToken);
+			foreach (var declaration in matching)
+			{
+				if (contexts.ContainsKey(declaration))
+					continue;
+				var firstLine = Math.Max(1, declaration.StartLine - contextLines);
+				var lastLine = checked(declaration.StartLine + contextLines);
+				var evidence = lines
+					.Where(line => line.LineNumber >= firstLine && line.LineNumber <= lastLine)
+					.ToArray();
+				if (evidence.Length > 0)
+				{
+					contexts[declaration] = new McpSearchMatchContext(
+						[declaration.StartLine],
+						evidence,
+						StartsNewGroup: false);
+				}
+			}
+		}
+
+		return matching
+			.Where(contexts.ContainsKey)
+			.Select(declaration => contexts[declaration])
+			.ToArray();
+	}
+
 	public static McpSearchSymbolResult Resolve(
 		IReadOnlyList<McpSearchHit> hits,
 		IReadOnlyDictionary<string, IReadOnlyList<NavigationDeclaration>> navigationByFile,
@@ -84,7 +178,7 @@ internal static class McpSearchSymbols
 				if (hit.Line < span.Start || hit.Line > span.End)
 					continue;
 				if (best is null || span.End - span.Start < best.End - best.Start ||
-				    span.End - span.Start == best.End - best.Start && span.CharacterLength < best.CharacterLength)
+					span.End - span.Start == best.End - best.Start && span.CharacterLength < best.CharacterLength)
 					best = span;
 			}
 
@@ -250,6 +344,42 @@ internal static class McpSearchSymbols
 	{
 		var separator = name.AsSpan().LastIndexOfAny('.', '#', '/');
 		return separator >= 0 ? name.AsSpan(separator + 1) : name.AsSpan();
+	}
+
+	private static bool NameMatches(string declaredName, string requestedName)
+	{
+		if (declaredName.Equals(requestedName, StringComparison.OrdinalIgnoreCase))
+			return true;
+		return requestedName.IndexOfAny(['.', '#', '/', ':']) < 0 &&
+			   LastSearchSegment(declaredName).Equals(requestedName, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static ReadOnlySpan<char> LastSearchSegment(string name)
+	{
+		var separator = name.LastIndexOfAny(['.', '#', '/', ':']);
+		return separator >= 0 ? name.AsSpan(separator + 1) : name.AsSpan();
+	}
+
+	private static IReadOnlyList<McpTextLineRange> ReadLineRanges(
+		string content,
+		CancellationToken cancellationToken)
+	{
+		var lines = new List<McpTextLineRange>();
+		var lineStart = 0;
+		var lineNumber = 1;
+		for (var index = 0; index < content.Length; index++)
+		{
+			if ((index & 0xFFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			if (content[index] is not ('\r' or '\n'))
+				continue;
+			lines.Add(new McpTextLineRange(lineNumber++, lineStart, index - lineStart));
+			if (content[index] == '\r' && index + 1 < content.Length && content[index + 1] == '\n')
+				index++;
+			lineStart = index + 1;
+		}
+		lines.Add(new McpTextLineRange(lineNumber, lineStart, content.Length - lineStart));
+		return lines;
 	}
 
 	private sealed record DeclarationSpan(int Start, int End, string Name, int CharacterLength);
