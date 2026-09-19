@@ -388,14 +388,21 @@ public sealed class McpClientLaunchServiceTests
 		await File.WriteAllTextAsync(
 			clientShim,
 			"@echo off\r\n" +
-			"set \"DEVPROJEX_CAPTURED_PATH=%~dp0captured.txt\"\r\n" +
-			"set \"DEVPROJEX_CAPTURED_ARGUMENT=%~1\"\r\n" +
-			"\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" " +
-			"-NoLogo -NoProfile -NonInteractive -Command " +
-			"\"[IO.File]::WriteAllText($env:DEVPROJEX_CAPTURED_PATH, " +
-			"$env:DEVPROJEX_CAPTURED_ARGUMENT, [Text.UTF8Encoding]::new($false))\"\r\n" +
-			"exit /b %errorlevel%\r\n",
+			"chcp 65001 >nul\r\n" +
+			"> \"%~dp0captured.tmp\" <nul set /p \"=%~1\"\r\n" +
+			"move /y \"%~dp0captured.tmp\" \"%~dp0captured.txt\" >nul\r\n" +
+			"exit /b 0\r\n",
 			TestContext.Current.CancellationToken);
+		var captureReady = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		using var captureWatcher = new FileSystemWatcher(
+			toolsDirectory,
+			Path.GetFileName(capturedPath))
+		{
+			EnableRaisingEvents = true
+		};
+		captureWatcher.Created += (_, _) => captureReady.TrySetResult();
+		captureWatcher.Renamed += (_, _) => captureReady.TrySetResult();
 		var locator = new McpClientExecutableLocator(new McpClientExecutableLocatorOptions
 		{
 			Platform = TerminalCommandHostPlatform.Windows,
@@ -420,6 +427,11 @@ public sealed class McpClientLaunchServiceTests
 			TestContext.Current.CancellationToken);
 
 		Assert.True(result.Succeeded, result.ErrorMessage);
+		if (File.Exists(capturedPath))
+			captureReady.TrySetResult();
+		await captureReady.Task.WaitAsync(
+			TimeSpan.FromSeconds(10),
+			TestContext.Current.CancellationToken);
 		Assert.Equal(projectRoot, await File.ReadAllTextAsync(
 			capturedPath,
 			TestContext.Current.CancellationToken));
