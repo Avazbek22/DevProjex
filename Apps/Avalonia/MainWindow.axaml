@@ -219,7 +219,6 @@
                           AutomaticUpdateCheckChanged="OnAutomaticUpdateCheckChanged"
                           TerminalCommandSetupRequested="OnTerminalCommandSetup"
                           McpConnectionRequested="OnMcpConnectionRequested"
-                          ToggleMcpLiveContextRequested="OnToggleMcpLiveContext"
                           McpDocumentationRequested="OnMcpDocumentationRequested"
                           HelpCloseRequested="OnHelpClose"
                           LanguageRuRequested="OnLangRu"

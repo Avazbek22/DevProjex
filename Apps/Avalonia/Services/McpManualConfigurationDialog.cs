@@ -2,11 +2,17 @@ using Avalonia.Automation;
 
 namespace DevProjex.Avalonia.Services;
 
+internal enum McpManualPayloadPresentation
+{
+    Configuration,
+    Command
+}
+
 internal sealed record McpManualConfigurationDialogContent(
     string Title,
     string Reason,
-    string ConfigurationLabel,
-    string Configuration,
+    string PayloadLabel,
+    string Payload,
     string PathsLabel,
     IReadOnlyList<string> SuggestedConfigPaths,
     string CopyButton,
@@ -17,22 +23,30 @@ internal static class McpManualConfigurationDialog
     public static McpManualConfigurationDialogContent CreateContent(
         LocalizationService localization,
         McpConnectionResult result,
-        string fallbackConfiguration)
+        string fallbackConfiguration,
+        McpManualPayloadPresentation presentation = McpManualPayloadPresentation.Configuration)
     {
         ArgumentNullException.ThrowIfNull(localization);
         ArgumentNullException.ThrowIfNull(result);
 
-        var configuration = string.IsNullOrWhiteSpace(result.ManualConfiguration)
+        var payload = string.IsNullOrWhiteSpace(result.ManualConfiguration)
             ? fallbackConfiguration
             : result.ManualConfiguration;
-        if (string.IsNullOrWhiteSpace(configuration))
-            configuration = result.CommandOutput ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(payload))
+            payload = result.CommandOutput ?? string.Empty;
+
+        var payloadLabel = presentation switch
+        {
+            McpManualPayloadPresentation.Configuration => localization["Dialog.McpManual.Configuration"],
+            McpManualPayloadPresentation.Command => localization["Dialog.McpManual.Command"],
+            _ => throw new ArgumentOutOfRangeException(nameof(presentation), presentation, null)
+        };
 
         return new McpManualConfigurationDialogContent(
             localization["Dialog.McpManual.Title"],
             NormalizeSingleLine(result.UserMessage),
-            localization["Dialog.McpManual.Configuration"],
-            configuration,
+            payloadLabel,
+            payload,
             localization["Dialog.McpManual.Paths"],
             result.SuggestedConfigPaths?
                 .Where(static path => !string.IsNullOrWhiteSpace(path))
@@ -118,30 +132,30 @@ internal static class McpManualConfigurationDialog
             details.Children.Add(paths);
         }
 
-        var configurationLabel = new TextBlock
+        var payloadLabel = new TextBlock
         {
-            Text = content.ConfigurationLabel,
+            Text = content.PayloadLabel,
             FontWeight = FontWeight.SemiBold
         };
-        AutomationProperties.SetName(configurationLabel, content.ConfigurationLabel);
-        details.Children.Add(configurationLabel);
+        AutomationProperties.SetName(payloadLabel, content.PayloadLabel);
+        details.Children.Add(payloadLabel);
         grid.Children.Add(details);
 
-        var configuration = new TextBox
+        var payload = new TextBox
         {
             Name = "McpManualConfigurationText",
-            Text = content.Configuration,
+            Text = content.Payload,
             IsReadOnly = true,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.NoWrap,
             FontFamily = FontFamily.Parse("Consolas,Menlo,Monospace"),
             FontSize = 13
         };
-        configuration.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
-        configuration.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
-        AutomationProperties.SetName(configuration, content.ConfigurationLabel);
-        Grid.SetRow(configuration, 2);
-        grid.Children.Add(configuration);
+        payload.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+        payload.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+        AutomationProperties.SetName(payload, content.PayloadLabel);
+        Grid.SetRow(payload, 2);
+        grid.Children.Add(payload);
 
         var buttons = new StackPanel
         {
@@ -153,12 +167,12 @@ internal static class McpManualConfigurationDialog
         Grid.SetRow(buttons, 3);
 
         var copy = CreateButton(content.CopyButton);
-        copy.IsEnabled = !string.IsNullOrWhiteSpace(content.Configuration);
+        copy.IsEnabled = !string.IsNullOrWhiteSpace(content.Payload);
         copy.Click += async (_, _) =>
         {
             try
             {
-                await owner.Clipboard!.SetTextAsync(content.Configuration);
+                await owner.Clipboard!.SetTextAsync(content.Payload);
             }
             catch
             {

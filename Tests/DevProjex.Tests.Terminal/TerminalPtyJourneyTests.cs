@@ -65,28 +65,46 @@ public sealed class TerminalPtyJourneyTests
 	}
 
 	[Fact(Timeout = 60_000)]
-	public async Task ConnectionCommandUsesTheSharedStandardModeSetting()
+	public async Task ConnectionCommandAlwaysUsesLiveMode()
 	{
 		using var workspace = CreateProject();
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			workspace.Path,
 			["tui", workspace.Path, "--profile", "standard", "--language", "en"],
-			cancellationToken: TestContext.Current.CancellationToken,
-			initializeDataRoot: root =>
-			{
-				var store = new DevProjex.Infrastructure.ThemePresets.UserSettingsStore(() => root);
-				var settings = store.Load();
-				settings.ViewSettings = settings.ViewSettings with
-				{
-					IsMcpLiveContextEnabled = false
-				};
-				Assert.True(store.TrySave(settings));
-			});
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.WaitForScreenAsync(
 			"> PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync(":mcp connect json\r", TestContext.Current.CancellationToken);
+		var fragment = await terminal.WaitForScreenAsync(
+			"mcpServers",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("--live", fragment, StringComparison.Ordinal);
+		Assert.Contains(workspace.Path, fragment, StringComparison.Ordinal);
+
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task PrintableMcpCommandKeepsAnExplicitStandardMode()
+	{
+		using var workspace = CreateProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":mcp json standard\r", TestContext.Current.CancellationToken);
 		var fragment = await terminal.WaitForScreenAsync(
 			"mcpServers",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -98,8 +116,7 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
-			await terminal.WaitForExitAsync(
-				cancellationToken: TestContext.Current.CancellationToken));
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact(Timeout = 60_000)]

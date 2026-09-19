@@ -61,7 +61,6 @@ public sealed record AppViewSettings
     public bool IsTreeExpansionAnimationEnabled { get; init; } = true;
     public bool IsStatusMetricsAnimationEnabled { get; init; } = true;
     public bool IsToolAnimationEnabled { get; init; } = true;
-    public bool IsMcpLiveContextEnabled { get; init; } = true;
     public bool IsTerminalCommandPromptDismissed { get; init; }
     public AppLanguage? PreferredLanguage { get; init; }
 }

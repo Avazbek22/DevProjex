@@ -164,6 +164,12 @@ prints the manual `mcpServers` configuration and the usual Claude Desktop paths.
 If a command-line client is not installed or a connection fails, the result
 includes the manual command or configuration to use instead.
 
+Add `--open` to open the client after a successful registration. Claude Code
+and Codex open in a new terminal rooted at the project; Cursor and VS Code open
+the project through their URL scheme or installed command-line fallback. The
+default remains registration only. `--print` and `--open` are mutually exclusive,
+and `--open` is rejected for the manual-only `json` client.
+
 Add `--print` to make no client or project changes and print only the connection
 fragment, matching the earlier behavior. Every fragment embeds the absolute
 installed executable path: winget and portable ZIP installations retain it while
@@ -624,6 +630,7 @@ Specific options are:
 ```text
 --project <PROJECT|URL>
 --direction <dependencies|dependents|both>   default: both
+--depth <1..10>                              default: 1
 -f, --format <text|json>                     default: text
 --branch <NAME>                              URL source only
 --max-file-bytes <SIZE>
@@ -637,6 +644,13 @@ and a cross-scope marker where applicable; ambiguous references stay grouped wit
 candidate paths. JSON is the deterministic `devprojex-related-files` document described in
 [CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no content-transformation
 flags and does not return source content.
+Depth `1` preserves the direct-neighbor response. A larger depth walks only
+resolved edges: every newly reached file becomes a seed for the next hop, while
+ambiguous, unresolved, and external evidence is reported but never traversed.
+Text emits one seed section per visited file; JSON adds those seed objects to the
+existing `seeds` array in deterministic breadth-first order. A traversal may visit
+at most 256 distinct seed files; a wider result fails before output with
+`DPX-DEPENDENCY-TRAVERSAL-LIMIT` instead of returning a partial graph.
 When a grammar rejects one construction but independent facts survive, text output adds
 `[Dependency partial parse]` with the dropped-construction count and bounded line ranges; JSON uses
 `coverage.partialParseDiagnostics`. No fact from a damaged construction is published.

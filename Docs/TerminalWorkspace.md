@@ -251,11 +251,13 @@ inline ghost suffix as soon as a token can be completed:
 | `export zip <path>` / `export folder <path>` | open the existing project-export confirmation |
 | `copy [tree\|content\|tree-content] [text\|markdown\|json\|xml]` | copy an exact context document without changing the current view or format |
 | `analyze` | analyze the current context |
+| `related <path> [--direction <dependencies\|dependents\|both>] [--depth <1..10>]` | show dependency relations in the output panel using the current workspace selection |
 | `branch [name]` | switch the cloned repository branch, or open branch selection |
 | `update` | get updates for the cloned repository |
 | `recent` | open recent projects and repositories |
 | `profile save [name]` | save the current settings as a portable profile |
-| `mcp connect <claude-code\|codex\|cursor\|vscode\|json>` | connect the selected MCP client to the open project; `json` shows the manual configuration |
+| `mcp [claude-code\|codex\|cursor\|vscode\|json] [live\|standard]` | print a connection fragment without changing client configuration |
+| `mcp connect <claude-code\|codex\|cursor\|vscode\|json>` | connect the selected MCP client to the open project in live mode; `json` shows the manual configuration |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
 | `diagnostics` | show every diagnostic in a scrollable overlay |
@@ -276,6 +278,8 @@ Examples:
 :view content
 :search "connection string"
 :copy content markdown
+:related src/App.cs --direction dependencies --depth 2
+:mcp codex standard
 :refresh
 :language ja
 :export context markdown "../review context.md"
@@ -287,13 +291,18 @@ Oversized OSC 52 payloads are never truncated; the command reports an error and
 directs the user to `export` instead. A view or format supplied to `copy` applies
 only to that operation.
 
-`mcp connect` uses the shared application **Live context** preference, which is on
-by default. Turning that preference off makes subsequent TUI connections use the
-standard MCP server mode. The connection runs asynchronously; its localized result
+`mcp connect` always registers live mode and never opens another terminal or
+editor, because Terminal Workspace is already interactive. Its localized result
 appears both in the workspace status line and in a scrollable output panel. A
 missing command-line client or another failure shows the same reason together with
 the manual fallback configuration. Cursor and VS Code update their project files;
-the other client behaviors match `devprojex mcp connect`.
+the other client behaviors match `devprojex mcp connect`. The older `mcp` form
+continues to print a fragment and accepts an explicit live or standard mode.
+
+`related` uses the same dependency engine and text renderer as the direct CLI.
+Depth `1` shows direct relations; larger values walk only resolved edges and emit
+one section per visited file. Ambiguous and unresolved evidence is never followed.
+The same 256-seed limit fails honestly before the panel shows a partial graph.
 
 Left/Right, Home/End, Backspace, and Delete edit the line. Esc cancels it,
 Enter executes it, and Up/Down traverses command history. The newest 50 commands

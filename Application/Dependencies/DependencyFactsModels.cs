@@ -309,4 +309,12 @@ public sealed record DependencyRelatedResult(
 	DependencyIndexSnapshot Index,
 	IReadOnlyList<SeedRelatedFiles> Seeds);
 
+public sealed class DependencyTraversalLimitException(int maximumSeeds) : Exception(
+	$"The related traversal reached more than {maximumSeeds} files. Reduce the depth or narrow the effective selection.")
+{
+	public const string ErrorCode = "DPX-DEPENDENCY-TRAVERSAL-LIMIT";
+
+	public int MaximumSeeds { get; } = maximumSeeds;
+}
+
 public readonly record struct DependencyIndexProgress(int CompletedFiles, int TotalFiles);

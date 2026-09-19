@@ -183,8 +183,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         {
             IsStatusMetricsAnimationEnabled =
                 storedPreferences.StatusMetricsAnimation ?? true,
-            IsToolAnimationEnabled = storedPreferences.ToolAnimation ?? true,
-            IsMcpLiveContextEnabled = storedPreferences.McpLiveContext ?? true
+			IsToolAnimationEnabled = storedPreferences.ToolAnimation ?? true
         };
 
         return database;
@@ -280,8 +279,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
             return new StoredViewPreferences(
                 ReadOptionalBoolean(viewSettings, "isStatusMetricsAnimationEnabled"),
-                ReadOptionalBoolean(viewSettings, "isToolAnimationEnabled"),
-                ReadOptionalBoolean(viewSettings, "isMcpLiveContextEnabled"));
+				ReadOptionalBoolean(viewSettings, "isToolAnimationEnabled"));
         }
         catch
         {
@@ -341,6 +339,5 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     private readonly record struct StoredViewPreferences(
         bool? StatusMetricsAnimation,
-        bool? ToolAnimation,
-        bool? McpLiveContext);
+		bool? ToolAnimation);
 }

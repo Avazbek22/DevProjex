@@ -16,6 +16,7 @@ public sealed class McpConnectionCommandTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Contains("claude-code, codex, cursor, vscode, or json", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--print", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--open", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("1   Runtime or filesystem failure", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
 	}
@@ -49,6 +50,142 @@ public sealed class McpConnectionCommandTests
 		Assert.Contains("add: connected", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(run.Environment.StandardError);
 		Assert.Empty(connectionService.PrintRequests);
+		Assert.Empty(run.LaunchService.Requests);
+	}
+
+	[Fact]
+	public async Task Connect_ClientAndModeChoicesAreCaseInsensitive()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var connectionService = new StubMcpConnectionService
+		{
+			Result = new McpConnectionResult(McpConnectionStatus.Connected, "Codex connected.")
+		};
+
+		var run = await RunAsync(
+			workspace,
+			connectionService,
+			["mcp", "connect", project, "--client", "CODEX", "--mode", "STANDARD", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.Success, run.ExitCode);
+		var request = Assert.Single(connectionService.ConnectRequests);
+		Assert.Equal(McpConnectionClient.Codex, request.Client);
+		Assert.Equal(McpConnectionMode.Standard, request.Mode);
+	}
+
+	[Fact]
+	public async Task Connect_OpenLaunchesTheRegisteredClientOnlyAfterSuccess()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var connectionService = new StubMcpConnectionService
+		{
+			Result = new McpConnectionResult(
+				McpConnectionStatus.Connected,
+				"Codex connected.",
+				CommandOutput: "add: connected")
+		};
+
+		var run = await RunAsync(
+			workspace,
+			connectionService,
+			["mcp", "connect", project, "--client", "codex", "--open", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.Success, run.ExitCode);
+		var request = Assert.Single(run.LaunchService.Requests);
+		Assert.Equal(McpConnectionClient.Codex, request.Client);
+		Assert.Equal(Path.GetFullPath(project), request.ProjectRoot);
+		Assert.Contains("connected", run.Environment.StandardOutput, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("add: connected", run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Codex", run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("opened", run.Environment.StandardOutput, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public async Task Connect_OpenFailureReportsManualCommandAfterRegistration()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var launchService = new StubMcpClientLaunchService
+		{
+			Result = new McpClientLaunchResult(
+				McpClientLaunchStatus.Failed,
+				"No supported terminal application was found.",
+				"codex")
+		};
+
+		var run = await RunAsync(
+			workspace,
+			new StubMcpConnectionService
+			{
+				Result = new McpConnectionResult(McpConnectionStatus.Connected, "Codex connected.")
+			},
+			["mcp", "connect", project, "--client", "codex", "--open", "--language", "en"],
+			launchService);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, run.ExitCode);
+		Assert.Contains("server is connected", run.Environment.StandardOutput, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("No supported terminal", run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("codex", run.Environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Connect_OpenDoesNotLaunchAfterRegistrationFailure()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+
+		var run = await RunAsync(
+			workspace,
+			new StubMcpConnectionService
+			{
+				Result = new McpConnectionResult(McpConnectionStatus.ProcessFailed, "Registration failed.")
+			},
+			["mcp", "connect", project, "--client", "codex", "--open", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, run.ExitCode);
+		Assert.Empty(run.LaunchService.Requests);
+	}
+
+	[Fact]
+	public async Task Connect_PrintAndOpenAreRejectedTogether()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var connectionService = new StubMcpConnectionService();
+
+		var run = await RunAsync(
+			workspace,
+			connectionService,
+			["mcp", "connect", project, "--print", "--open", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, run.ExitCode);
+		Assert.Contains("--print", run.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("--open", run.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Empty(connectionService.ConnectRequests);
+		Assert.Empty(connectionService.PrintRequests);
+		Assert.Empty(run.LaunchService.Requests);
+	}
+
+	[Fact]
+	public async Task Connect_JsonAndOpenAreRejectedBeforeManualConfiguration()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var connectionService = new StubMcpConnectionService();
+
+		var run = await RunAsync(
+			workspace,
+			connectionService,
+			["mcp", "connect", project, "--client", "JSON", "--open", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, run.ExitCode);
+		Assert.Contains("--open", run.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("json", run.Environment.StandardError, StringComparison.OrdinalIgnoreCase);
+		Assert.Empty(connectionService.ConnectRequests);
+		Assert.Empty(connectionService.PrintRequests);
+		Assert.Empty(run.LaunchService.Requests);
 	}
 
 	[Theory]
@@ -140,14 +277,17 @@ public sealed class McpConnectionCommandTests
 	private static async Task<CommandRun> RunAsync(
 		TemporaryDirectory workspace,
 		StubMcpConnectionService connectionService,
-		IReadOnlyList<string> arguments)
+		IReadOnlyList<string> arguments,
+		StubMcpClientLaunchService? launchService = null)
 	{
+		launchService ??= new StubMcpClientLaunchService();
 		var dataRoot = workspace.CreateDirectory("app-data");
 		var executablePath = workspace.WriteFile("DevProjex.exe", string.Empty);
 		using var ownedServices = new TerminalServiceFactory(() => dataRoot).Create(AppLanguage.En);
 		var services = ownedServices with
 		{
 			McpConnectionService = connectionService,
+			McpClientLaunchService = launchService,
 			TerminalCommandSetupService = new StubTerminalCommandSetupService(executablePath)
 		};
 		var environment = new TestTerminalEnvironment();
@@ -156,7 +296,22 @@ public sealed class McpConnectionCommandTests
 			new TerminalServiceFactory(_ => services));
 
 		var exitCode = await application.RunAsync(arguments, TestContext.Current.CancellationToken);
-		return new CommandRun(exitCode, environment, executablePath);
+		return new CommandRun(exitCode, environment, executablePath, launchService);
+	}
+
+	private sealed class StubMcpClientLaunchService : IMcpClientLaunchService
+	{
+		public McpClientLaunchResult Result { get; init; } = new(McpClientLaunchStatus.Opened);
+		public List<McpClientLaunchRequest> Requests { get; } = [];
+
+		public Task<McpClientLaunchResult> OpenAsync(
+			McpClientLaunchRequest request,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Requests.Add(request);
+			return Task.FromResult(Result);
+		}
 	}
 
 	private sealed class StubMcpConnectionService : IMcpConnectionService
@@ -209,5 +364,6 @@ public sealed class McpConnectionCommandTests
 	private sealed record CommandRun(
 		int ExitCode,
 		TestTerminalEnvironment Environment,
-		string ExecutablePath);
+		string ExecutablePath,
+		StubMcpClientLaunchService LaunchService);
 }

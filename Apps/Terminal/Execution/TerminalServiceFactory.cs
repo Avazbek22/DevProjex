@@ -200,6 +200,7 @@ public sealed class TerminalServiceFactory(
 				UserSettingsStore: new UserSettingsStore(resolvedAppDataPathProvider),
 				TerminalCommandSetupService: new TerminalCommandSetupService(),
 				McpConnectionService: new McpConnectionService(localization),
+				McpClientLaunchService: new McpClientLaunchService(localization),
 				GitTrackedModeReadinessProbe: new GitTrackedModeReadinessProbe(),
 				RecentWorkspacesService: new RecentWorkspacesService(),
 				RecentProjectsStore: recentProjects,

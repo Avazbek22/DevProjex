@@ -74,7 +74,6 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<AutomaticUpdateCheckChangedEventArgs>? AutomaticUpdateCheckChanged;
     public event EventHandler<RoutedEventArgs>? TerminalCommandSetupRequested;
     public event EventHandler<McpConnectionRequestedEventArgs>? McpConnectionRequested;
-    public event EventHandler<RoutedEventArgs>? ToggleMcpLiveContextRequested;
     public event EventHandler<RoutedEventArgs>? McpDocumentationRequested;
     public event EventHandler<RoutedEventArgs>? HelpCloseRequested;
     public event EventHandler<RoutedEventArgs>? AboutRequested;
@@ -385,9 +384,6 @@ public partial class TopMenuBarView : UserControl
 
     private void OnMcpOtherClients(object? sender, RoutedEventArgs e) =>
         RequestMcpConnection(sender, McpConnectionClient.Json);
-
-    private void OnToggleMcpLiveContext(object? sender, RoutedEventArgs e) =>
-        ToggleMcpLiveContextRequested?.Invoke(sender, e);
 
     private void OnMcpDocumentation(object? sender, RoutedEventArgs e) =>
         McpDocumentationRequested?.Invoke(sender, e);

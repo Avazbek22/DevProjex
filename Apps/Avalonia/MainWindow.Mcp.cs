@@ -21,9 +21,7 @@ public partial class MainWindow
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
             request = new McpConnectionRequest(
                 e.Client,
-                _viewModel.IsMcpLiveContextEnabled
-                    ? McpConnectionMode.Live
-                    : McpConnectionMode.Standard,
+                McpConnectionMode.Live,
                 executablePath,
                 Path.GetFullPath(_currentPath));
             var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
@@ -32,7 +30,12 @@ public partial class MainWindow
 
             if (result.Succeeded)
             {
-                _toastService.Show(result.UserMessage);
+                var launchResult = await _mcpClientLaunchService.OpenAsync(
+                    new McpClientLaunchRequest(request.Client, request.ProjectRoot),
+                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!launchResult.Succeeded)
+                    await ShowMcpLaunchFailureAsync(request, launchResult);
                 await ShowMcpConnectionPathPromptAsync(snapshot);
                 return;
             }
@@ -59,12 +62,6 @@ public partial class MainWindow
         }
     }
 
-    private void OnToggleMcpLiveContext(object? sender, RoutedEventArgs e)
-    {
-        _appearanceSettings.ToggleMcpLiveContext();
-        e.Handled = true;
-    }
-
     private void OnMcpDocumentationRequested(object? sender, RoutedEventArgs e)
     {
         OpenExternalLink(ProjectLinks.McpDocumentationUrl);
@@ -73,14 +70,46 @@ public partial class MainWindow
 
     private async Task ShowMcpManualConfigurationAsync(
         McpConnectionResult result,
-        McpConnectionRequest request)
+        McpConnectionRequest request,
+        McpManualPayloadPresentation presentation = McpManualPayloadPresentation.Configuration)
     {
         var content = McpManualConfigurationDialog.CreateContent(
             _localization,
             result,
-            TryCreatePrintableConfiguration(request));
+            TryCreatePrintableConfiguration(request),
+            presentation);
         await McpManualConfigurationDialog.ShowAsync(this, content);
     }
+
+    private Task ShowMcpLaunchFailureAsync(
+        McpConnectionRequest request,
+        McpClientLaunchResult launchResult)
+    {
+        var error = string.IsNullOrWhiteSpace(launchResult.ErrorMessage)
+            ? _localization["Mcp.Connect.UnknownError"]
+            : launchResult.ErrorMessage;
+        var result = new McpConnectionResult(
+            McpConnectionStatus.ProcessFailed,
+            _localization.Format(
+                "Mcp.Open.FailedAfterConnection",
+                GetMcpClientDisplayName(request.Client),
+                error),
+            ManualConfiguration: launchResult.ManualCommand);
+        return ShowMcpManualConfigurationAsync(
+            result,
+            request,
+            McpManualPayloadPresentation.Command);
+    }
+
+    private static string GetMcpClientDisplayName(McpConnectionClient client) => client switch
+    {
+        McpConnectionClient.ClaudeCode => "Claude Code",
+        McpConnectionClient.Codex => "Codex",
+        McpConnectionClient.Cursor => "Cursor",
+        McpConnectionClient.VsCode => "VS Code",
+        McpConnectionClient.Json => "JSON",
+        _ => throw new ArgumentOutOfRangeException(nameof(client), client, null)
+    };
 
     private string TryCreatePrintableConfiguration(McpConnectionRequest request)
     {

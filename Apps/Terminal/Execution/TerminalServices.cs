@@ -27,6 +27,7 @@ public sealed record TerminalServices(
 	UserSettingsStore UserSettingsStore,
 	ITerminalCommandSetupService TerminalCommandSetupService,
 	IMcpConnectionService McpConnectionService,
+	IMcpClientLaunchService McpClientLaunchService,
 	GitTrackedModeReadinessProbe GitTrackedModeReadinessProbe,
 	RecentWorkspacesService RecentWorkspacesService,
 	RecentProjectsStore RecentProjectsStore,
