@@ -1114,7 +1114,9 @@ internal sealed class DevProjexMcpTools(
 					.ConfigureAwait(false);
 			if (storedSearch is not null)
 			{
-				var storedContext = liveContext?.RecordStoredResult(plan.SourceRoot);
+				var storedContext = liveContext?.RecordStoredResult(
+					plan.SourceRoot,
+					McpStoredResultKind.Search);
 				if (storedContext is not null)
 					packs.RecordLiveContext(storedSearch.Id, storedContext);
 			}
@@ -1301,7 +1303,9 @@ internal sealed class DevProjexMcpTools(
 				},
 				McpStoredResultKind.Related,
 				cancellationToken).ConfigureAwait(false);
-			var storedContext = liveContext?.RecordStoredResult(plan.SourceRoot);
+			var storedContext = liveContext?.RecordStoredResult(
+				plan.SourceRoot,
+				McpStoredResultKind.Related);
 			if (storedContext is not null)
 				packs.RecordLiveContext(pack.Id, storedContext);
 			return McpToolResults.TextSuccess(
@@ -1403,7 +1407,7 @@ internal sealed class DevProjexMcpTools(
 			var addressedPage = FormatFileReadHeader(relativePath, page) + page.Text;
 			var spotlighted = McpSpotlight.Wrap(addressedPage);
 			if (liveContext?.IsOutsideSelection(plan.SourceRoot, relativePath) == true)
-				spotlighted = FormatOutsideSelectionNotice(relativePath) + Environment.NewLine + spotlighted;
+				spotlighted = FormatOutsideSelectionNotice(1) + Environment.NewLine + spotlighted;
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				spotlighted,
 				rangeNotice,
@@ -1494,15 +1498,14 @@ internal sealed class DevProjexMcpTools(
 		var spotlighted = McpSpotlight.Wrap(rendered.Text);
 		if (liveContext is not null)
 		{
-			var outsideNotices = resolvedRequests
+			var outsidePathCount = resolvedRequests
 				.Where(static item => item.PhysicalPath is not null)
 				.Select(item => McpProjectService.ToRelative(plan.SourceRoot, item.PhysicalPath!))
 				.Where(path => liveContext.IsOutsideSelection(plan.SourceRoot, path))
 				.Distinct(StringComparer.Ordinal)
-				.Select(FormatOutsideSelectionNotice)
-				.ToArray();
-			if (outsideNotices.Length > 0)
-				spotlighted = string.Join(Environment.NewLine, outsideNotices) + Environment.NewLine + spotlighted;
+				.Count();
+			if (outsidePathCount > 0)
+				spotlighted = FormatOutsideSelectionNotice(outsidePathCount) + Environment.NewLine + spotlighted;
 		}
 		return McpToolResults.TextSuccess(AppendTrustedNotices(
 			spotlighted,
@@ -1516,9 +1519,11 @@ internal sealed class DevProjexMcpTools(
 				new McpSelectionNoticeContext(HasPaths: true, HasPatterns: false))));
 	}
 
-	private static string FormatOutsideSelectionNotice(string relativePath) =>
-		$"[Live context] {McpTextEscaping.EscapeSingleLine(relativePath)} is outside the current window selection; " +
-		"returned because you named it. Tree, search, pack and related stay within the selection.";
+	private static string FormatOutsideSelectionNotice(int pathCount) => pathCount == 1
+		? "[Live context] the named path is outside the current window selection; returned because you named it. " +
+		  "Tree, search, pack and related stay within the selection."
+		: $"[Live context] {pathCount} named paths are outside the current window selection; returned because you named them. " +
+		  "Tree, search, pack and related stay within the selection.";
 
 	private static McpBatchFileReadResult RenderBatchFileReads(
 		IReadOnlyList<McpResolvedFileReadRequest> requests,

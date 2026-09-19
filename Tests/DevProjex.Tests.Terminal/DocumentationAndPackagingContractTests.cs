@@ -145,23 +145,29 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Checked nodes are focus", normalizedServer, StringComparison.Ordinal);
 		string[] liveContextOutputContracts =
 		[
-			"[Live context] <path> is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.",
+			"[Live context] the named path is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.",
 			"[Live context] revision 16 · 128 files selected in the window",
-			"[Live context] revision 16 · 128 files selected in the window · root project-name",
-			"[Live context] changed since revision 14: +docs/api, +tests, -src/legacy",
-			"[Live context] changed since revision 14: +docs/api, +tests, -src/legacy and 4 more",
+			"[Live context] revision 16 · 128 files selected in the window · root 1 of 2",
+			"[Live context] changed since revision 14: +2 folders, -1 file",
+			"[Live context] changed since revision 14: +7 folders, -2 files · 5 names shown, 4 more",
 			"[Live context] changed since revision 14: selection settings changed",
-			"[Live context] changed since revision 14: -all, +docs/api, +tests",
-			"[Live context] changed since revision 14: -src/legacy, +all",
+			"[Live context] changed since revision 14: -all, +2 folders",
+			"[Live context] changed since revision 14: -1 folder, +all",
 			"[Live context] no window selection saved for this root; using server defaults.",
 			"[Live context] no window selection saved for this root; using server defaults. If the DevProjex window runs on Windows, live context across WSL is not supported yet.",
 			"[Live context] the window selects no files; tick files in the DevProjex window.",
 			"[Live context] saved window selection could not be read; using revision 16. Retry this call.",
+			"[Live context] saved window selection could not be read; retry this call.",
 			"[Live context] pack built at revision 14.",
-			"[Live context] pack built at revision 14; window is at revision 16. Call pack_context again to include the current selection."
+			"[Live context] pack built at revision 14; window is at revision 16. Call pack_context again to include the current selection.",
+			"[Live context] search result built at revision 14; window is at revision 16. Call search_project again to include the current selection.",
+			"[Live context] related-files result built at revision 14; window is at revision 16. Call related_files again to include the current selection."
 		];
 		foreach (var outputContract in liveContextOutputContracts)
 			Assert.Contains(outputContract, server, StringComparison.Ordinal);
+		Assert.Contains("Live context root 1 name:", server, StringComparison.Ordinal);
+		Assert.Contains("Live context changed paths since revision 14:", server, StringComparison.Ordinal);
+		Assert.Contains("remain inside the same randomized untrusted-data boundary", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("including an error result", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("latest plan built for that root", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("Before the first plan is built, the count is `0`", normalizedServer, StringComparison.Ordinal);
@@ -169,7 +175,18 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("unsupported future schema", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("no usable backup is available", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("A usable backup initializes revision 1 instead", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("server defaults at revision 1", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("does not silently use server defaults", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("genuinely absent profile", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("Three rules stay separate", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("The reduced set never recommends its omitted `pack_context` tool", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"scopes use Git only to select paths: every existing file's content comes from the current working tree, never from index or reference blobs",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"use Git only to choose paths; every existing file's content is read from the current working tree, never from the index or reference blobs",
+			normalizedCommandLine,
+			StringComparison.Ordinal);
 		Assert.Contains("an empty array selects nothing", normalizedProfiles, StringComparison.Ordinal);
 		Assert.Contains(
 			"Both surfaces display null and an empty array as an unchecked tree",
@@ -739,6 +756,7 @@ public sealed class DocumentationAndPackagingContractTests
 		var containerSmoke = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-HeadlessContainerSmoke.ps1"));
 		var dockerfile = File.ReadAllText(Path.Combine(rootPath, "Dockerfile"));
 		var installation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Installation.md"));
+		var mcpServer = File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md"));
 		var releaseProcess = File.ReadAllText(Path.Combine(rootPath, "Docs", "Release-Process.md"));
 
 		Assert.Contains("$($manifest.release.headless.archivePrefix).v$Version.$($Rid.rid).$extension", buildScript, StringComparison.Ordinal);
@@ -792,6 +810,14 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("DevProjex-headless.v<version>.<rid>", installation, StringComparison.Ordinal);
 		Assert.Contains("ghcr.io/avazbek22/devprojex", installation, StringComparison.Ordinal);
 		Assert.Contains("intentionally contains no Git", installation, StringComparison.Ordinal);
+		Assert.Contains("mcp --root /project --git-mode none", installation, StringComparison.Ordinal);
+		Assert.Contains("analyze /project --git-mode none", installation, StringComparison.Ordinal);
+		Assert.Contains("mcp --root /project --git-mode none", mcpServer, StringComparison.Ordinal);
+		Assert.Equal(
+			3,
+			Regex.Matches(
+				mcpServer,
+				Regex.Escape("\"--root\", \"/project\", \"--git-mode\", \"none\"")).Count);
 		Assert.Contains("latest", releaseProcess, StringComparison.Ordinal);
 		Assert.Contains("exact registry", releaseProcess, StringComparison.Ordinal);
 		Assert.Contains("Two independent producers cannot atomically update one checksum manifest", releaseProcess, StringComparison.Ordinal);

@@ -35,6 +35,41 @@ public sealed class McpStoredSearchRegistryTests
 	}
 
 	[Fact]
+	public async Task AnExpiredPackDoesNotRecommendAnOmittedTool()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path, toolSet: McpToolSet.Reduced);
+		var stored = await WriteAsync(registry, McpStoredResultKind.Pack, "packed context");
+
+		registry.Remove(stored);
+
+		var failure = Assert.Throws<McpToolException>(() => registry.OpenReadDocument(stored));
+		Assert.Contains("pack expired", failure.Message, StringComparison.Ordinal);
+		Assert.DoesNotContain("pack_context", failure.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ReducedSearchStorageFailureNamesAnAvailableRetryTool()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: 8,
+			maximumSessionBytes: 16,
+			toolSet: McpToolSet.Reduced);
+
+		var failure = await Assert.ThrowsAsync<McpToolException>(() => registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[9], token),
+			McpStoredResultKind.Search,
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(McpErrorCodes.PackTooLarge, failure.Code);
+		Assert.Contains("call search_project again", failure.Message, StringComparison.Ordinal);
+		Assert.DoesNotContain("pack_context", failure.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task AnExpiredRelatedFilesResultTellsTheCallerToAskRelatedFilesAgain()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -11,3 +11,21 @@ internal enum McpStoredResultKind
 	Search,
 	Related
 }
+
+internal static class McpStoredResultAdvice
+{
+	public static string? RefreshTool(McpToolSet toolSet, McpStoredResultKind kind) => kind switch
+	{
+		McpStoredResultKind.Pack when toolSet == McpToolSet.Full => "pack_context",
+		McpStoredResultKind.Search => "search_project",
+		McpStoredResultKind.Related => "related_files",
+		_ => null
+	};
+
+	public static string ResultName(McpStoredResultKind kind) => kind switch
+	{
+		McpStoredResultKind.Search => "search result",
+		McpStoredResultKind.Related => "related-files result",
+		_ => "pack"
+	};
+}

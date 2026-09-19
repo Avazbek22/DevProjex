@@ -222,9 +222,11 @@ connections always include `--live`. After a successful connection, an optional 
 dialog can offer the platform-appropriate terminal setup. The window
 title names an active client or session count, saved focused paths are restored on reopen,
 and disabling secret protection while a live session exists requires confirmation.
-Directly named readable files can still be returned with an explicit outside-focus
-notice, while tree, search, analysis, dependency, and pack operations stay within
-the checked focus and all configured filters remain enforced.
+Live mode has three separate rules: **focus** keeps tree, search, analysis, dependency,
+and pack operations inside the checked selection; **access boundaries** still enforce
+the configured filters and secret protection, while a directly named readable file may
+be returned with an outside-focus notice; **saved results** stay pinned to the revision
+that created them and must be rebuilt explicitly after the window selection changes.
 
 Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`. `related_files` answers "what does this file actually use, and who uses it" from a static dependency index over up to 16 seed files, so following a thread never widens the selection. `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
 

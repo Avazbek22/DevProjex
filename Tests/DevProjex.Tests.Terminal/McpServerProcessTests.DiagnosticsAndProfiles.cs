@@ -341,7 +341,7 @@ public sealed partial class McpServerProcessTests
 		var refreshedText = AllProcessText(refreshed);
 		Assert.Contains("docs/Outside.cs", refreshedText, StringComparison.Ordinal);
 		Assert.DoesNotContain("src/Inside.cs", refreshedText, StringComparison.Ordinal);
-		Assert.Contains("[Live context] changed since revision 1: +docs, -src", refreshedText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] changed since revision 1: +1 folder, -1 folder", refreshedText, StringComparison.Ordinal);
 		Assert.Contains("[Live context] revision 2 · 1 files selected in the window", refreshedText, StringComparison.Ordinal);
 
 		var namedOutsideSelection = await server.Client.CallToolAsync(
@@ -351,9 +351,73 @@ public sealed partial class McpServerProcessTests
 			options: null,
 			TestContext.Current.CancellationToken);
 		Assert.StartsWith(
-			"[Live context] src/Inside.cs is outside the current window selection; returned because you named it.",
+			"[Live context] the named path is outside the current window selection; returned because you named it.",
 			AllProcessText(namedOutsideSelection),
 			StringComparison.Ordinal);
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task RealProcessLiveContextUsesDefaultsOnlyWhenTheProfileIsAbsent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Inside.cs", "class Inside { }\n");
+		var dataRoot = workspace.CreateDirectory("data");
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			arguments: ["--live"],
+			clientInfo: new Implementation { Name = "process-client", Version = "1.0" });
+		var result = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var text = AllProcessText(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("Inside.cs", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] no window selection saved for this root; using server defaults.",
+			text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task RealProcessLiveContextRejectsAnUnreadableInitialProfile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Inside.cs", "class Inside { }\n");
+		var dataRoot = workspace.CreateDirectory("data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		Assert.True(store.EnsureStorageExists());
+		File.WriteAllText(store.GetPath(), "{\"schemaVersion\":3,\"profiles\":");
+
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			arguments: ["--live"],
+			clientInfo: new Implementation { Name = "process-client", Version = "1.0" });
+		var result = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+		var text = AllProcessText(result);
+
+		Assert.True(result.IsError);
+		Assert.Contains("DPX-MCP-PROJECT-UNAVAILABLE", text, StringComparison.Ordinal);
+		Assert.Contains("retry this call", text, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains(
+			"[Live context] saved window selection could not be read; retry this call.",
+			text,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("Inside.cs", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("using server defaults", text, StringComparison.Ordinal);
 	}
 
 	[Fact(Timeout = 60_000)]
@@ -433,7 +497,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("Outside.cs", recoveredText, StringComparison.Ordinal);
 		Assert.DoesNotContain("Inside.cs", recoveredText, StringComparison.Ordinal);
 		Assert.DoesNotContain("could not be read", recoveredText, StringComparison.Ordinal);
-		Assert.Contains("[Live context] changed since revision 1: +docs, -src", recoveredText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] changed since revision 1: +1 folder, -1 folder", recoveredText, StringComparison.Ordinal);
 		Assert.Contains("[Live context] revision 2 · 1 files selected in the window", recoveredText, StringComparison.Ordinal);
 	}
 
@@ -525,7 +589,7 @@ public sealed partial class McpServerProcessTests
 			afterResetText,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"[Live context] changed since revision 1: -src, +all",
+			"[Live context] changed since revision 1: -1 folder, +all",
 			afterResetText,
 			StringComparison.Ordinal);
 		Assert.Contains(

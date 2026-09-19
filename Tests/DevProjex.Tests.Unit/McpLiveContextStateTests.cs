@@ -32,9 +32,15 @@ public sealed class McpLiveContextStateTests
 			Assert.Equal(2, state.ReadProfile(temporary.Path).Revision);
 			var changed = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
 			Assert.Contains(
-				"[Live context] changed since revision 1: +docs/api, +tests, -src",
+				"[Live context] changed since revision 1: +2 paths, -1 path",
 				changed,
 				StringComparison.Ordinal);
+			Assert.Contains("+docs/api", changed, StringComparison.Ordinal);
+			Assert.Contains("+tests", changed, StringComparison.Ordinal);
+			Assert.Contains("-src", changed, StringComparison.Ordinal);
+			AssertMarkerIsInsideUntrustedData(changed, "docs/api");
+			AssertMarkerIsInsideUntrustedData(changed, "tests");
+			AssertMarkerIsInsideUntrustedData(changed, "src");
 		}
 
 		using (state.BeginInvocation())
@@ -285,7 +291,7 @@ public sealed class McpLiveContextStateTests
 	}
 
 	[Fact]
-	public void MissingBackupEntryUsesDefaultsAndReportsTheDegradedRead()
+	public void MissingBackupEntryReportsAnUnreadableInitialSnapshot()
 	{
 		using var temporary = new TemporaryDirectory();
 		var recoveredMissing = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null)
@@ -303,7 +309,12 @@ public sealed class McpLiveContextStateTests
 
 		Assert.True(snapshot.IsMissing);
 		Assert.True(snapshot.IsReadFailure);
-		Assert.Contains("saved window selection could not be read; using revision 1", response, StringComparison.Ordinal);
+		Assert.False(snapshot.HasSuccessfulSnapshot);
+		Assert.Contains(
+			"[Live context] saved window selection could not be read; retry this call.",
+			response,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("using revision", response, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -423,9 +434,10 @@ public sealed class McpLiveContextStateTests
 				response,
 				StringComparison.Ordinal);
 			Assert.Contains(
-				"[Live context] changed since revision 1: -src, +all",
+				"[Live context] changed since revision 1: -1 path, +all",
 				response,
 				StringComparison.Ordinal);
+			AssertMarkerIsInsideUntrustedData(response, "src");
 		}
 	}
 
@@ -482,6 +494,15 @@ public sealed class McpLiveContextStateTests
 
 	private static string Text(CallToolResult result) =>
 		string.Join('\n', result.Content.OfType<TextContentBlock>().Select(static block => block.Text));
+
+	private static void AssertMarkerIsInsideUntrustedData(string text, string marker)
+	{
+		var start = text.IndexOf("<untrusted-data-", StringComparison.Ordinal);
+		var markerIndex = text.IndexOf(marker, StringComparison.Ordinal);
+		var end = text.IndexOf("</untrusted-data-", StringComparison.Ordinal);
+		Assert.True(start >= 0 && markerIndex > start && end > markerIndex, text);
+		Assert.Equal(markerIndex, text.LastIndexOf(marker, StringComparison.Ordinal));
+	}
 
 	private sealed class SequenceProfileStore(params ProjectProfileLookupResult[] results) : IProjectProfileStore
 	{

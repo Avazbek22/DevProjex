@@ -177,12 +177,12 @@ public static class McpServerHost
 			() => servicesFactory?.Invoke(rootJail) ?? McpServices.Create(rootJail, appDataPathProvider),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var liveContext = live
-			? new McpLiveContextState(rootRegistry, () => services.Value.ProfileStore)
+			? new McpLiveContextState(rootRegistry, () => services.Value.ProfileStore, toolSet: toolSet)
 			: null;
 		await using var liveSession = live
 			? new LiveSessionRegistry(appDataPathProvider).Start(rootRegistry.ConfiguredRoots)
 			: null;
-		await using var packs = new McpPackRegistry(tempRoot);
+		await using var packs = new McpPackRegistry(tempRoot, toolSet: toolSet);
 		var projectService = new Lazy<McpProjectService>(
 			() =>
 			{
@@ -207,7 +207,13 @@ public static class McpServerHost
 			remoteHosts,
 			searchBodyCharacters,
 			liveContext);
-		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote, agentExclusions, toolSet, searchBodyCharacters);
+		var catalog = new DevProjexMcpToolCatalog(
+			tools,
+			allowRemote,
+			agentExclusions,
+			toolSet,
+			searchBodyCharacters,
+			live);
 
 		var builder = Host.CreateApplicationBuilder([]);
 		builder.Logging.ClearProviders();
