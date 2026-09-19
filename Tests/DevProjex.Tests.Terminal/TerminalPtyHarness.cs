@@ -124,9 +124,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		string? binaryOverride = null)
 	{
 		if (string.Equals(
-			    Environment.GetEnvironmentVariable(SkipInteractiveTuiTestsVariable),
-			    "1",
-			    StringComparison.Ordinal))
+				Environment.GetEnvironmentVariable(SkipInteractiveTuiTestsVariable),
+				"1",
+				StringComparison.Ordinal))
 		{
 			Assert.Skip(
 				"Interactive TUI PTY journeys are disabled in broad CI jobs; Release Validation runs the curated PTY matrix.");
@@ -150,9 +150,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 		var launchesThroughDotNetHost = false;
 		if (OperatingSystem.IsWindows() &&
-		    (usesTerminalTestHost ||
-		     Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY") is null) &&
-		    File.Exists(Path.ChangeExtension(binary, ".dll")))
+			(usesTerminalTestHost ||
+			 Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY") is null) &&
+			File.Exists(Path.ChangeExtension(binary, ".dll")))
 		{
 			launchArguments =
 			[
@@ -241,15 +241,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		if (OperatingSystem.IsWindows())
 		{
 			if (ShouldLaunchWindowsDotNetHostDirectly(
-				    writeShellCompletionMarker,
-				    verifyExecutableRelaunch,
-				    launchesThroughDotNetHost))
+					writeShellCompletionMarker,
+					verifyExecutableRelaunch,
+					launchesThroughDotNetHost))
 			{
 				return (binary, arguments.ToArray(), null);
 			}
 
 			var host = Environment.GetEnvironmentVariable("COMSPEC") ??
-			           Path.Combine(Environment.SystemDirectory, "cmd.exe");
+					   Path.Combine(Environment.SystemDirectory, "cmd.exe");
 			var launch = BuildWindowsLaunchCommand(
 				binary,
 				arguments,
@@ -341,39 +341,39 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellVersionProbeMarker)}; ";
 
 		return $"dpx_stty_before=$(stty -g 2>/dev/null || true); " +
-		       $"{invocation}; dpx_exit=$?; " +
-		       "dpx_stty_after=$(stty -g 2>/dev/null || true); " +
-		       "if [ -n \"$dpx_stty_before\" ] && " +
-		       "[ \"$dpx_stty_before\" = \"$dpx_stty_after\" ]; then " +
-		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalStateRestoredMarker)}; " +
-		       "else " +
-		       $"printf '%s%s before=%s after=%s\\n' " +
-		       $"{SplitMarkerForPosixShell(ShellTerminalStateMismatchMarker)} " +
-		       "\"$dpx_stty_before\" \"$dpx_stty_after\"; " +
-		       "fi; " +
-		       "dpx_stty_flags=$(stty -a 2>/dev/null | tr ';\\n' '  '); " +
-		       "[ -n \"$dpx_stty_flags\" ] || exit 98; " +
-		       "case \" $dpx_stty_flags \" in " +
-		       "*\" -icanon \"*|*\" -echo \"*|*\" -isig \"*) exit 98 ;; esac; " +
-		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalPropertiesRestoredMarker)}; " +
-		       $"echo {QuoteForPosixShell(ShellEchoProbe)}; " +
-		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellHandshakeMarker)}; " +
-		       "IFS= read -r dpx_sync; " +
-		       $"[ \"$dpx_sync\" = {QuoteForPosixShell(ShellInputSentinel)} ] || exit 97; " +
-		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellLineInputAcceptedMarker)}; " +
-		       "dpx_stty_settled=$(stty -g 2>/dev/null || true); " +
-		       "if [ -n \"$dpx_stty_before\" ] && " +
-		       "[ \"$dpx_stty_before\" = \"$dpx_stty_settled\" ]; then " +
-		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellSettledTerminalStateRestoredMarker)}; " +
-		       "else " +
-		       $"printf '%s%s before=%s settled=%s\\n' " +
-		       $"{SplitMarkerForPosixShell(ShellSettledTerminalStateMismatchMarker)} " +
-		       "\"$dpx_stty_before\" \"$dpx_stty_settled\"; " +
-		       "fi; " +
-		       extendedProbe +
-		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellUsabilityVerifiedMarker)}; " +
-		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellCompletionMarker)}; " +
-		       "IFS= read -r dpx_release; exit \"$dpx_exit\"";
+			   $"{invocation}; dpx_exit=$?; " +
+			   "dpx_stty_after=$(stty -g 2>/dev/null || true); " +
+			   "if [ -n \"$dpx_stty_before\" ] && " +
+			   "[ \"$dpx_stty_before\" = \"$dpx_stty_after\" ]; then " +
+			   $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalStateRestoredMarker)}; " +
+			   "else " +
+			   $"printf '%s%s before=%s after=%s\\n' " +
+			   $"{SplitMarkerForPosixShell(ShellTerminalStateMismatchMarker)} " +
+			   "\"$dpx_stty_before\" \"$dpx_stty_after\"; " +
+			   "fi; " +
+			   "dpx_stty_flags=$(stty -a 2>/dev/null | tr ';\\n' '  '); " +
+			   "[ -n \"$dpx_stty_flags\" ] || exit 98; " +
+			   "case \" $dpx_stty_flags \" in " +
+			   "*\" -icanon \"*|*\" -echo \"*|*\" -isig \"*) exit 98 ;; esac; " +
+			   $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalPropertiesRestoredMarker)}; " +
+			   $"echo {QuoteForPosixShell(ShellEchoProbe)}; " +
+			   $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellHandshakeMarker)}; " +
+			   "IFS= read -r dpx_sync; " +
+			   $"[ \"$dpx_sync\" = {QuoteForPosixShell(ShellInputSentinel)} ] || exit 97; " +
+			   $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellLineInputAcceptedMarker)}; " +
+			   "dpx_stty_settled=$(stty -g 2>/dev/null || true); " +
+			   "if [ -n \"$dpx_stty_before\" ] && " +
+			   "[ \"$dpx_stty_before\" = \"$dpx_stty_settled\" ]; then " +
+			   $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellSettledTerminalStateRestoredMarker)}; " +
+			   "else " +
+			   $"printf '%s%s before=%s settled=%s\\n' " +
+			   $"{SplitMarkerForPosixShell(ShellSettledTerminalStateMismatchMarker)} " +
+			   "\"$dpx_stty_before\" \"$dpx_stty_settled\"; " +
+			   "fi; " +
+			   extendedProbe +
+			   $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellUsabilityVerifiedMarker)}; " +
+			   $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellCompletionMarker)}; " +
+			   "IFS= read -r dpx_release; exit \"$dpx_exit\"";
 	}
 
 	private static string QuoteForCommandPrompt(string value) =>
@@ -389,7 +389,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	{
 		var split = marker.Length / 2;
 		return QuoteForPosixShell(marker[..split]) + " " +
-		       QuoteForPosixShell(marker[split..]);
+			   QuoteForPosixShell(marker[split..]);
 	}
 
 	public async Task SendAsync(string input, CancellationToken cancellationToken = default)
@@ -409,18 +409,73 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	public Task SendEnterAsync(CancellationToken cancellationToken = default) =>
 		SendAsync("\r", cancellationToken);
 
-	public async Task SendQuitAndConfirmAsync(CancellationToken cancellationToken = default)
+	public async Task OpenCommandLineAsync(CancellationToken cancellationToken = default)
 	{
-		for (var attempt = 0; attempt < 3; attempt++)
+		for (var attempt = 0; attempt < 10; attempt++)
 		{
 			await WaitForScreenToSettleAsync(cancellationToken).ConfigureAwait(false);
-			var workspaceScreen = CaptureScreen();
-			await SendAsync("q", cancellationToken).ConfigureAwait(false);
-			await WaitForScreenChangeAsync(workspaceScreen, cancellationToken).ConfigureAwait(false);
+			var before = CaptureScreen();
+			await SendAsync(":", cancellationToken).ConfigureAwait(false);
+			var after = await WaitForStableScreenAsync(
+				readiness: screen =>
+					screen.Contains(":set", StringComparison.Ordinal) ||
+					!string.Equals(screen, before, StringComparison.Ordinal),
+				readinessDescription: "opening the workspace command line or completing the preceding operation",
+				timelineState: screen =>
+					$"commandLine={screen.Contains(":set", StringComparison.Ordinal)} " +
+					$"changed={!string.Equals(screen, before, StringComparison.Ordinal)}",
+				timeout: PtyCoordinationTimeout,
+				cancellationToken: cancellationToken).ConfigureAwait(false);
+			if (after.Contains(":set", StringComparison.Ordinal))
+				return;
+		}
+
+		throw new TimeoutException(
+			"Timed out waiting for the workspace command line to become available.\n" +
+			$"Screen:\n{CaptureScreen()}\nRaw output tail:\n{CaptureRawOutputTail()}");
+	}
+
+	public async Task SendQuitAndConfirmAsync(CancellationToken cancellationToken = default)
+	{
+		var quitDialogVisible = false;
+		for (var quitAttempt = 0; quitAttempt < 5; quitAttempt++)
+		{
 			await WaitForScreenToSettleAsync(cancellationToken).ConfigureAwait(false);
+			var before = CaptureScreen();
+			await SendAsync("q", cancellationToken).ConfigureAwait(false);
+			var after = await WaitForStableScreenAsync(
+				readiness: screen =>
+					screen.Contains("OK", StringComparison.Ordinal) ||
+					!string.Equals(screen, before, StringComparison.Ordinal),
+				readinessDescription: "showing the quit dialog or completing the preceding operation",
+				timelineState: screen =>
+					$"dialog={screen.Contains("OK", StringComparison.Ordinal)} " +
+					$"changed={!string.Equals(screen, before, StringComparison.Ordinal)}",
+				timeout: PtyCoordinationTimeout,
+				cancellationToken: cancellationToken).ConfigureAwait(false);
+			quitDialogVisible = after.Contains("OK", StringComparison.Ordinal);
+			if (quitDialogVisible)
+				break;
+		}
+
+		if (!quitDialogVisible)
+		{
+			throw new TimeoutException(
+				"Timed out waiting for the quit confirmation.\n" +
+				$"Screen:\n{CaptureScreen()}\nRaw output tail:\n{CaptureRawOutputTail()}");
+		}
+
+		for (var confirmationAttempt = 0; confirmationAttempt < 3; confirmationAttempt++)
+		{
 			await SendEnterAsync(cancellationToken).ConfigureAwait(false);
 			if (await WaitForQuitCompletionAsync(cancellationToken).ConfigureAwait(false))
 				return;
+			if (!CaptureScreen().Contains("OK", StringComparison.Ordinal))
+			{
+				throw new TimeoutException(
+					"The quit dialog closed without terminating the terminal process.\n" +
+					$"Screen:\n{CaptureScreen()}\nRaw output tail:\n{CaptureRawOutputTail()}");
+			}
 		}
 
 		throw new TimeoutException(
@@ -431,7 +486,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	private async Task<bool> WaitForQuitCompletionAsync(CancellationToken cancellationToken)
 	{
 		var stopwatch = Stopwatch.StartNew();
-		while (stopwatch.Elapsed < TimeSpan.FromSeconds(3))
+		while (stopwatch.Elapsed < PtyExitTimeout)
 		{
 			if (HasExited || CaptureRawOutput().Contains(ShellHandshakeMarker, StringComparison.Ordinal))
 				return true;
@@ -446,7 +501,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		var previous = CaptureScreen();
 		var stableSamples = 0;
 		var stopwatch = Stopwatch.StartNew();
-		while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+		while (stopwatch.Elapsed < PtyCoordinationTimeout)
 		{
 			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
 			var current = CaptureScreen();
@@ -467,26 +522,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			CaptureScreen());
 	}
 
-	private async Task WaitForScreenChangeAsync(
-		string previous,
-		CancellationToken cancellationToken)
-	{
-		var stopwatch = Stopwatch.StartNew();
-		while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
-		{
-			var current = CaptureScreen();
-			if (!string.Equals(previous, current, StringComparison.Ordinal))
-				return;
-			if (HasExited)
-				throw new Xunit.Sdk.XunitException(
-					$"Terminal process exited with code {_process.ExitCode} before the quit confirmation appeared.");
-			await Task.Delay(25, cancellationToken).ConfigureAwait(false);
-		}
+	private static TimeSpan PtyCoordinationTimeout =>
+		string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+			? TimeSpan.FromMinutes(2)
+			: TimeSpan.FromSeconds(30);
 
-		throw new TimeoutException(
-			"Timed out waiting for the quit confirmation.\n" +
-			CaptureScreen());
-	}
+	private static TimeSpan PtyExitTimeout =>
+		string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+			? TimeSpan.FromMinutes(2)
+			: TimeSpan.FromSeconds(30);
 
 	public async Task CompleteShellRestorationHandshakeAsync(
 		CancellationToken cancellationToken = default)
@@ -664,8 +708,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		var minimumRedrawLength = Math.Max(64, columns * 2);
 		var timeout = Stopwatch.StartNew();
 		while (!HasExited &&
-		       RawOutput.Length - outputLengthBeforeResize < minimumRedrawLength &&
-		       timeout.Elapsed < TimeSpan.FromSeconds(3))
+			   RawOutput.Length - outputLengthBeforeResize < minimumRedrawLength &&
+			   timeout.Elapsed < TimeSpan.FromSeconds(3))
 		{
 			await Task.Delay(25, cancellationToken).ConfigureAwait(false);
 		}
@@ -823,7 +867,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			}
 
 			if (matches &&
-			    string.Equals(previous, screen, StringComparison.Ordinal))
+				string.Equals(previous, screen, StringComparison.Ordinal))
 			{
 				stableSamples++;
 				if (stableSamples >= 3)
@@ -1024,9 +1068,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 					WindowSizeQuery.Length - 1,
 					_terminalQueryScanBuffer.Length);
 				if (_terminalQueryScanBuffer.Length > retainedLength)
-				_terminalQueryScanBuffer.Remove(
-					0,
-					_terminalQueryScanBuffer.Length - retainedLength);
+					_terminalQueryScanBuffer.Remove(
+						0,
+						_terminalQueryScanBuffer.Length - retainedLength);
 				return;
 			}
 
@@ -1044,8 +1088,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		try
 		{
 			await foreach (var response in _terminalResponses.Reader
-				               .ReadAllAsync(_readerCts.Token)
-				               .ConfigureAwait(false))
+							   .ReadAllAsync(_readerCts.Token)
+							   .ConfigureAwait(false))
 			{
 				lock (_terminalGate)
 					_terminalResponseLog.Append(Convert.ToHexString(Encoding.UTF8.GetBytes(response))).Append(' ');
@@ -1219,16 +1263,16 @@ internal static class PublishedApplicationLocator
 		while (directory is not null)
 		{
 			if (string.Equals(
-			    directory.Name,
-			    ReleaseConfiguration,
-			    StringComparison.OrdinalIgnoreCase))
+				directory.Name,
+				ReleaseConfiguration,
+				StringComparison.OrdinalIgnoreCase))
 			{
 				return ReleaseConfiguration;
 			}
 			if (string.Equals(
-			    directory.Name,
-			    DebugConfiguration,
-			    StringComparison.OrdinalIgnoreCase))
+				directory.Name,
+				DebugConfiguration,
+				StringComparison.OrdinalIgnoreCase))
 			{
 				return DebugConfiguration;
 			}
@@ -1243,7 +1287,7 @@ internal static class PublishedApplicationLocator
 		var explicitRoot = Environment.GetEnvironmentVariable(
 			"DEVPROJEX_TUI_TEST_REPOSITORY_ROOT");
 		if (!string.IsNullOrWhiteSpace(explicitRoot) &&
-		    File.Exists(Path.Combine(explicitRoot, "DevProjex.sln")))
+			File.Exists(Path.Combine(explicitRoot, "DevProjex.sln")))
 			return Path.GetFullPath(explicitRoot);
 
 		foreach (var origin in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
