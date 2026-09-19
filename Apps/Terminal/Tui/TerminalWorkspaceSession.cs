@@ -3337,7 +3337,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			};
 			await ShowOperationFailureAsync(
 				exception.Code,
-				L(messageKey),
+				exception.Detail ?? L(messageKey),
 				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		catch
@@ -3592,6 +3592,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				L("Terminal.Diagnostic.GitStateDeleted"),
 			"DPX-PROJECT-NOT-FOUND" or "DPX-PROJECT-PATH-INVALID" =>
 				L("Terminal.Tui.Error.ProjectUnavailable"),
+			"DPX-SELECTION-PATH-MISSING" =>
+				L("Terminal.Diagnostic.SelectedPathMissing"),
+			"DPX-SELECTION-PATH-INVALID" =>
+				L("Terminal.Error.SelectionPathInvalid"),
 			_ => L("Terminal.Tui.Error.InvalidOperation")
 		};
 
@@ -5358,22 +5362,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var diagnostics = _state.Plan.Diagnostics;
 		var body = diagnostics.Count == 0
 			? L("Terminal.Tui.Diagnostics.None")
-			: string.Join("\n\n", diagnostics.Select(diagnostic =>
-			{
-				var severity = diagnostic.Severity switch
-				{
-					ContextDiagnosticSeverity.Error => L("Terminal.Label.Error"),
-					ContextDiagnosticSeverity.Warning => L("Terminal.Label.Warning"),
-					_ => L("Terminal.Label.Info")
-				};
-				var message = ContextDiagnosticRenderer.ResolveMessage(
-					_services.Localization,
-					diagnostic);
-				var path = string.IsNullOrWhiteSpace(diagnostic.Path)
-					? string.Empty
-					: $"\n{L("Terminal.Label.Path")}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}";
-				return $"{severity} [{diagnostic.Code}]\n{message}{path}";
-			}));
+			: FormatContextDiagnostics(diagnostics);
 		ShowScrollableOverlay(
 			L("Terminal.Tui.Command.Diagnostics.Title"),
 			body,
@@ -5381,6 +5370,32 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			preferredWidth: 92,
 			preferredHeight: 27);
 	}
+
+	private string FormatContextDiagnostics(IReadOnlyList<ContextDiagnostic> diagnostics) =>
+		FormatContextDiagnostics(_services.Localization, diagnostics);
+
+	internal static string FormatContextDiagnostics(
+		LocalizationService localization,
+		IReadOnlyList<ContextDiagnostic> diagnostics) =>
+		string.Join("\n\n", diagnostics.Select(diagnostic =>
+			{
+				var severity = diagnostic.Severity switch
+				{
+					ContextDiagnosticSeverity.Error => localization["Terminal.Label.Error"],
+					ContextDiagnosticSeverity.Warning => localization["Terminal.Label.Warning"],
+					_ => localization["Terminal.Label.Info"]
+				};
+				var message = ContextDiagnosticRenderer.ResolveMessage(
+				localization,
+					diagnostic);
+				var pathLabel = diagnostic.Code == "DPX-PROJECT-SELECTION-WARNING"
+					? localization["Terminal.Label.Value"]
+					: localization["Terminal.Label.Path"];
+				var path = string.IsNullOrWhiteSpace(diagnostic.Path)
+					? string.Empty
+				: $"\n{pathLabel}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}";
+				return $"{severity} [{diagnostic.Code}]\n{message}{path}";
+			}));
 
 	private bool TryLeaveWorkspace(Action leave)
 	{
@@ -5455,9 +5470,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		public void Report(T value) => report(value);
 	}
 
-	private sealed class TerminalWorkspaceOperationException(string code) : Exception
+	private sealed class TerminalWorkspaceOperationException(
+		string code,
+		string? detail = null) : Exception
 	{
 		public string Code { get; } = code;
+		public string? Detail { get; } = detail;
 	}
 }
 

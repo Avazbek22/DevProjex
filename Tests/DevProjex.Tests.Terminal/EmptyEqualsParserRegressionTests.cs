@@ -126,6 +126,10 @@ public sealed class EmptyEqualsParserRegressionTests
 			{
 				["ui", "status", "--timeout=", "10s"],
 				"--timeout"
+			},
+			{
+				["related", "src/App.cs", "--depth=", "2"],
+				"--depth"
 			}
 		};
 
@@ -159,6 +163,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		// export context intentionally adds this repeatable required-value option: per-file detail
 		// overrides of the form "<glob>=<full|compact|signatures>".
 		"--detail-for",
+		"--depth",
 		// related intentionally adds this required-value option to the public CLI grammar.
 		"--direction",
 		"--exclude",

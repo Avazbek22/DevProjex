@@ -1,9 +1,7 @@
 using Avalonia.Automation;
 using Avalonia.VisualTree;
 using DevProjex.Application.Services;
-using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Kernel.Abstractions;
-using System.Text.Json;
 
 namespace DevProjex.Tests.UI;
 
@@ -11,91 +9,163 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 {
 	[AvaloniaFact]
-	public async Task ConnectMenu_UsesPersistedLiveModeAndShowsSuccessToast()
+	public async Task OpenMenu_AlwaysUsesLiveModeAndOpensClientWithoutSuccessToast()
 	{
-		var appDataPath = Path.Combine(
-			workspace.Project.AppDataPath,
-			"mcp-connect-ui",
-			Guid.NewGuid().ToString("N"));
-		Directory.CreateDirectory(appDataPath);
 		var service = new RecordingMcpConnectionService(request => new McpConnectionResult(
 			McpConnectionStatus.Connected,
 			$"{request.Client} connected"));
+		var launcher = new RecordingMcpClientLaunchService(_ => new McpClientLaunchResult(
+			McpClientLaunchStatus.Opened));
 		var terminalCommand = new StubTerminalCommandSetupService(
 			CreateTerminalSnapshot(workspace.Project.RootPath, TerminalCommandSetupState.Installed));
-		var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
 			workspace.Project,
-			appDataPathOverride: appDataPath,
 			configureServices: services => services with
 			{
 				McpConnectionService = service,
+				McpClientLaunchService = launcher,
 				TerminalCommandSetupService = terminalCommand
 			});
 
 		try
 		{
 			var cursor = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
-				firstWindow,
+				window,
 				"McpConnectCursorMenuItem");
 			await UiTestDriver.RaiseMenuItemClickAsync(cursor);
 			await UiTestDriver.WaitForConditionAsync(
-				firstWindow,
-				() => service.Requests.Count == 1 &&
-					  UiTestDriver.GetToastService(firstWindow).Items.Any(
-						  static toast => toast.Message == "Cursor connected"),
-				"the successful MCP connection toast");
+				window,
+				() => service.Requests.Count == 1 && launcher.Requests.Count == 1,
+				"the MCP client launch request");
 
 			var firstRequest = Assert.Single(service.Requests);
 			Assert.Equal(McpConnectionClient.Cursor, firstRequest.Client);
 			Assert.Equal(McpConnectionMode.Live, firstRequest.Mode);
 			Assert.Equal(Path.GetFullPath(workspace.Project.RootPath), firstRequest.ProjectRoot);
-
-			var live = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
-				firstWindow,
-				"McpLiveContextMenuItem");
-			Assert.True(Assert.IsType<CheckBox>(live.Header).IsChecked);
-			await UiTestDriver.RaiseMenuItemClickAsync(live);
-			Assert.False(UiTestDriver.GetViewModel(firstWindow).IsMcpLiveContextEnabled);
-			Assert.False(Assert.IsType<CheckBox>(live.Header).IsChecked);
-
-			using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(
-				appDataPath,
-				"DevProjex",
-				"user-settings.json")));
-			Assert.False(document.RootElement
-				.GetProperty("viewSettings")
-				.GetProperty("isMcpLiveContextEnabled")
-				.GetBoolean());
+			var launchRequest = Assert.Single(launcher.Requests);
+			Assert.Equal(McpConnectionClient.Cursor, launchRequest.Client);
+			Assert.Equal(firstRequest.ProjectRoot, launchRequest.ProjectRoot);
+			Assert.Empty(UiTestDriver.GetToastService(window).Items);
+			Assert.Empty(window.OwnedWindows);
 		}
 		finally
 		{
-			await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+			await UiTestDriver.CloseWindowAsync(window);
 		}
+	}
 
-		var secondWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+	[AvaloniaTheory]
+	[InlineData((int)TerminalCommandSetupState.NotInstalled)]
+	[InlineData((int)TerminalCommandSetupState.InstalledPathMissing)]
+	[InlineData((int)TerminalCommandSetupState.Stale)]
+	public async Task SuccessfulConnectionAndOpen_ShowsPathPromptForActionableState(int stateValue)
+	{
+		var service = new RecordingMcpConnectionService(_ => new McpConnectionResult(
+			McpConnectionStatus.Connected,
+			"Cursor connected"));
+		var launcher = new RecordingMcpClientLaunchService(_ => new McpClientLaunchResult(
+			McpClientLaunchStatus.Opened));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
 			workspace.Project,
-			appDataPathOverride: appDataPath,
 			configureServices: services => services with
 			{
 				McpConnectionService = service,
-				TerminalCommandSetupService = terminalCommand
+				McpClientLaunchService = launcher,
+				TerminalCommandSetupService = new StubTerminalCommandSetupService(
+					CreateTerminalSnapshot(
+						workspace.Project.RootPath,
+						(TerminalCommandSetupState)stateValue))
 			});
+
 		try
 		{
-			Assert.False(UiTestDriver.GetViewModel(secondWindow).IsMcpLiveContextEnabled);
-			var codex = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
-				secondWindow,
-				"McpConnectCodexMenuItem");
-			await UiTestDriver.RaiseMenuItemClickAsync(codex);
+			var cursor = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+				window,
+				"McpConnectCursorMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(cursor);
 			await UiTestDriver.WaitForConditionAsync(
-				secondWindow,
-				() => service.Requests.Count == 2,
-				"the second MCP connection request");
-			Assert.Equal(McpConnectionMode.Standard, service.Requests[1].Mode);
+				window,
+				() => window.OwnedWindows.Count == 1 &&
+					string.Equals(window.OwnedWindows[0].Title, "Terminal command", StringComparison.Ordinal),
+				"the MCP PATH prompt");
+
+			var prompt = Assert.Single(window.OwnedWindows);
+			Assert.Equal("Terminal command", prompt.Title);
+			Assert.Empty(UiTestDriver.GetToastService(window).Items);
+			prompt.Close();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 0,
+				"the MCP PATH prompt to close");
 		}
 		finally
 		{
-			await UiTestDriver.CloseWindowAsync(secondWindow);
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task SuccessfulConnectionWithLaunchFailure_ShowsManualLaunchDialog()
+	{
+		var service = new RecordingMcpConnectionService(_ => new McpConnectionResult(
+			McpConnectionStatus.Connected,
+			"Cursor connected"));
+		var launcher = new RecordingMcpClientLaunchService(_ => new McpClientLaunchResult(
+			McpClientLaunchStatus.Failed,
+			"URL handler unavailable.",
+			"cursor \"C:/Проекты/Мой проект\""));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with
+			{
+				McpConnectionService = service,
+				McpClientLaunchService = launcher,
+				TerminalCommandSetupService = new StubTerminalCommandSetupService(
+					CreateTerminalSnapshot(workspace.Project.RootPath, TerminalCommandSetupState.Stale))
+			});
+
+		try
+		{
+			var cursor = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+				window,
+				"McpConnectCursorMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(cursor);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"the MCP launch failure dialog");
+
+			var dialog = Assert.Single(window.OwnedWindows);
+			var reason = Assert.Single(
+				dialog.GetVisualDescendants().OfType<TextBlock>(),
+				static control => control.Name == "McpManualConfigurationReason");
+			var reasonText = Assert.IsType<string>(reason.Text);
+			Assert.Contains("server is connected", reasonText, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("URL handler unavailable", reasonText, StringComparison.Ordinal);
+			var command = Assert.Single(
+				dialog.GetVisualDescendants().OfType<TextBox>(),
+				static control => control.Name == "McpManualConfigurationText");
+			Assert.StartsWith("cursor", Assert.IsType<string>(command.Text), StringComparison.Ordinal);
+			Assert.Equal("Command", AutomationProperties.GetName(command));
+			Assert.Empty(UiTestDriver.GetToastService(window).Items);
+			dialog.Close();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1 &&
+					string.Equals(window.OwnedWindows[0].Title, "Terminal command", StringComparison.Ordinal),
+				"the MCP PATH prompt after closing the launch failure dialog");
+
+			var prompt = Assert.Single(window.OwnedWindows);
+			Assert.Equal("Terminal command", prompt.Title);
+			prompt.Close();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 0,
+				"the MCP PATH prompt to close");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
 		}
 	}
 
@@ -215,5 +285,20 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 		public TerminalCommandPathSetupResult ConfigurePath() => throw new NotSupportedException();
 
 		public TerminalCommandInstallResult Reinstall() => throw new NotSupportedException();
+	}
+
+	private sealed class RecordingMcpClientLaunchService(
+		Func<McpClientLaunchRequest, McpClientLaunchResult> resultFactory) : IMcpClientLaunchService
+	{
+		public List<McpClientLaunchRequest> Requests { get; } = [];
+
+		public Task<McpClientLaunchResult> OpenAsync(
+			McpClientLaunchRequest request,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Requests.Add(request);
+			return Task.FromResult(resultFactory(request));
+		}
 	}
 }

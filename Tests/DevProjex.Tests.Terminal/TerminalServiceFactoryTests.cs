@@ -75,6 +75,7 @@ public sealed class TerminalServiceFactoryTests
 			services.UserSettingsStore.GetPath(),
 			PathComparer.Default);
 		Assert.IsType<McpConnectionService>(services.McpConnectionService);
+		Assert.IsType<McpClientLaunchService>(services.McpClientLaunchService);
 	}
 
 	[Fact]

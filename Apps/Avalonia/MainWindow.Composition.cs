@@ -790,6 +790,7 @@ public partial class MainWindow
     private readonly TextFileExportService _textFileExport;
     private readonly IToastService _toastService;
     private readonly IMcpConnectionService _mcpConnectionService;
+    private readonly IMcpClientLaunchService _mcpClientLaunchService;
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
     private readonly IAppInstanceLauncher _appInstanceLauncher;
@@ -1022,6 +1023,7 @@ public partial class MainWindow
         _textFileExport = services.TextFileExportService;
         _toastService = services.ToastService;
         _mcpConnectionService = services.McpConnectionService;
+        _mcpClientLaunchService = services.McpClientLaunchService;
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
         _appInstanceLauncher = services.AppInstanceLauncher;

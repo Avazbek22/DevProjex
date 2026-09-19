@@ -103,7 +103,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isTreeExpansionAnimationEnabled = true;
     private bool _isStatusMetricsAnimationEnabled = true;
     private bool _isToolAnimationEnabled = true;
-    private bool _isMcpLiveContextEnabled = true;
     private bool _filterVisible;
     private ExportFormat _selectedExportFormat = ExportFormat.Ascii;
     private PreviewContentMode _selectedPreviewContentMode = PreviewContentMode.Tree;
@@ -860,17 +859,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (_isToolAnimationEnabled == value) return;
             _isToolAnimationEnabled = value;
-            RaisePropertyChanged();
-        }
-    }
-
-    public bool IsMcpLiveContextEnabled
-    {
-        get => _isMcpLiveContextEnabled;
-        set
-        {
-            if (_isMcpLiveContextEnabled == value) return;
-            _isMcpLiveContextEnabled = value;
             RaisePropertyChanged();
         }
     }
@@ -1721,10 +1709,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuMcp { get; private set; } = string.Empty;
     public string MenuMcpLiveContext { get; private set; } = string.Empty;
     public string MenuMcpDocumentation { get; private set; } = string.Empty;
-    public string MenuMcpConnectClaudeCode { get; private set; } = string.Empty;
-    public string MenuMcpConnectCodex { get; private set; } = string.Empty;
-    public string MenuMcpConnectCursor { get; private set; } = string.Empty;
-    public string MenuMcpConnectVsCode { get; private set; } = string.Empty;
+    public string MenuMcpOpenClaudeCode { get; private set; } = string.Empty;
+    public string MenuMcpOpenCodex { get; private set; } = string.Empty;
+    public string MenuMcpOpenCursor { get; private set; } = string.Empty;
+    public string MenuMcpOpenVsCode { get; private set; } = string.Empty;
     public string MenuMcpOtherClients { get; private set; } = string.Empty;
     public ObservableCollection<ToastMessageViewModel> ToastItems { get; private set; } = [];
     public bool HasToastItems => ToastItems.Count > 0;
@@ -1925,10 +1913,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuMcp = _localization["Menu.Mcp"];
         MenuMcpLiveContext = _localization["Menu.Mcp.LiveContext"];
         MenuMcpDocumentation = _localization["Menu.Mcp.Documentation"];
-        MenuMcpConnectClaudeCode = _localization["Menu.Mcp.ConnectClaudeCode"];
-        MenuMcpConnectCodex = _localization["Menu.Mcp.ConnectCodex"];
-        MenuMcpConnectCursor = _localization["Menu.Mcp.ConnectCursor"];
-        MenuMcpConnectVsCode = _localization["Menu.Mcp.ConnectVsCode"];
+        MenuMcpOpenClaudeCode = _localization["Menu.Mcp.OpenClaudeCode"];
+        MenuMcpOpenCodex = _localization["Menu.Mcp.OpenCodex"];
+        MenuMcpOpenCursor = _localization["Menu.Mcp.OpenCursor"];
+        MenuMcpOpenVsCode = _localization["Menu.Mcp.OpenVsCode"];
         MenuMcpOtherClients = _localization["Menu.Mcp.OtherClients"];
         MenuView = _localization["Menu.View"];
         MenuViewExpandAll = _localization["Menu.View.ExpandAll"];
@@ -2117,10 +2105,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuMcp));
         RaisePropertyChanged(nameof(MenuMcpLiveContext));
         RaisePropertyChanged(nameof(MenuMcpDocumentation));
-        RaisePropertyChanged(nameof(MenuMcpConnectClaudeCode));
-        RaisePropertyChanged(nameof(MenuMcpConnectCodex));
-        RaisePropertyChanged(nameof(MenuMcpConnectCursor));
-        RaisePropertyChanged(nameof(MenuMcpConnectVsCode));
+        RaisePropertyChanged(nameof(MenuMcpOpenClaudeCode));
+        RaisePropertyChanged(nameof(MenuMcpOpenCodex));
+        RaisePropertyChanged(nameof(MenuMcpOpenCursor));
+        RaisePropertyChanged(nameof(MenuMcpOpenVsCode));
         RaisePropertyChanged(nameof(MenuMcpOtherClients));
         RaisePropertyChanged(nameof(MenuView));
         RaisePropertyChanged(nameof(MenuViewExpandAll));

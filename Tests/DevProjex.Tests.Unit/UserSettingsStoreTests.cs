@@ -18,7 +18,6 @@ public sealed class UserSettingsStoreTests
         Assert.True(database.ViewSettings.IsTreeExpansionAnimationEnabled);
         Assert.True(database.ViewSettings.IsStatusMetricsAnimationEnabled);
         Assert.True(database.ViewSettings.IsToolAnimationEnabled);
-        Assert.True(database.ViewSettings.IsMcpLiveContextEnabled);
         Assert.False(database.ViewSettings.IsTerminalCommandPromptDismissed);
         Assert.Null(database.ViewSettings.PreferredLanguage);
         Assert.False(database.UpdateCheckSettings.IsAutomaticCheckEnabled);
@@ -59,7 +58,6 @@ public sealed class UserSettingsStoreTests
             IsTreeExpansionAnimationEnabled = false,
             IsStatusMetricsAnimationEnabled = false,
             IsToolAnimationEnabled = false,
-            IsMcpLiveContextEnabled = false,
             IsTerminalCommandPromptDismissed = true,
             PreferredLanguage = AppLanguage.It
         };
@@ -68,10 +66,31 @@ public sealed class UserSettingsStoreTests
         var loaded = store.LoadForStartup(TimeSpan.FromMilliseconds(25));
 
         Assert.Equal(expected, loaded.ViewSettings);
-        Assert.False(loaded.ViewSettings.IsMcpLiveContextEnabled);
     }
 
     [Fact]
+	public void LoadForStartup_LegacyMcpLiveContextPreferenceIsIgnored()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new UserSettingsStore(() => temp.Path);
+		WriteJson(store.GetPath(), """
+        {
+          "schemaVersion": 9,
+          "viewSettings": {
+            "isCompactMode": true,
+            "isMcpLiveContextEnabled": false,
+            "preferredLanguage": "fr"
+          }
+        }
+        """);
+
+		var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+
+		Assert.True(loaded.ViewSettings.IsCompactMode);
+		Assert.Equal(AppLanguage.Fr, loaded.ViewSettings.PreferredLanguage);
+	}
+
+	[Fact]
     public void EnsureStorageExists_CreatesCleanViewOnlyDocumentAndBackup()
     {
         using var temp = new TemporaryDirectory();
@@ -120,7 +139,6 @@ public sealed class UserSettingsStoreTests
         Assert.True(loaded.ViewSettings.IsTreeExpansionAnimationEnabled);
         Assert.True(loaded.ViewSettings.IsStatusMetricsAnimationEnabled);
         Assert.True(loaded.ViewSettings.IsToolAnimationEnabled);
-        Assert.True(loaded.ViewSettings.IsMcpLiveContextEnabled);
         Assert.True(loaded.ViewSettings.IsTerminalCommandPromptDismissed);
         Assert.Equal(AppLanguage.De, loaded.ViewSettings.PreferredLanguage);
         using var rewritten = JsonDocument.Parse(File.ReadAllText(store.GetPath()));

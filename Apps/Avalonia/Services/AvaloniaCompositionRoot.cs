@@ -144,6 +144,7 @@ public static class AvaloniaCompositionRoot
         var zipDownloadService = new ZipDownloadService();
         var applicationUpdateService = new GitHubReleaseUpdateService();
         var mcpConnectionService = new McpConnectionService(localization);
+        var mcpClientLaunchService = new McpClientLaunchService(localization);
         ITaskbarProgressService taskbarProgressService = OperatingSystem.IsWindows()
             ? new WindowsTaskbarProgressService()
             : new NoopTaskbarProgressService();
@@ -182,6 +183,7 @@ public static class AvaloniaCompositionRoot
             ProjectAnalysisService: projectAnalysisService,
             ApplicationUpdateService: applicationUpdateService,
             McpConnectionService: mcpConnectionService,
+            McpClientLaunchService: mcpClientLaunchService,
             TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService,
             SessionMetricsRecorder: sessionMetricsRecorder,
