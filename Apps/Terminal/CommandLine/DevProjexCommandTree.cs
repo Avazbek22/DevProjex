@@ -76,6 +76,7 @@ public sealed class DevProjexCommandTree
 		root.Subcommands.Add(BuildMcpCommand());
 		root.Subcommands.Add(BuildOpenCommand());
 		root.Subcommands.Add(BuildAnalyzeCommand());
+		root.Subcommands.Add(BuildSearchCommand());
 		root.Subcommands.Add(BuildRelatedCommand());
 		root.Subcommands.Add(BuildTreeCommand());
 		root.Subcommands.Add(BuildExportCommand());
@@ -692,6 +693,143 @@ public sealed class DevProjexCommandTree
 								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
 						.ConfigureAwait(false);
+				},
+				_localization).ConfigureAwait(false);
+		});
+		return command;
+	}
+
+	private Command BuildSearchCommand()
+	{
+		var command = new Command(
+			"search",
+			"Searches selected project content and names matching declarations.");
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex search Configure .",
+			"devprojex search \"class\\s+Widget\" . --regex --format json",
+			"devprojex search Widget . --symbols --search-body-chars 900");
+		var pattern = RequiredArgument("PATTERN");
+		pattern.Description = "Text, regular expression, or symbol name to search for.";
+		var project = ProjectSourceArgument();
+		var regex = new Option<bool>("--regex")
+		{
+			Description = "Interpret PATTERN as a .NET regular expression."
+		};
+		var symbols = new Option<bool>("--symbols")
+		{
+			Description = "Match PATTERN as a complete identifier and name containing declarations."
+		};
+		var maximumResults = new Option<int>("--max")
+		{
+			Description = "Return at most 1..200 matching lines; default 50.",
+			HelpName = "N",
+			DefaultValueFactory = _ => 50
+		};
+		var searchBodyCharacters = new Option<string>("--search-body-chars")
+		{
+			Description = "Limit the best declaration body to 1..16000 characters, or off; default 1800.",
+			HelpName = "off|N",
+			DefaultValueFactory = _ => "1800"
+		};
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliSearchOutputFormat.Text,
+			CliChoiceSets.SearchOutputFormat,
+			_localization);
+		format.Aliases.Add("-f");
+		var outputPath = OutputPathOption();
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeHidePrivateData: false,
+			includeCodeTransformations: false);
+		command.Arguments.Add(pattern);
+		command.Arguments.Add(project);
+		command.Options.Add(regex);
+		command.Options.Add(symbols);
+		command.Options.Add(maximumResults);
+		command.Options.Add(searchBodyCharacters);
+		command.Options.Add(format);
+		command.Options.Add(outputPath);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(regex) && result.GetValue(symbols))
+			{
+				result.AddError(LocalizedParseError.Create(
+					"--regex and --symbols cannot be used together."));
+			}
+			if (CliParseValue.TryGet(result, maximumResults, out var maximum) && maximum is < 1 or > 200)
+			{
+				result.AddError(LocalizedParseError.Create(
+					"--max must be between 1 and 200."));
+			}
+			try
+			{
+				_ = McpServerHost.ParseSearchBodyCharacters(
+					result.GetResult(searchBodyCharacters) is null
+						? "1800"
+						: result.GetValue(searchBodyCharacters));
+			}
+			catch (ArgumentException exception)
+			{
+				result.AddError(LocalizedParseError.Create(exception.Message));
+			}
+		});
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var outputOptions = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				outputOptions,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							outputOptions)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
+					return await new SearchCommandHandler(services, environment).ExecuteAsync(
+						new SearchCommandRequest(
+							resolvedSource.ProjectPath,
+							parseResult.GetValue(pattern) ??
+								throw new InvalidOperationException("The required search pattern was not parsed."),
+							spec,
+							parseResult.GetValue(regex)
+								? SearchMode.Regex
+								: parseResult.GetValue(symbols) ? SearchMode.Symbols : SearchMode.Text,
+							parseResult.GetValue(maximumResults),
+							McpServerHost.ParseSearchBodyCharacters(
+								parseResult.GetValue(searchBodyCharacters) ?? "1800"),
+							parseResult.GetValue(format) switch
+							{
+								CliSearchOutputFormat.Text => SearchOutputFormat.Text,
+								CliSearchOutputFormat.Json => SearchOutputFormat.Json,
+								CliSearchOutputFormat.Markdown => SearchOutputFormat.Markdown,
+								_ => throw new ArgumentOutOfRangeException()
+							},
+							parseResult.GetValue(outputPath),
+							outputOptions,
+							resolvedSource.RepositorySourceUrl),
+						cancellationToken).ConfigureAwait(false);
 				},
 				_localization).ConfigureAwait(false);
 		});

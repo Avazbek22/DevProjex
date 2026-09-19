@@ -10,6 +10,13 @@ internal enum CliTextJsonFormat
 	Json
 }
 
+internal enum CliSearchOutputFormat
+{
+	Text,
+	Json,
+	Markdown
+}
+
 internal enum CliRecentKind
 {
 	All,
@@ -115,6 +122,11 @@ internal static class CliChoiceSets
 	public static CliChoiceSet<CliTextJsonFormat> TextJson { get; } = new(
 		new("text", CliTextJsonFormat.Text),
 		new("json", CliTextJsonFormat.Json));
+
+	public static CliChoiceSet<CliSearchOutputFormat> SearchOutputFormat { get; } = new(
+		new("text", CliSearchOutputFormat.Text),
+		new("json", CliSearchOutputFormat.Json),
+		new("markdown", CliSearchOutputFormat.Markdown));
 
 	public static CliChoiceSet<CliDependencyDirection> DependencyDirection { get; } = new(
 		new("dependencies", CliDependencyDirection.Dependencies),

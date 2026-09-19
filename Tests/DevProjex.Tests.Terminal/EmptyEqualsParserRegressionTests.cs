@@ -48,6 +48,10 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--max-file-bytes"
 			},
 			{
+				["search", "needle", ".", "--max=", "10"],
+				"--max"
+			},
+			{
 				["analyze", ".", "--color=", "never"],
 				"--color"
 			},
@@ -172,6 +176,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--kind",
 		"--language",
 		"--limit",
+		"--max",
 		"--max-file-bytes",
 		"--max-tokens",
 		"--mode",
