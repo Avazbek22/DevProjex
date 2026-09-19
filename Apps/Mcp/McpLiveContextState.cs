@@ -68,6 +68,7 @@ internal sealed class McpLiveContextState(
 		var store = profileStore();
 		var lookup = store.LookupProfile(configuredRoot, profileLookupTimeout);
 		if (lookup.Status == ProjectProfileLookupStatus.Missing &&
+			lookup.RecoveryStatus is null &&
 			!PathComparer.Default.Equals(configuredRoot, normalizedRoot))
 		{
 			lookup = store.LookupProfile(normalizedRoot, profileLookupTimeout);

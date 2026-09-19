@@ -318,6 +318,49 @@ public sealed class McpLiveContextStateTests
 	}
 
 	[Fact]
+	public void RecoveredMissingProfileDoesNotFallThroughToThePhysicalRootAlias()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var alias = Path.Combine(temporary.Path, "project-alias");
+		try
+		{
+			Directory.CreateSymbolicLink(alias, project);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			return;
+		}
+
+		try
+		{
+			var recoveredMissing = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null)
+			{
+				RecoveryStatus = ProjectProfileLookupStatus.InvalidStorage
+			};
+			var store = new SequenceProfileStore(
+				recoveredMissing,
+				Found(Profile(["unexpected-second-lookup"])));
+			var roots = new McpRootRegistry([alias]);
+			var state = new McpLiveContextState(roots, () => store, TimeSpan.Zero);
+
+			using var invocation = state.BeginInvocation();
+			var snapshot = state.ReadProfile(Assert.Single(roots.Roots));
+
+			Assert.Equal(1, store.LookupCount);
+			Assert.True(snapshot.IsReadFailure);
+			Assert.False(snapshot.HasSuccessfulSnapshot);
+			Assert.Null(snapshot.Profile);
+		}
+		finally
+		{
+			if (Directory.Exists(alias))
+				Directory.Delete(alias);
+		}
+	}
+
+	[Fact]
 	public void SettingsOnlyChangeReportsAnHonestRevisionReason()
 	{
 		using var temporary = new TemporaryDirectory();
