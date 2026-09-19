@@ -107,6 +107,7 @@ internal sealed class McpLiveContextState(
 				profile.Value is not { } current ||
 				current.Revision != state.Revision)
 				return;
+			state.PendingChange = ClassifyPendingChange(state.Root, state.PendingChange, plan.EffectiveTree);
 			state.SelectedFileCount = plan.IncludedFiles.Count;
 			active.Roots.Add(normalizedRoot);
 		}
@@ -186,23 +187,29 @@ internal sealed class McpLiveContextState(
 				notices.AddRange(active.AdditionalNotices);
 			var configuredRoots = roots.Roots
 				.Select(PathUtility.Normalize)
+				.Distinct(PathComparer.Default)
 				.Order(ProjectTreePathIdentity.CanonicalComparer)
 				.ToArray();
+			var dynamicRoots = observedRoots
+				.Where(root => !configuredRoots.Contains(root, PathComparer.Default))
+				.Distinct(PathComparer.Default)
+				.Order(ProjectTreePathIdentity.CanonicalComparer);
+			var noticeRoots = configuredRoots.Concat(dynamicRoots).ToArray();
 			var orderedRoots = observedRoots.Order(ProjectTreePathIdentity.CanonicalComparer).ToArray();
 			foreach (var root in orderedRoots)
 			{
 				if (!states.TryGetValue(root, out var state))
 					continue;
 				var rootIndex = Array.FindIndex(
-					configuredRoots,
+					noticeRoots,
 					candidate => PathComparer.Default.Equals(candidate, root)) + 1;
 				AppendRootNotices(
 					notices,
 					untrustedDetails,
 					state,
-					roots.Roots.Count > 1,
+					noticeRoots.Length > 1,
 					rootIndex,
-					configuredRoots.Length);
+					noticeRoots.Length);
 			}
 		}
 		if (notices.Count == 0 && untrustedDetails.Count == 0)
@@ -272,7 +279,7 @@ internal sealed class McpLiveContextState(
 			var previousRevision = state.Revision;
 			state.Revision++;
 			state.SelectedFileCount = null;
-			var frontierChanges = BuildFrontierChanges(state.Root, state.Frontier, frontier);
+			var frontierChanges = BuildFrontierChanges(state.Frontier, frontier);
 			state.PendingChange = new PendingChange(
 				previousRevision,
 				frontierChanges);
@@ -348,7 +355,6 @@ internal sealed class McpLiveContextState(
 	}
 
 	private static IReadOnlyList<FrontierChange> BuildFrontierChanges(
-		string root,
 		string[]? before,
 		string[]? after)
 	{
@@ -358,49 +364,66 @@ internal sealed class McpLiveContextState(
 			return
 			[
 				new FrontierChange(Added: false, FrontierChangeKind.All, Path: null),
-				.. (after ?? []).Select(path => CreatePathChange(root, path, added: true))
+				.. (after ?? []).Select(path => CreatePathChange(path, added: true))
 			];
 		if (after is null)
 			return
 			[
-				.. before.Select(path => CreatePathChange(root, path, added: false)),
+				.. before.Select(path => CreatePathChange(path, added: false)),
 				new FrontierChange(Added: true, FrontierChangeKind.All, Path: null)
 			];
 
 		var previous = before.ToHashSet(StringComparer.Ordinal);
 		var current = after.ToHashSet(StringComparer.Ordinal);
 		return current.Except(previous, StringComparer.Ordinal).Order(StringComparer.Ordinal)
-			.Select(path => CreatePathChange(root, path, added: true))
+			.Select(path => CreatePathChange(path, added: true))
 			.Concat(previous.Except(current, StringComparer.Ordinal).Order(StringComparer.Ordinal)
-				.Select(path => CreatePathChange(root, path, added: false)))
+				.Select(path => CreatePathChange(path, added: false)))
 			.ToArray();
 	}
 
-	private static FrontierChange CreatePathChange(string root, string path, bool added) =>
-		new(added, ClassifyPath(root, path), path);
+	private static FrontierChange CreatePathChange(string path, bool added) =>
+		new(added, FrontierChangeKind.Path, path);
 
-	private static FrontierChangeKind ClassifyPath(string root, string relativePath)
+	private static PendingChange? ClassifyPendingChange(
+		string root,
+		PendingChange? pendingChange,
+		TreeNodeDescriptor effectiveTree)
 	{
-		try
+		if (pendingChange is null || pendingChange.Changes.All(static change => change.Path is null))
+			return pendingChange;
+
+		var remainingPaths = pendingChange.Changes
+			.Where(static change => change.Path is not null)
+			.Select(static change => change.Path!)
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
+		var kindsByPath = new Dictionary<string, FrontierChangeKind>(ProjectTreePathIdentity.CanonicalComparer);
+		var pendingNodes = new Stack<TreeNodeDescriptor>();
+		pendingNodes.Push(effectiveTree);
+		while (remainingPaths.Count > 0 && pendingNodes.TryPop(out var node))
 		{
-			var normalizedRoot = Path.GetFullPath(root);
-			var candidate = Path.GetFullPath(Path.Combine(normalizedRoot, relativePath));
-			var relative = Path.GetRelativePath(normalizedRoot, candidate);
-			if (Path.IsPathRooted(relative) ||
-				relative.Equals("..", StringComparison.Ordinal) ||
-				relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
-				relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
-				return FrontierChangeKind.Path;
-			if (Directory.Exists(candidate))
-				return FrontierChangeKind.Folder;
-			if (File.Exists(candidate))
-				return FrontierChangeKind.File;
+			var relativePath = Path.GetRelativePath(root, node.FullPath).Replace('\\', '/');
+			if (remainingPaths.Remove(relativePath) &&
+				!relativePath.Equals(".", StringComparison.Ordinal) &&
+				!Path.IsPathRooted(relativePath) &&
+				!relativePath.Equals("..", StringComparison.Ordinal) &&
+				!relativePath.StartsWith("../", StringComparison.Ordinal))
+			{
+				kindsByPath[relativePath] = node.IsDirectory
+					? FrontierChangeKind.Folder
+					: FrontierChangeKind.File;
+			}
+
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				pendingNodes.Push(node.Children[index]);
 		}
-		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
-		{
-			return FrontierChangeKind.Path;
-		}
-		return FrontierChangeKind.Path;
+
+		var classified = pendingChange.Changes
+			.Select(change => change.Path is not null && kindsByPath.TryGetValue(change.Path, out var kind)
+				? change with { Kind = kind }
+				: change)
+			.ToArray();
+		return pendingChange with { Changes = classified };
 	}
 
 	private static void AppendRootNotices(

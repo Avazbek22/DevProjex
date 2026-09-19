@@ -180,6 +180,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Three rules stay separate", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("The reduced set never recommends its omitted `pack_context` tool", server, StringComparison.Ordinal);
 		Assert.Contains(
+			"rerun the tool that created the stored result",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
 			"scopes use Git only to select paths: every existing file's content comes from the current working tree, never from index or reference blobs",
 			normalizedServer,
 			StringComparison.Ordinal);

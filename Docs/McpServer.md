@@ -404,7 +404,10 @@ batched `get_file` call instead of several single reads; see
   visibility only, never the redaction pass.
 - Large packs are kept in an application-owned temporary session directory. Pack
   ids are random, valid only in the current server process, and removed at exit.
-  After a server restart, call `pack_context` again to create a new id.
+  After a server restart, rerun the tool that created the stored result to create
+  a new id: `pack_context` for context packs, `search_project` for saved searches,
+  or `related_files` for saved dependency results. `pack_context` is unavailable
+  in the reduced tool set.
   Stale session directories older than 24 hours are scavenged at startup. A
   stored pack is limited to 200 MiB and all packs in one server session are
   limited to 1 GiB. To place a new pack within the session limit, the server evicts

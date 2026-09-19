@@ -140,6 +140,81 @@ public sealed class McpLiveContextStateTests
 	}
 
 	[Fact]
+	public void ChangedPathKindsComeOnlyFromTheEffectivePlanTree()
+	{
+		using var temporary = new TemporaryDirectory();
+		_ = temporary.CreateFolder("not-in-plan");
+		var store = new SequenceProfileStore(
+			Found(Profile(["old-selection"])),
+			Found(Profile(["not-in-plan", "virtual-folder", "virtual.cs"])));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			_ = state.AppendNotices(McpToolResults.TextSuccess("initial"));
+		}
+
+		var effectiveTree = new TreeNodeDescriptor(
+			"project",
+			temporary.Path,
+			true,
+			false,
+			"folder",
+			[
+				new TreeNodeDescriptor(
+					"virtual-folder",
+					Path.Combine(temporary.Path, "virtual-folder"),
+					true,
+					false,
+					"folder",
+					[]),
+				new TreeNodeDescriptor(
+					"virtual.cs",
+					Path.Combine(temporary.Path, "virtual.cs"),
+					false,
+					false,
+					"csharp",
+					[])
+			]);
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			state.RecordPlan(temporary.Path, Plan(temporary.Path, 1, effectiveTree));
+			var response = Text(state.AppendNotices(McpToolResults.TextSuccess("changed")));
+
+			Assert.Contains(
+				"[Live context] changed since revision 1: +1 path, +1 folder, +1 file, -1 path",
+				response,
+				StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void DynamicRootUsesAPositiveOrdinalAcrossConfiguredAndObservedRoots()
+	{
+		using var temporary = new TemporaryDirectory();
+		var first = temporary.CreateFolder("configured-a");
+		var second = temporary.CreateFolder("configured-b");
+		var dynamicRoot = temporary.CreateFolder("dynamic-z");
+		var state = new McpLiveContextState(
+			new McpRootRegistry([first, second]),
+			() => new SequenceProfileStore(Found(Profile(null))),
+			TimeSpan.Zero);
+
+		using var invocation = state.BeginInvocation();
+		_ = state.ReadProfile(dynamicRoot);
+		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+
+		Assert.DoesNotContain("root 0 of", response, StringComparison.Ordinal);
+		Assert.Contains("root 3 of 3", response, StringComparison.Ordinal);
+		AssertMarkerIsInsideUntrustedData(response, "dynamic-z");
+	}
+
+	[Fact]
 	public void APlanFromAnOlderConcurrentRevisionCannotReplaceTheCurrentCount()
 	{
 		using var temporary = new TemporaryDirectory();
@@ -505,9 +580,12 @@ public sealed class McpLiveContextStateTests
 	private static ProjectProfileLookupResult Found(ProjectSelectionProfile profile) =>
 		new(ProjectProfileLookupStatus.Found, profile);
 
-	private static ProjectContextPlan Plan(string root, int fileCount)
+	private static ProjectContextPlan Plan(
+		string root,
+		int fileCount,
+		TreeNodeDescriptor? effectiveTree = null)
 	{
-		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		var tree = effectiveTree ?? new TreeNodeDescriptor("project", root, true, false, "folder", []);
 		var analysis = new ProjectAnalysisReport(
 			ProjectAnalysisReport.CurrentSchemaVersion,
 			DateTimeOffset.UnixEpoch,
