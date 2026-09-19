@@ -36,10 +36,12 @@ public sealed class IgnoreRulesBuildCacheTests
 	{
 		var buildCount = 0;
 		var cancellationToken = TestContext.Current.CancellationToken;
+		var buildStarted = CreateSignal();
 		using var releaseBuild = new ManualResetEventSlim();
 		var cache = new IgnoreRulesBuildCache((_, _, _) =>
 		{
 			Interlocked.Increment(ref buildCount);
+			buildStarted.TrySetResult();
 			releaseBuild.Wait(cancellationToken);
 			return CreateRules();
 		});
@@ -55,9 +57,7 @@ public sealed class IgnoreRulesBuildCacheTests
 
 		try
 		{
-			Assert.True(SpinWait.SpinUntil(
-				() => Volatile.Read(ref buildCount) == 1,
-				TimeSpan.FromSeconds(2)));
+			await buildStarted.Task.WaitAsync(SafetyTimeout, cancellationToken);
 		}
 		finally
 		{
@@ -70,19 +70,20 @@ public sealed class IgnoreRulesBuildCacheTests
 		Assert.All(results, rules => Assert.Same(results[0], rules));
 	}
 
-	#pragma warning disable xUnit1051 // This test verifies cancellation with its own controlled token.
+#pragma warning disable xUnit1051 // This test verifies cancellation with its own controlled token.
 	[Fact]
 	public async Task GetOrBuild_CancelledWaiterDoesNotWaitForActiveBuild()
 	{
 		var testCancellationToken = TestContext.Current.CancellationToken;
-		using var buildStarted = new ManualResetEventSlim();
+		var buildStarted = CreateSignal();
+		var waiterStarted = CreateSignal();
 		using var releaseBuild = new ManualResetEventSlim();
 		using var waiterCancellation = new CancellationTokenSource();
 		var buildCount = 0;
 		var cache = new IgnoreRulesBuildCache((_, _, _, _) =>
 		{
 			Interlocked.Increment(ref buildCount);
-			buildStarted.Set();
+			buildStarted.TrySetResult();
 			releaseBuild.Wait(testCancellationToken);
 			return CreateRules();
 		});
@@ -90,21 +91,26 @@ public sealed class IgnoreRulesBuildCacheTests
 		var activeBuild = RunOnDedicatedThread(
 			() => cache.GetOrBuild(WorkspacePath, [], selectedRootFolders: null),
 			testCancellationToken);
-		Assert.True(buildStarted.Wait(TimeSpan.FromSeconds(2), testCancellationToken));
+		await buildStarted.Task.WaitAsync(SafetyTimeout, testCancellationToken);
 
 		var waitingBuild = RunOnDedicatedThread(
-			() => Assert.ThrowsAny<OperationCanceledException>(() =>
-				cache.GetOrBuildWithCancellation(
-					WorkspacePath,
-					[IgnoreOptionId.SmartIgnore],
-					selectedRootFolders: null,
-					waiterCancellation.Token)),
+			() =>
+			{
+				waiterStarted.TrySetResult();
+				Assert.ThrowsAny<OperationCanceledException>(() =>
+					cache.GetOrBuildWithCancellation(
+						WorkspacePath,
+						[IgnoreOptionId.SmartIgnore],
+						selectedRootFolders: null,
+						waiterCancellation.Token));
+			},
 			testCancellationToken);
+		await waiterStarted.Task.WaitAsync(SafetyTimeout, testCancellationToken);
 		waiterCancellation.Cancel();
 
 		try
 		{
-			await waitingBuild.WaitAsync(TimeSpan.FromSeconds(2), testCancellationToken);
+			await waitingBuild.WaitAsync(SafetyTimeout, testCancellationToken);
 		}
 		finally
 		{
@@ -114,7 +120,7 @@ public sealed class IgnoreRulesBuildCacheTests
 		await activeBuild;
 		Assert.Equal(1, buildCount);
 	}
-	#pragma warning restore xUnit1051
+#pragma warning restore xUnit1051
 
 	[Fact]
 	public void GetOrBuild_ChangedSelectionAndInvalidationBothRebuild()
@@ -163,13 +169,13 @@ public sealed class IgnoreRulesBuildCacheTests
 	{
 		var buildCount = 0;
 		var cancellationToken = TestContext.Current.CancellationToken;
-		using var buildStarted = new ManualResetEventSlim();
+		var buildStarted = CreateSignal();
 		using var releaseBuild = new ManualResetEventSlim();
 		var cache = new IgnoreRulesBuildCache((_, _, _) =>
 		{
 			if (Interlocked.Increment(ref buildCount) == 1)
 			{
-				buildStarted.Set();
+				buildStarted.TrySetResult();
 				releaseBuild.Wait(cancellationToken);
 			}
 
@@ -179,20 +185,18 @@ public sealed class IgnoreRulesBuildCacheTests
 		var firstBuild = RunOnDedicatedThread(
 			() => cache.GetOrBuild(WorkspacePath, [IgnoreOptionId.SmartIgnore], ["src"]),
 			cancellationToken);
-		Assert.True(buildStarted.Wait(
-			TimeSpan.FromSeconds(2),
-			cancellationToken));
+		await buildStarted.Task.WaitAsync(SafetyTimeout, cancellationToken);
 
 		IgnoreRules second;
 		try
 		{
 			var invalidation = RunOnDedicatedThread(cache.Invalidate, cancellationToken);
-			await invalidation.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+			await invalidation.WaitAsync(SafetyTimeout, cancellationToken);
 
 			var secondBuild = RunOnDedicatedThread(
 				() => cache.GetOrBuild(WorkspacePath, [IgnoreOptionId.SmartIgnore], ["src"]),
 				cancellationToken);
-			second = await secondBuild.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+			second = await secondBuild.WaitAsync(SafetyTimeout, cancellationToken);
 		}
 		finally
 		{
@@ -224,6 +228,14 @@ public sealed class IgnoreRulesBuildCacheTests
 			cancellationToken,
 			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
 			TaskScheduler.Default);
+
+	private static TaskCompletionSource CreateSignal() =>
+		new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+	private static TimeSpan SafetyTimeout =>
+		string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+			? TimeSpan.FromMinutes(2)
+			: TimeSpan.FromSeconds(30);
 
 	private static IgnoreRules CreateRules() =>
 		new(

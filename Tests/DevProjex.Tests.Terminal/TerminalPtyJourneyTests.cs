@@ -563,12 +563,30 @@ public sealed class TerminalPtyJourneyTests
 		Assert.Contains("CONTEXT PREVIEW", initialWorkspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: "PROJECT TREE",
+			forbidden: ":set",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: "[x] src",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"v [x] src",
+		await terminal.WaitForStableScreenAsync(
+			readiness: screen =>
+				screen.Contains("v [x] src", StringComparison.Ordinal) &&
+				HasVisibleSelection(terminal, "src", "Feature"),
+			readinessDescription: "showing the expanded selected folder with settled focus",
+			timelineState: screen =>
+				$"expanded={screen.Contains("v [x] src", StringComparison.Ordinal)} " +
+				$"focused={HasVisibleSelection(terminal, "src", "Feature")}",
+			timeout: PtySafetyTimeout,
 			cancellationToken: TestContext.Current.CancellationToken);
-		await Task.Delay(150, TestContext.Current.CancellationToken);
 		AssertSelectionIsVisible(terminal, "src", "Feature");
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -807,28 +825,40 @@ public sealed class TerminalPtyJourneyTests
 		string selectedText,
 		string otherText)
 	{
-		var selectedRow = terminal.FindVisibleRow(selectedText);
-		var otherRow = terminal.FindVisibleRow(otherText);
-		Assert.True(selectedRow >= 0);
-		Assert.True(otherRow >= 0);
-		var selectedColumn = terminal.CaptureScreen()
-			.Split('\n')[selectedRow]
-			.IndexOf(selectedText, StringComparison.Ordinal);
-		var otherColumn = terminal.CaptureScreen()
-			.Split('\n')[otherRow]
-			.IndexOf(otherText, StringComparison.Ordinal);
-		var selectedStyle = terminal.CaptureCellStyle(selectedRow, selectedColumn);
-		var otherStyle = terminal.CaptureCellStyle(otherRow, otherColumn);
-		var otherVisual = (otherStyle.BackgroundMode, otherStyle.Background, otherStyle.Inverse);
-		var selectedVisual = (
-			selectedStyle.BackgroundMode,
-			selectedStyle.Background,
-			selectedStyle.Inverse);
 		Assert.True(
-			otherVisual != selectedVisual,
-			$"Selected row has no visible focus style. Selected={selectedVisual}, Other={otherVisual}.{Environment.NewLine}" +
+			HasVisibleSelection(terminal, selectedText, otherText),
+			"Selected row has no visible focus style." + Environment.NewLine +
 			terminal.CaptureScreen());
 	}
+
+	private static bool HasVisibleSelection(
+		TerminalPtyHarness terminal,
+		string selectedText,
+		string otherText)
+	{
+		var screen = terminal.CaptureScreen();
+		var lines = screen.Split('\n');
+		var selectedRow = Array.FindIndex(
+			lines,
+			line => line.Contains(selectedText, StringComparison.Ordinal));
+		var otherRow = Array.FindIndex(
+			lines,
+			line => line.Contains(otherText, StringComparison.Ordinal));
+		if (selectedRow < 0 || otherRow < 0)
+			return false;
+
+		var selectedColumn = lines[selectedRow].IndexOf(selectedText, StringComparison.Ordinal);
+		var otherColumn = lines[otherRow].IndexOf(otherText, StringComparison.Ordinal);
+		var selectedStyle = terminal.CaptureCellStyle(selectedRow, selectedColumn);
+		var otherStyle = terminal.CaptureCellStyle(otherRow, otherColumn);
+		return (otherStyle.BackgroundMode, otherStyle.Background, otherStyle.Inverse) !=
+			   (selectedStyle.BackgroundMode, selectedStyle.Background, selectedStyle.Inverse);
+	}
+
+	private static TimeSpan PtySafetyTimeout =>
+		string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+			? TimeSpan.FromMinutes(2)
+			: TimeSpan.FromSeconds(30);
 
 	private static async Task SelectWelcomeActionAsync(
 		TerminalPtyHarness terminal,
