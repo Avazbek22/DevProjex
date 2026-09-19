@@ -7,6 +7,7 @@ internal enum TerminalWorkspaceCommandVerb
 	Set,
 	All,
 	Type,
+	Select,
 	View,
 	Format,
 	Search,
@@ -17,6 +18,7 @@ internal enum TerminalWorkspaceCommandVerb
 	Branch,
 	Update,
 	Recent,
+	Open,
 	Profile,
 	Mcp,
 	Refresh,
@@ -55,12 +57,14 @@ internal enum TerminalWorkspaceCommandGrammar
 	ToggleOption,
 	ToggleGroup,
 	ToggleTypes,
+	Select,
 	View,
 	Format,
 	Text,
 	Export,
 	Copy,
 	OptionalText,
+	RequiredText,
 	Profile,
 	McpConnection,
 	Language,
@@ -113,7 +117,8 @@ internal readonly record struct TerminalWorkspaceCommandParseResult(
 internal sealed record TerminalWorkspaceCommandParseContext(
 	IReadOnlyList<string> AvailableExtensions,
 	IReadOnlySet<TerminalWorkspaceCommandVerb>? AllowedVerbs = null,
-	string? WorkingDirectory = null)
+	string? WorkingDirectory = null,
+	string? ProfileDirectory = null)
 {
 	public static TerminalWorkspaceCommandParseContext Empty { get; } = new([]);
 	public IReadOnlyList<string> VerbTokens => AllowedVerbs is null
@@ -169,6 +174,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			"type <.ext> [<.ext>...] <on|off>",
 			"type .cs on",
 			static (session, command) => session.ExecuteTypeCommand(command)),
+		Define(
+			TerminalWorkspaceCommandVerb.Select,
+			TerminalWorkspaceCommandGrammar.Select,
+			"select",
+			"select <path|glob> [<path|glob>...] <on|off>",
+			"select src/**/*.cs on",
+			static (session, command) => session.ExecuteSelectCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.View,
 			TerminalWorkspaceCommandGrammar.View,
@@ -243,11 +255,19 @@ internal static class TerminalWorkspaceCommandCatalog
 			static (session, command) => session.ExecuteRecentCommand(command),
 			TerminalWorkspaceCommandAvailability.Always),
 		Define(
+			TerminalWorkspaceCommandVerb.Open,
+			TerminalWorkspaceCommandGrammar.RequiredText,
+			"open",
+			"open <path|url>",
+			"open \"../Sample Project\"",
+			static (session, command) => session.ExecuteOpenCommand(command),
+			TerminalWorkspaceCommandAvailability.Always),
+		Define(
 			TerminalWorkspaceCommandVerb.Profile,
 			TerminalWorkspaceCommandGrammar.Profile,
 			"profile",
-			"profile save [name]",
-			"profile save \"Review Settings\"",
+			"profile <save|load|show|reset> ...",
+			"profile show",
 			static (session, command) => session.ExecuteProfileCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Mcp,

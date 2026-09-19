@@ -47,6 +47,10 @@ public sealed record TerminalTreeRow(
 	}
 }
 
+internal readonly record struct TerminalTreeSelectionResult(
+	int ChangedNodes,
+	int MissingSelectors);
+
 /// <summary>
 /// Keeps terminal tree interaction entirely in memory. Filesystem scans are reserved for
 /// structural settings changes; expanding nodes and changing check state only rebuild the
@@ -527,6 +531,78 @@ public sealed class TerminalWorkspaceState : IDisposable
 			GetCheckState(Plan.EffectiveTree) == TerminalTreeCheckState.Unchecked;
 		UpdatePathOptionStates(Plan);
 		RebuildVisibleRows();
+	}
+
+	internal TerminalTreeSelectionResult SetSelection(
+		IReadOnlyList<string> selectors,
+		bool selected)
+	{
+		ArgumentNullException.ThrowIfNull(selectors);
+		var previousFrontier = _selectedPathFrontier;
+		var previousRootState = GetCheckState(Plan.EffectiveTree);
+		var previousStates = new Dictionary<string, TerminalTreeCheckState>(
+			_checkStates,
+			ProjectTreePathIdentity.CanonicalComparer);
+		var targets = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		var missing = 0;
+		foreach (var selector in selectors)
+		{
+			var matches = ResolveSelectionTargets(selector);
+			if (matches.Count == 0)
+			{
+				missing++;
+				continue;
+			}
+			foreach (var match in matches)
+				targets.Add(match.FullPath);
+		}
+
+		if (targets.Count == 0)
+			return new TerminalTreeSelectionResult(0, missing);
+
+		Interlocked.Increment(ref _revision);
+		foreach (var target in targets.Order(ProjectTreePathIdentity.CanonicalComparer))
+			SetSubtreeSelection(_nodesByPath[target], selected);
+		RecomputeCheckStates();
+		_selectedPathFrontier = ResolveUpdatedSelectedPathFrontier(
+			previousFrontier,
+			previousRootState);
+		_usesUncheckedWholeTreePresentation =
+			GetCheckState(Plan.EffectiveTree) == TerminalTreeCheckState.Unchecked;
+		UpdatePathOptionStates(Plan);
+		RebuildVisibleRows();
+
+		var changed = _checkStates.Count(pair =>
+			previousStates.GetValueOrDefault(pair.Key) != pair.Value);
+		return new TerminalTreeSelectionResult(changed, missing);
+	}
+
+	private IReadOnlyList<TreeNodeDescriptor> ResolveSelectionTargets(string selector)
+	{
+		if (string.Equals(selector, "all", StringComparison.OrdinalIgnoreCase))
+			return [Plan.EffectiveTree];
+
+		if (selector.IndexOfAny(['*', '?', '{', '}']) < 0)
+		{
+			var normalized = ProjectSelectionPath.NormalizeRelative(selector);
+			return _nodesByPath.Values
+				.Where(node => ProjectTreePathIdentity.CanonicalComparer.Equals(
+					ToRelativePath(node.FullPath),
+					normalized.Length == 0 ? "." : normalized))
+				.ToArray();
+		}
+
+		ProjectRelativeGlob.Validate(selector);
+		var matchers = ProjectRelativeGlob.ExpandBraces(selector)
+			.Select(ProjectRelativeGlob.Compile)
+			.ToArray();
+		return _nodesByPath.Values
+			.Where(node =>
+			{
+				var relative = ToRelativePath(node.FullPath);
+				return matchers.Any(matcher => matcher.IsMatch(relative));
+			})
+			.ToArray();
 	}
 
 	public int FindNext(string query, int startIndex, bool reverse = false)

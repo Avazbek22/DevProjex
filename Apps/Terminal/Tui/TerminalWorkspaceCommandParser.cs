@@ -10,7 +10,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		["off", "gitignore", "tracked", "staged", "changes", "diff:<ref>..<ref>"];
 	private static readonly string[] AggregateTargets = ["types", "exclusions", "content"];
 	private static readonly string[] ExportTargets = ["context", "zip", "folder"];
-	private static readonly string[] ProfileTargets = ["save"];
+	private static readonly string[] ProfileTargets = ["save", "load", "show", "reset"];
 	private static readonly string[] McpTargets = ["connect"];
 	private static readonly string[] McpClients = ["claude-code", "codex", "cursor", "vscode", "json"];
 	private static readonly IReadOnlyList<string> LanguageCodes = CliChoiceSets.Language.Tokens;
@@ -49,6 +49,9 @@ internal sealed class TerminalWorkspaceCommandParser
 			[TerminalWorkspaceCommandGrammar.ToggleTypes] = new(
 				ParseType,
 				CompleteTypes),
+			[TerminalWorkspaceCommandGrammar.Select] = new(
+				static (definition, tokens, _) => ParseSelect(definition, tokens),
+				CompleteSelect),
 			[TerminalWorkspaceCommandGrammar.View] = new(
 				static (definition, tokens, _) => ParseView(definition, tokens),
 				CompleteView),
@@ -67,6 +70,9 @@ internal sealed class TerminalWorkspaceCommandParser
 			[TerminalWorkspaceCommandGrammar.OptionalText] = new(
 				static (definition, tokens, _) => ParseOptionalText(definition, tokens),
 				NoCompletions),
+			[TerminalWorkspaceCommandGrammar.RequiredText] = new(
+				static (definition, tokens, _) => ParseRequiredText(definition, tokens),
+				CompleteRequiredPath),
 			[TerminalWorkspaceCommandGrammar.Profile] = new(
 				static (definition, tokens, _) => ParseProfile(definition, tokens),
 				CompleteProfile),
@@ -328,6 +334,30 @@ internal sealed class TerminalWorkspaceCommandParser
 			Values: extensions));
 	}
 
+	private static TerminalWorkspaceCommandParseResult ParseSelect(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count < 3)
+			return Missing(tokens, tokens.Count == 1 ? ["all"] : ToggleValues);
+
+		var valueToken = tokens[^1];
+		if (!TryParseToggle(valueToken, out var enabled, out var error))
+			return TerminalWorkspaceCommandParseResult.Failure(error!);
+
+		var selectors = tokens.Skip(1).Take(tokens.Count - 2)
+			.Select(static token => token.Value)
+			.Distinct(StringComparer.Ordinal)
+			.ToArray();
+		if (selectors.Contains("all", StringComparer.OrdinalIgnoreCase) && selectors.Length != 1)
+			return Unexpected(tokens[2]);
+
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Enabled: enabled,
+			Values: selectors));
+	}
+
 	private static TerminalWorkspaceCommandParseResult ParseView(
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
@@ -459,6 +489,19 @@ internal sealed class TerminalWorkspaceCommandParser
 			Text: tokens.Count == 2 ? tokens[1].Value : null));
 	}
 
+	private static TerminalWorkspaceCommandParseResult ParseRequiredText(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count < 2)
+			return Missing(tokens, []);
+		if (tokens.Count > 2)
+			return Unexpected(tokens[2]);
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Text: tokens[1].Value));
+	}
+
 	private static TerminalWorkspaceCommandParseResult ParseProfile(
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
@@ -467,11 +510,16 @@ internal sealed class TerminalWorkspaceCommandParser
 			return Missing(tokens, ProfileTargets);
 		if (!Contains(ProfileTargets, tokens[1].Value))
 			return Unknown(tokens[1], ProfileTargets);
+		var target = Normalize(tokens[1].Value, ProfileTargets);
+		if (target == "load" && tokens.Count < 3)
+			return Missing(tokens, []);
+		if (target is "show" or "reset" && tokens.Count > 2)
+			return Unexpected(tokens[2]);
 		if (tokens.Count > 3)
 			return Unexpected(tokens[3]);
 		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
 			definition,
-			Target: "save",
+			Target: target,
 			Text: tokens.Count == 3 ? tokens[2].Value : null));
 	}
 
@@ -573,6 +621,20 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandParseContext context) =>
 		argumentIndex >= 0 ? ResolveTypeCompletions(tokens, context) : default;
 
+	private static CompletionCandidateSource CompleteSelect(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context)
+	{
+		if (argumentIndex < 0)
+			return default;
+		var paths = ResolvePathCompletions(current, context.WorkingDirectory);
+		return argumentIndex == 0
+			? new CompletionCandidateSource(["all", .. paths], ToggleValues)
+			: new CompletionCandidateSource(paths, ToggleValues);
+	}
+
 	private static CompletionCandidateSource CompleteView(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
@@ -625,7 +687,25 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
-		argumentIndex == 0 ? new CompletionCandidateSource(ProfileTargets) : default;
+		argumentIndex switch
+		{
+			0 => new CompletionCandidateSource(ProfileTargets),
+			1 when tokens.Count > 1 &&
+				string.Equals(tokens[1].Value, "load", StringComparison.OrdinalIgnoreCase) =>
+				new CompletionCandidateSource(
+					ResolveProfileNameCompletions(context.ProfileDirectory),
+					ResolvePathCompletions(current, context.WorkingDirectory)),
+			_ => default
+		};
+
+	private static CompletionCandidateSource CompleteRequiredPath(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex == 0
+			? new CompletionCandidateSource(ResolvePathCompletions(current, context.WorkingDirectory))
+			: default;
 
 	private static CompletionCandidateSource CompleteMcpConnection(
 		int argumentIndex,
@@ -680,6 +760,26 @@ internal sealed class TerminalWorkspaceCommandParser
 				.Take(100)
 				.Select(path => rooted ? path : Path.GetRelativePath(baseDirectory, path))
 				.ToArray();
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+			ArgumentException or NotSupportedException)
+		{
+			return [];
+		}
+	}
+
+	private static IReadOnlyList<string> ResolveProfileNameCompletions(string? profileDirectory)
+	{
+		if (string.IsNullOrWhiteSpace(profileDirectory))
+			return [];
+		try
+		{
+			return Directory.EnumerateFiles(profileDirectory, "*.json", SearchOption.TopDirectoryOnly)
+				.Select(Path.GetFileNameWithoutExtension)
+				.Where(static name => !string.IsNullOrWhiteSpace(name))
+				.Order(StringComparer.CurrentCultureIgnoreCase)
+				.Take(100)
+				.ToArray()!;
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
 			ArgumentException or NotSupportedException)

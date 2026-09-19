@@ -116,6 +116,33 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal("My Name", result.Command.Text);
 	}
 
+	[Fact]
+	public void Parse_SelectPreservesQuotedPathsAndRequiresTheFinalToggle()
+	{
+		var result = _parser.Parse("select \"данные проекта/*.cs\" src/**/*.md off", Context);
+
+		Assert.True(result.IsSuccess);
+		Assert.Equal(["данные проекта/*.cs", "src/**/*.md"], result.Command!.Values);
+		Assert.False(result.Command.Enabled);
+	}
+
+	[Theory]
+	[InlineData("profile load settings", "load", "settings")]
+	[InlineData("profile load \"../Team Settings.json\"", "load", "../Team Settings.json")]
+	[InlineData("profile show", "show", null)]
+	[InlineData("profile reset", "reset", null)]
+	internal void Parse_ProfileActionsUseStableSubcommands(
+		string text,
+		string target,
+		string? value)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal(target, result.Command!.Target);
+		Assert.Equal(value, result.Command.Text);
+	}
+
 	[Theory]
 	[InlineData("mcp connect claude-code", "claude-code")]
 	[InlineData("mcp CONNECT Codex", "codex")]
@@ -154,7 +181,35 @@ public sealed class TerminalWorkspaceCommandParserTests
 
 		Assert.Contains(copyView.Candidates, candidate => candidate.Token == "tree-content");
 		Assert.Contains(copyFormat.Candidates, candidate => candidate.Token == "markdown");
-		Assert.Contains(profile.Candidates, candidate => candidate.Token == "save");
+		Assert.Equal(
+			["save", "load", "show", "reset"],
+			profile.Candidates.Select(static candidate => candidate.Token));
+	}
+
+	[Fact]
+	public void CompletionQuotesSelectOpenAndProfilePaths()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateDirectory("данные проекта");
+		workspace.WriteFile("Team Settings.json", "{}");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: workspace.Path,
+			ProfileDirectory: workspace.Path);
+
+		var select = _parser.GetCompletion("select дан", 10, context);
+		var open = _parser.GetCompletion("open дан", 8, context);
+		var profile = _parser.GetCompletion("profile load Tea", 16, context);
+
+		Assert.Equal(
+			"select \"данные проекта\"",
+			Assert.Single(select.Candidates, static item => item.Token == "данные проекта").CompletedText);
+		Assert.Equal(
+			"open \"данные проекта\"",
+			Assert.Single(open.Candidates, static item => item.Token == "данные проекта").CompletedText);
+		Assert.Equal(
+			"profile load \"Team Settings\"",
+			Assert.Single(profile.Candidates, static item => item.Token == "Team Settings").CompletedText);
 	}
 
 	[Fact]
@@ -361,6 +416,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["all content on", TerminalWorkspaceCommandVerb.All],
 		["type .cs on", TerminalWorkspaceCommandVerb.Type],
 		["type .cs .md off", TerminalWorkspaceCommandVerb.Type],
+		["select all on", TerminalWorkspaceCommandVerb.Select],
+		["select src/*.cs docs off", TerminalWorkspaceCommandVerb.Select],
 		["view tree-content", TerminalWorkspaceCommandVerb.View],
 		["format markdown", TerminalWorkspaceCommandVerb.Format],
 		["search private value", TerminalWorkspaceCommandVerb.Search],
@@ -380,8 +437,12 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["branch feature/review", TerminalWorkspaceCommandVerb.Branch],
 		["update", TerminalWorkspaceCommandVerb.Update],
 		["recent", TerminalWorkspaceCommandVerb.Recent],
+		["open .", TerminalWorkspaceCommandVerb.Open],
 		["profile save", TerminalWorkspaceCommandVerb.Profile],
 		["profile save \"My Name\"", TerminalWorkspaceCommandVerb.Profile],
+		["profile load profile.json", TerminalWorkspaceCommandVerb.Profile],
+		["profile show", TerminalWorkspaceCommandVerb.Profile],
+		["profile reset", TerminalWorkspaceCommandVerb.Profile],
 		["mcp connect claude-code", TerminalWorkspaceCommandVerb.Mcp],
 		["mcp connect codex", TerminalWorkspaceCommandVerb.Mcp],
 		["refresh", TerminalWorkspaceCommandVerb.Refresh],
@@ -403,6 +464,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["set git diff:main...feature", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "diff:<ref>..<ref>"],
 		["all unknown on", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "content"],
 		["type .cs", TerminalWorkspaceCommandErrorCode.MissingArgument, 8, "on"],
+		["select src maybe", TerminalWorkspaceCommandErrorCode.InvalidValue, 11, "on"],
+		["select all src on", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 11, (string?)null],
 		["view contents", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "content"],
 		["format yaml", TerminalWorkspaceCommandErrorCode.UnknownToken, 7, "xml"],
 		["export archive out.zip", TerminalWorkspaceCommandErrorCode.UnknownToken, 7, "zip"],
@@ -414,7 +477,9 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["update now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 7, (string?)null],
 		["recent now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 7, (string?)null],
 		["profile", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, "save"],
-		["profile load", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "save"],
+		["profile load", TerminalWorkspaceCommandErrorCode.MissingArgument, 12, (string?)null],
+		["profile reset now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 14, (string?)null],
+		["profile loads x", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "load"],
 		["mcp", TerminalWorkspaceCommandErrorCode.MissingArgument, 3, "connect"],
 		["mcp unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "connect"],
 		["mcp connect", TerminalWorkspaceCommandErrorCode.MissingArgument, 11, "codex"],
