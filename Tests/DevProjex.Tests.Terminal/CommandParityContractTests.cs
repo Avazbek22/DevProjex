@@ -46,8 +46,8 @@ public sealed class CommandParityContractTests
 			foreach (var token in operation.Split(' ', StringSplitOptions.RemoveEmptyEntries))
 			{
 				command = command.Subcommands.SingleOrDefault(candidate => candidate.Name == token) ??
-				          throw new Xunit.Sdk.XunitException(
-					          $"Docs/CommandLine.md names missing CLI command '{operation}'.");
+						  throw new Xunit.Sdk.XunitException(
+							  $"Docs/CommandLine.md names missing CLI command '{operation}'.");
 			}
 		}
 	}

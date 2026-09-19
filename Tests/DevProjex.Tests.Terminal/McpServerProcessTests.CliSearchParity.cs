@@ -41,9 +41,9 @@ public sealed partial class McpServerProcessTests
 		foreach (var declaration in document.RootElement.GetProperty("declarations").EnumerateArray())
 		{
 			var selector = $"{declaration.GetProperty("path").GetString()} " +
-			               $"{declaration.GetProperty("symbol").GetString()} " +
-			               $"{declaration.GetProperty("startLine").GetInt32()}-" +
-			               declaration.GetProperty("endLine").GetInt32();
+						   $"{declaration.GetProperty("symbol").GetString()} " +
+						   $"{declaration.GetProperty("startLine").GetInt32()}-" +
+						   declaration.GetProperty("endLine").GetInt32();
 			Assert.Contains(selector, mcp, StringComparison.Ordinal);
 			if (declaration.GetProperty("body").GetString() is { Length: > 0 } body)
 				Assert.Contains(body, mcp, StringComparison.Ordinal);
@@ -86,11 +86,11 @@ public sealed partial class McpServerProcessTests
 			CreateNoWindow = true
 		};
 		foreach (var argument in new[]
-		         {
-			         PublishedApplicationLocator.FindApplicationAssembly(),
-			         "search", "needle", project, "--format", "json", "--git-mode", "none",
-			         "--exclude", "none", "--language", "en", "--plain", "--progress", "never"
-		         })
+				 {
+					 PublishedApplicationLocator.FindApplicationAssembly(),
+					 "search", "needle", project, "--format", "json", "--git-mode", "none",
+					 "--exclude", "none", "--language", "en", "--plain", "--progress", "never"
+				 })
 		{
 			start.ArgumentList.Add(argument);
 		}

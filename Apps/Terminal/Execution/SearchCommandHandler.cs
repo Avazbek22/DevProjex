@@ -157,7 +157,7 @@ public sealed class SearchCommandHandler(
 				var annotatedFiles = candidates.SelectFilesForAnnotation(
 					McpSearchSymbols.MaximumAnnotatedFiles);
 				foreach (var stale in navigationByFile.Keys
-					         .Where(path => !annotatedFiles.Contains(path)).ToArray())
+							 .Where(path => !annotatedFiles.Contains(path)).ToArray())
 				{
 					navigationByFile.Remove(stale);
 				}
@@ -392,9 +392,9 @@ public sealed class SearchCommandHandler(
 		foreach (var declaration in declarations.Take(MaximumDeclarationsReported))
 		{
 			var row = $"{McpTextEscaping.EscapeSingleLine(declaration.RelativePath)} " +
-			          $"{McpTextEscaping.EscapeSingleLine(declaration.Name)} " +
-			          $"{declaration.StartLine.ToString(CultureInfo.InvariantCulture)}-" +
-			          $"{declaration.EndLine.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
+					  $"{McpTextEscaping.EscapeSingleLine(declaration.Name)} " +
+					  $"{declaration.StartLine.ToString(CultureInfo.InvariantCulture)}-" +
+					  $"{declaration.EndLine.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
 			if (output.Length + section.Length + row.Length > MaximumContentCharacters)
 				break;
 			section.Append(row);
@@ -422,7 +422,7 @@ public sealed class SearchCommandHandler(
 			{
 				body.AppendLine().Append("[Declaration body truncated: ")
 					.Append(preview.RemainingLines.ToString(CultureInfo.InvariantCulture))
-					.Append(" line(s) remain.]" );
+					.Append(" line(s) remain.]");
 			}
 			body.AppendLine();
 			if (output.Length + section.Length + body.Length <= MaximumContentCharacters)
@@ -505,7 +505,7 @@ public sealed class SearchCommandHandler(
 		var longest = Regex.Matches(text, "`+").Select(match => match.Length).DefaultIfEmpty(2).Max();
 		var fence = new string('`', Math.Max(3, longest + 1));
 		return $"# Search results{Environment.NewLine}{Environment.NewLine}" +
-		       $"{fence}text{Environment.NewLine}{text}{Environment.NewLine}{fence}{Environment.NewLine}";
+			   $"{fence}text{Environment.NewLine}{text}{Environment.NewLine}{fence}{Environment.NewLine}";
 	}
 
 	private static IReadOnlyList<string> BoundaryLimits(McpSearchBoundary boundary)

@@ -150,10 +150,10 @@ public sealed class SearchCommandProcessTests
 		};
 		start.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		foreach (var argument in new[]
-		         {
-			         "search", pattern, project, "--git-mode", "none", "--exclude", "none",
-			         "--language", "en", "--plain", "--progress", "never"
-		         }.Concat(extra))
+				 {
+					 "search", pattern, project, "--git-mode", "none", "--exclude", "none",
+					 "--language", "en", "--plain", "--progress", "never"
+				 }.Concat(extra))
 		{
 			start.ArgumentList.Add(argument);
 		}
