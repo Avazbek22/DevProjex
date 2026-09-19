@@ -143,46 +143,38 @@
       <MenuItem Name="McpMenuItem"
                 Header="{Binding MenuMcp}"
                 AutomationProperties.Name="{Binding MenuMcp}">
-        <MenuItem Name="McpConnectClaudeCodeMenuItem"
-                  Header="{Binding MenuMcpConnectClaudeCode}"
-                  IsEnabled="{Binding IsProjectLoaded}"
-                  AutomationProperties.Name="{Binding MenuMcpConnectClaudeCode}"
-                  Click="OnMcpConnectClaudeCode" />
-        <MenuItem Name="McpConnectCodexMenuItem"
-                  Header="{Binding MenuMcpConnectCodex}"
-                  IsEnabled="{Binding IsProjectLoaded}"
-                  AutomationProperties.Name="{Binding MenuMcpConnectCodex}"
-                  Click="OnMcpConnectCodex" />
-        <MenuItem Name="McpConnectCursorMenuItem"
-                  Header="{Binding MenuMcpConnectCursor}"
-                  IsEnabled="{Binding IsProjectLoaded}"
-                  AutomationProperties.Name="{Binding MenuMcpConnectCursor}"
-                  Click="OnMcpConnectCursor" />
-        <MenuItem Name="McpConnectVsCodeMenuItem"
-                  Header="{Binding MenuMcpConnectVsCode}"
-                  IsEnabled="{Binding IsProjectLoaded}"
-                  AutomationProperties.Name="{Binding MenuMcpConnectVsCode}"
-                  Click="OnMcpConnectVsCode" />
-        <MenuItem Name="McpOtherClientsMenuItem"
-                  Header="{Binding MenuMcpOtherClients}"
-                  IsEnabled="{Binding IsProjectLoaded}"
-                  AutomationProperties.Name="{Binding MenuMcpOtherClients}"
-                  Click="OnMcpOtherClients" />
-        <Separator />
         <MenuItem Name="McpLiveContextMenuItem"
-                  IsEnabled="{Binding IsProjectLoaded}"
-                  Click="OnToggleMcpLiveContext"
+                  Header="{Binding MenuMcpLiveContext}"
                   AutomationProperties.Name="{Binding MenuMcpLiveContext}">
-          <MenuItem.Header>
-            <CheckBox Content="{Binding MenuMcpLiveContext}"
-                      IsChecked="{Binding IsMcpLiveContextEnabled}"
-                      IsHitTestVisible="False"
-                      AutomationProperties.Name="{Binding MenuMcpLiveContext}" />
-          </MenuItem.Header>
+          <MenuItem Name="McpConnectClaudeCodeMenuItem"
+                    Header="{Binding MenuMcpOpenClaudeCode}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOpenClaudeCode}"
+                    Click="OnMcpConnectClaudeCode" />
+          <MenuItem Name="McpConnectCodexMenuItem"
+                    Header="{Binding MenuMcpOpenCodex}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOpenCodex}"
+                    Click="OnMcpConnectCodex" />
+          <MenuItem Name="McpConnectCursorMenuItem"
+                    Header="{Binding MenuMcpOpenCursor}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOpenCursor}"
+                    Click="OnMcpConnectCursor" />
+          <MenuItem Name="McpConnectVsCodeMenuItem"
+                    Header="{Binding MenuMcpOpenVsCode}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOpenVsCode}"
+                    Click="OnMcpConnectVsCode" />
+          <Separator />
+          <MenuItem Name="McpOtherClientsMenuItem"
+                    Header="{Binding MenuMcpOtherClients}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOtherClients}"
+                    Click="OnMcpOtherClients" />
         </MenuItem>
         <MenuItem Name="McpDocumentationMenuItem"
                   Header="{Binding MenuMcpDocumentation}"
-                  IsEnabled="{Binding IsProjectLoaded}"
                   AutomationProperties.Name="{Binding MenuMcpDocumentation}"
                   Click="OnMcpDocumentation" />
       </MenuItem>

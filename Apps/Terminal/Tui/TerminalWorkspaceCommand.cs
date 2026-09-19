@@ -15,6 +15,7 @@ internal enum TerminalWorkspaceCommandVerb
 	Export,
 	Copy,
 	Analyze,
+	Related,
 	Branch,
 	Update,
 	Recent,
@@ -67,6 +68,7 @@ internal enum TerminalWorkspaceCommandGrammar
 	RequiredText,
 	Profile,
 	McpConnection,
+	Related,
 	Language,
 	Help,
 	None
@@ -81,7 +83,15 @@ internal sealed record TerminalWorkspaceCommand(
 	ProjectContextDocumentFormat? Format = null,
 	ProjectCopyExportFormat? ProjectExportFormat = null,
 	string? Text = null,
-	string? Destination = null);
+	string? Destination = null,
+	int? Depth = null,
+	TerminalWorkspaceMcpAction McpAction = TerminalWorkspaceMcpAction.Print);
+
+internal enum TerminalWorkspaceMcpAction
+{
+	Print,
+	Connect
+}
 
 internal enum TerminalWorkspaceCommandErrorCode
 {
@@ -231,6 +241,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			"analyze",
 			static (session, command) => session.ExecuteAnalyzeCommand(command)),
 		Define(
+			TerminalWorkspaceCommandVerb.Related,
+			TerminalWorkspaceCommandGrammar.Related,
+			"related",
+			"related <path> [--direction <dependencies|dependents|both>] [--depth <1..10>]",
+			"related src/App.cs --direction dependencies --depth 2",
+			static (session, command) => session.ExecuteRelatedCommand(command)),
+		Define(
 			TerminalWorkspaceCommandVerb.Branch,
 			TerminalWorkspaceCommandGrammar.OptionalText,
 			"branch",
@@ -273,8 +290,8 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandVerb.Mcp,
 			TerminalWorkspaceCommandGrammar.McpConnection,
 			"mcp",
-			"mcp connect <claude-code|codex|cursor|vscode|json>",
-			"mcp connect codex",
+			"mcp [client] [live|standard] | mcp connect <client>",
+			"mcp codex live",
 			static (session, command) => session.ExecuteMcpCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Refresh,

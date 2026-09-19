@@ -158,6 +158,26 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.True(result.IsSuccess, result.Error?.ToString());
 		Assert.Equal(expectedClient, result.Command!.Target);
 		Assert.Null(result.Command.Text);
+		Assert.Equal(TerminalWorkspaceMcpAction.Connect, result.Command.McpAction);
+	}
+
+	[Theory]
+	[InlineData("mcp", "claude-code", "live")]
+	[InlineData("mcp codex", "codex", "live")]
+	[InlineData("mcp cursor standard", "cursor", "standard")]
+	[InlineData("mcp vscode live", "vscode", "live")]
+	[InlineData("mcp json standard", "json", "standard")]
+	internal void Parse_McpWithoutConnectPreservesPrintableFragments(
+		string text,
+		string expectedClient,
+		string expectedMode)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal(expectedClient, result.Command!.Target);
+		Assert.Equal(expectedMode, result.Command.Text);
+		Assert.Equal(TerminalWorkspaceMcpAction.Print, result.Command.McpAction);
 	}
 
 	[Fact]
@@ -166,10 +186,63 @@ public sealed class TerminalWorkspaceCommandParserTests
 		var action = _parser.GetCompletion("mcp ", 4, Context);
 		var clients = _parser.GetCompletion("mcp connect ", 12, Context);
 
-		Assert.Equal(["connect"], action.Candidates.Select(static item => item.Token));
+		Assert.Equal(
+			["connect", "claude-code", "codex", "cursor", "vscode", "json"],
+			action.Candidates.Select(static item => item.Token));
 		Assert.Equal(
 			["claude-code", "codex", "cursor", "vscode", "json"],
 			clients.Candidates.Select(static item => item.Token));
+		var modes = _parser.GetCompletion("mcp codex ", 10, Context);
+		Assert.Equal(["live", "standard"], modes.Candidates.Select(static item => item.Token));
+	}
+
+	[Theory]
+	[InlineData("related src/App.cs", "src/App.cs", "both", 1)]
+	[InlineData("related \"src/My App.cs\" --direction dependencies", "src/My App.cs", "dependencies", 1)]
+	[InlineData("related src/App.cs --depth 3 --direction dependents", "src/App.cs", "dependents", 3)]
+	internal void Parse_RelatedUsesBoundedDirectionAndDepth(
+		string text,
+		string expectedPath,
+		string expectedDirection,
+		int expectedDepth)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal(expectedPath, result.Command!.Target);
+		Assert.Equal(expectedDirection, result.Command.Text);
+		Assert.Equal(expectedDepth, result.Command.Depth);
+	}
+
+	[Fact]
+	public void CompletionOffersRelatedPathsOptionsDirectionsAndDepths()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}");
+		var context = Context with { WorkingDirectory = workspace.Path };
+
+		var paths = _parser.GetCompletion("related src/A", 13, context);
+		var options = _parser.GetCompletion("related src/App.cs ", 19, context);
+		var directions = _parser.GetCompletion("related src/App.cs --direction ", 31, context);
+		var depths = _parser.GetCompletion("related src/App.cs --depth ", 27, context);
+		var nextOption = _parser.GetCompletion(
+			"related src/App.cs --direction dependencies ",
+			44,
+			context);
+		var noOptions = _parser.GetCompletion(
+			"related src/App.cs --direction dependencies --depth 2 ",
+			54,
+			context);
+
+		Assert.Contains(paths.Candidates, static item => item.Token == "src/App.cs");
+		Assert.Equal(["--direction", "--depth"], options.Candidates.Select(static item => item.Token));
+		Assert.Equal(
+			["dependencies", "dependents", "both"],
+			directions.Candidates.Select(static item => item.Token));
+		Assert.Equal("1", depths.Candidates.First().Token);
+		Assert.Equal("10", depths.Candidates.Last().Token);
+		Assert.Equal(["--depth"], nextOption.Candidates.Select(static item => item.Token));
+		Assert.Empty(noOptions.Candidates);
 	}
 
 	[Fact]
@@ -433,6 +506,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["copy", TerminalWorkspaceCommandVerb.Copy],
 		["copy tree-content json", TerminalWorkspaceCommandVerb.Copy],
 		["analyze", TerminalWorkspaceCommandVerb.Analyze],
+		["related src/App.cs", TerminalWorkspaceCommandVerb.Related],
+		["related src/App.cs --direction both --depth 2", TerminalWorkspaceCommandVerb.Related],
 		["branch", TerminalWorkspaceCommandVerb.Branch],
 		["branch feature/review", TerminalWorkspaceCommandVerb.Branch],
 		["update", TerminalWorkspaceCommandVerb.Update],
@@ -445,6 +520,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["profile reset", TerminalWorkspaceCommandVerb.Profile],
 		["mcp connect claude-code", TerminalWorkspaceCommandVerb.Mcp],
 		["mcp connect codex", TerminalWorkspaceCommandVerb.Mcp],
+		["mcp codex standard", TerminalWorkspaceCommandVerb.Mcp],
+		["mcp", TerminalWorkspaceCommandVerb.Mcp],
 		["refresh", TerminalWorkspaceCommandVerb.Refresh],
 		["language", TerminalWorkspaceCommandVerb.Language],
 		["language zh-cn", TerminalWorkspaceCommandVerb.Language],
@@ -480,11 +557,15 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["profile load", TerminalWorkspaceCommandErrorCode.MissingArgument, 12, (string?)null],
 		["profile reset now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 14, (string?)null],
 		["profile loads x", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "load"],
-		["mcp", TerminalWorkspaceCommandErrorCode.MissingArgument, 3, "connect"],
 		["mcp unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "connect"],
 		["mcp connect", TerminalWorkspaceCommandErrorCode.MissingArgument, 11, "codex"],
 		["mcp connect unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 12, "json"],
 		["mcp connect codex live", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 18, (string?)null],
+		["mcp codex unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 10, "standard"],
+		["related", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, "path"],
+		["related src/App.cs --side both", TerminalWorkspaceCommandErrorCode.UnknownToken, 19, "--direction"],
+		["related src/App.cs --depth 0", TerminalWorkspaceCommandErrorCode.InvalidValue, 27, "1"],
+		["related src/App.cs --depth 11", TerminalWorkspaceCommandErrorCode.InvalidValue, 27, "10"],
 		["refresh now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 8, (string?)null],
 		["language klingon", TerminalWorkspaceCommandErrorCode.UnknownLanguage, 9, "en"],
 		["language ru extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 12, (string?)null],

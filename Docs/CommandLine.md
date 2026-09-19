@@ -68,6 +68,7 @@ devprojex
 │   └── connect
 ├── open
 ├── analyze
+├── search
 ├── related
 ├── tree
 ├── export
@@ -164,6 +165,12 @@ prints the manual `mcpServers` configuration and the usual Claude Desktop paths.
 If a command-line client is not installed or a connection fails, the result
 includes the manual command or configuration to use instead.
 
+Add `--open` to open the client after a successful registration. Claude Code
+and Codex open in a new terminal rooted at the project; Cursor and VS Code open
+the project through their URL scheme or installed command-line fallback. The
+default remains registration only. `--print` and `--open` are mutually exclusive,
+and `--open` is rejected for the manual-only `json` client.
+
 Add `--print` to make no client or project changes and print only the connection
 fragment, matching the earlier behavior. Every fragment embeds the absolute
 installed executable path: winget and portable ZIP installations retain it while
@@ -175,6 +182,29 @@ moving that file requires printing or connecting again.
 Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. `--language CODE` localizes human-readable help,
 status, diagnostics, and Terminal Workspace labels.
+
+## Command parity
+
+This table is the surface contract. A command name identifies the public action on
+that surface; `direct action` means the graphical surface exposes the action without
+a command, and `none by design` means that surface deliberately does not own it.
+Arguments such as `--select`, `paths`, and `profile` are shown where the action is a
+request-scoped choice rather than a standalone command.
+
+| Action | GUI | TUI | CLI | MCP |
+|---|---|---|---|---|
+| Open project | direct action | `open` | `open` | none by design |
+| Select files | direct action | `select` | `--select` | `paths` |
+| Load profile | direct action | `profile load` | `--profile` | `profile` |
+| Show profile | direct action | `profile show` | `profile show` | `list_projects` |
+| Reset profile | direct action | `profile reset` | `profile reset` | none by design |
+| Save profile | direct action | `profile save` | `profile save` | none by design |
+| Search | direct action | `search` | `search` | `search_project` |
+| Related files | none by design | `related` | `related` | `related_files` |
+| Analyze | direct action | `analyze` | `analyze` | `analyze` |
+| Export context | direct action | `export` | `export context` | `pack_context` |
+| Connect MCP client | none by design | `mcp connect` | `mcp connect` | none by design |
+| Diagnostics | direct action | `diagnostics` | `doctor` | none by design |
 
 ## Version
 
@@ -600,6 +630,63 @@ devprojex analyze . --top-files 10
 devprojex analyze . --max-file-bytes 1m
 ```
 
+## Search
+
+```shell
+devprojex search <PATTERN> [PROJECT|URL] [options]
+```
+
+`search` scans the safe transformed text of the effective selection with the same
+bounded regex scanner, evidence ordering, declaration navigation, 64 MiB inspection
+budget, 16,000-character result budget, and 200-match request ceiling used by MCP
+`search_project`. The default mode treats `PATTERN` as literal text. `--regex`
+enables a timed .NET regular expression; `--symbols` treats the pattern as one
+complete identifier while retaining the same source evidence and containing-
+declaration lookup. The two mode switches are mutually exclusive. Matching ignores
+case, as does the default MCP call, and returns two context lines around each match.
+
+Specific options are:
+
+```text
+--regex
+--symbols
+--max <N>                               default: 50; range: 1..200
+--search-body-chars <off|N>             default: 1800; range: 1..16000
+-f, --format <text|json|markdown>        default: text
+-o, --output <PATH|->                    default: -
+--branch <NAME>                          URL source only
+--profile <standard|local|FILE>
+--root <PATH> ...
+--select <RELATIVE_PATH> ...
+--exclude <NAME> ...
+--git-mode <MODE>
+--hide-secrets / --no-hide-secrets
+<shared output options, including --plain>
+```
+
+Text output keeps the MCP path-grouped evidence shape: `line:text` marks a matching
+line, `line-text` is context, and `in SYMBOL` names the containing declaration. A
+bounded best declaration body follows when it is unique and enabled. `[Resolution]`
+counts shown matches whose containing declaration was named versus those with no
+declaration evidence; it never claims dependency resolution. `[Search boundary]`
+states whether every eligible source and observed match fit, and names every active
+limit when the answer is partial. The CLI has no session pack store, so a partial
+answer directs the caller to narrow the pattern or selection and run it again.
+
+JSON is the deterministic `devprojex-search-results` document described in
+[CLI-Output-Contract.md](CLI-Output-Contract.md). Markdown contains the complete
+text form in a fence longer than any backtick run in the result. File output is
+atomic, must be outside the source project, and refuses to replace an existing file.
+
+Examples:
+
+```shell
+devprojex search Configure .
+devprojex search "class\\s+Widget" . --regex --format json
+devprojex search Widget . --symbols --search-body-chars 900
+devprojex search TODO https://github.com/owner/repo --max 20 --hide-secrets
+```
+
 ## Related
 
 ```shell
@@ -624,6 +711,7 @@ Specific options are:
 ```text
 --project <PROJECT|URL>
 --direction <dependencies|dependents|both>   default: both
+--depth <1..10>                              default: 1
 -f, --format <text|json>                     default: text
 --branch <NAME>                              URL source only
 --max-file-bytes <SIZE>
@@ -637,6 +725,13 @@ and a cross-scope marker where applicable; ambiguous references stay grouped wit
 candidate paths. JSON is the deterministic `devprojex-related-files` document described in
 [CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no content-transformation
 flags and does not return source content.
+Depth `1` preserves the direct-neighbor response. A larger depth walks only
+resolved edges: every newly reached file becomes a seed for the next hop, while
+ambiguous, unresolved, and external evidence is reported but never traversed.
+Text emits one seed section per visited file; JSON adds those seed objects to the
+existing `seeds` array in deterministic breadth-first order. A traversal may visit
+at most 256 distinct seed files; a wider result fails before output with
+`DPX-DEPENDENCY-TRAVERSAL-LIMIT` instead of returning a partial graph.
 When a grammar rejects one construction but independent facts survive, text output adds
 `[Dependency partial parse]` with the dropped-construction count and bounded line ranges; JSON uses
 `coverage.partialParseDiagnostics`. No fact from a damaged construction is published.

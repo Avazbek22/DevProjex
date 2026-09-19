@@ -104,6 +104,58 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task RelatedCommandPublishesDependencyOutputInTheCommandPanel()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("Consumer.cs", "public sealed class Consumer { public Target Value { get; } }\n");
+		project.WriteFile("Target.cs", "public sealed class Target {}\n");
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":related Consumer.cs --direction dependencies --depth 1\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Dependencies",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("Target.cs", result, StringComparison.Ordinal);
+		Assert.Contains("[Resolution]", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RelatedCommandReportsTheSelectionFailureInTheCommandPanel()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("Consumer.cs", "public sealed class Consumer {}\n");
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":related Missing.cs\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"DPX-SELECTION-PATH-MISSING",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("selected path is absent from the effective tree", result, StringComparison.OrdinalIgnoreCase);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task ProfileSaveWithQuotedNamePersistsAValidProfileOutsideTheProject()
 	{
 		using var workspace = new TemporaryDirectory();

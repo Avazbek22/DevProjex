@@ -9,6 +9,32 @@ public enum AnalysisOutputFormat
 	Json
 }
 
+public enum SearchMode
+{
+	Text,
+	Regex,
+	Symbols
+}
+
+public enum SearchOutputFormat
+{
+	Text,
+	Json,
+	Markdown
+}
+
+public sealed record SearchCommandRequest(
+	string ProjectPath,
+	string Pattern,
+	ProjectSelectionSpec Selection,
+	SearchMode Mode,
+	int MaximumResults,
+	int SearchBodyCharacters,
+	SearchOutputFormat Format,
+	string? OutputPath,
+	TerminalOutputOptions Output,
+	string? RepositorySourceUrl = null);
+
 public sealed record AnalyzeCommandRequest(
 	string ProjectPath,
 	ProjectSelectionSpec Selection,
@@ -31,7 +57,8 @@ public sealed record RelatedCommandRequest(
 	AnalysisOutputFormat Format,
 	TerminalOutputOptions Output,
 	long? MaxFileBytes = null,
-	string? RepositorySourceUrl = null);
+	string? RepositorySourceUrl = null,
+	int Depth = 1);
 
 public sealed record TreeCommandRequest(
 	string ProjectPath,

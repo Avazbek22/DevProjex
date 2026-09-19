@@ -48,6 +48,10 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--max-file-bytes"
 			},
 			{
+				["search", "needle", ".", "--max=", "10"],
+				"--max"
+			},
+			{
 				["analyze", ".", "--color=", "never"],
 				"--color"
 			},
@@ -122,6 +126,10 @@ public sealed class EmptyEqualsParserRegressionTests
 			{
 				["ui", "status", "--timeout=", "10s"],
 				"--timeout"
+			},
+			{
+				["related", "src/App.cs", "--depth=", "2"],
+				"--depth"
 			}
 		};
 
@@ -155,6 +163,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		// export context intentionally adds this repeatable required-value option: per-file detail
 		// overrides of the form "<glob>=<full|compact|signatures>".
 		"--detail-for",
+		"--depth",
 		// related intentionally adds this required-value option to the public CLI grammar.
 		"--direction",
 		"--exclude",
@@ -167,6 +176,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--kind",
 		"--language",
 		"--limit",
+		"--max",
 		"--max-file-bytes",
 		"--max-tokens",
 		"--mode",

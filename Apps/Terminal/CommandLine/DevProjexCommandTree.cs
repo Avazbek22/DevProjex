@@ -10,6 +10,9 @@ namespace DevProjex.Terminal.CommandLine;
 
 public sealed class DevProjexCommandTree
 {
+	private static readonly string[] McpConnectionClients =
+		["claude-code", "codex", "cursor", "vscode", "json"];
+	private static readonly string[] McpConnectionModes = ["live", "standard"];
 	private static readonly TimeSpan MaximumRequestTimeout = TimeSpan.FromTicks(
 		(uint.MaxValue - 1L) * TimeSpan.TicksPerMillisecond);
 	private readonly ITerminalEnvironment environment;
@@ -73,6 +76,7 @@ public sealed class DevProjexCommandTree
 		root.Subcommands.Add(BuildMcpCommand());
 		root.Subcommands.Add(BuildOpenCommand());
 		root.Subcommands.Add(BuildAnalyzeCommand());
+		root.Subcommands.Add(BuildSearchCommand());
 		root.Subcommands.Add(BuildRelatedCommand());
 		root.Subcommands.Add(BuildTreeCommand());
 		root.Subcommands.Add(BuildExportCommand());
@@ -271,30 +275,47 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.McpPrint")
 		};
-		client.CompletionSources.Add(["claude-code", "codex", "cursor", "vscode", "json"]);
-		mode.CompletionSources.Add(["live", "standard"]);
+		var open = new Option<bool>("--open")
+		{
+			Description = L("Terminal.Option.McpOpen")
+		};
+		client.CompletionSources.Add(McpConnectionClients);
+		mode.CompletionSources.Add(McpConnectionModes);
 		client.Validators.Add(result =>
 		{
-			if (result.GetValueOrDefault<string>() is not
-				("claude-code" or "codex" or "cursor" or "vscode" or "json"))
+			if (!McpConnectionClients.Contains(
+					result.GetValueOrDefault<string>(),
+					StringComparer.OrdinalIgnoreCase))
 			{
 				result.AddError(L("Terminal.Validation.McpClient"));
 			}
 		});
 		mode.Validators.Add(result =>
 		{
-			if (result.GetValueOrDefault<string>() is not ("live" or "standard"))
+			if (!McpConnectionModes.Contains(
+					result.GetValueOrDefault<string>(),
+					StringComparer.OrdinalIgnoreCase))
 				result.AddError(L("Terminal.Validation.McpConnectionMode"));
 		});
 		command.Arguments.Add(project);
 		command.Options.Add(client);
 		command.Options.Add(mode);
 		command.Options.Add(print);
+		command.Options.Add(open);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(print) && result.GetValue(open))
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.McpPrintOpenConflict")));
+			if (result.GetValue(open) &&
+				string.Equals(result.GetValue(client), "json", StringComparison.OrdinalIgnoreCase))
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.McpOpenJson")));
+		});
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp connect . --client claude-code --mode live",
 			"devprojex mcp connect . --client cursor --mode standard",
-			"devprojex mcp connect . --client vscode --print");
+			"devprojex mcp connect . --client vscode --print",
+			"devprojex mcp connect . --client codex --open");
 		command.SetAction((parseResult, cancellationToken) =>
 			CommandExecution.RunAsync(
 				environment,
@@ -306,9 +327,10 @@ public sealed class DevProjexCommandTree
 						var executablePath = McpConnectionExecutablePathResolver.Resolve(
 							services.TerminalCommandSetupService.Probe(),
 							Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+						var connectionClient = ParseConnectionClient(parseResult.GetValue(client));
 						var request = new McpConnectionRequest(
-							ParseConnectionClient(parseResult.GetValue(client)),
-							parseResult.GetValue(mode) == "live"
+							connectionClient,
+							string.Equals(parseResult.GetValue(mode), "live", StringComparison.OrdinalIgnoreCase)
 								? McpConnectionMode.Live
 								: McpConnectionMode.Standard,
 							executablePath,
@@ -323,7 +345,31 @@ public sealed class DevProjexCommandTree
 						var result = await services.McpConnectionService
 							.ConnectAsync(request, cancellationToken)
 							.ConfigureAwait(false);
-						return WriteMcpConnectionResult(result);
+						if (!parseResult.GetValue(open) || !result.Succeeded)
+							return WriteMcpConnectionResult(result);
+
+						var launchResult = await services.McpClientLaunchService
+							.OpenAsync(new McpClientLaunchRequest(connectionClient, request.ProjectRoot), cancellationToken)
+							.ConfigureAwait(false);
+						if (launchResult.Succeeded)
+						{
+							WriteMcpConnectionResult(result);
+							TerminalTextEscaping.WriteSingleLine(
+								environment.Output,
+								_localization.Format("Mcp.Open.Succeeded", DisplayConnectionClient(connectionClient)));
+							return CommandLineExitCodes.Success;
+						}
+
+						WriteMcpConnectionResult(result);
+						TerminalTextEscaping.WriteSingleLine(
+							environment.Output,
+							_localization.Format(
+								"Mcp.Open.FailedAfterConnection",
+								DisplayConnectionClient(connectionClient),
+								launchResult.ErrorMessage ?? L("Mcp.Connect.UnknownError")));
+						if (!string.IsNullOrWhiteSpace(launchResult.ManualCommand))
+							TerminalTextEscaping.WriteSingleLine(environment.Output, launchResult.ManualCommand);
+						return CommandLineExitCodes.RuntimeError;
 					}),
 				_localization));
 		return command;
@@ -350,7 +396,7 @@ public sealed class DevProjexCommandTree
 			: CommandLineExitCodes.RuntimeError;
 	}
 
-	private static McpConnectionClient ParseConnectionClient(string? value) => value switch
+	private static McpConnectionClient ParseConnectionClient(string? value) => value?.ToLowerInvariant() switch
 	{
 		"claude-code" => McpConnectionClient.ClaudeCode,
 		"codex" => McpConnectionClient.Codex,
@@ -358,6 +404,16 @@ public sealed class DevProjexCommandTree
 		"vscode" => McpConnectionClient.VsCode,
 		"json" => McpConnectionClient.Json,
 		_ => throw new ArgumentException("Unsupported MCP connection client.", nameof(value))
+	};
+
+	private static string DisplayConnectionClient(McpConnectionClient client) => client switch
+	{
+		McpConnectionClient.ClaudeCode => "Claude Code",
+		McpConnectionClient.Codex => "Codex",
+		McpConnectionClient.Cursor => "Cursor",
+		McpConnectionClient.VsCode => "VS Code",
+		McpConnectionClient.Json => "JSON",
+		_ => throw new ArgumentOutOfRangeException(nameof(client), client, null)
 	};
 
 	private Option<CliExclusionValue[]> CreateMcpExcludeOption()
@@ -643,6 +699,143 @@ public sealed class DevProjexCommandTree
 		return command;
 	}
 
+	private Command BuildSearchCommand()
+	{
+		var command = new Command(
+			"search",
+			"Searches selected project content and names matching declarations.");
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex search Configure .",
+			"devprojex search \"class\\s+Widget\" . --regex --format json",
+			"devprojex search Widget . --symbols --search-body-chars 900");
+		var pattern = RequiredArgument("PATTERN");
+		pattern.Description = "Text, regular expression, or symbol name to search for.";
+		var project = ProjectSourceArgument();
+		var regex = new Option<bool>("--regex")
+		{
+			Description = "Interpret PATTERN as a .NET regular expression."
+		};
+		var symbols = new Option<bool>("--symbols")
+		{
+			Description = "Match PATTERN as a complete identifier and name containing declarations."
+		};
+		var maximumResults = new Option<int>("--max")
+		{
+			Description = "Return at most 1..200 matching lines; default 50.",
+			HelpName = "N",
+			DefaultValueFactory = _ => 50
+		};
+		var searchBodyCharacters = new Option<string>("--search-body-chars")
+		{
+			Description = "Limit the best declaration body to 1..16000 characters, or off; default 1800.",
+			HelpName = "off|N",
+			DefaultValueFactory = _ => "1800"
+		};
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliSearchOutputFormat.Text,
+			CliChoiceSets.SearchOutputFormat,
+			_localization);
+		format.Aliases.Add("-f");
+		var outputPath = OutputPathOption();
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeHidePrivateData: false,
+			includeCodeTransformations: false);
+		command.Arguments.Add(pattern);
+		command.Arguments.Add(project);
+		command.Options.Add(regex);
+		command.Options.Add(symbols);
+		command.Options.Add(maximumResults);
+		command.Options.Add(searchBodyCharacters);
+		command.Options.Add(format);
+		command.Options.Add(outputPath);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(regex) && result.GetValue(symbols))
+			{
+				result.AddError(LocalizedParseError.Create(
+					"--regex and --symbols cannot be used together."));
+			}
+			if (CliParseValue.TryGet(result, maximumResults, out var maximum) && maximum is < 1 or > 200)
+			{
+				result.AddError(LocalizedParseError.Create(
+					"--max must be between 1 and 200."));
+			}
+			try
+			{
+				_ = McpServerHost.ParseSearchBodyCharacters(
+					result.GetResult(searchBodyCharacters) is null
+						? "1800"
+						: result.GetValue(searchBodyCharacters));
+			}
+			catch (ArgumentException exception)
+			{
+				result.AddError(LocalizedParseError.Create(exception.Message));
+			}
+		});
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var outputOptions = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				outputOptions,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							outputOptions)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
+					return await new SearchCommandHandler(services, environment).ExecuteAsync(
+						new SearchCommandRequest(
+							resolvedSource.ProjectPath,
+							parseResult.GetValue(pattern) ??
+								throw new InvalidOperationException("The required search pattern was not parsed."),
+							spec,
+							parseResult.GetValue(regex)
+								? SearchMode.Regex
+								: parseResult.GetValue(symbols) ? SearchMode.Symbols : SearchMode.Text,
+							parseResult.GetValue(maximumResults),
+							McpServerHost.ParseSearchBodyCharacters(
+								parseResult.GetValue(searchBodyCharacters) ?? "1800"),
+							parseResult.GetValue(format) switch
+							{
+								CliSearchOutputFormat.Text => SearchOutputFormat.Text,
+								CliSearchOutputFormat.Json => SearchOutputFormat.Json,
+								CliSearchOutputFormat.Markdown => SearchOutputFormat.Markdown,
+								_ => throw new ArgumentOutOfRangeException()
+							},
+							parseResult.GetValue(outputPath),
+							outputOptions,
+							resolvedSource.RepositorySourceUrl),
+						cancellationToken).ConfigureAwait(false);
+				},
+				_localization).ConfigureAwait(false);
+		});
+		return command;
+	}
+
 	private Command BuildRelatedCommand()
 	{
 		var command = new Command("related", L("Terminal.Command.Related"));
@@ -671,6 +864,12 @@ public sealed class DevProjexCommandTree
 			CliDependencyDirection.Both,
 			CliChoiceSets.DependencyDirection,
 			_localization);
+		var depth = new Option<int>("--depth")
+		{
+			Description = L("Terminal.Option.RelatedDepth"),
+			HelpName = "N",
+			DefaultValueFactory = _ => RelatedQueryRunner.MinimumDepth
+		};
 		var format = CliChoiceSymbols.Option(
 			"--format",
 			L("Terminal.Option.Format"),
@@ -687,10 +886,19 @@ public sealed class DevProjexCommandTree
 		command.Arguments.Add(seed);
 		command.Options.Add(project);
 		command.Options.Add(direction);
+		command.Options.Add(depth);
 		command.Options.Add(format);
 		command.Options.Add(branch);
 		selection.AddTo(command);
 		_output.AddProgressTo(command);
+		command.Validators.Add(result =>
+		{
+			if (CliParseValue.TryGet(result, depth, out var value) &&
+				value is < RelatedQueryRunner.MinimumDepth or > RelatedQueryRunner.MaximumDepth)
+			{
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.RelatedDepth")));
+			}
+		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var output = _output.Get(parseResult);
@@ -734,7 +942,8 @@ public sealed class DevProjexCommandTree
 								: AnalysisOutputFormat.Text,
 							output,
 							selection.GetMaxFileBytes(parseResult),
-							resolvedSource.RepositorySourceUrl),
+							resolvedSource.RepositorySourceUrl,
+							parseResult.GetValue(depth)),
 						cancellationToken).ConfigureAwait(false);
 				},
 				_localization).ConfigureAwait(false);

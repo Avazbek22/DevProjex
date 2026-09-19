@@ -1,5 +1,6 @@
 using System.Globalization;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
@@ -314,6 +315,80 @@ internal sealed partial class TerminalWorkspaceSession
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
+	internal TerminalWorkspaceCommandExecutionResult ExecuteRelatedCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null || string.IsNullOrWhiteSpace(command.Target))
+			return InvalidCommandExecution();
+
+		var direction = command.Text switch
+		{
+			"dependencies" => DependencyDirection.Dependencies,
+			"dependents" => DependencyDirection.Dependents,
+			"both" => DependencyDirection.Both,
+			_ => throw new ArgumentOutOfRangeException(nameof(command), command.Text, null)
+		};
+		var depth = command.Depth ?? RelatedQueryRunner.MinimumDepth;
+		var state = _state;
+		TrackActiveOperation(RunOperationAsync(
+			L("Terminal.Tui.Command.Related.Title"),
+			async token =>
+			{
+				var plan = await _controller.BuildCurrentPlanAsync(state, token).ConfigureAwait(false);
+				var planDiagnostics = FormatContextDiagnostics(plan.Diagnostics);
+				if (plan.HasErrors)
+				{
+					throw new TerminalWorkspaceOperationException(
+						"DPX-TUI-RELATED-SELECTION-FAILED",
+						planDiagnostics);
+				}
+				var seed = RelatedQueryRunner.ResolveSeed(plan, command.Target);
+				DependencyRelatedResult related;
+				try
+				{
+					related = await RelatedQueryRunner.FindAsync(
+							_services.DependencyFactsEngine,
+							plan,
+							seed,
+							direction,
+							depth,
+							token)
+						.ConfigureAwait(false);
+				}
+				catch (DependencyTraversalLimitException exception)
+				{
+					throw new TerminalWorkspaceOperationException(
+						DependencyTraversalLimitException.ErrorCode,
+						_services.Localization.Format(
+							"Terminal.Related.TraversalLimit",
+							exception.MaximumSeeds));
+				}
+				using var writer = new StringWriter(CultureInfo.CurrentCulture);
+				if (planDiagnostics.Length > 0)
+				{
+					await writer.WriteLineAsync(planDiagnostics).ConfigureAwait(false);
+					await writer.WriteLineAsync().ConfigureAwait(false);
+				}
+				if (related.Seeds.Any(static item => item.NoFactsReason is { Length: > 0 }))
+				{
+					await writer.WriteLineAsync(
+						"warning[DPX-DEPENDENCY-UNSUPPORTED]: " +
+						TerminalTextEscaping.EscapeSingleLine(L("Terminal.Related.NoFacts"))).ConfigureAwait(false);
+				}
+				await RelatedOutputRenderer.WriteAsync(
+						writer,
+						related,
+						direction,
+						AnalysisOutputFormat.Text,
+						_services.Localization,
+						token)
+					.ConfigureAwait(false);
+				return writer.ToString().TrimEnd();
+			},
+			originatedFromCommandLine: true));
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
 	internal TerminalWorkspaceCommandExecutionResult ExecuteBranchCommand(
 		TerminalWorkspaceCommand command)
 	{
@@ -386,6 +461,29 @@ internal sealed partial class TerminalWorkspaceSession
 			return InvalidCommandExecution();
 
 		var projectRoot = _state.Plan.SourceRoot;
+		if (command.McpAction == TerminalWorkspaceMcpAction.Print)
+		{
+			var mode = command.Text == "standard"
+				? McpConnectionMode.Standard
+				: McpConnectionMode.Live;
+			var executablePath = McpConnectionExecutablePathResolver.Resolve(
+				_services.TerminalCommandSetupService.Probe(),
+				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+			var fragment = _services.McpConnectionService.CreatePrintableConfiguration(
+				new McpConnectionRequest(
+					client.Value,
+					mode,
+					executablePath,
+					Path.GetFullPath(projectRoot)));
+			ShowScrollableOverlay(
+				L("Terminal.Tui.Command.Mcp.Title"),
+				fragment,
+				TerminalWorkspaceTheme.Dialog,
+				preferredWidth: 96,
+				preferredHeight: 14);
+			return TerminalWorkspaceCommandExecutionResult.Deferred();
+		}
+
 		var operationCts = ReplaceActiveOperation();
 		TrackActiveOperation(Task.Run(
 			() => ConnectMcpClientAsync(client.Value, projectRoot, operationCts),
@@ -400,16 +498,12 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		try
 		{
-			var useLiveContext = _services.UserSettingsStore
-				.Load()
-				.ViewSettings
-				.IsMcpLiveContextEnabled;
 			var executablePath = McpConnectionExecutablePathResolver.Resolve(
 				_services.TerminalCommandSetupService.Probe(),
 				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 			var request = new McpConnectionRequest(
 				client,
-				useLiveContext ? McpConnectionMode.Live : McpConnectionMode.Standard,
+				McpConnectionMode.Live,
 				executablePath,
 				Path.GetFullPath(projectRoot));
 			var result = await _services.McpConnectionService

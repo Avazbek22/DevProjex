@@ -204,20 +204,22 @@ DevProjex ships a built-in **secure [Model Context Protocol](https://modelcontex
 devprojex mcp --root /path/to/project
 ```
 
-Connect from the Desktop **MCP** menu, from Terminal Workspace with
-`mcp connect <client>`, or from the CLI with
-`devprojex mcp connect . --client <client>`. Claude Code and Codex are configured
-through their installed command, while Cursor and VS Code receive a project-local
-`.cursor/mcp.json` or `.vscode/mcp.json`. Existing files are merged without changing
-other servers. Use `--print` in the CLI when only a manual configuration fragment is
-needed.
+Connect from the Desktop **MCP → Live context** submenu, from Terminal Workspace
+with `mcp connect <client>`, or from the CLI with
+`devprojex mcp connect . --client <client>`. Desktop registers the live server and
+opens Claude Code, Codex, Cursor, or VS Code. Terminal Workspace registers without
+opening another terminal, while the CLI opens the client only when `--open` is given.
+Claude Code and Codex are configured through their installed command; Cursor and
+VS Code receive a project-local `.cursor/mcp.json` or `.vscode/mcp.json`. Existing
+files are merged without changing other servers. Use `--print` when only a manual
+configuration fragment is needed.
 
 **Live context** connects an MCP session to the checked tree in an open DevProjex
-window through the shared local project profile. The **MCP** menu, between File
-and Git, connects Claude Code, Codex, Cursor, or VS Code directly and provides a
-manual JSON fallback for other clients. Its persisted **Live context** check controls
-whether new connections include `--live`. After a successful connection, an optional
-PATH dialog can offer the platform-appropriate terminal setup. The window
+window through the shared local project profile. The compact **MCP** menu, between
+File and Git, has a **Live context** submenu that registers and opens Claude Code,
+Codex, Cursor, or VS Code, plus a manual JSON fallback for other clients. Desktop
+connections always include `--live`. After a successful connection, an optional PATH
+dialog can offer the platform-appropriate terminal setup. The window
 title names an active client or session count, saved focused paths are restored on reopen,
 and disabling secret protection while a live session exists requires confirmation.
 Directly named readable files can still be returned with an explicit outside-focus
@@ -268,8 +270,8 @@ See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool refer
 ## Safety boundaries 🛡️
 
 DevProjex keeps normal processing and MCP tools read-only. The only write inside an
-opened project is an explicit **Connect Cursor** or **Connect VS Code** action, which
-atomically creates or updates `.cursor/mcp.json` or `.vscode/mcp.json`:
+opened project is an explicit Cursor or VS Code MCP connection, which atomically
+creates or updates `.cursor/mcp.json` or `.vscode/mcp.json`:
 
 * Does not otherwise edit, rename, move, or delete files in the opened source project
 * Does not commit, merge, push, or switch branches in the source repository opened from the user's filesystem. Branch operations are limited to application-owned cached clones.

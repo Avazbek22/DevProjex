@@ -198,6 +198,15 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("devprojex mcp connect", normalizedCommandLine, StringComparison.Ordinal);
 		Assert.Contains("Add `--print` to make no client or project changes", normalizedCommandLine, StringComparison.Ordinal);
+		Assert.Contains("Add `--open` to open the client after a successful registration", normalizedCommandLine, StringComparison.Ordinal);
+		Assert.Contains("`--print` and `--open` are mutually exclusive", normalizedCommandLine, StringComparison.Ordinal);
+		Assert.Contains("`--open` is rejected for the manual-only `json` client", normalizedCommandLine, StringComparison.Ordinal);
+		Assert.Contains("The Desktop **MCP** menu contains **Live context ▸** and **Documentation**", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("**Open in Claude Code**, **Open in Codex**, **Open in Cursor**", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("A successful open shows no connection toast", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("Terminal Workspace's `mcp connect` uses live mode", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("`related` uses the same dependency engine and text renderer as the direct CLI", normalizedTerminal, StringComparison.Ordinal);
+		Assert.Contains("The older `mcp` form continues to print a fragment", normalizedTerminal, StringComparison.Ordinal);
 		Assert.Contains("moving that file requires printing or connecting again", normalizedCommandLine, StringComparison.Ordinal);
 	}
 

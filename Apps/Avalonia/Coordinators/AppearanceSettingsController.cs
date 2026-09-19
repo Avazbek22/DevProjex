@@ -159,13 +159,6 @@ internal sealed class AppearanceSettingsController(
         SaveCurrentViewSettings();
     }
 
-    public void ToggleMcpLiveContext()
-    {
-        viewModel.IsMcpLiveContextEnabled =
-            !viewModel.IsMcpLiveContextEnabled;
-        SaveCurrentViewSettings();
-    }
-
     public void ToggleThemePopover()
         => viewModel.ThemePopoverOpen = !viewModel.ThemePopoverOpen;
 
@@ -373,8 +366,6 @@ internal sealed class AppearanceSettingsController(
             settings.IsStatusMetricsAnimationEnabled;
         viewModel.IsToolAnimationEnabled =
             settings.IsToolAnimationEnabled;
-        viewModel.IsMcpLiveContextEnabled =
-            settings.IsMcpLiveContextEnabled;
         workspace.UpdateCompactModeVisualState();
     }
 
@@ -412,8 +403,6 @@ internal sealed class AppearanceSettingsController(
                 viewModel.IsStatusMetricsAnimationEnabled,
             IsToolAnimationEnabled =
                 viewModel.IsToolAnimationEnabled,
-            IsMcpLiveContextEnabled =
-                viewModel.IsMcpLiveContextEnabled,
             IsTerminalCommandPromptDismissed =
                 current.IsTerminalCommandPromptDismissed,
             PreferredLanguage = current.PreferredLanguage
