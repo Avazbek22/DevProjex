@@ -1483,19 +1483,57 @@ detail level is unchanged, byte for byte.
 The `devprojex` command must be on `PATH`; otherwise use its absolute executable
 path. Replace `/absolute/path/to/project` in the examples.
 
-Desktop's **MCP** menu, Terminal Workspace's `mcp` command, and
-`devprojex mcp connect` use one fragment generator and embed the absolute installed
-executable path. Select Live context to include `--live`, or Standard to retain the
-ordinary server baseline. The Store fragment uses the stable WindowsApps alias;
+Desktop's **MCP** menu, Terminal Workspace's `mcp connect` command, and
+`devprojex mcp connect` use one connection service and embed the absolute installed
+executable path. Desktop connections always include `--live`; the CLI `--mode`
+option selects live or standard mode, and Terminal Workspace's `mcp connect` uses
+live mode. The Store configuration uses the stable WindowsApps alias;
 winget and ZIP paths remain stable while their installation directory is unchanged;
 the macOS path remains stable while the `.app` bundle stays in place. AppImage
-fragments name the AppImage itself, so moving it requires copying a new fragment.
-In Desktop, the menu is available only with an open project. Copying succeeds before
-any optional PATH prompt: Windows can install or repair the command, while macOS and
-Linux show the shell-profile line to copy. Dismissing that prompt does not suppress
-future checks. The title shows the live client name or active-session count. If a
+configurations name the AppImage itself, so moving it requires reconnecting.
+
+The Desktop **MCP** menu contains **Live context ▸** and **Documentation**. The live
+submenu contains **Open in Claude Code**, **Open in Codex**, **Open in Cursor**,
+**Open in VS Code**, and **Other clients…**; those five actions are enabled only with
+an open project.
+The first two actions invoke the installed client command, capture its output, replace
+an existing `devprojex` entry, and then open a new terminal at the project root.
+Claude Code stores the entry in the project-local scope selected by its working
+directory; Codex stores it in its global configuration. **Open in Cursor** atomically
+merges only the `devprojex` entry in `.cursor/mcp.json`; **Open in VS Code** does the
+same in `.vscode/mcp.json`, then each action opens the project through its URL scheme
+with its command-line launcher as a fallback.
+Unrelated JSON properties and servers are retained. Malformed JSON is never overwritten:
+DevProjex reports the error and presents the configuration for manual installation.
+**Other clients…** presents the generic `mcpServers` JSON and the standard Claude
+Desktop configuration paths on Windows and macOS.
+
+A missing command or failed client process uses the same manual-configuration window.
+If removing an existing Claude Code or Codex entry succeeds but adding its replacement
+fails, the previous entry has already been removed; the result states this and presents
+the manual configuration below. If registration succeeds but opening the client fails,
+the window states that the server is connected, names the launch failure, and provides
+a manual launch command to copy. A successful open shows no connection toast. The optional
+PATH prompt appears only after a successful connection: Windows can install or repair
+the command, while macOS and Linux show the shell-profile line to copy. Dismissing that
+prompt does not suppress future checks. The title shows the live client name or active-session count. If a
 live session exists, applying a transition from enabled to disabled secret protection
 requires confirmation; other settings and sessions in Standard mode do not add it.
+
+The CLI performs the connection by default:
+
+```shell
+devprojex mcp connect /absolute/path/to/project --client claude-code --mode live
+devprojex mcp connect /absolute/path/to/project --client cursor --mode standard
+devprojex mcp connect /absolute/path/to/project --client codex --mode live --open
+```
+
+Clients are `claude-code`, `codex`, `cursor`, `vscode`, and `json`. The `json` client
+always returns the manual configuration. Add `--print` to print the configuration
+without discovering a client, starting a process, or writing a project file. Add
+`--open` to open the selected client after a successful registration; without it the
+CLI only registers the server and prints the result. The manual-only `json` client
+rejects `--open`.
 
 ### Claude Code
 

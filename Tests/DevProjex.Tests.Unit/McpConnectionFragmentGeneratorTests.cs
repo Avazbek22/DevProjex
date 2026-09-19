@@ -38,6 +38,10 @@ public sealed class McpConnectionFragmentGeneratorTests
 	[InlineData((int)McpConnectionClient.ClaudeCode, (int)McpConnectionMode.Standard)]
 	[InlineData((int)McpConnectionClient.Codex, (int)McpConnectionMode.Live)]
 	[InlineData((int)McpConnectionClient.Codex, (int)McpConnectionMode.Standard)]
+	[InlineData((int)McpConnectionClient.Cursor, (int)McpConnectionMode.Live)]
+	[InlineData((int)McpConnectionClient.Cursor, (int)McpConnectionMode.Standard)]
+	[InlineData((int)McpConnectionClient.VsCode, (int)McpConnectionMode.Live)]
+	[InlineData((int)McpConnectionClient.VsCode, (int)McpConnectionMode.Standard)]
 	[InlineData((int)McpConnectionClient.Json, (int)McpConnectionMode.Live)]
 	[InlineData((int)McpConnectionClient.Json, (int)McpConnectionMode.Standard)]
 	public void Generate_PreservesAbsoluteUnicodePathsAndMode(int clientValue, int modeValue)
@@ -56,10 +60,12 @@ public sealed class McpConnectionFragmentGeneratorTests
 		{
 			Assert.Contains("C:\\\\Program Files\\\\DevProjex", fragment, StringComparison.Ordinal);
 		}
-		else if (client == McpConnectionClient.Json)
+		else if (client is McpConnectionClient.Cursor or McpConnectionClient.VsCode or McpConnectionClient.Json)
 		{
 			using var document = JsonDocument.Parse(fragment);
-			var server = document.RootElement.GetProperty("mcpServers").GetProperty("devprojex");
+			var containerName = client == McpConnectionClient.VsCode ? "servers" : "mcpServers";
+			var server = document.RootElement.GetProperty(containerName).GetProperty("devprojex");
+			Assert.Equal(client == McpConnectionClient.VsCode, server.TryGetProperty("type", out _));
 			Assert.Equal(executable, server.GetProperty("command").GetString());
 			Assert.Contains(root, server.GetProperty("args").EnumerateArray().Select(static value => value.GetString()));
 		}
@@ -91,26 +97,39 @@ public sealed class McpConnectionFragmentGeneratorTests
 
 	[Theory]
 	[MemberData(nameof(StructuredFragmentCases))]
-	public void Generate_JsonRoundTripsEveryPathCharacter(
+	public void Generate_JsonClientsRoundTripEveryPathCharacter(
 		int modeValue,
 		string executable,
 		string root)
 	{
 		var mode = (McpConnectionMode)modeValue;
-		var fragment = McpConnectionFragmentGenerator.Generate(
-			McpConnectionClient.Json,
-			mode,
-			executable,
-			root);
+		foreach (var client in new[]
+				 {
+					 McpConnectionClient.Cursor,
+					 McpConnectionClient.VsCode,
+					 McpConnectionClient.Json
+				 })
+		{
+			var fragment = McpConnectionFragmentGenerator.Generate(
+				client,
+				mode,
+				executable,
+				root);
 
-		using var document = JsonDocument.Parse(fragment);
-		var server = document.RootElement.GetProperty("mcpServers").GetProperty("devprojex");
-		AssertConnection(
-			server.GetProperty("command").GetString(),
-			server.GetProperty("args").EnumerateArray().Select(static value => value.GetString()).ToArray(),
-			mode,
-			executable,
-			root);
+			using var document = JsonDocument.Parse(fragment);
+			var containerName = client == McpConnectionClient.VsCode ? "servers" : "mcpServers";
+			var server = document.RootElement.GetProperty(containerName).GetProperty("devprojex");
+			if (client == McpConnectionClient.VsCode)
+				Assert.Equal("stdio", server.GetProperty("type").GetString());
+			else
+				Assert.False(server.TryGetProperty("type", out _));
+			AssertConnection(
+				server.GetProperty("command").GetString(),
+				server.GetProperty("args").EnumerateArray().Select(static value => value.GetString()).ToArray(),
+				mode,
+				executable,
+				root);
+		}
 	}
 
 	[Theory]
@@ -310,7 +329,7 @@ public sealed class McpConnectionFragmentGeneratorTests
 							  "[Console]::Out.Write((ConvertTo-Json -Compress -Depth 4 -InputObject $results))";
 		var command = fragments[0].Split(' ', 2, StringSplitOptions.RemoveEmptyEntries)[0];
 		var result = await RunShellAsync(
-			"powershell.exe",
+			"pwsh",
 			["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
 			JsonSerializer.Serialize(new { command, fragments }));
 		return JsonSerializer.Deserialize<string[][]>(result) ?? [];
@@ -351,8 +370,22 @@ public sealed class McpConnectionFragmentGeneratorTests
 							throw new InvalidOperationException($"Could not start {executable}.");
 		var standardOutput = process.StandardOutput.ReadToEndAsync();
 		var standardError = process.StandardError.ReadToEndAsync();
-		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-		await process.WaitForExitAsync(timeout.Token);
+		try
+		{
+			await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		}
+		catch (OperationCanceledException)
+		{
+			try
+			{
+				if (!process.HasExited)
+					process.Kill(entireProcessTree: true);
+			}
+			catch (InvalidOperationException)
+			{
+			}
+			throw;
+		}
 		var error = await standardError;
 		Assert.True(process.ExitCode == 0, $"{executable} exited with {process.ExitCode}: {error}");
 		return await standardOutput;

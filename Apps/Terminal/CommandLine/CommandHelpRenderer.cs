@@ -113,7 +113,7 @@ public sealed class CommandHelpRenderer(
 			"tui" => [0, 1, 2, 3, 130],
 			"export" or "profile" or "cache" or "ui" => [0, 2, 130],
 			"recent" or "profile show" or "profile validate" or "profile reset" or
-				"cache path" or "completion" => [0, 1, 2, 130],
+				"cache path" or "completion" or "mcp connect" => [0, 1, 2, 130],
 			_ when path.StartsWith("ui ", StringComparison.Ordinal) => [0, 1, 2, 3, 4, 5, 130],
 			_ => [0, 2, 130]
 		};

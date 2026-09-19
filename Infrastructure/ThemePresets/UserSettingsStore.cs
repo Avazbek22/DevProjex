@@ -163,7 +163,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     private UserSettingsDb NormalizeAfterRead(
         UserSettingsDb database,
-        StoredAnimationPreferences animationPreferences)
+        StoredViewPreferences storedPreferences)
     {
         var sourceSchemaVersion = database.SchemaVersion;
         Normalize(database);
@@ -182,8 +182,8 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         database.ViewSettings = database.ViewSettings with
         {
             IsStatusMetricsAnimationEnabled =
-                animationPreferences.StatusMetrics ?? true,
-            IsToolAnimationEnabled = animationPreferences.Tools ?? true
+                storedPreferences.StatusMetricsAnimation ?? true,
+			IsToolAnimationEnabled = storedPreferences.ToolAnimation ?? true
         };
 
         return database;
@@ -246,18 +246,18 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     private bool TryRead(string path, out UserSettingsDb database, out bool requiresRewrite)
     {
-        var animationPreferences = ReadStoredAnimationPreferences(path);
+        var storedPreferences = ReadStoredViewPreferences(path);
         return JsonStorePersistence.TryReadNormalized(
             path,
             SerializerOptions,
             CreateDefaultDb,
-            value => NormalizeAfterRead(value, animationPreferences),
+            value => NormalizeAfterRead(value, storedPreferences),
             out database,
             out requiresRewrite,
             JsonStorePersistence.SmallDocumentMaximumBytes);
     }
 
-    private static StoredAnimationPreferences ReadStoredAnimationPreferences(string path)
+    private static StoredViewPreferences ReadStoredViewPreferences(string path)
     {
         try
         {
@@ -277,9 +277,9 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 return default;
             }
 
-            return new StoredAnimationPreferences(
+            return new StoredViewPreferences(
                 ReadOptionalBoolean(viewSettings, "isStatusMetricsAnimationEnabled"),
-                ReadOptionalBoolean(viewSettings, "isToolAnimationEnabled"));
+				ReadOptionalBoolean(viewSettings, "isToolAnimationEnabled"));
         }
         catch
         {
@@ -337,7 +337,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
     private static bool TrySaveInternal(JsonStoreFileSet fileSet, UserSettingsDb database)
         => JsonStorePersistence.TryWriteAtomic(fileSet, database, SerializerOptions);
 
-    private readonly record struct StoredAnimationPreferences(
-        bool? StatusMetrics,
-        bool? Tools);
+    private readonly record struct StoredViewPreferences(
+        bool? StatusMetricsAnimation,
+		bool? ToolAnimation);
 }

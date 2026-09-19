@@ -26,26 +26,30 @@ public sealed class RelatedCommandHandler(
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization).Write(plan.Diagnostics);
 		if (plan.HasErrors) return CommandLineExitCodes.PolicyFailure;
 
-		SelectedPathExistenceValidator.Validate(plan.SourceRoot, [request.SeedPath]);
-		var relative = ProjectSelectionPath.NormalizeRelative(request.SeedPath);
-		var fullPath = Path.GetFullPath(Path.Combine(plan.SourceRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
-		var exact = plan.IncludedFiles.FirstOrDefault(candidate => PathComparer.Default.Equals(candidate, fullPath));
-		if (exact is null)
-			throw new ProjectContextValidationException(
-				"DPX-SELECTION-PATH-MISSING",
-				"The related seed is outside the effective selection.",
-				request.SeedPath);
-		relative = PathUtility.GetPortableRelativePath(plan.SourceRoot, exact);
-		var related = await status.RunAsync(
+		var relative = RelatedQueryRunner.ResolveSeed(plan, request.SeedPath);
+		DependencyRelatedResult related;
+		try
+		{
+			related = await status.RunAsync(
 			services.Localization["Terminal.Status.IndexingDependencies"],
-			() => services.DependencyFactsEngine.FindRelatedAsync(
-				plan.SourceRoot,
-				plan.IncludedFiles,
-				[relative],
+				() => RelatedQueryRunner.FindAsync(
+					services.DependencyFactsEngine,
+					plan,
+					relative,
 				request.Direction,
-				cancellationToken: cancellationToken)).ConfigureAwait(false);
-		var seed = related.Seeds.Single();
-		if (seed.NoFactsReason is { Length: > 0 })
+					request.Depth,
+					cancellationToken)).ConfigureAwait(false);
+		}
+		catch (DependencyTraversalLimitException exception)
+		{
+			new ErrorRenderer(environment, request.Output, services.Localization).Write(new TerminalError(
+				DependencyTraversalLimitException.ErrorCode,
+				services.Localization.Format("Terminal.Related.TraversalLimit", exception.MaximumSeeds),
+				ExitCode: CommandLineExitCodes.PolicyFailure,
+				Exception: exception));
+			return CommandLineExitCodes.PolicyFailure;
+		}
+		if (related.Seeds.Any(static seed => seed.NoFactsReason is { Length: > 0 }))
 		{
 			environment.Error.WriteLine(
 				"warning[DPX-DEPENDENCY-UNSUPPORTED]: " +

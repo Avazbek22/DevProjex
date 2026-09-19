@@ -287,8 +287,11 @@ stay on stderr. The shape is:
 }
 ```
 
-`direction` is `dependencies`, `dependents`, or `both`. Seeds and related paths use
-portable project-relative `/` separators. Each related item retains its aggregate
+`direction` is `dependencies`, `dependents`, or `both`. At depth `1`, `seeds`
+contains the requested seed exactly as before. At larger depths, it additionally
+contains each file reached through resolved edges, once, in deterministic
+breadth-first order. Seeds and related paths use portable project-relative `/`
+separators. Each related item retains its aggregate
 evidence reasons, resolution status, sorted candidate list, cross-compilation-scope
 flag, and estimated source tokens. Ambiguous references have `status: "ambiguous"`
 and list every allowed candidate; self-file edges are absent. A seed whose language
@@ -300,9 +303,12 @@ unsupported-language and C# error-node dictionaries use stable ordinal keys.
 facts remained usable. Each item contains `path`, `droppedConstructs`, bounded `ranges` with
 one-based `startLine`/`endLine`, and `rangesTruncated`. Text output reports the same data as
 `[Dependency partial parse] path=... · dropped=N · lines=...`.
-`resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for the
-requested seeds and direction. Text output carries the same values in `[Resolution]`; consequently an
+`resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for every
+seed section emitted at the requested depth and direction. Text output carries the same values in `[Resolution]`; consequently an
 empty related-file list does not imply that every observed reference was resolved.
+Traversal follows only resolved edges and is limited to 256 distinct seed files.
+Crossing that limit emits `DPX-DEPENDENCY-TRAVERSAL-LIMIT`, returns policy exit
+code `3`, and writes no partial related-files document.
 `searchScope.files` is the manifest file count after the profile, selected paths,
 Git mode, exclusions, and file-size limit. No field can contain a file or candidate
 outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and

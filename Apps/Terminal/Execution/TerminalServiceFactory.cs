@@ -3,6 +3,7 @@ using DevProjex.Terminal.CommandLine;
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.Secrets;
+using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
@@ -196,7 +197,10 @@ public sealed class TerminalServiceFactory(
 				PortableProfileService: portableProfiles,
 				SelectionResolver: selectionResolver,
 				TerminalSettingsStore: new TerminalSettingsStore(resolvedAppDataPathProvider),
+				UserSettingsStore: new UserSettingsStore(resolvedAppDataPathProvider),
 				TerminalCommandSetupService: new TerminalCommandSetupService(),
+				McpConnectionService: new McpConnectionService(localization),
+				McpClientLaunchService: new McpClientLaunchService(localization),
 				GitTrackedModeReadinessProbe: new GitTrackedModeReadinessProbe(),
 				RecentWorkspacesService: new RecentWorkspacesService(),
 				RecentProjectsStore: recentProjects,

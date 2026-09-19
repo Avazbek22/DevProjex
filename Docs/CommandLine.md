@@ -150,14 +150,33 @@ dependency, and pack operations; filters and mandatory protection remain the
 ceiling. A directly named readable file can still be returned with an explicit
 outside-focus notice. Without `--live`, server behavior is unchanged.
 
-`devprojex mcp connect [PROJECT] --client claude-code|codex|json --mode
-live|standard` prints a ready-to-use connection fragment. The project defaults
-to the current directory, the client to `claude-code`, and the mode to `live`.
-The command embeds the absolute installed executable path: winget and portable
-ZIP installations retain it while their installation directory stays fixed;
-the Store uses `%LOCALAPPDATA%\Microsoft\WindowsApps\devprojex.exe`; a macOS
-application uses its path inside the `.app` bundle. An AppImage uses the current
-AppImage path, so moving that file requires copying the fragment again.
+`devprojex mcp connect [PROJECT] --client
+claude-code|codex|cursor|vscode|json --mode live|standard` connects the selected
+client and prints a human-readable result. The project defaults to the current
+directory, the client to `claude-code`, and the mode to `live`.
+
+Claude Code receives a project-local `claude mcp remove`/`mcp add` sequence.
+Codex receives the equivalent global `codex mcp` replacement. Cursor updates
+`.cursor/mcp.json`, and VS Code updates `.vscode/mcp.json`; both project files
+preserve every server other than `devprojex` and are replaced atomically. Invalid
+existing JSON is preserved and reported instead of being overwritten. `json`
+prints the manual `mcpServers` configuration and the usual Claude Desktop paths.
+If a command-line client is not installed or a connection fails, the result
+includes the manual command or configuration to use instead.
+
+Add `--open` to open the client after a successful registration. Claude Code
+and Codex open in a new terminal rooted at the project; Cursor and VS Code open
+the project through their URL scheme or installed command-line fallback. The
+default remains registration only. `--print` and `--open` are mutually exclusive,
+and `--open` is rejected for the manual-only `json` client.
+
+Add `--print` to make no client or project changes and print only the connection
+fragment, matching the earlier behavior. Every fragment embeds the absolute
+installed executable path: winget and portable ZIP installations retain it while
+their installation directory stays fixed; the Store uses
+`%LOCALAPPDATA%\Microsoft\WindowsApps\devprojex.exe`; a macOS application uses
+its path inside the `.app` bundle. An AppImage uses the current AppImage path, so
+moving that file requires printing or connecting again.
 
 Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. `--language CODE` localizes human-readable help,
@@ -611,6 +630,7 @@ Specific options are:
 ```text
 --project <PROJECT|URL>
 --direction <dependencies|dependents|both>   default: both
+--depth <1..10>                              default: 1
 -f, --format <text|json>                     default: text
 --branch <NAME>                              URL source only
 --max-file-bytes <SIZE>
@@ -624,6 +644,13 @@ and a cross-scope marker where applicable; ambiguous references stay grouped wit
 candidate paths. JSON is the deterministic `devprojex-related-files` document described in
 [CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no content-transformation
 flags and does not return source content.
+Depth `1` preserves the direct-neighbor response. A larger depth walks only
+resolved edges: every newly reached file becomes a seed for the next hop, while
+ambiguous, unresolved, and external evidence is reported but never traversed.
+Text emits one seed section per visited file; JSON adds those seed objects to the
+existing `seeds` array in deterministic breadth-first order. A traversal may visit
+at most 256 distinct seed files; a wider result fails before output with
+`DPX-DEPENDENCY-TRAVERSAL-LIMIT` instead of returning a partial graph.
 When a grammar rejects one construction but independent facts survive, text output adds
 `[Dependency partial parse]` with the dropped-construction count and bounded line ranges; JSON uses
 `coverage.partialParseDiagnostics`. No fact from a damaged construction is published.

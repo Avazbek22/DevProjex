@@ -39,6 +39,15 @@ public sealed class CompletionReleaseRegressionTests
 	}
 
 	[Fact]
+	public async Task McpConnectCompletionOffersPrintAndOpenModes()
+	{
+		var candidates = await CompleteAsync("devprojex mcp connect . --");
+
+		Assert.Contains("--print", candidates);
+		Assert.Contains("--open", candidates);
+	}
+
+	[Fact]
 	public async Task OutputKindCompletionContainsOnlyCanonicalValues()
 	{
 		var candidates = await CompleteAsync("devprojex export project . --as ");
