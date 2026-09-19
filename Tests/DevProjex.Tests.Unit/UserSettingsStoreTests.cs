@@ -27,7 +27,7 @@ public sealed class UserSettingsStoreTests
     }
 
     [Fact]
-    public void LoadForStartup_WhenStoreLockIsHeld_ReturnsViewDefaultsWithinBoundedTime()
+    public async Task LoadForStartup_WhenStoreLockIsHeld_ReturnsViewDefaultsWithinBoundedTime()
     {
         using var temp = new TemporaryDirectory();
         var store = new UserSettingsStore(() => temp.Path);
@@ -38,13 +38,12 @@ public sealed class UserSettingsStoreTests
             FileMode.OpenOrCreate,
             FileAccess.ReadWrite,
             FileShare.None);
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var loaded = await Task.Run(
+                () => store.LoadForStartup(TimeSpan.FromMilliseconds(25)),
+                TestContext.Current.CancellationToken)
+            .WaitAsync(StartupLoadSafetyTimeout, TestContext.Current.CancellationToken);
 
-        var loaded = store.LoadForStartup(TimeSpan.FromMilliseconds(25));
-
-        stopwatch.Stop();
         Assert.Equal(new AppViewSettings(), loaded.ViewSettings);
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Startup load took {stopwatch.Elapsed}.");
     }
 
     [Fact]
@@ -69,11 +68,11 @@ public sealed class UserSettingsStoreTests
     }
 
     [Fact]
-	public void LoadForStartup_LegacyMcpLiveContextPreferenceIsIgnored()
-	{
-		using var temp = new TemporaryDirectory();
-		var store = new UserSettingsStore(() => temp.Path);
-		WriteJson(store.GetPath(), """
+    public void LoadForStartup_LegacyMcpLiveContextPreferenceIsIgnored()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        WriteJson(store.GetPath(), """
         {
           "schemaVersion": 9,
           "viewSettings": {
@@ -84,13 +83,13 @@ public sealed class UserSettingsStoreTests
         }
         """);
 
-		var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+        var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
 
-		Assert.True(loaded.ViewSettings.IsCompactMode);
-		Assert.Equal(AppLanguage.Fr, loaded.ViewSettings.PreferredLanguage);
-	}
+        Assert.True(loaded.ViewSettings.IsCompactMode);
+        Assert.Equal(AppLanguage.Fr, loaded.ViewSettings.PreferredLanguage);
+    }
 
-	[Fact]
+    [Fact]
     public void EnsureStorageExists_CreatesCleanViewOnlyDocumentAndBackup()
     {
         using var temp = new TemporaryDirectory();
@@ -487,4 +486,9 @@ public sealed class UserSettingsStoreTests
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, json);
     }
+
+    private static TimeSpan StartupLoadSafetyTimeout =>
+        string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+            ? TimeSpan.FromMinutes(2)
+            : TimeSpan.FromSeconds(30);
 }

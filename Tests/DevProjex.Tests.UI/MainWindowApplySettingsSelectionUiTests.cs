@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Specialized;
 using System.Runtime.CompilerServices;
 using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
@@ -302,8 +303,24 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             source.IsChecked = true;
             source.IsExpanded = true;
             FindRequiredDirectChild(source, "AppCore").IsExpanded = true;
+            var treePublished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            NotifyCollectionChangedEventHandler observePublication = (_, _) =>
+            {
+                var roots = UiTestDriver.GetViewModel(window).TreeNodes;
+                if (roots.Count == 1 && !ReferenceEquals(oldRoot, roots[0]))
+                    treePublished.TrySetResult();
+            };
+            UiTestDriver.GetViewModel(window).TreeNodes.CollectionChanged += observePublication;
 
-            await UiTestDriver.RefreshProjectAsync(window);
+            try
+            {
+                await UiTestDriver.RefreshProjectAsync(window);
+                await treePublished.Task.WaitAsync(PublicationSafetyTimeout, TestContext.Current.CancellationToken);
+            }
+            finally
+            {
+                UiTestDriver.GetViewModel(window).TreeNodes.CollectionChanged -= observePublication;
+            }
 
             var refreshedRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
             Assert.NotSame(oldRoot, refreshedRoot);
@@ -1095,6 +1112,11 @@ public sealed class MainWindowApplySettingsSelectionUiTests
                 projectionRules,
                 cancellationToken);
     }
+
+    private static TimeSpan PublicationSafetyTimeout =>
+        string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+            ? TimeSpan.FromMinutes(2)
+            : TimeSpan.FromSeconds(30);
 
     private sealed class MutatingGitRepositoryService(string repositoryPath) : IGitRepositoryService
     {
