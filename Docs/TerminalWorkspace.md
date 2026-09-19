@@ -228,7 +228,7 @@ strict: only a complete token executes. Tab accepts or cycles completion, while 
 invalid token reports its position and up to three similar candidates. Arguments
 containing whitespace can use single or double quotes; path completion inserts
 and preserves the required quotes automatically.
-Welcome exposes the focused subset `recent`, `language`, `help`, and `quit`.
+Welcome exposes the focused subset `open`, `recent`, `language`, `help`, and `quit`.
 
 The input line exposes the active argument schema before execution and renders an
 inline ghost suffix as soon as a token can be completed:
@@ -243,6 +243,7 @@ inline ghost suffix as soon as a token can be completed:
 | `set git off\|gitignore\|tracked\|staged\|changes\|diff:<ref>..<ref>` | select the Git axis without changing profiles |
 | `all types\|exclusions\|content on\|off` | apply the framed **All** action |
 | `type <.ext> [<.ext>...] on\|off` | toggle available file extensions |
+| `select <path\|glob> [<path\|glob>...] on\|off` | check or uncheck matching tree nodes; a directory applies to its subtree, and `all` names the complete tree |
 | `view tree\|content\|tree-content` | select Preview mode |
 | `format text\|markdown\|json\|xml` | select tree format |
 | `search [text]` | search Preview, or clear it with no text |
@@ -254,7 +255,11 @@ inline ghost suffix as soon as a token can be completed:
 | `branch [name]` | switch the cloned repository branch, or open branch selection |
 | `update` | get updates for the cloned repository |
 | `recent` | open recent projects and repositories |
+| `open <path\|url>` | open a local folder or clone and open a repository through the existing source workflow |
 | `profile save [name]` | save the current settings as a portable profile |
+| `profile load <name\|path>` | load a portable profile and apply it immediately |
+| `profile show` | show the effective settings and tree selection |
+| `profile reset` | reset the current project to default settings after confirmation |
 | `mcp connect <claude-code\|codex\|cursor\|vscode\|json>` | connect the selected MCP client to the open project; `json` shows the manual configuration |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
@@ -265,6 +270,20 @@ inline ghost suffix as soon as a token can be completed:
 `set git none` is accepted as a synonym for `set git off`; command help and
 completion continue to advertise the shorter `off` form.
 
+`select` uses the same project-relative glob syntax as the other selection filters. Exact
+directory paths apply to their complete subtree, `select all ...` targets the whole tree,
+and selectors that are absent from the effective tree are counted and reported with the
+existing `DPX-SELECTION-PATH-MISSING` warning. The resulting check-state change follows the
+same projection and local-profile persistence path as a manual checkbox, so Live Context
+consumers observe the updated selection.
+
+`open` uses the same local-folder and repository-source workflow as startup and `recent`.
+Repository URLs show the existing clone confirmation and progress before the cloned project
+opens. `profile load` resolves a simple name in the same portable-profile directory used by
+`profile save`; an explicit path can be quoted. Loading applies the profile immediately,
+`profile show` renders the effective CLI profile report, and `profile reset` confirms before
+restoring the default settings and selection.
+
 Examples:
 
 ```text
@@ -273,11 +292,15 @@ Examples:
 :set git diff:main..feature
 :all types off
 :type .cs .md on
+:select "source files/**/*.cs" docs on
+:select all off
 :view content
 :search "connection string"
 :copy content markdown
 :refresh
 :language ja
+:open "../sample project"
+:profile load "Team Settings"
 :export context markdown "../review context.md"
 ```
 
