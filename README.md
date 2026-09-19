@@ -18,7 +18,7 @@ DevProjex turns any folder or codebase into clean, ready-to-use context for AI c
 
 Choose what you need in an interactive file tree, check the result in a live preview, then export it as **ASCII, Markdown, JSON, or XML**. Need more than text? Export a real copy of your project — a clean **folder or ZIP file** — with the same filters applied.
 
-> 🔒 **Read-only and telemetry-free by design.** DevProjex does not upload your project contents or collect telemetry.
+> 🔒 **Read-only analysis and telemetry-free by design.** DevProjex does not upload your project contents or collect telemetry.
 
 ---
 
@@ -204,13 +204,22 @@ DevProjex ships a built-in **secure [Model Context Protocol](https://modelcontex
 devprojex mcp --root /path/to/project
 ```
 
-For Claude Code it's one command: `claude mcp add devprojex -- devprojex mcp --root .`
+Connect from the Desktop **MCP → Live context** submenu, from Terminal Workspace
+with `mcp connect <client>`, or from the CLI with
+`devprojex mcp connect . --client <client>`. Desktop registers the live server and
+opens Claude Code, Codex, Cursor, or VS Code. Terminal Workspace registers without
+opening another terminal, while the CLI opens the client only when `--open` is given.
+Claude Code and Codex are configured through their installed command; Cursor and
+VS Code receive a project-local `.cursor/mcp.json` or `.vscode/mcp.json`. Existing
+files are merged without changing other servers. Use `--print` when only a manual
+configuration fragment is needed.
 
 **Live context** connects an MCP session to the checked tree in an open DevProjex
-window through the shared local project profile. The **MCP** menu, between File
-and Git, copies Live context or Standard setup for Claude Code, Codex, or another
-JSON client; if the terminal command needs PATH setup, a follow-up dialog offers
-the platform-appropriate action without changing the copied fragment. The window
+window through the shared local project profile. The compact **MCP** menu, between
+File and Git, has a **Live context** submenu that registers and opens Claude Code,
+Codex, Cursor, or VS Code, plus a manual JSON fallback for other clients. Desktop
+connections always include `--live`. After a successful connection, an optional PATH
+dialog can offer the platform-appropriate terminal setup. The window
 title names an active client or session count, saved focused paths are restored on reopen,
 and disabling secret protection while a live session exists requires confirmation.
 Directly named readable files can still be returned with an explicit outside-focus
@@ -260,9 +269,11 @@ See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool refer
 
 ## Safety boundaries 🛡️
 
-DevProjex keeps your source projects read-only, with clear limits on what it does:
+DevProjex keeps normal processing and MCP tools read-only. The only write inside an
+opened project is an explicit Cursor or VS Code MCP connection, which atomically
+creates or updates `.cursor/mcp.json` or `.vscode/mcp.json`:
 
-* Does not edit, rename, move, or delete files in the opened source project
+* Does not otherwise edit, rename, move, or delete files in the opened source project
 * Does not commit, merge, push, or switch branches in the source repository opened from the user's filesystem. Branch operations are limited to application-owned cached clones.
 * Does not include binary file contents in text or AI-context output; redaction rules do not scan binary data
 * Writes generated files and project copies only to destinations you choose, outside the source project

@@ -868,8 +868,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.SaveProfile",
 				"Terminal.Command.ProfileExport",
 				"P",
-				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
-					TerminalWorkspaceCommandVerb.Profile).Syntax,
+				commandSyntax: "profile save [name]",
 				execute: () => SaveProfile()),
 			CreateAction(
 				TerminalWorkspaceActionKind.OpenDesktop,

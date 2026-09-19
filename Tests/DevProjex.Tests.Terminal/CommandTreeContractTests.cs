@@ -14,7 +14,7 @@ public sealed class CommandTreeContractTests
 		Assert.Equal(
 			[
 				"analyze", "cache", "completion", "doctor", "export", "help", "mcp", "open", "profile",
-				"recent", "related", "tree", "tui", "ui"
+				"recent", "related", "search", "tree", "tui", "ui"
 			],
 			root.Subcommands
 				.Where(static command => !command.Hidden)
@@ -302,6 +302,7 @@ public sealed class CommandTreeContractTests
 
 		Assert.Contains(analyze.Options, static option => option.Name == "--max-file-bytes");
 		Assert.Contains(related.Options, static option => option.Name == "--max-file-bytes");
+		Assert.Contains(related.Options, static option => option.Name == "--depth");
 		Assert.Contains(tree.Options, static option => option.Name == "--max-file-bytes");
 		Assert.Contains(context.Options, static option => option.Name == "--max-file-bytes");
 		Assert.DoesNotContain(project.Options, static option => option.Name == "--max-file-bytes");

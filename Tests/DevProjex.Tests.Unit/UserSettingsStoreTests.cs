@@ -69,6 +69,28 @@ public sealed class UserSettingsStoreTests
     }
 
     [Fact]
+	public void LoadForStartup_LegacyMcpLiveContextPreferenceIsIgnored()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new UserSettingsStore(() => temp.Path);
+		WriteJson(store.GetPath(), """
+        {
+          "schemaVersion": 9,
+          "viewSettings": {
+            "isCompactMode": true,
+            "isMcpLiveContextEnabled": false,
+            "preferredLanguage": "fr"
+          }
+        }
+        """);
+
+		var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+
+		Assert.True(loaded.ViewSettings.IsCompactMode);
+		Assert.Equal(AppLanguage.Fr, loaded.ViewSettings.PreferredLanguage);
+	}
+
+	[Fact]
     public void EnsureStorageExists_CreatesCleanViewOnlyDocumentAndBackup()
     {
         using var temp = new TemporaryDirectory();

@@ -1,6 +1,7 @@
 using DevProjex.Terminal.Tui;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -23,7 +24,10 @@ public sealed record TerminalServices(
 	PortableProjectProfileService PortableProfileService,
 	ProjectSelectionResolver SelectionResolver,
 	TerminalSettingsStore TerminalSettingsStore,
+	UserSettingsStore UserSettingsStore,
 	ITerminalCommandSetupService TerminalCommandSetupService,
+	IMcpConnectionService McpConnectionService,
+	IMcpClientLaunchService McpClientLaunchService,
 	GitTrackedModeReadinessProbe GitTrackedModeReadinessProbe,
 	RecentWorkspacesService RecentWorkspacesService,
 	RecentProjectsStore RecentProjectsStore,

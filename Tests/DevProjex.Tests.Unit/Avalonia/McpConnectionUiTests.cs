@@ -2,9 +2,12 @@ using DevProjex.Application.Services;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
 using DevProjex.Infrastructure.TerminalCommands;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
 using Avalonia.Markup.Xaml;
+using Avalonia.VisualTree;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
@@ -14,13 +17,59 @@ public sealed class McpConnectionUiTests
 	[
 		"Menu.Mcp",
 		"Menu.Mcp.LiveContext",
-		"Menu.Mcp.Standard",
 		"Menu.Mcp.Documentation",
-		"Menu.Mcp.ClaudeCode",
-		"Menu.Mcp.Codex",
-		"Menu.Mcp.Json",
+		"Menu.Mcp.OpenClaudeCode",
+		"Menu.Mcp.OpenCodex",
+		"Menu.Mcp.OpenCursor",
+		"Menu.Mcp.OpenVsCode",
+		"Menu.Mcp.OtherClients",
 		"Dialog.McpPath.Title",
 		"Dialog.McpPath.Body",
+		"Dialog.McpManual.Title",
+		"Dialog.McpManual.Configuration",
+		"Dialog.McpManual.Command",
+		"Dialog.McpManual.Paths",
+		"Mcp.Connect.ClaudeCode.Connected",
+		"Mcp.Connect.ClaudeCode.Updated",
+		"Mcp.Connect.Codex.Connected",
+		"Mcp.Connect.Codex.Updated",
+		"Mcp.Connect.ClientNotFound",
+		"Mcp.Connect.ProjectConfigurationFailed",
+		"Mcp.Connect.UnknownError",
+		"Mcp.Connect.ProjectConfigurationUpdated",
+		"Mcp.Connect.RestartClient",
+		"Mcp.Connect.ManualConfiguration",
+		"Mcp.Connect.CommandTimedOut",
+		"Mcp.Connect.CommandFailed",
+		"Mcp.Connect.CommandFailedAfterRemoval",
+		"Mcp.Connect.ManualFallbackHint",
+		"Mcp.Connect.OutputIncomplete",
+		"Mcp.Open.FailedAfterConnection",
+		"Mcp.Open.Succeeded",
+		"Mcp.Open.ClientNotFound",
+		"Mcp.Open.TerminalNotFound",
+		"Mcp.Open.ProcessStartFailed",
+		"Mcp.Open.DispatcherTimedOut",
+		"Mcp.Open.DispatcherExited",
+		"Mcp.Open.TerminalStartFailed",
+		"Mcp.Open.EditorStartFailed",
+		"Mcp.Open.ManualJsonUnsupported",
+		"Terminal.Command.McpConnect",
+		"Terminal.Option.McpClient",
+		"Terminal.Option.McpConnectionMode",
+		"Terminal.Option.McpPrint",
+		"Terminal.Option.McpOpen",
+		"Terminal.Option.RelatedDepth",
+		"Terminal.Validation.McpClient",
+		"Terminal.Validation.McpConnectionMode",
+		"Terminal.Validation.McpOpenJson",
+		"Terminal.Validation.McpPrintOpenConflict",
+		"Terminal.Validation.RelatedDepth",
+		"Terminal.Tui.Command.Mcp.Description",
+		"Terminal.Tui.Command.Mcp.Schema",
+		"Terminal.Tui.Command.Related.Title",
+		"Terminal.Tui.Command.Related.Description",
+		"Terminal.Tui.Command.Related.Schema",
 		"Dialog.LiveContext.Secrets.Title",
 		"Dialog.LiveContext.Secrets.Message",
 		"Dialog.LiveContext.Secrets.Apply"
@@ -127,21 +176,116 @@ public sealed class McpConnectionUiTests
 		Assert.Equal(fileIndex + 1, mcpIndex);
 		Assert.Equal(mcpIndex + 1, gitIndex);
 
-		var live = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpLiveMenuItem"));
-		var standard = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpStandardMenuItem"));
-		Assert.False(live.IsEnabled);
-		Assert.False(standard.IsEnabled);
-		viewModel.IsProjectLoaded = true;
+		var live = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpLiveContextMenuItem"));
+		var documentation = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpDocumentationMenuItem"));
+		var topLevelMcpItems = Assert.IsType<MenuItem>(items[mcpIndex]).Items.OfType<MenuItem>().ToArray();
+		Assert.Collection(
+			topLevelMcpItems,
+			item => Assert.Same(live, item),
+			item => Assert.Same(documentation, item));
+		Assert.Equal(viewModel.MenuMcpLiveContext, live.Header);
+		Assert.Equal(viewModel.MenuMcpLiveContext, AutomationProperties.GetName(live));
 		Assert.True(live.IsEnabled);
-		Assert.True(standard.IsEnabled);
+		Assert.True(documentation.IsEnabled);
+
+		var connectItems = new[]
+		{
+			"McpConnectClaudeCodeMenuItem",
+			"McpConnectCodexMenuItem",
+			"McpConnectCursorMenuItem",
+			"McpConnectVsCodeMenuItem",
+			"McpOtherClientsMenuItem"
+		}.Select(name => Assert.IsType<MenuItem>(view.FindControl<MenuItem>(name))).ToArray();
+		Assert.All(connectItems, static item => Assert.False(item.IsEnabled));
+		Assert.Equal(5, live.Items.OfType<MenuItem>().Count());
+		Assert.Equal(6, live.Items.Count);
+		viewModel.IsProjectLoaded = true;
+		Assert.All(connectItems, static item => Assert.True(item.IsEnabled));
 
 		McpConnectionRequestedEventArgs? requested = null;
 		view.McpConnectionRequested += (_, args) => requested = args;
-		var item = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpLiveCodexMenuItem"));
+		var item = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpConnectCursorMenuItem"));
 		item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 		Assert.NotNull(requested);
-		Assert.Equal(McpConnectionClient.Codex, requested.Client);
-		Assert.Equal(McpConnectionMode.Live, requested.Mode);
+		Assert.Equal(McpConnectionClient.Cursor, requested.Client);
+		Assert.Equal(viewModel.MenuMcpOpenCursor, AutomationProperties.GetName(item));
+	}
+
+	[AvaloniaFact]
+	public void ManualConfigurationDialog_PresentsReasonPayloadPathsAndAutomationNames()
+	{
+		var localization = CreateLocalization();
+		var result = new McpConnectionResult(
+			McpConnectionStatus.ClientNotFound,
+			"Claude Code was not found.\nUse the configuration below.",
+			ManualConfiguration: "{\"mcpServers\":{}}",
+			SuggestedConfigPaths:
+			[
+				@"%APPDATA%\Claude\claude_desktop_config.json",
+				"~/Library/Application Support/Claude/claude_desktop_config.json"
+			]);
+		var content = McpManualConfigurationDialog.CreateContent(
+			localization,
+			result,
+			"fallback");
+		var owner = new Window();
+		var dialog = McpManualConfigurationDialog.CreateDialogWindow(owner, content);
+
+		try
+		{
+			Assert.DoesNotContain('\n', content.Reason);
+			Assert.Equal("{\"mcpServers\":{}}", content.Payload);
+			var textBox = Assert.Single(
+				dialog.GetLogicalDescendants().OfType<TextBox>(),
+				static control => control.Name == "McpManualConfigurationText");
+			Assert.True(textBox.IsReadOnly);
+			Assert.Equal(content.Payload, textBox.Text);
+			Assert.Equal(content.PayloadLabel, AutomationProperties.GetName(textBox));
+			var paths = Assert.Single(
+				dialog.GetLogicalDescendants().OfType<SelectableTextBlock>(),
+				static control => control.Name == "McpManualConfigurationPaths");
+			Assert.Contains("claude_desktop_config.json", paths.Text, StringComparison.Ordinal);
+			Assert.All(
+				dialog.GetLogicalDescendants().OfType<Button>(),
+				static button => Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(button))));
+		}
+		finally
+		{
+			dialog.Close();
+			owner.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public void ManualConfigurationDialog_LabelsManualLaunchPayloadAsCommand()
+	{
+		var localization = CreateLocalization();
+		var result = new McpConnectionResult(
+			McpConnectionStatus.ProcessFailed,
+			"The server is connected, but the client could not be opened.",
+			ManualConfiguration: "cursor \"C:/Projects/My project\"");
+		var content = McpManualConfigurationDialog.CreateContent(
+			localization,
+			result,
+			"fallback",
+			McpManualPayloadPresentation.Command);
+		var owner = new Window();
+		var dialog = McpManualConfigurationDialog.CreateDialogWindow(owner, content);
+
+		try
+		{
+			Assert.Equal("Dialog.McpManual.Command", content.PayloadLabel);
+			var textBox = Assert.Single(
+				dialog.GetLogicalDescendants().OfType<TextBox>(),
+				static control => control.Name == "McpManualConfigurationText");
+			Assert.Equal(result.ManualConfiguration, textBox.Text);
+			Assert.Equal(content.PayloadLabel, AutomationProperties.GetName(textBox));
+		}
+		finally
+		{
+			dialog.Close();
+			owner.Close();
+		}
 	}
 
 	[Fact]
@@ -202,9 +346,11 @@ public sealed class McpConnectionUiTests
 			.Concat(
 			[
 				"Dialog.TerminalCommand.CopyPathCommand",
+				"Dialog.TerminalCommand.CopyCommand",
 				"Dialog.TerminalCommand.AddToPath",
 				"Dialog.TerminalCommand.Setup",
-				"Dialog.TerminalCommand.NotNow"
+				"Dialog.TerminalCommand.NotNow",
+				"Dialog.OK"
 			])
 			.ToDictionary(static key => key, static key => key, StringComparer.Ordinal);
 		return new LocalizationService(

@@ -1,10 +1,198 @@
 using System.Diagnostics;
 using System.Text.Json;
+using DevProjex.Application.Dependencies;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class RelatedCommandProcessTests
 {
+	[Fact]
+	public void DepthTraversesOnlyResolvedEdgesAndOnePreservesTheExistingShape()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/A.cs", "public sealed class A { public B Value { get; } }\n");
+		workspace.WriteFile("project/B.cs", "public sealed class B { public C Value { get; } }\n");
+		workspace.WriteFile("project/C.cs", "public sealed class C {}\n");
+
+		var implicitDepth = Run(workspace, "related", "A.cs", "--project", project,
+			"--direction", "dependencies", "--format", "json", "--git-mode", "none", "--exclude", "none");
+		var explicitDepthOne = Run(workspace, "related", "A.cs", "--project", project,
+			"--direction", "dependencies", "--depth", "1", "--format", "json",
+			"--git-mode", "none", "--exclude", "none");
+		var implicitTextDepth = Run(workspace, "related", "A.cs", "--project", project,
+			"--direction", "dependencies", "--format", "text", "--git-mode", "none", "--exclude", "none");
+		var explicitTextDepthOne = Run(workspace, "related", "A.cs", "--project", project,
+			"--direction", "dependencies", "--depth", "1", "--format", "text",
+			"--git-mode", "none", "--exclude", "none");
+		var depthTwo = Run(workspace, "related", "A.cs", "--project", project,
+			"--direction", "dependencies", "--depth", "2", "--format", "json",
+			"--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, implicitDepth.ExitCode);
+		Assert.Equal(implicitDepth.StandardOutput, explicitDepthOne.StandardOutput);
+		Assert.Equal(implicitTextDepth.StandardOutput, explicitTextDepthOne.StandardOutput);
+		Assert.Equal(0, depthTwo.ExitCode);
+		using var document = JsonDocument.Parse(depthTwo.StandardOutput);
+		var seeds = document.RootElement.GetProperty("seeds").EnumerateArray().ToArray();
+		Assert.Equal(["A.cs", "B.cs"], seeds.Select(static seed => seed.GetProperty("seed").GetString()));
+		Assert.Contains(
+			seeds[1].GetProperty("dependencies").EnumerateArray(),
+			static dependency => dependency.GetProperty("path").GetString() == "C.cs");
+	}
+
+	[Fact]
+	public void DepthUsesDeterministicBreadthFirstOrderWithoutRepeatingCyclesOrSharedTargets()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/A.cs", "public sealed class A { public B B { get; } public C C { get; } }\n");
+		workspace.WriteFile("project/B.cs", "public sealed class B { public A A { get; } public D D { get; } }\n");
+		workspace.WriteFile("project/C.cs", "public sealed class C { public D D { get; } }\n");
+		workspace.WriteFile("project/D.cs", "public sealed class D { public A A { get; } }\n");
+
+		var first = Run(workspace, "related", "A.cs", "--project", project,
+			"--direction", "dependencies", "--depth", "10", "--format", "json",
+			"--git-mode", "none", "--exclude", "none");
+		var second = Run(workspace, "related", "A.cs", "--project", project,
+			"--direction", "dependencies", "--depth", "10", "--format", "json",
+			"--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, first.ExitCode);
+		Assert.Equal(first.StandardOutput, second.StandardOutput);
+		using var document = JsonDocument.Parse(first.StandardOutput);
+		var seeds = document.RootElement.GetProperty("seeds").EnumerateArray().ToArray();
+		Assert.Equal(
+			["A.cs", "B.cs", "C.cs", "D.cs"],
+			seeds.Select(static seed => seed.GetProperty("seed").GetString()));
+	}
+
+	[Fact]
+	public void DepthDoesNotTraverseUnresolvedOrExternalEvidence()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		workspace.WriteFile("project/package.json", "{\"name\":\"sample\",\"dependencies\":{\"react\":\"1.0.0\"}}\n");
+		workspace.WriteFile("project/main.ts", "import React from 'react';\nimport Missing from 'not-declared';\nvoid React;\nvoid Missing;\n");
+
+		var result = Run(workspace, "related", "main.ts", "--project", project,
+			"--direction", "dependencies", "--depth", "10", "--format", "json",
+			"--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		var seed = Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray());
+		Assert.Equal("main.ts", seed.GetProperty("seed").GetString());
+		var resolution = document.RootElement.GetProperty("resolution");
+		Assert.True(resolution.GetProperty("unresolved").GetInt32() > 0);
+		Assert.True(resolution.GetProperty("external").GetInt32() > 0);
+	}
+
+	[Fact]
+	public void DepthKeepsResolvedPythonNamespaceEvidenceWithoutTreatingItAsAFileSeed()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/pyproject.toml", "[project]\nname = \"fixture\"\n");
+		workspace.WriteFile("project/consumer.py", "import ns\n");
+		workspace.WriteFile("project/ns/portion.py", "value = 1\n");
+
+		var result = Run(workspace, "related", "consumer.py", "--project", project,
+			"--direction", "dependencies", "--depth", "2", "--format", "json",
+			"--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		var seed = Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray());
+		Assert.Equal("consumer.py", seed.GetProperty("seed").GetString());
+		var dependency = Assert.Single(seed.GetProperty("dependencies").EnumerateArray());
+		Assert.Equal("namespace:ns", dependency.GetProperty("path").GetString());
+		Assert.Equal("resolved", dependency.GetProperty("status").GetString());
+		Assert.Contains(
+			dependency.GetProperty("reasons").EnumerateArray(),
+			static reason => reason.GetString() == "one namespace-package entity");
+	}
+
+	[Fact]
+	public void DepthFailsHonestlyBeforeRenderingWhenTraversalExceedsTheSeedLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		var source = new StringBuilder("public sealed class Seed {\n");
+		for (var index = 0; index < DependencyFactsEngine.MaximumRelatedTraversalSeeds; index++)
+		{
+			var type = $"Target{index:D3}";
+			source.Append("public ").Append(type).Append(' ').Append(type).Append("Value { get; }\n");
+			workspace.WriteFile($"project/{type}.cs", $"public sealed class {type} {{}}\n");
+		}
+		source.Append("}\n");
+		workspace.WriteFile("project/Seed.cs", source.ToString());
+
+		var result = Run(workspace, "related", "Seed.cs", "--project", project,
+			"--direction", "dependencies", "--depth", "2", "--format", "json",
+			"--git-mode", "none", "--exclude", "none");
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, result.ExitCode);
+		Assert.Empty(result.StandardOutput);
+		Assert.Contains(DependencyTraversalLimitException.ErrorCode, result.StandardError, StringComparison.Ordinal);
+		Assert.Contains(
+			DependencyFactsEngine.MaximumRelatedTraversalSeeds.ToString(),
+			result.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void DepthDoesNotTraverseAmbiguousCandidates()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/lib.sh", "root_value=1\n");
+		workspace.WriteFile("project/scripts/lib.sh", "script_value=1\n");
+		workspace.WriteFile("project/scripts/main.sh", "source ./lib.sh\n");
+
+		var result = Run(
+			workspace,
+			"related", "scripts/main.sh",
+			"--project", project,
+			"--direction", "dependencies",
+			"--depth", "2",
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.Equal(0, result.ExitCode);
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		var seed = Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray());
+		Assert.Equal("scripts/main.sh", seed.GetProperty("seed").GetString());
+		var dependency = Assert.Single(seed.GetProperty("dependencies").EnumerateArray());
+		Assert.Equal("ambiguous", dependency.GetProperty("status").GetString());
+	}
+
+	[Theory]
+	[InlineData("0")]
+	[InlineData("11")]
+	public void DepthOutsideThePublishedRangeIsRejected(string depth)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/main.cs", "public sealed class Main {}\n");
+
+		var result = Run(
+			workspace,
+			"related", "main.cs",
+			"--project", project,
+			"--depth", depth,
+			"--git-mode", "none",
+			"--exclude", "none");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Contains("--depth must be between 1 and 10", result.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public void ConditionalParameterProjectionReportsOnlyTheOmittedSourceLines()
 	{

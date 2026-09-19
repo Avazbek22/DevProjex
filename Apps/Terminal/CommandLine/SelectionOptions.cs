@@ -15,6 +15,7 @@ internal sealed class SelectionOptions
 	private readonly LocalizationService _localization;
 	private readonly bool _includeHidePrivateData;
 	private readonly bool _includeContentTransformations;
+	private readonly bool _includeCodeTransformations;
 	private readonly bool _includeMaxFileBytes;
 	public Option<CliProfileValue> Profile { get; }
 
@@ -57,12 +58,14 @@ internal sealed class SelectionOptions
 		string defaultProfile = "standard",
 		bool includeHidePrivateData = true,
 		bool includeContentTransformations = true,
+		bool includeCodeTransformations = true,
 		bool includeMaxFileBytes = false,
 		GitModeOptionCapability gitModeCapability = GitModeOptionCapability.All)
 	{
 		_environment = environment;
 		_localization = localization;
 		_includeContentTransformations = includeContentTransformations;
+		_includeCodeTransformations = includeContentTransformations && includeCodeTransformations;
 		_includeHidePrivateData = includeContentTransformations && includeHidePrivateData;
 		_includeMaxFileBytes = includeMaxFileBytes;
 		Profile = CliChoiceSymbols.ProfileOption(
@@ -159,12 +162,15 @@ internal sealed class SelectionOptions
 				command.Options.Add(HidePrivateData);
 				command.Options.Add(NoHidePrivateData);
 			}
-			command.Options.Add(CompressCode);
-			command.Options.Add(NoCompressCode);
-			command.Options.Add(StripComments);
-			command.Options.Add(NoStripComments);
-			command.Options.Add(StripBlankLines);
-			command.Options.Add(NoStripBlankLines);
+			if (_includeCodeTransformations)
+			{
+				command.Options.Add(CompressCode);
+				command.Options.Add(NoCompressCode);
+				command.Options.Add(StripComments);
+				command.Options.Add(NoStripComments);
+				command.Options.Add(StripBlankLines);
+				command.Options.Add(NoStripBlankLines);
+			}
 			command.Validators.Add(result =>
 			{
 				foreach (var (positive, negative) in TogglePairs())
@@ -221,13 +227,13 @@ internal sealed class SelectionOptions
 		bool? hidePrivateData = _includeHidePrivateData
 			? ResolveToggle(parseResult, HidePrivateData, NoHidePrivateData)
 			: null;
-		bool? compressCode = _includeContentTransformations
+		bool? compressCode = _includeCodeTransformations
 			? ResolveToggle(parseResult, CompressCode, NoCompressCode)
 			: null;
-		bool? stripComments = _includeContentTransformations
+		bool? stripComments = _includeCodeTransformations
 			? ResolveToggle(parseResult, StripComments, NoStripComments)
 			: null;
-		bool? stripBlankLines = _includeContentTransformations
+		bool? stripBlankLines = _includeCodeTransformations
 			? ResolveToggle(parseResult, StripBlankLines, NoStripBlankLines)
 			: null;
 		SelectedPathExistenceValidator.Validate(projectPath, selectedPaths);
@@ -476,14 +482,17 @@ internal sealed class SelectionOptions
 			symbols.Add(HidePrivateData);
 			symbols.Add(NoHidePrivateData);
 		}
-		symbols.AddRange([
-			CompressCode,
-			NoCompressCode,
-			StripComments,
-			NoStripComments,
-			StripBlankLines,
-			NoStripBlankLines
-		]);
+		if (_includeCodeTransformations)
+		{
+			symbols.AddRange([
+				CompressCode,
+				NoCompressCode,
+				StripComments,
+				NoStripComments,
+				StripBlankLines,
+				NoStripBlankLines
+			]);
+		}
 		return symbols;
 	}
 
@@ -495,9 +504,12 @@ internal sealed class SelectionOptions
 		yield return (HideSecrets, NoHideSecrets);
 		if (_includeHidePrivateData)
 			yield return (HidePrivateData, NoHidePrivateData);
-		yield return (CompressCode, NoCompressCode);
-		yield return (StripComments, NoStripComments);
-		yield return (StripBlankLines, NoStripBlankLines);
+		if (_includeCodeTransformations)
+		{
+			yield return (CompressCode, NoCompressCode);
+			yield return (StripComments, NoStripComments);
+			yield return (StripBlankLines, NoStripBlankLines);
+		}
 	}
 
 	private static bool? ResolveToggle(

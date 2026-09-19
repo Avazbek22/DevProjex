@@ -10,6 +10,7 @@ stdout is the machine/payload channel:
 - help and version;
 - completion scripts;
 - text, JSON, or XML analysis;
+- text, JSON, or Markdown search results;
 - text, Markdown, JSON, or XML context;
 - one absolute result path after file, folder, or ZIP output.
 - one accepted local path or safe repository URL after `open`.
@@ -237,6 +238,74 @@ policy exit code `3` when effective findings exist or selected text could not be
 inspected. A broken output pipe does not turn that policy result into success; the
 two gates are independent.
 
+## Search JSON
+
+`search --format json` emits a deterministic schema-version-1 document. It is the
+structured form of the same bounded evidence returned by MCP `search_project`:
+match coordinates, containing declarations, the selected declaration body, result
+counts, and every boundary that made the response partial.
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-search-results",
+  "query": {
+    "pattern": "Configure",
+    "mode": "text"
+  },
+  "matches": [
+    {
+      "path": "src/App.cs",
+      "line": 12,
+      "text": "    void Configure()",
+      "declaration": "App.Configure"
+    }
+  ],
+  "declarations": [
+    {
+      "path": "src/App.cs",
+      "symbol": "App.Configure",
+      "startLine": 12,
+      "endLine": 18,
+      "body": "    void Configure()\n    {\n        // ...\n    }",
+      "remainingBodyLines": 0
+    }
+  ],
+  "resolution": {
+    "resolved": 1,
+    "ambiguous": 0,
+    "unresolved": 0,
+    "external": 0
+  },
+  "searchBoundary": {
+    "complete": true,
+    "eligibleSources": 24,
+    "inspectedSources": 24,
+    "encounteredMatches": 1,
+    "retainedMatches": 1,
+    "writtenMatches": 1,
+    "namedDeclarationFiles": 1,
+    "limits": []
+  }
+}
+```
+
+`query.mode` is `text`, `regex`, or `symbols`. Match paths are project-relative
+portable paths and line numbers are one-based coordinates in the transformed text
+that was actually searched. `text` is the complete escaped matching line without
+its numeric prefix. `declaration` is nullable when navigation has no containing
+declaration. Declaration `body` is nullable when body output is disabled or no body
+fits, and `remainingBodyLines` reports a bounded prefix honestly.
+
+`resolution` has the same four stable field names as the text `[Resolution]` line.
+For search it describes containing-declaration evidence for written matches:
+`resolved` means one containing declaration was named and `unresolved` means none
+was proved; search does not invent ambiguous or external declaration targets.
+`searchBoundary.limits` uses the same constant tokens as the text
+`[Search boundary]` line. An empty `matches` array is meaningful only together with
+that boundary: a complete empty search and a partial search of no readable sources
+are different results.
+
 ## Related-files JSON
 
 `related --format json` emits one deterministic document on stdout. Operational
@@ -287,8 +356,11 @@ stay on stderr. The shape is:
 }
 ```
 
-`direction` is `dependencies`, `dependents`, or `both`. Seeds and related paths use
-portable project-relative `/` separators. Each related item retains its aggregate
+`direction` is `dependencies`, `dependents`, or `both`. At depth `1`, `seeds`
+contains the requested seed exactly as before. At larger depths, it additionally
+contains each file reached through resolved edges, once, in deterministic
+breadth-first order. Seeds and related paths use portable project-relative `/`
+separators. Each related item retains its aggregate
 evidence reasons, resolution status, sorted candidate list, cross-compilation-scope
 flag, and estimated source tokens. Ambiguous references have `status: "ambiguous"`
 and list every allowed candidate; self-file edges are absent. A seed whose language
@@ -300,9 +372,12 @@ unsupported-language and C# error-node dictionaries use stable ordinal keys.
 facts remained usable. Each item contains `path`, `droppedConstructs`, bounded `ranges` with
 one-based `startLine`/`endLine`, and `rangesTruncated`. Text output reports the same data as
 `[Dependency partial parse] path=... · dropped=N · lines=...`.
-`resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for the
-requested seeds and direction. Text output carries the same values in `[Resolution]`; consequently an
+`resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for every
+seed section emitted at the requested depth and direction. Text output carries the same values in `[Resolution]`; consequently an
 empty related-file list does not imply that every observed reference was resolved.
+Traversal follows only resolved edges and is limited to 256 distinct seed files.
+Crossing that limit emits `DPX-DEPENDENCY-TRAVERSAL-LIMIT`, returns policy exit
+code `3`, and writes no partial related-files document.
 `searchScope.files` is the manifest file count after the profile, selected paths,
 Git mode, exclusions, and file-size limit. No field can contain a file or candidate
 outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and

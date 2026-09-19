@@ -9,6 +9,7 @@ public partial class MainWindow
 {
     private async void OnMcpConnectionRequested(object? sender, McpConnectionRequestedEventArgs e)
     {
+        McpConnectionRequest? request = null;
         try
         {
             if (string.IsNullOrWhiteSpace(_currentPath) || !_viewModel.IsProjectLoaded)
@@ -18,18 +19,46 @@ public partial class MainWindow
             var executablePath = McpConnectionExecutablePathResolver.Resolve(
                 snapshot,
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-            var fragment = McpConnectionFragmentGenerator.Generate(
+            request = new McpConnectionRequest(
                 e.Client,
-                e.Mode,
+                McpConnectionMode.Live,
                 executablePath,
                 Path.GetFullPath(_currentPath));
-            await SetClipboardTextAsync(fragment);
-            _toastService.Show(_localization["Toast.Copy.Preview"]);
-            await ShowMcpConnectionPathPromptAsync(snapshot);
+            var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+            var result = await _mcpConnectionService.ConnectAsync(request, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (result.Succeeded)
+            {
+                var launchResult = await _mcpClientLaunchService.OpenAsync(
+                    new McpClientLaunchRequest(request.Client, request.ProjectRoot),
+                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!launchResult.Succeeded)
+                    await ShowMcpLaunchFailureAsync(request, launchResult);
+                await ShowMcpConnectionPathPromptAsync(snapshot);
+                return;
+            }
+
+            await ShowMcpManualConfigurationAsync(result, request);
+        }
+        catch (OperationCanceledException) when (_windowLifetimeCts?.IsCancellationRequested == true)
+        {
+            // Window shutdown owns cancellation of an in-flight connection.
         }
         catch (Exception exception)
         {
-            await ShowErrorAsync(ResolveDesktopExceptionMessage(exception));
+            if (request is null)
+            {
+                await ShowErrorAsync(ResolveDesktopExceptionMessage(exception));
+                return;
+            }
+
+            var result = new McpConnectionResult(
+                McpConnectionStatus.ProcessFailed,
+                ResolveDesktopExceptionMessage(exception),
+                ManualConfiguration: TryCreatePrintableConfiguration(request));
+            await ShowMcpManualConfigurationAsync(result, request);
         }
     }
 
@@ -37,6 +66,61 @@ public partial class MainWindow
     {
         OpenExternalLink(ProjectLinks.McpDocumentationUrl);
         e.Handled = true;
+    }
+
+    private async Task ShowMcpManualConfigurationAsync(
+        McpConnectionResult result,
+        McpConnectionRequest request,
+        McpManualPayloadPresentation presentation = McpManualPayloadPresentation.Configuration)
+    {
+        var content = McpManualConfigurationDialog.CreateContent(
+            _localization,
+            result,
+            TryCreatePrintableConfiguration(request),
+            presentation);
+        await McpManualConfigurationDialog.ShowAsync(this, content);
+    }
+
+    private Task ShowMcpLaunchFailureAsync(
+        McpConnectionRequest request,
+        McpClientLaunchResult launchResult)
+    {
+        var error = string.IsNullOrWhiteSpace(launchResult.ErrorMessage)
+            ? _localization["Mcp.Connect.UnknownError"]
+            : launchResult.ErrorMessage;
+        var result = new McpConnectionResult(
+            McpConnectionStatus.ProcessFailed,
+            _localization.Format(
+                "Mcp.Open.FailedAfterConnection",
+                GetMcpClientDisplayName(request.Client),
+                error),
+            ManualConfiguration: launchResult.ManualCommand);
+        return ShowMcpManualConfigurationAsync(
+            result,
+            request,
+            McpManualPayloadPresentation.Command);
+    }
+
+    private static string GetMcpClientDisplayName(McpConnectionClient client) => client switch
+    {
+        McpConnectionClient.ClaudeCode => "Claude Code",
+        McpConnectionClient.Codex => "Codex",
+        McpConnectionClient.Cursor => "Cursor",
+        McpConnectionClient.VsCode => "VS Code",
+        McpConnectionClient.Json => "JSON",
+        _ => throw new ArgumentOutOfRangeException(nameof(client), client, null)
+    };
+
+    private string TryCreatePrintableConfiguration(McpConnectionRequest request)
+    {
+        try
+        {
+            return _mcpConnectionService.CreatePrintableConfiguration(request);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private async Task ShowMcpConnectionPathPromptAsync(TerminalCommandSetupSnapshot snapshot)

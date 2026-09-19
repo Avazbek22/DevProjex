@@ -41,6 +41,8 @@ public sealed record AvaloniaAppServices(
     IFileContentAnalyzer FileContentAnalyzer,
     ProjectAnalysisService ProjectAnalysisService,
     IApplicationUpdateService ApplicationUpdateService,
+    IMcpConnectionService McpConnectionService,
+    IMcpClientLaunchService McpClientLaunchService,
     ITerminalCommandSetupService TerminalCommandSetupService,
     ITaskbarProgressService TaskbarProgressService,
     SessionMetricsRecorder SessionMetricsRecorder,
@@ -50,7 +52,8 @@ public sealed record AvaloniaAppServices(
     LiveSessionRegistry LiveSessionRegistry)
 {
 	internal Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
-		DesktopControlServerFactory { get; init; } = static (handler, projectPath, cancellationToken) =>
+        DesktopControlServerFactory
+    { get; init; } = static (handler, projectPath, cancellationToken) =>
 			DesktopControlServer.StartAsync(
 				handler,
 				projectPath,

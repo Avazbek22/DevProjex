@@ -11,6 +11,8 @@ namespace DevProjex.Application.Dependencies;
 
 public sealed partial class DependencyFactsEngine : IDisposable
 {
+	public const int MaximumRelatedTraversalSeeds = 256;
+
 	private readonly IDependencyFactExtractor _extractor;
 	private readonly IDependencyConfigurationProvider _configurationProvider;
 	private readonly DependencyFactsLimits _limits;
@@ -295,6 +297,62 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	{
 		var index = await IndexAsync(sourceRoot, manifestFiles, progress, cancellationToken)
 			.ConfigureAwait(false);
+		return FindRelated(index, seedRelativePaths, direction);
+	}
+
+	public async Task<DependencyRelatedResult> FindRelatedAsync(
+		string sourceRoot,
+		IReadOnlyList<string> manifestFiles,
+		IReadOnlyList<string> seedRelativePaths,
+		DependencyDirection direction,
+		int depth,
+		IProgress<DependencyIndexProgress>? progress = null,
+		CancellationToken cancellationToken = default)
+	{
+		if (depth < 1)
+			throw new ArgumentOutOfRangeException(nameof(depth));
+
+		var index = await IndexAsync(sourceRoot, manifestFiles, progress, cancellationToken)
+			.ConfigureAwait(false);
+		var normalizedSeeds = seedRelativePaths.Select(Normalize).ToArray();
+		var visited = new HashSet<string>(normalizedSeeds, StringComparer.Ordinal);
+		if (visited.Count > MaximumRelatedTraversalSeeds)
+			throw new DependencyTraversalLimitException(MaximumRelatedTraversalSeeds);
+		IReadOnlyList<string> frontier = normalizedSeeds;
+		var seeds = new List<SeedRelatedFiles>();
+		for (var level = 0; level < depth && frontier.Count > 0; level++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var result = FindRelated(index, frontier, direction);
+			seeds.AddRange(result.Seeds);
+			if (level + 1 >= depth)
+				break;
+
+			var next = new HashSet<string>(StringComparer.Ordinal);
+			foreach (var path in result.Seeds
+						 .SelectMany(seed => RelatedFiles(seed, direction))
+						 .Where(file => file.Status == ResolutionStatus.Resolved &&
+							 index.FileByPath.ContainsKey(file.Path))
+						 .Select(static file => file.Path))
+			{
+				if (visited.Contains(path) || !next.Add(path))
+					continue;
+				if (visited.Count + next.Count > MaximumRelatedTraversalSeeds)
+					throw new DependencyTraversalLimitException(MaximumRelatedTraversalSeeds);
+			}
+
+			frontier = next.Order(StringComparer.Ordinal).ToArray();
+			visited.UnionWith(frontier);
+		}
+
+		return new DependencyRelatedResult(index, seeds);
+	}
+
+	private static DependencyRelatedResult FindRelated(
+		DependencyIndexSnapshot index,
+		IReadOnlyList<string> seedRelativePaths,
+		DependencyDirection direction)
+	{
 		var fileByPath = index.FileByPath;
 		var seeds = new List<SeedRelatedFiles>(seedRelativePaths.Count);
 		foreach (var rawSeed in seedRelativePaths)
@@ -316,6 +374,22 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			seeds.Add(new SeedRelatedFiles(seed, facts.LanguageId, dependencies, dependents, null));
 		}
 		return new DependencyRelatedResult(index, seeds);
+	}
+
+	private static IEnumerable<RelatedFile> RelatedFiles(
+		SeedRelatedFiles seed,
+		DependencyDirection direction)
+	{
+		if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
+		{
+			foreach (var dependency in seed.Dependencies)
+				yield return dependency;
+		}
+		if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
+		{
+			foreach (var dependent in seed.Dependents)
+				yield return dependent;
+		}
 	}
 
 	private static FileFacts RebindScope(FileFacts facts, string scopeId)

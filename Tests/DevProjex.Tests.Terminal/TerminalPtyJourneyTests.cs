@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.ResourceStore;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -16,6 +17,9 @@ public sealed class TerminalPtyJourneyTests
 	public async Task LiveSessionStatusAndConnectionCommandAreVisible()
 	{
 		using var workspace = CreateProject();
+		var expectedMessage = new LocalizationService(
+			new JsonLocalizationCatalog(),
+			AppLanguage.En)["Mcp.Connect.ManualConfiguration"];
 		LiveSessionWriter? liveSession = null;
 		try
 		{
@@ -32,14 +36,21 @@ public sealed class TerminalPtyJourneyTests
 			await terminal.WaitForScreenAsync(
 				"Live context (sample-client)",
 				cancellationToken: TestContext.Current.CancellationToken);
-			await terminal.SendAsync(":mcp json live\r", TestContext.Current.CancellationToken);
+			await terminal.SendAsync(":mcp connect json\r", TestContext.Current.CancellationToken);
 			var fragment = await terminal.WaitForScreenAsync(
 				"mcpServers",
 				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains(expectedMessage, fragment, StringComparison.Ordinal);
 			Assert.Contains("--live", fragment, StringComparison.Ordinal);
 			Assert.Contains(workspace.Path, fragment, StringComparison.Ordinal);
 
 			await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenWithoutAsync(
+				"mcpServers",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				expectedMessage,
+				cancellationToken: TestContext.Current.CancellationToken);
 			await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 			Assert.Equal(
 				CommandLineExitCodes.Success,
@@ -51,6 +62,61 @@ public sealed class TerminalPtyJourneyTests
 			if (liveSession is not null)
 				await liveSession.DisposeAsync();
 		}
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task ConnectionCommandAlwaysUsesLiveMode()
+	{
+		using var workspace = CreateProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":mcp connect json\r", TestContext.Current.CancellationToken);
+		var fragment = await terminal.WaitForScreenAsync(
+			"mcpServers",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("--live", fragment, StringComparison.Ordinal);
+		Assert.Contains(workspace.Path, fragment, StringComparison.Ordinal);
+
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task PrintableMcpCommandKeepsAnExplicitStandardMode()
+	{
+		using var workspace = CreateProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":mcp json standard\r", TestContext.Current.CancellationToken);
+		var fragment = await terminal.WaitForScreenAsync(
+			"mcpServers",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("--live", fragment, StringComparison.Ordinal);
+		Assert.Contains(workspace.Path, fragment, StringComparison.Ordinal);
+
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact(Timeout = 60_000)]

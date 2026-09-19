@@ -103,6 +103,14 @@ internal static class CommandExecution
 				ExitCode: CommandLineExitCodes.RuntimeError,
 				Exception: exception));
 		}
+		catch (SearchCommandException exception)
+		{
+			return WriteError(environment, outputOptions, text, new TerminalError(
+				exception.Code,
+				exception.Message,
+				ExitCode: CommandLineExitCodes.UsageError,
+				Exception: exception));
+		}
 		catch (OutputDestinationConflictException exception)
 		{
 			return WriteError(environment, outputOptions, text, new TerminalError(
