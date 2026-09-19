@@ -177,6 +177,29 @@ Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. `--language CODE` localizes human-readable help,
 status, diagnostics, and Terminal Workspace labels.
 
+## Command parity
+
+This table is the surface contract. A command name identifies the public action on
+that surface; `direct action` means the graphical surface exposes the action without
+a command, and `none by design` means that surface deliberately does not own it.
+Arguments such as `--select`, `paths`, and `profile` are shown where the action is a
+request-scoped choice rather than a standalone command.
+
+| Action | GUI | TUI | CLI | MCP |
+|---|---|---|---|---|
+| Open project | direct action | `open` | `open` | none by design |
+| Select files | direct action | `select` | `--select` | `paths` |
+| Load profile | direct action | `profile load` | `--profile` | `profile` |
+| Show profile | direct action | `profile show` | `profile show` | `list_projects` |
+| Reset profile | direct action | `profile reset` | `profile reset` | none by design |
+| Save profile | direct action | `profile save` | `profile save` | none by design |
+| Search | direct action | `search` | `search` | `search_project` |
+| Related files | none by design | `related` | `related` | `related_files` |
+| Analyze | direct action | `analyze` | `analyze` | `analyze` |
+| Export context | direct action | `export` | `export context` | `pack_context` |
+| Connect MCP client | none by design | `mcp connect` | `mcp connect` | none by design |
+| Diagnostics | direct action | `diagnostics` | `doctor` | none by design |
+
 ## Version
 
 ```shell
