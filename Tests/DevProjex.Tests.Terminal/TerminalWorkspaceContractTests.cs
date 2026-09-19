@@ -1939,7 +1939,7 @@ public sealed class TerminalWorkspaceContractTests
 			startInfo.ArgumentList.Add(argument);
 		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-		timeout.CancelAfter(TimeSpan.FromSeconds(10));
+		timeout.CancelAfter(ProcessSafetyTimeout);
 		// Drain both pipes without blocking the process-exit continuation that invoked the test.
 		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
 		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
@@ -1949,6 +1949,11 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.True(process.ExitCode == 0, error);
 		return output.Trim();
 	}
+
+	private static TimeSpan ProcessSafetyTimeout =>
+		string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+			? TimeSpan.FromMinutes(2)
+			: TimeSpan.FromSeconds(30);
 
 	private static async Task SetPreviewDocumentAsync(
 		TerminalWorkspaceState state,
