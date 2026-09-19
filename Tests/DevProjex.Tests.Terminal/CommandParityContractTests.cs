@@ -75,9 +75,17 @@ public sealed class CommandParityContractTests
 		foreach (var definition in TerminalWorkspaceCommandCatalog.All)
 		{
 			result.Add(definition.Token);
-			var syntax = definition.Syntax.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-			if (syntax.Length > 1 && !syntax[1].StartsWith('<') && !syntax[1].StartsWith('['))
-				result.Add($"{definition.Token} {syntax[1]}");
+			foreach (var alternative in definition.Syntax.Split('|', StringSplitOptions.TrimEntries))
+			{
+				var syntax = alternative.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+				if (syntax.Length > 1 &&
+					syntax[0] == definition.Token &&
+					!syntax[1].StartsWith('<') &&
+					!syntax[1].StartsWith('['))
+				{
+					result.Add($"{definition.Token} {syntax[1]}");
+				}
+			}
 		}
 		return result;
 	}
