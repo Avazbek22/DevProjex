@@ -387,7 +387,14 @@ public sealed class McpClientLaunchServiceTests
 		var capturedPath = Path.Combine(toolsDirectory, "captured.txt");
 		await File.WriteAllTextAsync(
 			clientShim,
-			"@echo off\r\n> \"%~dp0captured.txt\" <nul set /p \"=%~1\"\r\nexit /b 0\r\n",
+			"@echo off\r\n" +
+			"set \"DEVPROJEX_CAPTURED_PATH=%~dp0captured.txt\"\r\n" +
+			"set \"DEVPROJEX_CAPTURED_ARGUMENT=%~1\"\r\n" +
+			"\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" " +
+			"-NoLogo -NoProfile -NonInteractive -Command " +
+			"\"[IO.File]::WriteAllText($env:DEVPROJEX_CAPTURED_PATH, " +
+			"$env:DEVPROJEX_CAPTURED_ARGUMENT, [Text.UTF8Encoding]::new($false))\"\r\n" +
+			"exit /b %errorlevel%\r\n",
 			TestContext.Current.CancellationToken);
 		var locator = new McpClientExecutableLocator(new McpClientExecutableLocatorOptions
 		{
@@ -763,18 +770,20 @@ public sealed class McpClientLaunchServiceTests
 		IReadOnlyList<McpClientLaunchAttemptResult>? externalLinkResults = null,
 		AppLanguage language = AppLanguage.En)
 	{
-		var toolsDirectory = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "mcp launch tools Пример"));
+		var pathEntry = platform == TerminalCommandHostPlatform.Windows
+			? Path.GetFullPath(Path.Combine(Path.GetTempPath(), "mcp launch tools Пример"))
+			: "/mcp-launch-tools-Пример";
 		var extension = platform == TerminalCommandHostPlatform.Windows ? ".exe" : string.Empty;
 		var executables = availableCommands
 			.Distinct(StringComparer.OrdinalIgnoreCase)
 			.ToDictionary(
 				static command => command,
-				command => Path.Combine(toolsDirectory, command + extension),
+				command => Path.GetFullPath(Path.Combine(pathEntry, command + extension)),
 				StringComparer.OrdinalIgnoreCase);
 		var locator = new McpClientExecutableLocator(new McpClientExecutableLocatorOptions
 		{
 			Platform = platform,
-			PathVariableProvider = () => toolsDirectory,
+			PathVariableProvider = () => pathEntry,
 			PathExtensionsProvider = () => ".EXE;.CMD;.BAT",
 			FileExists = candidate => executables.Values.Contains(
 				candidate,
