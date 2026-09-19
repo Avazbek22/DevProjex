@@ -10,6 +10,7 @@ stdout is the machine/payload channel:
 - help and version;
 - completion scripts;
 - text, JSON, or XML analysis;
+- text, JSON, or Markdown search results;
 - text, Markdown, JSON, or XML context;
 - one absolute result path after file, folder, or ZIP output.
 - one accepted local path or safe repository URL after `open`.
@@ -236,6 +237,74 @@ when diagnostics are present.
 policy exit code `3` when effective findings exist or selected text could not be
 inspected. A broken output pipe does not turn that policy result into success; the
 two gates are independent.
+
+## Search JSON
+
+`search --format json` emits a deterministic schema-version-1 document. It is the
+structured form of the same bounded evidence returned by MCP `search_project`:
+match coordinates, containing declarations, the selected declaration body, result
+counts, and every boundary that made the response partial.
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-search-results",
+  "query": {
+    "pattern": "Configure",
+    "mode": "text"
+  },
+  "matches": [
+    {
+      "path": "src/App.cs",
+      "line": 12,
+      "text": "    void Configure()",
+      "declaration": "App.Configure"
+    }
+  ],
+  "declarations": [
+    {
+      "path": "src/App.cs",
+      "symbol": "App.Configure",
+      "startLine": 12,
+      "endLine": 18,
+      "body": "    void Configure()\n    {\n        // ...\n    }",
+      "remainingBodyLines": 0
+    }
+  ],
+  "resolution": {
+    "resolved": 1,
+    "ambiguous": 0,
+    "unresolved": 0,
+    "external": 0
+  },
+  "searchBoundary": {
+    "complete": true,
+    "eligibleSources": 24,
+    "inspectedSources": 24,
+    "encounteredMatches": 1,
+    "retainedMatches": 1,
+    "writtenMatches": 1,
+    "namedDeclarationFiles": 1,
+    "limits": []
+  }
+}
+```
+
+`query.mode` is `text`, `regex`, or `symbols`. Match paths are project-relative
+portable paths and line numbers are one-based coordinates in the transformed text
+that was actually searched. `text` is the complete escaped matching line without
+its numeric prefix. `declaration` is nullable when navigation has no containing
+declaration. Declaration `body` is nullable when body output is disabled or no body
+fits, and `remainingBodyLines` reports a bounded prefix honestly.
+
+`resolution` has the same four stable field names as the text `[Resolution]` line.
+For search it describes containing-declaration evidence for written matches:
+`resolved` means one containing declaration was named and `unresolved` means none
+was proved; search does not invent ambiguous or external declaration targets.
+`searchBoundary.limits` uses the same constant tokens as the text
+`[Search boundary]` line. An empty `matches` array is meaningful only together with
+that boundary: a complete empty search and a partial search of no readable sources
+are different results.
 
 ## Related-files JSON
 

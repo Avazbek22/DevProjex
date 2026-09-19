@@ -14,7 +14,7 @@ public sealed class CommandTreeContractTests
 		Assert.Equal(
 			[
 				"analyze", "cache", "completion", "doctor", "export", "help", "mcp", "open", "profile",
-				"recent", "related", "tree", "tui", "ui"
+				"recent", "related", "search", "tree", "tui", "ui"
 			],
 			root.Subcommands
 				.Where(static command => !command.Hidden)

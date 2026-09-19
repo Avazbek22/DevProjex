@@ -53,6 +53,29 @@ public sealed class CompletionCommandContractTests
 	[InlineData("zsh")]
 	[InlineData("fish")]
 	[InlineData("powershell")]
+	public void EveryShellCompletionReachesSearchAndItsOptions(string shell)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		Assert.NotEmpty(CompletionScriptGenerator.Generate(root, shell));
+		Assert.Contains(
+			"search",
+			ContextAwareCompletionEngine.Complete(root, "devprojex se", "devprojex se".Length));
+		var options = ContextAwareCompletionEngine.Complete(
+			root,
+			"devprojex search needle . --",
+			"devprojex search needle . --".Length);
+		Assert.Contains("--regex", options);
+		Assert.Contains("--symbols", options);
+		Assert.Contains("--search-body-chars", options);
+		Assert.Contains("--format", options);
+	}
+
+	[Theory]
+	[InlineData("bash")]
+	[InlineData("zsh")]
+	[InlineData("fish")]
+	[InlineData("powershell")]
 	public async Task CompletionCommandWritesOnlyTheRequestedScript(string shell)
 	{
 		var environment = new TestTerminalEnvironment();
