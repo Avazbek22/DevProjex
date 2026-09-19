@@ -329,12 +329,7 @@ public sealed class PreviewDocumentBuilder(
             var readResult = prepared.ReadResult;
             var content = readResult.Content;
 			if (redactionScope is not null &&
-			    readResult.Classification is not (
-				    FileContentClassification.Text or
-				    FileContentClassification.TooLarge or
-				    FileContentClassification.Unreadable or
-				    FileContentClassification.UnsupportedEncoding or
-				    FileContentClassification.Binary))
+			    !PreparedSecretFile.IsRedactionOutputSafeClassification(readResult.Classification))
 			{
 				throw new SecretDetectionException(
 					$"Hide Secrets could not inspect '{file}' ({readResult.Classification}).");

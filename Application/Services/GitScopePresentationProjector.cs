@@ -387,13 +387,11 @@ public static class GitScopePresentationProjector
 				                     IgnoreRuleSemantics.IsDotName(directory.Name)
 					? rules with { IgnoreHiddenFolders = false }
 					: rules;
-				var gitEvaluation = rules.IsGitIgnoreTraversalEnabled
-					? gitIgnore.Evaluate(
-						directory.FullPath,
-						directory.RelativePath,
-						isDirectory: true,
-						directory.Name)
-					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				var gitEvaluation = gitIgnore.Evaluate(
+					directory.FullPath,
+					directory.RelativePath,
+					isDirectory: true,
+					directory.Name);
 				if (IgnoreDecisionEngine.EvaluateDirectory(
 						directory.FullPath,
 						directory.Name,
@@ -411,9 +409,7 @@ public static class GitScopePresentationProjector
 			ref readonly var file = ref inventory.GetEntryRef(scopedFile.EntryIndex);
 			if (applyExtensionFilter && !AllowsExtension(file.Name, effectiveExtensionPolicy))
 				continue;
-			var fileGitEvaluation = rules.IsGitIgnoreTraversalEnabled
-				? gitIgnore.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
-				: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+			var fileGitEvaluation = gitIgnore.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name);
 			var smartIgnoreScopePath = file.ParentIndex >= 0
 				? inventory.GetEntryRef(file.ParentIndex).FullPath
 				: projectRoot;
@@ -549,13 +545,11 @@ public static class GitScopePresentationProjector
 			                     IgnoreRuleSemantics.IsDotName(directory.Name)
 				? rules with { IgnoreHiddenFolders = false }
 				: rules;
-			var gitEvaluation = rules.IsGitIgnoreTraversalEnabled
-				? gitIgnore.Evaluate(
-					directory.FullPath,
-					directory.RelativePath,
-					isDirectory: true,
-					directory.Name)
-				: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+			var gitEvaluation = gitIgnore.Evaluate(
+				directory.FullPath,
+				directory.RelativePath,
+				isDirectory: true,
+				directory.Name);
 			visibility[index] = !IgnoreDecisionEngine.EvaluateDirectory(
 				directory.FullPath,
 				directory.Name,
@@ -633,13 +627,11 @@ public static class GitScopePresentationProjector
 			foreach (var ancestorIndex in scopedFile.AncestorIndexes)
 			{
 				ref readonly var directory = ref inventory.GetEntryRef(ancestorIndex);
-				var gitEvaluation = rules.IsGitIgnoreTraversalEnabled
-					? gitIgnore.Evaluate(
-						directory.FullPath,
-						directory.RelativePath,
-						isDirectory: true,
-						directory.Name)
-					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				var gitEvaluation = gitIgnore.Evaluate(
+					directory.FullPath,
+					directory.RelativePath,
+					isDirectory: true,
+					directory.Name);
 				var decision = IgnoreDecisionEngine.EvaluateDirectory(
 					directory.FullPath,
 					directory.Name,
@@ -656,9 +648,7 @@ public static class GitScopePresentationProjector
 			if (blocked)
 				continue;
 
-			var fileGitEvaluation = rules.IsGitIgnoreTraversalEnabled
-				? gitIgnore.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
-				: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+			var fileGitEvaluation = gitIgnore.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name);
 			var fileDecision = IgnoreDecisionEngine.EvaluateFile(
 				file.FullPath,
 				file.Name,

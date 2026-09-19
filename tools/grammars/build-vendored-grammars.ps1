@@ -152,10 +152,65 @@ function Apply-SourcePatches($Grammar, [string]$SourceDirectory)
     }
 }
 
+function Assert-SourcePatchArtifacts($Grammar)
+{
+    if ($null -eq $Grammar.PSObject.Properties['sourcePatchArtifacts'])
+    {
+        return
+    }
+
+    $repositoryPrefix = [IO.Path]::GetFullPath($repositoryRoot) + [IO.Path]::DirectorySeparatorChar
+    foreach ($patch in $Grammar.sourcePatchArtifacts)
+    {
+        $artifactPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot $patch.artifactPath))
+        if (-not $artifactPath.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase))
+        {
+            throw "Source patch artifact is outside the repository: $artifactPath"
+        }
+
+        Assert-FileHash $artifactPath $patch.sha256
+    }
+}
+
+function Apply-SourcePatchArtifacts($Grammar, [string]$SourceDirectory)
+{
+    if ($null -eq $Grammar.PSObject.Properties['sourcePatchArtifacts'])
+    {
+        return
+    }
+
+    Assert-SourcePatchArtifacts $Grammar
+    $sourcePrefix = [IO.Path]::GetFullPath($SourceDirectory) + [IO.Path]::DirectorySeparatorChar
+    foreach ($patch in $Grammar.sourcePatchArtifacts)
+    {
+        $artifactPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot $patch.artifactPath))
+        & git -c core.autocrlf=false -C $SourceDirectory apply --check --whitespace=nowarn -- $artifactPath
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "Source patch '$($patch.description)' does not apply cleanly to $($Grammar.name)."
+        }
+
+        & git -c core.autocrlf=false -C $SourceDirectory apply --whitespace=nowarn -- $artifactPath
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "Source patch '$($patch.description)' failed for $($Grammar.name)."
+        }
+
+        $targetPath = [IO.Path]::GetFullPath((Join-Path $SourceDirectory $patch.targetPath))
+        if (-not $targetPath.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase))
+        {
+            throw "Source patch target is outside the extracted source: $targetPath"
+        }
+
+        Assert-FileHash $targetPath $patch.resultSha256
+    }
+}
+
 if ($VerifyOnly)
 {
     foreach ($grammar in $grammars)
     {
+        Assert-SourcePatchArtifacts $grammar
         foreach ($binary in $grammar.binaries)
         {
             Assert-BinaryShape $grammar $binary
@@ -221,6 +276,7 @@ try
 
         $sourceDirectory = $sourceDirectories[0].FullName
         Apply-SourcePatches $grammar $sourceDirectory
+        Apply-SourcePatchArtifacts $grammar $sourceDirectory
         $sourceFiles = @($grammar.build.sourceFiles | ForEach-Object {
             $path = Join-Path $sourceDirectory $_
             if (-not (Test-Path -LiteralPath $path -PathType Leaf))

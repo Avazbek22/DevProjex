@@ -109,12 +109,14 @@ public partial class MainWindow
 			hidePrivateDataApplied: _appliedHidePrivateDataEnabled,
 			compressCodeApplied: _appliedCompressCodeEnabled,
 			stripCommentsApplied: _appliedStripCommentsEnabled,
-			stripBlankLinesApplied: _appliedStripBlankLinesEnabled);
+			stripBlankLinesApplied: _appliedStripBlankLinesEnabled,
+			compressionUnavailable: _codeCompressionSnapshot?.Availability.IsUnavailable == true);
 		_viewModel.SetCompressionStatus(
 			_codeCompressionSnapshot?.BodyTransformedFiles,
 			_codeCompressionSnapshot?.TotalFiles,
 			_codeCompressionSnapshot?.SourceCharacters,
-			_codeCompressionSnapshot?.TransformedCharacters);
+			_codeCompressionSnapshot?.TransformedCharacters,
+			_codeCompressionSnapshot?.Availability.PrimaryReason);
 		_viewModel.SetCommentStripStatus(
 			_codeCompressionSnapshot?.CommentTransformedFiles,
 			_codeCompressionSnapshot?.TotalFiles);
@@ -787,6 +789,8 @@ public partial class MainWindow
     private readonly RepositoryWebPathPresentationService _repositoryWebPathPresentationService;
     private readonly TextFileExportService _textFileExport;
     private readonly IToastService _toastService;
+    private readonly IMcpConnectionService _mcpConnectionService;
+    private readonly IMcpClientLaunchService _mcpClientLaunchService;
     private readonly IconCache _iconCache;
     private readonly IElevationService _elevation;
     private readonly IAppInstanceLauncher _appInstanceLauncher;
@@ -823,9 +827,10 @@ public partial class MainWindow
     private readonly RefreshTreePipeline _refreshPipeline;
     private readonly ProjectTextOutputPipeline _textOutputPipeline;
     private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
+    private readonly TreeSelectionProfilePersistenceCoordinator _treeSelectionProfiles;
     private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
     private readonly TaskbarProgressCoordinator _taskbarProgress;
-	private readonly Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
+    private readonly Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
 		_desktopControlServerFactory;
     private readonly SemaphoreSlim _desktopInteractionGate = new(1, 1);
 	private readonly TaskCompletionSource<bool> _shutdownCompletion =
@@ -964,6 +969,7 @@ public partial class MainWindow
     private readonly IReadOnlyList<string> _startupErrors;
     private readonly ITerminalCommandSetupService _terminalCommandSetupService;
     private readonly SessionMetricsRecorder _sessionMetrics;
+	private readonly BackgroundTaskRegistry _backgroundTasks;
 	private readonly SecretRedactionSession _secretRedactionSession;
 	private readonly CodeCompressionSession _codeCompressionSession;
 	private CodeCompressionSnapshot? _codeCompressionSnapshot;
@@ -1016,6 +1022,8 @@ public partial class MainWindow
         _repositoryWebPathPresentationService = services.RepositoryWebPathPresentationService;
         _textFileExport = services.TextFileExportService;
         _toastService = services.ToastService;
+        _mcpConnectionService = services.McpConnectionService;
+        _mcpClientLaunchService = services.McpClientLaunchService;
         _iconCache = new IconCache(services.IconStore);
         _elevation = services.Elevation;
         _appInstanceLauncher = services.AppInstanceLauncher;
@@ -1026,8 +1034,12 @@ public partial class MainWindow
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
         _terminalCommandSetupService = services.TerminalCommandSetupService;
+        _liveSessionRegistry = services.LiveSessionRegistry;
 		_desktopControlServerFactory = services.DesktopControlServerFactory;
         _sessionMetrics = services.SessionMetricsRecorder;
+		_backgroundTasks = new BackgroundTaskRegistry(
+			_windowLifetimeCts.Token,
+			ReportBackgroundTaskFailure);
 		_secretRedactionSession = services.SecretRedactionSession;
 		_codeCompressionSession = services.CodeCompressionSession;
 		_secretRedactionPreparer = new SecretRedactionOutputPreparer(services.FileContentAnalyzer);
@@ -1064,7 +1076,8 @@ public partial class MainWindow
             CreateExportPathPresentation,
             () => Bounds.Width,
             ScheduleBackgroundMemoryCleanup,
-            () => PublishedTransformationContext);
+            () => PublishedTransformationContext,
+			_backgroundTasks);
         _previewPipeline = new PreviewWorkspacePipeline(
             this,
             // 350ms delay ensures thumb animation (250ms) completes fully before loading.
@@ -1083,7 +1096,7 @@ public partial class MainWindow
             _ignoreOptionsService,
             BuildIgnoreRules,
             GetIgnoreOptionsAvailability,
-            TryElevateAndRestart,
+            HandleBackgroundRootAccessDenied,
             () => _currentPath,
             _statusOperations,
             ApplyProgrammaticContentTransformationSelectionChange,
@@ -1101,10 +1114,17 @@ public partial class MainWindow
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(
 			_viewModel,
-			_selectionCoordinator,
-			services.ProjectProfileStore,
-			_secretRedactionSession,
-			() => _currentPath);
+            _selectionCoordinator,
+            services.ProjectProfileStore,
+            _secretRedactionSession,
+            () => _currentPath,
+            CaptureProfileSelectionFrontier);
+        _treeSelectionProfiles = new TreeSelectionProfilePersistenceCoordinator(
+            (projectPath, selectedPaths, cancellationToken) =>
+                _projectProfiles.PersistSelectedPathsAsync(
+                    projectPath,
+                    selectedPaths,
+                    cancellationToken));
         _taskbarProgress = new TaskbarProgressCoordinator(
             _viewModel,
             services.TaskbarProgressService);
@@ -1358,7 +1378,8 @@ public partial class MainWindow
             SettingsPanelAnimationDuration,
             () => new MemoryCleanupRetentionSnapshot(
                 _codeCompressionSession.Diagnostics.RetainedCacheBytes,
-                _metrics.RetainedReadFactBytes));
+                _metrics.RetainedReadFactBytes),
+			_backgroundTasks);
         _treeViewport = new TreeViewportController(
             _viewModel,
             new TreeViewportControls(
@@ -1419,6 +1440,7 @@ public partial class MainWindow
         Closed += OnWindowClosed;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
+		StartLiveSessionObservation();
 
         _elevationAttempted = startupOptions.ElevationAttempted ||
                               _desktopStartupRequest?.ElevationAttempted == true;

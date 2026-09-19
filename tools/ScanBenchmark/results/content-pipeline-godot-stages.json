@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "measuredUtc": "2026-09-07T09:05:00Z",
+  "platform": "Microsoft Windows 10.0.26200",
+  "corpus": {
+    "name": "godotengine/godot",
+    "sha": "34d06658a85845111a50db9e485ec4a0701d4298",
+    "files": 14261
+  },
+  "command": "export context <root> --exclude none --git-mode gitignore --hide-secrets --force -o <output>",
+  "interpretation": "Per-file stages overlap across workers; elapsedMilliseconds is their aggregate time and must not be summed into wall time.",
+  "baseline": {
+    "commit": "c249c30944b15771f351ff2057f77817b1706ea4",
+    "controlWallMilliseconds": 33785.054,
+    "stages": {
+      "Selection": { "elapsedMilliseconds": 2445.10, "calls": 1 },
+      "SourceRead": { "elapsedMilliseconds": 2458.19, "calls": 14261 },
+      "Compression": { "elapsedMilliseconds": 18.86, "calls": 14261 },
+      "DetectorInitialization": { "elapsedMilliseconds": 63.61, "calls": 1 },
+      "Detection": { "elapsedMilliseconds": 10908.81, "calls": 14153 },
+      "RedactionAndOutput": { "elapsedMilliseconds": 7501.48, "calls": 28306 },
+      "Cleanup": { "elapsedMilliseconds": 1437.68, "calls": 1 }
+    }
+  },
+  "optimized": {
+    "branch": "perf/secret-pipeline-and-engine",
+    "controlWallMilliseconds": 9856.59,
+    "profiledWallMilliseconds": 10157.36,
+    "transformationActiveRangeMilliseconds": 6263.90,
+    "stages": {
+      "Selection": { "elapsedMilliseconds": 2150.75, "calls": 1 },
+      "SourceRead": { "elapsedMilliseconds": 2479.12, "calls": 14261 },
+      "Compression": { "elapsedMilliseconds": 18.37, "calls": 14261 },
+      "DetectorInitialization": { "elapsedMilliseconds": 49.11, "calls": 1 },
+      "Detection": { "elapsedMilliseconds": 7581.94, "calls": 14153 },
+      "RedactionAndOutput": { "elapsedMilliseconds": 925.94, "calls": 28306 },
+      "Cleanup": { "elapsedMilliseconds": 21.54, "calls": 1 }
+    },
+    "detectorCharacterization": {
+      "characters": 306482455,
+      "keywordCandidatesMilliseconds": 835.26,
+      "detectionMilliseconds": 4240.09,
+      "combinedDetectorMilliseconds": 4688.65,
+      "throughputMegabytesPerSecond": 130.7,
+      "findings": 43,
+      "keywordAutomatonBytes": 148936
+    }
+  }
+}

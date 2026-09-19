@@ -48,6 +48,10 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--max-file-bytes"
 			},
 			{
+				["search", "needle", ".", "--max=", "10"],
+				"--max"
+			},
+			{
 				["analyze", ".", "--color=", "never"],
 				"--color"
 			},
@@ -74,6 +78,14 @@ public sealed class EmptyEqualsParserRegressionTests
 			{
 				["export", "context", ".", "--max-tokens=", "10"],
 				"--max-tokens"
+			},
+			{
+				["export", "context", ".", "--rank=", "importance"],
+				"--rank"
+			},
+			{
+				["export", "context", ".", "--rank", "importance", "--focus=", "src/App.cs"],
+				"--focus"
 			},
 			{
 				["tui", ".", "--screen=", "inline"],
@@ -114,6 +126,10 @@ public sealed class EmptyEqualsParserRegressionTests
 			{
 				["ui", "status", "--timeout=", "10s"],
 				"--timeout"
+			},
+			{
+				["related", "src/App.cs", "--depth=", "2"],
+				"--depth"
 			}
 		};
 
@@ -142,28 +158,42 @@ public sealed class EmptyEqualsParserRegressionTests
 		"-x",
 		"--as",
 		"--branch",
+		"--client",
 		"--color",
+		// export context intentionally adds this repeatable required-value option: per-file detail
+		// overrides of the form "<glob>=<full|compact|signatures>".
+		"--detail-for",
+		"--depth",
+		// related intentionally adds this required-value option to the public CLI grammar.
+		"--direction",
 		"--exclude",
 		"--extension",
 		"--filter",
+		"--focus",
 		"--format",
 		"--git-mode",
 		"--instance",
 		"--kind",
 		"--language",
 		"--limit",
+		"--max",
 		"--max-file-bytes",
 		"--max-tokens",
+		"--mode",
 		"--output",
 		"--profile",
 		"--progress",
 		"--project",
+		"--rank",
+		"--remote-hosts",
 		"--root",
 		"--screen",
 		"--search",
+		"--search-body-chars",
 		"--select",
 		"--select-from",
 		"--timeout",
+		"--tool-set",
 		"--top-files",
 		"--tree-format",
 		"--verbosity",
@@ -234,7 +264,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		foreach (var (command, path) in EnumeratePublicCommands(root))
 		{
 			foreach (var option in command.Options.Where(static option =>
-				         !option.Hidden))
+						 !option.Hidden))
 			{
 				foreach (var identifier in new[] { option.Name }.Concat(option.Aliases))
 				{
@@ -370,8 +400,8 @@ public sealed class EmptyEqualsParserRegressionTests
 		foreach (var child in command.Subcommands.Where(static child => !child.Hidden))
 		{
 			foreach (var result in EnumeratePublicCommands(
-				         child,
-				         [.. path, child.Name]))
+						 child,
+						 [.. path, child.Name]))
 			{
 				yield return result;
 			}

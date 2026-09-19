@@ -1,0 +1,61 @@
+{
+  "seriesId": "pipeline-fixture",
+  "productBuildSha": "d0236dc9cff93970c9657abcd211b8e46ef5f569",
+  "model": "model-fixture",
+  "clientVersion": "client-fixture-1",
+  "toolLoadingMode": "dynamic",
+  "repetitions": 1,
+  "protocolVersion": "2025-06-18",
+  "client": {
+    "command": "node",
+    "args": [
+      "fake-stream-client.mjs",
+      "--session-id", "{sessionId}",
+      "--model", "{model}",
+      "--mcp-config", "{mcpConfigPath}",
+      "--client-version", "client-fixture-1",
+      "--tool-config", "{toolConfigPath}",
+      "--arm", "{arm}",
+      "--prompt", "{prompt}"
+    ]
+  },
+  "tasks": [
+    { "id": "sample", "prompt": "Explain the retry behavior." }
+  ],
+  "arms": [
+    {
+      "id": "left",
+      "productBuildSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "limits": { "maxResults": 200 },
+      "server": { "command": "node", "args": ["fake-mcp-server.mjs", "left"] },
+      "toolConfiguration": { "allowed": ["search_project", "get_file"] }
+    },
+    {
+      "id": "right",
+      "productBuildSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "limits": { "maxResults": 200 },
+      "server": { "command": "node", "args": ["fake-mcp-server.mjs", "right"] },
+      "toolConfiguration": { "allowed": ["search_project", "get_file"] }
+    }
+  ],
+  "limits": {
+    "maxAttemptsPerAssignment": 2,
+    "probeTimeoutMs": 10000,
+    "sessionTimeoutMs": 10000,
+    "smallFileCharacters": 1000
+  },
+  "pricing": {
+    "currency": "USD",
+    "perMillionTokens": {
+      "inputTokens": 3,
+      "cacheWriteTokens": 3.75,
+      "cacheReadTokens": 0.3,
+      "outputTokens": 15
+    }
+  },
+  "evaluation": {
+    "orderCalibration": { "evaluatedPairs": 18, "orderDisagreementRate": 0.3333333333333333 },
+    "oracleRegistry": "task-oracles.json",
+    "savedAssessments": "saved-assessments.json"
+  }
+}

@@ -5,6 +5,10 @@ internal sealed record ProjectLoadSnapshot(
     TreeRefreshInput TreeInput,
     BuildTreeResult TreeResult,
     ProjectTreeInventorySnapshot? TreeInventory,
-	GitScopePresentationProjection? GitScopePresentation,
+    GitScopePresentationProjection? GitScopePresentation,
     TreeNodeViewModel TreeRoot,
-	PersistentSecretMarksSnapshot? PersistentMarks);
+    PersistentSecretMarksSnapshot? PersistentMarks,
+    ProjectProfileTreeSelection? ProfileTreeSelection);
+
+internal sealed record ProjectProfileTreeSelection(
+    IReadOnlyCollection<string>? SelectedPaths);

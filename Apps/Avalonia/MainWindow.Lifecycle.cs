@@ -145,6 +145,8 @@ public partial class MainWindow
         {
             CancelAndDispose(ref _windowLifetimeCts);
             CompleteSessionMetricsRecording();
+            if (!_treeSelectionProfiles.Flush(TimeSpan.FromSeconds(2)))
+                Trace.TraceWarning("Project tree selection persistence did not finish before shutdown.");
             FlushPersistedStateOnWindowClose();
 
             // Unsubscribe from window events
@@ -184,6 +186,7 @@ public partial class MainWindow
                 _previewBar.SizeChanged -= OnPreviewBarSizeChanged;
             DetachRecentMenuHandlers();
             DetachTreeFontMenuHandlers();
+			StopLiveSessionObservation();
 			_secretRedactionSession.SnapshotPublished -= OnSecretRedactionSnapshotPublished;
 			_codeCompressionSession.SnapshotPublished -= OnCodeCompressionSnapshotPublished;
 			_secretRedactionSession.Reset();
@@ -211,11 +214,13 @@ public partial class MainWindow
 
             // Dispose coordinators
             _memoryCleanup.Dispose();
+			_backgroundTasks.Dispose();
             _previewWorkspaceController.Dispose();
 			_previewSearchController.Dispose();
             _searchFilterController.Dispose();
             _workspacePresentation.Dispose();
             _selectionCoordinator.Dispose();
+            _treeSelectionProfiles.Dispose();
             _themeBrushCoordinator.Dispose();
             _applicationUpdates.Dispose();
             _statusOperations.Dispose();

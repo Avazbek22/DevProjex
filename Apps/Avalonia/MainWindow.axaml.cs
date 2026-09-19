@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Avalonia.Platform.Storage;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.TerminalCommands;
 using AppViewSettings = DevProjex.Infrastructure.ThemePresets.AppViewSettings;
 
@@ -1090,6 +1091,7 @@ public partial class MainWindow : Window
             var exists = Directory.Exists(normalizedPath);
             return (
                 Exists: exists,
+                IsReparsePoint: exists && FileSystemRootEntryPolicy.IsReparsePoint(normalizedPath),
                 CanRead: exists && _scanOptions.CanReadRoot(normalizedPath));
         });
 
@@ -1106,7 +1108,19 @@ public partial class MainWindow : Window
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
+            if (rootAccess.IsReparsePoint)
+            {
+                _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "reparse-root");
+                await ShowErrorAsync(_localization["Msg.RootIsReparsePoint"]);
+                return false;
+            }
+
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "access-denied");
+            if (_elevation.IsAdministrator)
+            {
+                await ShowErrorAsync(_localization["Desktop.Error.AccessDenied"]);
+                return false;
+            }
             if (TryElevateAndRestart(normalizedPath))
                 return false;
 
@@ -1114,6 +1128,9 @@ public partial class MainWindow : Window
                 await ShowErrorAsync(_localization["Msg.AccessDeniedRoot"]);
             return false;
         }
+
+        if (_viewModel.IsProjectLoaded)
+            await _treeSelectionProfiles.FlushAsync(_windowLifetimeCts?.Token ?? CancellationToken.None);
 
         var projectLoadFinalization = BeginProjectLoadFinalization();
         var previousSourceType = _viewModel.ProjectSourceType;
@@ -1329,17 +1346,17 @@ public partial class MainWindow : Window
 
     private bool TryElevateAndRestart(string path)
     {
+        if (_elevation.IsAdministrator) return false;
+        if (_elevationAttempted) return false;
+
+        _elevationAttempted = true;
+
         if (!BuildFlags.AllowElevation)
         {
             // Store builds: never attempt elevation, just show a clear message.
             _ = ShowErrorAsync(_localization["Msg.AccessDeniedElevationRequired"]);
             return false;
         }
-
-        if (_elevation.IsAdministrator) return false;
-        if (_elevationAttempted) return false;
-
-        _elevationAttempted = true;
 
         var arguments = new[]
         {
@@ -1360,6 +1377,15 @@ public partial class MainWindow : Window
 
         _ = ShowInfoAsync(_localization["Msg.ElevationCanceled"]);
         return false;
+    }
+
+    private bool HandleBackgroundRootAccessDenied(string path)
+    {
+        var message = FileSystemRootEntryPolicy.IsReparsePoint(path)
+            ? _localization["Msg.RootIsReparsePoint"]
+            : _localization["Msg.AccessDeniedRoot"];
+        _ = ShowErrorAsync(message);
+        return true;
     }
 
     private async Task<bool> ReloadProjectAsync(
@@ -1393,24 +1419,37 @@ public partial class MainWindow : Window
         _projectLoadTiming = timing;
 #endif
 
-		PersistentSecretMarksSnapshot? persistentMarks = null;
-		if (applyStoredProfile)
-		{
-			var runtimeGitMode = _selectionCoordinator.ActiveGitFilteringMode;
+        PersistentSecretMarksSnapshot? persistentMarks = null;
+        ProjectProfileTreeSelection? profileTreeSelection = null;
+        if (applyStoredProfile)
+        {
+            var runtimeGitMode = _selectionCoordinator.ActiveGitFilteringMode;
 			var profileSnapshot = await LoadProjectProfileWithRetryAsync(
 				_currentPath,
 				cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
 
-			if (profileSnapshot is { HasProfile: true, Profile: not null })
+            if (profileSnapshot is { HasProfile: true, Profile: not null })
+            {
+                _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
+                if (!preserveTreeState)
+                {
+                    profileTreeSelection = new ProjectProfileTreeSelection(
+                        profileSnapshot.Profile.SelectedPaths);
+                }
+            }
+            else if (profileSnapshot.Status == ProjectProfileLookupStatus.Missing)
+            {
+                _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
+                if (!preserveTreeState)
+                    profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: null);
+            }
+			else if (profileSnapshot.Status == ProjectProfileLookupStatus.TemporarilyUnavailable &&
+			         !preserveTreeState)
 			{
-				_selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
+				profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: []);
 			}
-			else if (profileSnapshot.Status == ProjectProfileLookupStatus.Missing)
-			{
-				_selectionCoordinator.ResetProjectProfileSelections(_currentPath);
-			}
-			_selectionCoordinator.RestoreMomentaryGitFilteringMode(runtimeGitMode);
+            _selectionCoordinator.RestoreMomentaryGitFilteringMode(runtimeGitMode);
 
 			if (profileSnapshot is
 			    {
@@ -1423,27 +1462,19 @@ public partial class MainWindow : Window
 		}
 
 		return await _projectLoadSnapshotPipeline.ReloadAsync(
-			_currentPath,
-			preserveTreeState,
-			persistentMarks,
-			cancellationToken);
-	}
+            _currentPath,
+            preserveTreeState,
+            persistentMarks,
+            profileTreeSelection,
+            cancellationToken);
+    }
 
 	private async Task<ProjectProfileLoadSnapshot> LoadProjectProfileWithRetryAsync(
 		string projectPath,
 		CancellationToken cancellationToken)
 	{
-		var retryDelay = TimeSpan.FromMilliseconds(100);
-		while (true)
-		{
-			var snapshot = await _projectProfiles
-				.LoadSnapshotAsync(projectPath, cancellationToken);
-			if (snapshot.Status != ProjectProfileLookupStatus.TemporarilyUnavailable)
-				return snapshot;
-
-			await Task.Delay(retryDelay, cancellationToken);
-			retryDelay = TimeSpan.FromMilliseconds(Math.Min(retryDelay.TotalMilliseconds * 2, 1000));
-		}
+		return await _projectProfiles
+			.LoadSnapshotWithRetryAsync(projectPath, cancellationToken);
 	}
 
     /// <summary>
@@ -1883,6 +1914,9 @@ public partial class MainWindow : Window
             await AnimateSettingsPanelAsync(true);
     }
 
+    private static void ReportBackgroundTaskFailure(string operationName, Exception exception) =>
+		Debug.WriteLine($"[WARN] Background task '{operationName}' failed: {exception}");
+
     private static async void ObserveDetachedTask(Task task, string operationName)
     {
         try
@@ -1899,7 +1933,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[WARN] Background task '{operationName}' failed: {ex}");
+			ReportBackgroundTaskFailure(operationName, ex);
         }
     }
 
@@ -1958,11 +1992,14 @@ public partial class MainWindow : Window
         bool isGitMode,
         string? currentRepositoryUrl,
         string? currentBranch,
-        string? currentProjectDisplayName)
+		string? currentProjectDisplayName,
+		IReadOnlyList<LiveSessionRecord> liveSessions,
+		string? multipleSessionsText)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
             return MainWindowViewModel.BaseTitle;
 
+		string title;
         if (isGitMode && !string.IsNullOrEmpty(currentRepositoryUrl))
         {
             var displayRepositoryUrl = RepositoryWebPathPresentationService.NormalizeForDisplay(currentRepositoryUrl);
@@ -1974,24 +2011,43 @@ public partial class MainWindow : Window
             var branchDisplay = !string.IsNullOrEmpty(currentBranch)
                 ? $" [{currentBranch}]"
                 : string.Empty;
-            return $"{MainWindowViewModel.BaseTitle} - {displayRepositoryUrl}{branchDisplay}";
+			title = $"{MainWindowViewModel.BaseTitle} - {displayRepositoryUrl}{branchDisplay}";
         }
+		else
+		{
+			var displayPath = !string.IsNullOrEmpty(currentProjectDisplayName)
+				? currentProjectDisplayName
+				: currentPath;
+			title = $"{MainWindowViewModel.BaseTitle} - {displayPath}";
+		}
 
-        var displayPath = !string.IsNullOrEmpty(currentProjectDisplayName)
-            ? currentProjectDisplayName
-            : currentPath;
-
-        return $"{MainWindowViewModel.BaseTitle} - {displayPath}";
+		return liveSessions.Count switch
+		{
+			0 => title,
+			1 => $"{title} · Live context ({LiveSessionRegistry.FormatClientName(liveSessions[0].ClientName)})",
+			_ => $"{title} · Live context ({multipleSessionsText ?? liveSessions.Count.ToString(CultureInfo.InvariantCulture)})"
+		};
     }
 
     private void UpdateTitle()
     {
+		RefreshLiveSessionSnapshot();
+		ApplyWindowTitle();
+	}
+
+	private void ApplyWindowTitle()
+	{
+		var multipleSessionsText = _liveSessions.Count > 1
+			? _localization.Format("LiveContext.Title.Sessions", _liveSessions.Count)
+			: null;
         _viewModel.Title = BuildWindowTitle(
             _currentPath,
             _viewModel.IsGitMode,
             _currentRepositoryUrl,
             _viewModel.CurrentBranch,
-            _currentProjectDisplayName);
+			_currentProjectDisplayName,
+			_liveSessions,
+			multipleSessionsText);
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
@@ -2002,7 +2058,11 @@ public partial class MainWindow : Window
             _viewModel.IsGitMode,
             _currentRepositoryUrl,
             _viewModel.CurrentBranch,
-            _currentProjectDisplayName);
+			_currentProjectDisplayName,
+			_liveSessions,
+			_liveSessions.Count > 1
+				? _localization.Format("LiveContext.Title.Sessions", _liveSessions.Count)
+				: null);
         var totalElapsed = loadingElapsed + analysisElapsed;
         var timingSuffix =
             $"[{FormatSeconds(loadingElapsed)} + {FormatSeconds(analysisElapsed)} = {FormatSeconds(totalElapsed)}]";

@@ -1,4 +1,5 @@
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Application.Ranking;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -7,6 +8,32 @@ public enum AnalysisOutputFormat
 	Text,
 	Json
 }
+
+public enum SearchMode
+{
+	Text,
+	Regex,
+	Symbols
+}
+
+public enum SearchOutputFormat
+{
+	Text,
+	Json,
+	Markdown
+}
+
+public sealed record SearchCommandRequest(
+	string ProjectPath,
+	string Pattern,
+	ProjectSelectionSpec Selection,
+	SearchMode Mode,
+	int MaximumResults,
+	int SearchBodyCharacters,
+	SearchOutputFormat Format,
+	string? OutputPath,
+	TerminalOutputOptions Output,
+	string? RepositorySourceUrl = null);
 
 public sealed record AnalyzeCommandRequest(
 	string ProjectPath,
@@ -21,6 +48,17 @@ public sealed record AnalyzeCommandRequest(
 	int? TopFiles = null,
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null);
+
+public sealed record RelatedCommandRequest(
+	string ProjectPath,
+	string SeedPath,
+	ProjectSelectionSpec Selection,
+	DependencyDirection Direction,
+	AnalysisOutputFormat Format,
+	TerminalOutputOptions Output,
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null,
+	int Depth = 1);
 
 public sealed record TreeCommandRequest(
 	string ProjectPath,
@@ -42,6 +80,8 @@ public sealed record ExportContextCommandRequest(
 	bool DryRun,
 	long? MaximumEstimatedTokens,
 	TerminalOutputOptions Output,
+	ProjectContextRank? Rank = null,
+	IReadOnlyList<string>? Focus = null,
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null);
 

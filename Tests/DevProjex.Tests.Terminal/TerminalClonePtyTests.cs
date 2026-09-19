@@ -8,6 +8,48 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalClonePtyTests
 {
 	[Fact(Timeout = 120_000)]
+	public async Task ExplicitHttpsNetworkProfileOpensARealRemoteInTerminalWorkspace()
+	{
+		if (!string.Equals(
+			    Environment.GetEnvironmentVariable("DEVPROJEX_INTERNAL_HTTPS_TUI_PROBE"),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			Assert.Skip("Set DEVPROJEX_INTERNAL_HTTPS_TUI_PROBE=1 for the opt-in real-network probe.");
+			return;
+		}
+
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "HTTPS clone probe");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			"https://github.com/octocat/Hello-World",
+			TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForStableScreenAsync(
+			required: "DevProjex Terminal · Hello-World",
+			timeout: TimeSpan.FromSeconds(60),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("Hello-World", workspace, StringComparison.Ordinal);
+		Assert.Contains("https://github.com/octocat/Hello-World", workspace, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task SshCloneCannotPromptThroughTheParentPty()
 	{
 		if (OperatingSystem.IsWindows())
@@ -23,12 +65,13 @@ public sealed class TerminalClonePtyTests
 		var batchMarker = Path.Combine(
 			fakeTransportRoot.Path,
 			"batch-mode-observed");
+		var escapedBatchMarker = batchMarker.Replace("'", "'\"'\"'", StringComparison.Ordinal);
 		File.WriteAllText(
 			fakeSsh,
 			"#!/bin/sh\n" +
 			"case \" $* \" in\n" +
 			"  *\" -o BatchMode=yes \"*)\n" +
-			"    printf '%s' batch > \"$DPX_FAKE_SSH_BATCH_MARKER\"\n" +
+			$"    printf '%s' batch > '{escapedBatchMarker}'\n" +
 			"    exit 73\n" +
 			"    ;;\n" +
 			"esac\n" +
@@ -54,7 +97,6 @@ public sealed class TerminalClonePtyTests
 			environment: new Dictionary<string, string>
 			{
 				["PATH"] = fakeBin + Path.PathSeparator + inheritedPath,
-				["DPX_FAKE_SSH_BATCH_MARKER"] = batchMarker,
 				["GIT_SSH_COMMAND"] = "interactive-user-override",
 				["GIT_SSH_VARIANT"] = "simple"
 			},
@@ -113,7 +155,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -170,7 +213,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -241,7 +285,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -314,7 +359,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -423,7 +469,8 @@ public sealed class TerminalClonePtyTests
 			},
 			cancellationToken: TestContext.Current.CancellationToken,
 			initializeDataRoot: dataRoot => internalDataRoot = dataRoot,
-			useProgressCheckpointHost: true);
+			useProgressCheckpointHost: true,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",

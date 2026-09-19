@@ -548,6 +548,61 @@ public sealed class GitIgnoreSourceIoIntegrationTests
 			static node => node.Name.Equals("visible.cs", StringComparison.Ordinal));
 	}
 
+	[Fact]
+	public async Task RepositoryInfoExcludeLockedSourceFailsClosedWithPartialAccessDiagnostic()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Exclusive sharing is a Windows filesystem contract.");
+		using var temp = new TemporaryDirectory();
+		EnsureGitAvailable(temp.Path);
+		Assert.Equal(0, RunGit(temp.Path, "init", "--quiet"));
+		temp.CreateFile("visible.cs", "visible");
+		using var lockedSource = new FileStream(Path.Combine(temp.Path, ".git", "info", "exclude"),
+			FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+		var plan = await new ProjectContextPlanner(CreateProjectAnalysisService()).BuildAsync(
+			new ProjectContextRequest(temp.Path, new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.RespectGitIgnore, Exclusions: [])), TestContext.Current.CancellationToken);
+		Assert.Empty(plan.IncludedFiles);
+		Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code == "DPX-PROJECT-PARTIAL-ACCESS");
+	}
+
+	[Fact]
+	public async Task RepositoryInfoExcludePermissionDeniedFailsClosedOnUnix()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix permissions require a Unix filesystem.");
+			return;
+		}
+		using var temp = new TemporaryDirectory();
+		EnsureGitAvailable(temp.Path);
+		Assert.Equal(0, RunGit(temp.Path, "init", "--quiet"));
+		temp.CreateFile("visible.cs", "visible");
+		var source = Path.Combine(temp.Path, ".git", "info", "exclude");
+		var originalMode = File.GetUnixFileMode(source);
+		try
+		{
+			File.SetUnixFileMode(source, UnixFileMode.None);
+			try
+			{
+				using var readable = File.OpenRead(source);
+				Assert.Skip("This user can bypass Unix file permissions.");
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
+			var plan = await new ProjectContextPlanner(CreateProjectAnalysisService()).BuildAsync(
+				new ProjectContextRequest(temp.Path, new ProjectSelectionSpec(
+					GitMode: GitFilteringMode.RespectGitIgnore, Exclusions: [])), TestContext.Current.CancellationToken);
+			Assert.Empty(plan.IncludedFiles);
+			Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code == "DPX-PROJECT-PARTIAL-ACCESS");
+		}
+		finally
+		{
+			File.SetUnixFileMode(source, originalMode);
+		}
+	}
+
 	private static ProjectAnalysisService CreateProjectAnalysisService() =>
 		new(
 			new ScanOptionsUseCase(new FileSystemScanner()),

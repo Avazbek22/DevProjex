@@ -8,5 +8,6 @@ global using DevProjex.Kernel.Models;
 global using DevProjex.Terminal.CommandLine;
 global using DevProjex.Terminal.Execution;
 global using DevProjex.Terminal.Tui;
+global using DevProjex.Tests.Terminal.Host;
 global using DevProjex.Tests.Terminal.Progress;
 global using Xunit;

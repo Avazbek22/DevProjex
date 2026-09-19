@@ -17,7 +17,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
 
     public GitAdvancedScenariosTests()
     {
-        _gitService = new GitRepositoryService();
+        _gitService = new GitRepositoryService(allowFileTransportForTests: true);
         var testCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitAdvanced");
         _cacheService = new RepoCacheService(testCachePath);
         _tempDir = new TemporaryDirectory();

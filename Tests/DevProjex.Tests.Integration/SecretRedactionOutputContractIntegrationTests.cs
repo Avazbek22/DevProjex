@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Globalization;
+using System.Runtime.Versioning;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diagnostics;
@@ -83,6 +84,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			session,
 			ProjectCopyExportFormat.Zip);
 
+		// The format-aware JSON lexer no longer treats Password= inside a connection-string
+		// scalar as a second JSON property. The connection-password span preserves the same coverage.
 		Assert.Equal(10, preview.Redactions.Count);
 		Assert.Equal(10, preview.Redactions.Count(static span =>
 			span.State == SecretPreviewSpanState.Redacted));
@@ -1184,6 +1187,197 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			StringComparison.Ordinal);
 	}
 
+	public static IEnumerable<object[]> FileContentClassifications() =>
+		Enum.GetValues<FileContentClassification>().Select(static classification => new object[] { classification });
+
+	[Theory]
+	[MemberData(nameof(FileContentClassifications))]
+	public async Task EveryContentClassificationIsHandledExplicitlyAcrossRedactedOutputConsumers(
+		FileContentClassification classification)
+	{
+		const string sourceMarker = "classification-content-must-not-leak-when-unscannable";
+		const string sourceContent = sourceMarker + "\n";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("classification-project");
+		var sourcePath = PathUtility.Normalize(
+			temporary.CreateFile("classification-project/probe.txt", sourceContent));
+		var exportRoot = temporary.CreateDirectory("classification-exports");
+		var analyzer = new ClassifiedPathContentAnalyzer(
+			new FileContentAnalyzer(),
+			sourcePath,
+			classification);
+		using var session = new SecretRedactionSession(new NoFindingsDetector());
+		var redaction = new SecretRedactionContext(sourceRoot, session);
+		var transformation = new ContentTransformationContext(null, redaction);
+		var preparer = new SecretRedactionOutputPreparer(analyzer);
+
+		var expectedUnscannable = classification switch
+		{
+			FileContentClassification.Text => false,
+			FileContentClassification.Binary => false,
+			FileContentClassification.TooLarge => true,
+			FileContentClassification.Unreadable => true,
+			FileContentClassification.AccessDenied => true,
+			FileContentClassification.Missing => false,
+			FileContentClassification.UnsupportedEncoding => true,
+			_ => throw new InvalidOperationException($"Unhandled test classification: {classification}.")
+		};
+
+		if (classification == FileContentClassification.Missing)
+		{
+			await Assert.ThrowsAsync<SecretDetectionException>(async () =>
+			{
+				await using var ignored = await preparer.PrepareAsync(
+					transformation,
+					[sourcePath],
+					TestContext.Current.CancellationToken);
+			});
+			await Assert.ThrowsAsync<SecretDetectionException>(async () =>
+			{
+				using var ignored = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+					[sourcePath],
+					TestContext.Current.CancellationToken,
+					displayPathMapper: null,
+					includeOmissionMarkers: true,
+					transformationContext: redaction,
+					projectRoot: sourceRoot);
+			});
+			await Assert.ThrowsAsync<SecretDetectionException>(() =>
+				new SelectedContentExportService(analyzer).BuildAsync(
+					[sourcePath],
+					TestContext.Current.CancellationToken,
+					displayPathMapper: null,
+					transformationContext: redaction));
+			var copyException = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				ExportClassifiedProjectAsync(
+					sourceRoot,
+					sourcePath,
+					analyzer,
+					Path.Combine(exportRoot, "missing")));
+			Assert.Equal(ProjectCopyExportError.SecretDetectionFailed, copyException.Error);
+			return;
+		}
+
+		await using (var prepared = await preparer.PrepareAsync(
+			             transformation,
+			             [sourcePath],
+			             TestContext.Current.CancellationToken))
+		{
+			Assert.Equal(expectedUnscannable, prepared.GetFile(sourcePath).IsUnscannable);
+			Assert.Equal(
+				expectedUnscannable,
+				prepared.UnscannableFiles.Any(file => file.Classification == classification));
+		}
+
+		using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+			[sourcePath],
+			TestContext.Current.CancellationToken,
+			displayPathMapper: null,
+			includeOmissionMarkers: true,
+			transformationContext: redaction,
+			projectRoot: sourceRoot);
+		var previewText = preview!.GetLineRangeText(1, preview.LineCount);
+		var selectedText = await new SelectedContentExportService(analyzer).BuildAsync(
+			[sourcePath],
+			TestContext.Current.CancellationToken,
+			displayPathMapper: null,
+			transformationContext: redaction);
+		var readsBeforeCopy = analyzer.ReadFactCount;
+		var forcedReadsBeforeCopy = analyzer.ForcedReadFactCount;
+		var copy = await ExportClassifiedProjectAsync(
+			sourceRoot,
+			sourcePath,
+			analyzer,
+			Path.Combine(exportRoot, classification.ToString()));
+		Assert.True(
+			analyzer.ReadFactCount > readsBeforeCopy,
+			$"Copy preparation did not read the classified file; last read: {analyzer.LastReadFactPath ?? "<none>"}.");
+		if (classification != FileContentClassification.Text)
+		{
+			Assert.True(
+				analyzer.ForcedReadFactCount > forcedReadsBeforeCopy,
+				$"Copy preparation read '{analyzer.LastReadFactPath ?? "<none>"}' instead of '{sourcePath}'.");
+		}
+
+		if (classification == FileContentClassification.AccessDenied)
+		{
+			Assert.Contains("[Access denied while reading file]", previewText, StringComparison.Ordinal);
+			Assert.DoesNotContain(sourceMarker, previewText, StringComparison.Ordinal);
+			Assert.DoesNotContain(sourceMarker, selectedText, StringComparison.Ordinal);
+			Assert.Equal(
+				FileContentClassification.AccessDenied,
+				Assert.Single(copy.UnscannableFiles!).Classification);
+			Assert.False(File.Exists(Path.Combine(copy.DestinationPath, Path.GetFileName(sourcePath))));
+			var notice = await File.ReadAllTextAsync(
+				Path.Combine(copy.DestinationPath, ProjectCopyExportService.TransformationNoticeFileName),
+				TestContext.Current.CancellationToken);
+			Assert.Contains("probe.txt - access denied", notice, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	[UnsupportedOSPlatform("windows")]
+	public async Task ReadProtectedFileDegradesPerFileAcrossRedactedOutputConsumers()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Unix file modes provide the deterministic read-denial fixture for this test.");
+
+		const string sourceMarker = "protected-content-must-not-leak";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("protected-project");
+		var sourcePath = PathUtility.Normalize(
+			temporary.CreateFile("protected-project/probe.txt", sourceMarker + "\n"));
+		var exportRoot = temporary.CreateDirectory("protected-exports");
+		var originalMode = File.GetUnixFileMode(sourcePath);
+
+		try
+		{
+			File.SetUnixFileMode(sourcePath, UnixFileMode.None);
+			try
+			{
+				using var ignored = File.OpenRead(sourcePath);
+				Assert.Skip("The current account can still read a mode-000 file.");
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
+
+			var analyzer = new FileContentAnalyzer();
+			using var session = new SecretRedactionSession(new NoFindingsDetector());
+			var redaction = new SecretRedactionContext(sourceRoot, session);
+			using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+				[sourcePath],
+				TestContext.Current.CancellationToken,
+				displayPathMapper: null,
+				includeOmissionMarkers: true,
+				transformationContext: redaction,
+				projectRoot: sourceRoot);
+			var previewText = preview!.GetLineRangeText(1, preview.LineCount);
+			var selectedText = await new SelectedContentExportService(analyzer).BuildAsync(
+				[sourcePath],
+				TestContext.Current.CancellationToken,
+				displayPathMapper: null,
+				transformationContext: redaction);
+			var copy = await ExportClassifiedProjectAsync(
+				sourceRoot,
+				sourcePath,
+				analyzer,
+				Path.Combine(exportRoot, "copy"));
+
+			Assert.Contains("[Access denied while reading file]", previewText, StringComparison.Ordinal);
+			Assert.DoesNotContain(sourceMarker, previewText, StringComparison.Ordinal);
+			Assert.DoesNotContain(sourceMarker, selectedText, StringComparison.Ordinal);
+			Assert.Equal(
+				FileContentClassification.AccessDenied,
+				Assert.Single(copy.UnscannableFiles!).Classification);
+			Assert.False(File.Exists(Path.Combine(copy.DestinationPath, Path.GetFileName(sourcePath))));
+		}
+		finally
+		{
+			File.SetUnixFileMode(sourcePath, originalMode);
+		}
+	}
+
 	[Fact]
 	public async Task StripComments_RemovesACommentSecretBeforeDetectionAndKeepsModeCachesIsolated()
 	{
@@ -1270,6 +1464,168 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Equal(1, plain.DetectedCount);
 		Assert.Equal(1, stripped.DetectedCount);
 		Assert.Equal(1, detector.CallCount);
+	}
+
+	[Fact]
+	public async Task StripComments_PreservesSourceFindingWhenItsKeywordIsRemoved()
+	{
+		const string token = "pat7o9mw4c058sei5.bb075cee667b90855a4471502369a2bd7e93f38ba6aa8039a2527e577ca5793a";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("source-finding-project");
+		var path = temporary.CreateFile(
+			"source-finding-project/State.cs",
+			$"// airtable credential{Environment.NewLine}internal static class State {{ public const string Value = \"{token}\"; }}");
+		using var redactionSession = new SecretRedactionSession(new GitleaksSecretDetector());
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var context = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				sourceRoot,
+				compressionSession,
+				CodeTransformKinds.Comments),
+			new SecretRedactionContext(sourceRoot, redactionSession))!;
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		await using var compressionOnly = await preparer.PrepareAsync(
+			ContentTransformationContext.For(
+				new CodeCompressionContext(
+					sourceRoot,
+					compressionSession,
+					CodeTransformKinds.Comments),
+				redaction: null)!,
+			[path],
+			TestContext.Current.CancellationToken);
+		var transformedBeforeRedaction = await File.ReadAllTextAsync(
+			compressionOnly.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+
+		var analysis = await preparer.AnalyzeAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		await using var prepared = await preparer.PrepareAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		var output = await File.ReadAllTextAsync(
+			prepared.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, analysis.DetectedCount);
+		Assert.Equal(1, analysis.RedactedCount);
+		AssertExactReplacement(
+			transformedBeforeRedaction,
+			output,
+			token,
+			"DEVPROJEX_REDACTED[airtable-personnal-access-token#1]");
+		Assert.Equal(2, redactionSession.GetCacheDiagnostics().DetectionRuns);
+	}
+
+	[Fact]
+	public async Task StripComments_DetectsFindingCreatedByTransformation()
+	{
+		const string secret = "joined-secret-value-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("transformed-finding-project");
+		var path = temporary.CreateFile(
+			"transformed-finding-project/State.cs",
+			$"// removed detector context{Environment.NewLine}" +
+			$"internal static class State {{ public const string Value = \"{secret}\"; }}");
+		var detector = new ExactValueWhenMarkerAbsentDetector(secret, "removed detector context");
+		using var redactionSession = new SecretRedactionSession(detector);
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var compression = new CodeCompressionContext(
+			sourceRoot,
+			compressionSession,
+			CodeTransformKinds.Comments);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		await using var compressionOnly = await preparer.PrepareAsync(
+			ContentTransformationContext.For(compression, redaction: null)!,
+			[path],
+			TestContext.Current.CancellationToken);
+		var transformedBeforeRedaction = await File.ReadAllTextAsync(
+			compressionOnly.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+		var context = ContentTransformationContext.For(
+			compression,
+			new SecretRedactionContext(sourceRoot, redactionSession))!;
+
+		await using var prepared = await preparer.PrepareAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		var output = await File.ReadAllTextAsync(
+			prepared.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+
+		AssertExactReplacement(
+			transformedBeforeRedaction,
+			output,
+			secret,
+			"DEVPROJEX_REDACTED[exact-value#1]");
+		Assert.Equal(2, detector.CallCount);
+	}
+
+	[Fact]
+	public async Task StripComments_InvalidatesCombinedFindingsWhenOnlyRemovedSourceTextChanges()
+	{
+		const string token = "pat7o9mw4c058sei5.bb075cee667b90855a4471502369a2bd7e93f38ba6aa8039a2527e577ca5793a";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("source-fingerprint-project");
+		var path = temporary.CreateFile(
+			"source-fingerprint-project/State.cs",
+			$"// airtable{Environment.NewLine}" +
+			$"internal static class State {{ public const string Value = \"{token}\"; }}");
+		var originalTimestamp = File.GetLastWriteTimeUtc(path);
+		var originalLength = new FileInfo(path).Length;
+		using var redactionSession = new SecretRedactionSession(new GitleaksSecretDetector());
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var compression = new CodeCompressionContext(
+			sourceRoot,
+			compressionSession,
+			CodeTransformKinds.Comments);
+		var context = ContentTransformationContext.For(
+			compression,
+			new SecretRedactionContext(sourceRoot, redactionSession))!;
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		await using (var first = await preparer.PrepareAsync(
+			             context,
+			             [path],
+			             TestContext.Current.CancellationToken))
+		{
+			var output = await File.ReadAllTextAsync(
+				first.GetFile(path).ContentPath,
+				TestContext.Current.CancellationToken);
+			Assert.Contains(
+				"DEVPROJEX_REDACTED[airtable-personnal-access-token#1]",
+				output,
+				StringComparison.Ordinal);
+		}
+
+		await File.WriteAllTextAsync(
+			path,
+			$"// aaaaaaaa{Environment.NewLine}" +
+			$"internal static class State {{ public const string Value = \"{token}\"; }}",
+			TestContext.Current.CancellationToken);
+		File.SetLastWriteTimeUtc(path, originalTimestamp);
+		Assert.Equal(originalLength, new FileInfo(path).Length);
+		await using var second = await preparer.PrepareAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		var secondOutput = await File.ReadAllTextAsync(
+			second.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+		await using var compressionOnly = await preparer.PrepareAsync(
+			ContentTransformationContext.For(compression, redaction: null)!,
+			[path],
+			TestContext.Current.CancellationToken);
+		var transformedControl = await File.ReadAllTextAsync(
+			compressionOnly.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(transformedControl, secondOutput);
+		Assert.Contains(token, secondOutput, StringComparison.Ordinal);
+		Assert.Equal(3, redactionSession.GetCacheDiagnostics().DetectionRuns);
 	}
 
 	[Fact]
@@ -2416,6 +2772,44 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				cancellationToken: TestContext.Current.CancellationToken);
 	}
 
+	private static async Task<ProjectCopyExportResult> ExportClassifiedProjectAsync(
+		string sourceRoot,
+		string sourcePath,
+		IFileContentAnalyzer analyzer,
+		string destination)
+	{
+		using var session = new SecretRedactionSession(new NoFindingsDetector());
+		var tree = new TreeNodeDescriptor(
+			Path.GetFileName(sourceRoot),
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor(Path.GetFileName(sourcePath), sourcePath, false, false, "file", [])]);
+		return await new ProjectCopyExportService(
+				new ProjectCopyExportPlanBuilder(),
+				analyzer,
+				session)
+			.ExportAsync(
+				new ProjectCopyExportRequest(
+					sourceRoot,
+					"project",
+					tree,
+					new HashSet<string>(PathComparer.Default),
+					destination,
+					ProjectCopyExportFormat.Folder,
+					ProjectCopyDestinationMode.Exact,
+					RedactSecrets: true,
+					NoticeText: new ProjectCopyNoticeText(
+						"redaction applied",
+						"compression applied",
+						"files excluded",
+						"too large",
+						"unsupported encoding",
+						"access denied")),
+				cancellationToken: TestContext.Current.CancellationToken);
+	}
+
 	private static void AssertNoOutputLegends(IEnumerable<string> outputs)
 	{
 		Assert.All(outputs, output =>
@@ -2443,11 +2837,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "settings.json")));
 		var connection = File.ReadAllText(Path.Combine(result.DestinationPath, "config", "appsettings.json"));
 		AssertNoTextSecret(connection);
-		Assert.Contains(
-			"Host=db;Username=admin;Pass" +
-			"word=DEVPROJEX_REDACTED[connection-password#1];Database=app",
-			connection,
-			StringComparison.Ordinal);
+		AssertConnectionStringCoverage(connection);
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "service.txt")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "web.config")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, ".env")));
@@ -2485,11 +2875,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(ReadZipText(archive, "config/settings.json"));
 		var connection = ReadZipText(archive, "config/appsettings.json");
 		AssertNoTextSecret(connection);
-		Assert.Contains(
-			"Host=db;Username=admin;Pass" +
-			"word=DEVPROJEX_REDACTED[connection-password#1];Database=app",
-			connection,
-			StringComparison.Ordinal);
+		AssertConnectionStringCoverage(connection);
 		AssertNoTextSecret(ReadZipText(archive, "config/service.txt"));
 		AssertNoTextSecret(ReadZipText(archive, "config/web.config"));
 		AssertNoTextSecret(ReadZipText(archive, ".env"));
@@ -2522,6 +2908,18 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			item.FullName.EndsWith(suffix, StringComparison.Ordinal));
 		using var reader = new StreamReader(entry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
 		return reader.ReadToEnd();
+	}
+
+	private static void AssertConnectionStringCoverage(string content)
+	{
+		Assert.StartsWith(
+			"{\"ConnectionStrings\":{\"Main\":\"Host=db;Username=admin;Password=",
+			content,
+			StringComparison.Ordinal);
+		Assert.EndsWith("}}\n", content, StringComparison.Ordinal);
+		Assert.Equal(0, CountOccurrences(content, "DEVPROJEX_REDACTED[config-secret#1]"));
+		Assert.Equal(1, CountOccurrences(content, "DEVPROJEX_REDACTED[connection-password#1]"));
+		Assert.Contains(";Database=app", content, StringComparison.Ordinal);
 	}
 
 	private sealed class CategorizedExactValueDetector(
@@ -2631,6 +3029,30 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		for (var offset = 0; (offset = value.IndexOf(search, offset, StringComparison.Ordinal)) >= 0; offset += search.Length)
 			count++;
 		return count;
+	}
+
+	private static void AssertExactReplacement(
+		string transformedBeforeRedaction,
+		string actual,
+		string sensitiveValue,
+		string replacement)
+	{
+		var start = transformedBeforeRedaction.IndexOf(sensitiveValue, StringComparison.Ordinal);
+		Assert.True(
+			start >= 0,
+			$"The transformed control text must retain the asserted sensitive range. Actual: {transformedBeforeRedaction}");
+		Assert.Equal(
+			transformedBeforeRedaction[..start],
+			actual[..start]);
+		Assert.Equal(
+			transformedBeforeRedaction[(start + sensitiveValue.Length)..],
+			actual[(start + replacement.Length)..]);
+		Assert.Equal(
+			string.Concat(
+				transformedBeforeRedaction.AsSpan(0, start),
+				replacement,
+				transformedBeforeRedaction.AsSpan(start + sensitiveValue.Length)),
+			actual);
 	}
 
 	private static string NormalizeForClipboard(string text)
@@ -2778,6 +3200,97 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		{
 			Interlocked.Increment(ref _contentReadCount);
 			return inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+		}
+	}
+
+	private sealed class ClassifiedPathContentAnalyzer(
+		IFileContentAnalyzer inner,
+		string classifiedPath,
+		FileContentClassification classification) : IFileContentAnalyzer
+	{
+		private int _forcedReadFactCount;
+		private int _readFactCount;
+		private string? _lastReadFactPath;
+
+		public int ForcedReadFactCount => Volatile.Read(ref _forcedReadFactCount);
+		public int ReadFactCount => Volatile.Read(ref _readFactCount);
+		public string? LastReadFactPath => Volatile.Read(ref _lastReadFactPath);
+
+		private bool IsClassifiedPath(string path) => PathComparer.Default.Equals(path, classifiedPath);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? classification
+				: inner.ClassifyWithoutReading(path);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult(classification == FileContentClassification.TooLarge)
+				: inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult<TextFileMetrics?>(null)
+				: inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult<TextFileContent?>(null)
+				: inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult<TextFileContent?>(null)
+				: inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			IsClassifiedPath(path) && classification != FileContentClassification.Text
+				? ValueTask.FromResult(new FileContentReadResult(classification))
+				: inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _readFactCount);
+			Volatile.Write(ref _lastReadFactPath, path);
+			if (!IsClassifiedPath(path) || classification == FileContentClassification.Text)
+				return inner.ReadFactAsync(path, maxSizeForFullRead, cancellationToken);
+
+			Interlocked.Increment(ref _forcedReadFactCount);
+			return ValueTask.FromResult(new ContentReadFact(null, classification, null, null));
+		}
+	}
+
+	private sealed class ExactValueWhenMarkerAbsentDetector(string secret, string marker) : ISecretDetector
+	{
+		public int CallCount { get; private set; }
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default)
+		{
+			CallCount++;
+			if (content.Contains(marker, StringComparison.Ordinal))
+				return [];
+			var index = content.IndexOf(secret, StringComparison.Ordinal);
+			return index < 0
+				? []
+				: [new DetectedSecret("exact-value", index, secret.Length, secret, RuleOrder: 0)];
 		}
 	}
 

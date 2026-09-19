@@ -271,7 +271,7 @@ public partial class MainWindow
 				refreshGitBranches: !cachedUpdateFailed,
 				showSuccessToast: !cachedUpdateFailed);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             if (stagingPath is not null)
             {

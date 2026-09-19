@@ -1,4 +1,5 @@
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia;
 
@@ -77,15 +78,36 @@ public partial class MainWindow
 		}
 	}
 
-	private void PublishTreeSelectionChange()
-	{
-		_treeSelectionSnapshotCache.Invalidate();
-		if (CaptureGitScopePresentationRefreshContext() is not null)
-			BeginOrderedSelectionProjectionBuild(StatusOperationPresentation.ExtendedDelay);
-		InvalidateSecretRedactionCount();
+    private void PublishTreeSelectionChange()
+    {
+        _treeSelectionSnapshotCache.Invalidate();
+        ScheduleProfileSelectionPersistence();
+        if (CaptureGitScopePresentationRefreshContext() is not null)
+            BeginOrderedSelectionProjectionBuild(StatusOperationPresentation.ExtendedDelay);
+        InvalidateSecretRedactionCount();
 		ScheduleCompressionRefreshForSelectionChange();
         _metrics.ScheduleRecalculate();
         SchedulePreviewRefresh();
+    }
+
+    private void ScheduleProfileSelectionPersistence()
+    {
+        if (string.IsNullOrWhiteSpace(_currentPath) ||
+            _viewModel.TreeNodes.FirstOrDefault() is not { } root)
+        {
+            return;
+        }
+
+        _treeSelectionProfiles.Schedule(
+            _currentPath,
+            ProjectTreeUiState.CaptureProfileSelection(root));
+    }
+
+    private IReadOnlyCollection<string>? CaptureProfileSelectionFrontier()
+    {
+        return _viewModel.TreeNodes.FirstOrDefault() is { } root
+            ? ProjectTreeUiState.CaptureProfileSelection(root)
+            : null;
     }
 
     private void OnStatusOperationCancelRequested(

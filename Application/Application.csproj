@@ -12,5 +12,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
+    <InternalsVisibleTo Include="DevProjex.Mcp" />
   </ItemGroup>
 </Project>

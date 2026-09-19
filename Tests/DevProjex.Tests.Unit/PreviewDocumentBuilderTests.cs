@@ -929,11 +929,37 @@ public sealed class PreviewDocumentBuilderTests
 		using var analyzer = new CoordinatedFileContentAnalyzer(
 			coordinateFirstPair: Environment.ProcessorCount > 1);
 
-		using var document = await new PreviewDocumentBuilder(analyzer)
+		var operation = new PreviewDocumentBuilder(analyzer)
 			.BuildContentDocumentAsync(
 				paths,
 				TestContext.Current.CancellationToken,
 				Path.GetFileName);
+		var preparationStarted = Environment.ProcessorCount == 1;
+		try
+		{
+			if (!preparationStarted)
+			{
+				await WaitForConcurrentPreparationAsync(
+					analyzer.FirstPairReady,
+					operation,
+					TestContext.Current.CancellationToken);
+				preparationStarted = true;
+			}
+		}
+		finally
+		{
+			analyzer.Release();
+			try
+			{
+				await operation;
+			}
+			catch when (!preparationStarted)
+			{
+				// The coordination failure remains authoritative after pending work is drained.
+			}
+		}
+
+		using var document = await operation;
 
 		Assert.NotNull(document);
 		Assert.True(
@@ -942,6 +968,34 @@ public sealed class PreviewDocumentBuilderTests
 		Assert.Equal(
 			paths.OrderBy(static path => path, PathComparer.Default).Select(Path.GetFileName),
 			document.Sections.Select(static section => section.DisplayPath));
+	}
+
+	private static async Task WaitForConcurrentPreparationAsync(
+		Task firstPairReady,
+		Task operation,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			await Task.WhenAny(firstPairReady, operation)
+				.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+		}
+		catch (TimeoutException exception)
+		{
+			throw new TimeoutException(
+				$"Concurrent preview preparation did not start; operation status={operation.Status}; " +
+				$"pair status={firstPairReady.Status}.",
+				exception);
+		}
+
+		if (!firstPairReady.IsCompleted)
+		{
+			await operation;
+			throw new InvalidOperationException(
+				"Preview preparation completed before the second coordinated read started.");
+		}
+
+		await firstPairReady;
 	}
 
 	[Fact]
@@ -1238,35 +1292,54 @@ public sealed class PreviewDocumentBuilderTests
 	private sealed class CoordinatedFileContentAnalyzer(bool coordinateFirstPair)
 		: IFileContentAnalyzer, IDisposable
 	{
-		private readonly ManualResetEventSlim _firstPairReady = new(false);
+		private readonly TaskCompletionSource _firstPairReady =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly ManualResetEventSlim _release = new(false);
 		private int _active;
 		private int _firstPairArrivals;
 		private int _maximumConcurrency;
 
+		public Task FirstPairReady => _firstPairReady.Task;
 		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+		public void Release() => _release.Set();
 
 		public ValueTask<ContentReadFact> ReadFactAsync(
 			string path,
 			long maxSizeForFullRead,
 			CancellationToken cancellationToken = default)
 		{
+			if (!coordinateFirstPair)
+				return ValueTask.FromResult(ReadFact(path, cancellationToken));
+
+			return new ValueTask<ContentReadFact>(Task.Factory.StartNew(
+				() => ReadFact(path, cancellationToken),
+				cancellationToken,
+				TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+				TaskScheduler.Default));
+		}
+
+		private ContentReadFact ReadFact(string path, CancellationToken cancellationToken)
+		{
 			var active = Interlocked.Increment(ref _active);
 			UpdateMaximum(ref _maximumConcurrency, active);
 			try
 			{
-				if (coordinateFirstPair && Volatile.Read(ref _firstPairArrivals) < 2)
+				if (coordinateFirstPair)
 				{
-					if (Interlocked.Increment(ref _firstPairArrivals) >= 2)
-						_firstPairReady.Set();
-					if (!_firstPairReady.Wait(TimeSpan.FromSeconds(5), cancellationToken))
-						throw new TimeoutException("Parallel preview preparation did not start a second worker.");
+					var arrival = Interlocked.Increment(ref _firstPairArrivals);
+					if (arrival <= 2)
+					{
+						if (arrival == 2)
+							_firstPairReady.TrySetResult();
+						_release.Wait(cancellationToken);
+					}
 				}
 
 				var content = File.ReadAllText(path);
-				return ValueTask.FromResult(ContentReadFact.FromReadResult(
+				return ContentReadFact.FromReadResult(
 					new FileContentReadResult(
 						FileContentClassification.Text,
-						CreateTextContent(content))));
+						CreateTextContent(content)));
 			}
 			finally
 			{
@@ -1295,7 +1368,7 @@ public sealed class PreviewDocumentBuilderTests
 			CancellationToken cancellationToken = default) =>
 			throw new NotSupportedException();
 
-		public void Dispose() => _firstPairReady.Dispose();
+		public void Dispose() => _release.Dispose();
 
 		private static void UpdateMaximum(ref int target, int candidate)
 		{

@@ -1,0 +1,9 @@
+(namespace_declaration) @context.namespace
+(file_scoped_namespace_declaration) @context.namespace
+(using_directive) @context.using
+(class_declaration) @declaration.class
+(struct_declaration) @declaration.struct
+(interface_declaration) @declaration.interface
+(record_declaration) @declaration.record
+(enum_declaration) @declaration.enum
+(delegate_declaration) @declaration.delegate

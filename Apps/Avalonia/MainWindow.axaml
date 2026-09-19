@@ -218,6 +218,8 @@
                           UpdateOpenRepositoryRequested="OnUpdateOpenRepository"
                           AutomaticUpdateCheckChanged="OnAutomaticUpdateCheckChanged"
                           TerminalCommandSetupRequested="OnTerminalCommandSetup"
+                          McpConnectionRequested="OnMcpConnectionRequested"
+                          McpDocumentationRequested="OnMcpDocumentationRequested"
                           HelpCloseRequested="OnHelpClose"
                           LanguageRuRequested="OnLangRu"
                           LanguageEnRequested="OnLangEn"

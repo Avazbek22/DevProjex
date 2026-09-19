@@ -13,7 +13,8 @@ public sealed class ProjectTreeInventorySnapshot(
 	IReadOnlyList<ScopedGitIgnoreMatcher>? discoveredGitIgnoreMatchers = null,
 	IReadOnlyList<GitTrackedPathIndex>? discoveredGitTrackedPathIndexes = null,
 	bool hadScanFailure = false,
-	IReadOnlyList<string>? discoveredGitRepositoryRoots = null)
+	IReadOnlyList<string>? discoveredGitRepositoryRoots = null,
+	IReadOnlyList<ProjectControlFileIdentity>? observedControlFiles = null)
 {
 	public IReadOnlyList<ProjectTreeInventoryEntry> Entries => entries;
 	public bool RootAccessDenied { get; } = rootAccessDenied;
@@ -30,6 +31,9 @@ public sealed class ProjectTreeInventorySnapshot(
 
 	public IReadOnlyList<string> DiscoveredGitRepositoryRoots { get; } =
 		discoveredGitRepositoryRoots ?? [];
+
+	public IReadOnlyList<ProjectControlFileIdentity> ObservedControlFiles { get; } =
+		observedControlFiles ?? [];
 
 	public GitWorkspaceEvidence GitEvidence { get; } = new(
 		(discoveredGitRepositoryRoots?.Count ?? 0) > 0 ||
@@ -53,3 +57,9 @@ public sealed class ProjectTreeInventorySnapshot(
 		return CollectionsMarshal.AsSpan(entries).Slice(parent.FirstChildIndex, parent.ChildCount);
 	}
 }
+
+public readonly record struct ProjectControlFileIdentity(
+	string Path,
+	bool Exists,
+	long Length,
+	long LastWriteTimeUtcTicks);

@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using DevProjex.Application.Ranking;
 
 namespace DevProjex.Terminal.CommandLine;
 
@@ -7,6 +8,13 @@ internal enum CliTextJsonFormat
 {
 	Text,
 	Json
+}
+
+internal enum CliSearchOutputFormat
+{
+	Text,
+	Json,
+	Markdown
 }
 
 internal enum CliRecentKind
@@ -34,6 +42,13 @@ internal enum CliDeveloperScenario
 	Standard,
 	PreviewSearchRetention,
 	ProjectMemoryLifecycle
+}
+
+internal enum CliDependencyDirection
+{
+	Dependencies,
+	Dependents,
+	Both
 }
 
 internal enum CliProfileSource
@@ -108,6 +123,16 @@ internal static class CliChoiceSets
 		new("text", CliTextJsonFormat.Text),
 		new("json", CliTextJsonFormat.Json));
 
+	public static CliChoiceSet<CliSearchOutputFormat> SearchOutputFormat { get; } = new(
+		new("text", CliSearchOutputFormat.Text),
+		new("json", CliSearchOutputFormat.Json),
+		new("markdown", CliSearchOutputFormat.Markdown));
+
+	public static CliChoiceSet<CliDependencyDirection> DependencyDirection { get; } = new(
+		new("dependencies", CliDependencyDirection.Dependencies),
+		new("dependents", CliDependencyDirection.Dependents),
+		new("both", CliDependencyDirection.Both));
+
 	public static CliChoiceSet<CliRecentKind> RecentKind { get; } = new(
 		new("all", CliRecentKind.All),
 		new("folder", CliRecentKind.Folder),
@@ -126,6 +151,9 @@ internal static class CliChoiceSets
 			.Select(static descriptor =>
 				new CliChoiceSet<ProjectContextDocumentFormat>.Choice(descriptor.Token, descriptor.Id))
 			.ToArray());
+
+	public static CliChoiceSet<ProjectContextRank> ContextRank { get; } = new(
+		new CliChoiceSet<ProjectContextRank>.Choice("importance", ProjectContextRank.Importance));
 
 	public static CliChoiceSet<ProjectCopyExportFormat> ProjectExportFormat { get; } = new(
 		new("folder", ProjectCopyExportFormat.Folder),

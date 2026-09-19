@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.Git;
+using DevProjex.Mcp;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
 
@@ -122,8 +123,17 @@ internal sealed class TerminalProjectSourceResolver(
 			return false;
 		if (source.Contains("://", StringComparison.Ordinal))
 			return true;
-		if (Directory.Exists(source))
-			return false;
+		// The probe below exists to tell an existing directory from an scp-style remote, and it is
+		// the wrong question to ask of a path that names a host: opening one is what makes the
+		// operating system contact that host, and here that would happen before anything has
+		// decided what the string is. Such a form is settled from its spelling instead, by the same
+		// classifier the server-side resolver uses, so there is one place that decides this.
+		if (!McpRemoteProviderPath.ReachesRemoteProvider(source))
+		{
+			McpProjectPathProbe.Record();
+			if (Directory.Exists(source))
+				return false;
+		}
 		var colon = source.IndexOf(':');
 		return colon > 0 &&
 		       (source[..colon].Contains('@') || source[..colon].Contains('.'));

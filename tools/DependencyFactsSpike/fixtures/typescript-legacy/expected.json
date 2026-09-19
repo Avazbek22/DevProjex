@@ -1,0 +1,6 @@
+{
+  "name": "typescript-legacy",
+  "edges": [
+    { "source": "main.ts", "reference": "./value", "status": "Unresolved", "reasonContains": "legacy tsconfig" }
+  ]
+}

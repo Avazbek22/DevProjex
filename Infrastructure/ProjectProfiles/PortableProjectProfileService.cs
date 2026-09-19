@@ -8,7 +8,12 @@ namespace DevProjex.Infrastructure.ProjectProfiles;
 public sealed record PortableProfileValidationResult(
 	bool IsValid,
 	ProjectSelectionSpec? Selection,
-	IReadOnlyList<string> Errors);
+	IReadOnlyList<string> Errors,
+	int? SourceSchemaVersion = null);
+
+public sealed record PortableProfileLoadResult(
+	ProjectSelectionSpec Selection,
+	int SourceSchemaVersion);
 
 public sealed class PortableProjectProfileException(string code, string message, Exception? innerException = null)
 	: Exception(message, innerException)
@@ -18,8 +23,11 @@ public sealed class PortableProjectProfileException(string code, string message,
 
 public sealed class PortableProjectProfileService
 {
-	public const int CurrentSchemaVersion = 1;
+	public const int LegacySchemaVersion = 1;
+	public const int CurrentSchemaVersion = 2;
 	public const string DocumentKind = "devprojex-profile";
+	public const string LegacySchemaNotice =
+		"Portable profile uses legacy schema version 1 and will be rewritten as version 2 when saved.";
 	internal const long MaximumDocumentBytes = ProjectProfileStorageLimits.MaximumJsonBytes;
 
 	private static readonly JsonSerializerOptions ReadOptions = new()
@@ -38,6 +46,11 @@ public sealed class PortableProjectProfileService
 	};
 
 	public async Task<ProjectSelectionSpec> LoadAsync(
+		string path,
+		CancellationToken cancellationToken = default) =>
+		(await LoadWithMetadataAsync(path, cancellationToken).ConfigureAwait(false)).Selection;
+
+	public async Task<PortableProfileLoadResult> LoadWithMetadataAsync(
 		string path,
 		CancellationToken cancellationToken = default)
 	{
@@ -91,17 +104,19 @@ public sealed class PortableProjectProfileService
 		var document = ToDocument(selection);
 		try
 		{
+			var payload = JsonSerializer.SerializeToUtf8Bytes(document, WriteOptions);
+			if (payload.LongLength > MaximumDocumentBytes)
+			{
+				throw new PortableProjectProfileException(
+					"DPX-CLI-PROFILE-SELECTION-TOO-LARGE",
+					"Portable profile exceeds the document limit.");
+			}
 			var requestedPath = NormalizeProfilePath(path);
 			_ = ValidateSaveDestination(sourceRoot, requestedPath, overwrite);
 			return await AtomicFileOutput.WriteAsync(
 					requestedPath,
 					overwrite,
-					(stream, token) =>
-						JsonSerializer.SerializeAsync(
-							stream,
-							document,
-							WriteOptions,
-							token),
+					(stream, token) => stream.WriteAsync(payload, token).AsTask(),
 					cancellationToken,
 					candidate => ExactFileOutputDestinationPolicy.Resolve(
 						sourceRoot,
@@ -171,8 +186,12 @@ public sealed class PortableProjectProfileService
 	{
 		try
 		{
-			var selection = await LoadAsync(path, cancellationToken).ConfigureAwait(false);
-			return new PortableProfileValidationResult(true, selection, []);
+			var result = await LoadWithMetadataAsync(path, cancellationToken).ConfigureAwait(false);
+			return new PortableProfileValidationResult(
+				true,
+				result.Selection,
+				[],
+				result.SourceSchemaVersion);
 		}
 		catch (PortableProjectProfileException exception)
 		{
@@ -180,12 +199,12 @@ public sealed class PortableProjectProfileService
 		}
 	}
 
-	private static ProjectSelectionSpec ValidateAndConvert(
+	private static PortableProfileLoadResult ValidateAndConvert(
 		PortableProfileDocument? document,
 		string fullPath)
 	{
 		if (document is null ||
-		    document.SchemaVersion != CurrentSchemaVersion ||
+		    document.SchemaVersion is not LegacySchemaVersion and not CurrentSchemaVersion ||
 		    (document.Kind is not null &&
 		     !string.Equals(document.Kind, DocumentKind, StringComparison.Ordinal)) ||
 		    document.Selection is null)
@@ -193,6 +212,12 @@ public sealed class PortableProjectProfileService
 			throw new PortableProjectProfileException(
 				"DPX-CLI-PROFILE-INVALID",
 				"Portable profile schema is missing or unsupported.");
+		}
+		if (document.Selection.AdditionalProperties?.Keys.Any(IsUnrecognizedSecuritySetting) == true)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				"Portable profile contains an unrecognized security setting.");
 		}
 
 		if (!ProjectSelectionTokens.TryParseGitMode(document.Selection.GitMode, out var gitMode))
@@ -225,20 +250,33 @@ public sealed class PortableProjectProfileService
 				exclusions.Add(exclusion);
 		}
 
-		var selectedPaths = NormalizeSelectedPathsOrThrow(document.Selection.SelectedPaths);
+		var selectedPaths = document.Selection.SelectedPaths is null ||
+		                    document.SchemaVersion == LegacySchemaVersion &&
+		                    document.Selection.SelectedPaths.Count == 0
+			? null
+			: NormalizeSelectedPathsOrThrow(document.Selection.SelectedPaths);
 
-		return new ProjectSelectionSpec(
-			Roots: NormalizeRootNames(document.Selection.Roots),
-			Extensions: NormalizeExtensionNames(document.Selection.Extensions),
-			SelectedPaths: selectedPaths.Count == 0 ? null : selectedPaths,
-			GitMode: gitMode,
-			Exclusions: ProjectSelectionTokens.OrderExclusions(exclusions),
-			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
-			HidePrivateData: document.Selection.HidePrivateData ?? false,
-			CompressCode: document.Selection.CompressCode ?? false,
-			StripComments: document.Selection.StripComments ?? false,
-			StripBlankLines: document.Selection.StripBlankLines ?? false,
-			ProfileSource: new ProjectProfileReference(ProjectProfileSourceKind.Portable, fullPath));
+		return new PortableProfileLoadResult(
+			new ProjectSelectionSpec(
+				Roots: NormalizeRootNames(document.Selection.Roots),
+				Extensions: NormalizeExtensionNames(document.Selection.Extensions),
+				SelectedPaths: selectedPaths,
+				GitMode: gitMode,
+				Exclusions: ProjectSelectionTokens.OrderExclusions(exclusions),
+				HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
+				HidePrivateData: document.Selection.HidePrivateData ?? false,
+				CompressCode: document.Selection.CompressCode ?? false,
+				StripComments: document.Selection.StripComments ?? false,
+				StripBlankLines: document.Selection.StripBlankLines ?? false,
+				ProfileSource: new ProjectProfileReference(ProjectProfileSourceKind.Portable, fullPath)),
+			document.SchemaVersion);
+	}
+
+	private static bool IsUnrecognizedSecuritySetting(string name)
+	{
+		var normalized = string.Concat(name.Where(char.IsLetterOrDigit)).ToLowerInvariant();
+		return normalized.StartsWith("hidesecret", StringComparison.Ordinal) ||
+		       normalized.StartsWith("hideprivate", StringComparison.Ordinal);
 	}
 
 	private static PortableProfileDocument ToDocument(ProjectSelectionSpec selection)
@@ -256,7 +294,9 @@ public sealed class PortableProjectProfileService
 				"Momentary Git scopes cannot be saved in a portable profile.");
 		}
 
-		var selectedPaths = NormalizeSelectedPathsOrThrow(selection.SelectedPaths);
+		var selectedPaths = selection.SelectedPaths is null
+			? null
+			: NormalizeSelectedPathsOrThrow(selection.SelectedPaths);
 		return new PortableProfileDocument
 		{
 			SchemaVersion = CurrentSchemaVersion,
@@ -267,7 +307,7 @@ public sealed class PortableProjectProfileService
 					.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 					.ToArray(),
 				Extensions = selection.Extensions?.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
-				SelectedPaths = selectedPaths.ToArray(),
+				SelectedPaths = selectedPaths?.ToArray(),
 				GitMode = ProjectSelectionTokens.ToToken(selection.GitMode.Value),
 				Exclusions = ProjectSelectionTokens.OrderExclusions(selection.Exclusions)
 					.Select(ProjectSelectionTokens.ToToken)
@@ -363,7 +403,7 @@ public sealed class PortableProjectProfileService
 	{
 		public IReadOnlyList<string>? Roots { get; set; }
 		public IReadOnlyList<string>? Extensions { get; set; }
-		public IReadOnlyList<string> SelectedPaths { get; set; } = [];
+		public IReadOnlyList<string>? SelectedPaths { get; set; }
 		public string? GitMode { get; set; }
 		public IReadOnlyList<string> Exclusions { get; set; } = [];
 		public bool? HideSecrets { get; set; }

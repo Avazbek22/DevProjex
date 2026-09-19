@@ -399,19 +399,9 @@ public sealed class TerminalApplication
 	}
 
 	private TerminalServiceFactory CreateDefaultServiceFactory()
-	{
-		if (!environment.Variables.TryGetValue(
-			    InvocationEnvironment.InternalDataRootVariable,
-			    out var value) ||
-		    string.IsNullOrWhiteSpace(value) ||
-		    !Path.IsPathFullyQualified(value))
-		{
-			return new TerminalServiceFactory();
-		}
-
-		var dataRoot = Path.GetFullPath(value);
-		return new TerminalServiceFactory(() => dataRoot);
-	}
+		=> TerminalServiceFactory.FromEnvironment(
+			environment.Variables,
+			TerminalHostCapabilities.Desktop);
 
 	private static bool IsImplicitTuiInvocation(IReadOnlyList<string> arguments)
 	{

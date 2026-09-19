@@ -1,0 +1,2 @@
+class Beta:
+    pass

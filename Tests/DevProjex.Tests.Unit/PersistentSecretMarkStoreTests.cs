@@ -1,7 +1,32 @@
+using DevProjex.Infrastructure.Persistence;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class PersistentSecretMarkStoreTests
 {
+	[Fact]
+	public async Task BackupFailureAfterPrimaryCommitIsReportedAsSuccessfulWrite()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var operations = new JsonStoreWriteOperations(
+			static (source, destination, backup) => File.Replace(source, destination, backup),
+			static (_, _, _) => throw new IOException("backup unavailable"));
+		var store = new PersistentSecretMarkStore(
+			() => temporary.Path,
+			writeOperations: operations);
+
+		var write = await store.AddAsync(
+			project,
+			Mark(FirstHash, 12),
+			TestContext.Current.CancellationToken);
+		var loaded = await store.LoadAsync(project, TestContext.Current.CancellationToken);
+
+		Assert.True(write.Succeeded);
+		Assert.True(loaded.Succeeded);
+		Assert.Single(loaded.Snapshot!.Marks);
+	}
+
 	private const string FirstHash = "001122334455";
 	private const string SecondHash = "aabbccddeeff";
 	private const string V2Hash = "v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

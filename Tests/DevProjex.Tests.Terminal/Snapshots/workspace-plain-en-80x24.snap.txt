@@ -1,9 +1,9 @@
  DevProjex Terminal | <PROJECT>
  <PROJECT_ROOT>
 > PROJECT TREE
-v [x] <PROJECT>
-  > [x] src
-    [x] README.md
+v [ ] <PROJECT>
+  > [ ] src
+    [ ] README.md
 
 
 

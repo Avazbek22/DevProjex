@@ -3,6 +3,32 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfileStoreTests
 {
 	[Fact]
+	public void ExpectedRevisionRejectsAConcurrentProfileUpdate()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs"], []));
+		var observed = store.LookupProfile(project, TimeSpan.FromSeconds(1));
+		Assert.Equal(ProjectProfileLookupStatus.Found, observed.Status);
+		Assert.NotNull(observed.UpdatedUtc);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [".json"], []),
+			observed.UpdatedUtc.Value.AddMinutes(1)));
+
+		var stale = store.TrySaveProfileWithResult(
+			project,
+			new ProjectSelectionProfile([], [".md"], []),
+			observed.UpdatedUtc);
+
+		Assert.Equal(ProjectProfileSaveStatus.Conflict, stale.Status);
+		Assert.False(stale.Succeeded);
+		Assert.True(store.TryLoadProfile(project, out var current));
+		Assert.Equal([".json"], current.SelectedExtensions);
+	}
+
+	[Fact]
 	public void TrySaveProfilesWithResult_PersistsEveryProfileInOneBatch()
 	{
 		using var temporary = new TemporaryDirectory();
@@ -64,6 +90,62 @@ public sealed class ProjectProfileStoreTests
 			roots.OrderBy(static path => path, ProjectTreePathIdentity.CanonicalComparer),
 			loaded.SelectedRootFolders);
 		Assert.All(roots, root => Assert.True(loaded.RootFolderStates![root]));
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void SelectedPathsRoundTripPreservesImplicitAndExplicitEmptySelection(bool implicitSelection)
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		IReadOnlyCollection<string>? selectedPaths = implicitSelection ? null : [];
+
+		store.SaveProfile(
+			projectPath,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: selectedPaths));
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		if (implicitSelection)
+			Assert.Null(loaded.SelectedPaths);
+		else
+			Assert.Empty(Assert.IsAssignableFrom<IReadOnlyCollection<string>>(loaded.SelectedPaths));
+	}
+
+	[Fact]
+	public async Task ProfileWithoutSelectedPathsLoadsAsImplicitFullTree()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		var normalizedProjectPath = Path.GetFullPath(projectPath);
+		var escapedProjectPath = JsonSerializer.Serialize(normalizedProjectPath);
+		var updatedUtc = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+		var profilePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(profilePath)!);
+		await File.WriteAllTextAsync(
+			profilePath,
+			$$"""
+			{
+			  "schemaVersion": 3,
+			  "profiles": {
+			    {{escapedProjectPath}}: {
+			      "selectedRootFolders": [],
+			      "selectedExtensions": [],
+			      "selectedIgnoreOptions": [],
+			      "rootFolderStates": {},
+			      "extensionStates": {},
+			      "ignoreOptionStates": {},
+			      "updatedUtc": "{{updatedUtc}}"
+			    }
+			  }
+			}
+			""",
+			TestContext.Current.CancellationToken);
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Null(loaded.SelectedPaths);
 	}
 
 	[Fact]
@@ -307,7 +389,7 @@ public sealed class ProjectProfileStoreTests
 	}
 
 	[Fact]
-	public void TryLoadProfile_CorruptedJson_ReturnsFalseAndRecoversOnNextSave()
+	public void TryLoadProfile_CorruptedJson_ReturnsFalseAndRefusesDestructiveSave()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -315,7 +397,8 @@ public sealed class ProjectProfileStoreTests
 			var store = CreateStore(tempRoot);
 			var path = store.GetPath();
 			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-			File.WriteAllText(path, "{ this is not valid json");
+			const string corruptPayload = "{ this is not valid json";
+			File.WriteAllText(path, corruptPayload);
 
 			Assert.False(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out _));
 
@@ -323,12 +406,8 @@ public sealed class ProjectProfileStoreTests
 				SelectedRootFolders: ["src"],
 				SelectedExtensions: [".cs"],
 				SelectedIgnoreOptions: [IgnoreOptionId.HiddenFiles]);
-			store.SaveProfile(Path.Combine(tempRoot, "RepoA"), profile);
-
-			Assert.True(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out var loaded));
-			Assert.Single(loaded.SelectedRootFolders);
-			Assert.Single(loaded.SelectedExtensions);
-			Assert.Single(loaded.SelectedIgnoreOptions);
+			Assert.False(store.TrySaveProfile(Path.Combine(tempRoot, "RepoA"), profile));
+			Assert.Equal(corruptPayload, File.ReadAllText(path));
 		}
 		finally
 		{
@@ -435,6 +514,24 @@ public sealed class ProjectProfileStoreTests
 		{
 			Directory.Delete(tempRoot, recursive: true);
 		}
+	}
+
+	[Fact]
+	public void SaveProfile_ProjectPathWithUnicodeAndSpacesRoundTrips()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("проект с пробелами");
+		var store = CreateStore(temporary.Path);
+		var profile = new ProjectSelectionProfile(
+			SelectedRootFolders: ["исходники"],
+			SelectedExtensions: [".cs"],
+			SelectedIgnoreOptions: [],
+			SelectedPaths: ["исходники/Главный файл.cs"]);
+
+		store.SaveProfile(projectPath, profile);
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Equal(["исходники/Главный файл.cs"], loaded.SelectedPaths);
 	}
 
 	[Fact]

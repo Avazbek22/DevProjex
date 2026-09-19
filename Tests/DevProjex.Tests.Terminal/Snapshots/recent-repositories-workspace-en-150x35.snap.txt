@@ -1,9 +1,9 @@
  DevProjex Terminal · DevProjex [main]
  https://github.com/Avazbek22/DevProjex
 ┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
-│v [x] DevProjex                       ││DevProjex                                                             ││┌┤Content processing [ ] All (5) ──┐│
-│  > [x] src                           ││├── src                                                               │││[ ] Hide secrets                  ││
-│    [x] README.md                     │││   └── RepositoryMarker.cs                                           │││[ ] Hide private data             ││
+│v [ ] DevProjex                       ││DevProjex                                                             ││┌┤Content processing [ ] All (5) ──┐│
+│  > [ ] src                           ││├── src                                                               │││[ ] Hide secrets                  ││
+│    [ ] README.md                     │││   └── RepositoryMarker.cs                                           │││[ ] Hide private data             ││
 │                                      ││└── README.md                                                         │││[ ] Compress code                 ││
 │                                      ││                                                                      │││[ ] Strip comments                ││
 │                                      ││                                                                      │││[ ] Strip blank lines             ││

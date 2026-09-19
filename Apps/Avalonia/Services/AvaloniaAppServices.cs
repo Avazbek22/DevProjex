@@ -2,6 +2,7 @@ using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Application.Updates;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Application.DesktopControl;
 using DevProjex.Terminal.DesktopControl;
 
@@ -40,15 +41,19 @@ public sealed record AvaloniaAppServices(
     IFileContentAnalyzer FileContentAnalyzer,
     ProjectAnalysisService ProjectAnalysisService,
     IApplicationUpdateService ApplicationUpdateService,
+    IMcpConnectionService McpConnectionService,
+    IMcpClientLaunchService McpClientLaunchService,
     ITerminalCommandSetupService TerminalCommandSetupService,
     ITaskbarProgressService TaskbarProgressService,
     SessionMetricsRecorder SessionMetricsRecorder,
 	SecretRedactionSession SecretRedactionSession,
 	CodeCompressionSession CodeCompressionSession,
-	IProjectPathLauncher ProjectPathLauncher)
+	IProjectPathLauncher ProjectPathLauncher,
+    LiveSessionRegistry LiveSessionRegistry)
 {
 	internal Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
-		DesktopControlServerFactory { get; init; } = static (handler, projectPath, cancellationToken) =>
+        DesktopControlServerFactory
+    { get; init; } = static (handler, projectPath, cancellationToken) =>
 			DesktopControlServer.StartAsync(
 				handler,
 				projectPath,

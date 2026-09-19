@@ -435,6 +435,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					effectiveRules,
 					cancellationToken,
 					gitIgnoreLoadSession),
+				gitIgnoreLoadSession.GetObservedControlFiles(),
 				cancellationToken)
 			: null;
 		return new ScanResult<ProjectWorkspaceScanSnapshot>(
@@ -533,9 +534,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				if (PathComparer.Default.Equals(dirName, rules.ExcludedRootFolderName))
 					continue;
 
-				var directoryGitIgnore = useGitIgnore
-					? gitIgnoreContext.Evaluate(dir.FullPath, dir.RelativePath, isDirectory: true, dirName)
-					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				var directoryGitIgnore = gitIgnoreContext.Evaluate(dir.FullPath, dir.RelativePath, isDirectory: true, dirName);
 				if (ShouldSkipDirectoryByName(dirName, dir.FullPath, dir.IsHidden, rules, directoryGitIgnore))
 					continue;
 
@@ -613,9 +612,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
 	{
-		var gitIgnoreEvaluation = rules.IsGitIgnoreTraversalEnabled
-			? gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: true, name)
-			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+		var gitIgnoreEvaluation = gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: true, name);
 		var gitIgnoreCandidateEvaluation = rules.GitIgnoreCandidateMatchesActiveRules
 			? gitIgnoreEvaluation
 			: gitIgnoreCandidateContext.Evaluate(fullPath, relativePath, isDirectory: true, name);
@@ -649,8 +646,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	{
 		var isExtensionless = IsExtensionlessFileName(name);
 		var extensionStart = GetExtensionStart(name);
-		var gitIgnored = rules.IsGitIgnoreTraversalEnabled &&
-		                 gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: false, name).IsIgnored;
+		var gitIgnored = gitIgnoreContext.Evaluate(fullPath, relativePath, isDirectory: false, name).IsIgnored;
 		var gitIgnoredCandidate = rules.GitIgnoreCandidateMatchesActiveRules
 			? gitIgnored
 			: gitIgnoreCandidateContext
@@ -1046,9 +1042,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		var normalizedRootPath = rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 		var rootName = Path.GetFileName(normalizedRootPath);
-		var rootGitIgnore = useGitIgnore
-			? gitIgnoreContext.Evaluate(rootPath, string.Empty, isDirectory: true, rootName)
-			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+		var rootGitIgnore = gitIgnoreContext.Evaluate(rootPath, string.Empty, isDirectory: true, rootName);
 
 		// Selected root folders must obey the same directory-level rules as the tree itself.
 		// Otherwise a stale root selection (for example a dot-folder discovered before the
@@ -1132,7 +1126,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					directoryGitIgnoreCandidateContext,
 					cancellationToken,
 					loadSession: gitIgnoreLoadSession);
-				if (IsActiveGitIgnoreReadFailure(rules, gitIgnoreLoadStatus))
+				if (directoryGitIgnoreCandidateContext.IsOpaqueRepository(dir) &&
+				    PathComparer.Default.Equals(directoryGitIgnoreCandidateContext.GetOwningRepository(dir), dir))
+					gitIgnoreImpactCount++;
+				if (directoryGitIgnoreContext.IsOpaqueRepository(dir) && gitIgnoreLoadStatus != GitIgnoreMatcherLoadStatus.ReadFailure)
+					continue;
+				if (IsActiveGitIgnoreReadFailure(rules, gitIgnoreLoadStatus) ||
+				    directoryGitIgnoreContext.IsOpaqueRepository(dir) && gitIgnoreLoadStatus == GitIgnoreMatcherLoadStatus.ReadFailure)
 				{
 					directories.Add(new DirectoryScanNode(
 						dir,
@@ -1159,9 +1159,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					if (collectIgnoreOptionCounts)
 						AccumulateDirectoryIgnoreOptionCounts(sd, ref directoryCounts);
 
-					var directoryGitIgnore = useGitIgnore
-						? directoryGitIgnoreContext.Evaluate(sd.FullPath, sd.RelativePath, isDirectory: true, sd.Name)
-						: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+					var directoryGitIgnore = directoryGitIgnoreContext.Evaluate(sd.FullPath, sd.RelativePath, isDirectory: true, sd.Name);
 					var directoryGitIgnoreCandidate = rules.GitIgnoreCandidateMatchesActiveRules
 						? directoryGitIgnore
 						: directoryGitIgnoreCandidateContext.Evaluate(
@@ -1169,7 +1167,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 							sd.RelativePath,
 							isDirectory: true,
 							sd.Name);
-					if (directoryGitIgnoreCandidate.IsIgnored)
+					if (directoryGitIgnoreCandidate.IsIgnored && !directoryGitIgnoreCandidateContext.IsOpaqueRepository(dir))
 						gitIgnoreImpactCount++;
 					if (ShouldSkipDirectoryByName(sd.Name, sd.FullPath, sd.IsHidden, rules, directoryGitIgnore))
 						continue;
@@ -1254,15 +1252,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 							if (collectIgnoreOptionCounts)
 								AccumulateFileIgnoreOptionCounts(file, ref localState.Counts);
 
-							var fileGitIgnore = useGitIgnore
-								? directoryGitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
-								: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+							var fileGitIgnore = directoryGitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name);
 							var fileGitIgnoreCandidate = rules.GitIgnoreCandidateMatchesActiveRules
 								? fileGitIgnore.IsIgnored
 								: directoryGitIgnoreCandidateContext
 									.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
 									.IsIgnored;
-							if (fileGitIgnoreCandidate)
+							if (fileGitIgnoreCandidate && !directoryGitIgnoreCandidateContext.IsOpaqueRepository(dir))
 								localState.GitIgnoreImpactCount++;
 							if (ShouldSkipFileByName(
 								    file.Name,
@@ -1440,9 +1436,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				if (collectIgnoreOptionCounts)
 					AccumulateFileIgnoreOptionCounts(file, ref counts);
 
-				var fileGitIgnore = useGitIgnore
-					? gitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name)
-					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				var fileGitIgnore = gitIgnoreContext.Evaluate(file.FullPath, file.RelativePath, isDirectory: false, file.Name);
 				if (ShouldSkipFileByName(
 					    file.Name,
 					    file.FullPath,
@@ -2078,6 +2072,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					discovery.Value.DiscoveredGitIgnoreMatchers,
 					discovery.Value.DiscoveredGitTrackedPathIndexes,
 					discovery.Value.DiscoveredGitRepositoryRoots,
+					gitIgnoreLoadSession.GetObservedControlFiles(),
 					cancellationToken);
 			}
 
@@ -2117,6 +2112,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IReadOnlyList<ScopedGitIgnoreMatcher> discoveredGitIgnoreMatchers,
 		IReadOnlyList<GitTrackedPathIndex> discoveredGitTrackedPathIndexes,
 		IReadOnlyList<string> discoveredGitRepositoryRoots,
+		IReadOnlyList<ProjectControlFileIdentity> observedControlFiles,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -2153,7 +2149,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			discoveredGitIgnoreMatchers,
 			discoveredGitTrackedPathIndexes,
 			hadScanFailure,
-			discoveredGitRepositoryRoots);
+			discoveredGitRepositoryRoots,
+			observedControlFiles);
 
 		int AddDirectoryShell(int sourceIndex, int parentIndex)
 		{
@@ -2312,6 +2309,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool hadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> rootFileGitIgnoreMatchers,
 		GitTrackedPathIndex? rootTrackedPathIndex,
+		IReadOnlyList<ProjectControlFileIdentity> observedControlFiles,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -2413,7 +2411,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			discoveredGitIgnoreMatchers,
 			discoveredGitTrackedPathIndexes,
 			hadScanFailure,
-			discoveredGitRepositoryRoots);
+			discoveredGitRepositoryRoots,
+			observedControlFiles);
 	}
 
 	private static IReadOnlyList<string> MergeDiscoveredGitRepositoryRoots(
@@ -2833,11 +2832,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						cancellationToken,
 						captureFiles);
 					directoryFiles = captureFiles ? directoryBatch.Files : null;
-					if (!string.IsNullOrWhiteSpace(directoryBatch.GitMetadataPath))
-					{
-						discoveredGitRepositoryRoots.Add(facts.FullPath);
-						gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
-					}
 					(gitIgnoreContext, gitIgnoreCandidateContext, var gitIgnoreLoadStatus) = EnterGitIgnoreScope(
 						facts.FullPath,
 						facts.RelativePath,
@@ -2849,7 +2843,24 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						discoveredGitIgnoreMatchers,
 						discoveredGitTrackedPathIndexes,
 						gitIgnoreLoadSession);
-					if (IsActiveGitIgnoreReadFailure(effectiveRules, gitIgnoreLoadStatus))
+					if (!string.IsNullOrWhiteSpace(directoryBatch.GitMetadataPath) &&
+					    !gitIgnoreCandidateContext.IsOpaqueRepository(facts.FullPath))
+					{
+						discoveredGitRepositoryRoots.Add(facts.FullPath);
+						gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
+					}
+					if (gitIgnoreCandidateContext.IsOpaqueRepository(facts.FullPath))
+						directControllerImpactCounts = PathComparer.Default.Equals(
+							gitIgnoreCandidateContext.GetOwningRepository(facts.FullPath), facts.FullPath)
+							? new IgnoreControllerImpactCounts(GitIgnore: 1)
+							: IgnoreControllerImpactCounts.Empty;
+					if (gitIgnoreContext.IsOpaqueRepository(facts.FullPath))
+					{
+						directoryFiles = [];
+						canTraverseChildren = false;
+					}
+					if (IsActiveGitIgnoreReadFailure(effectiveRules, gitIgnoreLoadStatus) ||
+					    gitIgnoreContext.IsOpaqueRepository(facts.FullPath) && gitIgnoreLoadStatus == GitIgnoreMatcherLoadStatus.ReadFailure)
 					{
 							directories.Add(new EffectiveIgnoreScanNode(
 								facts.FullPath,
@@ -3266,6 +3277,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			if (visibilityState.BaseFinalVisible != visibilityState.EmptyFoldersFinalVisible)
 				effectiveCounts.EmptyFolders++;
 
+			// An opaque repository contributes its boundary once, even when the disabled
+			// GitIgnore filter lets the inventory enumerate its descendants.
+			if (node.GitIgnoreCandidateContext.IsOpaqueRepository(node.Path))
+			{
+				if (PathComparer.Default.Equals(node.GitIgnoreCandidateContext.GetOwningRepository(node.Path), node.Path))
+					controllerImpactCounts = controllerImpactCounts.Add(new IgnoreControllerImpactCounts(GitIgnore: 1));
+				continue;
+			}
 			controllerImpactCounts = controllerImpactCounts.Add(node.DirectControllerImpactCounts);
 			var smartIgnoreBaselineFiles = effectiveRules.IsGitIgnoreTraversalEnabled
 				? metrics.GitIgnoreVisibleFiles
@@ -3851,19 +3870,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		GitIgnoreMatcherLoadSession? loadSession = null)
 	{
 		loadSession ??= new GitIgnoreMatcherLoadSession();
-		var activeContainsScope = activeContext.ContainsScope(directoryPath);
-		var candidateContainsScope = candidateContext.ContainsScope(directoryPath);
-		ScopedGitIgnoreMatcher? scopedMatcher = null;
-		var loadStatus = GitIgnoreMatcherLoadStatus.NotFound;
-		if (!string.IsNullOrWhiteSpace(gitIgnorePath))
-		{
-			var loadResult = loadSession.LoadWithCancellation(
-				directoryPath,
-				gitIgnorePath,
-				cancellationToken);
-			scopedMatcher = loadResult.Matcher;
-			loadStatus = loadResult.Status;
-		}
+		if (candidateContext.IsOpaqueRepository(directoryPath))
+			return (activeContext, candidateContext, GitIgnoreMatcherLoadStatus.NotFound);
+		var loadResult = loadSession.LoadScope(directoryPath, gitIgnorePath, gitMetadataPath,
+			gitMetadataPath is null ? null : activeContext.GetOwningRepository(directoryPath), cancellationToken);
+		var scopedMatcher = loadResult.Matcher;
+		var loadStatus = loadResult.Status;
 
 		var requiresTrackedPathIndex =
 			activeContext.RequiresTrackedPathIndex ||
@@ -3871,7 +3883,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			scopedMatcher is not null &&
 			!ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty);
 		var reachedRepositoryBoundary = !string.IsNullOrWhiteSpace(gitMetadataPath);
-		if (requiresTrackedPathIndex && (reachedRepositoryBoundary || scopedMatcher is not null))
+		if (scopedMatcher?.IsOpaqueRepository != true && requiresTrackedPathIndex && (reachedRepositoryBoundary || scopedMatcher is not null))
 		{
 			GitTrackedPathIndex? trackedPathIndex = null;
 			var loadedTrackedPathIndex = reachedRepositoryBoundary
@@ -3879,11 +3891,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					directoryPath,
 					gitMetadataPath!,
 					cancellationToken,
-					out trackedPathIndex)
+					out trackedPathIndex,
+					out var observedControlFiles)
 				: GitTrackedPathIndexCache.TryLoadNearest(
 					directoryPath,
 					cancellationToken,
-					out trackedPathIndex);
+					out trackedPathIndex,
+					out observedControlFiles);
+			loadSession.Observe(observedControlFiles);
 			if (loadedTrackedPathIndex)
 			{
 				if (!activeContext.ContainsTrackedPathIndex(trackedPathIndex.RepositoryRootPath) ||
@@ -3916,12 +3931,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		discoveredMatchers?.Add(scopedMatcher);
 		return (
-			activeContainsScope
-				? activeContext
-				: activeContext.WithScope(scopedMatcher, directoryRelativePath),
-			candidateContainsScope
-				? candidateContext
-				: candidateContext.WithScope(scopedMatcher, directoryRelativePath),
+			activeContext.WithScope(scopedMatcher, directoryRelativePath),
+			candidateContext.WithScope(scopedMatcher, directoryRelativePath),
 			loadStatus);
 	}
 
@@ -3958,10 +3969,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (!activeContext.RequiresTrackedPathIndex && !candidateContext.RequiresTrackedPathIndex)
 			return (activeContext, candidateContext, null, ancestorScopes.LoadStatus);
 
-		if (!GitTrackedPathIndexCache.TryLoadNearest(
-			    scanRootPath,
-			    cancellationToken,
-			    out var trackedPathIndex))
+		var loadedTrackedPathIndex = GitTrackedPathIndexCache.TryLoadNearest(
+			scanRootPath,
+			cancellationToken,
+			out var trackedPathIndex,
+			out var observedControlFiles);
+		loadSession.Observe(observedControlFiles);
+		if (!loadedTrackedPathIndex)
 		{
 			return (activeContext, candidateContext, null, ancestorScopes.LoadStatus);
 		}

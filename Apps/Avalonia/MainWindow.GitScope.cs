@@ -99,9 +99,14 @@ public partial class MainWindow
 		var gitDiagnostics = diagnostics.Where(IsGitScopeDiagnostic).ToArray();
 		foreach (var diagnostic in gitDiagnostics)
 		{
-			var message = diagnostic.Code == GitScopeFilter.DeletedDiagnosticCode
-				? _localization.Format("Terminal.Diagnostic.GitStateDeleted", diagnostic.Count ?? 0)
-				: _localization["Terminal.Diagnostic.GitStateUnavailable"];
+			var message = diagnostic.Code switch
+			{
+				GitScopeFilter.DeletedDiagnosticCode =>
+					_localization.Format("Terminal.Diagnostic.GitStateDeleted", diagnostic.Count ?? 0),
+				GitScopeFilter.UnsafeFilterDiagnosticCode =>
+					_localization.Format("Terminal.Diagnostic.GitUnsafeFilter", diagnostic.Detail ?? "unknown"),
+				_ => _localization["Terminal.Diagnostic.GitStateUnavailable"]
+			};
 			_toastService.Show(message);
 		}
 		return gitDiagnostics.Any(static diagnostic =>
@@ -110,7 +115,8 @@ public partial class MainWindow
 
 	internal static bool IsGitScopeDiagnostic(ContextDiagnostic diagnostic) =>
 		diagnostic.Code is GitScopeFilter.DeletedDiagnosticCode or
-			GitScopeFilter.UnavailableDiagnosticCode;
+			GitScopeFilter.UnavailableDiagnosticCode or
+			GitScopeFilter.UnsafeFilterDiagnosticCode;
 
 	private void UpdateGitScopePresentationRefreshContext(
 		TreeRefreshInput input,

@@ -32,7 +32,7 @@ public enum PreviewWorkspaceMode
 
 public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    public const string TitleVersion = "5.1";
+    public const string TitleVersion = "5.2";
     public const string BaseTitle = "DevProjex v" + TitleVersion;
     public const double DefaultTreeFontSize = 15;
     public const double DefaultPreviewFontSize = 15;
@@ -87,6 +87,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private long? _compressionSourceCharacters;
 	private long? _compressionTransformedCharacters;
 	private bool _compressionPreparationActive;
+	private string? _compressionUnavailableReason;
 	private int? _commentStrippedFilesCount;
 	private int? _commentStripTotalFilesCount;
 	private bool _commentStripPreparationActive;
@@ -1705,6 +1706,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuCopyTree { get; private set; } = string.Empty;
     public string MenuCopyContent { get; private set; } = string.Empty;
     public string MenuCopyTreeAndContent { get; private set; } = string.Empty;
+    public string MenuMcp { get; private set; } = string.Empty;
+    public string MenuMcpLiveContext { get; private set; } = string.Empty;
+    public string MenuMcpDocumentation { get; private set; } = string.Empty;
+    public string MenuMcpOpenClaudeCode { get; private set; } = string.Empty;
+    public string MenuMcpOpenCodex { get; private set; } = string.Empty;
+    public string MenuMcpOpenCursor { get; private set; } = string.Empty;
+    public string MenuMcpOpenVsCode { get; private set; } = string.Empty;
+    public string MenuMcpOtherClients { get; private set; } = string.Empty;
     public ObservableCollection<ToastMessageViewModel> ToastItems { get; private set; } = [];
     public bool HasToastItems => ToastItems.Count > 0;
     public string MenuView { get; private set; } = string.Empty;
@@ -1901,6 +1910,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuCopyTree = _localization["Menu.Copy.Tree"];
         MenuCopyContent = _localization["Menu.Copy.Content"];
         MenuCopyTreeAndContent = _localization["Menu.Copy.TreeAndContent"];
+        MenuMcp = _localization["Menu.Mcp"];
+        MenuMcpLiveContext = _localization["Menu.Mcp.LiveContext"];
+        MenuMcpDocumentation = _localization["Menu.Mcp.Documentation"];
+        MenuMcpOpenClaudeCode = _localization["Menu.Mcp.OpenClaudeCode"];
+        MenuMcpOpenCodex = _localization["Menu.Mcp.OpenCodex"];
+        MenuMcpOpenCursor = _localization["Menu.Mcp.OpenCursor"];
+        MenuMcpOpenVsCode = _localization["Menu.Mcp.OpenVsCode"];
+        MenuMcpOtherClients = _localization["Menu.Mcp.OtherClients"];
         MenuView = _localization["Menu.View"];
         MenuViewExpandAll = _localization["Menu.View.ExpandAll"];
         MenuViewCollapseAll = _localization["Menu.View.CollapseAll"];
@@ -2085,6 +2102,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuCopyTree));
         RaisePropertyChanged(nameof(MenuCopyContent));
         RaisePropertyChanged(nameof(MenuCopyTreeAndContent));
+        RaisePropertyChanged(nameof(MenuMcp));
+        RaisePropertyChanged(nameof(MenuMcpLiveContext));
+        RaisePropertyChanged(nameof(MenuMcpDocumentation));
+        RaisePropertyChanged(nameof(MenuMcpOpenClaudeCode));
+        RaisePropertyChanged(nameof(MenuMcpOpenCodex));
+        RaisePropertyChanged(nameof(MenuMcpOpenCursor));
+        RaisePropertyChanged(nameof(MenuMcpOpenVsCode));
+        RaisePropertyChanged(nameof(MenuMcpOtherClients));
         RaisePropertyChanged(nameof(MenuView));
         RaisePropertyChanged(nameof(MenuViewExpandAll));
         RaisePropertyChanged(nameof(MenuViewCollapseAll));
@@ -2397,12 +2422,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		int? compressedFiles,
 		int? totalFiles,
 		long? sourceCharacters,
-		long? transformedCharacters)
+		long? transformedCharacters,
+		string? unavailableReason = null)
 	{
 		if (_compressedFilesCount == compressedFiles &&
 		    _compressionTotalFilesCount == totalFiles &&
 		    _compressionSourceCharacters == sourceCharacters &&
-		    _compressionTransformedCharacters == transformedCharacters)
+		    _compressionTransformedCharacters == transformedCharacters &&
+		    string.Equals(_compressionUnavailableReason, unavailableReason, StringComparison.Ordinal))
 		{
 			return;
 		}
@@ -2411,6 +2438,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		_compressionTotalFilesCount = totalFiles;
 		_compressionSourceCharacters = sourceCharacters;
 		_compressionTransformedCharacters = transformedCharacters;
+		_compressionUnavailableReason = unavailableReason;
 		UpdateSettingsCompressionNotice();
 	}
 
@@ -2581,6 +2609,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	{
 		var notice = _compressionPreparationActive
 			? _localization["Settings.Compression.Status.Scanning"]
+			: _compressionUnavailableReason is { Length: > 0 } unavailableReason
+				? _localization.Format("Compression.Status.Unavailable", unavailableReason)
 			: (_compressedFilesCount, _compressionTotalFilesCount) switch
 		{
 			(0, 0) => _localization["Settings.Compression.Status.NothingToCompress"],
