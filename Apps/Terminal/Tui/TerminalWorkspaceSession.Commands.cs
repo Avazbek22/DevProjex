@@ -162,6 +162,40 @@ internal sealed partial class TerminalWorkspaceSession
 		return ToggleCommandResult(string.Join(", ", command.Values), enabled);
 	}
 
+	internal TerminalWorkspaceCommandExecutionResult ExecuteSelectCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null || command.Enabled is not { } enabled || command.Values is null)
+			return InvalidCommandExecution();
+		try
+		{
+			var result = _state.SetSelection(command.Values, enabled);
+			if (result.ChangedNodes > 0)
+			{
+				RefreshWorkspace();
+				ScheduleSelectionProjection();
+				ScheduleLocalProfilePersistence();
+			}
+			var message = string.Format(
+				CultureInfo.CurrentCulture,
+				L("Terminal.Tui.Command.Select.Result"),
+				result.ChangedNodes,
+				result.MissingSelectors);
+			if (result.MissingSelectors > 0)
+			{
+				message += "\n[DPX-SELECTION-PATH-MISSING] " +
+					L("Terminal.Diagnostic.SelectedPathMissing");
+			}
+			return TerminalWorkspaceCommandExecutionResult.Success(message);
+		}
+		catch (Exception exception) when (exception is
+			ProjectRelativeGlobException or ProjectContextValidationException)
+		{
+			return TerminalWorkspaceCommandExecutionResult.Failure(
+				L("Terminal.Tui.Command.Select.Error.InvalidPattern"));
+		}
+	}
+
 	internal TerminalWorkspaceCommandExecutionResult ExecuteViewCommand(
 		TerminalWorkspaceCommand command)
 	{
@@ -381,18 +415,31 @@ internal sealed partial class TerminalWorkspaceSession
 			: TerminalWorkspaceCommandExecutionResult.Unavailable();
 	}
 
+	internal TerminalWorkspaceCommandExecutionResult ExecuteOpenCommand(
+		TerminalWorkspaceCommand command) => OpenProjectSource(command.Text);
+
 	internal TerminalWorkspaceCommandExecutionResult ExecuteProfileCommand(
 		TerminalWorkspaceCommand command)
 	{
-		if (command.Target != "save")
-			return InvalidCommandExecution();
-		if (!string.IsNullOrWhiteSpace(command.Text) && !IsValidProfileName(command.Text))
+		switch (command.Target)
 		{
-			return TerminalWorkspaceCommandExecutionResult.Failure(
-				L("Terminal.Tui.Command.Error.InvalidProfileName"));
+			case "save":
+				if (!string.IsNullOrWhiteSpace(command.Text) && !IsValidProfileName(command.Text))
+				{
+					return TerminalWorkspaceCommandExecutionResult.Failure(
+						L("Terminal.Tui.Command.Error.InvalidProfileName"));
+				}
+				SaveProfile(command.Text, originatedFromCommandLine: true);
+				return TerminalWorkspaceCommandExecutionResult.Deferred();
+			case "load":
+				return LoadProfile(command.Text);
+			case "show":
+				return ShowCurrentProfile();
+			case "reset":
+				return ResetCurrentProfile();
+			default:
+				return InvalidCommandExecution();
 		}
-		SaveProfile(command.Text, originatedFromCommandLine: true);
-		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteMcpCommand(
@@ -632,6 +679,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_screen == TerminalWorkspaceScreen.Welcome
 			? new([], new HashSet<TerminalWorkspaceCommandVerb>
 			{
+				TerminalWorkspaceCommandVerb.Open,
 				TerminalWorkspaceCommandVerb.Recent,
 				TerminalWorkspaceCommandVerb.Language,
 				TerminalWorkspaceCommandVerb.Help,
@@ -639,7 +687,8 @@ internal sealed partial class TerminalWorkspaceSession
 			})
 			: new(
 				_state?.Plan.AvailableExtensions ?? [],
-				WorkingDirectory: _state?.Plan.SourceRoot ?? Directory.GetCurrentDirectory());
+				WorkingDirectory: _state?.Plan.SourceRoot ?? Directory.GetCurrentDirectory(),
+				ProfileDirectory: ResolvePortableProfileDirectory());
 
 	private void OpenCommandLine(string initialText = "")
 	{
@@ -743,6 +792,7 @@ internal sealed partial class TerminalWorkspaceSession
 	private TerminalWorkspaceCommandExecutionResult ExecuteWelcomeCommand(TerminalWorkspaceCommand command) =>
 		command.Definition.Verb switch
 		{
+			TerminalWorkspaceCommandVerb.Open => ExecuteOpenCommand(command),
 			TerminalWorkspaceCommandVerb.Recent => ExecuteRecentCommand(command),
 			TerminalWorkspaceCommandVerb.Language => ExecuteLanguageCommand(command),
 			TerminalWorkspaceCommandVerb.Help => ExecuteHelpCommand(command),

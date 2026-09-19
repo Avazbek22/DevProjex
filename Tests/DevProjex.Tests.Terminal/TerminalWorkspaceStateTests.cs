@@ -231,6 +231,41 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void CommandSelectionUsesFolderSubtreesAndReportsMissingSelectors()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+
+		var result = state.SetSelection(["src", "missing path"], selected: true);
+
+		Assert.Equal(4, result.ChangedNodes);
+		Assert.Equal(1, result.MissingSelectors);
+		Assert.Equal(["src"], state.BuildSelectedRelativePaths());
+	}
+
+	[Fact]
+	public void CommandSelectionUsesSharedProjectRelativeGlobSyntax()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.SetSelection(["all"], selected: true);
+
+		var result = state.SetSelection(["src/*.cs"], selected: false);
+
+		Assert.Equal(4, result.ChangedNodes);
+		Assert.Equal(0, result.MissingSelectors);
+		Assert.Equal(["empty"], state.BuildSelectedRelativePaths());
+	}
+
+	[Fact]
+	public void CommandSelectionRejectsUnsafeGlobWithoutChangingState()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+
+		Assert.Throws<ProjectRelativeGlobException>(() =>
+			state.SetSelection(["../**/*.cs"], selected: true));
+		Assert.Null(state.BuildSelection().SelectedPaths);
+	}
+
+	[Fact]
 	public void EmptyDirectoryCanBeDeselectedAndReselected()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());
