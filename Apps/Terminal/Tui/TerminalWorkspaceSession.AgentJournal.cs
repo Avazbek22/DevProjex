@@ -84,10 +84,10 @@ internal sealed partial class TerminalWorkspaceSession
 				"The receipt destination already exists.").ConfigureAwait(false);
 		}
 		catch (Exception exception) when (exception is
-			       IOException or
-			       UnauthorizedAccessException or
-			       ArgumentException or
-			       NotSupportedException)
+				   IOException or
+				   UnauthorizedAccessException or
+				   ArgumentException or
+				   NotSupportedException)
 		{
 			await ShowAgentJournalErrorAsync(
 				"DPX-TUI-JOURNAL-UNAVAILABLE",

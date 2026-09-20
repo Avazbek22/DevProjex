@@ -56,12 +56,12 @@ internal sealed record TerminalAgentJournalSessionRow(AgentJournalSession Sessio
 			? duration.ToString("h\\:mm\\:ss", CultureInfo.InvariantCulture)
 			: duration.ToString("m\\:ss", CultureInfo.InvariantCulture);
 		return $"{TerminalTextEscaping.EscapeSingleLine(Session.Id)} | {started} | {client} | {mode} | " +
-		       $"{projects} | {Session.Totals.Calls.ToString(CultureInfo.InvariantCulture)} | " +
-		       $"{Session.Totals.ResultCharacters.ToString(CultureInfo.InvariantCulture)} | " +
-		       $"{Session.Totals.EstimatedTokens.ToString(CultureInfo.InvariantCulture)} | " +
-		       $"{Session.Totals.FilesDelivered.ToString(CultureInfo.InvariantCulture)} | " +
-		       $"{(Session.Totals.SecretsMasked + Session.Totals.PrivateDataMasked).ToString(CultureInfo.InvariantCulture)} | " +
-		       $"{formattedDuration} | {(Session.IsLive ? "yes" : "no")}";
+			   $"{projects} | {Session.Totals.Calls.ToString(CultureInfo.InvariantCulture)} | " +
+			   $"{Session.Totals.ResultCharacters.ToString(CultureInfo.InvariantCulture)} | " +
+			   $"{Session.Totals.EstimatedTokens.ToString(CultureInfo.InvariantCulture)} | " +
+			   $"{Session.Totals.FilesDelivered.ToString(CultureInfo.InvariantCulture)} | " +
+			   $"{(Session.Totals.SecretsMasked + Session.Totals.PrivateDataMasked).ToString(CultureInfo.InvariantCulture)} | " +
+			   $"{formattedDuration} | {(Session.IsLive ? "yes" : "no")}";
 	}
 }
 

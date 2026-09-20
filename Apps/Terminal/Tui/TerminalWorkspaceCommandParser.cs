@@ -897,14 +897,14 @@ internal sealed class TerminalWorkspaceCommandParser
 			1 when tokens.Count > 1 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) =>
 				new CompletionCandidateSource(McpLogTargets),
 			2 when tokens.Count > 2 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
-			                    string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
+								string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
 				new CompletionCandidateSource(ResolvePathCompletions(current, context.WorkingDirectory)),
 			3 when tokens.Count > 3 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
-			                    string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
+								string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
 				new CompletionCandidateSource(McpLogFormats, ["session", "last"]),
 			4 when tokens.Count > 4 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
-			                    string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) &&
-			                    Contains(McpLogFormats, tokens[4].Value) =>
+								string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) &&
+								Contains(McpLogFormats, tokens[4].Value) =>
 				new CompletionCandidateSource(["session", "last"]),
 			1 when tokens.Count > 1 && Contains(McpClients, tokens[1].Value) =>
 				new CompletionCandidateSource(McpModes),
