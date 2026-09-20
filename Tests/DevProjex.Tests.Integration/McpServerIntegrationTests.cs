@@ -134,10 +134,8 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("Outside.cs", empty, StringComparison.Ordinal);
 	}
 
-	[Theory]
-	[InlineData(false)]
-	[InlineData(true)]
-	public async Task LocalMarksUseConfiguredRootAcrossPhysicalAliases(bool live)
+	[Fact]
+	public async Task LiveContextUsesConfiguredRootMarksAsAuthoritativeAcrossPhysicalAliases()
 	{
 		using var workspace = new TemporaryDirectory();
 		var physicalProject = workspace.CreateDirectory("physical-project");
@@ -159,7 +157,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(
 			configuredProject,
 			workspace.Path,
-			live: live,
+			live: true,
 			rootRegistryFactory: roots => new McpRootRegistry(
 				roots,
 				(path, requireDirectory) => PathComparer.Default.Equals(
@@ -168,10 +166,9 @@ public sealed partial class McpServerIntegrationTests
 					? physicalProject
 					: McpRootRegistry.ResolvePhysicalExistingPath(path, requireDirectory)));
 
-		var arguments = new Dictionary<string, object?> { ["path"] = relativePath };
-		if (!live)
-			arguments["profile"] = "local";
-		var result = await server.CallAsync("get_file", arguments);
+		var result = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = relativePath });
 
 		Assert.NotEqual(true, result.IsError);
 		Assert.DoesNotContain(markedValue, AllText(result), StringComparison.Ordinal);
@@ -6918,10 +6915,10 @@ public sealed partial class McpServerIntegrationTests
 		var appData = Path.Combine(workspace.Path, "app-data");
 		var store = new ProjectProfileStore(() => appData);
 		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs", ".csproj"], [], SelectedPaths: null));
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
 		var firstRelated = await server.CallAsync(
 			"related_files",
-			new Dictionary<string, object?> { ["path"] = relativeConsumer, ["profile"] = "local" });
+			new Dictionary<string, object?> { ["path"] = relativeConsumer });
 		Assert.Contains(typeName, AllText(firstRelated), StringComparison.Ordinal);
 		await AddPersistentMarkAsync(
 			store,
@@ -6933,10 +6930,10 @@ public sealed partial class McpServerIntegrationTests
 
 		var file = await server.CallAsync(
 			"get_file",
-			new Dictionary<string, object?> { ["path"] = relativeConsumer, ["profile"] = "local" });
+			new Dictionary<string, object?> { ["path"] = relativeConsumer });
 		var related = await server.CallAsync(
 			"related_files",
-			new Dictionary<string, object?> { ["path"] = relativeConsumer, ["profile"] = "local" });
+			new Dictionary<string, object?> { ["path"] = relativeConsumer });
 
 		Assert.DoesNotContain(typeName, AllText(file), StringComparison.Ordinal);
 		Assert.DoesNotContain(typeName, AllText(related), StringComparison.Ordinal);

@@ -102,12 +102,9 @@ internal sealed class McpProjectService(
 		int? liveProfileRevision = null;
 		if (liveContext is null)
 		{
-			var profileLookupRoot = profileReference.Kind == ProjectProfileSourceKind.Local
-				? roots.ResolveConfiguredRoot(projectRoot)
-				: projectRoot;
 			selection = await services.SelectionResolver
 				.ResolveAsync(
-					profileLookupRoot,
+					projectRoot,
 					profileReference,
 					new ProjectSelectionSpec(
 						GitMode: baselineGitMode,
@@ -917,9 +914,7 @@ internal sealed class McpProjectService(
 				SecretRedactionFeatureSelection.Resolve(
 					hideSecrets: true,
 					hidePrivateData: IsPrivateDataHidden(plan)),
-				PersistentMarksAreAuthoritative:
-					liveContext is not null ||
-					plan.Selection.ProfileSource?.Kind == ProjectProfileSourceKind.Local))!;
+				PersistentMarksAreAuthoritative: liveContext is not null))!;
 	}
 
 	public string ResolveProtectedDocumentRoot(ProjectContextPlan plan)
