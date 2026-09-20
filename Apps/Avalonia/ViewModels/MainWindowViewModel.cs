@@ -45,7 +45,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly NotifyCollectionChangedEventHandler _extensionsChangedHandler;
     private readonly NotifyCollectionChangedEventHandler _recentFoldersChangedHandler;
     private readonly NotifyCollectionChangedEventHandler _recentRepositoriesChangedHandler;
-    private readonly NotifyCollectionChangedEventHandler _cachedRepositoriesChangedHandler;
+	private readonly NotifyCollectionChangedEventHandler _cachedRepositoriesChangedHandler;
     private bool _disposed;
 
     private string _title;
@@ -57,12 +57,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _searchQuery = string.Empty;
     private int _searchCurrentMatchIndex;
     private int _searchTotalMatches;
-    private bool _previewSearchVisible;
-    private string _previewSearchQuery = string.Empty;
-    private int _previewSearchCurrentMatchIndex;
-    private int _previewSearchTotalMatches;
-    private bool _previewSearchMatchesCapped;
-    private bool _isPreviewSearchInProgress;
+	private bool _previewSearchVisible;
+	private string _previewSearchQuery = string.Empty;
+	private int _previewSearchCurrentMatchIndex;
+	private int _previewSearchTotalMatches;
+	private bool _previewSearchMatchesCapped;
+	private bool _isPreviewSearchInProgress;
     private int _filterMatchCount;
     private string _nameFilter = string.Empty;
 
@@ -73,30 +73,30 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool _allExtensionsChecked;
     private bool _allIgnoreChecked;
-    private bool _allContentProcessingChecked;
-    private GitFilteringModeOptionViewModel? _selectedGitFilteringModeOption;
-    private bool _gitFilteringRepositoryAvailable;
-    private bool _isGitFilteringModeSelectorVisible;
-    internal bool IsRefreshingGitFilteringModes { get; private set; }
-    private IgnoreOptionViewModel? _hideSecretsOption;
-    private IgnoreOptionViewModel? _hidePrivateDataOption;
-    private ContentRedactionStatus _secretsRedactionStatus;
-    private ContentRedactionStatus _privateDataRedactionStatus;
-    private int? _compressedFilesCount;
-    private int? _compressionTotalFilesCount;
-    private long? _compressionSourceCharacters;
-    private long? _compressionTransformedCharacters;
-    private bool _compressionPreparationActive;
-    private string? _compressionUnavailableReason;
-    private int? _commentStrippedFilesCount;
-    private int? _commentStripTotalFilesCount;
-    private bool _commentStripPreparationActive;
-    private int? _blankLineStrippedFilesCount;
-    private int? _blankLineStripTotalFilesCount;
-    private bool _blankLineStripPreparationActive;
-    private bool _appliedCompressCodeEnabled;
-    private bool _appliedStripCommentsEnabled;
-    private bool _appliedStripBlankLinesEnabled;
+	private bool _allContentProcessingChecked;
+	private GitFilteringModeOptionViewModel? _selectedGitFilteringModeOption;
+	private bool _gitFilteringRepositoryAvailable;
+	private bool _isGitFilteringModeSelectorVisible;
+	internal bool IsRefreshingGitFilteringModes { get; private set; }
+	private IgnoreOptionViewModel? _hideSecretsOption;
+	private IgnoreOptionViewModel? _hidePrivateDataOption;
+	private ContentRedactionStatus _secretsRedactionStatus;
+	private ContentRedactionStatus _privateDataRedactionStatus;
+	private int? _compressedFilesCount;
+	private int? _compressionTotalFilesCount;
+	private long? _compressionSourceCharacters;
+	private long? _compressionTransformedCharacters;
+	private bool _compressionPreparationActive;
+	private string? _compressionUnavailableReason;
+	private int? _commentStrippedFilesCount;
+	private int? _commentStripTotalFilesCount;
+	private bool _commentStripPreparationActive;
+	private int? _blankLineStrippedFilesCount;
+	private int? _blankLineStripTotalFilesCount;
+	private bool _blankLineStripPreparationActive;
+	private bool _appliedCompressCodeEnabled;
+	private bool _appliedStripCommentsEnabled;
+	private bool _appliedStripBlankLinesEnabled;
     private bool _isDarkTheme = true;
     private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
@@ -139,9 +139,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _menuFileRecentEmpty = string.Empty;
     private string _menuFileOpenNewWindow = string.Empty;
     private string _gitCloneRecentRepositoriesLabel = string.Empty;
-    private bool _gitCloneCacheLoading;
-    private bool _gitCloneCacheManagementInProgress;
-    private RepositoryCacheEntryViewModel? _selectedGitCloneCacheEntry;
+	private bool _gitCloneCacheLoading;
+	private bool _gitCloneCacheManagementInProgress;
+	private RepositoryCacheEntryViewModel? _selectedGitCloneCacheEntry;
     private double _helpPopoverMaxWidth = 800;
     private double _helpPopoverMaxHeight = 680;
     private double _aboutPopoverMaxWidth = 520;
@@ -163,7 +163,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _statusProgressIsIndeterminate = true;
     private double _statusProgressValue;
     private bool _isProjectCopyExportInProgress;
-    private bool _isProjectLoadInProgress;
+	private bool _isProjectLoadInProgress;
 
     public MainWindowViewModel(LocalizationService localization, HelpContentProvider helpContentProvider)
     {
@@ -175,11 +175,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateLocalization();
 
         // Create named handlers for proper cleanup
-        _ignoreOptionsChangedHandler = (_, _) =>
-        {
-            SynchronizeIgnoreOptionSections();
-            UpdateAllCheckboxLabels();
-        };
+		_ignoreOptionsChangedHandler = (_, _) =>
+		{
+			SynchronizeIgnoreOptionSections();
+			UpdateAllCheckboxLabels();
+		};
         _extensionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
         _recentFoldersChangedHandler = (_, _) =>
         {
@@ -191,24 +191,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(HasRecentRepositories));
             RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
         };
-        _cachedRepositoriesChangedHandler = (_, _) =>
-        {
-            RaisePropertyChanged(nameof(HasCachedRepositories));
-            RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
-            RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
-        };
+		_cachedRepositoriesChangedHandler = (_, _) =>
+		{
+			RaisePropertyChanged(nameof(HasCachedRepositories));
+			RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
+			RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
+		};
 
         // Subscribe to collection changes to update "All" checkbox labels with counts
         IgnoreOptions.CollectionChanged += _ignoreOptionsChangedHandler;
         Extensions.CollectionChanged += _extensionsChangedHandler;
         RecentFolders.CollectionChanged += _recentFoldersChangedHandler;
         RecentRepositories.CollectionChanged += _recentRepositoriesChangedHandler;
-        CachedRepositories.CollectionChanged += _cachedRepositoriesChangedHandler;
+		CachedRepositories.CollectionChanged += _cachedRepositoriesChangedHandler;
         ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
     }
 
     private ObservableCollection<TreeNodeViewModel> _treeNodes = [];
-    private readonly ResettableObservableCollection<RepositoryCacheEntryViewModel> _cachedRepositories = [];
+	private readonly ResettableObservableCollection<RepositoryCacheEntryViewModel> _cachedRepositories = [];
 
     public ObservableCollection<TreeNodeViewModel> TreeNodes
     {
@@ -222,78 +222,78 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
     public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = new ResettableObservableCollection<SelectionOptionViewModel>();
     public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new ResettableObservableCollection<IgnoreOptionViewModel>();
-    public ObservableCollection<IgnoreOptionViewModel> PathIgnoreOptions { get; } =
-        new ResettableObservableCollection<IgnoreOptionViewModel>();
-    public ObservableCollection<IgnoreOptionViewModel> ContentProcessingOptions { get; } =
-        new ResettableObservableCollection<IgnoreOptionViewModel>();
-    public ObservableCollection<GitFilteringModeOptionViewModel> GitFilteringModes { get; } =
-        new ResettableObservableCollection<GitFilteringModeOptionViewModel>();
-    public GitFilteringModeOptionViewModel? SelectedGitFilteringModeOption
-    {
-        get => _selectedGitFilteringModeOption;
-        set
-        {
-            if (ReferenceEquals(_selectedGitFilteringModeOption, value)) return;
-            _selectedGitFilteringModeOption = value;
-            RaisePropertyChanged();
-        }
-    }
-    public bool IsGitFilteringModeSelectorVisible
-    {
-        get => _isGitFilteringModeSelectorVisible;
-        private set
-        {
-            if (_isGitFilteringModeSelectorVisible == value) return;
-            _isGitFilteringModeSelectorVisible = value;
-            RaisePropertyChanged();
-        }
-    }
-    public IgnoreOptionViewModel? HideSecretsOption
-    {
-        get => _hideSecretsOption;
-        private set
-        {
-            if (ReferenceEquals(_hideSecretsOption, value)) return;
-            _hideSecretsOption = value;
-            RaisePropertyChanged();
-            RaisePropertyChanged(nameof(HasHideSecretsOption));
-        }
-    }
-    public bool HasHideSecretsOption => HideSecretsOption is not null;
-    public IgnoreOptionViewModel? HidePrivateDataOption
-    {
-        get => _hidePrivateDataOption;
-        private set
-        {
-            if (ReferenceEquals(_hidePrivateDataOption, value)) return;
-            _hidePrivateDataOption = value;
-            RaisePropertyChanged();
-        }
-    }
-    public bool HasContentProcessingOptions => ContentProcessingOptions.Count > 0;
+	public ObservableCollection<IgnoreOptionViewModel> PathIgnoreOptions { get; } =
+		new ResettableObservableCollection<IgnoreOptionViewModel>();
+	public ObservableCollection<IgnoreOptionViewModel> ContentProcessingOptions { get; } =
+		new ResettableObservableCollection<IgnoreOptionViewModel>();
+	public ObservableCollection<GitFilteringModeOptionViewModel> GitFilteringModes { get; } =
+		new ResettableObservableCollection<GitFilteringModeOptionViewModel>();
+	public GitFilteringModeOptionViewModel? SelectedGitFilteringModeOption
+	{
+		get => _selectedGitFilteringModeOption;
+		set
+		{
+			if (ReferenceEquals(_selectedGitFilteringModeOption, value)) return;
+			_selectedGitFilteringModeOption = value;
+			RaisePropertyChanged();
+		}
+	}
+	public bool IsGitFilteringModeSelectorVisible
+	{
+		get => _isGitFilteringModeSelectorVisible;
+		private set
+		{
+			if (_isGitFilteringModeSelectorVisible == value) return;
+			_isGitFilteringModeSelectorVisible = value;
+			RaisePropertyChanged();
+		}
+	}
+	public IgnoreOptionViewModel? HideSecretsOption
+	{
+		get => _hideSecretsOption;
+		private set
+		{
+			if (ReferenceEquals(_hideSecretsOption, value)) return;
+			_hideSecretsOption = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(HasHideSecretsOption));
+		}
+	}
+	public bool HasHideSecretsOption => HideSecretsOption is not null;
+	public IgnoreOptionViewModel? HidePrivateDataOption
+	{
+		get => _hidePrivateDataOption;
+		private set
+		{
+			if (ReferenceEquals(_hidePrivateDataOption, value)) return;
+			_hidePrivateDataOption = value;
+			RaisePropertyChanged();
+		}
+	}
+	public bool HasContentProcessingOptions => ContentProcessingOptions.Count > 0;
     public ObservableCollection<FontFamily> FontFamilies { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentFolders { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentRepositories { get; } = [];
-    public ObservableCollection<RepositoryCacheEntryViewModel> CachedRepositories => _cachedRepositories;
+	public ObservableCollection<RepositoryCacheEntryViewModel> CachedRepositories => _cachedRepositories;
 
-    internal void ReplaceCachedRepositories(IEnumerable<RepositoryCacheEntryViewModel> entries)
-    {
-        var selectedPath = SelectedGitCloneCacheEntry?.LocalPath;
-        _cachedRepositories.ReplaceAll(entries);
-        if (selectedPath is null)
-            return;
+	internal void ReplaceCachedRepositories(IEnumerable<RepositoryCacheEntryViewModel> entries)
+	{
+		var selectedPath = SelectedGitCloneCacheEntry?.LocalPath;
+		_cachedRepositories.ReplaceAll(entries);
+		if (selectedPath is null)
+			return;
 
-        RepositoryCacheEntryViewModel? replacement = null;
-        for (var index = 0; index < _cachedRepositories.Count; index++)
-        {
-            var candidate = _cachedRepositories[index];
-            if (!PathComparer.Default.Equals(candidate.LocalPath, selectedPath))
-                continue;
-            replacement = candidate;
-            break;
-        }
-        SelectedGitCloneCacheEntry = replacement;
-    }
+		RepositoryCacheEntryViewModel? replacement = null;
+		for (var index = 0; index < _cachedRepositories.Count; index++)
+		{
+			var candidate = _cachedRepositories[index];
+			if (!PathComparer.Default.Equals(candidate.LocalPath, selectedPath))
+				continue;
+			replacement = candidate;
+			break;
+		}
+		SelectedGitCloneCacheEntry = replacement;
+	}
 
     public void ResetTreeNodes()
     {
@@ -447,7 +447,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(IsSearchAvailable));
             RaisePropertyChanged(nameof(IsSearchFilterAvailable));
-            RaisePropertyChanged(nameof(IsPreviewSearchAvailable));
+			RaisePropertyChanged(nameof(IsPreviewSearchAvailable));
             RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
             RaisePropertyChanged(nameof(CanApplySettings));
             RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
@@ -550,17 +550,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsProjectLoadInProgress
     {
         get => _isProjectLoadInProgress;
-        internal set
-        {
-            if (_isProjectLoadInProgress == value)
-                return;
+		internal set
+		{
+			if (_isProjectLoadInProgress == value)
+				return;
 
-            _isProjectLoadInProgress = value;
-            RaisePropertyChanged();
-            RaisePropertyChanged(nameof(CanApplySettings));
-            RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
-        }
-    }
+			_isProjectLoadInProgress = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(CanApplySettings));
+			RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
+		}
+	}
 
     public bool CanChangeProjectTree => !_isProjectCopyExportInProgress;
 
@@ -574,13 +574,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsSearchFilterAvailable => _isProjectLoaded && IsTreePaneVisible && !_isProjectCopyExportInProgress;
 
-    public bool IsPreviewSearchAvailable =>
-        _isProjectLoaded &&
-        IsPreviewPaneVisible &&
-        _selectedPreviewContentMode != PreviewContentMode.Tree;
+	public bool IsPreviewSearchAvailable =>
+		_isProjectLoaded &&
+		IsPreviewPaneVisible &&
+		_selectedPreviewContentMode != PreviewContentMode.Tree;
 
-    public bool AreFilterSettingsEnabled =>
-        _isProjectLoaded && !_isProjectCopyExportInProgress;
+	public bool AreFilterSettingsEnabled =>
+		_isProjectLoaded && !_isProjectCopyExportInProgress;
 
     public bool CanApplySettings => CanStartApplySettings;
 
@@ -620,13 +620,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     internal void CompleteApplySettings() => Interlocked.Exchange(ref _applySettingsInProgress, 0);
 
     private bool CanStartApplySettings =>
-        _isProjectLoaded && !_applySettingsBusyDelayElapsed && !_isProjectCopyExportInProgress &&
-        !_isProjectLoadInProgress;
+		_isProjectLoaded && !_applySettingsBusyDelayElapsed && !_isProjectCopyExportInProgress &&
+		!_isProjectLoadInProgress;
 
     private bool CanStartApplySettingsWork(StatusOperationType activeOperationType) =>
         _isProjectLoaded &&
         !_isProjectCopyExportInProgress &&
-        !_isProjectLoadInProgress &&
+		!_isProjectLoadInProgress &&
         activeOperationType is StatusOperationType.None or
             StatusOperationType.MetricsCalculation or
             StatusOperationType.SelectionRefresh or
@@ -727,50 +727,50 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SearchMatchSummaryText => $"({_searchCurrentMatchIndex} / {_searchTotalMatches})";
 
-    public bool PreviewSearchVisible
-    {
-        get => _previewSearchVisible;
-        set
-        {
-            if (_previewSearchVisible == value) return;
-            _previewSearchVisible = value;
-            RaisePropertyChanged();
-            RaisePropertyChanged(nameof(PreviewSearchMatchSummaryVisible));
-        }
-    }
+	public bool PreviewSearchVisible
+	{
+		get => _previewSearchVisible;
+		set
+		{
+			if (_previewSearchVisible == value) return;
+			_previewSearchVisible = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(PreviewSearchMatchSummaryVisible));
+		}
+	}
 
-    public string PreviewSearchQuery
-    {
-        get => _previewSearchQuery;
-        set
-        {
-            if (_previewSearchQuery == value) return;
-            _previewSearchQuery = value;
-            RaisePropertyChanged();
-            RaisePropertyChanged(nameof(PreviewSearchMatchSummaryVisible));
-        }
-    }
+	public string PreviewSearchQuery
+	{
+		get => _previewSearchQuery;
+		set
+		{
+			if (_previewSearchQuery == value) return;
+			_previewSearchQuery = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(PreviewSearchMatchSummaryVisible));
+		}
+	}
 
-    public int PreviewSearchCurrentMatchIndex => _previewSearchCurrentMatchIndex;
+	public int PreviewSearchCurrentMatchIndex => _previewSearchCurrentMatchIndex;
 
-    public int PreviewSearchTotalMatches => _previewSearchTotalMatches;
+	public int PreviewSearchTotalMatches => _previewSearchTotalMatches;
 
-    public bool PreviewSearchMatchesCapped => _previewSearchMatchesCapped;
+	public bool PreviewSearchMatchesCapped => _previewSearchMatchesCapped;
 
-    public bool IsPreviewSearchInProgress => _isPreviewSearchInProgress;
+	public bool IsPreviewSearchInProgress => _isPreviewSearchInProgress;
 
-    public bool PreviewSearchMatchSummaryVisible =>
-        _previewSearchVisible && !string.IsNullOrWhiteSpace(_previewSearchQuery);
+	public bool PreviewSearchMatchSummaryVisible =>
+		_previewSearchVisible && !string.IsNullOrWhiteSpace(_previewSearchQuery);
 
-    public string PreviewSearchMatchSummaryText
-    {
-        get
-        {
-            var current = _previewSearchCurrentMatchIndex.ToString("N0", CultureInfo.CurrentCulture);
-            var total = _previewSearchTotalMatches.ToString("N0", CultureInfo.CurrentCulture);
-            return $"({current} / {total}{(_previewSearchMatchesCapped ? "+" : string.Empty)})";
-        }
-    }
+	public string PreviewSearchMatchSummaryText
+	{
+		get
+		{
+			var current = _previewSearchCurrentMatchIndex.ToString("N0", CultureInfo.CurrentCulture);
+			var total = _previewSearchTotalMatches.ToString("N0", CultureInfo.CurrentCulture);
+			return $"({current} / {total}{(_previewSearchMatchesCapped ? "+" : string.Empty)})";
+		}
+	}
 
     public string NameFilter
     {
@@ -968,7 +968,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(IsPreviewTreeSelected));
             RaisePropertyChanged(nameof(IsPreviewContentSelected));
             RaisePropertyChanged(nameof(IsPreviewTreeAndContentSelected));
-            RaisePropertyChanged(nameof(IsPreviewSearchAvailable));
+			RaisePropertyChanged(nameof(IsPreviewSearchAvailable));
             RaisePropertyChanged(nameof(PreviewCopyCurrentModeTooltip));
         }
     }
@@ -1178,7 +1178,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(IsPreviewOnlyMode));
         RaisePropertyChanged(nameof(IsSearchAvailable));
         RaisePropertyChanged(nameof(IsSearchFilterAvailable));
-        RaisePropertyChanged(nameof(IsPreviewSearchAvailable));
+		RaisePropertyChanged(nameof(IsPreviewSearchAvailable));
         RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
     }
 
@@ -1323,8 +1323,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(CanStartGitClone));
             RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
-            RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
-            RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
+			RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
+			RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
         }
     }
 
@@ -1351,42 +1351,42 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public RepositoryCacheEntryViewModel? SelectedGitCloneCacheEntry
-    {
-        get => _selectedGitCloneCacheEntry;
-        set
-        {
-            if (ReferenceEquals(_selectedGitCloneCacheEntry, value)) return;
-            _selectedGitCloneCacheEntry = value;
-            RaisePropertyChanged();
-            RaisePropertyChanged(nameof(CanStartGitClone));
-        }
-    }
+	public RepositoryCacheEntryViewModel? SelectedGitCloneCacheEntry
+	{
+		get => _selectedGitCloneCacheEntry;
+		set
+		{
+			if (ReferenceEquals(_selectedGitCloneCacheEntry, value)) return;
+			_selectedGitCloneCacheEntry = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(CanStartGitClone));
+		}
+	}
 
-    public bool GitCloneCacheLoading
-    {
-        get => _gitCloneCacheLoading;
-        set
-        {
-            if (_gitCloneCacheLoading == value) return;
-            _gitCloneCacheLoading = value;
-            RaisePropertyChanged();
-            RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
-            RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
-        }
-    }
+	public bool GitCloneCacheLoading
+	{
+		get => _gitCloneCacheLoading;
+		set
+		{
+			if (_gitCloneCacheLoading == value) return;
+			_gitCloneCacheLoading = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
+			RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
+		}
+	}
 
-    public bool GitCloneCacheManagementInProgress
-    {
-        get => _gitCloneCacheManagementInProgress;
-        set
-        {
-            if (_gitCloneCacheManagementInProgress == value) return;
-            _gitCloneCacheManagementInProgress = value;
-            RaisePropertyChanged();
-            RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
-        }
-    }
+	public bool GitCloneCacheManagementInProgress
+	{
+		get => _gitCloneCacheManagementInProgress;
+		set
+		{
+			if (_gitCloneCacheManagementInProgress == value) return;
+			_gitCloneCacheManagementInProgress = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
+		}
+	}
 
     public double HelpPopoverMaxWidth
     {
@@ -1568,40 +1568,40 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(SearchMatchSummaryVisible));
     }
 
-    public void UpdatePreviewSearchMatchSummary(
-        int currentIndex,
-        int totalMatches,
-        bool matchesCapped)
-    {
-        var normalizedTotal = Math.Max(0, totalMatches);
-        var normalizedCurrent = normalizedTotal == 0
-            ? 0
-            : Math.Clamp(currentIndex, 1, normalizedTotal);
-        if (_previewSearchCurrentMatchIndex == normalizedCurrent &&
-            _previewSearchTotalMatches == normalizedTotal &&
-            _previewSearchMatchesCapped == matchesCapped)
-        {
-            return;
-        }
+	public void UpdatePreviewSearchMatchSummary(
+		int currentIndex,
+		int totalMatches,
+		bool matchesCapped)
+	{
+		var normalizedTotal = Math.Max(0, totalMatches);
+		var normalizedCurrent = normalizedTotal == 0
+			? 0
+			: Math.Clamp(currentIndex, 1, normalizedTotal);
+		if (_previewSearchCurrentMatchIndex == normalizedCurrent &&
+		    _previewSearchTotalMatches == normalizedTotal &&
+		    _previewSearchMatchesCapped == matchesCapped)
+		{
+			return;
+		}
 
-        _previewSearchCurrentMatchIndex = normalizedCurrent;
-        _previewSearchTotalMatches = normalizedTotal;
-        _previewSearchMatchesCapped = matchesCapped;
-        RaisePropertyChanged(nameof(PreviewSearchCurrentMatchIndex));
-        RaisePropertyChanged(nameof(PreviewSearchTotalMatches));
-        RaisePropertyChanged(nameof(PreviewSearchMatchesCapped));
-        RaisePropertyChanged(nameof(PreviewSearchMatchSummaryText));
-        RaisePropertyChanged(nameof(PreviewSearchMatchSummaryVisible));
-    }
+		_previewSearchCurrentMatchIndex = normalizedCurrent;
+		_previewSearchTotalMatches = normalizedTotal;
+		_previewSearchMatchesCapped = matchesCapped;
+		RaisePropertyChanged(nameof(PreviewSearchCurrentMatchIndex));
+		RaisePropertyChanged(nameof(PreviewSearchTotalMatches));
+		RaisePropertyChanged(nameof(PreviewSearchMatchesCapped));
+		RaisePropertyChanged(nameof(PreviewSearchMatchSummaryText));
+		RaisePropertyChanged(nameof(PreviewSearchMatchSummaryVisible));
+	}
 
-    public void SetPreviewSearchInProgress(bool isInProgress)
-    {
-        if (_isPreviewSearchInProgress == isInProgress)
-            return;
+	public void SetPreviewSearchInProgress(bool isInProgress)
+	{
+		if (_isPreviewSearchInProgress == isInProgress)
+			return;
 
-        _isPreviewSearchInProgress = isInProgress;
-        RaisePropertyChanged(nameof(IsPreviewSearchInProgress));
-    }
+		_isPreviewSearchInProgress = isInProgress;
+		RaisePropertyChanged(nameof(IsPreviewSearchInProgress));
+	}
 
     public void SetSearchInProgress(bool isInProgress)
     {
@@ -1653,19 +1653,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool RecentFoldersMenuVisible => HasRecentFolders;
 
     public bool HasRecentRepositories => RecentRepositories.Count > 0;
-    public bool HasCachedRepositories => CachedRepositories.Count > 0;
+	public bool HasCachedRepositories => CachedRepositories.Count > 0;
 
     // Hide the clone recent list while cloning is in progress to avoid
     // exposing stale selections during the active git operation.
     public bool GitCloneRecentRepositoriesVisible => !GitCloneInProgress && HasRecentRepositories;
-    public bool GitCloneLocalCacheVisible =>
-        !GitCloneInProgress && !GitCloneCacheLoading && HasCachedRepositories;
-    public bool CanUseGitCloneLocalCache =>
-        !GitCloneInProgress && !GitCloneCacheLoading && !GitCloneCacheManagementInProgress && HasCachedRepositories;
+	public bool GitCloneLocalCacheVisible =>
+		!GitCloneInProgress && !GitCloneCacheLoading && HasCachedRepositories;
+	public bool CanUseGitCloneLocalCache =>
+		!GitCloneInProgress && !GitCloneCacheLoading && !GitCloneCacheManagementInProgress && HasCachedRepositories;
 
-    public bool CanStartGitClone =>
-        !GitCloneInProgress &&
-        (SelectedGitCloneCacheEntry is not null || !string.IsNullOrWhiteSpace(GitCloneUrl));
+	public bool CanStartGitClone =>
+		!GitCloneInProgress &&
+		(SelectedGitCloneCacheEntry is not null || !string.IsNullOrWhiteSpace(GitCloneUrl));
 
     public bool AllIgnoreChecked
     {
@@ -1678,16 +1678,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool AllContentProcessingChecked
-    {
-        get => _allContentProcessingChecked;
-        set
-        {
-            if (_allContentProcessingChecked == value) return;
-            _allContentProcessingChecked = value;
-            RaisePropertyChanged();
-        }
-    }
+	public bool AllContentProcessingChecked
+	{
+		get => _allContentProcessingChecked;
+		set
+		{
+			if (_allContentProcessingChecked == value) return;
+			_allContentProcessingChecked = value;
+			RaisePropertyChanged();
+		}
+	}
 
     public string MenuFile { get; private set; } = string.Empty;
     public string MenuFileOpen { get; private set; } = string.Empty;
@@ -1799,32 +1799,32 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemeBorderVisibility { get; private set; } = string.Empty;
     public string ThemeMenuTransparency { get; private set; } = string.Empty;
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
-    public string SettingsSecretsTitle { get; private set; } = string.Empty;
-    public string SettingsSecretsNotice { get; private set; } = string.Empty;
-    public string SettingsPrivateDataNotice { get; private set; } = string.Empty;
-    public string SettingsCompressionNotice { get; private set; } = string.Empty;
-    public string SettingsCommentStripNotice { get; private set; } = string.Empty;
-    public string SettingsBlankLineStripNotice { get; private set; } = string.Empty;
-    public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
-    public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
-    public string PreviewSecretAlwaysHideFormat { get; private set; } = string.Empty;
-    public string PreviewSecretHideHereFormat { get; private set; } = string.Empty;
-    public string PreviewPrivateDataAlwaysHideFormat { get; private set; } = string.Empty;
-    public string PreviewSecretHideHereTooltip { get; private set; } = string.Empty;
-    public string PreviewSecretAlwaysHideTooltip { get; private set; } = string.Empty;
-    public string PreviewPrivateDataAlwaysHideTooltip { get; private set; } = string.Empty;
-    public string PreviewSecretRemoveMark { get; private set; } = string.Empty;
-    public string PreviewSecretKeepAllRuleFormat { get; private set; } = string.Empty;
-    public string PreviewSecretHideAllRuleFormat { get; private set; } = string.Empty;
-    public string PreviewSecretKeepAllFileFormat { get; private set; } = string.Empty;
-    public string PreviewSecretHideAllFileFormat { get; private set; } = string.Empty;
-    public string PreviewSecretSelectionTooShort { get; private set; } = string.Empty;
-    public string PreviewSecretSelectionTooLong { get; private set; } = string.Empty;
-    public string PreviewSecretSelectionMultiline { get; private set; } = string.Empty;
-    public string PreviewSecretSelectionContentOnly { get; private set; } = string.Empty;
+	public string SettingsSecretsTitle { get; private set; } = string.Empty;
+	public string SettingsSecretsNotice { get; private set; } = string.Empty;
+	public string SettingsPrivateDataNotice { get; private set; } = string.Empty;
+	public string SettingsCompressionNotice { get; private set; } = string.Empty;
+	public string SettingsCommentStripNotice { get; private set; } = string.Empty;
+	public string SettingsBlankLineStripNotice { get; private set; } = string.Empty;
+	public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
+	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
+	public string PreviewSecretAlwaysHideFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideHereFormat { get; private set; } = string.Empty;
+	public string PreviewPrivateDataAlwaysHideFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideHereTooltip { get; private set; } = string.Empty;
+	public string PreviewSecretAlwaysHideTooltip { get; private set; } = string.Empty;
+	public string PreviewPrivateDataAlwaysHideTooltip { get; private set; } = string.Empty;
+	public string PreviewSecretRemoveMark { get; private set; } = string.Empty;
+	public string PreviewSecretKeepAllRuleFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideAllRuleFormat { get; private set; } = string.Empty;
+	public string PreviewSecretKeepAllFileFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideAllFileFormat { get; private set; } = string.Empty;
+	public string PreviewSecretSelectionTooShort { get; private set; } = string.Empty;
+	public string PreviewSecretSelectionTooLong { get; private set; } = string.Empty;
+	public string PreviewSecretSelectionMultiline { get; private set; } = string.Empty;
+	public string PreviewSecretSelectionContentOnly { get; private set; } = string.Empty;
     public string SettingsAll { get; private set; } = string.Empty;
     public string SettingsAllIgnore { get; private set; } = string.Empty;
-    public string SettingsAllContentProcessing { get; private set; } = string.Empty;
+	public string SettingsAllContentProcessing { get; private set; } = string.Empty;
     public string SettingsAllExtensions { get; private set; } = string.Empty;
     public string SettingsExtensions { get; private set; } = string.Empty;
     public string SettingsFont { get; private set; } = string.Empty;
@@ -1866,7 +1866,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string DropZoneTitle { get; private set; } = string.Empty;
     public string DropZoneButtonText { get; private set; } = string.Empty;
     public string DropZoneHotkeyHint { get; private set; } = string.Empty;
-    public string DropZoneShortcut { get; private set; } = string.Empty;
+	public string DropZoneShortcut { get; private set; } = string.Empty;
     public string DropZoneCloneButtonText { get; private set; } = string.Empty;
 
     public string StatusOperationLoadingProject { get; private set; } = string.Empty;
@@ -1904,11 +1904,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string GitCloneProgressDownloading { get; private set; } = string.Empty;
     public string GitCloneProgressExtracting { get; private set; } = string.Empty;
     public string GitCloneProgressPreparing { get; private set; } = string.Empty;
-    public string GitCloneProgressSwitchingBranch { get; private set; } = string.Empty;
-    public string GitCloneLocalCacheLabel { get; private set; } = string.Empty;
-    public string GitCloneLocalCacheZip { get; private set; } = string.Empty;
-    public string GitCloneLocalCacheRemove { get; private set; } = string.Empty;
-    public string GitCloneLocalCacheActiveDeleteToolTip { get; private set; } = string.Empty;
+	public string GitCloneProgressSwitchingBranch { get; private set; } = string.Empty;
+	public string GitCloneLocalCacheLabel { get; private set; } = string.Empty;
+	public string GitCloneLocalCacheZip { get; private set; } = string.Empty;
+	public string GitCloneLocalCacheRemove { get; private set; } = string.Empty;
+	public string GitCloneLocalCacheActiveDeleteToolTip { get; private set; } = string.Empty;
 
     // Git error messages
     public string GitErrorGitNotFound { get; private set; } = string.Empty;
@@ -1993,34 +1993,34 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         HelpAboutSupport = _localization["Help.About.Support"];
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
         UpdateApplicationUpdateLocalization();
-        SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
-        RefreshGitFilteringModes(
-            _gitFilteringRepositoryAvailable,
-            IsGitFilteringModeSelectorVisible,
-            SelectedGitFilteringModeOption?.Mode ?? GitFilteringMode.None);
-        SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
-        UpdateSettingsSecretsNotice();
-        UpdateSettingsPrivateDataNotice();
-        UpdateSettingsCompressionNotice();
-        UpdateSettingsCommentStripNotice();
-        UpdateSettingsBlankLineStripNotice();
-        PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
-        PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
-        PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Secret.Always"];
-        PreviewSecretHideHereFormat = _localization["Preview.Secret.Mark.Secret.Here"];
-        PreviewPrivateDataAlwaysHideFormat = _localization["Preview.Secret.Mark.PrivateData.Always"];
-        PreviewSecretHideHereTooltip = _localization["Preview.Secret.Mark.Tooltip.Here"];
-        PreviewSecretAlwaysHideTooltip = _localization["Preview.Secret.Mark.Tooltip.Persistent"];
-        PreviewPrivateDataAlwaysHideTooltip = _localization["Preview.Secret.Mark.Tooltip.PrivateData"];
-        PreviewSecretRemoveMark = _localization["Preview.Secret.Mark.Remove"];
-        PreviewSecretKeepAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Keep"];
-        PreviewSecretHideAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Hide"];
-        PreviewSecretKeepAllFileFormat = _localization["Preview.Secret.Bulk.File.Keep"];
-        PreviewSecretHideAllFileFormat = _localization["Preview.Secret.Bulk.File.Hide"];
-        PreviewSecretSelectionTooShort = _localization["Preview.Secret.Mark.Validation.TooShort"];
-        PreviewSecretSelectionTooLong = _localization["Preview.Secret.Mark.Validation.TooLong"];
-        PreviewSecretSelectionMultiline = _localization["Preview.Secret.Mark.Validation.Multiline"];
-        PreviewSecretSelectionContentOnly = _localization["Preview.Secret.Mark.Validation.ContentOnly"];
+		SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
+		RefreshGitFilteringModes(
+			_gitFilteringRepositoryAvailable,
+			IsGitFilteringModeSelectorVisible,
+			SelectedGitFilteringModeOption?.Mode ?? GitFilteringMode.None);
+		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
+		UpdateSettingsSecretsNotice();
+		UpdateSettingsPrivateDataNotice();
+		UpdateSettingsCompressionNotice();
+		UpdateSettingsCommentStripNotice();
+		UpdateSettingsBlankLineStripNotice();
+		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
+		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
+		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Secret.Always"];
+		PreviewSecretHideHereFormat = _localization["Preview.Secret.Mark.Secret.Here"];
+		PreviewPrivateDataAlwaysHideFormat = _localization["Preview.Secret.Mark.PrivateData.Always"];
+		PreviewSecretHideHereTooltip = _localization["Preview.Secret.Mark.Tooltip.Here"];
+		PreviewSecretAlwaysHideTooltip = _localization["Preview.Secret.Mark.Tooltip.Persistent"];
+		PreviewPrivateDataAlwaysHideTooltip = _localization["Preview.Secret.Mark.Tooltip.PrivateData"];
+		PreviewSecretRemoveMark = _localization["Preview.Secret.Mark.Remove"];
+		PreviewSecretKeepAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Keep"];
+		PreviewSecretHideAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Hide"];
+		PreviewSecretKeepAllFileFormat = _localization["Preview.Secret.Bulk.File.Keep"];
+		PreviewSecretHideAllFileFormat = _localization["Preview.Secret.Bulk.File.Hide"];
+		PreviewSecretSelectionTooShort = _localization["Preview.Secret.Mark.Validation.TooShort"];
+		PreviewSecretSelectionTooLong = _localization["Preview.Secret.Mark.Validation.TooLong"];
+		PreviewSecretSelectionMultiline = _localization["Preview.Secret.Mark.Validation.Multiline"];
+		PreviewSecretSelectionContentOnly = _localization["Preview.Secret.Mark.Validation.ContentOnly"];
         SettingsAll = _localization["Settings.All"];
         UpdateAllCheckboxLabels();
         SettingsExtensions = _localization["Settings.Extensions"];
@@ -2057,7 +2057,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         DropZoneTitle = _localization["DropZone.Title"];
         DropZoneButtonText = _localization["DropZone.Button"];
         DropZoneHotkeyHint = _localization["DropZone.HotkeyHint"];
-        DropZoneShortcut = _localization["DropZone.Shortcut"];
+		DropZoneShortcut = _localization["DropZone.Shortcut"];
         DropZoneCloneButtonText = _localization["DropZone.CloneButton"];
 
         StatusOperationLoadingProject = _localization["Status.Operation.LoadingProject"];
@@ -2086,11 +2086,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         GitCloneProgressDownloading = _localization["Git.Clone.Progress.Downloading"];
         GitCloneProgressExtracting = _localization["Git.Clone.Progress.Extracting"];
         GitCloneProgressPreparing = _localization["Git.Clone.Progress.Preparing"];
-        GitCloneProgressSwitchingBranch = _localization["Git.Clone.Progress.SwitchingBranch"];
-        GitCloneLocalCacheLabel = _localization["Git.Clone.LocalCache"];
-        GitCloneLocalCacheZip = _localization["Git.Clone.LocalCache.Zip"];
-        GitCloneLocalCacheRemove = _localization["Dialog.RecentFolderUnavailable.Remove"];
-        GitCloneLocalCacheActiveDeleteToolTip = _localization["Git.Clone.LocalCache.ActiveDeleteTooltip"];
+		GitCloneProgressSwitchingBranch = _localization["Git.Clone.Progress.SwitchingBranch"];
+		GitCloneLocalCacheLabel = _localization["Git.Clone.LocalCache"];
+		GitCloneLocalCacheZip = _localization["Git.Clone.LocalCache.Zip"];
+		GitCloneLocalCacheRemove = _localization["Dialog.RecentFolderUnavailable.Remove"];
+		GitCloneLocalCacheActiveDeleteToolTip = _localization["Git.Clone.LocalCache.ActiveDeleteTooltip"];
 
         // Git error messages
         GitErrorGitNotFound = _localization["Git.Error.GitNotFound"];
@@ -2186,26 +2186,26 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HelpAboutSupport));
         RaisePropertyChanged(nameof(HelpAboutOpenLink));
         RaisePropertyChanged(nameof(SettingsIgnoreTitle));
-        RaisePropertyChanged(nameof(SettingsSecretsTitle));
-        RaisePropertyChanged(nameof(SettingsSecretsNotice));
-        RaisePropertyChanged(nameof(SettingsPrivateDataNotice));
-        RaisePropertyChanged(nameof(PreviewSecretRedactedTooltip));
-        RaisePropertyChanged(nameof(PreviewSecretKeptTooltip));
-        RaisePropertyChanged(nameof(PreviewSecretAlwaysHideFormat));
-        RaisePropertyChanged(nameof(PreviewSecretHideHereFormat));
-        RaisePropertyChanged(nameof(PreviewPrivateDataAlwaysHideFormat));
-        RaisePropertyChanged(nameof(PreviewSecretHideHereTooltip));
-        RaisePropertyChanged(nameof(PreviewSecretAlwaysHideTooltip));
-        RaisePropertyChanged(nameof(PreviewPrivateDataAlwaysHideTooltip));
-        RaisePropertyChanged(nameof(PreviewSecretRemoveMark));
-        RaisePropertyChanged(nameof(PreviewSecretKeepAllRuleFormat));
-        RaisePropertyChanged(nameof(PreviewSecretHideAllRuleFormat));
-        RaisePropertyChanged(nameof(PreviewSecretKeepAllFileFormat));
-        RaisePropertyChanged(nameof(PreviewSecretHideAllFileFormat));
-        RaisePropertyChanged(nameof(PreviewSecretSelectionTooShort));
-        RaisePropertyChanged(nameof(PreviewSecretSelectionTooLong));
-        RaisePropertyChanged(nameof(PreviewSecretSelectionMultiline));
-        RaisePropertyChanged(nameof(PreviewSecretSelectionContentOnly));
+		RaisePropertyChanged(nameof(SettingsSecretsTitle));
+		RaisePropertyChanged(nameof(SettingsSecretsNotice));
+		RaisePropertyChanged(nameof(SettingsPrivateDataNotice));
+		RaisePropertyChanged(nameof(PreviewSecretRedactedTooltip));
+		RaisePropertyChanged(nameof(PreviewSecretKeptTooltip));
+		RaisePropertyChanged(nameof(PreviewSecretAlwaysHideFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideHereFormat));
+		RaisePropertyChanged(nameof(PreviewPrivateDataAlwaysHideFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideHereTooltip));
+		RaisePropertyChanged(nameof(PreviewSecretAlwaysHideTooltip));
+		RaisePropertyChanged(nameof(PreviewPrivateDataAlwaysHideTooltip));
+		RaisePropertyChanged(nameof(PreviewSecretRemoveMark));
+		RaisePropertyChanged(nameof(PreviewSecretKeepAllRuleFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideAllRuleFormat));
+		RaisePropertyChanged(nameof(PreviewSecretKeepAllFileFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideAllFileFormat));
+		RaisePropertyChanged(nameof(PreviewSecretSelectionTooShort));
+		RaisePropertyChanged(nameof(PreviewSecretSelectionTooLong));
+		RaisePropertyChanged(nameof(PreviewSecretSelectionMultiline));
+		RaisePropertyChanged(nameof(PreviewSecretSelectionContentOnly));
         RaisePropertyChanged(nameof(SettingsAll));
         RaisePropertyChanged(nameof(SettingsExtensions));
         RaisePropertyChanged(nameof(SettingsFont));
@@ -2242,7 +2242,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(DropZoneTitle));
         RaisePropertyChanged(nameof(DropZoneButtonText));
         RaisePropertyChanged(nameof(DropZoneHotkeyHint));
-        RaisePropertyChanged(nameof(DropZoneShortcut));
+		RaisePropertyChanged(nameof(DropZoneShortcut));
         RaisePropertyChanged(nameof(DropZoneCloneButtonText));
 
         RaisePropertyChanged(nameof(StatusOperationLoadingProject));
@@ -2284,11 +2284,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(GitCloneProgressDownloading));
         RaisePropertyChanged(nameof(GitCloneProgressExtracting));
         RaisePropertyChanged(nameof(GitCloneProgressPreparing));
-        RaisePropertyChanged(nameof(GitCloneProgressSwitchingBranch));
-        RaisePropertyChanged(nameof(GitCloneLocalCacheLabel));
-        RaisePropertyChanged(nameof(GitCloneLocalCacheZip));
-        RaisePropertyChanged(nameof(GitCloneLocalCacheRemove));
-        RaisePropertyChanged(nameof(GitCloneLocalCacheActiveDeleteToolTip));
+		RaisePropertyChanged(nameof(GitCloneProgressSwitchingBranch));
+		RaisePropertyChanged(nameof(GitCloneLocalCacheLabel));
+		RaisePropertyChanged(nameof(GitCloneLocalCacheZip));
+		RaisePropertyChanged(nameof(GitCloneLocalCacheRemove));
+		RaisePropertyChanged(nameof(GitCloneLocalCacheActiveDeleteToolTip));
         RaisePropertyChanged(nameof(GitErrorGitNotFound));
         RaisePropertyChanged(nameof(GitErrorCloneFailed));
         RaisePropertyChanged(nameof(GitErrorInvalidUrl));
@@ -2325,448 +2325,448 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrEmpty(baseText))
             baseText = _localization["Settings.All"];
 
-        var ignoreCount = PathIgnoreOptions.Count;
-        SettingsAllIgnore = ignoreCount > 0 ? $"{baseText} ({ignoreCount})" : baseText;
-        SettingsAllContentProcessing = ContentProcessingOptions.Count > 0
-            ? $"{baseText} ({ContentProcessingOptions.Count})"
-            : baseText;
+		var ignoreCount = PathIgnoreOptions.Count;
+		SettingsAllIgnore = ignoreCount > 0 ? $"{baseText} ({ignoreCount})" : baseText;
+		SettingsAllContentProcessing = ContentProcessingOptions.Count > 0
+			? $"{baseText} ({ContentProcessingOptions.Count})"
+			: baseText;
         SettingsAllExtensions = Extensions.Count > 0 ? $"{baseText} ({Extensions.Count})" : baseText;
         RaisePropertyChanged(nameof(SettingsAllIgnore));
-        RaisePropertyChanged(nameof(SettingsAllContentProcessing));
+		RaisePropertyChanged(nameof(SettingsAllContentProcessing));
         RaisePropertyChanged(nameof(SettingsAllExtensions));
     }
 
-    private void SynchronizeIgnoreOptionSections()
-    {
-        var contentTransformationIds = ProjectPresentationCatalog.ContentTransformations
-            .Select(static descriptor => descriptor.LegacyOptionId)
-            .ToHashSet();
-        ((ResettableObservableCollection<IgnoreOptionViewModel>)PathIgnoreOptions).ReplaceAll(
-            IgnoreOptions.Where(option =>
-                !contentTransformationIds.Contains(option.Id) &&
-                !GitFilteringModeResolver.IsGitFilteringOption(option.Id)));
-        HideSecretsOption = IgnoreOptions.FirstOrDefault(
-            static option => option.Id == IgnoreOptionId.HideSecrets);
-        HidePrivateDataOption = IgnoreOptions.FirstOrDefault(
-            static option => option.Id == IgnoreOptionId.HidePrivateData);
-        SynchronizeContentProcessingOptions(contentTransformationIds);
-        RaisePropertyChanged(nameof(HasContentProcessingOptions));
-    }
+	private void SynchronizeIgnoreOptionSections()
+	{
+		var contentTransformationIds = ProjectPresentationCatalog.ContentTransformations
+			.Select(static descriptor => descriptor.LegacyOptionId)
+			.ToHashSet();
+		((ResettableObservableCollection<IgnoreOptionViewModel>)PathIgnoreOptions).ReplaceAll(
+			IgnoreOptions.Where(option =>
+				!contentTransformationIds.Contains(option.Id) &&
+				!GitFilteringModeResolver.IsGitFilteringOption(option.Id)));
+		HideSecretsOption = IgnoreOptions.FirstOrDefault(
+			static option => option.Id == IgnoreOptionId.HideSecrets);
+		HidePrivateDataOption = IgnoreOptions.FirstOrDefault(
+			static option => option.Id == IgnoreOptionId.HidePrivateData);
+		SynchronizeContentProcessingOptions(contentTransformationIds);
+		RaisePropertyChanged(nameof(HasContentProcessingOptions));
+	}
 
-    public void RefreshGitFilteringModes(
-        bool repositoryAvailable,
-        bool selectorVisible,
-        GitFilteringMode selectedMode)
-    {
-        _gitFilteringRepositoryAvailable = repositoryAvailable;
-        IsGitFilteringModeSelectorVisible = selectorVisible;
-        var supported = ProjectPresentationCatalog.GitFiltering
-            .Where(descriptor => repositoryAvailable ||
-                descriptor.Id is GitFilteringMode.None or GitFilteringMode.RespectGitIgnore)
-            .Select(descriptor => new GitFilteringModeOptionViewModel(
-                descriptor.Id,
-                _localization[descriptor.LabelKey]))
-            .ToArray();
-        IsRefreshingGitFilteringModes = true;
-        try
-        {
-            if (!GitFilteringModes.SequenceEqual(supported))
-                ((ResettableObservableCollection<GitFilteringModeOptionViewModel>)GitFilteringModes)
-                    .ReplaceAll(supported);
-            SelectedGitFilteringModeOption = GitFilteringModes.FirstOrDefault(option =>
-                option.Mode == selectedMode) ?? GitFilteringModes.FirstOrDefault();
-        }
-        finally
-        {
-            IsRefreshingGitFilteringModes = false;
-        }
-    }
+	public void RefreshGitFilteringModes(
+		bool repositoryAvailable,
+		bool selectorVisible,
+		GitFilteringMode selectedMode)
+	{
+		_gitFilteringRepositoryAvailable = repositoryAvailable;
+		IsGitFilteringModeSelectorVisible = selectorVisible;
+		var supported = ProjectPresentationCatalog.GitFiltering
+			.Where(descriptor => repositoryAvailable ||
+				descriptor.Id is GitFilteringMode.None or GitFilteringMode.RespectGitIgnore)
+			.Select(descriptor => new GitFilteringModeOptionViewModel(
+				descriptor.Id,
+				_localization[descriptor.LabelKey]))
+			.ToArray();
+		IsRefreshingGitFilteringModes = true;
+		try
+		{
+			if (!GitFilteringModes.SequenceEqual(supported))
+				((ResettableObservableCollection<GitFilteringModeOptionViewModel>)GitFilteringModes)
+					.ReplaceAll(supported);
+			SelectedGitFilteringModeOption = GitFilteringModes.FirstOrDefault(option =>
+				option.Mode == selectedMode) ?? GitFilteringModes.FirstOrDefault();
+		}
+		finally
+		{
+			IsRefreshingGitFilteringModes = false;
+		}
+	}
 
-    private void SynchronizeContentProcessingOptions(IReadOnlySet<IgnoreOptionId>? transformationIds = null)
-    {
-        transformationIds ??= ProjectPresentationCatalog.ContentTransformationOptionIds;
-        // Transformation rows are always offered: scanning and compression are opt-in, so the
-        // user must be able to reach an unchecked checkbox before any result exists for it.
-        var desiredOptions = IgnoreOptions.Where(option =>
-                transformationIds.Contains(option.Id))
-            .ToArray();
-        if (!ContentProcessingOptions.SequenceEqual(desiredOptions, ReferenceEqualityComparer.Instance))
-        {
-            // Rows can be relabeled while the user interacts with another transformation below.
-            // Removing and inserting single rows keeps every other row's control alive; a reset would regenerate all
-            // containers and can swallow a click aimed at a checkbox that was just rebuilt.
-            var collection = ContentProcessingOptions;
-            for (var index = collection.Count - 1; index >= 0; index--)
-            {
-                if (Array.IndexOf(desiredOptions, collection[index]) < 0)
-                    collection.RemoveAt(index);
-            }
-            // Both lists preserve the IgnoreOptions order, so aligning by position never duplicates.
-            for (var index = 0; index < desiredOptions.Length; index++)
-            {
-                if (index >= collection.Count ||
-                    !ReferenceEquals(collection[index], desiredOptions[index]))
-                {
-                    collection.Insert(index, desiredOptions[index]);
-                }
-            }
-        }
-        UpdateContentProcessingOptionStatuses();
-    }
+	private void SynchronizeContentProcessingOptions(IReadOnlySet<IgnoreOptionId>? transformationIds = null)
+	{
+		transformationIds ??= ProjectPresentationCatalog.ContentTransformationOptionIds;
+		// Transformation rows are always offered: scanning and compression are opt-in, so the
+		// user must be able to reach an unchecked checkbox before any result exists for it.
+		var desiredOptions = IgnoreOptions.Where(option =>
+				transformationIds.Contains(option.Id))
+			.ToArray();
+		if (!ContentProcessingOptions.SequenceEqual(desiredOptions, ReferenceEqualityComparer.Instance))
+		{
+			// Rows can be relabeled while the user interacts with another transformation below.
+			// Removing and inserting single rows keeps every other row's control alive; a reset would regenerate all
+			// containers and can swallow a click aimed at a checkbox that was just rebuilt.
+			var collection = ContentProcessingOptions;
+			for (var index = collection.Count - 1; index >= 0; index--)
+			{
+				if (Array.IndexOf(desiredOptions, collection[index]) < 0)
+					collection.RemoveAt(index);
+			}
+			// Both lists preserve the IgnoreOptions order, so aligning by position never duplicates.
+			for (var index = 0; index < desiredOptions.Length; index++)
+			{
+				if (index >= collection.Count ||
+				    !ReferenceEquals(collection[index], desiredOptions[index]))
+				{
+					collection.Insert(index, desiredOptions[index]);
+				}
+			}
+		}
+		UpdateContentProcessingOptionStatuses();
+	}
 
-    internal void SetContentProcessingStatus(
-        SecretScanState scanState,
-        int? detectedCount = null,
-        int? hiddenCount = null,
-        int? skippedFileCount = null,
-        int? failedFileCount = null,
-        IReadOnlyList<UnscannableFile>? unscannableFiles = null) =>
-        SetRedactionStatus(
-            IgnoreOptionId.HideSecrets,
-            new ContentRedactionStatus(
-                scanState,
-                detectedCount,
-                hiddenCount,
-                skippedFileCount,
-                failedFileCount,
-                unscannableFiles));
+	internal void SetContentProcessingStatus(
+		SecretScanState scanState,
+		int? detectedCount = null,
+		int? hiddenCount = null,
+		int? skippedFileCount = null,
+		int? failedFileCount = null,
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null) =>
+		SetRedactionStatus(
+			IgnoreOptionId.HideSecrets,
+			new ContentRedactionStatus(
+				scanState,
+				detectedCount,
+				hiddenCount,
+				skippedFileCount,
+				failedFileCount,
+				unscannableFiles));
 
-    internal void SetPrivateDataProcessingStatus(
-        SecretScanState scanState,
-        int? detectedCount = null,
-        int? hiddenCount = null,
-        int? skippedFileCount = null,
-        int? failedFileCount = null,
-        IReadOnlyList<UnscannableFile>? unscannableFiles = null,
-        bool? pathUserNameHidden = null) =>
-        SetRedactionStatus(
-            IgnoreOptionId.HidePrivateData,
-            new ContentRedactionStatus(
-                scanState,
-                detectedCount,
-                hiddenCount,
-                skippedFileCount,
-                failedFileCount,
-                unscannableFiles,
-                pathUserNameHidden));
+	internal void SetPrivateDataProcessingStatus(
+		SecretScanState scanState,
+		int? detectedCount = null,
+		int? hiddenCount = null,
+		int? skippedFileCount = null,
+		int? failedFileCount = null,
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null,
+		bool? pathUserNameHidden = null) =>
+		SetRedactionStatus(
+			IgnoreOptionId.HidePrivateData,
+			new ContentRedactionStatus(
+				scanState,
+				detectedCount,
+				hiddenCount,
+				skippedFileCount,
+				failedFileCount,
+				unscannableFiles,
+				pathUserNameHidden));
 
-    private void SetRedactionStatus(IgnoreOptionId optionId, ContentRedactionStatus status)
-    {
-        ref var current = ref GetRedactionStatus(optionId);
-        if (current == status)
-            return;
-        current = status;
-        UpdateRedactionNotice(optionId);
-    }
+	private void SetRedactionStatus(IgnoreOptionId optionId, ContentRedactionStatus status)
+	{
+		ref var current = ref GetRedactionStatus(optionId);
+		if (current == status)
+			return;
+		current = status;
+		UpdateRedactionNotice(optionId);
+	}
 
-    internal void SetCompressionStatus(
-        int? compressedFiles,
-        int? totalFiles,
-        long? sourceCharacters,
-        long? transformedCharacters,
-        string? unavailableReason = null)
-    {
-        if (_compressedFilesCount == compressedFiles &&
-            _compressionTotalFilesCount == totalFiles &&
-            _compressionSourceCharacters == sourceCharacters &&
-            _compressionTransformedCharacters == transformedCharacters &&
-            string.Equals(_compressionUnavailableReason, unavailableReason, StringComparison.Ordinal))
-        {
-            return;
-        }
+	internal void SetCompressionStatus(
+		int? compressedFiles,
+		int? totalFiles,
+		long? sourceCharacters,
+		long? transformedCharacters,
+		string? unavailableReason = null)
+	{
+		if (_compressedFilesCount == compressedFiles &&
+		    _compressionTotalFilesCount == totalFiles &&
+		    _compressionSourceCharacters == sourceCharacters &&
+		    _compressionTransformedCharacters == transformedCharacters &&
+		    string.Equals(_compressionUnavailableReason, unavailableReason, StringComparison.Ordinal))
+		{
+			return;
+		}
 
-        _compressedFilesCount = compressedFiles;
-        _compressionTotalFilesCount = totalFiles;
-        _compressionSourceCharacters = sourceCharacters;
-        _compressionTransformedCharacters = transformedCharacters;
-        _compressionUnavailableReason = unavailableReason;
-        UpdateSettingsCompressionNotice();
-    }
+		_compressedFilesCount = compressedFiles;
+		_compressionTotalFilesCount = totalFiles;
+		_compressionSourceCharacters = sourceCharacters;
+		_compressionTransformedCharacters = transformedCharacters;
+		_compressionUnavailableReason = unavailableReason;
+		UpdateSettingsCompressionNotice();
+	}
 
-    internal void SetCompressionPreparationStatus(bool isActive)
-    {
-        if (_compressionPreparationActive == isActive)
-            return;
+	internal void SetCompressionPreparationStatus(bool isActive)
+	{
+		if (_compressionPreparationActive == isActive)
+			return;
 
-        _compressionPreparationActive = isActive;
-        UpdateSettingsCompressionNotice();
-    }
+		_compressionPreparationActive = isActive;
+		UpdateSettingsCompressionNotice();
+	}
 
-    internal void SetCommentStripStatus(int? strippedFiles, int? totalFiles)
-    {
-        if (_commentStrippedFilesCount == strippedFiles &&
-            _commentStripTotalFilesCount == totalFiles)
-        {
-            return;
-        }
+	internal void SetCommentStripStatus(int? strippedFiles, int? totalFiles)
+	{
+		if (_commentStrippedFilesCount == strippedFiles &&
+		    _commentStripTotalFilesCount == totalFiles)
+		{
+			return;
+		}
 
-        _commentStrippedFilesCount = strippedFiles;
-        _commentStripTotalFilesCount = totalFiles;
-        UpdateSettingsCommentStripNotice();
-    }
+		_commentStrippedFilesCount = strippedFiles;
+		_commentStripTotalFilesCount = totalFiles;
+		UpdateSettingsCommentStripNotice();
+	}
 
-    internal void SetCommentStripPreparationStatus(bool isActive)
-    {
-        if (_commentStripPreparationActive == isActive)
-            return;
+	internal void SetCommentStripPreparationStatus(bool isActive)
+	{
+		if (_commentStripPreparationActive == isActive)
+			return;
 
-        _commentStripPreparationActive = isActive;
-        UpdateSettingsCommentStripNotice();
-    }
+		_commentStripPreparationActive = isActive;
+		UpdateSettingsCommentStripNotice();
+	}
 
-    internal void SetBlankLineStripStatus(int? strippedFiles, int? totalFiles)
-    {
-        if (_blankLineStrippedFilesCount == strippedFiles &&
-            _blankLineStripTotalFilesCount == totalFiles)
-        {
-            return;
-        }
+	internal void SetBlankLineStripStatus(int? strippedFiles, int? totalFiles)
+	{
+		if (_blankLineStrippedFilesCount == strippedFiles &&
+		    _blankLineStripTotalFilesCount == totalFiles)
+		{
+			return;
+		}
 
-        _blankLineStrippedFilesCount = strippedFiles;
-        _blankLineStripTotalFilesCount = totalFiles;
-        UpdateSettingsBlankLineStripNotice();
-    }
+		_blankLineStrippedFilesCount = strippedFiles;
+		_blankLineStripTotalFilesCount = totalFiles;
+		UpdateSettingsBlankLineStripNotice();
+	}
 
-    internal void SetBlankLineStripPreparationStatus(bool isActive)
-    {
-        if (_blankLineStripPreparationActive == isActive)
-            return;
+	internal void SetBlankLineStripPreparationStatus(bool isActive)
+	{
+		if (_blankLineStripPreparationActive == isActive)
+			return;
 
-        _blankLineStripPreparationActive = isActive;
-        UpdateSettingsBlankLineStripNotice();
-    }
+		_blankLineStripPreparationActive = isActive;
+		UpdateSettingsBlankLineStripNotice();
+	}
 
-    internal void SetAppliedContentTransformationState(
-        bool compressCode,
-        bool stripComments,
-        bool stripBlankLines)
-    {
-        if (_appliedCompressCodeEnabled == compressCode &&
-            _appliedStripCommentsEnabled == stripComments &&
-            _appliedStripBlankLinesEnabled == stripBlankLines)
-        {
-            return;
-        }
+	internal void SetAppliedContentTransformationState(
+		bool compressCode,
+		bool stripComments,
+		bool stripBlankLines)
+	{
+		if (_appliedCompressCodeEnabled == compressCode &&
+		    _appliedStripCommentsEnabled == stripComments &&
+		    _appliedStripBlankLinesEnabled == stripBlankLines)
+		{
+			return;
+		}
 
-        _appliedCompressCodeEnabled = compressCode;
-        _appliedStripCommentsEnabled = stripComments;
-        _appliedStripBlankLinesEnabled = stripBlankLines;
-        UpdateContentProcessingOptionStatuses();
-    }
+		_appliedCompressCodeEnabled = compressCode;
+		_appliedStripCommentsEnabled = stripComments;
+		_appliedStripBlankLinesEnabled = stripBlankLines;
+		UpdateContentProcessingOptionStatuses();
+	}
 
-    private void UpdateSettingsSecretsNotice()
-        => UpdateRedactionNotice(IgnoreOptionId.HideSecrets);
+	private void UpdateSettingsSecretsNotice()
+		=> UpdateRedactionNotice(IgnoreOptionId.HideSecrets);
 
-    private void UpdateSettingsPrivateDataNotice()
-        => UpdateRedactionNotice(IgnoreOptionId.HidePrivateData);
+	private void UpdateSettingsPrivateDataNotice()
+		=> UpdateRedactionNotice(IgnoreOptionId.HidePrivateData);
 
-    private void UpdateRedactionNotice(IgnoreOptionId optionId)
-    {
-        var status = GetRedactionStatus(optionId);
-        var notice = status.ScanState switch
-        {
-            SecretScanState.Failed => FormatFailedRedactionStatus(status),
-            SecretScanState.Limited => FormatLimitedRedactionStatus(status),
-            SecretScanState.Completed when
-                status.DetectedCount is { } detected &&
-                status.HiddenCount is { } hidden &&
-                detected > 0 =>
-                _localization.Format("Settings.Secrets.Status.Applied", detected, hidden),
-            SecretScanState.Completed when status.DetectedCount == 0 =>
-                _localization[optionId == IgnoreOptionId.HideSecrets
-                    ? "Settings.Ignore.HideSecrets.NoMatches"
-                    : "Settings.Ignore.HidePrivateData.NoMatches"],
-            _ => string.Empty
-        };
-        if (optionId == IgnoreOptionId.HidePrivateData &&
-            status.PathUserNameHidden is { } pathUserNameHidden)
-        {
-            var pathStatus = _localization[pathUserNameHidden
-                ? "Settings.PrivateData.Status.PathHidden"
-                : "Settings.PrivateData.Status.PathShown"];
-            notice = string.IsNullOrEmpty(notice)
-                ? pathStatus
-                : string.Join(Environment.NewLine, notice, pathStatus);
-        }
+	private void UpdateRedactionNotice(IgnoreOptionId optionId)
+	{
+		var status = GetRedactionStatus(optionId);
+		var notice = status.ScanState switch
+		{
+			SecretScanState.Failed => FormatFailedRedactionStatus(status),
+			SecretScanState.Limited => FormatLimitedRedactionStatus(status),
+			SecretScanState.Completed when
+				status.DetectedCount is { } detected &&
+				status.HiddenCount is { } hidden &&
+				detected > 0 =>
+				_localization.Format("Settings.Secrets.Status.Applied", detected, hidden),
+			SecretScanState.Completed when status.DetectedCount == 0 =>
+				_localization[optionId == IgnoreOptionId.HideSecrets
+					? "Settings.Ignore.HideSecrets.NoMatches"
+					: "Settings.Ignore.HidePrivateData.NoMatches"],
+			_ => string.Empty
+		};
+		if (optionId == IgnoreOptionId.HidePrivateData &&
+		    status.PathUserNameHidden is { } pathUserNameHidden)
+		{
+			var pathStatus = _localization[pathUserNameHidden
+				? "Settings.PrivateData.Status.PathHidden"
+				: "Settings.PrivateData.Status.PathShown"];
+			notice = string.IsNullOrEmpty(notice)
+				? pathStatus
+				: string.Join(Environment.NewLine, notice, pathStatus);
+		}
 
-        var current = optionId == IgnoreOptionId.HideSecrets
-            ? SettingsSecretsNotice
-            : SettingsPrivateDataNotice;
-        if (string.Equals(current, notice, StringComparison.Ordinal))
-        {
-            UpdateContentProcessingOptionStatuses();
-            return;
-        }
+		var current = optionId == IgnoreOptionId.HideSecrets
+			? SettingsSecretsNotice
+			: SettingsPrivateDataNotice;
+		if (string.Equals(current, notice, StringComparison.Ordinal))
+		{
+			UpdateContentProcessingOptionStatuses();
+			return;
+		}
 
-        if (optionId == IgnoreOptionId.HideSecrets)
-        {
-            SettingsSecretsNotice = notice;
-            RaisePropertyChanged(nameof(SettingsSecretsNotice));
-        }
-        else
-        {
-            SettingsPrivateDataNotice = notice;
-            RaisePropertyChanged(nameof(SettingsPrivateDataNotice));
-        }
-        UpdateContentProcessingOptionStatuses();
-    }
+		if (optionId == IgnoreOptionId.HideSecrets)
+		{
+			SettingsSecretsNotice = notice;
+			RaisePropertyChanged(nameof(SettingsSecretsNotice));
+		}
+		else
+		{
+			SettingsPrivateDataNotice = notice;
+			RaisePropertyChanged(nameof(SettingsPrivateDataNotice));
+		}
+		UpdateContentProcessingOptionStatuses();
+	}
 
-    /// <summary>
-    /// A failed pass is described by what it still delivered: partial counts when any files were
-    /// read and the number of files it could not check. The closing line tells the user the warning
-    /// indicator retries the scan, because a failure here is usually transient - a file locked by
-    /// an editor or a scanner - and worth one more attempt.
-    /// </summary>
-    private string FormatFailedRedactionStatus(ContentRedactionStatus status)
-    {
-        var lines = new List<string>(3);
-        if (status.DetectedCount is { } detected &&
-            status.HiddenCount is { } hidden &&
-            detected > 0)
-        {
-            lines.Add(_localization.Format("Settings.Secrets.Status.Applied", detected, hidden));
-        }
+	/// <summary>
+	/// A failed pass is described by what it still delivered: partial counts when any files were
+	/// read and the number of files it could not check. The closing line tells the user the warning
+	/// indicator retries the scan, because a failure here is usually transient - a file locked by
+	/// an editor or a scanner - and worth one more attempt.
+	/// </summary>
+	private string FormatFailedRedactionStatus(ContentRedactionStatus status)
+	{
+		var lines = new List<string>(3);
+		if (status.DetectedCount is { } detected &&
+		    status.HiddenCount is { } hidden &&
+		    detected > 0)
+		{
+			lines.Add(_localization.Format("Settings.Secrets.Status.Applied", detected, hidden));
+		}
 
-        lines.Add(status.FailedFileCount is int failed and > 0
-            ? _localization.Format("Settings.Secrets.Status.FailedFiles", failed)
-            : _localization["Settings.Secrets.Status.Failed"]);
+		lines.Add(status.FailedFileCount is int failed and > 0
+			? _localization.Format("Settings.Secrets.Status.FailedFiles", failed)
+			: _localization["Settings.Secrets.Status.Failed"]);
 
-        lines.Add(_localization["Settings.Secrets.Status.Retry"]);
-        return string.Join(Environment.NewLine, lines);
-    }
+		lines.Add(_localization["Settings.Secrets.Status.Retry"]);
+		return string.Join(Environment.NewLine, lines);
+	}
 
-    private string FormatLimitedRedactionStatus(ContentRedactionStatus status)
-    {
-        if (status.DetectedCount is { } detected &&
-            status.HiddenCount is { } hidden &&
-            detected > 0)
-        {
-            return _localization.Format("Settings.Secrets.Status.Applied", detected, hidden);
-        }
-        return string.Empty;
-    }
+	private string FormatLimitedRedactionStatus(ContentRedactionStatus status)
+	{
+		if (status.DetectedCount is { } detected &&
+		    status.HiddenCount is { } hidden &&
+		    detected > 0)
+		{
+			return _localization.Format("Settings.Secrets.Status.Applied", detected, hidden);
+		}
+		return string.Empty;
+	}
 
-    private void UpdateSettingsCompressionNotice()
-    {
-        var notice = _compressionPreparationActive
-            ? _localization["Settings.Compression.Status.Scanning"]
-            : _compressionUnavailableReason is { Length: > 0 } unavailableReason
-                ? _localization.Format("Compression.Status.Unavailable", unavailableReason)
-            : (_compressedFilesCount, _compressionTotalFilesCount) switch
-            {
-                (0, 0) => _localization["Settings.Compression.Status.NothingToCompress"],
-                ({ } compressed, { } total) when
-                    _compressionSourceCharacters is { } sourceCharacters &&
-                    _compressionTransformedCharacters is { } transformedCharacters =>
-                    _localization.Format(
-                        "Settings.Compression.Status.Applied",
-                        compressed,
-                        total,
-                        CodeCompressionSnapshot.EstimateTokens(sourceCharacters),
-                        CodeCompressionSnapshot.EstimateTokens(transformedCharacters))
-                    .Replace(
-                        ". ",
-                        $".{Environment.NewLine}",
-                        StringComparison.Ordinal),
-                _ => string.Empty
-            };
-        if (string.Equals(SettingsCompressionNotice, notice, StringComparison.Ordinal))
-        {
-            UpdateContentProcessingOptionStatuses();
-            return;
-        }
+	private void UpdateSettingsCompressionNotice()
+	{
+		var notice = _compressionPreparationActive
+			? _localization["Settings.Compression.Status.Scanning"]
+			: _compressionUnavailableReason is { Length: > 0 } unavailableReason
+				? _localization.Format("Compression.Status.Unavailable", unavailableReason)
+			: (_compressedFilesCount, _compressionTotalFilesCount) switch
+		{
+			(0, 0) => _localization["Settings.Compression.Status.NothingToCompress"],
+			({ } compressed, { } total) when
+				_compressionSourceCharacters is { } sourceCharacters &&
+				_compressionTransformedCharacters is { } transformedCharacters =>
+				_localization.Format(
+					"Settings.Compression.Status.Applied",
+					compressed,
+					total,
+					CodeCompressionSnapshot.EstimateTokens(sourceCharacters),
+					CodeCompressionSnapshot.EstimateTokens(transformedCharacters))
+				.Replace(
+					". ",
+					$".{Environment.NewLine}",
+					StringComparison.Ordinal),
+			_ => string.Empty
+		};
+		if (string.Equals(SettingsCompressionNotice, notice, StringComparison.Ordinal))
+		{
+			UpdateContentProcessingOptionStatuses();
+			return;
+		}
 
-        SettingsCompressionNotice = notice;
-        RaisePropertyChanged(nameof(SettingsCompressionNotice));
-        UpdateContentProcessingOptionStatuses();
-    }
+		SettingsCompressionNotice = notice;
+		RaisePropertyChanged(nameof(SettingsCompressionNotice));
+		UpdateContentProcessingOptionStatuses();
+	}
 
-    private void UpdateSettingsCommentStripNotice()
-    {
-        var notice = _commentStripPreparationActive
-            ? _localization["Settings.Comments.Status.Scanning"]
-            : (_commentStrippedFilesCount, _commentStripTotalFilesCount) switch
-            {
-                (0, not null) => _localization["Settings.Comments.Status.NothingToStrip"],
-                ({ } stripped, { } total) => _localization.Format(
-                    "Settings.Comments.Status.Applied",
-                    stripped,
-                    total),
-                _ => string.Empty
-            };
-        if (string.Equals(SettingsCommentStripNotice, notice, StringComparison.Ordinal))
-        {
-            UpdateContentProcessingOptionStatuses();
-            return;
-        }
+	private void UpdateSettingsCommentStripNotice()
+	{
+		var notice = _commentStripPreparationActive
+			? _localization["Settings.Comments.Status.Scanning"]
+			: (_commentStrippedFilesCount, _commentStripTotalFilesCount) switch
+			{
+				(0, not null) => _localization["Settings.Comments.Status.NothingToStrip"],
+				({ } stripped, { } total) => _localization.Format(
+					"Settings.Comments.Status.Applied",
+					stripped,
+					total),
+				_ => string.Empty
+			};
+		if (string.Equals(SettingsCommentStripNotice, notice, StringComparison.Ordinal))
+		{
+			UpdateContentProcessingOptionStatuses();
+			return;
+		}
 
-        SettingsCommentStripNotice = notice;
-        RaisePropertyChanged(nameof(SettingsCommentStripNotice));
-        UpdateContentProcessingOptionStatuses();
-    }
+		SettingsCommentStripNotice = notice;
+		RaisePropertyChanged(nameof(SettingsCommentStripNotice));
+		UpdateContentProcessingOptionStatuses();
+	}
 
-    private void UpdateSettingsBlankLineStripNotice()
-    {
-        var notice = _blankLineStripPreparationActive
-            ? _localization["Settings.BlankLines.Status.Scanning"]
-            : (_blankLineStrippedFilesCount, _blankLineStripTotalFilesCount) switch
-            {
-                (0, not null) => _localization["Settings.BlankLines.Status.NothingToStrip"],
-                ({ } stripped, { } total) => _localization.Format(
-                    "Settings.BlankLines.Status.Applied",
-                    stripped,
-                    total),
-                _ => string.Empty
-            };
-        if (string.Equals(SettingsBlankLineStripNotice, notice, StringComparison.Ordinal))
-        {
-            UpdateContentProcessingOptionStatuses();
-            return;
-        }
+	private void UpdateSettingsBlankLineStripNotice()
+	{
+		var notice = _blankLineStripPreparationActive
+			? _localization["Settings.BlankLines.Status.Scanning"]
+			: (_blankLineStrippedFilesCount, _blankLineStripTotalFilesCount) switch
+			{
+				(0, not null) => _localization["Settings.BlankLines.Status.NothingToStrip"],
+				({ } stripped, { } total) => _localization.Format(
+					"Settings.BlankLines.Status.Applied",
+					stripped,
+					total),
+				_ => string.Empty
+			};
+		if (string.Equals(SettingsBlankLineStripNotice, notice, StringComparison.Ordinal))
+		{
+			UpdateContentProcessingOptionStatuses();
+			return;
+		}
 
-        SettingsBlankLineStripNotice = notice;
-        RaisePropertyChanged(nameof(SettingsBlankLineStripNotice));
-        UpdateContentProcessingOptionStatuses();
-    }
+		SettingsBlankLineStripNotice = notice;
+		RaisePropertyChanged(nameof(SettingsBlankLineStripNotice));
+		UpdateContentProcessingOptionStatuses();
+	}
 
-    private void UpdateContentProcessingOptionStatuses()
-    {
-        foreach (var option in IgnoreOptions)
-        {
-            option.IsWarningStatus = (option.Id is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData) &&
-                GetRedactionStatus(option.Id).ScanState == SecretScanState.Failed;
-            // The notice is already empty for every state without something to say (Pending,
-            // Scanning, Disabled), so it can feed the indicator directly. This is what lets a clean
-            // completed scan show its "no matches" confirmation instead of an empty section.
-            option.StatusText = option.Id switch
-            {
-                IgnoreOptionId.HideSecrets => SettingsSecretsNotice,
-                IgnoreOptionId.HidePrivateData => SettingsPrivateDataNotice,
-                IgnoreOptionId.CompressCode when _appliedCompressCodeEnabled => SettingsCompressionNotice,
-                IgnoreOptionId.StripComments when _appliedStripCommentsEnabled => SettingsCommentStripNotice,
-                IgnoreOptionId.StripBlankLines when _appliedStripBlankLinesEnabled => SettingsBlankLineStripNotice,
-                _ => string.Empty
-            };
-        }
-    }
+	private void UpdateContentProcessingOptionStatuses()
+	{
+		foreach (var option in IgnoreOptions)
+		{
+			option.IsWarningStatus = (option.Id is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData) &&
+				GetRedactionStatus(option.Id).ScanState == SecretScanState.Failed;
+			// The notice is already empty for every state without something to say (Pending,
+			// Scanning, Disabled), so it can feed the indicator directly. This is what lets a clean
+			// completed scan show its "no matches" confirmation instead of an empty section.
+			option.StatusText = option.Id switch
+			{
+				IgnoreOptionId.HideSecrets => SettingsSecretsNotice,
+				IgnoreOptionId.HidePrivateData => SettingsPrivateDataNotice,
+				IgnoreOptionId.CompressCode when _appliedCompressCodeEnabled => SettingsCompressionNotice,
+				IgnoreOptionId.StripComments when _appliedStripCommentsEnabled => SettingsCommentStripNotice,
+				IgnoreOptionId.StripBlankLines when _appliedStripBlankLinesEnabled => SettingsBlankLineStripNotice,
+				_ => string.Empty
+			};
+		}
+	}
 
-    private ref ContentRedactionStatus GetRedactionStatus(IgnoreOptionId optionId)
-    {
-        if (optionId == IgnoreOptionId.HideSecrets)
-            return ref _secretsRedactionStatus;
-        if (optionId == IgnoreOptionId.HidePrivateData)
-            return ref _privateDataRedactionStatus;
-        throw new ArgumentOutOfRangeException(nameof(optionId), optionId, null);
-    }
+	private ref ContentRedactionStatus GetRedactionStatus(IgnoreOptionId optionId)
+	{
+		if (optionId == IgnoreOptionId.HideSecrets)
+			return ref _secretsRedactionStatus;
+		if (optionId == IgnoreOptionId.HidePrivateData)
+			return ref _privateDataRedactionStatus;
+		throw new ArgumentOutOfRangeException(nameof(optionId), optionId, null);
+	}
 
-    private readonly record struct ContentRedactionStatus(
-        SecretScanState ScanState,
-        int? DetectedCount = null,
-        int? HiddenCount = null,
-        int? SkippedFileCount = null,
-        int? FailedFileCount = null,
-        IReadOnlyList<UnscannableFile>? UnscannableFiles = null,
-        bool? PathUserNameHidden = null);
+	private readonly record struct ContentRedactionStatus(
+		SecretScanState ScanState,
+		int? DetectedCount = null,
+		int? HiddenCount = null,
+		int? SkippedFileCount = null,
+		int? FailedFileCount = null,
+		IReadOnlyList<UnscannableFile>? UnscannableFiles = null,
+		bool? PathUserNameHidden = null);
 
     /// <summary>
     /// Cleans up event subscriptions and resources to prevent memory leaks.
@@ -2785,23 +2785,23 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         Extensions.CollectionChanged -= _extensionsChangedHandler;
         RecentFolders.CollectionChanged -= _recentFoldersChangedHandler;
         RecentRepositories.CollectionChanged -= _recentRepositoriesChangedHandler;
-        CachedRepositories.CollectionChanged -= _cachedRepositoriesChangedHandler;
+		CachedRepositories.CollectionChanged -= _cachedRepositoriesChangedHandler;
         ToastItems.CollectionChanged -= OnToastItemsCollectionChanged;
 
         // Clear collections to release references
         TreeNodes.Clear();
         IgnoreOptions.Clear();
-        PathIgnoreOptions.Clear();
-        ContentProcessingOptions.Clear();
-        _secretsRedactionStatus = default;
-        _privateDataRedactionStatus = default;
-        HideSecretsOption = null;
-        HidePrivateDataOption = null;
+		PathIgnoreOptions.Clear();
+		ContentProcessingOptions.Clear();
+		_secretsRedactionStatus = default;
+		_privateDataRedactionStatus = default;
+		HideSecretsOption = null;
+		HidePrivateDataOption = null;
         Extensions.Clear();
         FontFamilies.Clear();
-        GitBranches.Clear();
-        SelectedGitCloneCacheEntry = null;
-        CachedRepositories.Clear();
+		GitBranches.Clear();
+		SelectedGitCloneCacheEntry = null;
+		CachedRepositories.Clear();
         ToastItems.Clear();
 
         // Clear large strings

@@ -35,7 +35,7 @@ public sealed record AvaloniaAppServices(
     IToastService ToastService,
     IIconStore IconStore,
     IGitRepositoryService GitRepositoryService,
-    IGitScopePathProvider GitScopePathProvider,
+	IGitScopePathProvider GitScopePathProvider,
     IRepoCacheService RepoCacheService,
     IZipDownloadService ZipDownloadService,
     IFileContentAnalyzer FileContentAnalyzer,
@@ -57,8 +57,8 @@ public sealed record AvaloniaAppServices(
     internal Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
         DesktopControlServerFactory
     { get; init; } = static (handler, projectPath, cancellationToken) =>
-            DesktopControlServer.StartAsync(
-                handler,
-                projectPath,
-                cancellationToken: cancellationToken);
+			DesktopControlServer.StartAsync(
+				handler,
+				projectPath,
+				cancellationToken: cancellationToken);
 }

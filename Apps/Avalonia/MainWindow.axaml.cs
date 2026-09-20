@@ -12,7 +12,7 @@ public partial class MainWindow : Window
 {
     private const double BranchMenuItemHeight = 32;
     private const double TreeFontMenuItemHeight = 32;
-    private static readonly TimeSpan ShutdownPersistenceBudget = TimeSpan.FromSeconds(10);
+	private static readonly TimeSpan ShutdownPersistenceBudget = TimeSpan.FromSeconds(10);
 
     internal enum TerminalCommandPostInstallUiAction
     {
@@ -252,7 +252,7 @@ public partial class MainWindow : Window
         UpdateTitle();
         UpdateToastHostLayout();
 
-        RelabelIgnoreOptionsWithCurrentCounts();
+		RelabelIgnoreOptionsWithCurrentCounts();
     }
 
     private async Task ShowErrorAsync(string message)
@@ -385,202 +385,202 @@ public partial class MainWindow : Window
         _previewPipeline.ScheduleRefresh(immediate);
     }
 
-    private void ScheduleContentTransformationRefresh(IgnoreOptionId? changedOptionId)
-    {
-        // The regular cache key already tracks selection and presentation changes. Redaction
-        // overrides are separate content state, so invalidate only when that state changes;
-        // invalidating every preview refresh would rescan all selected text unnecessarily.
-        InvalidatePreviewCache();
-        PublishTransformationContext();
-        if (RequiresCompressionRefresh(changedOptionId))
-        {
-            // A complete baseline only describes one transformation identity. Mark it incomplete so
-            // MetricsPipeline fills the missing raw/compressed variants instead of republishing the
-            // previous identity; already measured variants remain cached and are reused on later
-            // toggles. The metrics identity contains only compression, so a Hide Secrets toggle
-            // would recompute the exact numbers already on screen - it skips this block entirely.
-            _metrics.HasCompleteBaseline = false;
-            _metrics.ScheduleRecalculate();
-            // Redaction consumes compressed text but does not change the compression plan. Restarting
-            // Tree-sitter for a Hide Secrets toggle stalls the checkbox without changing its result.
-            var compressionEnabled = CreateCodeCompressionContext() is not null;
-            _metrics.CancelCompressionPrewarm();
-            if (_currentTree is not null)
-            {
-                ObserveDetachedTask(
-                    _metrics.PrewarmCompressionAsync(
-                        _currentTree,
-                        CancellationToken.None,
-                        cleanupAfterCompletion:
-                            MemoryCleanupReason.ApplySettingsWorkCompleted),
-                    "PrewarmCodeCompression");
-            }
+	private void ScheduleContentTransformationRefresh(IgnoreOptionId? changedOptionId)
+	{
+		// The regular cache key already tracks selection and presentation changes. Redaction
+		// overrides are separate content state, so invalidate only when that state changes;
+		// invalidating every preview refresh would rescan all selected text unnecessarily.
+		InvalidatePreviewCache();
+		PublishTransformationContext();
+		if (RequiresCompressionRefresh(changedOptionId))
+		{
+			// A complete baseline only describes one transformation identity. Mark it incomplete so
+			// MetricsPipeline fills the missing raw/compressed variants instead of republishing the
+			// previous identity; already measured variants remain cached and are reused on later
+			// toggles. The metrics identity contains only compression, so a Hide Secrets toggle
+			// would recompute the exact numbers already on screen - it skips this block entirely.
+			_metrics.HasCompleteBaseline = false;
+			_metrics.ScheduleRecalculate();
+			// Redaction consumes compressed text but does not change the compression plan. Restarting
+			// Tree-sitter for a Hide Secrets toggle stalls the checkbox without changing its result.
+			var compressionEnabled = CreateCodeCompressionContext() is not null;
+			_metrics.CancelCompressionPrewarm();
+			if (_currentTree is not null)
+			{
+				ObserveDetachedTask(
+					_metrics.PrewarmCompressionAsync(
+						_currentTree,
+						CancellationToken.None,
+						cleanupAfterCompletion:
+							MemoryCleanupReason.ApplySettingsWorkCompleted),
+					"PrewarmCodeCompression");
+			}
 
-            // Compression publishes counts only after it has produced output. Clear a disabled
-            // transformation immediately instead of attaching the previous run to an inactive row.
-            _codeCompressionSnapshot = compressionEnabled
-                ? GetCompressionSnapshotForCurrentSelection()
-                : null;
-        }
-        if (!IsAnyContentRedactionEnabled)
-        {
-            // Redaction scanning is strictly opt-in: with both checkboxes off no discovery may run, not
-            // even in the background. Cancel anything in flight and return the row to neutral.
-            CancelSecretRedactionDiscovery();
-            _secretRedactionMatchedCount = null;
-            _secretRedactionCount = null;
-            _privateDataRedactionMatchedCount = null;
-            _privateDataRedactionCount = null;
-            _secretRedactionScanState = SecretScanState.Disabled;
-            ApplyRedactionStatus(SecretScanState.Disabled);
-            RelabelIgnoreOptionsWithCurrentCounts();
-            if (_viewModel.IsAnyPreviewVisible)
-                _previewPipeline.ScheduleRefresh(immediate: true);
-            return;
-        }
-        // Start detector-only initialization before Preview and count pipelines read any
-        // selected content. This is engine warm-up; it never accesses the project tree.
-        _ = _secretRedactionSession.BeginWarmUp(AppliedRedactionFeatures);
-        // A canceled option refresh may restore the exact selection that was already scanned.
-        // Reuse that snapshot synchronously so rollback also restores the measured label.
-        var discoveryActive = IsSecretDiscoveryActiveForCurrentSelection();
-        var cachedRedactionSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
-        if (cachedRedactionSnapshot is not null)
-        {
-            _secretRedactionMatchedCount = cachedRedactionSnapshot.SecretDetectedCount;
-            _secretRedactionCount = cachedRedactionSnapshot.SecretRedactedCount;
-            _privateDataRedactionMatchedCount = cachedRedactionSnapshot.PrivateDataDetectedCount;
-            _privateDataRedactionCount = cachedRedactionSnapshot.PrivateDataRedactedCount;
-            _secretRedactionScanState = ResolveSecretScanState(cachedRedactionSnapshot);
-            ApplyRedactionStatus(
-                _secretRedactionScanState,
-                cachedRedactionSnapshot.SkippedFileCount,
-                cachedRedactionSnapshot.FailedFileCount,
-                cachedRedactionSnapshot.UnscannableFiles);
-        }
-        // A visible preview is already a complete measurement. Keep it until its replacement
-        // publishes so a session-to-durable mark transition cannot flash an empty status.
-        else if (!_viewModel.IsAnyPreviewVisible || _secretRedactionCount is null)
-        {
-            _secretRedactionMatchedCount = null;
-            _secretRedactionCount = null;
-            _privateDataRedactionMatchedCount = null;
-            _privateDataRedactionCount = null;
-            _secretRedactionScanState = discoveryActive
-                ? SecretScanState.Scanning
-                : SecretScanState.Pending;
-            ApplyRedactionStatus(_secretRedactionScanState);
-        }
-        RelabelIgnoreOptionsWithCurrentCounts();
-        if (_viewModel.IsAnyPreviewVisible)
-            _previewPipeline.ScheduleRefresh(immediate: true);
-        // Applying a redaction change is an explicit request: its scan starts without a debounce and
-        // with visible progress. Selection-driven refreshes keep the delayed anti-flash presentation.
-        ScheduleSecretRedactionCountRefresh(
-            changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData
-                ? StatusOperationPresentation.Immediate
-                : StatusOperationPresentation.ExtendedDelay);
-    }
+			// Compression publishes counts only after it has produced output. Clear a disabled
+			// transformation immediately instead of attaching the previous run to an inactive row.
+			_codeCompressionSnapshot = compressionEnabled
+				? GetCompressionSnapshotForCurrentSelection()
+				: null;
+		}
+		if (!IsAnyContentRedactionEnabled)
+		{
+			// Redaction scanning is strictly opt-in: with both checkboxes off no discovery may run, not
+			// even in the background. Cancel anything in flight and return the row to neutral.
+			CancelSecretRedactionDiscovery();
+			_secretRedactionMatchedCount = null;
+			_secretRedactionCount = null;
+			_privateDataRedactionMatchedCount = null;
+			_privateDataRedactionCount = null;
+			_secretRedactionScanState = SecretScanState.Disabled;
+			ApplyRedactionStatus(SecretScanState.Disabled);
+			RelabelIgnoreOptionsWithCurrentCounts();
+			if (_viewModel.IsAnyPreviewVisible)
+				_previewPipeline.ScheduleRefresh(immediate: true);
+			return;
+		}
+		// Start detector-only initialization before Preview and count pipelines read any
+		// selected content. This is engine warm-up; it never accesses the project tree.
+		_ = _secretRedactionSession.BeginWarmUp(AppliedRedactionFeatures);
+		// A canceled option refresh may restore the exact selection that was already scanned.
+		// Reuse that snapshot synchronously so rollback also restores the measured label.
+		var discoveryActive = IsSecretDiscoveryActiveForCurrentSelection();
+		var cachedRedactionSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
+		if (cachedRedactionSnapshot is not null)
+		{
+			_secretRedactionMatchedCount = cachedRedactionSnapshot.SecretDetectedCount;
+			_secretRedactionCount = cachedRedactionSnapshot.SecretRedactedCount;
+			_privateDataRedactionMatchedCount = cachedRedactionSnapshot.PrivateDataDetectedCount;
+			_privateDataRedactionCount = cachedRedactionSnapshot.PrivateDataRedactedCount;
+			_secretRedactionScanState = ResolveSecretScanState(cachedRedactionSnapshot);
+			ApplyRedactionStatus(
+				_secretRedactionScanState,
+				cachedRedactionSnapshot.SkippedFileCount,
+				cachedRedactionSnapshot.FailedFileCount,
+				cachedRedactionSnapshot.UnscannableFiles);
+		}
+		// A visible preview is already a complete measurement. Keep it until its replacement
+		// publishes so a session-to-durable mark transition cannot flash an empty status.
+		else if (!_viewModel.IsAnyPreviewVisible || _secretRedactionCount is null)
+		{
+			_secretRedactionMatchedCount = null;
+			_secretRedactionCount = null;
+			_privateDataRedactionMatchedCount = null;
+			_privateDataRedactionCount = null;
+			_secretRedactionScanState = discoveryActive
+				? SecretScanState.Scanning
+				: SecretScanState.Pending;
+			ApplyRedactionStatus(_secretRedactionScanState);
+		}
+		RelabelIgnoreOptionsWithCurrentCounts();
+		if (_viewModel.IsAnyPreviewVisible)
+			_previewPipeline.ScheduleRefresh(immediate: true);
+		// Applying a redaction change is an explicit request: its scan starts without a debounce and
+		// with visible progress. Selection-driven refreshes keep the delayed anti-flash presentation.
+		ScheduleSecretRedactionCountRefresh(
+			changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData
+				? StatusOperationPresentation.Immediate
+				: StatusOperationPresentation.ExtendedDelay);
+	}
 
-    private void ApplyProgrammaticContentTransformationSelectionChange(IgnoreOptionId? changedOptionId)
-    {
-        if (changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData)
-        {
-            TryApplySelectedContentRedactionState(changedOptionId.Value);
-            return;
-        }
+	private void ApplyProgrammaticContentTransformationSelectionChange(IgnoreOptionId? changedOptionId)
+	{
+		if (changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData)
+		{
+			TryApplySelectedContentRedactionState(changedOptionId.Value);
+			return;
+		}
 
-        ScheduleContentTransformationRefresh(changedOptionId);
-    }
+		ScheduleContentTransformationRefresh(changedOptionId);
+	}
 
-    private bool EnsureManualRedactionClassEnabled(ManualRedactionClass classification)
-    {
-        var optionId = classification switch
-        {
-            ManualRedactionClass.Secret => IgnoreOptionId.HideSecrets,
-            ManualRedactionClass.PrivateData => IgnoreOptionId.HidePrivateData,
-            _ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
-        };
-        var wasApplied = optionId == IgnoreOptionId.HideSecrets
-            ? _appliedHideSecretsEnabled
-            : _appliedHidePrivateDataEnabled;
-        _selectionCoordinator.ApplyContentRedactionOverrideAsApplied(
-            _currentPath,
-            optionId,
-            enabled: true);
-        var isApplied = optionId == IgnoreOptionId.HideSecrets
-            ? _appliedHideSecretsEnabled
-            : _appliedHidePrivateDataEnabled;
-        return !wasApplied && isApplied || TryApplySelectedContentRedactionState(optionId);
-    }
+	private bool EnsureManualRedactionClassEnabled(ManualRedactionClass classification)
+	{
+		var optionId = classification switch
+		{
+			ManualRedactionClass.Secret => IgnoreOptionId.HideSecrets,
+			ManualRedactionClass.PrivateData => IgnoreOptionId.HidePrivateData,
+			_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
+		};
+		var wasApplied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		_selectionCoordinator.ApplyContentRedactionOverrideAsApplied(
+			_currentPath,
+			optionId,
+			enabled: true);
+		var isApplied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		return !wasApplied && isApplied || TryApplySelectedContentRedactionState(optionId);
+	}
 
-    private void ApplySelectedContentRedactionStates()
-    {
-        var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
-        var hideSecrets = selected.Contains(IgnoreOptionId.HideSecrets);
-        var hidePrivateData = selected.Contains(IgnoreOptionId.HidePrivateData);
-        if (_appliedHideSecretsEnabled == hideSecrets &&
-            _appliedHidePrivateDataEnabled == hidePrivateData)
-        {
-            return;
-        }
+	private void ApplySelectedContentRedactionStates()
+	{
+		var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
+		var hideSecrets = selected.Contains(IgnoreOptionId.HideSecrets);
+		var hidePrivateData = selected.Contains(IgnoreOptionId.HidePrivateData);
+		if (_appliedHideSecretsEnabled == hideSecrets &&
+		    _appliedHidePrivateDataEnabled == hidePrivateData)
+		{
+			return;
+		}
 
-        _appliedHideSecretsEnabled = hideSecrets;
-        _appliedHidePrivateDataEnabled = hidePrivateData;
-        ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets);
-    }
+		_appliedHideSecretsEnabled = hideSecrets;
+		_appliedHidePrivateDataEnabled = hidePrivateData;
+		ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets);
+	}
 
-    private bool TryApplySelectedContentRedactionState(IgnoreOptionId optionId)
-    {
-        var selected = _selectionCoordinator
-            .GetSelectedIgnoreOptionIds()
-            .Contains(optionId);
-        var applied = optionId == IgnoreOptionId.HideSecrets
-            ? _appliedHideSecretsEnabled
-            : _appliedHidePrivateDataEnabled;
-        if (applied == selected)
-            return false;
+	private bool TryApplySelectedContentRedactionState(IgnoreOptionId optionId)
+	{
+		var selected = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(optionId);
+		var applied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		if (applied == selected)
+			return false;
 
-        if (optionId == IgnoreOptionId.HideSecrets)
-            _appliedHideSecretsEnabled = selected;
-        else
-            _appliedHidePrivateDataEnabled = selected;
-        ScheduleContentTransformationRefresh(optionId);
-        return true;
-    }
+		if (optionId == IgnoreOptionId.HideSecrets)
+			_appliedHideSecretsEnabled = selected;
+		else
+			_appliedHidePrivateDataEnabled = selected;
+		ScheduleContentTransformationRefresh(optionId);
+		return true;
+	}
 
-    internal static bool RequiresCompressionRefresh(IgnoreOptionId? changedOptionId) =>
-        changedOptionId is null or IgnoreOptionId.CompressCode or IgnoreOptionId.StripComments or
-            IgnoreOptionId.StripBlankLines;
+	internal static bool RequiresCompressionRefresh(IgnoreOptionId? changedOptionId) =>
+		changedOptionId is null or IgnoreOptionId.CompressCode or IgnoreOptionId.StripComments or
+			IgnoreOptionId.StripBlankLines;
 
-    private static SecretScanState ResolveSecretScanState(SecretRedactionSnapshot? snapshot) =>
-        snapshot switch
-        {
-            null => SecretScanState.Pending,
-            { HasFailures: true } => SecretScanState.Failed,
-            { HasLimitedCoverage: true } => SecretScanState.Limited,
-            { IsComplete: true } => SecretScanState.Completed,
-            _ => SecretScanState.Failed
-        };
+	private static SecretScanState ResolveSecretScanState(SecretRedactionSnapshot? snapshot) =>
+		snapshot switch
+		{
+			null => SecretScanState.Pending,
+			{ HasFailures: true } => SecretScanState.Failed,
+			{ HasLimitedCoverage: true } => SecretScanState.Limited,
+			{ IsComplete: true } => SecretScanState.Completed,
+			_ => SecretScanState.Failed
+		};
 
-    private void InvalidateSecretRedactionCount(bool scheduleRefreshImmediately = true)
-    {
-        CancelSecretRedactionDiscovery();
-        _secretRedactionSession.InvalidateSnapshots();
-        _secretRedactionScanState = IsAnyContentRedactionEnabled
-            ? SecretScanState.Pending
-            : SecretScanState.Disabled;
-        ApplyRedactionStatus(_secretRedactionScanState);
-        if (_secretRedactionCount is not null)
-            _secretRedactionCount = null;
-        _secretRedactionMatchedCount = null;
-        _privateDataRedactionCount = null;
-        _privateDataRedactionMatchedCount = null;
-        RelabelIgnoreOptionsWithCurrentCounts();
+	private void InvalidateSecretRedactionCount(bool scheduleRefreshImmediately = true)
+	{
+		CancelSecretRedactionDiscovery();
+		_secretRedactionSession.InvalidateSnapshots();
+		_secretRedactionScanState = IsAnyContentRedactionEnabled
+			? SecretScanState.Pending
+			: SecretScanState.Disabled;
+		ApplyRedactionStatus(_secretRedactionScanState);
+		if (_secretRedactionCount is not null)
+			_secretRedactionCount = null;
+		_secretRedactionMatchedCount = null;
+		_privateDataRedactionCount = null;
+		_privateDataRedactionMatchedCount = null;
+		RelabelIgnoreOptionsWithCurrentCounts();
 
-        if (scheduleRefreshImmediately)
-            ScheduleSecretRedactionCountRefresh();
-    }
+		if (scheduleRefreshImmediately)
+			ScheduleSecretRedactionCountRefresh();
+	}
 
     private void CancelPreviewRefresh()
     {
@@ -997,8 +997,8 @@ public partial class MainWindow : Window
         // Give persistence one last synchronous chance before the process exits.
         // This protects against transient IO failures that would otherwise make the UI look correct
         // during the session but leave no durable snapshot for the next launch.
-        var startedTimestamp = Stopwatch.GetTimestamp();
-        _appearanceSettings.PersistPendingChanges();
+		var startedTimestamp = Stopwatch.GetTimestamp();
+		_appearanceSettings.PersistPendingChanges();
 
         if (_recentProjectsDb.RecentFolders.Count > 0 ||
             _recentProjectsDb.RecentFolderRemovals.Count > 0 ||
@@ -1007,16 +1007,16 @@ public partial class MainWindow : Window
             _recentProjectsStore.TryPersist(_recentProjectsDb);
         }
 
-        var remaining = ShutdownPersistenceBudget - Stopwatch.GetElapsedTime(startedTimestamp);
-        if (remaining < TimeSpan.Zero)
-            remaining = TimeSpan.Zero;
-        var result = _projectProfiles.FlushPending(remaining);
-        if (!result.Succeeded)
-        {
-            Trace.TraceWarning(
-                $"Project profile shutdown persistence was incomplete: " +
-                $"attempted={result.Attempted}, saved={result.Saved}, remaining={result.Remaining}.");
-        }
+		var remaining = ShutdownPersistenceBudget - Stopwatch.GetElapsedTime(startedTimestamp);
+		if (remaining < TimeSpan.Zero)
+			remaining = TimeSpan.Zero;
+		var result = _projectProfiles.FlushPending(remaining);
+		if (!result.Succeeded)
+		{
+			Trace.TraceWarning(
+				$"Project profile shutdown persistence was incomplete: " +
+				$"attempted={result.Attempted}, saved={result.Saved}, remaining={result.Remaining}.");
+		}
     }
 
     private async Task<bool> TryOpenFolderAsync(
@@ -1135,7 +1135,7 @@ public partial class MainWindow : Window
         var projectLoadFinalization = BeginProjectLoadFinalization();
         var previousSourceType = _viewModel.ProjectSourceType;
         var previousBranch = _viewModel.CurrentBranch;
-        var previousBranches = _viewModel.GitBranches.ToArray();
+		var previousBranches = _viewModel.GitBranches.ToArray();
         var previousRepositoryUrl = _currentRepositoryUrl;
         var previousProjectDisplayName = _currentProjectDisplayName;
         var candidateBranch = ReferenceEquals(candidateSession, _currentRepositorySession)
@@ -1164,7 +1164,7 @@ public partial class MainWindow : Window
                     candidateSession?.Dispose();
                 _viewModel.ProjectSourceType = previousSourceType;
                 _viewModel.CurrentBranch = previousBranch;
-                RestoreGitBranches(previousBranches);
+				RestoreGitBranches(previousBranches);
                 _currentRepositoryUrl = previousRepositoryUrl;
                 _currentProjectDisplayName = previousProjectDisplayName;
                 _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
@@ -1190,20 +1190,20 @@ public partial class MainWindow : Window
                     ? ProjectSourceType.GitClone
                     : ProjectSourceType.ZipDownload;
                 _viewModel.CurrentBranch = candidateBranch;
-                _viewModel.GitBranches.Clear();
-                if (candidateSession.ContentKind == RepositoryCacheContentKind.Git &&
-                    !string.IsNullOrWhiteSpace(candidateBranch))
-                {
-                    _viewModel.GitBranches.Add(
-                        new GitBranch(candidateBranch, IsActive: true, IsRemote: false));
-                }
-                UpdateBranchMenu();
-                if (candidateSession.ContentKind == RepositoryCacheContentKind.Git)
-                {
-                    ObserveDetachedTask(
-                        RefreshCachedRepositoryBranchesAfterLoadAsync(normalizedPath),
-                        "RefreshCachedRepositoryBranchesAfterLoad");
-                }
+				_viewModel.GitBranches.Clear();
+				if (candidateSession.ContentKind == RepositoryCacheContentKind.Git &&
+				    !string.IsNullOrWhiteSpace(candidateBranch))
+				{
+					_viewModel.GitBranches.Add(
+						new GitBranch(candidateBranch, IsActive: true, IsRemote: false));
+				}
+				UpdateBranchMenu();
+				if (candidateSession.ContentKind == RepositoryCacheContentKind.Git)
+				{
+					ObserveDetachedTask(
+						RefreshCachedRepositoryBranchesAfterLoadAsync(normalizedPath),
+						"RefreshCachedRepositoryBranchesAfterLoad");
+				}
                 UpdateTitle();
             }
             else
@@ -1224,7 +1224,7 @@ public partial class MainWindow : Window
             {
                 _viewModel.ProjectSourceType = previousSourceType;
                 _viewModel.CurrentBranch = previousBranch;
-                RestoreGitBranches(previousBranches);
+				RestoreGitBranches(previousBranches);
                 _currentRepositoryUrl = previousRepositoryUrl;
                 _currentProjectDisplayName = previousProjectDisplayName;
             }
@@ -1394,7 +1394,7 @@ public partial class MainWindow : Window
         bool reuseUnchangedDiscoveryCaches = false,
         bool preserveTreeState = true)
     {
-        if (string.IsNullOrEmpty(_currentPath)) return false;
+		if (string.IsNullOrEmpty(_currentPath)) return false;
         cancellationToken.ThrowIfCancellationRequested();
 
         // A no-change F5 validates only directories previously inspected by scope discovery.
@@ -1424,10 +1424,10 @@ public partial class MainWindow : Window
         if (applyStoredProfile)
         {
             var runtimeGitMode = _selectionCoordinator.ActiveGitFilteringMode;
-            var profileSnapshot = await LoadProjectProfileWithRetryAsync(
-                _currentPath,
-                cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+			var profileSnapshot = await LoadProjectProfileWithRetryAsync(
+				_currentPath,
+				cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
 
             if (profileSnapshot is { HasProfile: true, Profile: not null })
             {
@@ -1444,24 +1444,24 @@ public partial class MainWindow : Window
                 if (!preserveTreeState)
                     profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: null);
             }
-            else if (profileSnapshot.Status == ProjectProfileLookupStatus.TemporarilyUnavailable &&
-                     !preserveTreeState)
-            {
-                profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: []);
-            }
+			else if (profileSnapshot.Status == ProjectProfileLookupStatus.TemporarilyUnavailable &&
+			         !preserveTreeState)
+			{
+				profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: []);
+			}
             _selectionCoordinator.RestoreMomentaryGitFilteringMode(runtimeGitMode);
 
-            if (profileSnapshot is
-                {
-                    Status: ProjectProfileLookupStatus.Found or ProjectProfileLookupStatus.Missing,
-                    PersistentMarks: not null
-                })
-            {
-                persistentMarks = profileSnapshot.PersistentMarks;
-            }
-        }
+			if (profileSnapshot is
+			    {
+				    Status: ProjectProfileLookupStatus.Found or ProjectProfileLookupStatus.Missing,
+				    PersistentMarks: not null
+			    })
+			{
+				persistentMarks = profileSnapshot.PersistentMarks;
+			}
+		}
 
-        return await _projectLoadSnapshotPipeline.ReloadAsync(
+		return await _projectLoadSnapshotPipeline.ReloadAsync(
             _currentPath,
             preserveTreeState,
             persistentMarks,
@@ -1469,32 +1469,32 @@ public partial class MainWindow : Window
             cancellationToken);
     }
 
-    private async Task<ProjectProfileLoadSnapshot> LoadProjectProfileWithRetryAsync(
-        string projectPath,
-        CancellationToken cancellationToken)
-    {
-        return await _projectProfiles
-            .LoadSnapshotWithRetryAsync(projectPath, cancellationToken);
-    }
+	private async Task<ProjectProfileLoadSnapshot> LoadProjectProfileWithRetryAsync(
+		string projectPath,
+		CancellationToken cancellationToken)
+	{
+		return await _projectProfiles
+			.LoadSnapshotWithRetryAsync(projectPath, cancellationToken);
+	}
 
     /// <summary>
     /// Clears state from previous project to release memory before loading a new one.
     /// </summary>
     private void ClearPreviousProjectState(
-        bool forceCompactingGc = false,
-        bool preserveProjectSessions = false)
+		bool forceCompactingGc = false,
+		bool preserveProjectSessions = false)
     {
         _memoryCleanup.CancelPreview();
-        CancelSecretRedactionDiscovery();
-        ApplyProjectRuntimeState(ProjectRuntimeStateSnapshot.Cleared);
-        PublishTransformationContext();
-        if (!preserveProjectSessions)
-        {
-            _secretRedactionSession.Reset();
-            _codeCompressionSession.Reset();
-            _contentSessionProjectPath = null;
-        }
-        _selectionCoordinator.ClearAppliedSelectionState();
+		CancelSecretRedactionDiscovery();
+		ApplyProjectRuntimeState(ProjectRuntimeStateSnapshot.Cleared);
+		PublishTransformationContext();
+		if (!preserveProjectSessions)
+		{
+			_secretRedactionSession.Reset();
+			_codeCompressionSession.Reset();
+			_contentSessionProjectPath = null;
+		}
+		_selectionCoordinator.ClearAppliedSelectionState();
 
         // Background metrics become stale as soon as the visible tree is about to change.
         // Cancel them before tearing down the current project state to avoid wasted I/O.
@@ -1529,16 +1529,16 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterBaseTree = null;
         _currentTreeInventory = null;
-        _viewModel.SetAppliedContentTransformationState(
-            compressCode: false,
-            stripComments: false,
-            stripBlankLines: false);
-        _viewModel.SetCompressionPreparationStatus(isActive: false);
-        _viewModel.SetCommentStripPreparationStatus(isActive: false);
-        _viewModel.SetBlankLineStripPreparationStatus(isActive: false);
-        _viewModel.SetCompressionStatus(null, null, null, null);
-        _viewModel.SetCommentStripStatus(null, null);
-        _viewModel.SetBlankLineStripStatus(null, null);
+		_viewModel.SetAppliedContentTransformationState(
+			compressCode: false,
+			stripComments: false,
+			stripBlankLines: false);
+		_viewModel.SetCompressionPreparationStatus(isActive: false);
+		_viewModel.SetCommentStripPreparationStatus(isActive: false);
+		_viewModel.SetBlankLineStripPreparationStatus(isActive: false);
+		_viewModel.SetCompressionStatus(null, null, null, null);
+		_viewModel.SetCommentStripStatus(null, null);
+		_viewModel.SetBlankLineStripStatus(null, null);
         _metrics.HasCompleteBaseline = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;
@@ -1547,7 +1547,7 @@ public partial class MainWindow : Window
         _viewModel.IsPreviewLoading = false;
         InvalidatePreviewCache();
         _metrics.InvalidateComputedCaches();
-        _metrics.ResetStatusMetricsSnapshot();
+		_metrics.ResetStatusMetricsSnapshot();
 
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
@@ -1559,58 +1559,58 @@ public partial class MainWindow : Window
             compactLargeObjectHeap: forceCompactingGc);
     }
 
-    private void RestoreGitBranches(IReadOnlyList<GitBranch> branches)
-    {
-        _viewModel.GitBranches.Clear();
-        foreach (var branch in branches)
-            _viewModel.GitBranches.Add(branch);
-        UpdateBranchMenu();
-    }
+	private void RestoreGitBranches(IReadOnlyList<GitBranch> branches)
+	{
+		_viewModel.GitBranches.Clear();
+		foreach (var branch in branches)
+			_viewModel.GitBranches.Add(branch);
+		UpdateBranchMenu();
+	}
 
-    private async Task RefreshCachedRepositoryBranchesAfterLoadAsync(string projectPath)
-    {
-        var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
-        await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
-            _postLoadVisualReadyTask,
-            MetricsCalculationPolicy.InitialVisualReadyTimeout,
-            cancellationToken);
-        if (PathComparer.Default.Equals(_currentPath, projectPath))
-            await RefreshGitBranchesAsync(projectPath, cancellationToken);
-    }
+	private async Task RefreshCachedRepositoryBranchesAfterLoadAsync(string projectPath)
+	{
+		var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+		await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+			_postLoadVisualReadyTask,
+			MetricsCalculationPolicy.InitialVisualReadyTimeout,
+			cancellationToken);
+		if (PathComparer.Default.Equals(_currentPath, projectPath))
+			await RefreshGitBranchesAsync(projectPath, cancellationToken);
+	}
 
-    private ProjectRuntimeStateSnapshot CaptureProjectRuntimeState() => new(
-        _appliedHideSecretsEnabled,
-        _appliedHidePrivateDataEnabled,
-        _appliedCompressCodeEnabled,
-        _appliedStripCommentsEnabled,
-        _appliedStripBlankLinesEnabled,
-        _secretRedactionCount,
-        _secretRedactionMatchedCount,
-        _privateDataRedactionCount,
-        _privateDataRedactionMatchedCount,
-        _secretRedactionScanState,
-        _codeCompressionSnapshot);
+	private ProjectRuntimeStateSnapshot CaptureProjectRuntimeState() => new(
+		_appliedHideSecretsEnabled,
+		_appliedHidePrivateDataEnabled,
+		_appliedCompressCodeEnabled,
+		_appliedStripCommentsEnabled,
+		_appliedStripBlankLinesEnabled,
+		_secretRedactionCount,
+		_secretRedactionMatchedCount,
+		_privateDataRedactionCount,
+		_privateDataRedactionMatchedCount,
+		_secretRedactionScanState,
+		_codeCompressionSnapshot);
 
-    private void ApplyProjectRuntimeState(ProjectRuntimeStateSnapshot state)
-    {
-        _appliedHideSecretsEnabled = state.HideSecretsApplied;
-        _appliedHidePrivateDataEnabled = state.HidePrivateDataApplied;
-        _appliedCompressCodeEnabled = state.CompressCodeApplied;
-        _appliedStripCommentsEnabled = state.StripCommentsApplied;
-        _appliedStripBlankLinesEnabled = state.StripBlankLinesApplied;
-        _secretRedactionCount = state.SecretRedactedCount;
-        _secretRedactionMatchedCount = state.SecretDetectedCount;
-        _privateDataRedactionCount = state.PrivateDataRedactedCount;
-        _privateDataRedactionMatchedCount = state.PrivateDataDetectedCount;
-        _secretRedactionScanState = state.SecretScanState;
-        _codeCompressionSnapshot = state.CompressionSnapshot;
-        _viewModel.SetAppliedContentTransformationState(
-            state.CompressCodeApplied,
-            state.StripCommentsApplied,
-            state.StripBlankLinesApplied);
-        ApplyRedactionStatus(state.SecretScanState);
-        RelabelIgnoreOptionsWithCurrentCounts();
-    }
+	private void ApplyProjectRuntimeState(ProjectRuntimeStateSnapshot state)
+	{
+		_appliedHideSecretsEnabled = state.HideSecretsApplied;
+		_appliedHidePrivateDataEnabled = state.HidePrivateDataApplied;
+		_appliedCompressCodeEnabled = state.CompressCodeApplied;
+		_appliedStripCommentsEnabled = state.StripCommentsApplied;
+		_appliedStripBlankLinesEnabled = state.StripBlankLinesApplied;
+		_secretRedactionCount = state.SecretRedactedCount;
+		_secretRedactionMatchedCount = state.SecretDetectedCount;
+		_privateDataRedactionCount = state.PrivateDataRedactedCount;
+		_privateDataRedactionMatchedCount = state.PrivateDataDetectedCount;
+		_secretRedactionScanState = state.SecretScanState;
+		_codeCompressionSnapshot = state.CompressionSnapshot;
+		_viewModel.SetAppliedContentTransformationState(
+			state.CompressCodeApplied,
+			state.StripCommentsApplied,
+			state.StripBlankLinesApplied);
+		ApplyRedactionStatus(state.SecretScanState);
+		RelabelIgnoreOptionsWithCurrentCounts();
+	}
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ResetInteractiveFilterCache() =>
@@ -1627,28 +1627,28 @@ public partial class MainWindow : Window
             postLoadCleanupReason,
             preserveStatusMetrics);
 
-    private TreeNodeViewModel BuildTreeViewModel(
-        TreeNodeDescriptor descriptor,
-        TreeNodeViewModel? parent,
-        CancellationToken cancellationToken = default)
+	private TreeNodeViewModel BuildTreeViewModel(
+		TreeNodeDescriptor descriptor,
+		TreeNodeViewModel? parent,
+		CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+		cancellationToken.ThrowIfCancellationRequested();
         return BuildTreeViewModelCore(
             descriptor,
             parent,
             materializeChildrenNow: parent is null,
-            allowParallelAtThisLevel: parent is null,
-            cancellationToken);
+			allowParallelAtThisLevel: parent is null,
+			cancellationToken);
     }
 
     private TreeNodeViewModel BuildTreeViewModelCore(
         TreeNodeDescriptor descriptor,
         TreeNodeViewModel? parent,
         bool materializeChildrenNow,
-        bool allowParallelAtThisLevel,
-        CancellationToken cancellationToken)
+		bool allowParallelAtThisLevel,
+		CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+		cancellationToken.ThrowIfCancellationRequested();
         var icon = _iconCache.GetIcon(descriptor.IconKey);
         // Eagerly building the entire view-model graph was one of the biggest remaining
         // startup costs on large projects. We now materialize only the root-visible level
@@ -1667,11 +1667,11 @@ public partial class MainWindow : Window
         if (!materializeChildrenNow || descriptor.Children.Count == 0)
             return node;
 
-        foreach (var child in BuildImmediateChildViewModels(
-                     node,
-                     descriptor.Children,
-                     allowParallelAtThisLevel,
-                     cancellationToken))
+		foreach (var child in BuildImmediateChildViewModels(
+			         node,
+			         descriptor.Children,
+			         allowParallelAtThisLevel,
+			         cancellationToken))
             node.Children.Add(child);
 
         return node;
@@ -1685,17 +1685,17 @@ public partial class MainWindow : Window
         return BuildImmediateChildViewModels(
             parent,
             parent.Descriptor.Children,
-            allowParallelAtThisLevel: false,
-            CancellationToken.None);
+			allowParallelAtThisLevel: false,
+			CancellationToken.None);
     }
 
     private List<TreeNodeViewModel> BuildImmediateChildViewModels(
         TreeNodeViewModel parent,
         IReadOnlyList<TreeNodeDescriptor> children,
-        bool allowParallelAtThisLevel,
-        CancellationToken cancellationToken)
+		bool allowParallelAtThisLevel,
+		CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+		cancellationToken.ThrowIfCancellationRequested();
         if (children.Count == 0)
             return [];
 
@@ -1706,8 +1706,8 @@ public partial class MainWindow : Window
             var childNodes = new TreeNodeViewModel[children.Count];
             var parallelOptions = new ParallelOptions
             {
-                MaxDegreeOfParallelism = Math.Min(TreeViewModelBuildParallelism, children.Count),
-                CancellationToken = cancellationToken
+				MaxDegreeOfParallelism = Math.Min(TreeViewModelBuildParallelism, children.Count),
+				CancellationToken = cancellationToken
             };
 
             Parallel.For(0, children.Count, parallelOptions, index =>
@@ -1716,8 +1716,8 @@ public partial class MainWindow : Window
                     children[index],
                     parent,
                     materializeChildrenNow: false,
-                    allowParallelAtThisLevel: false,
-                    cancellationToken);
+					allowParallelAtThisLevel: false,
+					cancellationToken);
             });
 
             return [.. childNodes];
@@ -1726,13 +1726,13 @@ public partial class MainWindow : Window
         var realizedChildren = new List<TreeNodeViewModel>(children.Count);
         foreach (var child in children)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+			cancellationToken.ThrowIfCancellationRequested();
             var childViewModel = BuildTreeViewModelCore(
                 child,
                 parent,
                 materializeChildrenNow: false,
-                allowParallelAtThisLevel: false,
-                cancellationToken);
+				allowParallelAtThisLevel: false,
+				cancellationToken);
             realizedChildren.Add(childViewModel);
         }
 
@@ -1790,7 +1790,7 @@ public partial class MainWindow : Window
         // Project lifecycle operations already committed to visible progress. Their compression
         // and metrics phases must continue that feedback immediately once the reveal gate opens.
         // Interactive option changes keep the delayed presentation to avoid flashing on fast work.
-        var secretRefreshVersion = Volatile.Read(ref _secretRedactionCountRefreshVersion);
+		var secretRefreshVersion = Volatile.Read(ref _secretRedactionCountRefreshVersion);
         ObserveDetachedTask(
             RunPostLoadBackgroundWorkAsync(
                 postLoadVisualReadyTask,
@@ -1798,7 +1798,7 @@ public partial class MainWindow : Window
                 statusPresentation,
                 initializeMetricsAsync,
                 cleanupAfterCompletion,
-                secretRefreshVersion,
+				secretRefreshVersion,
                 cancellationToken),
             "RunPostLoadBackgroundWork");
     }
@@ -1809,7 +1809,7 @@ public partial class MainWindow : Window
         StatusOperationPresentation statusPresentation,
         Func<CancellationToken, Task> initializeMetricsAsync,
         MemoryCleanupReason? cleanupAfterCompletion,
-        long secretRefreshVersion,
+		long secretRefreshVersion,
         CancellationToken cancellationToken)
     {
         try
@@ -1822,11 +1822,11 @@ public partial class MainWindow : Window
                     statusPresentation,
                     retainReadFactsForNextMetricsPass: true),
                 initializeMetricsAsync,
-                () =>
-                {
-                    if (secretRefreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
-                        ScheduleSecretRedactionCountRefresh(statusPresentation);
-                },
+				() =>
+				{
+					if (secretRefreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
+						ScheduleSecretRedactionCountRefresh(statusPresentation);
+				},
                 cleanupAfterCompletion,
                 ScheduleBackgroundMemoryCleanup,
                 cancellationToken);
@@ -1917,7 +1917,7 @@ public partial class MainWindow : Window
     }
 
     private static void ReportBackgroundTaskFailure(string operationName, Exception exception) =>
-        Debug.WriteLine($"[WARN] Background task '{operationName}' failed: {exception}");
+		Debug.WriteLine($"[WARN] Background task '{operationName}' failed: {exception}");
 
     private static async void ObserveDetachedTask(Task task, string operationName)
     {
@@ -1935,7 +1935,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ReportBackgroundTaskFailure(operationName, ex);
+			ReportBackgroundTaskFailure(operationName, ex);
         }
     }
 
@@ -1994,14 +1994,14 @@ public partial class MainWindow : Window
         bool isGitMode,
         string? currentRepositoryUrl,
         string? currentBranch,
-        string? currentProjectDisplayName,
-        IReadOnlyList<LiveSessionRecord> liveSessions,
-        string? multipleSessionsText)
+		string? currentProjectDisplayName,
+		IReadOnlyList<LiveSessionRecord> liveSessions,
+		string? multipleSessionsText)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
             return MainWindowViewModel.BaseTitle;
 
-        string title;
+		string title;
         if (isGitMode && !string.IsNullOrEmpty(currentRepositoryUrl))
         {
             var displayRepositoryUrl = RepositoryWebPathPresentationService.NormalizeForDisplay(currentRepositoryUrl);
@@ -2013,43 +2013,43 @@ public partial class MainWindow : Window
             var branchDisplay = !string.IsNullOrEmpty(currentBranch)
                 ? $" [{currentBranch}]"
                 : string.Empty;
-            title = $"{MainWindowViewModel.BaseTitle} - {displayRepositoryUrl}{branchDisplay}";
+			title = $"{MainWindowViewModel.BaseTitle} - {displayRepositoryUrl}{branchDisplay}";
         }
-        else
-        {
-            var displayPath = !string.IsNullOrEmpty(currentProjectDisplayName)
-                ? currentProjectDisplayName
-                : currentPath;
-            title = $"{MainWindowViewModel.BaseTitle} - {displayPath}";
-        }
+		else
+		{
+			var displayPath = !string.IsNullOrEmpty(currentProjectDisplayName)
+				? currentProjectDisplayName
+				: currentPath;
+			title = $"{MainWindowViewModel.BaseTitle} - {displayPath}";
+		}
 
-        return liveSessions.Count switch
-        {
-            0 => title,
-            1 => $"{title} · Live context ({LiveSessionRegistry.FormatClientName(liveSessions[0].ClientName)})",
-            _ => $"{title} · Live context ({multipleSessionsText ?? liveSessions.Count.ToString(CultureInfo.InvariantCulture)})"
-        };
+		return liveSessions.Count switch
+		{
+			0 => title,
+			1 => $"{title} · Live context ({LiveSessionRegistry.FormatClientName(liveSessions[0].ClientName)})",
+			_ => $"{title} · Live context ({multipleSessionsText ?? liveSessions.Count.ToString(CultureInfo.InvariantCulture)})"
+		};
     }
 
     private void UpdateTitle()
     {
-        RefreshLiveSessionSnapshot();
-        ApplyWindowTitle();
-    }
+		RefreshLiveSessionSnapshot();
+		ApplyWindowTitle();
+	}
 
-    private void ApplyWindowTitle()
-    {
-        var multipleSessionsText = _liveSessions.Count > 1
-            ? _localization.Format("LiveContext.Title.Sessions", _liveSessions.Count)
-            : null;
+	private void ApplyWindowTitle()
+	{
+		var multipleSessionsText = _liveSessions.Count > 1
+			? _localization.Format("LiveContext.Title.Sessions", _liveSessions.Count)
+			: null;
         _viewModel.Title = BuildWindowTitle(
             _currentPath,
             _viewModel.IsGitMode,
             _currentRepositoryUrl,
             _viewModel.CurrentBranch,
-            _currentProjectDisplayName,
-            _liveSessions,
-            multipleSessionsText);
+			_currentProjectDisplayName,
+			_liveSessions,
+			multipleSessionsText);
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
@@ -2117,14 +2117,14 @@ public partial class MainWindow : Window
             rootPath,
             selectedRootFolders,
             cancellationToken);
-        return availability with
-        {
-            ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled,
-            SecretRedactionsCount = _secretRedactionCount,
-            SecretMatchesCount = _secretRedactionMatchedCount,
-            PrivateDataRedactionsCount = _privateDataRedactionCount,
-            PrivateDataMatchesCount = _privateDataRedactionMatchedCount
-        };
+		return availability with
+		{
+			ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled,
+			SecretRedactionsCount = _secretRedactionCount,
+			SecretMatchesCount = _secretRedactionMatchedCount,
+			PrivateDataRedactionsCount = _privateDataRedactionCount,
+			PrivateDataMatchesCount = _privateDataRedactionMatchedCount
+		};
     }
 
     private IgnoreRules BuildIgnoreRules(string rootPath)
@@ -2141,16 +2141,16 @@ public partial class MainWindow : Window
     private ProjectLoadCancellationSnapshot CaptureProjectLoadCancellationSnapshot()
     {
         var hadLoadedProjectBefore = _viewModel.IsProjectLoaded && !string.IsNullOrWhiteSpace(_currentPath);
-        var selectionCheckpoint = _selectionCoordinator.CaptureProjectCheckpoint();
-        var treeSelection = hadLoadedProjectBefore
-            ? ProjectTreeSelectionSnapshot.Capture(
-                _currentPath!,
-                _viewModel.TreeNodes,
-                _treeSelectionSnapshotCache)
-            : null;
-        var treeExpansion = hadLoadedProjectBefore
-            ? ProjectTreeUiState.CaptureExpansion(_currentPath!, _viewModel.TreeNodes)
-            : null;
+		var selectionCheckpoint = _selectionCoordinator.CaptureProjectCheckpoint();
+		var treeSelection = hadLoadedProjectBefore
+			? ProjectTreeSelectionSnapshot.Capture(
+				_currentPath!,
+				_viewModel.TreeNodes,
+				_treeSelectionSnapshotCache)
+			: null;
+		var treeExpansion = hadLoadedProjectBefore
+			? ProjectTreeUiState.CaptureExpansion(_currentPath!, _viewModel.TreeNodes)
+			: null;
 
         return new ProjectLoadCancellationSnapshot(
             HadLoadedProjectBefore: hadLoadedProjectBefore,
@@ -2172,21 +2172,21 @@ public partial class MainWindow : Window
             AllIgnoreChecked: _viewModel.AllIgnoreChecked,
             HasCompleteMetricsBaseline: _metrics.HasCompleteBaseline,
             Extensions: _viewModel.Extensions
-                .Select(static option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
-                .ToArray(),
+				.Select(static option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
+				.ToArray(),
             IgnoreOptions: _viewModel.IgnoreOptions
-                .Select(static option => new IgnoreOptionSnapshot(option.Id, option.Label, option.IsChecked))
-                .ToArray())
-        {
-            SelectionCheckpoint = selectionCheckpoint,
-            RuntimeState = CaptureProjectRuntimeState(),
-            TreeSelection = treeSelection,
-            TreeExpansion = treeExpansion,
-            SearchQuery = _viewModel.SearchQuery,
-            NameFilter = _viewModel.NameFilter,
-            PreviewSearchVisible = _viewModel.PreviewSearchVisible,
-            PreviewSearchQuery = _viewModel.PreviewSearchQuery
-        };
+				.Select(static option => new IgnoreOptionSnapshot(option.Id, option.Label, option.IsChecked))
+				.ToArray())
+		{
+			SelectionCheckpoint = selectionCheckpoint,
+			RuntimeState = CaptureProjectRuntimeState(),
+			TreeSelection = treeSelection,
+			TreeExpansion = treeExpansion,
+			SearchQuery = _viewModel.SearchQuery,
+			NameFilter = _viewModel.NameFilter,
+			PreviewSearchVisible = _viewModel.PreviewSearchVisible,
+			PreviewSearchQuery = _viewModel.PreviewSearchQuery
+		};
     }
 
     private bool TryApplyActiveProjectLoadCancellationFallback()
@@ -2217,9 +2217,9 @@ public partial class MainWindow : Window
         _viewModel.StatusMetricsVisible = snapshot.StatusMetricsVisible;
         _viewModel.StatusTreeStatsText = snapshot.StatusTreeStatsText;
         _viewModel.StatusContentStatsText = snapshot.StatusContentStatsText;
-        _viewModel.SearchQuery = snapshot.SearchQuery;
-        _viewModel.NameFilter = snapshot.NameFilter;
-        ApplyProjectRuntimeState(snapshot.RuntimeState);
+		_viewModel.SearchQuery = snapshot.SearchQuery;
+		_viewModel.NameFilter = snapshot.NameFilter;
+		ApplyProjectRuntimeState(snapshot.RuntimeState);
 
         _viewModel.ProjectSourceType = snapshot.ProjectSourceType;
         _viewModel.CurrentBranch = snapshot.CurrentBranch;
@@ -2227,10 +2227,10 @@ public partial class MainWindow : Window
         foreach (var branch in snapshot.GitBranches)
             _viewModel.GitBranches.Add(branch);
 
-        if (snapshot.SelectionCheckpoint is { } selectionCheckpoint)
-            _selectionCoordinator.RestoreProjectCheckpoint(selectionCheckpoint);
-        else
-            RestoreLegacySelectionSnapshot(snapshot);
+		if (snapshot.SelectionCheckpoint is { } selectionCheckpoint)
+			_selectionCoordinator.RestoreProjectCheckpoint(selectionCheckpoint);
+		else
+			RestoreLegacySelectionSnapshot(snapshot);
         _metrics.HasCompleteBaseline = snapshot.HasCompleteMetricsBaseline;
         UpdateCompactModeVisualState();
         UpdateWorkspaceLayoutForCurrentMode();
@@ -2245,78 +2245,78 @@ public partial class MainWindow : Window
             var rootNode = BuildTreeViewModel(snapshot.Tree.Root, null);
             rootNode.DisplayName = displayName;
             _viewModel.TreeNodes.Add(rootNode);
-            ProjectTreeUiState.RestoreExpansion(rootNode, snapshot.TreeExpansion);
-            if (snapshot.TreeSelection is not null)
-            {
-                ApplyTreeSelectionWithoutPublishing(() => snapshot.TreeSelection.Restore(rootNode));
-            }
+			ProjectTreeUiState.RestoreExpansion(rootNode, snapshot.TreeExpansion);
+			if (snapshot.TreeSelection is not null)
+			{
+				ApplyTreeSelectionWithoutPublishing(() => snapshot.TreeSelection.Restore(rootNode));
+			}
         }
-        _previewSearchController.RestoreProjectState(
-            snapshot.PreviewSearchQuery,
-            snapshot.PreviewSearchVisible);
-        SyncSearchAndFilterVisualStateFromFlags();
-        _searchFilterController.ReapplyActiveTreeQueryPresentation();
-        _viewModel.IsProjectLoadInProgress = false;
-        PublishTransformationContext();
-        ScheduleRestoredPreviewRefresh(snapshot.Path);
+		_previewSearchController.RestoreProjectState(
+			snapshot.PreviewSearchQuery,
+			snapshot.PreviewSearchVisible);
+		SyncSearchAndFilterVisualStateFromFlags();
+		_searchFilterController.ReapplyActiveTreeQueryPresentation();
+		_viewModel.IsProjectLoadInProgress = false;
+		PublishTransformationContext();
+		ScheduleRestoredPreviewRefresh(snapshot.Path);
 
         UpdateBranchMenu();
         UpdateTitle();
     }
 
-    private void ScheduleRestoredPreviewRefresh(string? restoredProjectPath)
-    {
-        Dispatcher.UIThread.Post(
-            () =>
-            {
-                if (string.IsNullOrWhiteSpace(restoredProjectPath) ||
-                    !PathComparer.Default.Equals(_currentPath, restoredProjectPath) ||
-                    !_viewModel.IsAnyPreviewVisible)
-                {
-                    return;
-                }
+	private void ScheduleRestoredPreviewRefresh(string? restoredProjectPath)
+	{
+		Dispatcher.UIThread.Post(
+			() =>
+			{
+				if (string.IsNullOrWhiteSpace(restoredProjectPath) ||
+				    !PathComparer.Default.Equals(_currentPath, restoredProjectPath) ||
+				    !_viewModel.IsAnyPreviewVisible)
+				{
+					return;
+				}
 
-                var refresh = _previewPipeline.RefreshNowAsync(allowDuringModeSwitch: true);
-                ObserveDetachedTask(
-                    refresh.Completion,
-                    "RestoreProjectPreviewAfterCancellation");
-            },
-            DispatcherPriority.Background);
-    }
+				var refresh = _previewPipeline.RefreshNowAsync(allowDuringModeSwitch: true);
+				ObserveDetachedTask(
+					refresh.Completion,
+					"RestoreProjectPreviewAfterCancellation");
+			},
+			DispatcherPriority.Background);
+	}
 
-    private void RestoreLegacySelectionSnapshot(ProjectLoadCancellationSnapshot snapshot)
-    {
-        _viewModel.Extensions.Clear();
-        foreach (var option in snapshot.Extensions)
-            _viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+	private void RestoreLegacySelectionSnapshot(ProjectLoadCancellationSnapshot snapshot)
+	{
+		_viewModel.Extensions.Clear();
+		foreach (var option in snapshot.Extensions)
+			_viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
 
-        _viewModel.IgnoreOptions.Clear();
-        var controllerGroupEndIndex = -1;
-        for (var index = snapshot.IgnoreOptions.Count - 1; index >= 0; index--)
-        {
-            if (snapshot.IgnoreOptions[index].Id is IgnoreOptionId.UseGitIgnore
-                or IgnoreOptionId.TrackedGitFilesOnly
-                or IgnoreOptionId.SmartIgnore)
-            {
-                controllerGroupEndIndex = index;
-                break;
-            }
-        }
+		_viewModel.IgnoreOptions.Clear();
+		var controllerGroupEndIndex = -1;
+		for (var index = snapshot.IgnoreOptions.Count - 1; index >= 0; index--)
+		{
+			if (snapshot.IgnoreOptions[index].Id is IgnoreOptionId.UseGitIgnore
+			    or IgnoreOptionId.TrackedGitFilesOnly
+			    or IgnoreOptionId.SmartIgnore)
+			{
+				controllerGroupEndIndex = index;
+				break;
+			}
+		}
 
-        for (var index = 0; index < snapshot.IgnoreOptions.Count; index++)
-        {
-            var option = snapshot.IgnoreOptions[index];
-            _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
-                option.Id,
-                option.Label,
-                option.IsChecked,
-                isControllerGroupEnd: index == controllerGroupEndIndex));
-        }
+		for (var index = 0; index < snapshot.IgnoreOptions.Count; index++)
+		{
+			var option = snapshot.IgnoreOptions[index];
+			_viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+				option.Id,
+				option.Label,
+				option.IsChecked,
+				isControllerGroupEnd: index == controllerGroupEndIndex));
+		}
 
-        _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
-        _viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
-        _selectionCoordinator.ReevaluatePendingApplyChanges();
-    }
+		_viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
+		_viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
+		_selectionCoordinator.ReevaluatePendingApplyChanges();
+	}
 
     private static CancellationTokenSource ReplaceCancellationSource(ref CancellationTokenSource? target)
     {
@@ -2348,13 +2348,13 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterBaseTree = null;
         _currentTreeInventory = null;
-        _gitScopePresentationRefreshContext = null;
+		_gitScopePresentationRefreshContext = null;
         _currentProjectDisplayName = null;
         _currentRepositoryUrl = null;
         _searchFilterController.ClearProjectState();
 
         _viewModel.IsProjectLoaded = false;
-        _viewModel.IsProjectLoadInProgress = false;
+		_viewModel.IsProjectLoadInProgress = false;
         _viewModel.SettingsVisible = false;
         _viewModel.SearchVisible = false;
         _viewModel.FilterVisible = false;
@@ -2407,31 +2407,31 @@ public partial class MainWindow : Window
 
     private IReadOnlySet<string> GetCheckedPaths()
     {
-        // Empty checked paths intentionally mean the whole tree in the GUI and must not be reinterpreted as Select None.
-        return _currentTree is null
-            ? _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes)
-            : _treeSelectionSnapshotCache.GetOrCreateNormalized(
-                _viewModel.TreeNodes,
-                _currentTree.Root);
+		// Empty checked paths intentionally mean the whole tree in the GUI and must not be reinterpreted as Select None.
+		return _currentTree is null
+			? _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes)
+			: _treeSelectionSnapshotCache.GetOrCreateNormalized(
+				_viewModel.TreeNodes,
+				_currentTree.Root);
     }
 
-    private IReadOnlySet<string>? GetGitRepositoryScopePaths()
-    {
-        if (_viewModel.TreeNodes.Count == 0 ||
-            string.IsNullOrWhiteSpace(_currentPath) ||
-            !PathComparer.Default.Equals(_explicitTreeSelectionProjectPath, _currentPath))
-            return null;
+	private IReadOnlySet<string>? GetGitRepositoryScopePaths()
+	{
+		if (_viewModel.TreeNodes.Count == 0 ||
+		    string.IsNullOrWhiteSpace(_currentPath) ||
+		    !PathComparer.Default.Equals(_explicitTreeSelectionProjectPath, _currentPath))
+			return null;
 
-        var checkedPaths = GetCheckedPaths();
-        return checkedPaths.Count == 0 ? null : checkedPaths;
+		var checkedPaths = GetCheckedPaths();
+		return checkedPaths.Count == 0 ? null : checkedPaths;
     }
 
-    private IReadOnlyList<string> GetOrderedSelectedFilePaths() =>
-        _currentTree is null
-            ? Array.Empty<string>()
-            : _treeSelectionSnapshotCache.GetOrCreateOrderedFiles(
-                _viewModel.TreeNodes,
-                _currentTree.Root,
-                _currentTree.OrderedFilePaths);
+	private IReadOnlyList<string> GetOrderedSelectedFilePaths() =>
+		_currentTree is null
+			? Array.Empty<string>()
+			: _treeSelectionSnapshotCache.GetOrCreateOrderedFiles(
+				_viewModel.TreeNodes,
+				_currentTree.Root,
+				_currentTree.OrderedFilePaths);
 
 }

@@ -56,8 +56,8 @@ public static class AvaloniaCompositionRoot
         SessionMetricsOptions sessionMetrics,
         Func<string>? appDataPathProvider)
     {
-        if (appDataPathProvider is null)
-            _ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
+		if (appDataPathProvider is null)
+			_ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
 
         var desktopPlatform = DesktopPlatformResolver.Resolve();
         var localizationCatalog = new JsonLocalizationCatalog();
@@ -97,21 +97,21 @@ public static class AvaloniaCompositionRoot
         var filterSelectionService = new FilterOptionSelectionService();
         var treeExportService = new TreeExportService();
         var fileContentAnalyzer = new FileContentAnalyzer();
-        var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
-        var persistentSecretIdentity = new PersistentSecretIdentityProvider(appDataPathProvider);
-        var secretRedactionSession = SecretRedactionSession.CreateWithPrivateData(
-            new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService),
-            new PrivateDataDetector(),
-            projectProfileStore,
-            persistentSecretIdentity);
-        var codeCompressionSession = CodeCompressionFactory.CreateSession();
+		var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
+		var persistentSecretIdentity = new PersistentSecretIdentityProvider(appDataPathProvider);
+		var secretRedactionSession = SecretRedactionSession.CreateWithPrivateData(
+			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService),
+			new PrivateDataDetector(),
+			projectProfileStore,
+			persistentSecretIdentity);
+		var codeCompressionSession = CodeCompressionFactory.CreateSession();
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
         var projectCopyExportService = new ProjectCopyExportService(
-            new ProjectCopyExportPlanBuilder(),
-            fileContentAnalyzer,
-            secretRedactionSession,
-            codeCompressionSession);
+			new ProjectCopyExportPlanBuilder(),
+			fileContentAnalyzer,
+			secretRedactionSession,
+			codeCompressionSession);
         var projectAnalysisService = new ProjectAnalysisService(
             scanOptionsUseCase,
             buildTreeUseCase,
@@ -183,7 +183,7 @@ public static class AvaloniaCompositionRoot
             ToastService: toastService,
             IconStore: iconStore,
             GitRepositoryService: gitRepositoryService,
-            GitScopePathProvider: new GitScopePathProvider(),
+			GitScopePathProvider: new GitScopePathProvider(),
             RepoCacheService: repoCacheService,
             ZipDownloadService: zipDownloadService,
             FileContentAnalyzer: fileContentAnalyzer,

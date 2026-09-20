@@ -286,10 +286,10 @@ public partial class MainWindow
             ? TerminalCommandPostInstallUiAction.None
             : TerminalCommandPostInstallUiAction.ShowError;
 
-    private string ResolveTerminalCommandSetupFailureMessage() =>
-        DesktopExceptionPresentation.AppendCode(
-            _localization["Dialog.TerminalCommand.InstallFailed"],
-            DesktopExceptionPresentation.OperationFailedCode);
+	private string ResolveTerminalCommandSetupFailureMessage() =>
+		DesktopExceptionPresentation.AppendCode(
+			_localization["Dialog.TerminalCommand.InstallFailed"],
+			DesktopExceptionPresentation.OperationFailedCode);
 
     internal static bool RequiresTerminalCommandPathConfiguration(TerminalCommandSetupSnapshot snapshot) =>
         snapshot.State is
@@ -423,20 +423,20 @@ public partial class MainWindow
     private void OnSearchKeyDown(object? sender, KeyEventArgs e) =>
         _searchFilterController.HandleSearchInputKey(e);
 
-    private void OnTogglePreviewSearch(object? sender, RoutedEventArgs e) =>
-        _previewSearchController.Toggle();
+	private void OnTogglePreviewSearch(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Toggle();
 
-    private void OnPreviewSearchClose(object? sender, RoutedEventArgs e) =>
-        _previewSearchController.Close();
+	private void OnPreviewSearchClose(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Close();
 
-    private void OnPreviewSearchNext(object? sender, RoutedEventArgs e) =>
-        _previewSearchController.Navigate(1);
+	private void OnPreviewSearchNext(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Navigate(1);
 
-    private void OnPreviewSearchPrev(object? sender, RoutedEventArgs e) =>
-        _previewSearchController.Navigate(-1);
+	private void OnPreviewSearchPrev(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Navigate(-1);
 
-    private void OnPreviewSearchKeyDown(object? sender, KeyEventArgs e) =>
-        _previewSearchController.HandleInputKey(e);
+	private void OnPreviewSearchKeyDown(object? sender, KeyEventArgs e) =>
+		_previewSearchController.HandleInputKey(e);
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
@@ -453,17 +453,17 @@ public partial class MainWindow
             return;
         }
 
-        if (_previewSearchController.TryHandleToggleHotkey(e))
-            return;
+		if (_previewSearchController.TryHandleToggleHotkey(e))
+			return;
 
         if (_searchFilterController.TryHandleToggleHotkey(e))
             return;
 
-        if (_previewSearchController.TryHandleNavigationHotkey(e))
-            return;
+		if (_previewSearchController.TryHandleNavigationHotkey(e))
+			return;
 
-        if (_previewSearchController.TryHandleEscape(e))
-            return;
+		if (_previewSearchController.TryHandleEscape(e))
+			return;
 
         // Esc closes the help popover
         if (e.Key == Key.Escape && _viewModel.HelpPopoverOpen)
@@ -618,8 +618,8 @@ public partial class MainWindow
     {
         ResetAgentActivityForProjectOpen();
         _previewSearchController.ClearProjectState();
-        return _searchFilterController.PrepareForProjectLoadAsync();
-    }
+		return _searchFilterController.PrepareForProjectLoadAsync();
+	}
 
     private void OnExtensionsAllChanged(object? sender, RoutedEventArgs e)
     {
@@ -635,24 +635,24 @@ public partial class MainWindow
         _selectionCoordinator.HandleIgnoreAllChanged(check, _currentPath);
     }
 
-    private void OnGitFilteringModeChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (_viewModel.IsRefreshingGitFilteringModes)
-            return;
-        if ((sender as ComboBox)?.SelectedItem is not GitFilteringModeOptionViewModel option)
-            return;
-        var previousMode = e.RemovedItems.Count > 0 &&
-                           e.RemovedItems[0] is GitFilteringModeOptionViewModel previousOption
-            ? previousOption.Mode
-            : (GitFilteringMode?)null;
-        _selectionCoordinator.HandleGitFilteringModeChanged(option.Mode, _currentPath, previousMode);
-    }
+	private void OnGitFilteringModeChanged(object? sender, SelectionChangedEventArgs e)
+	{
+		if (_viewModel.IsRefreshingGitFilteringModes)
+			return;
+		if ((sender as ComboBox)?.SelectedItem is not GitFilteringModeOptionViewModel option)
+			return;
+		var previousMode = e.RemovedItems.Count > 0 &&
+		                   e.RemovedItems[0] is GitFilteringModeOptionViewModel previousOption
+			? previousOption.Mode
+			: (GitFilteringMode?)null;
+		_selectionCoordinator.HandleGitFilteringModeChanged(option.Mode, _currentPath, previousMode);
+	}
 
-    private void OnContentProcessingAllChanged(object? sender, RoutedEventArgs e)
-    {
-        var check = (sender as CheckBox)?.IsChecked == true;
-        _selectionCoordinator.HandleContentProcessingAllChanged(check);
-    }
+	private void OnContentProcessingAllChanged(object? sender, RoutedEventArgs e)
+	{
+		var check = (sender as CheckBox)?.IsChecked == true;
+		_selectionCoordinator.HandleContentProcessingAllChanged(check);
+	}
 
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
@@ -714,7 +714,7 @@ public partial class MainWindow
                         _selectionCoordinator.TryAcceptContentTransformationOnlyChangeAsApplied(_currentPath))
                     {
                         await ApplyContentTransformationSettingsAsync(currentTree, cancellationToken);
-                        await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
+						await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
                         return;
                     }
 
@@ -728,7 +728,7 @@ public partial class MainWindow
                     // instead of presenting settings that describe a different tree.
                 } while (refreshOutcome == TreeRefreshOutcome.StaleInput);
 
-                await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
+				await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
             }
             catch (OperationCanceledException)
             {
