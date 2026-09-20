@@ -341,7 +341,12 @@ renders that hint in brackets instead of relying on dim color.
 
 Debounced tree selection, expansion, focus, view, and format state is flushed
 before leaving a workspace or exiting, so an immediate exit cannot discard the
-last accepted interaction.
+last accepted interaction. A workspace that made no profile change does not write
+a new profile revision. When Desktop and Terminal Workspace are open together,
+each save reapplies only the fields changed in that window to the latest stored
+revision; a transient write failure keeps the newest selection pending for a
+bounded retry and is reported in the Terminal Workspace error panel if flushing
+still cannot commit it.
 
 `language` without an argument shows the current language and all supported codes.
 A mistyped code reports only the nearest candidates and points back to the

@@ -65,16 +65,18 @@ public sealed class ProjectProfilePersistenceCoordinator(
             return;
 
         var profile = CaptureCurrentProfile(currentPath!);
-		if (profileStore is ProjectProfileStore)
-		{
-			_ = await PersistMergedAsync(
-				currentPath!,
-				profile,
-				readiness.RecoveredSnapshot?.Profile,
-				ProjectProfileMergeFields.AllSelections,
-				cancellationToken).ConfigureAwait(false);
-			return;
-		}
+        if (profileStore is ProjectProfileStore)
+        {
+            var merged = await PersistMergedAsync(
+                currentPath!,
+                profile,
+                readiness.RecoveredSnapshot?.Profile,
+                ProjectProfileMergeFields.AllSelections,
+                cancellationToken).ConfigureAwait(false);
+            if (!merged)
+                throw new IOException("The project profile could not be saved without overwriting a newer revision.");
+            return;
+        }
         await _pendingWrites
 			.PersistAsync(
 				currentPath!,
@@ -102,16 +104,18 @@ public sealed class ProjectProfilePersistenceCoordinator(
 			: CaptureProfileForSelectionWrite(currentPath!, selectedPaths);
         if (profile is null)
             return;
-		if (profileStore is ProjectProfileStore)
-		{
-			_ = await PersistMergedAsync(
-				currentPath!,
-				profile,
-				readiness.RecoveredSnapshot?.Profile,
-				ProjectProfileMergeFields.SelectedPaths,
-				cancellationToken).ConfigureAwait(false);
-			return;
-		}
+        if (profileStore is ProjectProfileStore)
+        {
+            var merged = await PersistMergedAsync(
+                currentPath!,
+                profile,
+                readiness.RecoveredSnapshot?.Profile,
+                ProjectProfileMergeFields.SelectedPaths,
+                cancellationToken).ConfigureAwait(false);
+            if (!merged)
+                throw new IOException("The project selection could not be saved without overwriting a newer revision.");
+            return;
+        }
 
         await _pendingWrites
             .PersistAsync(
