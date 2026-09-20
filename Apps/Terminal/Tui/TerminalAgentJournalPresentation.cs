@@ -36,14 +36,18 @@ internal sealed record TerminalAgentJournalSnapshot(
 	}
 }
 
-internal sealed record TerminalAgentJournalSessionRow(AgentJournalSession Session)
+internal sealed record TerminalAgentJournalSessionRow(
+	AgentJournalSession Session,
+	Func<string, string, string>? Localize = null)
 {
 	public override string ToString()
 	{
 		var started = Session.StartedUtc.ToLocalTime().ToString(
 			"yyyy-MM-dd HH:mm:ss",
 			CultureInfo.InvariantCulture);
-		var mode = Session.Mode.ToString().ToLowerInvariant();
+		var mode = Session.Mode == AgentJournalMode.Live
+			? Text(Localize, "AgentJournal.Mode.Live", "live")
+			: Text(Localize, "AgentJournal.Mode.Standard", "standard");
 		var client = TerminalTextEscaping.EscapeSingleLine(
 			string.IsNullOrWhiteSpace(Session.ClientVersion)
 				? Session.ClientName
@@ -61,21 +65,54 @@ internal sealed record TerminalAgentJournalSessionRow(AgentJournalSession Sessio
 			   $"{Session.Totals.EstimatedTokens.ToString(CultureInfo.InvariantCulture)} | " +
 			   $"{Session.Totals.FilesDelivered.ToString(CultureInfo.InvariantCulture)} | " +
 			   $"{(Session.Totals.SecretsMasked + Session.Totals.PrivateDataMasked).ToString(CultureInfo.InvariantCulture)} | " +
-			   $"{formattedDuration} | {(Session.IsLive ? "yes" : "no")}";
+			   $"{formattedDuration} | {(Session.IsLive
+				   ? Text(Localize, "Terminal.Value.Yes", "yes")
+				   : Text(Localize, "Terminal.Value.No", "no"))}";
 	}
+
+	private static string Text(
+		Func<string, string, string>? localize,
+		string key,
+		string fallback) => localize?.Invoke(key, fallback) ?? fallback;
 }
 
 internal static class TerminalAgentJournalPresentation
 {
-	internal const string SessionHeader =
-		"Session | Started | Client | Mode | Project | Calls | Characters | Tokens | Files | Masked | Duration | Live";
-	private const string CallHeader =
-		"# | UTC | Tool | Root | Revision | Duration ms | Characters | Tokens | Files | Masked | Notices | Error";
+	public static string BuildSessionHeader(Func<string, string, string>? localize = null) => string.Join(
+		" | ",
+		"Session",
+		Text(localize, "AgentJournal.Column.Time", "Started"),
+		Text(localize, "AgentJournal.Column.Client", "Client"),
+		Text(localize, "AgentJournal.Column.Mode", "Mode"),
+		Text(localize, "AgentJournal.Column.Project", "Project"),
+		Text(localize, "AgentJournal.Column.Calls", "Calls"),
+		Text(localize, "AgentJournal.Column.Characters", "Characters"),
+		Text(localize, "AgentJournal.Column.Tokens", "Tokens"),
+		Text(localize, "AgentJournal.Column.Files", "Files"),
+		Text(localize, "AgentJournal.Column.Masked", "Masked"),
+		Text(localize, "AgentJournal.Column.Duration", "Duration"),
+		Text(localize, "AgentJournal.Live", "Live"));
+
+	private static string BuildCallHeader(Func<string, string, string>? localize) => string.Join(
+		" | ",
+		Text(localize, "AgentJournal.Column.Number", "#"),
+		"UTC",
+		Text(localize, "AgentJournal.Column.Tool", "Tool"),
+		Text(localize, "AgentJournal.Column.Project", "Root"),
+		Text(localize, "AgentJournal.Column.Revision", "Revision"),
+		Text(localize, "AgentJournal.Column.Duration", "Duration ms"),
+		Text(localize, "AgentJournal.Column.Characters", "Characters"),
+		Text(localize, "AgentJournal.Column.Tokens", "Tokens"),
+		Text(localize, "AgentJournal.Column.Files", "Files"),
+		Text(localize, "AgentJournal.Column.Masked", "Masked"),
+		Text(localize, "AgentJournal.Column.Notices", "Notices"),
+		Text(localize, "AgentJournal.Column.Error", "Error"));
 
 	public static string BuildActivityIndicator(
 		TerminalAgentJournalSnapshot snapshot,
 		string? focusedTreePath,
-		bool compact)
+		bool compact,
+		Func<string, string, string>? localize = null)
 	{
 		ArgumentNullException.ThrowIfNull(snapshot);
 		ArgumentNullException.ThrowIfNull(snapshot.LatestCall);
@@ -83,20 +120,30 @@ internal static class TerminalAgentJournalPresentation
 		if (!string.IsNullOrWhiteSpace(focusedTreePath) &&
 			snapshot.DeliveredPathCalls.TryGetValue(focusedTreePath, out var deliveredCalls))
 		{
+			var fileHint = string.Format(
+				CultureInfo.CurrentCulture,
+				Text(
+					localize,
+					"AgentActivity.Tree.ToolTip",
+					deliveredCalls == 1
+						? "focused file delivered in {0} call"
+						: "focused file delivered in {0} calls"),
+				deliveredCalls);
 			return compact
 				? $"A F:{deliveredCalls:N0} {tool} ({snapshot.TotalCalls:N0})"
-				: $"Agent activity: focused file delivered in {deliveredCalls:N0} " +
-				  (deliveredCalls == 1 ? "call" : "calls") +
-				  $"; {tool} ({snapshot.TotalCalls:N0} calls)";
+				: $"{Text(localize, "Menu.View.AgentActivity", "Agent activity")}: {fileHint}; " +
+				  $"{tool} ({FormatCalls(snapshot.TotalCalls, localize)})";
 		}
 		return compact
 			? $"A {tool} ({snapshot.TotalCalls:N0})"
-			: $"Agent activity: {tool} ({snapshot.TotalCalls:N0} calls)";
+			: $"{Text(localize, "Menu.View.AgentActivity", "Agent activity")}: " +
+			  $"{tool} ({FormatCalls(snapshot.TotalCalls, localize)})";
 	}
 
 	public static string BuildCallDetails(
 		AgentJournalSession session,
-		IReadOnlyList<AgentJournalCall> calls)
+		IReadOnlyList<AgentJournalCall> calls,
+		Func<string, string, string>? localize = null)
 	{
 		ArgumentNullException.ThrowIfNull(session);
 		ArgumentNullException.ThrowIfNull(calls);
@@ -110,7 +157,7 @@ internal static class TerminalAgentJournalPresentation
 			.Append(" | ")
 			.AppendLine(session.IsLive ? "live" : "ended");
 		output.AppendLine()
-			.AppendLine(CallHeader);
+			.AppendLine(BuildCallHeader(localize));
 
 		foreach (var call in calls.OrderBy(static call => call.Sequence))
 		{
@@ -142,24 +189,34 @@ internal static class TerminalAgentJournalPresentation
 		}
 
 		var totals = session.Totals;
+		var footer = Text(
+			localize,
+			"AgentJournal.Footer",
+			"{0} calls · {1} characters · ≈{2} tokens · {3} files · {4} masked · {5} errors");
 		output.AppendLine()
-			.Append("Totals | ")
-			.Append(totals.Calls.ToString("N0", CultureInfo.InvariantCulture))
-			.Append(" calls | ")
-			.Append(totals.ResultCharacters.ToString("N0", CultureInfo.InvariantCulture))
-			.Append(" characters | ")
-			.Append(totals.EstimatedTokens.ToString("N0", CultureInfo.InvariantCulture))
-			.Append(" tokens | ")
-			.Append(totals.FilesDelivered.ToString("N0", CultureInfo.InvariantCulture))
-			.Append(" files | ")
-			.Append(totals.SecretsMasked.ToString("N0", CultureInfo.InvariantCulture))
-			.Append(" secrets | ")
-			.Append(totals.PrivateDataMasked.ToString("N0", CultureInfo.InvariantCulture))
-			.Append(" private data | ")
-			.Append(totals.Errors.ToString("N0", CultureInfo.InvariantCulture))
-			.Append(" errors");
+			.Append(string.Format(
+				CultureInfo.CurrentCulture,
+				footer,
+				totals.Calls,
+				totals.ResultCharacters,
+				totals.EstimatedTokens,
+				totals.FilesDelivered,
+				totals.SecretsMasked + totals.PrivateDataMasked,
+				totals.Errors));
 		return output.ToString();
 	}
+
+	private static string FormatCalls(
+		long calls,
+		Func<string, string, string>? localize) => string.Format(
+		CultureInfo.CurrentCulture,
+		Text(localize, "AgentActivity.Status.Calls", calls == 1 ? "{0} call" : "{0} calls"),
+		calls);
+
+	private static string Text(
+		Func<string, string, string>? localize,
+		string key,
+		string fallback) => localize?.Invoke(key, fallback) ?? fallback;
 
 	public static IReadOnlySet<string> BuildDeliveredPathSet(
 		string projectRoot,

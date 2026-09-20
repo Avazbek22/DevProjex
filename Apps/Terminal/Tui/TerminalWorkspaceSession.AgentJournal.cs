@@ -12,7 +12,7 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed partial class TerminalWorkspaceSession
 {
-	private const string AgentJournalTitle = "Agent journal";
+	private string AgentJournalTitle => AgentJournalText("AgentJournal.Title", "Agent journal");
 
 	private TerminalWorkspaceCommandExecutionResult ExecuteAgentJournalCommand(
 		TerminalWorkspaceCommand command)
@@ -26,7 +26,11 @@ internal sealed partial class TerminalWorkspaceSession
 				return TerminalWorkspaceCommandExecutionResult.Failure(
 					"End live MCP sessions before clearing their journal.");
 			}
-			if (!Confirm(AgentJournalTitle, "Clear journal sessions for this project?"))
+			if (!Confirm(
+				AgentJournalText("AgentJournal.Clear.Title", "Clear agent journal"),
+				AgentJournalText(
+					"AgentJournal.Clear.ProjectMessage",
+					"Clear journal sessions for this project?")))
 				return TerminalWorkspaceCommandExecutionResult.Deferred();
 		}
 
@@ -206,7 +210,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			ShowScrollableOverlay(
 				AgentJournalTitle,
-				"No journal sessions for this project.",
+				AgentJournalText("AgentJournal.Empty", "No journal sessions for this project."),
 				TerminalWorkspaceTheme.Dialog,
 				preferredWidth: 72,
 				preferredHeight: 10);
@@ -217,7 +221,7 @@ internal sealed partial class TerminalWorkspaceSession
 		var height = Math.Clamp(_terminalHeight - 4, 18, Math.Max(18, _terminalHeight - 2));
 		using var dialog = CreateDialog(AgentJournalTitle, width, height);
 		var rows = new ObservableCollection<TerminalAgentJournalSessionRow>(
-			sessions.Select(static session => new TerminalAgentJournalSessionRow(session)));
+			sessions.Select(session => new TerminalAgentJournalSessionRow(session, AgentJournalText)));
 		var list = new ListView
 		{
 			X = 1,
@@ -232,7 +236,7 @@ internal sealed partial class TerminalWorkspaceSession
 			Y = 0,
 			Width = Dim.Fill(1),
 			Height = 1,
-			Text = TerminalAgentJournalPresentation.SessionHeader,
+			Text = TerminalAgentJournalPresentation.BuildSessionHeader(AgentJournalText),
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
 		list.SetSource(rows);
@@ -254,8 +258,8 @@ internal sealed partial class TerminalWorkspaceSession
 			var index = Math.Clamp(list.SelectedItem ?? 0, 0, sessions.Count - 1);
 			var session = sessions[index];
 			details.Text = receipts.TryGetValue(session.Id, out var receipt)
-				? TerminalAgentJournalPresentation.BuildCallDetails(session, receipt.Calls)
-				: TerminalAgentJournalPresentation.BuildCallDetails(session, []);
+				? TerminalAgentJournalPresentation.BuildCallDetails(session, receipt.Calls, AgentJournalText)
+				: TerminalAgentJournalPresentation.BuildCallDetails(session, [], AgentJournalText);
 			details.SetNeedsDraw();
 		}
 
@@ -264,6 +268,14 @@ internal sealed partial class TerminalWorkspaceSession
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Close")));
 		UpdateDetails();
 		RunOverlay(dialog, list);
+	}
+
+	private string AgentJournalText(string key, string fallback)
+	{
+		var value = L(key);
+		return string.Equals(value, $"[[{key}]]", StringComparison.Ordinal)
+			? fallback
+			: value;
 	}
 
 	private async Task ShowAgentJournalErrorAsync(string code, string message)

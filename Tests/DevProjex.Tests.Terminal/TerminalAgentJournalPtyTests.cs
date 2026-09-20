@@ -31,7 +31,7 @@ public sealed class TerminalAgentJournalPtyTests
 			"get_file",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Totals", overlay, StringComparison.Ordinal);
+		Assert.Contains("1 calls · 80 characters", overlay, StringComparison.Ordinal);
 		Assert.Contains("terminal-test", overlay, StringComparison.Ordinal);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 

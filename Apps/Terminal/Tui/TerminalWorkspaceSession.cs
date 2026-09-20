@@ -1696,7 +1696,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		return TerminalAgentJournalPresentation.BuildActivityIndicator(
 			snapshot,
 			focusedTreePath,
-			compact);
+			compact,
+			AgentJournalText);
 	}
 
 	private CodeCompressionAvailabilitySnapshot? GetCurrentCompressionAvailability(
