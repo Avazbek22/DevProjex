@@ -40,6 +40,11 @@ public static class Program {
 '@ | Set-Content -LiteralPath (Join-Path $script:SampleRoot 'Program.cs') -Encoding utf8NoBOM
     $secret = 'ghp_123456789012345678901234567890123456'
     "token=$secret" | Set-Content -LiteralPath (Join-Path $script:SampleRoot 'settings.txt') -Encoding utf8NoBOM
+    $mcpSmokeRoot = Join-Path $script:SampleRoot 'McpSmoke'
+    [System.IO.Directory]::CreateDirectory($mcpSmokeRoot) | Out-Null
+    'artifactNeedle' | Set-Content -LiteralPath (Join-Path $mcpSmokeRoot 'Probe.txt') -Encoding utf8NoBOM
+    ("large-marker`n" + ('x' * 70000)) |
+        Set-Content -LiteralPath (Join-Path $mcpSmokeRoot 'Large.txt') -Encoding utf8NoBOM
 
     $actualVersion = ((Invoke-Container @('--version')) -join "`n").Trim()
     if ($actualVersion -cne $Version) {
@@ -87,7 +92,7 @@ public static class Program {
         Write-Host 'SKIPPED: Node is unavailable; MCP initialize smoke was not run.'
     }
     else {
-        & node (Join-Path $repoRoot 'Scripts/smoke-headless-mcp.mjs') docker /project `
+        & node (Join-Path $repoRoot 'Scripts/smoke-headless-mcp.mjs') docker /project --fixture-ready `
             run --rm -i --read-only --tmpfs /tmp --volume "${script:SampleRoot}:/project:ro" $Image
         if ($LASTEXITCODE -ne 0) { throw 'Container MCP initialize smoke failed.' }
     }

@@ -325,16 +325,11 @@ public sealed class ProfileCommandHandler(
 		output.Append(services.Localization["Terminal.Analysis.GitMode"]).Append(": ")
 			.AppendLine(ProjectSelectionTokens.ToToken(selection));
 		output.Append(services.Localization["Terminal.Analysis.Roots"]).Append(": ")
-			.AppendLine(selection.Roots is { Count: > 0 } roots ? JoinEscaped(roots) : all);
+			.AppendLine(FormatSet(selection.Roots, all));
 		output.Append(services.Localization["Terminal.Analysis.Extensions"]).Append(": ")
-			.AppendLine(selection.Extensions is { Count: > 0 } extensions ? JoinEscaped(extensions) : all);
+			.AppendLine(FormatSet(selection.Extensions, all));
 		output.Append(services.Localization["Terminal.Profile.SelectedPaths"]).Append(": ")
-			.AppendLine(selection.SelectedPaths switch
-			{
-				null => all,
-				{ Count: 0 } => "none",
-				{ } selectedPaths => JoinEscaped(selectedPaths)
-			});
+			.AppendLine(FormatSet(selection.SelectedPaths, all));
 		if (selection.Exclusions is { Count: > 0 } exclusions)
 		{
 			output.Append(services.Localization["Terminal.Analysis.Exclusions"]).Append(": ")
@@ -358,6 +353,13 @@ public sealed class ProfileCommandHandler(
 
 	private static string JoinEscaped(IEnumerable<string> values) =>
 		string.Join(", ", values.Select(TerminalTextEscaping.EscapeSingleLine));
+
+	private static string FormatSet(IReadOnlyCollection<string>? values, string all) => values switch
+	{
+		null => all,
+		{ Count: 0 } => "none",
+		_ => JoinEscaped(values)
+	};
 
 	private static string FormatProfile(ProjectProfileReference? profile) =>
 		profile?.Kind switch

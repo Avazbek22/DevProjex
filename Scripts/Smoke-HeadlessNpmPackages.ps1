@@ -151,6 +151,34 @@ log: { type: stdout, format: pretty, level: warn }
         if ($LASTEXITCODE -ne 0 -or $actualVersion -cne $ExpectedDisplayVersion) {
             throw "The --ignore-scripts installation did not run the expected binary."
         }
+        $installedBinary = if ($IsWindows) {
+            Join-Path $installRoot "node_modules/.bin/devprojex.cmd"
+        }
+        else {
+            Join-Path $installRoot "node_modules/.bin/devprojex"
+        }
+        & (Join-Path $repoRoot "Scripts/Test-InstalledHeadlessArtifact.ps1") `
+            -Executable $installedBinary `
+            -WorkingRoot (Join-Path $temporaryRoot "npm-command-smoke") `
+            -ExpectedVersion $ExpectedDisplayVersion
+        if ($LASTEXITCODE -ne 0) { throw "Installed npm command smoke failed." }
+        if ($IsWindows) {
+            & $node (Join-Path $repoRoot "Scripts/smoke-headless-mcp.mjs") `
+                $env:ComSpec (Join-Path $temporaryRoot "npm-command-smoke/project") `
+                /d /s /c $installedBinary
+            if ($LASTEXITCODE -ne 0) { throw "Installed npm MCP read workflow failed." }
+            & $node (Join-Path $repoRoot "Scripts/smoke-headless-mcp.mjs") `
+                $env:ComSpec (Join-Path $temporaryRoot "npm-command-smoke/project") `
+                --live /d /s /c $installedBinary
+        }
+        else {
+            & $node (Join-Path $repoRoot "Scripts/smoke-headless-mcp.mjs") `
+                $installedBinary (Join-Path $temporaryRoot "npm-command-smoke/project")
+            if ($LASTEXITCODE -ne 0) { throw "Installed npm MCP read workflow failed." }
+            & $node (Join-Path $repoRoot "Scripts/smoke-headless-mcp.mjs") `
+                $installedBinary (Join-Path $temporaryRoot "npm-command-smoke/project") --live
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Installed npm live MCP read workflow failed." }
     }
     finally {
         Pop-Location

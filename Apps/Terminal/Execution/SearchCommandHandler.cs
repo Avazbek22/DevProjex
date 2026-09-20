@@ -50,13 +50,7 @@ public sealed class SearchCommandHandler(
 				exception);
 		}
 
-		var payload = request.Format switch
-		{
-			SearchOutputFormat.Text => RenderText(result),
-			SearchOutputFormat.Json => RenderJson(result),
-			SearchOutputFormat.Markdown => RenderMarkdown(result),
-			_ => throw new ArgumentOutOfRangeException(nameof(request.Format), request.Format, null)
-		};
+		var payload = Render(result, request.Format);
 		if (request.OutputPath is null or "-")
 		{
 			await environment.Output.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -224,87 +218,102 @@ public sealed class SearchCommandHandler(
 		var ordered = DevProjexMcpTools.BuildOrderedSearchGroups(candidateSnapshot);
 		var retainedMatchingFiles = ordered.Select(group => group.RelativePath)
 			.Distinct(StringComparer.Ordinal).Count();
-		var rendered = DevProjexMcpTools.RenderSearchGroups(
-			ordered,
-			request.MaximumResults,
-			MaximumContentCharacters);
-		var symbols = McpSearchSymbols.Resolve(
-			rendered.WrittenHits,
-			navigationByFile,
-			cancellationToken);
-		var preview = request.SearchBodyCharacters == 0
-			? null
-			: McpSearchSymbols.SelectDeclarationBodyPreview(
-				candidateSnapshot,
-				symbols.Declarations,
-				regex);
-		var layout = DevProjexMcpTools.PlanSearchDeclarationBody(
-			rendered,
-			symbols.Declarations,
-			preview);
-		rendered = layout.Rendered;
-		preview = layout.Preview;
-
-		var namesWritten = InsertDeclarationHeaders(
-			rendered.Output,
-			rendered.RenderedLines,
-			symbols,
-			MaximumContentCharacters);
-		if (!namesWritten)
-			symbols = symbols with { AnnotatedHits = 0 };
-		AppendDeclarationSection(rendered.Output, symbols.Declarations, preview);
-
-		var matches = rendered.WrittenHits.Select(hit =>
+		SearchResult BuildResult(int contentCharacters)
 		{
-			var candidate = candidateSnapshot.First(item =>
-				item.Group.RelativePath == hit.RelativePath && item.MatchLine == hit.Line);
-			var renderedMatch = candidate.Group.Lines.First(line => line.IsMatch).Text;
-			var separator = renderedMatch.IndexOf(':');
-			return new SearchMatch(
-				hit.RelativePath,
-				hit.Line,
-				separator >= 0 ? renderedMatch[(separator + 1)..] : renderedMatch,
+			var rendered = DevProjexMcpTools.RenderSearchGroups(
+				ordered,
+				request.MaximumResults,
+				contentCharacters);
+			var symbols = McpSearchSymbols.Resolve(
+				rendered.WrittenHits,
+				navigationByFile,
+				cancellationToken);
+			var preview = request.SearchBodyCharacters == 0
+				? null
+				: McpSearchSymbols.SelectDeclarationBodyPreview(
+					candidateSnapshot,
+					symbols.Declarations,
+					regex);
+			var layout = DevProjexMcpTools.PlanSearchDeclarationBody(
+				rendered,
+				symbols.Declarations,
+				preview);
+			rendered = layout.Rendered;
+			preview = layout.Preview;
+
+			var namesWritten = InsertDeclarationHeaders(
+				rendered.Output,
+				rendered.RenderedLines,
+				symbols,
+				contentCharacters);
+			if (!namesWritten)
+				symbols = symbols with { AnnotatedHits = 0 };
+			AppendDeclarationSection(rendered.Output, symbols.Declarations, preview, contentCharacters);
+
+			var matches = rendered.WrittenHits.Select(hit =>
+			{
+				var candidate = candidateSnapshot.First(item =>
+					item.Group.RelativePath == hit.RelativePath && item.MatchLine == hit.Line);
+				var renderedMatch = candidate.Group.Lines.First(line => line.IsMatch).Text;
+				var separator = renderedMatch.IndexOf(':');
+				return new SearchMatch(
+					hit.RelativePath,
+					hit.Line,
+					separator >= 0 ? renderedMatch[(separator + 1)..] : renderedMatch,
+					namesWritten
+						? symbols.Names.GetValueOrDefault(new McpSearchHitKey(hit.RelativePath, hit.Line))
+						: null);
+			}).ToArray();
+			var resolution = new SearchResolution(
+				Resolved: symbols.AnnotatedHits,
+				Ambiguous: 0,
+				Unresolved: Math.Max(0, matches.Length - symbols.AnnotatedHits),
+				External: 0);
+			var boundary = new McpSearchBoundary(
+				plan.IncludedFiles.Count,
+				inspectedSources,
+				totalMatches,
+				candidates.Count,
+				rendered.ShownMatches,
 				namesWritten
-					? symbols.Names.GetValueOrDefault(new McpSearchHitKey(hit.RelativePath, hit.Line))
-					: null);
-		}).ToArray();
-		var resolution = new SearchResolution(
-			Resolved: symbols.AnnotatedHits,
-			Ambiguous: 0,
-			Unresolved: Math.Max(0, matches.Length - symbols.AnnotatedHits),
-			External: 0);
-		var boundary = new McpSearchBoundary(
-			plan.IncludedFiles.Count,
-			inspectedSources,
-			totalMatches,
-			candidates.Count,
-			rendered.ShownMatches,
-			namesWritten
-				? symbols.Names.Keys.Select(key => key.RelativePath).Distinct(StringComparer.Ordinal).Count()
-				: 0,
-			inspectedFiles.Count < plan.IncludedFiles.Count,
-			candidates.MatchCapacityReached,
-			retainedMatchingFiles > McpSearchSymbols.MaximumAnnotatedFiles,
-			rendered.Truncated || !namesWritten,
-			rendered.ShownMatches < candidates.Count && rendered.ShownMatches >= request.MaximumResults,
-			candidates.CharacterCapacityReached,
-			StoredCharacterLimitReached: false,
-			unscannableSources);
-		return new SearchResult(
-			request.Pattern,
-			request.Mode,
-			matches,
-			symbols.Declarations.Select(declaration => new SearchDeclaration(
-				declaration.RelativePath,
-				declaration.Name,
-				declaration.StartLine,
-				declaration.EndLine,
-				preview?.Declaration == declaration ? preview.Text : null,
-				preview?.Declaration == declaration ? preview.RemainingLines : 0)).ToArray(),
-			resolution,
-			boundary,
-			rendered.Output.ToString().TrimEnd(),
-			matchingFiles);
+					? symbols.Names.Keys.Select(key => key.RelativePath).Distinct(StringComparer.Ordinal).Count()
+					: 0,
+				inspectedFiles.Count < plan.IncludedFiles.Count,
+				candidates.MatchCapacityReached,
+				retainedMatchingFiles > McpSearchSymbols.MaximumAnnotatedFiles,
+				rendered.Truncated || !namesWritten,
+				rendered.ShownMatches < candidates.Count && rendered.ShownMatches >= request.MaximumResults,
+				candidates.CharacterCapacityReached,
+				StoredCharacterLimitReached: false,
+				unscannableSources);
+			return new SearchResult(
+				request.Pattern,
+				request.Mode,
+				matches,
+				symbols.Declarations.Select(declaration => new SearchDeclaration(
+					declaration.RelativePath,
+					declaration.Name,
+					declaration.StartLine,
+					declaration.EndLine,
+					preview?.Declaration == declaration ? preview.Text : null,
+					preview?.Declaration == declaration ? preview.RemainingLines : 0)).ToArray(),
+				resolution,
+				boundary,
+				rendered.Output.ToString().TrimEnd(),
+				matchingFiles);
+		}
+
+		var contentBudget = MaximumContentCharacters;
+		while (true)
+		{
+			var result = BuildResult(contentBudget);
+			var serializedLength = Render(result, request.Format).Length;
+			if (serializedLength <= MaximumContentCharacters || contentBudget == 0)
+				return result;
+			contentBudget = Math.Max(
+				0,
+				contentBudget - Math.Max(1, serializedLength - MaximumContentCharacters));
+		}
 	}
 
 	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan)
@@ -414,7 +423,8 @@ public sealed class SearchCommandHandler(
 	private static void AppendDeclarationSection(
 		StringBuilder output,
 		IReadOnlyList<McpSearchDeclaration> declarations,
-		McpSearchDeclarationPreview? preview)
+		McpSearchDeclarationPreview? preview,
+		int maximumCharacters)
 	{
 		if (declarations.Count == 0)
 			return;
@@ -427,7 +437,7 @@ public sealed class SearchCommandHandler(
 					  $"{McpTextEscaping.EscapeSingleLine(declaration.Name)} " +
 					  $"{declaration.StartLine.ToString(CultureInfo.InvariantCulture)}-" +
 					  $"{declaration.EndLine.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
-			if (output.Length + section.Length + row.Length > MaximumContentCharacters)
+			if (output.Length + section.Length + row.Length > maximumCharacters)
 				break;
 			section.Append(row);
 			rows++;
@@ -457,7 +467,7 @@ public sealed class SearchCommandHandler(
 					.Append(" line(s) remain.]");
 			}
 			body.AppendLine();
-			if (output.Length + section.Length + body.Length <= MaximumContentCharacters)
+			if (output.Length + section.Length + body.Length <= maximumCharacters)
 				section.Append(body);
 		}
 		output.Append(section);
@@ -468,6 +478,14 @@ public sealed class SearchCommandHandler(
 		var output = new StringBuilder();
 		if (result.Body.Length > 0)
 			output.AppendLine(result.Body);
+		else if (result.Boundary.EncounteredMatches > 0)
+			output.AppendLine("[Matches omitted] Matches were found, but no complete result line fit within the output budget.");
+		else if (result.Boundary.InspectedSources < result.Boundary.EligibleSources)
+			output.Append("[Search partial] No matches were found in ")
+				.Append(result.Boundary.InspectedSources)
+				.Append(" inspected selected file(s); ")
+				.Append(result.Boundary.EligibleSources - result.Boundary.InspectedSources)
+				.AppendLine(" selected file(s) were not inspected.");
 		else
 			output.AppendLine($"[No matches] The pattern matched nothing in {result.Boundary.InspectedSources} inspected selected file(s).");
 		output.Append("[Resolution] resolved=").Append(result.Resolution.Resolved)
@@ -483,6 +501,14 @@ public sealed class SearchCommandHandler(
 		output.AppendLine(DevProjexMcpTools.FormatSearchBoundaryNotice(result.Boundary, hasStoredContinuation: false));
 		return output.ToString();
 	}
+
+	private static string Render(SearchResult result, SearchOutputFormat format) => format switch
+	{
+		SearchOutputFormat.Text => RenderText(result),
+		SearchOutputFormat.Json => RenderJson(result),
+		SearchOutputFormat.Markdown => RenderMarkdown(result),
+		_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+	};
 
 	private static string RenderJson(SearchResult result)
 	{

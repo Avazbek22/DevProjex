@@ -95,7 +95,9 @@ DevProjex writes schema version 2:
 Schema-v2 semantics:
 
 - `roots: null` means all currently available roots;
+- `roots: []` means no roots, while a non-empty array is the exact root set;
 - `extensions: null` means all currently available extensions;
+- `extensions: []` means no extensions, while a non-empty array is the exact extension set;
 - `selectedPaths: null` (or an omitted property) means the full effective tree;
 - an empty `selectedPaths` array means an explicit empty selection;
 - a non-empty `selectedPaths` array narrows the effective tree to those paths;
@@ -109,10 +111,11 @@ Schema-v2 semantics:
 - `stripBlankLines` independently removes unprotected whitespace-only source lines from output;
 - Exclusions contain only known path-filter tokens.
 
-The local `project-profiles.json` store uses the same `selectedPaths` semantics:
+The local `project-profiles.json` store uses the same three-state collection semantics.
+For roots, extensions, and selected paths, `profile show` renders null as `all`, an
+empty array as `none`, and a non-empty array as the ordered value list. For selected paths,
 an omitted or null value selects the full effective tree, an empty array selects
-nothing, and a non-empty array is the saved selection frontier. `profile show`
-renders these states as `all`, `none`, and the ordered path list respectively.
+nothing, and a non-empty array is the saved selection frontier.
 Desktop and Terminal Workspace both restore this frontier when a project opens.
 Both surfaces display null and an empty array as an unchecked tree, preserving the
 Desktop convention that no checked nodes means the full effective tree. Restoring a

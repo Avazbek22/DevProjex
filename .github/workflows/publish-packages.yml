@@ -158,9 +158,39 @@ jobs:
       display_version: ${{ needs.prepare.outputs.display_version }}
       package_version: ${{ needs.prepare.outputs.package_version }}
 
+  verify-source-gates:
+    name: Verify source CI gates
+    needs: [prepare, build]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Require successful source workflows
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          for workflow in dotnet.yml release-validate.yml; do
+            response="$(gh api --method GET \
+              -f head_sha="$SOURCE_SHA" \
+              -f per_page=100 \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs")"
+            successful="$(jq --arg sha "$SOURCE_SHA" \
+              '[.workflow_runs[] | select(.head_sha == $sha and .status == "completed" and .conclusion == "success")] | length' \
+              <<< "$response")"
+            if [[ "$successful" -lt 1 ]]; then
+              echo "Required workflow $workflow has no successful completed run for the selected source commit." >&2
+              exit 1
+            fi
+          done
+
   publish-nuget:
     name: Publish NuGet packages
-    needs: [prepare, build]
+    needs: [prepare, build, verify-source-gates]
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false && (inputs.channels == 'nuget' || inputs.channels == 'both') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -203,7 +233,7 @@ jobs:
 
   publish-npm:
     name: Publish npm packages
-    needs: [prepare, build]
+    needs: [prepare, build, verify-source-gates]
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false && (inputs.channels == 'npm' || inputs.channels == 'both') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

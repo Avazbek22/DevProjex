@@ -4,6 +4,8 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class SearchCommandProcessTests
 {
+	private const int MaximumOutputCharacters = 16_000;
+
 	[Fact]
 	public void TextJsonAndMarkdownDescribeTheSameMatches()
 	{
@@ -119,6 +121,100 @@ public sealed class SearchCommandProcessTests
 		Assert.DoesNotContain(token, result.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[", result.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("1:", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("text")]
+	[InlineData("markdown")]
+	public void MatchWhoseCompleteLineDoesNotFitIsReportedAsOmitted(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/long.txt", "needle " + new string('x', 17_000));
+
+		var result = Run(
+			workspace,
+			project,
+			"needle",
+			"--search-body-chars", "off",
+			"--format", format);
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("[Matches omitted]", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("[No matches]", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("matches=1", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("text")]
+	[InlineData("markdown")]
+	public void NoMatchesDistinguishesCompleteAndPartialInspection(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var completeProject = workspace.CreateDirectory("complete");
+		workspace.WriteFile("complete/empty.txt", "ordinary text");
+		var partialProject = workspace.CreateDirectory("partial");
+		workspace.WriteFile("partial/a.txt", "ordinary text");
+		var oversizedPath = workspace.WriteFile("partial/z.bin", string.Empty);
+		using (var oversized = new FileStream(oversizedPath, FileMode.Open, FileAccess.Write, FileShare.None))
+		{
+			oversized.SetLength(65L * 1024 * 1024);
+		}
+
+		var complete = Run(workspace, completeProject, "needle", "--format", format);
+		var partial = Run(workspace, partialProject, "needle", "--format", format);
+
+		Assert.Equal(0, complete.ExitCode);
+		Assert.Contains("[No matches]", complete.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Search partial]", complete.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(0, partial.ExitCode);
+		Assert.Contains("[Search partial]", partial.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("[No matches]", partial.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("inspection-bytes", partial.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("text")]
+	[InlineData("json")]
+	[InlineData("markdown")]
+	public void SerializedOutputHonorsTheFormatBudget(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 200; index++)
+		{
+			workspace.WriteFile(
+				$"project/src/File{index:D3}.txt",
+				$"needle value {index:D3} {new string('x', 100)}{Environment.NewLine}");
+		}
+
+		var result = Run(
+			workspace,
+			project,
+			"needle",
+			"--max", "200",
+			"--search-body-chars", "off",
+			"--format", format);
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.True(
+			result.StandardOutput.Length <= MaximumOutputCharacters,
+			$"{format} output contained {result.StandardOutput.Length} characters.");
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(result.StandardOutput);
+			var boundary = document.RootElement.GetProperty("searchBoundary");
+			Assert.Equal(
+				document.RootElement.GetProperty("matches").GetArrayLength(),
+				boundary.GetProperty("writtenMatches").GetInt32());
+			Assert.Contains(
+				"response-characters",
+				boundary.GetProperty("limits").EnumerateArray().Select(static value => value.GetString()));
+		}
+		else
+		{
+			Assert.Contains("response-characters", result.StandardOutput, StringComparison.Ordinal);
+		}
 	}
 
 	private static string CreateProject(TemporaryDirectory workspace)

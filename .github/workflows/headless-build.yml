@@ -95,8 +95,14 @@ jobs:
           if ($LASTEXITCODE -ne 3 -or $findingsText.Contains($secret, [StringComparison]::Ordinal)) {
             throw 'Headless archive secret gate smoke failed.'
           }
+          ./Scripts/Test-InstalledHeadlessArtifact.ps1 `
+            -Executable $binary `
+            -WorkingRoot (Join-Path $env:RUNNER_TEMP 'devprojex-headless-command-smoke') `
+            -ExpectedVersion $env:VERSION
           node Scripts/smoke-headless-mcp.mjs $binary $sample
-          if ($LASTEXITCODE -ne 0) { throw 'Headless archive MCP initialize smoke failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Headless archive MCP read workflow failed.' }
+          node Scripts/smoke-headless-mcp.mjs $binary $sample --live
+          if ($LASTEXITCODE -ne 0) { throw 'Headless archive live MCP read workflow failed.' }
 
       - name: Report archive sizes
         shell: pwsh

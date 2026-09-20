@@ -664,12 +664,46 @@ public sealed class DocumentationAndPackagingContractTests
 			rootPath, ".github", "workflows", "publish-packages.yml"));
 		var buildWorkflow = File.ReadAllText(Path.Combine(
 			rootPath, ".github", "workflows", "packages-build.yml"));
+		var archiveBuildWorkflow = File.ReadAllText(Path.Combine(
+			rootPath, ".github", "workflows", "headless-build.yml"));
+		var npmSmoke = File.ReadAllText(Path.Combine(
+			rootPath, "Scripts", "Smoke-HeadlessNpmPackages.ps1"));
+		var installedSmoke = File.ReadAllText(Path.Combine(
+			rootPath, "Scripts", "Test-InstalledHeadlessArtifact.ps1"));
+		var mcpSmoke = File.ReadAllText(Path.Combine(
+			rootPath, "Scripts", "smoke-headless-mcp.mjs"));
+		var installation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Installation.md"));
 		Assert.Contains("uses: ./.github/workflows/packages-build.yml", workflow, StringComparison.Ordinal);
 		Assert.Contains("Test-HeadlessPackages.ps1", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("Test-HeadlessPackageGateMutation.ps1", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("windows-latest", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("ubuntu-latest", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("macos-latest", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-InstalledHeadlessArtifact.ps1", buildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-InstalledHeadlessArtifact.ps1", archiveBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("Test-InstalledHeadlessArtifact.ps1", npmSmoke, StringComparison.Ordinal);
+		Assert.Contains("smoke-headless-mcp.mjs $binary $sample --live", archiveBuildWorkflow, StringComparison.Ordinal);
+		Assert.Contains("smoke-headless-mcp.mjs $binary $sample --live", buildWorkflow, StringComparison.Ordinal);
+		foreach (var command in new[] { "tree", "search", "related", "profile", "mcp" })
+			Assert.Contains($"'{command}'", installedSmoke, StringComparison.Ordinal);
+		foreach (var tool in new[]
+				 {
+					 "list_projects", "get_tree", "search_project", "get_file", "pack_context", "read_pack"
+				 })
+		{
+			Assert.Contains($"'{tool}'", mcpSmoke, StringComparison.Ordinal);
+		}
+		Assert.Contains("Expand-Archive DevProjex-headless.v5.2.win-x64.zip -DestinationPath $destination", installation, StringComparison.Ordinal);
+		Assert.Contains("& (Join-Path $destination 'devprojex.exe') --version", installation, StringComparison.Ordinal);
+		Assert.DoesNotContain("Expand-Archive DevProjex-headless.v5.2.win-x64.zip\n./devprojex.exe", installation.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+		Assert.Contains("verify-source-gates:", workflow, StringComparison.Ordinal);
+		Assert.Contains("actions: read", workflow, StringComparison.Ordinal);
+		Assert.Contains("for workflow in dotnet.yml release-validate.yml", workflow, StringComparison.Ordinal);
+		Assert.Contains("-f head_sha=\"$SOURCE_SHA\"", workflow, StringComparison.Ordinal);
+		Assert.Contains(".head_sha == $sha", workflow, StringComparison.Ordinal);
+		Assert.Contains(".status == \"completed\"", workflow, StringComparison.Ordinal);
+		Assert.Contains(".conclusion == \"success\"", workflow, StringComparison.Ordinal);
+		Assert.Contains("needs: [prepare, build, verify-source-gates]", workflow, StringComparison.Ordinal);
 		Assert.Contains("Publish-HeadlessPackages.ps1", workflow, StringComparison.Ordinal);
 		Assert.Contains("Test-ResumableHeadlessPublish.ps1", buildWorkflow, StringComparison.Ordinal);
 		Assert.Contains("'Scripts/ci/Test-ResumableHeadlessPublish.ps1'", workflow, StringComparison.Ordinal);

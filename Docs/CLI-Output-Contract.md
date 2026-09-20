@@ -243,7 +243,10 @@ two gates are independent.
 `search --format json` emits a deterministic schema-version-1 document. It is the
 structured form of the same bounded evidence returned by MCP `search_project`:
 match coordinates, containing declarations, the selected declaration body, result
-counts, and every boundary that made the response partial.
+counts, and every boundary that made the response partial. The complete serialized
+JSON document, including indentation and metadata, is limited to 16,000 characters.
+Admission stops before a complete match would exceed that format-specific budget;
+the JSON document itself is never truncated.
 
 ```json
 {
@@ -304,7 +307,10 @@ was proved; search does not invent ambiguous or external declaration targets.
 `searchBoundary.limits` uses the same constant tokens as the text
 `[Search boundary]` line. An empty `matches` array is meaningful only together with
 that boundary: a complete empty search and a partial search of no readable sources
-are different results.
+are different results. `writtenMatches` is the number of entries in `matches`.
+When matches were observed but no complete matching line fits, text and Markdown
+emit `[Matches omitted]`; when selected sources were left uninspected, an otherwise
+empty result emits `[Search partial]`. Neither state is described as `[No matches]`.
 
 ## Related-files JSON
 

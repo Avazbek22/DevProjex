@@ -124,8 +124,9 @@ Release automation prepares one headless archive for each supported RID. Choose
 `DevProjex-headless.v<version>.<rid>.tar.gz` on Linux and macOS. For the v5.2 release:
 
 ```powershell
-Expand-Archive DevProjex-headless.v5.2.win-x64.zip
-./devprojex.exe --version
+$destination = Join-Path $PWD 'devprojex-headless'
+Expand-Archive DevProjex-headless.v5.2.win-x64.zip -DestinationPath $destination
+& (Join-Path $destination 'devprojex.exe') --version
 ```
 
 ```bash

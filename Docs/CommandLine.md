@@ -639,7 +639,7 @@ devprojex search <PATTERN> [PROJECT|URL] [options]
 
 `search` scans the safe transformed text of the effective selection with the same
 bounded regex scanner, evidence ordering, declaration navigation, 64 MiB inspection
-budget, 16,000-character result budget, and 200-match request ceiling used by MCP
+budget, 16,000-character serialized-output budget, and 200-match request ceiling used by MCP
 `search_project`. The default mode treats `PATTERN` as literal text. `--regex`
 enables a timed .NET regular expression; `--symbols` treats the pattern as one
 complete identifier while retaining the same source evidence and containing-
@@ -673,10 +673,17 @@ declaration evidence; it never claims dependency resolution. `[Search boundary]`
 states whether every eligible source and observed match fit, and names every active
 limit when the answer is partial. The CLI has no session pack store, so a partial
 answer directs the caller to narrow the pattern or selection and run it again.
+If matches exist but no complete result line fits, text and Markdown say
+`[Matches omitted]` instead of claiming that nothing matched. If the inspection-byte
+or readability boundary leaves selected sources uninspected, an empty result says
+`[Search partial]` and reports how many selected files were not inspected.
 
 JSON is the deterministic `devprojex-search-results` document described in
-[CLI-Output-Contract.md](CLI-Output-Contract.md). Markdown contains the complete
-text form in a fence longer than any backtick run in the result. File output is
+[CLI-Output-Contract.md](CLI-Output-Contract.md). The 16,000-character limit applies
+to the complete serialized text, JSON, or Markdown document. Evidence is admitted
+as complete lines until the selected format fits; JSON is never made invalid by a
+final string slice, and `writtenMatches` counts exactly the serialized `matches`.
+Markdown contains the complete text form in a fence longer than any backtick run in the result. File output is
 atomic, must be outside the source project, and refuses to replace an existing file.
 
 Examples:
