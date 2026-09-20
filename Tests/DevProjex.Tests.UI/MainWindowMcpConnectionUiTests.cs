@@ -1,6 +1,7 @@
 using Avalonia.Automation;
 using Avalonia.VisualTree;
 using DevProjex.Application.Services;
+using DevProjex.Infrastructure.TerminalCommands;
 using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.UI;
@@ -9,7 +10,7 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 {
 	[AvaloniaFact]
-	public async Task OpenMenu_AlwaysUsesLiveModeAndOpensClientWithoutSuccessToast()
+	public async Task OpenMenus_PassLiveAndStandardModesAndOpenClientWithoutSuccessToast()
 	{
 		var service = new RecordingMcpConnectionService(request => new McpConnectionResult(
 			McpConnectionStatus.Connected,
@@ -45,6 +46,20 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 			var launchRequest = Assert.Single(launcher.Requests);
 			Assert.Equal(McpConnectionClient.Cursor, launchRequest.Client);
 			Assert.Equal(firstRequest.ProjectRoot, launchRequest.ProjectRoot);
+			Assert.Empty(UiTestDriver.GetToastService(window).Items);
+			Assert.Empty(window.OwnedWindows);
+
+			var standardCursor = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+				window,
+				"McpStandardConnectCursorMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(standardCursor);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => service.Requests.Count == 2 && launcher.Requests.Count == 2,
+				"the standard MCP client launch request");
+
+			Assert.Equal(McpConnectionMode.Standard, service.Requests[1].Mode);
+			Assert.Equal(McpConnectionClient.Cursor, service.Requests[1].Client);
 			Assert.Empty(UiTestDriver.GetToastService(window).Items);
 			Assert.Empty(window.OwnedWindows);
 		}
@@ -97,6 +112,59 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 				window,
 				() => window.OwnedWindows.Count == 0,
 				"the MCP PATH prompt to close");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task CodexConnectionForAnotherProjectRequiresConfirmationAndReportsReplacement()
+	{
+		var previousProject = Path.GetFullPath(Path.Combine(workspace.Project.RootPath, "..", "previous-project"));
+		var service = new ReplacementMcpConnectionService(previousProject);
+		var launcher = new RecordingMcpClientLaunchService(_ => new McpClientLaunchResult(
+			McpClientLaunchStatus.Opened));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with
+			{
+				McpConnectionService = service,
+				McpClientLaunchService = launcher,
+				TerminalCommandSetupService = new StubTerminalCommandSetupService(
+					CreateTerminalSnapshot(workspace.Project.RootPath, TerminalCommandSetupState.Installed))
+			});
+
+		try
+		{
+			var codex = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "McpConnectCodexMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(codex);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"the Codex replacement confirmation");
+
+			var confirmation = Assert.Single(window.OwnedWindows);
+			var message = string.Join(
+				' ',
+				confirmation.GetVisualDescendants().OfType<TextBlock>().Select(static item => item.Text));
+			Assert.Contains(previousProject, message, StringComparison.Ordinal);
+			Assert.Contains(Path.GetFullPath(workspace.Project.RootPath), message, StringComparison.Ordinal);
+			var replace = Assert.Single(
+				confirmation.GetVisualDescendants().OfType<Button>(),
+				static button => Equals(button.Content, "Replace connection"));
+			await UiTestDriver.RaiseButtonClickAsync(replace);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => service.ReplaceRequests.Count == 1 && launcher.Requests.Count == 1,
+				"the confirmed Codex replacement");
+
+			Assert.Empty(service.ConnectRequests);
+			Assert.Equal(previousProject, Assert.Single(service.ExpectedRoots));
+			Assert.Contains(
+				UiTestDriver.GetToastService(window).Items,
+				static item => item.Message == "Codex connection replaced");
 		}
 		finally
 		{
@@ -273,6 +341,51 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 
 		public string CreatePrintableConfiguration(McpConnectionRequest request) =>
 			"{\"mcpServers\":{\"devprojex\":{}}}";
+	}
+
+	private sealed class ReplacementMcpConnectionService(string existingProjectRoot)
+		: IMcpConnectionService, IMcpConnectionReplacementService
+	{
+		public List<McpConnectionRequest> ConnectRequests { get; } = [];
+		public List<McpConnectionRequest> ReplaceRequests { get; } = [];
+		public List<string> ExpectedRoots { get; } = [];
+
+		public Task<McpConnectionInspection> InspectAsync(
+			McpConnectionRequest request,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return Task.FromResult(new McpConnectionInspection(
+				true,
+				existingProjectRoot,
+				RequiresProjectReplacement: true));
+		}
+
+		public Task<McpConnectionResult> ReplaceAsync(
+			McpConnectionRequest request,
+			string expectedExistingProjectRoot,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			ReplaceRequests.Add(request);
+			ExpectedRoots.Add(expectedExistingProjectRoot);
+			return Task.FromResult(new McpConnectionResult(
+				McpConnectionStatus.Updated,
+				"Codex connection replaced",
+				Replaced: true));
+		}
+
+		public Task<McpConnectionResult> ConnectAsync(
+			McpConnectionRequest request,
+			CancellationToken cancellationToken = default)
+		{
+			ConnectRequests.Add(request);
+			return Task.FromResult(new McpConnectionResult(
+				McpConnectionStatus.Connected,
+				"connected"));
+		}
+
+		public string CreatePrintableConfiguration(McpConnectionRequest request) => "{}";
 	}
 
 	private sealed class StubTerminalCommandSetupService(TerminalCommandSetupSnapshot snapshot)

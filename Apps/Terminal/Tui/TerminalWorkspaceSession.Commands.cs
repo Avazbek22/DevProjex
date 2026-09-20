@@ -485,14 +485,18 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 
 		var operationCts = ReplaceActiveOperation();
+		var connectionMode = command.Text == "standard"
+			? McpConnectionMode.Standard
+			: McpConnectionMode.Live;
 		TrackActiveOperation(Task.Run(
-			() => ConnectMcpClientAsync(client.Value, projectRoot, operationCts),
+			() => ConnectMcpClientAsync(client.Value, connectionMode, projectRoot, operationCts),
 			CancellationToken.None));
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
 	private async Task ConnectMcpClientAsync(
 		McpConnectionClient client,
+		McpConnectionMode mode,
 		string projectRoot,
 		CancellationTokenSource operationCts)
 	{
@@ -503,11 +507,10 @@ internal sealed partial class TerminalWorkspaceSession
 				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 			var request = new McpConnectionRequest(
 				client,
-				McpConnectionMode.Live,
+				mode,
 				executablePath,
 				Path.GetFullPath(projectRoot));
-			var result = await _services.McpConnectionService
-				.ConnectAsync(request, operationCts.Token)
+			var result = await ConnectMcpClientWithConfirmationAsync(request, operationCts)
 				.ConfigureAwait(false);
 
 			await InvokeAsync(() =>
@@ -541,6 +544,48 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			ReleaseActiveOperation(operationCts);
 		}
+	}
+
+	private async Task<McpConnectionResult> ConnectMcpClientWithConfirmationAsync(
+		McpConnectionRequest request,
+		CancellationTokenSource operationCts)
+	{
+		if (request.Client != McpConnectionClient.Codex ||
+			_services.McpConnectionService is not IMcpConnectionReplacementService replacementService)
+		{
+			return await _services.McpConnectionService
+				.ConnectAsync(request, operationCts.Token)
+				.ConfigureAwait(false);
+		}
+
+		var inspection = await replacementService
+			.InspectAsync(request, operationCts.Token)
+			.ConfigureAwait(false);
+		if (!inspection.RequiresProjectReplacement ||
+			string.IsNullOrWhiteSpace(inspection.ExistingProjectRoot))
+		{
+			return await _services.McpConnectionService
+				.ConnectAsync(request, operationCts.Token)
+				.ConfigureAwait(false);
+		}
+
+		var confirmed = await InvokeAsync(() => Confirm(
+			L("Mcp.Connect.ReplaceTitle"),
+			_services.Localization.Format(
+				"Mcp.Connect.ReplacePrompt",
+				inspection.ExistingProjectRoot,
+				request.ProjectRoot))).ConfigureAwait(false);
+		if (!confirmed)
+		{
+			return new McpConnectionResult(
+				McpConnectionStatus.InvalidConfiguration,
+				L("Mcp.Connect.ReplaceCanceled"));
+		}
+
+		return await replacementService.ReplaceAsync(
+			request,
+			inspection.ExistingProjectRoot,
+			operationCts.Token).ConfigureAwait(false);
 	}
 
 	private void ShowMcpConnectionResult(McpConnectionResult result)

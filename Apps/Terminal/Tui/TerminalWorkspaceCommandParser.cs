@@ -539,16 +539,19 @@ internal sealed class TerminalWorkspaceCommandParser
 	{
 		if (tokens.Count >= 2 && Contains(McpTargets, tokens[1].Value))
 		{
-			if (tokens.Count > 3)
-				return Unexpected(tokens[3]);
+			if (tokens.Count > 4)
+				return Unexpected(tokens[4]);
 			if (tokens.Count < 3)
 				return Missing(tokens, McpClients);
 			if (!Contains(McpClients, tokens[2].Value))
 				return Unknown(tokens[2], McpClients);
+			if (tokens.Count == 4 && !Contains(McpModes, tokens[3].Value))
+				return Unknown(tokens[3], McpModes);
 
 			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
 				definition,
 					Target: Normalize(tokens[2].Value, McpClients),
+					Text: tokens.Count == 4 ? Normalize(tokens[3].Value, McpModes) : "live",
 					McpAction: TerminalWorkspaceMcpAction.Connect));
 		}
 
@@ -790,6 +793,8 @@ internal sealed class TerminalWorkspaceCommandParser
 			0 => new CompletionCandidateSource(McpTargets, McpClients),
 			1 when tokens.Count > 1 && Contains(McpTargets, tokens[1].Value) =>
 				new CompletionCandidateSource(McpClients),
+			2 when tokens.Count > 2 && Contains(McpTargets, tokens[1].Value) && Contains(McpClients, tokens[2].Value) =>
+				new CompletionCandidateSource(McpModes),
 			1 when tokens.Count > 1 && Contains(McpClients, tokens[1].Value) =>
 				new CompletionCandidateSource(McpModes),
 			_ => default

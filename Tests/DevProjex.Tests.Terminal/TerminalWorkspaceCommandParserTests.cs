@@ -144,20 +144,21 @@ public sealed class TerminalWorkspaceCommandParserTests
 	}
 
 	[Theory]
-	[InlineData("mcp connect claude-code", "claude-code")]
-	[InlineData("mcp CONNECT Codex", "codex")]
-	[InlineData("mcp connect cursor", "cursor")]
-	[InlineData("mcp connect vscode", "vscode")]
-	[InlineData("mcp connect json", "json")]
+	[InlineData("mcp connect claude-code", "claude-code", "live")]
+	[InlineData("mcp CONNECT Codex standard", "codex", "standard")]
+	[InlineData("mcp connect cursor live", "cursor", "live")]
+	[InlineData("mcp connect vscode", "vscode", "live")]
+	[InlineData("mcp connect json standard", "json", "standard")]
 	internal void Parse_McpConnectionUsesExplicitStableChoices(
 		string text,
-		string expectedClient)
+		string expectedClient,
+		string expectedMode)
 	{
 		var result = _parser.Parse(text, Context);
 
 		Assert.True(result.IsSuccess, result.Error?.ToString());
 		Assert.Equal(expectedClient, result.Command!.Target);
-		Assert.Null(result.Command.Text);
+		Assert.Equal(expectedMode, result.Command.Text);
 		Assert.Equal(TerminalWorkspaceMcpAction.Connect, result.Command.McpAction);
 	}
 
@@ -194,6 +195,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 			clients.Candidates.Select(static item => item.Token));
 		var modes = _parser.GetCompletion("mcp codex ", 10, Context);
 		Assert.Equal(["live", "standard"], modes.Candidates.Select(static item => item.Token));
+		var connectionModes = _parser.GetCompletion("mcp connect codex ", 18, Context);
+		Assert.Equal(["live", "standard"], connectionModes.Candidates.Select(static item => item.Token));
 	}
 
 	[Theory]
@@ -560,7 +563,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["mcp unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "connect"],
 		["mcp connect", TerminalWorkspaceCommandErrorCode.MissingArgument, 11, "codex"],
 		["mcp connect unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 12, "json"],
-		["mcp connect codex live", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 18, (string?)null],
+		["mcp connect codex unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 18, "standard"],
+		["mcp connect codex live extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 23, (string?)null],
 		["mcp codex unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 10, "standard"],
 		["related", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, "path"],
 		["related src/App.cs --side both", TerminalWorkspaceCommandErrorCode.UnknownToken, 19, "--direction"],

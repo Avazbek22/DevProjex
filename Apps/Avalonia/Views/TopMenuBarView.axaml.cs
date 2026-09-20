@@ -371,27 +371,43 @@ public partial class TopMenuBarView : UserControl
         => TerminalCommandSetupRequested?.Invoke(sender, e);
 
     private void OnMcpConnectClaudeCode(object? sender, RoutedEventArgs e) =>
-        RequestMcpConnection(sender, McpConnectionClient.ClaudeCode);
+        RequestMcpConnection(sender, McpConnectionClient.ClaudeCode, McpConnectionMode.Live);
 
     private void OnMcpConnectCodex(object? sender, RoutedEventArgs e) =>
-        RequestMcpConnection(sender, McpConnectionClient.Codex);
+        RequestMcpConnection(sender, McpConnectionClient.Codex, McpConnectionMode.Live);
 
     private void OnMcpConnectCursor(object? sender, RoutedEventArgs e) =>
-        RequestMcpConnection(sender, McpConnectionClient.Cursor);
+        RequestMcpConnection(sender, McpConnectionClient.Cursor, McpConnectionMode.Live);
 
     private void OnMcpConnectVsCode(object? sender, RoutedEventArgs e) =>
-        RequestMcpConnection(sender, McpConnectionClient.VsCode);
+        RequestMcpConnection(sender, McpConnectionClient.VsCode, McpConnectionMode.Live);
 
     private void OnMcpOtherClients(object? sender, RoutedEventArgs e) =>
-        RequestMcpConnection(sender, McpConnectionClient.Json);
+        RequestMcpConnection(sender, McpConnectionClient.Json, McpConnectionMode.Live);
+
+    private void OnMcpStandardConnectClaudeCode(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.ClaudeCode, McpConnectionMode.Standard);
+
+    private void OnMcpStandardConnectCodex(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.Codex, McpConnectionMode.Standard);
+
+    private void OnMcpStandardConnectCursor(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.Cursor, McpConnectionMode.Standard);
+
+    private void OnMcpStandardConnectVsCode(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.VsCode, McpConnectionMode.Standard);
+
+    private void OnMcpStandardOtherClients(object? sender, RoutedEventArgs e) =>
+        RequestMcpConnection(sender, McpConnectionClient.Json, McpConnectionMode.Standard);
 
     private void OnMcpDocumentation(object? sender, RoutedEventArgs e) =>
         McpDocumentationRequested?.Invoke(sender, e);
 
     private void RequestMcpConnection(
         object? sender,
-        McpConnectionClient client) =>
-        McpConnectionRequested?.Invoke(sender, new McpConnectionRequestedEventArgs(client));
+        McpConnectionClient client,
+        McpConnectionMode mode) =>
+        McpConnectionRequested?.Invoke(sender, new McpConnectionRequestedEventArgs(client, mode));
 
     private void OnAbout(object? sender, RoutedEventArgs e) => AboutRequested?.Invoke(sender, e);
 
