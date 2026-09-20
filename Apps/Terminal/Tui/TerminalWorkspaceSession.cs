@@ -50,6 +50,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly WorkspaceFocusModel _focus = new();
 	private readonly AsyncOperationCoordinator _operations;
 	private readonly TerminalSelectionProfilePersistenceCoordinator _selectionProfilePersistence;
+	private readonly object _localProfileBaselineSync = new();
+	private ProjectSelectionProfile? _localProfileBaseline;
 	private readonly LiveSessionRegistry _liveSessionRegistry;
 	private readonly TerminalExportDestinationHistory _exportDestinations = new();
 
@@ -1262,6 +1264,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			}
 		}
 		_state = state;
+		lock (_localProfileBaselineSync)
+			_localProfileBaseline = CaptureLocalProfile(state);
 		if (state.Plan.GitReadiness.Mode is { } mode && GitScopeSelection.IsPersistent(mode))
 			_preferredGitMode = mode;
 		_layoutMode = ResolveLayout();

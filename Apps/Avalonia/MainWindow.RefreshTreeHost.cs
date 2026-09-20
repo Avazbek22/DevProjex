@@ -229,6 +229,9 @@ public partial class MainWindow : IRefreshTreePipelineHost
         if (!interactiveFilter)
             ReapplyActiveTreeQueryPresentation();
 
+		if (completedFilterSelectionTransfer && selectionRestore.Applied)
+			PublishTreeSelectionChange();
+
         if (!interactiveFilter)
         {
             StartPostLoadBackgroundWork(

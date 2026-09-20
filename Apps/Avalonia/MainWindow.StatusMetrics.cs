@@ -100,11 +100,19 @@ public partial class MainWindow
 
         _treeSelectionProfiles.Schedule(
             _currentPath,
-            ProjectTreeUiState.CaptureProfileSelection(root));
+			CaptureProfileSelectionFrontier());
     }
 
     private IReadOnlyCollection<string>? CaptureProfileSelectionFrontier()
     {
+		if (_interactiveFilterSelectionSnapshot is { } filterSnapshot &&
+		    _filterBaseTree is { } fullTree &&
+		    !string.IsNullOrWhiteSpace(_currentPath) &&
+		    filterSnapshot.IsForProject(_currentPath))
+		{
+			return filterSnapshot.CaptureProfileSelection(fullTree.Root);
+		}
+
         return _viewModel.TreeNodes.FirstOrDefault() is { } root
             ? ProjectTreeUiState.CaptureProfileSelection(root)
             : null;

@@ -176,6 +176,35 @@ public sealed class ProjectTreeUiStateTests
 		Assert.Equal([upper.FullPath, lower.FullPath], bothFiles);
 	}
 
+	[Fact]
+	public void FilterSnapshotProfileSelectionKeepsHiddenPathsAndVisibleOverrides()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjex-TreeState", "FilteredProfile");
+		var first = CreateFile(rootPath, "A.cs");
+		var added = CreateFile(rootPath, "B.cs");
+		var hidden = CreateFile(rootPath, "T.cs");
+		var hiddenUnchecked = CreateFile(rootPath, "U.cs");
+		var descriptor = CreateFolder(
+			rootPath,
+			"FilteredProfile",
+			first,
+			added,
+			hidden,
+			hiddenUnchecked);
+		var source = BuildTree(descriptor);
+		source.Children[0].IsChecked = true;
+		source.Children[2].IsChecked = true;
+		var snapshot = ProjectTreeSelectionSnapshot.Capture(
+			rootPath,
+			[source],
+			new TreeSelectionSnapshotCache());
+		snapshot!.RecordOverride(added.FullPath, isChecked: true);
+
+		var selected = snapshot.CaptureProfileSelection(descriptor);
+
+		Assert.Equal(["A.cs", "B.cs", "T.cs"], selected);
+	}
+
     [Fact]
     public void ExpansionCaptureAndRestore_OnlyRealizeExpandedBranches()
     {
