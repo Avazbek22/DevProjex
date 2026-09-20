@@ -11,7 +11,8 @@ public sealed record LiveSessionRecord(
 	string? ClientName,
 	string? ClientVersion,
 	IReadOnlyList<string> Roots,
-	DateTimeOffset HeartbeatUtc);
+	DateTimeOffset HeartbeatUtc,
+	AgentJournalMode Mode = AgentJournalMode.Live);
 
 public sealed class LiveSessionRegistry(
 	Func<string>? stateRootProvider = null,
@@ -27,18 +28,22 @@ public sealed class LiveSessionRegistry(
 
 	public string DirectoryPath => Path.Combine(stateRoot(), "live-sessions");
 
-	public LiveSessionWriter Start(IReadOnlyList<string> roots) =>
+	public LiveSessionWriter Start(
+		IReadOnlyList<string> roots,
+		AgentJournalMode mode = AgentJournalMode.Live) =>
 		new(
 			this,
 			Environment.ProcessId,
 			GetCurrentProcessStartUtc(),
-			roots);
+			roots,
+			mode);
 
 	internal LiveSessionWriter Start(
 		int pid,
 		DateTimeOffset processStartUtc,
-		IReadOnlyList<string> roots) =>
-		new(this, pid, processStartUtc, roots);
+		IReadOnlyList<string> roots,
+		AgentJournalMode mode = AgentJournalMode.Live) =>
+		new(this, pid, processStartUtc, roots, mode);
 
 	public IReadOnlyList<LiveSessionRecord> ReadActive(string? projectRoot = null)
 	{
@@ -259,7 +264,8 @@ public sealed class LiveSessionWriter : IAsyncDisposable, IDisposable
 		LiveSessionRegistry registry,
 		int pid,
 		DateTimeOffset processStartUtc,
-		IReadOnlyList<string> roots)
+		IReadOnlyList<string> roots,
+		AgentJournalMode mode)
 	{
 		this.registry = registry;
 		record = new LiveSessionRecord(
@@ -268,7 +274,8 @@ public sealed class LiveSessionWriter : IAsyncDisposable, IDisposable
 			ClientName: null,
 			ClientVersion: null,
 			roots.Select(PathUtility.Normalize).Distinct(PathComparer.Default).ToArray(),
-			registry.UtcNow);
+			registry.UtcNow,
+			mode);
 		registry.TryWrite(record);
 		heartbeat = RunHeartbeatAsync();
 	}
