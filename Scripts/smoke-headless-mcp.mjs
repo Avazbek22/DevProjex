@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 const [command, root, ...rawPrefixArguments] = process.argv.slice(2);
 if (!command || !root) {
@@ -11,7 +12,9 @@ const liveIndex = rawPrefixArguments.indexOf('--live');
 const live = liveIndex >= 0;
 const prefixArguments = rawPrefixArguments.filter((_, index) => index !== liveIndex);
 const probeRoot = join(root, 'McpSmoke');
+const processTemp = join(dirname(root), `.devprojex-mcp-smoke-${randomUUID()}`);
 mkdirSync(probeRoot, { recursive: true });
+mkdirSync(processTemp, { recursive: true });
 writeFileSync(join(probeRoot, 'Probe.txt'), 'artifactNeedle\n', 'utf8');
 writeFileSync(join(probeRoot, 'Large.txt'), `large-marker\n${'x'.repeat(70_000)}`, 'utf8');
 
@@ -22,7 +25,15 @@ const child = spawn(
     shell: false,
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      DEVPROJEX_INTERNAL_DATA_ROOT: processTemp,
+      TEMP: processTemp,
+      TMP: processTemp,
+      TMPDIR: processTemp,
+    },
   });
+const childExited = new Promise((resolve) => child.once('exit', resolve));
 let stderr = '';
 let stdoutBuffer = '';
 let nextId = 1;
@@ -124,5 +135,13 @@ try {
 } finally {
   clearTimeout(timeout);
   child.stdin.end();
-  child.kill();
+  const stopped = await Promise.race([
+    childExited.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 3_000)),
+  ]);
+  if (!stopped) {
+    child.kill();
+    await childExited;
+  }
+  rmSync(processTemp, { recursive: true, force: true });
 }
