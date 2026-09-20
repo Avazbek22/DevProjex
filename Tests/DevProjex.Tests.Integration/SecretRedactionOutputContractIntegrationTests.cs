@@ -7,6 +7,7 @@ using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.Secrets;
+using DevProjex.Mcp;
 
 namespace DevProjex.Tests.Integration;
 
@@ -35,6 +36,45 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		PrivateKeyBodyFragment + "\n" +
 		"Ks14IReLcYgA" + "DhoXk56ZzXI=\n" +
 		"-----END " + "PRIVATE KEY-----";
+
+	[Fact]
+	public async Task MeasuredAdmissionRejectsSourceChangedBeforeMaterialization()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("project");
+		var sourcePath = Path.Combine(projectRoot, "Content.txt");
+		File.WriteAllText(sourcePath, "measured content\n");
+		var plan = await BuildPlanAsync(projectRoot, hideSecrets: true);
+		var analyzer = new FileContentAnalyzer();
+		using var session = new SecretRedactionSession(new NoFindingsDetector());
+		var context = new ContentTransformationContext(
+			null,
+			new SecretRedactionContext(projectRoot, session));
+		var preparer = new SecretRedactionOutputPreparer(analyzer);
+		await using var measured = await preparer.MeasureAsync(
+			context,
+			plan.IncludedFiles,
+			captureEffectiveFindings: false,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var admission = await new ProjectContextTokenAdmissionService(
+			new ProjectContextDocumentService(new TreeExportService(), analyzer))
+			.AdmitMeasuredAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Text,
+				maximumEstimatedTokens: 1_000,
+				measured,
+				cancellationToken: TestContext.Current.CancellationToken);
+		File.WriteAllText(sourcePath, "changed after admission and longer\n");
+
+		Assert.Throws<SecretDetectionException>(() =>
+			measured.EnsureSourceVersionsCurrent(admission.Plan.IncludedFiles));
+		var failure = Assert.Throws<McpToolException>(() =>
+			McpProjectService.EnsureMeasuredSourcesCurrent(measured, admission.Plan.IncludedFiles));
+		Assert.Equal(McpErrorCodes.ProjectUnavailable, failure.Code);
+		Assert.Contains("retry this call", failure.Message, StringComparison.Ordinal);
+		Assert.DoesNotContain(sourcePath, failure.Message, StringComparison.Ordinal);
+	}
 
 	[Fact]
 	public async Task EnabledRedaction_RemovesEveryTextSecretAcrossPreviewContextFolderAndZip()
@@ -119,11 +159,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var toggledLineNumber = 0;
 
 		using (var initialPreview = await previewBuilder.BuildContentDocumentAsync(
-			       plan.IncludedFiles,
-			       TestContext.Current.CancellationToken,
-			       TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
-			       includeOmissionMarkers: true,
-			       transformationContext: context))
+				   plan.IncludedFiles,
+				   TestContext.Current.CancellationToken,
+				   TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
+				   includeOmissionMarkers: true,
+				   transformationContext: context))
 		{
 			var occurrence = Assert.Single(
 				initialPreview!.Redactions
@@ -192,11 +232,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var previewBuilder = new PreviewDocumentBuilder(analyzer);
 
 		using (var initialPreview = await previewBuilder.BuildContentDocumentAsync(
-			       plan.IncludedFiles,
-			       TestContext.Current.CancellationToken,
-			       TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
-			       includeOmissionMarkers: false,
-			       transformationContext: context))
+				   plan.IncludedFiles,
+				   TestContext.Current.CancellationToken,
+				   TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+				   includeOmissionMarkers: false,
+				   transformationContext: context))
 		{
 			var cookieSpans = initialPreview!.Redactions
 				.Where(static span => span.RuleId == "http-cookie")
@@ -273,8 +313,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var exportRoot = temporary.CreateDirectory("redaction-feature-exports");
 		const string relativePath = "requests/private.http";
 		var content = $"GET https://localhost/health\n" +
-		              $"Authorization: Bearer {AuthorizationCredential}\n" +
-		              $"contact={PrivateEmail}\nserver={PrivateIpv4}\n";
+					  $"Authorization: Bearer {AuthorizationCredential}\n" +
+					  $"contact={PrivateEmail}\nserver={PrivateIpv4}\n";
 		var sourcePath = temporary.CreateFile($"redaction-feature-project/{relativePath}", content);
 		var sourceBytes = File.ReadAllBytes(sourcePath);
 		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, sourcePath);
@@ -419,11 +459,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var previewBuilder = new PreviewDocumentBuilder(analyzer);
 
 		using (var initial = await previewBuilder.BuildContentDocumentAsync(
-			       plan.IncludedFiles,
-			       TestContext.Current.CancellationToken,
-			       TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
-			       includeOmissionMarkers: false,
-			       transformationContext: context))
+				   plan.IncludedFiles,
+				   TestContext.Current.CancellationToken,
+				   TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+				   includeOmissionMarkers: false,
+				   transformationContext: context))
 		{
 			var email = Assert.Single(initial!.Redactions, static span => span.RuleId == "email");
 			Assert.True(session.ToggleKeepAsIs(email.OccurrenceId));
@@ -500,11 +540,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var previewBuilder = new PreviewDocumentBuilder(analyzer);
 
 		using (var initial = await previewBuilder.BuildContentDocumentAsync(
-			       plan.IncludedFiles,
-			       TestContext.Current.CancellationToken,
-			       TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
-			       includeOmissionMarkers: false,
-			       transformationContext: context))
+				   plan.IncludedFiles,
+				   TestContext.Current.CancellationToken,
+				   TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+				   includeOmissionMarkers: false,
+				   transformationContext: context))
 		{
 			var secret = Assert.Single(initial!.Redactions, static span => span.RuleId == "secret-overlap");
 			Assert.True(session.ToggleKeepAsIs(secret.OccurrenceId));
@@ -1259,9 +1299,9 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		}
 
 		await using (var prepared = await preparer.PrepareAsync(
-			             transformation,
-			             [sourcePath],
-			             TestContext.Current.CancellationToken))
+						 transformation,
+						 [sourcePath],
+						 TestContext.Current.CancellationToken))
 		{
 			Assert.Equal(expectedUnscannable, prepared.GetFile(sourcePath).IsUnscannable);
 			Assert.Equal(
@@ -1588,9 +1628,9 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
 
 		await using (var first = await preparer.PrepareAsync(
-			             context,
-			             [path],
-			             TestContext.Current.CancellationToken))
+						 context,
+						 [path],
+						 TestContext.Current.CancellationToken))
 		{
 			var output = await File.ReadAllTextAsync(
 				first.GetFile(path).ContentPath,

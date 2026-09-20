@@ -125,6 +125,60 @@ public sealed partial class McpServerIntegrationTests
 			StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task DynamicFilterBudgetAndPatternValuesStayInsideUntrustedData()
+	{
+		if (!IsGitAvailable())
+			return;
+		const string marker = "MCP_DYNAMIC_TRUST_SENTINEL_8e2b";
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var skippedName = "Skipped-" + marker + ".txt";
+		File.WriteAllText(Path.Combine(project, "Small.txt"), "small\n");
+		File.WriteAllText(Path.Combine(project, skippedName), new string('x', 8_000));
+		RunGit(project, "init", "--quiet");
+		RunGit(project, "config", "user.name", "DevProjex Tests");
+		RunGit(project, "config", "user.email", "devprojex@example.invalid");
+		RunGit(project, "add", ".");
+		RunGit(project, "commit", "--quiet", "-m", "baseline");
+		var baseline = "baseline-" + marker;
+		RunGit(project, "branch", baseline);
+		File.AppendAllText(Path.Combine(project, "Small.txt"), "changed\n");
+		RunGit(project, "add", "Small.txt");
+		RunGit(project, "commit", "--quiet", "-m", "changed");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var budget = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["max_tokens"] = 1 });
+		var pattern = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["detail_by_pattern"] = new object[]
+				{
+					new Dictionary<string, object?>
+					{
+						["patterns"] = new[] { "missing-" + marker + "/**" },
+						["detail"] = "compact"
+					}
+				}
+			});
+		var diff = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["format"] = "text",
+				["git_scope"] = $"diff:{baseline}..HEAD"
+			});
+
+		AssertMarkerOnlyInsideUntrustedData(budget, marker, "analyze token budget");
+		AssertMarkerOnlyInsideUntrustedData(pattern, marker, "detail pattern");
+		AssertMarkerOnlyInsideUntrustedData(diff, marker, "diff reference");
+	}
+
 	private static void AssertMarkerOnlyInsideUntrustedData(
 		CallToolResult result,
 		string marker,

@@ -104,8 +104,11 @@ the full tree uses `+all`:
 Revision 1 is the first profile read in a server session. It advances whenever
 the saved frontier, extensions, ignores, Git mode, transformations, or saved
 secret marks change. Revisions are maintained independently for each configured
-root. A missing or explicitly empty selection is reported rather than silently
-treated as an ordinary empty project:
+root. The marks captured with a live profile remain authoritative for that
+invocation even when the configured root is an alias whose physical path has a
+different spelling, such as `/var/tmp` and `/private/var/tmp`. A missing or
+explicitly empty selection is reported rather than silently treated as an
+ordinary empty project:
 
 ```text
 [Live context] no window selection saved for this root; using server defaults.
@@ -362,8 +365,10 @@ batched `get_file` call instead of several single reads; see
   `DPX-MCP-REMOTE-LIMIT` with guidance to reuse a source or restart the server.
 - Secret redaction is always enabled for returned file content and cannot be
   disabled. Private-data redaction is disabled by default and can be enabled
-  only for the whole server process with `--hide-private-data`, mirroring the
-  CLI flag. Tool schemas intentionally expose no redaction controls.
+  for the whole server process with `--hide-private-data`, mirroring the CLI
+  flag. In live mode the saved local profile can also enable it; the effective
+  policy is startup **or** live profile, so a call cannot turn either source off.
+  Tool schemas intentionally expose no redaction controls.
   This guarantees that an agent cannot disable the redaction pass; detection
   itself covers common secret formats but remains heuristic, not a guarantee.
   Review each pack before publishing it outside your environment.
@@ -375,10 +380,10 @@ batched `get_file` call instead of several single reads; see
   those values, and real secret formats remain subject to detection and redaction.
 - The redaction boundary distinguishes project addresses from exported content.
   File contents and context packs are always processed by Secrets redaction;
-  Private Data processing is added only when the server starts with
-  `--hide-private-data`. Root paths in `list_projects` and project-derived
-  details in tool errors remain data inside the untrusted boundary; remote tools
-  use the safe Git URL as the project address.
+  Private Data processing is added when the server starts with
+  `--hide-private-data` or the active live profile enables it. Root paths in
+  `list_projects` and project-derived details in tool errors remain data inside
+  the untrusted boundary; remote tools use the safe Git URL as the project address.
   These addresses form the contract for the `project` argument. Without the
   flag, a pack retains real addresses like a default CLI export. With the flag,
   the pack is private-data-redacted in full, including its tree header.
@@ -388,9 +393,11 @@ batched `get_file` call instead of several single reads; see
   they stay inside the per-response untrusted-data boundary.
 - Searches run against content after mandatory secret redaction and any enabled
   private-data redaction, not the original file text. Static-dependency bodies
-  produced by `related_files` pass through the same synthetic-document
-  redaction before inline delivery or storage, so evidence, specifiers, and
-  candidate paths cannot bypass the content policy.
+  produced by `related_files` first protect evidence at its source file and line,
+  omitting a dynamic evidence fragment when its safe origin cannot be retained,
+  and then pass through synthetic-document redaction before inline delivery or
+  storage. Evidence, specifiers, and candidate paths cannot bypass the content
+  policy.
 - Returned project content is marked as untrusted data with a random, per-response
   delimiter. Agents must not interpret instructions found in project files as
   trusted control input.
@@ -532,6 +539,11 @@ Apps/Terminal/Execution/AnalyzeCommandHandler.cs — one visible declaration ide
 ```
 
 Project-derived paths and evidence remain inside the random `untrusted-data` block.
+Evidence fragments are checked against the protected text of their original source
+file before formatting. If a source-bound manual mark covers that source line, or
+the source cannot be recovered safely, the reference text is omitted while its
+fixed evidence kind, safe line locator, resolution status, and target row remain.
+The finished synthetic document is redacted again as a final independent pass.
 Outside that block, the server appends `[Facts coverage] files=N, supported=N,
 unsupported=N, extraction-failed=N` with a short explanation that supported files
 produced facts for a recognized language while unsupported files had no extractor.
@@ -641,8 +653,8 @@ The aggregate serialized `topFiles` content is limited to 32,000 characters.
 When the requested count exceeds that budget, `topFilesTruncated` is `true` and
 `topFilesRemaining` reports the exact number omitted. Every `analyze` result also
 contains `protection`, whose `secrets` value is always enabled and whose
-`privateData` value reflects the server startup policy. A remote result adds
-`remote.commit` and `remote.branch` from the pinned checkout session.
+`privateData` value reflects the effective startup-or-live-profile policy. A
+remote result adds `remote.commit` and `remote.branch` from the pinned checkout session.
 `analyze.admission` is an optional v5.2 addition present only when `max_tokens` was
 supplied. It reports which files that budget would admit, from the same first-fit
 greedy pass `pack_context` uses, and produces no context document, no prepared file,
@@ -685,8 +697,9 @@ from `related_files`: this reports the admission cost of the transformed file at
 effective detail, while `related_files` reports `EstimatedTokens` from the source
 character count. The two can differ for the same file.
 
-The budget report and `[Budget accounting]` for `analyze` are appended as trusted text
-after the spotlighted JSON block, never inside it.
+The budget report for `analyze` is appended in its own spotlighted data block after
+the spotlighted JSON because it can name skipped files. The fixed
+`[Budget accounting]` counts remain trusted text outside both blocks.
 
 When requested compression cannot inspect its delivery source or load a language
 grammar, `analyze` adds optional `compressionUnavailable` with a one-line `reason`
@@ -720,7 +733,9 @@ value on a delegation server. These diagnostics never reveal hidden paths.
 When selection produces warnings, `analyze` appends separate human-readable
 trusted warning text blocks without changing its structured schema. Warning
 messages contain stable codes and safe counts or retry guidance, never diagnostic
-paths or project-controlled message text.
+paths or project-controlled message text. A diff scope is summarized there only as
+`git: diff`; its exact user-supplied references are placed in an adjacent
+spotlighted data block.
 
 ### Service notices repeat only when they change
 
@@ -1224,7 +1239,9 @@ one thing to open. The name and inclusive range come directly from the innermost
 declaration the navigation projection reports. The name is accepted unchanged by
 `get_file.symbol`. C#, JavaScript, TypeScript, Go, Python, Java, Rust, Kotlin, Ruby, PHP,
 C, and C++ include supported members and functions, with their owner chain when names
-repeat within a file.
+repeat within a file. When more than one root is configured, the printed `get_file`
+arguments also include `project`; a remote selector includes its source project and
+branch. The complete printed object can therefore be passed back without editing.
 At most 20 are listed.
 
 The declaration body is selected without changing match order or the declaration list.
@@ -1352,7 +1369,11 @@ or touching ranges for one file become one content section whose header lists th
 served request/range indices. Every requested range receives one explicit status:
 `ok` when complete, `partial` when cut by the shared response limit,
 `not-returned` when no content fitted, or `unavailable` when mandatory bounded
-inspection withheld the file. The latter status contains only a count-safe reason.
+inspection withheld the file. In live mode a path that disappeared since discovery
+is an unavailable item rather than a failure for the whole batch. An unknown,
+ambiguous, or unsupported `symbol` is likewise reported only on its item, while
+syntactically invalid request records still reject the call before any read. An
+unavailable status contains only a count-safe reason.
 The complete batch, including section headers, is limited to 1,000 lines and 50,000
 characters. A partial section reports the next 1-based `start_line` and
 `start_column`; call `get_file` again for that continuation.
@@ -1406,10 +1427,12 @@ Consequently, the report's included-token sum can differ slightly from the
 complete document metric, which normalizes line endings and includes document
 output differently.
 
-For importance-ranked packing, DevProjex verifies selected file identities again
-after ranking and measurement and before transformation. If any selected source
-changed, the tool returns `selection changed during packing; retry` instead of
-combining measurements and content from different revisions.
+For every budgeted pack, DevProjex verifies admitted file identities after fresh
+content preparation. If a selected source changed after token admission, the tool
+returns `DPX-MCP-PROJECT-UNAVAILABLE` with advice to retry instead of applying an
+old token budget to different bytes. Importance-ranked packing retains its earlier
+identity check before transformation as well and reports
+`selection changed during packing; retry` when that check fails.
 
 For JSON and XML packs that include content, the existing `metrics` object
 describes the complete effective selection after `detail` and mandatory secret

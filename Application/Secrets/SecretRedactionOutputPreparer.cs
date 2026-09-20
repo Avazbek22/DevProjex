@@ -188,7 +188,7 @@ public sealed class SecretRedactionOutputPreparer
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
-		if (context is { Compression: not null, Redaction: null })
+		if (context is { Compression: not null, Redaction: null } && transformedTextConsumer is null)
 		{
 			return await PrepareCompressionOnlyAsync(
 					context,
@@ -203,9 +203,12 @@ public sealed class SecretRedactionOutputPreparer
 		var redactionContext = context.Redaction;
 		if (redactionContext is not null)
 		{
-			await redactionContext.Session
-				.RefreshPersistentMarksAsync(redactionContext.ProjectRoot, cancellationToken)
-				.ConfigureAwait(false);
+			if (!redactionContext.PersistentMarksAreAuthoritative)
+			{
+				await redactionContext.Session
+					.RefreshPersistentMarksAsync(redactionContext.ProjectRoot, cancellationToken)
+					.ConfigureAwait(false);
+			}
 			using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.DetectorInitialization))
 				await redactionContext.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		}
@@ -230,7 +233,7 @@ public sealed class SecretRedactionOutputPreparer
 			{
 				var sourcePath = orderedFilePaths[sourceIndex];
 				if (requiredInspectionScope.GetContentInspectionMode(sourcePath) ==
-				    SecretContentInspectionMode.None)
+					SecretContentInspectionMode.None)
 				{
 					preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
 					if (captureTransformedMetrics)
@@ -260,11 +263,11 @@ public sealed class SecretRedactionOutputPreparer
 		try
 		{
 			await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
-			                   context,
-			                   transformationScope,
-			                   orderedFilePaths,
-			                   cancellationToken,
-			                   transformedTextConsumer is null ? requiredInspectionScope : null).ConfigureAwait(false))
+							   context,
+							   transformationScope,
+							   orderedFilePaths,
+							   cancellationToken,
+							   transformedTextConsumer is null ? requiredInspectionScope : null).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var completed = false;
@@ -291,8 +294,8 @@ public sealed class SecretRedactionOutputPreparer
 							if (captureTransformedMetrics && result.Content is { } estimatedContent)
 								transformedFileMetrics![prepared.SourceIndex] = ToContentFileMetrics(sourcePath, estimatedContent);
 							if (scope is not null &&
-							    (scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None ||
-							     transformedTextConsumer is not null))
+								(scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None ||
+								 transformedTextConsumer is not null))
 							{
 								scope.AnalyzeUnscannable(sourcePath, metadataAfterRead, result.Classification);
 								preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(
@@ -317,8 +320,8 @@ public sealed class SecretRedactionOutputPreparer
 					}
 
 					var content = result.Content ??
-					              throw new SecretDetectionException(
-						              $"Hide Secrets received no text for '{sourcePath}'.");
+								  throw new SecretDetectionException(
+									  $"Hide Secrets received no text for '{sourcePath}'.");
 					// Compression first: the redaction plan, its spans and its counts all describe the
 					// text that actually leaves, not the text on disk.
 					var compressed = prepared.Compression;
@@ -469,7 +472,7 @@ public sealed class SecretRedactionOutputPreparer
 				failedFileCount: 0,
 				unscannableFiles);
 			var compression = transformationScope.Compression?.Complete();
-			if (redactionContext is not null)
+			if (redactionContext is { PersistentMarksAreAuthoritative: false })
 			{
 				await redactionContext.Session
 					.FlushPendingPersistentMarkMigrationsAsync(
@@ -608,7 +611,7 @@ public sealed class SecretRedactionOutputPreparer
 					var sourcePath = orderedFilePaths[sourceIndex];
 					linkedCancellation.Token.ThrowIfCancellationRequested();
 					if (requiredInspectionScope?.GetContentInspectionMode(sourcePath) ==
-					    SecretContentInspectionMode.None)
+						SecretContentInspectionMode.None)
 					{
 						continue;
 					}
@@ -861,7 +864,7 @@ public sealed class SecretRedactionOutputPreparer
 
 			SecretScanCacheEntry? detectionEntry = null;
 			if (transformationScope.Redaction is { } redactionScope &&
-			    result.Classification == FileContentClassification.Text)
+				result.Classification == FileContentClassification.Text)
 			{
 				using var detectionStage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Detection);
 				detectionEntry = redactionScope.DetectSourceAndTransformedContent(
@@ -1063,7 +1066,7 @@ public sealed class SecretRedactionOutputPreparer
 		if (result.Classification != FileContentClassification.Text)
 		{
 			if (captureTransformedMetrics &&
-			    result.Classification == FileContentClassification.TooLarge)
+				result.Classification == FileContentClassification.TooLarge)
 			{
 				return await MeasureExactPassThroughAsync(
 						sourcePath,
@@ -1267,7 +1270,7 @@ public sealed class SecretRedactionOutputPreparer
 	{
 		var projectRoot = context.Redaction?.ProjectRoot ?? context.Compression?.ProjectRoot;
 		return projectRoot is not null &&
-		       ProjectSourcePathPolicy.IsUnsupportedNonRegularFile(projectRoot, sourcePath);
+			   ProjectSourcePathPolicy.IsUnsupportedNonRegularFile(projectRoot, sourcePath);
 	}
 
 	private static PreparedTransformationEntry CreateUnreadableTransformationEntry(
@@ -1351,8 +1354,8 @@ public sealed class SecretRedactionOutputPreparer
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 		if (await context.Session
-			    .EnsureCurrentPersistentIdentityReadyAsync(context.Features, cancellationToken)
-			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+				.EnsureCurrentPersistentIdentityReadyAsync(context.Features, cancellationToken)
+				.ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
 		{
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
 		}
@@ -1420,7 +1423,7 @@ public sealed class SecretRedactionOutputPreparer
 		{
 			var entry = entries[index];
 			if (entry is null &&
-			    scope.GetContentInspectionMode(orderedFilePaths[index]) == SecretContentInspectionMode.None)
+				scope.GetContentInspectionMode(orderedFilePaths[index]) == SecretContentInspectionMode.None)
 			{
 				continue;
 			}
@@ -1498,7 +1501,7 @@ public sealed class SecretRedactionOutputPreparer
 			}
 
 			if (scope.TryGetCachedEntry(sourcePath, metadata, out var cached) &&
-			    (cacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent || cached.IsUnscannable))
+				(cacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent || cached.IsUnscannable))
 			{
 				entries[index] = cached;
 				if (cached.IsUnscannable)
@@ -1602,9 +1605,9 @@ public sealed class SecretRedactionOutputPreparer
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 		var redactionContext = context.Redaction ??
-		                       throw new ArgumentException(
-			                       "The transformation context must include secret redaction.",
-			                       nameof(context));
+							   throw new ArgumentException(
+								   "The transformation context must include secret redaction.",
+								   nameof(context));
 		if (context.Compression is null)
 		{
 			return await AnalyzeAsync(redactionContext, orderedFilePaths, cancellationToken)
@@ -1612,25 +1615,25 @@ public sealed class SecretRedactionOutputPreparer
 		}
 
 		if (await redactionContext.Session
-			    .EnsureCurrentPersistentIdentityReadyAsync(redactionContext.Features, cancellationToken)
-			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+				.EnsureCurrentPersistentIdentityReadyAsync(redactionContext.Features, cancellationToken)
+				.ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
 		{
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
 		}
 		await WarmUpWithDiagnosticsAsync(redactionContext, cancellationToken).ConfigureAwait(false);
 		using var transformationScope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		var redactionScope = transformationScope.Redaction ??
-		                     throw new InvalidOperationException(
-			                     "The transformation scope did not create secret redaction state.");
+							 throw new InvalidOperationException(
+								 "The transformation scope did not create secret redaction state.");
 		var skippedFileCount = 0;
 		var unscannableFiles = new List<UnscannableFile>();
 
 		await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
-		                   context,
-		                   transformationScope,
-		                   orderedFilePaths,
-		                   cancellationToken,
-		                   redactionScope).ConfigureAwait(false))
+						   context,
+						   transformationScope,
+						   orderedFilePaths,
+						   cancellationToken,
+						   redactionScope).ConfigureAwait(false))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			switch (prepared.ReadResult.Classification)
@@ -1696,9 +1699,9 @@ public sealed class SecretRedactionOutputPreparer
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 		var redactionContext = context.Redaction ??
-		                       throw new ArgumentException(
-			                       "The transformation context must include secret redaction.",
-			                       nameof(context));
+							   throw new ArgumentException(
+								   "The transformation context must include secret redaction.",
+								   nameof(context));
 		if (context.Compression is null)
 		{
 			return await DiscoverAsync(redactionContext, orderedFilePaths, cacheMode, cancellationToken)
@@ -1708,19 +1711,19 @@ public sealed class SecretRedactionOutputPreparer
 		await WarmUpWithDiagnosticsAsync(redactionContext, cancellationToken).ConfigureAwait(false);
 		using var transformationScope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		var redactionScope = transformationScope.Redaction ??
-		                     throw new InvalidOperationException(
-			                     "The transformation scope did not create secret redaction state.");
+							 throw new InvalidOperationException(
+								 "The transformation scope did not create secret redaction state.");
 		var skippedFileCount = 0;
 		var failedFileCount = 0;
 		var unscannableFiles = new List<UnscannableFile>();
 
 		await foreach (var attempt in PrepareOrderedDiscoveryEntriesAsync(
-		                   context,
-		                   transformationScope,
-		                   redactionScope,
-		                   orderedFilePaths,
-		                   cacheMode,
-		                   cancellationToken).ConfigureAwait(false))
+						   context,
+						   transformationScope,
+						   redactionScope,
+						   orderedFilePaths,
+						   cacheMode,
+						   cancellationToken).ConfigureAwait(false))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (attempt.IsPolicyExcluded)
@@ -1812,13 +1815,13 @@ public sealed class SecretRedactionOutputPreparer
 			cancellationToken.ThrowIfCancellationRequested();
 			var item = new CompressionWorkItem(index, orderedFilePaths[index]);
 			if (redactionScope.GetContentInspectionMode(item.SourcePath) ==
-			    SecretContentInspectionMode.None)
+				SecretContentInspectionMode.None)
 			{
 				await foreach (var attempt in PrepareDiscoveryBatchAsync(
-				                   context,
-				                   transformationScope,
-				                   batch,
-				                   cancellationToken).ConfigureAwait(false))
+								   context,
+								   transformationScope,
+								   batch,
+								   cancellationToken).ConfigureAwait(false))
 				{
 					yield return attempt;
 				}
@@ -1838,10 +1841,10 @@ public sealed class SecretRedactionOutputPreparer
 			if (metadata is null)
 			{
 				await foreach (var attempt in PrepareDiscoveryBatchAsync(
-				                   context,
-				                   transformationScope,
-				                   batch,
-				                   cancellationToken).ConfigureAwait(false))
+								   context,
+								   transformationScope,
+								   batch,
+								   cancellationToken).ConfigureAwait(false))
 				{
 					yield return attempt;
 				}
@@ -1851,13 +1854,13 @@ public sealed class SecretRedactionOutputPreparer
 			}
 
 			if (redactionScope.TryGetCachedEntry(item.SourcePath, metadata.Value, out var cached) &&
-			    (cacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent || cached.IsUnscannable))
+				(cacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent || cached.IsUnscannable))
 			{
 				await foreach (var attempt in PrepareDiscoveryBatchAsync(
-				                   context,
-				                   transformationScope,
-				                   batch,
-				                   cancellationToken).ConfigureAwait(false))
+								   context,
+								   transformationScope,
+								   batch,
+								   cancellationToken).ConfigureAwait(false))
 				{
 					yield return attempt;
 				}
@@ -1869,10 +1872,10 @@ public sealed class SecretRedactionOutputPreparer
 			if (metadata.Value.Length > MaximumParallelScanFileBytes)
 			{
 				await foreach (var attempt in PrepareDiscoveryBatchAsync(
-				                   context,
-				                   transformationScope,
-				                   batch,
-				                   cancellationToken).ConfigureAwait(false))
+								   context,
+								   transformationScope,
+								   batch,
+								   cancellationToken).ConfigureAwait(false))
 				{
 					yield return attempt;
 				}
@@ -1890,10 +1893,10 @@ public sealed class SecretRedactionOutputPreparer
 				continue;
 
 			await foreach (var attempt in PrepareDiscoveryBatchAsync(
-			                   context,
-			                   transformationScope,
-			                   batch,
-			                   cancellationToken).ConfigureAwait(false))
+							   context,
+							   transformationScope,
+							   batch,
+							   cancellationToken).ConfigureAwait(false))
 			{
 				yield return attempt;
 			}
@@ -1901,10 +1904,10 @@ public sealed class SecretRedactionOutputPreparer
 		}
 
 		await foreach (var attempt in PrepareDiscoveryBatchAsync(
-		                   context,
-		                   transformationScope,
-		                   batch,
-		                   cancellationToken).ConfigureAwait(false))
+						   context,
+						   transformationScope,
+						   batch,
+						   cancellationToken).ConfigureAwait(false))
 		{
 			yield return attempt;
 		}
@@ -2661,9 +2664,9 @@ public sealed record PreparedSecretFile(
 		FileContentClassification classification)
 	{
 		if (classification is not (FileContentClassification.TooLarge or
-		    FileContentClassification.Unreadable or
-		    FileContentClassification.UnsupportedEncoding or
-		    FileContentClassification.AccessDenied))
+			FileContentClassification.Unreadable or
+			FileContentClassification.UnsupportedEncoding or
+			FileContentClassification.AccessDenied))
 		{
 			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
 		}
@@ -2738,6 +2741,17 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 
 	internal PreparedContentStore? ContentStore => _contentStore;
 
+	public void EnsureSourceVersionsCurrent(IEnumerable<string> sourcePaths)
+	{
+		ArgumentNullException.ThrowIfNull(sourcePaths);
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		foreach (var sourcePath in sourcePaths)
+		{
+			if (_files.TryGetValue(sourcePath, out var file) && file.SourceMetadata is not null)
+				file.EnsureSourceVersion();
+		}
+	}
+
 	public ExportOutputMetrics GetTransformedMetrics() =>
 		ExportOutputMetricsCalculator.FromOrderedContentFiles(TransformedFileMetrics);
 
@@ -2798,7 +2812,7 @@ public sealed class PreparedSecretFileContentAnalyzer :
 	{
 		this.sourceAnalyzer = sourceAnalyzer ?? throw new ArgumentNullException(nameof(sourceAnalyzer));
 		this.preparedContentAnalyzer = preparedContentAnalyzer ??
-		                                  throw new ArgumentNullException(nameof(preparedContentAnalyzer));
+										  throw new ArgumentNullException(nameof(preparedContentAnalyzer));
 		this.prepared = prepared ?? throw new ArgumentNullException(nameof(prepared));
 	}
 
@@ -2811,7 +2825,7 @@ public sealed class PreparedSecretFileContentAnalyzer :
 	{
 		var file = prepared.GetFile(path);
 		return file.ContentSlice is not null ||
-		       !ProjectTreePathIdentity.CanonicalComparer.Equals(file.SourcePath, file.ContentPath);
+			   !ProjectTreePathIdentity.CanonicalComparer.Equals(file.SourcePath, file.ContentPath);
 	}
 
 	private bool TryResolveStoredSlice(
@@ -3006,7 +3020,7 @@ public sealed class PreparedSecretFileContentAnalyzer :
 		RecordPreparedRead(file);
 		var resolvedAnalyzer = ResolveAnalyzer(file);
 		var snapshot = captureRawContentIdentity &&
-		               resolvedAnalyzer is IRawContentIdentityFileContentAnalyzer identityAnalyzer
+					   resolvedAnalyzer is IRawContentIdentityFileContentAnalyzer identityAnalyzer
 			? await identityAnalyzer
 				.OpenCompleteSnapshotWithRawContentIdentityAsync(file.ContentPath, cancellationToken)
 				.ConfigureAwait(false)
@@ -3121,8 +3135,8 @@ public sealed class PreparedSecretFileContentAnalyzer :
 				var length = Math.Min(ChunkSize, maximumCharacters - offset);
 				var boundary = offset + length;
 				if (boundary < maximumCharacters &&
-				    char.IsHighSurrogate(content[boundary - 1]) &&
-				    char.IsLowSurrogate(content[boundary]))
+					char.IsHighSurrogate(content[boundary - 1]) &&
+					char.IsLowSurrogate(content[boundary]))
 				{
 					length--;
 				}

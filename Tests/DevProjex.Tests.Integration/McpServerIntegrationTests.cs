@@ -8,6 +8,7 @@ using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.Dependencies;
 using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.Secrets;
 using DevProjex.Mcp;
 using DevProjex.Tests.Mcp;
 using ModelContextProtocol;
@@ -131,6 +132,116 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains("[Live context] the window selects no files", empty, StringComparison.Ordinal);
 		Assert.DoesNotContain("Inside.cs", empty, StringComparison.Ordinal);
 		Assert.DoesNotContain("Outside.cs", empty, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LiveContextUsesConfiguredRootMarksAsAuthoritativeAcrossPhysicalAliases()
+	{
+		using var workspace = new TemporaryDirectory();
+		var physicalProject = workspace.CreateDirectory("physical-project");
+		var configuredProject = Path.Combine(workspace.Path, "configured-alias");
+		const string markedValue = "manual-only-value-8492";
+		const string relativePath = "Secrets.txt";
+		var content = $"visible {markedValue} tail\n";
+		File.WriteAllText(Path.Combine(physicalProject, relativePath), content);
+		var appData = Path.Combine(workspace.Path, "app-data");
+		var store = new ProjectProfileStore(() => appData);
+		store.SaveProfile(configuredProject, new ProjectSelectionProfile([], [".txt"], [], SelectedPaths: null));
+		await AddPersistentMarkAsync(
+			store,
+			appData,
+			configuredProject,
+			relativePath,
+			content.IndexOf(markedValue, StringComparison.Ordinal),
+			markedValue);
+		await using var server = await McpTestServer.StartAsync(
+			configuredProject,
+			workspace.Path,
+			live: true,
+			rootRegistryFactory: roots => new McpRootRegistry(
+				roots,
+				(path, requireDirectory) => PathComparer.Default.Equals(
+					Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)),
+					Path.TrimEndingDirectorySeparator(Path.GetFullPath(configuredProject)))
+					? physicalProject
+					: McpRootRegistry.ResolvePhysicalExistingPath(path, requireDirectory)));
+
+		var result = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = relativePath });
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.DoesNotContain(markedValue, AllText(result), StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[", AllText(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LiveContextUsesConfiguredVarRootMarksOnMacOs()
+	{
+		if (!OperatingSystem.IsMacOS())
+			return;
+		using var workspace = new TemporaryDirectory();
+		var configuredProject = Path.Combine("/var/tmp", "devprojex-live-marks-" + Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(configuredProject);
+		try
+		{
+			const string markedValue = "manual-only-value-1964";
+			const string relativePath = "Secrets.txt";
+			var content = $"visible {markedValue} tail\n";
+			File.WriteAllText(Path.Combine(configuredProject, relativePath), content);
+			var appData = Path.Combine(workspace.Path, "app-data");
+			var store = new ProjectProfileStore(() => appData);
+			store.SaveProfile(configuredProject, new ProjectSelectionProfile([], [".txt"], [], SelectedPaths: null));
+			await AddPersistentMarkAsync(
+				store,
+				appData,
+				configuredProject,
+				relativePath,
+				content.IndexOf(markedValue, StringComparison.Ordinal),
+				markedValue);
+			await using var server = await McpTestServer.StartAsync(configuredProject, workspace.Path, live: true);
+
+			var result = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = relativePath });
+
+			Assert.NotEqual(true, result.IsError);
+			Assert.DoesNotContain(markedValue, AllText(result), StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[", AllText(result), StringComparison.Ordinal);
+		}
+		finally
+		{
+			Directory.Delete(configuredProject, recursive: true);
+		}
+	}
+
+	[Fact]
+	public async Task LiveProfilePrivateDataPolicyAppliesToContentAndProtectionNotice()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Contact.txt"), $"contact={PrivateEmail}\n");
+		var store = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
+		store.SaveProfile(
+			project,
+			new ProjectSelectionProfile(
+				[],
+				[".txt"],
+				[IgnoreOptionId.HidePrivateData],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.HidePrivateData] = true
+				},
+				SelectedPaths: null));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+
+		var result = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Contact.txt" });
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.DoesNotContain(PrivateEmail, AllText(result), StringComparison.Ordinal);
+		Assert.Contains("[Protection] secrets=always · private-data=enabled.", AllText(result), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -6732,6 +6843,144 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task LiveBatchKeepsReadableEntriesWhenAnotherPathDisappeared()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Available.txt"), "available-marker\n");
+		var removedPath = Path.Combine(project, "Removed.txt");
+		File.WriteAllText(removedPath, "removed-marker\n");
+		new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data")).SaveProfile(
+			project,
+			new ProjectSelectionProfile([], [".txt"], [], SelectedPaths: null));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+		_ = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "marker" });
+		File.Delete(removedPath);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[]
+			{
+				new { path = "Available.txt" },
+				new { path = "Removed.txt" }
+			}
+		});
+		var text = AllText(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("available-marker", text, StringComparison.Ordinal);
+		Assert.Contains("2.1 — unavailable — DPX-MCP-PATH-NOT-FOUND", text, StringComparison.Ordinal);
+		Assert.Contains("[Batch read] ok=1 · partial=0 · not-returned=0 · unavailable=1.", text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BatchSymbolFailureDoesNotDiscardAnotherResolvedSymbol()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "A.cs"), "sealed class A { string Found() => \"found-marker\"; }\n");
+		File.WriteAllText(Path.Combine(project, "B.cs"), "sealed class B { string Other() => \"other\"; }\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[]
+			{
+				new { path = "A.cs", symbol = "A.Found" },
+				new { path = "B.cs", symbol = "B.Missing" }
+			}
+		});
+		var text = AllText(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("found-marker", text, StringComparison.Ordinal);
+		Assert.Contains("2.1 — unavailable — symbol matches no declaration in this file", text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RelatedFilesRemovesSourceBoundManualMarkFromEvidenceReason()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		const string typeName = "OpaqueDependencyType";
+		const string relativeConsumer = "Consumer.cs";
+		File.WriteAllText(Path.Combine(project, "Fixture.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		var consumer = $"using Models; public sealed class Consumer {{ {typeName} Value {{ get; }} }}\n";
+		File.WriteAllText(Path.Combine(project, relativeConsumer), consumer);
+		File.WriteAllText(Path.Combine(project, "Model.cs"), $"namespace Models; public sealed class {typeName} {{ }}\n");
+		var appData = Path.Combine(workspace.Path, "app-data");
+		var store = new ProjectProfileStore(() => appData);
+		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs", ".csproj"], [], SelectedPaths: null));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+		var firstRelated = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = relativeConsumer });
+		Assert.Contains(typeName, AllText(firstRelated), StringComparison.Ordinal);
+		await AddPersistentMarkAsync(
+			store,
+			appData,
+			project,
+			relativeConsumer,
+			consumer.IndexOf(typeName, StringComparison.Ordinal),
+			typeName);
+
+		var file = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = relativeConsumer });
+		var related = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = relativeConsumer });
+
+		Assert.DoesNotContain(typeName, AllText(file), StringComparison.Ordinal);
+		Assert.DoesNotContain(typeName, AllText(related), StringComparison.Ordinal);
+		Assert.Contains("at line 1", AllText(related), StringComparison.Ordinal);
+		Assert.Contains("Model.cs", AllText(related), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchDeclarationBodyPrintsExecutableSelectorForMultipleRoots()
+	{
+		using var workspace = new TemporaryDirectory();
+		var first = workspace.CreateDirectory("first");
+		var second = workspace.CreateDirectory("second");
+		File.WriteAllText(
+			Path.Combine(second, "Target.cs"),
+			"sealed class Target { string FindMarker() => \"selector-marker\"; }\n");
+		await using var server = await McpTestServer.StartAsync([first, second], workspace.Path);
+
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["project"] = second,
+				["pattern"] = "FindMarker"
+			});
+		var text = AllText(search);
+
+		Assert.NotEqual(true, search.IsError);
+		Assert.Contains("\"path\":\"Target.cs\"", text, StringComparison.Ordinal);
+		Assert.Contains("\"symbol\":\"Target.FindMarker\"", text, StringComparison.Ordinal);
+		var printed = Regex.Match(text, "get_file (?<json>\\{[^\\r\\n]+\\})");
+		Assert.True(printed.Success, text);
+		using var arguments = JsonDocument.Parse(printed.Groups["json"].Value);
+		Assert.False(string.IsNullOrWhiteSpace(arguments.RootElement.GetProperty("project").GetString()));
+		var read = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["project"] = arguments.RootElement.GetProperty("project").GetString(),
+				["path"] = arguments.RootElement.GetProperty("path").GetString(),
+				["symbol"] = arguments.RootElement.GetProperty("symbol").GetString()
+			});
+		Assert.NotEqual(true, read.IsError);
+		Assert.Contains("selector-marker", AllText(read), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RelatedFilesListsFilesWhoseDependencyExtractionFailed()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -7346,9 +7595,9 @@ public sealed partial class McpServerIntegrationTests
 		RunGit(source, "config", "user.name", "DevProjex Tests");
 		RunGit(source, "config", "user.email", "devprojex@example.invalid");
 		File.WriteAllText(
-			Path.Combine(source, "Main.txt"),
-			"remote branch fixture\n" + new string('x', 70_000));
-		RunGit(source, "add", "Main.txt");
+			Path.Combine(source, "Main.cs"),
+			"sealed class RemoteFixture { string FindFixture() => \"fixture\"; }\n// " + new string('x', 70_000));
+		RunGit(source, "add", "Main.cs");
 		RunGit(source, "commit", "--quiet", "-m", "remote fixture");
 		RunGit(source, "checkout", "--quiet", "-b", branchSentinel);
 		var commit = ReadGit(source, "rev-parse", "HEAD");
@@ -7382,15 +7631,16 @@ public sealed partial class McpServerIntegrationTests
 			}), true),
 			("search_project", await server.CallAsync("search_project", new Dictionary<string, object?>(remote)
 			{
-				["pattern"] = "fixture"
+				["pattern"] = "FindFixture",
+				["context_lines"] = 0
 			}), true),
 			("related_files", await server.CallAsync("related_files", new Dictionary<string, object?>(remote)
 			{
-				["path"] = "Main.txt"
+				["path"] = "Main.cs"
 			}), true),
 			("get_file", await server.CallAsync("get_file", new Dictionary<string, object?>(remote)
 			{
-				["path"] = "Main.txt"
+				["path"] = "Main.cs"
 			}), true)
 		};
 		var stored = results.Single(static item => item.Name == "pack_context").Result;
@@ -7419,6 +7669,23 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(
 			branchSentinel,
 			Structured(analyze).GetProperty("remote").GetProperty("branch").GetString());
+		var searchText = AllText(results.Single(static item => item.Name == "search_project").Result);
+		var printed = Regex.Match(searchText, "get_file (?<json>\\{[^\\r\\n]+\\})");
+		Assert.True(printed.Success, searchText);
+		using var arguments = JsonDocument.Parse(printed.Groups["json"].Value);
+		Assert.Equal(repositoryUrl, arguments.RootElement.GetProperty("project").GetString());
+		Assert.Equal(branchSentinel, arguments.RootElement.GetProperty("branch").GetString());
+		var printedRead = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["project"] = arguments.RootElement.GetProperty("project").GetString(),
+				["branch"] = arguments.RootElement.GetProperty("branch").GetString(),
+				["path"] = arguments.RootElement.GetProperty("path").GetString(),
+				["symbol"] = arguments.RootElement.GetProperty("symbol").GetString()
+			});
+		Assert.NotEqual(true, printedRead.IsError);
+		Assert.Contains("FindFixture", AllText(printedRead), StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -8327,6 +8594,31 @@ public sealed partial class McpServerIntegrationTests
 			inner ?? throw new InvalidOperationException("This fake supports clone failure only.");
 	}
 
+	private static async Task AddPersistentMarkAsync(
+		ProjectProfileStore store,
+		string appData,
+		string projectRoot,
+		string relativePath,
+		int sourceOffset,
+		string value)
+	{
+		using var identityProvider = new PersistentSecretIdentityProvider(() => appData);
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.Ready,
+			await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.True(PersistentSecretIdentity.TryCreateV2(identityProvider, value, out var identity));
+		var result = await store.AddMarkAsync(
+			projectRoot,
+			new MarkedSecretProfileEntry(
+				identity,
+				null,
+				value.Length,
+				relativePath,
+				sourceOffset),
+			TestContext.Current.CancellationToken);
+		Assert.True(result.Succeeded);
+	}
+
 	private sealed class McpTestServer : IAsyncDisposable
 	{
 		private readonly Pipe _clientToServer;
@@ -8366,7 +8658,8 @@ public sealed partial class McpServerIntegrationTests
 			DependencyFactsEngine? dependencyFactsEngine = null,
 			IReadOnlySet<string>? remoteHosts = null,
 			bool live = false,
-			Implementation? clientInfo = null)
+			Implementation? clientInfo = null,
+			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null)
 		{
 			return await StartAsync(
 				[project],
@@ -8381,7 +8674,8 @@ public sealed partial class McpServerIntegrationTests
 				dependencyFactsEngine,
 				remoteHosts,
 				live,
-				clientInfo);
+				clientInfo,
+				rootRegistryFactory);
 		}
 
 		public static async Task<McpTestServer> StartAsync(
@@ -8397,7 +8691,8 @@ public sealed partial class McpServerIntegrationTests
 			DependencyFactsEngine? dependencyFactsEngine = null,
 			IReadOnlySet<string>? remoteHosts = null,
 			bool live = false,
-			Implementation? clientInfo = null)
+			Implementation? clientInfo = null,
+			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -8425,7 +8720,8 @@ public sealed partial class McpServerIntegrationTests
 				exclusions,
 				agentExclusions,
 				remoteHosts,
-				live: live);
+				live: live,
+				rootRegistryFactory: rootRegistryFactory);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

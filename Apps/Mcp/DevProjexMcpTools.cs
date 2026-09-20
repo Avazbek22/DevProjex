@@ -488,7 +488,7 @@ internal sealed class DevProjexMcpTools(
 			envelope["protection"] = new
 			{
 				secrets = "always",
-				privateData = Projects.HidePrivateData ? "enabled" : "disabled"
+				privateData = McpProjectService.IsPrivateDataHidden(plan) ? "enabled" : "disabled"
 			};
 			if (plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } sourceIdentity)
 			{
@@ -517,7 +517,7 @@ internal sealed class DevProjexMcpTools(
 			// first text block has to stay a byte-identical serialization of structuredContent.
 			var formattedAdmissionReport = admissionBudget is null
 				? null
-				: FormatTokenBudgetReport(admissionBudget);
+				: McpSpotlight.Wrap(FormatTokenBudgetReport(admissionBudget));
 			var notices = CombineTrustedNotices(
 				FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
 				FormatDetailMix(detailMix),
@@ -718,6 +718,8 @@ internal sealed class DevProjexMcpTools(
 						captureTransformedMetrics: format is
 							ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 					.ConfigureAwait(false);
+			if (measured is not null && prepared is not null)
+				McpProjectService.EnsureMeasuredSourcesCurrent(measured, plan.IncludedFiles);
 			operationProgress.Milestone(
 				65,
 				$"transforming content {transformedFileCount}/{transformedFileCount}");
@@ -1022,7 +1024,12 @@ internal sealed class DevProjexMcpTools(
 				candidateSnapshot,
 				symbols.Declarations,
 				regex);
-			var bodyLayout = PlanSearchDeclarationBody(rendered, symbols.Declarations, declarationPreview);
+			var declarationReadContext = CreateDeclarationReadContext(plan);
+			var bodyLayout = PlanSearchDeclarationBody(
+				rendered,
+				symbols.Declarations,
+				declarationPreview,
+				declarationReadContext);
 			rendered = bodyLayout.Rendered;
 			declarationPreview = bodyLayout.Preview;
 
@@ -1095,7 +1102,8 @@ internal sealed class DevProjexMcpTools(
 			var matchContentLimit = declarationPreview is { IsAddressable: true, Text.Length: > 0 }
 				? MaximumSearchContentCharacters - MinimumDeclarationSectionCharacters(
 					declarationPreview,
-					symbols.Declarations)
+					symbols.Declarations,
+					declarationReadContext)
 				: MaximumSearchContentCharacters;
 			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols, matchContentLimit);
 			if (namesRefused)
@@ -1104,7 +1112,8 @@ internal sealed class DevProjexMcpTools(
 			var declarationSection = AppendDeclarationSelectors(
 				output,
 				symbols.Declarations,
-				declarationPreview);
+				declarationPreview,
+				declarationReadContext);
 			var declarationsListed = declarationSection.DeclarationsListed;
 			// What the response could not carry is kept in the session, so the way forward is to
 			// page what this scan already found rather than to run the same scan again.
@@ -1240,6 +1249,7 @@ internal sealed class DevProjexMcpTools(
 				direction,
 				progress.MeasureFacts("Indexing dependency facts", 5, 90),
 				cancellationToken).ConfigureAwait(false);
+			related = await ProtectRelatedEvidenceAsync(plan, related, cancellationToken).ConfigureAwait(false);
 			await progress.CompleteAsync(100, related.Index.Metrics.ResolutionCacheHit
 				? "Dependency index reused"
 				: "Dependency index complete").ConfigureAwait(false);
@@ -1313,6 +1323,123 @@ internal sealed class DevProjexMcpTools(
 				"Call read_pack with this pack_id to read it.",
 				advertiseLargeResult: true);
 		}, cancellationToken);
+
+	private async Task<DependencyRelatedResult> ProtectRelatedEvidenceAsync(
+		ProjectContextPlan plan,
+		DependencyRelatedResult related,
+		CancellationToken cancellationToken)
+	{
+		var displayedReasons = related.Seeds
+			.SelectMany(static seed => seed.Dependencies.Concat(seed.Dependents))
+			.SelectMany(static file => file.Reasons)
+			.ToHashSet(StringComparer.Ordinal);
+		var evidence = related.Index.Edges
+			.SelectMany(edge => edge.Evidence.Select(site => new RelatedEvidence(
+				edge,
+				site,
+				FormatRelatedEvidenceReason(edge, site))))
+			.Where(item => displayedReasons.Contains(item.Reason))
+			.ToArray();
+		if (evidence.Length == 0)
+			return related;
+
+		var sourcePaths = evidence
+			.Select(item => Path.GetFullPath(item.Site.File, plan.SourceRoot))
+			.Where(File.Exists)
+			.Distinct(PathComparer.Default)
+			.Order(ProjectTreePathIdentity.CanonicalComparer)
+			.ToArray();
+		var transformed = new Dictionary<string, TransformedTextFile>(PathComparer.Default);
+		await using (var protectedSources = await Projects.ConsumeSearchTextAsync(
+			plan with { IncludedFiles = sourcePaths },
+			(file, _) =>
+			{
+				transformed[file.Path] = file;
+				return ValueTask.CompletedTask;
+			},
+			cancellationToken).ConfigureAwait(false))
+		{
+		}
+
+		var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+		foreach (var item in evidence)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var sourcePath = Path.GetFullPath(item.Site.File, plan.SourceRoot);
+			if (transformed.TryGetValue(sourcePath, out var source) &&
+				TryReadLine(source.Content, item.Site.Line, out var line, out var start, out var end) &&
+				!source.ReplacementRanges.Any(range => range.Start < end && range.End > start) &&
+				line.Contains(item.Edge.Reference, StringComparison.Ordinal))
+			{
+				continue;
+			}
+			replacements[item.Reason] =
+				$"{RelatedEvidenceLabel(item.Edge.Layer)} at line {item.Site.Line.ToString(CultureInfo.InvariantCulture)}";
+		}
+		if (replacements.Count == 0)
+			return related;
+
+		return related with
+		{
+			Seeds = related.Seeds.Select(seed => seed with
+			{
+				Dependencies = Protect(seed.Dependencies),
+				Dependents = Protect(seed.Dependents)
+			}).ToArray()
+		};
+
+		IReadOnlyList<RelatedFile> Protect(IReadOnlyList<RelatedFile> files) => files
+			.Select(file => file with
+			{
+				Reasons = file.Reasons
+					.Select(reason => replacements.GetValueOrDefault(reason, reason))
+					.Distinct(StringComparer.Ordinal)
+					.Order(StringComparer.Ordinal)
+					.ToArray()
+			})
+			.ToArray();
+	}
+
+	private static string FormatRelatedEvidenceReason(DependencyEdge edge, SourceSite site) =>
+		$"{RelatedEvidenceLabel(edge.Layer)} {edge.Reference} at line {site.Line.ToString(CultureInfo.InvariantCulture)}";
+
+	private static string RelatedEvidenceLabel(EvidenceLayer layer) => layer switch
+	{
+		EvidenceLayer.ExplicitImport => "import",
+		EvidenceLayer.TypeReference => "type reference",
+		_ => "reference"
+	};
+
+	private static bool TryReadLine(
+		string content,
+		int lineNumber,
+		out string line,
+		out int lineStart,
+		out int lineEnd)
+	{
+		line = string.Empty;
+		lineStart = 0;
+		lineEnd = 0;
+		if (lineNumber < 1)
+			return false;
+		var start = 0;
+		for (var current = 1; current < lineNumber; current++)
+		{
+			start = content.IndexOf('\n', start);
+			if (start < 0)
+				return false;
+			start++;
+		}
+		var end = content.IndexOf('\n', start);
+		if (end < 0)
+			end = content.Length;
+		if (end > start && content[end - 1] == '\r')
+			end--;
+		line = content[start..end];
+		lineStart = start;
+		lineEnd = end;
+		return true;
+	}
 
 	[Description(
 		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page or requests for up to eight files and sixteen whole-file, range, or symbol selections; forms are exclusive. Send one batched call whenever you want more than one file, range, or known symbol: requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]. Every item reports ok, partial, not-returned, or unavailable; overlaps merge under the shared 1,000-line/50,000-character limit. Coordinates address returned text; start_column continues a scalar page.")]
@@ -1439,6 +1566,7 @@ internal sealed class DevProjexMcpTools(
 			cancellationToken,
 			includeOutputMetrics: false,
 			exclusions: ParseExclusionsArgument(arguments),
+			tolerateMissingPaths: liveContext is not null,
 			allowNamedPathsOutsideSelection: liveContext is not null).ConfigureAwait(false);
 
 		var resolvedRequests = new List<McpResolvedFileReadRequest>(requestSet.Requests.Count);
@@ -1453,7 +1581,10 @@ internal sealed class DevProjexMcpTools(
 			catch (McpToolException exception) when (exception.Code is
 				   McpErrorCodes.PathNotFound or McpErrorCodes.RootViolation)
 			{
-				resolvedRequests.Add(new McpResolvedFileReadRequest(item, PhysicalPath: null));
+				resolvedRequests.Add(new McpResolvedFileReadRequest(
+					item,
+					PhysicalPath: null,
+					UnavailableReason: liveContext is null ? null : exception.Code));
 			}
 		}
 
@@ -1484,12 +1615,23 @@ internal sealed class DevProjexMcpTools(
 				file.Content,
 				resolved.Request.Symbol,
 				cancellationToken);
-			var (start, end) = ResolveSymbolRange(located);
+			if (located.Status != McpSymbolLookupStatus.Resolved)
+			{
+				resolvedRequests[index] = resolved with
+				{
+					UnavailableReason = FormatBatchSymbolFailure(located)
+				};
+				continue;
+			}
 			resolvedRequests[index] = resolved with
 			{
 				Request = resolved.Request with
 				{
-					Ranges = [new McpGetFileRange(resolved.Request.Index, 1, start!.Value, end!.Value)]
+					Ranges = [new McpGetFileRange(
+						resolved.Request.Index,
+						1,
+						located.StartLine,
+						located.EndLine)]
 				}
 			};
 		}
@@ -1536,11 +1678,11 @@ internal sealed class DevProjexMcpTools(
 		var unavailableReasons = new Dictionary<(int RequestIndex, int RangeIndex), string>();
 		foreach (var request in requests)
 		{
-			var reason = request.PhysicalPath is null
+			var reason = request.UnavailableReason ?? (request.PhysicalPath is null
 				? "outside effective selection"
 				: transformed.ContainsKey(request.PhysicalPath)
 					? null
-					: McpErrorCodes.PayloadTruncated;
+					: McpErrorCodes.PayloadTruncated);
 			if (reason is null)
 				continue;
 			foreach (var range in request.Request.Ranges)
@@ -1645,7 +1787,7 @@ internal sealed class DevProjexMcpTools(
 			GetCount("unavailable") == 0
 				? null
 				: $"[Batch unavailable] files={CountUnavailableFiles()} · ranges={GetCount("unavailable")}; " +
-				  $"{McpErrorCodes.PayloadTruncated} marks mandatory-inspection failures; other entries are outside the effective selection.",
+				  $"{McpErrorCodes.PayloadTruncated} marks mandatory-inspection failures; other entries have per-request path or symbol failures.",
 			continuations.Count == 0 && rangeNotices.Count == 0
 				? null
 				: string.Join('\n', continuations.Concat(rangeNotices)));
@@ -1664,6 +1806,8 @@ internal sealed class DevProjexMcpTools(
 		var groups = new List<McpMergedFileReadGroup>();
 		foreach (var request in requests)
 		{
+			if (request.UnavailableReason is not null)
+				continue;
 			foreach (var range in request.Request.Ranges)
 			{
 				var matching = groups
@@ -1785,7 +1929,7 @@ internal sealed class DevProjexMcpTools(
 	{
 		var selection = McpEffectiveFilters.SelectionNoticeParts(plan, agentExclusions, includeFilters, request);
 		var protection = includeProtection
-			? $"[Protection] secrets=always · private-data={(Projects.HidePrivateData ? "enabled" : "disabled")}."
+			? $"[Protection] secrets=always · private-data={(McpProjectService.IsPrivateDataHidden(plan) ? "enabled" : "disabled")}."
 			: null;
 		// Two cases always answer in full: a response that has to explain an empty selection
 		// names the filters that emptied it, and a max_file_bytes echo reports a value the
@@ -2274,7 +2418,8 @@ internal sealed class DevProjexMcpTools(
 
 	private sealed record McpResolvedFileReadRequest(
 		McpGetFileRequest Request,
-		string? PhysicalPath);
+		string? PhysicalPath,
+		string? UnavailableReason = null);
 
 	private sealed class McpMergedFileReadGroup(
 		string? physicalPath,
@@ -2295,6 +2440,10 @@ internal sealed class DevProjexMcpTools(
 		string Summary,
 		string? UnavailableNotice,
 		string? Continuations);
+
+	internal sealed record McpDeclarationReadContext(string Project, string? Branch);
+
+	private sealed record RelatedEvidence(DependencyEdge Edge, SourceSite Site, string Reason);
 
 	private static string? FormatPackEvictions(McpPackDocument pack) =>
 		pack.EvictedPackCount == 0
@@ -2548,11 +2697,11 @@ internal sealed class DevProjexMcpTools(
 			", ",
 			listed.Select(pattern => McpTextEscaping.EscapeSingleLine(Truncate(pattern))));
 		var remaining = mix.UnmatchedPatterns.Count - listed.Length;
-		return summary +
-			   $"\n[Detail] unmatched: {names}" +
-			   (remaining > 0
-				   ? $" and {remaining.ToString(CultureInfo.InvariantCulture)} more"
-				   : string.Empty);
+		var details = $"[Detail] unmatched: {names}" +
+			(remaining > 0
+				? $" and {remaining.ToString(CultureInfo.InvariantCulture)} more"
+				: string.Empty);
+		return summary + "\n" + McpSpotlight.Wrap(details);
 	}
 
 	private static string Truncate(string pattern) =>
@@ -2717,6 +2866,14 @@ internal sealed class DevProjexMcpTools(
 				$"{McpErrorCodes.InvalidArguments}: 'symbol' matches no declaration in this file; " +
 				"search_project names the declaration each hit sits inside.")
 		};
+
+	private static string FormatBatchSymbolFailure(McpSymbolLookup located) => located.Status switch
+	{
+		McpSymbolLookupStatus.Ambiguous =>
+			$"symbol is ambiguous ({located.CandidateCount.ToString(CultureInfo.InvariantCulture)} declarations)",
+		McpSymbolLookupStatus.Unsupported => "symbol lookup is unsupported for this file",
+		_ => "symbol matches no declaration in this file"
+	};
 
 	/// <summary>
 	/// Renders one group's numbered lines and nothing else. The path heading and the group separator
@@ -3160,14 +3317,15 @@ internal sealed class DevProjexMcpTools(
 	private static McpDeclarationSectionResult AppendDeclarationSelectors(
 		StringBuilder output,
 		IReadOnlyList<McpSearchDeclaration> declarations,
-		McpSearchDeclarationPreview? preview)
+		McpSearchDeclarationPreview? preview,
+		McpDeclarationReadContext? readContext = null)
 	{
 		if (declarations.Count == 0)
 			return McpDeclarationSectionResult.None;
 
 		var heading = $"{Environment.NewLine}{DeclarationsHeading}{Environment.NewLine}";
 		var body = preview is { IsAddressable: true, Text.Length: > 0 }
-			? FormatDeclarationBody(preview, declarations.Count)
+			? FormatDeclarationBody(preview, declarations.Count, readContext)
 			: string.Empty;
 		var room = MaximumSearchContentCharacters - output.Length - heading.Length - body.Length;
 		var rows = new StringBuilder();
@@ -3193,17 +3351,19 @@ internal sealed class DevProjexMcpTools(
 
 	private static int MinimumDeclarationSectionCharacters(
 		McpSearchDeclarationPreview preview,
-		IReadOnlyList<McpSearchDeclaration> declarations) =>
+		IReadOnlyList<McpSearchDeclaration> declarations,
+		McpDeclarationReadContext? readContext = null) =>
 		Environment.NewLine.Length +
 		DeclarationsHeading.Length +
 		Environment.NewLine.Length +
 		FormatDeclarationSelector(declarations[0]).Length +
-		FormatDeclarationBody(preview, declarations.Count).Length;
+		FormatDeclarationBody(preview, declarations.Count, readContext).Length;
 
 	internal static McpSearchBodyLayout PlanSearchDeclarationBody(
 		McpSearchRenderSlice rendered,
 		IReadOnlyList<McpSearchDeclaration> declarations,
-		McpSearchDeclarationPreview? preview)
+		McpSearchDeclarationPreview? preview,
+		McpDeclarationReadContext? readContext = null)
 	{
 		if (preview is not { IsAddressable: true, Text.Length: > 0 } || declarations.Count == 0)
 			return new McpSearchBodyLayout(rendered, preview);
@@ -3233,7 +3393,7 @@ internal sealed class DevProjexMcpTools(
 		var prefixLength = 0;
 		var includedLines = 0;
 		var framingCharacters = MinimumDeclarationSectionCharacters(
-			preview with { Text = string.Empty, RemainingLines = 0 }, declarations);
+			preview with { Text = string.Empty, RemainingLines = 0 }, declarations, readContext);
 		McpSearchDeclarationPreview? fitting = null;
 		var fittingLineCount = 0;
 		foreach (var bodyLine in bodyLines)
@@ -3296,12 +3456,11 @@ internal sealed class DevProjexMcpTools(
 
 	private static string FormatDeclarationBody(
 		McpSearchDeclarationPreview preview,
-		int declarationCount)
+		int declarationCount,
+		McpDeclarationReadContext? readContext)
 	{
 		var declaration = preview.Declaration;
-		var arguments =
-			$"{{\"path\":{JsonSerializer.Serialize(declaration.RelativePath)}," +
-			$"\"symbol\":{JsonSerializer.Serialize(declaration.Name)}}}";
+		var arguments = FormatDeclarationReadArguments(declaration, readContext);
 		var output = new StringBuilder()
 			.AppendLine()
 			.Append("Best declaration body (1 of ")
@@ -3321,6 +3480,30 @@ internal sealed class DevProjexMcpTools(
 		}
 		output.AppendLine();
 		return output.ToString();
+	}
+
+	private McpDeclarationReadContext? CreateDeclarationReadContext(ProjectContextPlan plan)
+	{
+		var remote = plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone };
+		if (!remote && roots.Roots.Count == 1)
+			return null;
+		return new McpDeclarationReadContext(
+			McpProjectService.ResolveAddressDocumentRoot(plan),
+			remote ? plan.SourceIdentity?.Branch : null);
+	}
+
+	private static string FormatDeclarationReadArguments(
+		McpSearchDeclaration declaration,
+		McpDeclarationReadContext? context)
+	{
+		var arguments = new Dictionary<string, string>(StringComparer.Ordinal);
+		if (context?.Project is { Length: > 0 } project)
+			arguments["project"] = project;
+		if (context?.Branch is { Length: > 0 } branch)
+			arguments["branch"] = branch;
+		arguments["path"] = declaration.RelativePath;
+		arguments["symbol"] = declaration.Name;
+		return JsonSerializer.Serialize(arguments);
 	}
 
 	private static string FormatDeclarationBodyTruncationNotice(int remainingLines) =>
