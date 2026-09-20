@@ -190,6 +190,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--screen",
 		"--search",
 		"--search-body-chars",
+		"--session",
 		"--select",
 		"--select-from",
 		"--timeout",
