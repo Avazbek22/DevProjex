@@ -74,8 +74,10 @@ public partial class MainWindow
     private void OnLiveSessionFilesRenamed(object sender, RenamedEventArgs e) =>
         ScheduleLiveSessionRefresh();
 
-    private void OnLiveSessionPollingTick(object? sender, EventArgs e) =>
+    private void OnLiveSessionPollingTick(object? sender, EventArgs e)
+    {
         RefreshLiveSessionPresentation();
+    }
 
     private void ScheduleLiveSessionRefresh()
     {
@@ -88,13 +90,17 @@ public partial class MainWindow
     {
         if (RefreshLiveSessionSnapshot())
             ApplyWindowTitle();
+        if (_viewModel.IsAgentActivityEnabled)
+            RefreshAgentActivityPresentation();
     }
 
     private bool RefreshLiveSessionSnapshot()
     {
         var sessions = string.IsNullOrWhiteSpace(_currentPath)
             ? Array.Empty<LiveSessionRecord>()
-            : _liveSessionRegistry.ReadActive(_currentPath);
+            : _liveSessionRegistry.ReadActive(_currentPath)
+                .Where(static session => session.Mode == AgentJournalMode.Live)
+                .ToArray();
         if (HaveSameLiveSessions(_liveSessions, sessions))
             return false;
 

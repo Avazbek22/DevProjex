@@ -38,6 +38,7 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? ZoomOutRequested;
     public event EventHandler<RoutedEventArgs>? ZoomResetRequested;
     public event EventHandler<RoutedEventArgs>? ToggleCompactModeRequested;
+    public event EventHandler<RoutedEventArgs>? ToggleAgentActivityRequested;
     public event EventHandler<RoutedEventArgs>? ToggleTreeExpansionAnimationRequested;
     public event EventHandler<RoutedEventArgs>? ToggleStatusMetricsAnimationRequested;
     public event EventHandler<RoutedEventArgs>? ToggleToolAnimationRequested;
@@ -74,6 +75,7 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<AutomaticUpdateCheckChangedEventArgs>? AutomaticUpdateCheckChanged;
     public event EventHandler<RoutedEventArgs>? TerminalCommandSetupRequested;
     public event EventHandler<McpConnectionRequestedEventArgs>? McpConnectionRequested;
+    public event EventHandler<RoutedEventArgs>? McpJournalRequested;
     public event EventHandler<RoutedEventArgs>? McpDocumentationRequested;
     public event EventHandler<RoutedEventArgs>? HelpCloseRequested;
     public event EventHandler<RoutedEventArgs>? AboutRequested;
@@ -254,6 +256,9 @@ public partial class TopMenuBarView : UserControl
     private void OnToggleCompactMode(object? sender, RoutedEventArgs e)
         => ToggleCompactModeRequested?.Invoke(sender, e);
 
+    private void OnToggleAgentActivity(object? sender, RoutedEventArgs e)
+        => ToggleAgentActivityRequested?.Invoke(sender, e);
+
     private void OnToggleTreeExpansionAnimation(
         object? sender,
         RoutedEventArgs e)
@@ -402,6 +407,9 @@ public partial class TopMenuBarView : UserControl
 
     private void OnMcpDocumentation(object? sender, RoutedEventArgs e) =>
         McpDocumentationRequested?.Invoke(sender, e);
+
+    private void OnMcpJournal(object? sender, RoutedEventArgs e) =>
+        McpJournalRequested?.Invoke(sender, e);
 
     private void RequestMcpConnection(
         object? sender,

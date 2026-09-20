@@ -9,92 +9,92 @@ public partial class MainWindow
 
     private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
-		if (!_allowCloseAfterManualSecretMarkPersistence &&
-		    _previewSurfaceController.HasPendingManualMarkOperations)
-		{
-			e.Cancel = true;
-			if (_manualSecretMarkClosePending)
-				return;
+        if (!_allowCloseAfterManualSecretMarkPersistence &&
+            _previewSurfaceController.HasPendingManualMarkOperations)
+        {
+            e.Cancel = true;
+            if (_manualSecretMarkClosePending)
+                return;
 
-			_manualSecretMarkClosePending = true;
-			await _previewSurfaceController.WaitForPendingManualMarkOperationsAsync();
-			_allowCloseAfterManualSecretMarkPersistence = true;
-			// Never re-enter Close while Avalonia is still dispatching the cancelled Closing event.
-			Dispatcher.Post(Close, DispatcherPriority.Send);
-			return;
-		}
+            _manualSecretMarkClosePending = true;
+            await _previewSurfaceController.WaitForPendingManualMarkOperationsAsync();
+            _allowCloseAfterManualSecretMarkPersistence = true;
+            // Never re-enter Close while Avalonia is still dispatching the cancelled Closing event.
+            Dispatcher.Post(Close, DispatcherPriority.Send);
+            return;
+        }
 
-		if (!_allowCloseAfterProjectCopyExportCleanup && _projectCopyExportCts is not null)
-		{
-			e.Cancel = true;
-			if (_projectCopyExportClosePending)
-				return;
+        if (!_allowCloseAfterProjectCopyExportCleanup && _projectCopyExportCts is not null)
+        {
+            e.Cancel = true;
+            if (_projectCopyExportClosePending)
+                return;
 
-			_projectCopyExportClosePending = true;
-			var completion = _projectCopyExportCompletion?.Task;
-			try
-			{
-				_projectCopyExportCts.Cancel();
-			}
-			catch (ObjectDisposedException)
-			{
-				// Export completion won the race with window shutdown.
-			}
+            _projectCopyExportClosePending = true;
+            var completion = _projectCopyExportCompletion?.Task;
+            try
+            {
+                _projectCopyExportCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Export completion won the race with window shutdown.
+            }
 
-			if (completion is not null)
-				await completion;
+            if (completion is not null)
+                await completion;
 
-			_allowCloseAfterProjectCopyExportCleanup = true;
-			Close();
-			return;
-		}
+            _allowCloseAfterProjectCopyExportCleanup = true;
+            Close();
+            return;
+        }
 
-		if (!_allowCloseAfterGitOperationCleanup && HasActiveGitOperations())
-		{
-			e.Cancel = true;
-			if (_gitOperationClosePending)
-				return;
+        if (!_allowCloseAfterGitOperationCleanup && HasActiveGitOperations())
+        {
+            e.Cancel = true;
+            if (_gitOperationClosePending)
+                return;
 
-			_gitOperationClosePending = true;
-			CancelActiveGitOperations();
-			await WaitForActiveGitOperationsAsync();
-			_allowCloseAfterGitOperationCleanup = true;
-			Dispatcher.Post(Close, DispatcherPriority.Send);
-			return;
-		}
+            _gitOperationClosePending = true;
+            CancelActiveGitOperations();
+            await WaitForActiveGitOperationsAsync();
+            _allowCloseAfterGitOperationCleanup = true;
+            Dispatcher.Post(Close, DispatcherPriority.Send);
+            return;
+        }
 
-		if (_allowCloseAfterDesktopControlServerCleanup)
-			return;
+        if (_allowCloseAfterDesktopControlServerCleanup)
+            return;
 
-		Interlocked.Exchange(ref _desktopControlServerShutdownRequested, 1);
-		if (_desktopControlServerClosePending)
-		{
-			e.Cancel = true;
-			return;
-		}
+        Interlocked.Exchange(ref _desktopControlServerShutdownRequested, 1);
+        if (_desktopControlServerClosePending)
+        {
+            e.Cancel = true;
+            return;
+        }
 
-		var desktopControlServer = Interlocked.Exchange(ref _desktopControlServer, null);
-		if (desktopControlServer is null)
-		{
-			_allowCloseAfterDesktopControlServerCleanup = true;
-			return;
-		}
+        var desktopControlServer = Interlocked.Exchange(ref _desktopControlServer, null);
+        if (desktopControlServer is null)
+        {
+            _allowCloseAfterDesktopControlServerCleanup = true;
+            return;
+        }
 
-		e.Cancel = true;
-		_desktopControlServerClosePending = true;
-		try
-		{
-			await desktopControlServer.DisposeAsync();
-		}
-		catch (Exception exception)
-		{
-			Trace.TraceWarning("Desktop control shutdown failed: {0}", exception.GetType().Name);
-		}
-		finally
-		{
-			_allowCloseAfterDesktopControlServerCleanup = true;
-			Dispatcher.Post(Close, DispatcherPriority.Send);
-		}
+        e.Cancel = true;
+        _desktopControlServerClosePending = true;
+        try
+        {
+            await desktopControlServer.DisposeAsync();
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceWarning("Desktop control shutdown failed: {0}", exception.GetType().Name);
+        }
+        finally
+        {
+            _allowCloseAfterDesktopControlServerCleanup = true;
+            Dispatcher.Post(Close, DispatcherPriority.Send);
+        }
     }
 
     private void CancelAndDisposeWindowOperations()
@@ -111,11 +111,11 @@ public partial class MainWindow
         CancelAndDispose(ref _projectOperationCts);
         CancelAndDispose(ref _applySettingsCts);
         CancelAndDispose(ref _gitCloneCts);
-		CancelAndDispose(ref _gitCloneCatalogCts);
+        CancelAndDispose(ref _gitCloneCatalogCts);
         CancelAndDispose(ref _gitOperationCts);
         CancelAndDispose(ref _projectCopyExportCts);
-		CancelAndDispose(ref _orderedSelectionProjectionCts);
-		CancelSecretRedactionDiscovery();
+        CancelAndDispose(ref _orderedSelectionProjectionCts);
+        CancelSecretRedactionDiscovery();
     }
 
     private static void CancelAndDispose(ref CancellationTokenSource? source)
@@ -186,11 +186,13 @@ public partial class MainWindow
                 _previewBar.SizeChanged -= OnPreviewBarSizeChanged;
             DetachRecentMenuHandlers();
             DetachTreeFontMenuHandlers();
-			StopLiveSessionObservation();
-			_secretRedactionSession.SnapshotPublished -= OnSecretRedactionSnapshotPublished;
-			_codeCompressionSession.SnapshotPublished -= OnCodeCompressionSnapshotPublished;
-			_secretRedactionSession.Reset();
-			_codeCompressionSession.Reset();
+            ClearAgentActivityPresentation();
+            StopLiveSessionObservation();
+            (_agentJournalReader as IDisposable)?.Dispose();
+            _secretRedactionSession.SnapshotPublished -= OnSecretRedactionSnapshotPublished;
+            _codeCompressionSession.SnapshotPublished -= OnCodeCompressionSnapshotPublished;
+            _secretRedactionSession.Reset();
+            _codeCompressionSession.Reset();
 
             // Unsubscribe from tunneled/bubbled events
             RemoveHandler(PointerPressedEvent, OnWindowPointerPressedForPreviewNavigation);
@@ -207,16 +209,16 @@ public partial class MainWindow
             Deactivated -= OnDeactivated;
 
             _previewSurfaceController.Dispose();
-			_treeContextMenu.Dispose();
+            _treeContextMenu.Dispose();
             CancelAndDisposeWindowOperations();
 
             _searchFilterController.ClearProjectState();
 
             // Dispose coordinators
             _memoryCleanup.Dispose();
-			_backgroundTasks.Dispose();
+            _backgroundTasks.Dispose();
             _previewWorkspaceController.Dispose();
-			_previewSearchController.Dispose();
+            _previewSearchController.Dispose();
             _searchFilterController.Dispose();
             _workspacePresentation.Dispose();
             _selectionCoordinator.Dispose();
@@ -224,8 +226,8 @@ public partial class MainWindow
             _themeBrushCoordinator.Dispose();
             _applicationUpdates.Dispose();
             _statusOperations.Dispose();
-			_secretRedactionSession.Dispose();
-			_codeCompressionSession.Dispose();
+            _secretRedactionSession.Dispose();
+            _codeCompressionSession.Dispose();
 
             // Dispose ViewModel to clean up collection event handlers
             _viewModel.Dispose();
@@ -244,7 +246,7 @@ public partial class MainWindow
             _currentTree = null;
             _filterBaseTree = null;
             _currentTreeInventory = null;
-			_gitScopePresentationRefreshContext = null;
+            _gitScopePresentationRefreshContext = null;
             ResetPreviewTreePaneVisualState();
             ResetInteractiveFilterCache();
             _metrics.InvalidateComputedCaches();
@@ -253,9 +255,9 @@ public partial class MainWindow
             _metrics.ClearFileMetricsCache(trimCapacity: true);
 
             // Releasing the file-handle lease makes this checkout eligible for silent cache GC.
-			Interlocked.Exchange(ref _currentRepositorySession, null)?.Dispose();
-			_repoCacheService.RequestGarbageCollection();
-			_repoCacheService.Dispose();
+            Interlocked.Exchange(ref _currentRepositorySession, null)?.Dispose();
+            _repoCacheService.RequestGarbageCollection();
+            _repoCacheService.Dispose();
 
             _taskbarProgress.Dispose();
             _desktopInteractionGate.Dispose();
