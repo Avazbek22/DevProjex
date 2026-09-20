@@ -76,6 +76,36 @@ public sealed class CompletionCommandContractTests
 	[InlineData("zsh")]
 	[InlineData("fish")]
 	[InlineData("powershell")]
+	public void EveryShellCompletionReachesAgentJournalOptions(string shell)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		Assert.NotEmpty(CompletionScriptGenerator.Generate(root, shell));
+		Assert.Contains(
+			"log",
+			ContextAwareCompletionEngine.Complete(root, "devprojex mcp l", "devprojex mcp l".Length));
+		var options = ContextAwareCompletionEngine.Complete(
+			root,
+			"devprojex mcp log . --",
+			"devprojex mcp log . --".Length);
+		Assert.Contains("--session", options);
+		Assert.Contains("--last", options);
+		Assert.Contains("--format", options);
+		Assert.Contains("--output", options);
+		Assert.Contains("--clear", options);
+		Assert.Contains("--yes", options);
+		var formats = ContextAwareCompletionEngine.Complete(
+			root,
+			"devprojex mcp log . --format ",
+			"devprojex mcp log . --format ".Length);
+		Assert.Equal(["json", "markdown", "text"], formats.Order(StringComparer.Ordinal));
+	}
+
+	[Theory]
+	[InlineData("bash")]
+	[InlineData("zsh")]
+	[InlineData("fish")]
+	[InlineData("powershell")]
 	public async Task CompletionCommandWritesOnlyTheRequestedScript(string shell)
 	{
 		var environment = new TestTerminalEnvironment();
@@ -103,13 +133,13 @@ public sealed class CompletionCommandContractTests
 		string argumentText)
 	{
 		if (shell == "powershell" &&
-		    !TryResolveExecutable("pwsh", out executable) &&
-		    !TryResolveExecutable("powershell", out executable))
+			!TryResolveExecutable("pwsh", out executable) &&
+			!TryResolveExecutable("powershell", out executable))
 		{
 			Assert.Skip("PowerShell is not installed on this test host.");
 		}
 		else if (shell != "powershell" &&
-		         !TryResolveExecutable(executable, out executable))
+				 !TryResolveExecutable(executable, out executable))
 		{
 			Assert.Skip($"{shell} is not installed on this test host.");
 		}
@@ -177,8 +207,8 @@ public sealed class CompletionCommandContractTests
 				.Split(';', StringSplitOptions.RemoveEmptyEntries)
 			: [string.Empty];
 		foreach (var directory in path.Split(
-			         Path.PathSeparator,
-			         StringSplitOptions.RemoveEmptyEntries))
+					 Path.PathSeparator,
+					 StringSplitOptions.RemoveEmptyEntries))
 		{
 			foreach (var extension in extensions)
 			{

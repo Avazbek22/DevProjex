@@ -15,7 +15,7 @@ public sealed class CommandParityContractTests
 		Assert.Equal(
 			["Action", "GUI", "TUI", "CLI", "MCP"],
 			rows.Header);
-		Assert.Equal(12, rows.Items.Count);
+		Assert.Equal(13, rows.Items.Count);
 		foreach (var row in rows.Items)
 		{
 			ValidateCliCell(cli, row[3]);

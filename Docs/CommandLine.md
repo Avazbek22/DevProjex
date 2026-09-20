@@ -65,7 +65,8 @@ for the documented exit-`1` launcher diagnostic.
 devprojex
 ├── tui
 ├── mcp
-│   └── connect
+│   ├── connect
+│   └── log
 ├── open
 ├── analyze
 ├── search
@@ -179,6 +180,20 @@ their installation directory stays fixed; the Store uses
 its path inside the `.app` bundle. An AppImage uses the current AppImage path, so
 moving that file requires printing or connecting again.
 
+`devprojex mcp log [PROJECT] [--session ID|--last] [--format
+text|json|markdown] [--output PATH] [--clear --yes]` reads the local MCP agent
+journal. `PROJECT` defaults to the current directory. Without a session selector,
+text output lists start time, client, mode, project, calls, result characters,
+estimated tokens, delivered files, masked values, duration, and whether the
+session is live. `--session` and `--last` show the recorded calls; Markdown emits
+the shared context receipt and therefore requires one of those selectors. JSON is
+the stable `devprojex-agent-journal` version-1 document described in
+[CLI-Output-Contract.md](CLI-Output-Contract.md). `--output` atomically creates a
+new file and never replaces an existing one. `--clear --yes` removes only sessions
+matching the selected project. The journal retains at most 200 sessions for 30
+days and stores metadata, counters, relative delivered paths, and whitelisted
+arguments, never file contents or detected values.
+
 Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. `--language CODE` localizes human-readable help,
 status, diagnostics, and Terminal Workspace labels.
@@ -204,6 +219,7 @@ request-scoped choice rather than a standalone command.
 | Analyze | direct action | `analyze` | `analyze` | `analyze` |
 | Export context | direct action | `export` | `export context` | `pack_context` |
 | Connect MCP client | MCP menu | `mcp connect` | `mcp connect` | none by design |
+| Inspect MCP journal | none by design | none by design | `mcp log` | none by design |
 | Diagnostics | none by design | `diagnostics` | `doctor` | none by design |
 
 ## Version
