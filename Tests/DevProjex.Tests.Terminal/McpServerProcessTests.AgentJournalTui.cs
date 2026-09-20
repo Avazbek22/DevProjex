@@ -108,6 +108,12 @@ public sealed partial class McpServerProcessTests
 			Assert.Equal(
 				new AgentJournalReceiptFormatter().FormatMarkdown(receipt),
 				await File.ReadAllTextAsync(exportPath, TestContext.Current.CancellationToken));
+
+			await terminal.SendAsync(":mcp log clear\r", TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				"End live MCP sessions before clearing their journal.",
+				timeout: TimeSpan.FromSeconds(15),
+				cancellationToken: TestContext.Current.CancellationToken);
 		}
 
 		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
