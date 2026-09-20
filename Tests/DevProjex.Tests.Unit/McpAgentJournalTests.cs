@@ -34,7 +34,8 @@ public sealed class McpAgentJournalTests
 			}
 		};
 		var result = McpToolResults.TextSuccess(
-			"payload\n[Live context] the named path is outside the current window selection; returned because you named it.");
+			McpSpotlight.Wrap("Results are partial; additional observed matches not shown.\nDPX-MCP-INVALID-ARGUMENTS") +
+			"\n[Live context] the named path is outside the current window selection; returned because you named it.");
 		var original = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 
 		using (journal.BeginCall("get_file", request))

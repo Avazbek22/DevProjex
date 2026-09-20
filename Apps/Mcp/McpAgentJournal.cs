@@ -141,6 +141,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		if (current is null || Volatile.Read(ref started) == 0 || Volatile.Read(ref disposed) != 0)
 			return;
 		var text = string.Join('\n', result.Content.OfType<TextContentBlock>().Select(static block => block.Text));
+		var trustedText = ExtractTrustedText(text);
 		var characters = text.Length;
 		var paths = current.DeliveredPaths
 			.Order(ProjectTreePathIdentity.CanonicalComparer)
@@ -161,8 +162,8 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			Math.Max(0, paths.Length - storedPaths.Length),
 			current.SecretsMasked,
 			current.PrivateDataMasked,
-			CaptureNotices(text),
-			result.IsError == true ? CaptureErrorCode(text) : null);
+			CaptureNotices(trustedText),
+			result.IsError == true ? CaptureErrorCode(trustedText) : null);
 		AddTotals(call);
 		operations.Writer.TryWrite(token => writer.RecordCall(session.Id, call, token));
 	}
@@ -320,6 +321,28 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			if (condition)
 				notices.Add(code);
 		}
+	}
+
+	private static string ExtractTrustedText(string text)
+	{
+		const string openingPrefix = "<untrusted-data-";
+		var cursor = 0;
+		var trusted = new StringBuilder(text.Length);
+		while (text.IndexOf(openingPrefix, cursor, StringComparison.Ordinal) is var opening && opening >= 0)
+		{
+			trusted.Append(text, cursor, opening - cursor);
+			var openingEnd = text.IndexOf('>', opening + openingPrefix.Length);
+			if (openingEnd < 0)
+				return trusted.ToString();
+			var tag = text[opening..(openingEnd + 1)];
+			var closingTag = "</" + tag[1..];
+			var closing = text.IndexOf(closingTag, openingEnd + 1, StringComparison.Ordinal);
+			if (closing < 0)
+				return trusted.ToString();
+			cursor = closing + closingTag.Length;
+		}
+		trusted.Append(text, cursor, text.Length - cursor);
+		return trusted.ToString();
 	}
 
 	private static string? CaptureErrorCode(string text)
