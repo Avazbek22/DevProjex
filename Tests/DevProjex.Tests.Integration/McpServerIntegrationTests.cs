@@ -7,6 +7,7 @@ using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.Dependencies;
+using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.Secrets;
 using DevProjex.Mcp;
@@ -32,6 +33,66 @@ public sealed partial class McpServerIntegrationTests
 		"related_files",
 		"get_file"
 	];
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task JournalRecordsAllPublishedToolsWithoutChangingTheirResponses(bool live)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = Path.Combine(project, "src");
+		Directory.CreateDirectory(source);
+		File.WriteAllText(Path.Combine(source, "Program.cs"), "class Program { Model Value = new(); }\n");
+		File.WriteAllText(Path.Combine(source, "Model.cs"), "class Model { }\n");
+		File.WriteAllText(Path.Combine(source, "Large.txt"), new string('x', 60_000));
+		File.WriteAllText(Path.Combine(project, "Outside.cs"), $"class Outside {{ string Token = \"{Secret}\"; }}\n");
+		var appData = Path.Combine(workspace.Path, "app-data");
+		if (live)
+		{
+			new ProjectProfileStore(() => appData).SaveProfile(
+				project,
+				new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
+		}
+
+		await using (var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			live: live,
+			clientInfo: new Implementation { Name = "journal-test", Version = "1.0" }))
+		{
+			Assert.NotEqual(true, (await server.CallAsync("list_projects")).IsError);
+			Assert.NotEqual(true, (await server.CallAsync("get_tree", new Dictionary<string, object?> { ["format"] = "text" })).IsError);
+			Assert.NotEqual(true, (await server.CallAsync("analyze")).IsError);
+			var pack = await server.CallAsync("pack_context");
+			Assert.NotEqual(true, pack.IsError);
+			var packId = Regex.Match(AllText(pack), "'(?<id>[a-f0-9]{48})'").Groups["id"].Value;
+			Assert.NotEmpty(packId);
+			Assert.NotEqual(true, (await server.CallAsync("read_pack", new Dictionary<string, object?> { ["pack_id"] = packId })).IsError);
+			Assert.NotEqual(true, (await server.CallAsync("search_project", new Dictionary<string, object?> { ["pattern"] = "Model" })).IsError);
+			Assert.NotEqual(true, (await server.CallAsync("related_files", new Dictionary<string, object?> { ["path"] = "src/Program.cs" })).IsError);
+			var file = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "Outside.cs" });
+			Assert.NotEqual(true, file.IsError);
+			Assert.Equal(live, AllText(file).Contains("outside the current window selection", StringComparison.Ordinal));
+		}
+
+		using var journal = new AgentJournalStore(
+			() => appData,
+			activeSessionProvider: static () => []);
+		var session = Assert.Single(await journal.ListSessionsAsync(cancellationToken: TestContext.Current.CancellationToken));
+		var calls = await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken);
+
+		Assert.Equal(live ? AgentJournalMode.Live : AgentJournalMode.Standard, session.Mode);
+		Assert.Equal(ExpectedTools, calls.Select(static call => call.Tool));
+		Assert.Equal(8, session.Totals.Calls);
+		Assert.True(session.Totals.ResultCharacters > 0);
+		Assert.True(session.Totals.EstimatedTokens > 0);
+		Assert.Contains(calls, call => call.Tool == "pack_context" && call.DeliveredPaths.Count >= 3);
+		Assert.Contains(calls, call => call.Tool == "search_project" && call.DeliveredPaths.Contains("src/Program.cs"));
+		Assert.Contains(calls, call => call.Tool == "get_file" && call.DeliveredPaths.Contains("Outside.cs"));
+		Assert.Equal(live, calls.Single(call => call.Tool == "get_file").Notices.Contains(AgentJournalNoticeCodes.OutsideSelection));
+		Assert.True(calls.Sum(static call => call.SecretsMasked) > 0);
+	}
 
 	[Fact]
 	public async Task LiveContextRefreshesTheWindowSelectionAcrossAllTools()
