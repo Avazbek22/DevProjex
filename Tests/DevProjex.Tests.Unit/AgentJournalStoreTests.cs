@@ -24,6 +24,7 @@ public sealed class AgentJournalStoreTests
 		Assert.Equal("src/Program.cs", Assert.Single(call.DeliveredPaths));
 		Assert.Equal("src/Program.cs", call.Arguments["path"]);
 		Assert.DoesNotContain("ignored", call.Arguments.Keys);
+		Assert.Equal(AgentJournalNoticeCodes.OutsideSelection, Assert.Single(call.Notices));
 		var jsonLines = await File.ReadAllTextAsync(Path.Combine(store.DirectoryPath, session.Id + ".jsonl"), cancellationToken);
 		Assert.Contains("\"mode\":\"Live\"", jsonLines, StringComparison.Ordinal);
 		Assert.EndsWith("\n", jsonLines, StringComparison.Ordinal);
@@ -91,6 +92,26 @@ public sealed class AgentJournalStoreTests
 	}
 
 	[Fact]
+	public async Task InvalidExplicitProjectFilterNeverListsOrClearsAllSessions()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			temporary.Path,
+			63,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 5, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+
+		var listed = await store.ListSessionsAsync(" ", cancellationToken: cancellationToken);
+		var removed = await store.ClearAsync(" ", cancellationToken);
+
+		Assert.Empty(listed);
+		Assert.Equal(0, removed);
+		Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+	}
+
+	[Fact]
 	public void ReceiptFormatterProducesStableMarkdownAndJsonContracts()
 	{
 		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
@@ -115,7 +136,8 @@ public sealed class AgentJournalStoreTests
 			Arguments = new Dictionary<string, string>(StringComparer.Ordinal)
 			{
 				["path"] = "src/Program.cs"
-			}
+			},
+			Notices = [AgentJournalNoticeCodes.OutsideSelection]
 		};
 		var receipt = new AgentJournalReceipt(
 			session,
@@ -256,6 +278,6 @@ public sealed class AgentJournalStoreTests
 			AdditionalDeliveredPaths: 0,
 			SecretsMasked: 2,
 			PrivateDataMasked: 3,
-			Notices: [AgentJournalNoticeCodes.OutsideSelection],
+			Notices: [AgentJournalNoticeCodes.OutsideSelection, "unrecognized-notice"],
 			ErrorCode: null);
 }
