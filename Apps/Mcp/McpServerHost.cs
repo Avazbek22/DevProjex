@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Reflection;
+using DevProjex.Infrastructure.AgentJournal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -180,9 +181,20 @@ public static class McpServerHost
 		var liveContext = live
 			? new McpLiveContextState(rootRegistry, () => services.Value.ProfileStore, toolSet: toolSet)
 			: null;
-		await using var liveSession = live
-			? new LiveSessionRegistry(appDataPathProvider).Start(rootRegistry.ConfiguredRoots)
-			: null;
+		var journalMode = live ? AgentJournalMode.Live : AgentJournalMode.Standard;
+		var journalToolSet = toolSet == McpToolSet.Full
+			? AgentJournalToolSet.Full
+			: AgentJournalToolSet.Reduced;
+		using var journalStore = new AgentJournalStore(appDataPathProvider);
+		await using var journal = new McpAgentJournal(
+			journalStore,
+			rootRegistry,
+			journalMode,
+			journalToolSet,
+			ResolveVersion(),
+			hidePrivateData);
+		await using var liveSession = new LiveSessionRegistry(appDataPathProvider)
+			.Start(rootRegistry.ConfiguredRoots, journalMode);
 		await using var packs = new McpPackRegistry(tempRoot, toolSet: toolSet);
 		var projectService = new Lazy<McpProjectService>(
 			() =>
@@ -207,7 +219,8 @@ public static class McpServerHost
 			allowRemote,
 			remoteHosts,
 			searchBodyCharacters,
-			liveContext);
+			liveContext,
+			journal);
 		var catalog = new DevProjexMcpToolCatalog(
 			tools,
 			allowRemote,
@@ -235,24 +248,26 @@ public static class McpServerHost
 			})
 			.WithStreamServerTransport(input, output)
 			.WithTools<DevProjexMcpToolCatalog>(catalog);
-		if (liveSession is not null)
+		serverBuilder.WithMessageFilters(filters => filters.AddIncomingFilter(next => async (context, token) =>
 		{
-			serverBuilder.WithMessageFilters(filters => filters.AddIncomingFilter(next => async (context, token) =>
+			Implementation? client = null;
+			if (context.JsonRpcMessage is JsonRpcRequest { Context.ClientInfo: { } requestClient })
 			{
-				if (context.JsonRpcMessage is JsonRpcRequest { Context.ClientInfo: { } requestClient })
-				{
-					liveSession.UpdateClient(requestClient.Name, requestClient.Version);
-				}
-				else if (context.JsonRpcMessage is JsonRpcRequest { Method: "initialize", Params: { } parameters })
-				{
-					var client = parameters
-						.Deserialize<InitializeRequestParams>(McpJsonUtilities.DefaultOptions)?
-						.ClientInfo;
-					liveSession.UpdateClient(client?.Name, client?.Version);
-				}
-				await next(context, token).ConfigureAwait(false);
-			}));
-		}
+				client = requestClient;
+			}
+			else if (context.JsonRpcMessage is JsonRpcRequest { Method: "initialize", Params: { } parameters })
+			{
+				client = parameters
+					.Deserialize<InitializeRequestParams>(McpJsonUtilities.DefaultOptions)?
+					.ClientInfo;
+			}
+			if (client is not null)
+			{
+				liveSession.UpdateClient(client.Name, client.Version);
+				await journal.StartAsync(client.Name, client.Version, token).ConfigureAwait(false);
+			}
+			await next(context, token).ConfigureAwait(false);
+		}));
 		serverBuilder.WithRequestFilters(filters => filters.AddListToolsFilter(next => async (request, token) =>
 			{
 				var result = await next(request, token).ConfigureAwait(false);

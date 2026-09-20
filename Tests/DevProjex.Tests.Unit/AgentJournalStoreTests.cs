@@ -1,0 +1,283 @@
+using DevProjex.Infrastructure.AgentJournal;
+
+namespace DevProjex.Tests.Unit;
+
+public sealed class AgentJournalStoreTests
+{
+	[Fact]
+	public async Task SessionAndCallRoundTripThroughJsonLines()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(temporary.Path, 42, new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		await store.EndSession(session.Id, session.StartedUtc.AddSeconds(2), new AgentJournalTotals(1, 120, 30, 1, 2, 3, 0), cancellationToken);
+
+		var restored = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+		var call = Assert.Single(await store.ReadCallsAsync(session.Id, cancellationToken));
+
+		Assert.Equal(session.Id, restored.Id);
+		Assert.Equal(AgentJournalMode.Live, restored.Mode);
+		Assert.Equal(30, restored.Totals.EstimatedTokens);
+		Assert.Equal("src/Program.cs", Assert.Single(call.DeliveredPaths));
+		Assert.Equal("src/Program.cs", call.Arguments["path"]);
+		Assert.DoesNotContain("ignored", call.Arguments.Keys);
+		Assert.Equal(AgentJournalNoticeCodes.OutsideSelection, Assert.Single(call.Notices));
+		var jsonLines = await File.ReadAllTextAsync(Path.Combine(store.DirectoryPath, session.Id + ".jsonl"), cancellationToken);
+		Assert.Contains("\"mode\":\"Live\"", jsonLines, StringComparison.Ordinal);
+		Assert.EndsWith("\n", jsonLines, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ReaderIgnoresAnIncompleteLastLine()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(temporary.Path, 43, new DateTimeOffset(2026, 9, 20, 1, 2, 4, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		var path = Path.Combine(store.DirectoryPath, session.Id + ".jsonl");
+		await File.AppendAllTextAsync(path, "{\"type\":\"call\",\"call\":", cancellationToken);
+
+		var call = Assert.Single(await store.ReadCallsAsync(session.Id, cancellationToken));
+
+		Assert.Equal(1, call.Sequence);
+	}
+
+	[Fact]
+	public async Task RetentionKeepsTheNewestSessionsWithinTheConfiguredLimit()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(
+			temporary.Path,
+			new AgentJournalRetentionPolicy(TimeSpan.FromDays(30), 2));
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		for (var index = 0; index < 3; index++)
+		{
+			var session = CreateSession(temporary.Path, 50 + index, started.AddSeconds(index));
+			await store.StartSession(session, cancellationToken);
+			File.SetLastWriteTimeUtc(
+				Path.Combine(store.DirectoryPath, session.Id + ".jsonl"),
+				started.AddSeconds(index).UtcDateTime);
+		}
+
+		var sessions = await store.ListSessionsAsync(cancellationToken: cancellationToken);
+
+		Assert.Equal(2, sessions.Count);
+		Assert.DoesNotContain(sessions, session => session.Pid == 50);
+	}
+
+	[Fact]
+	public async Task ClearCanRemoveOnlySessionsForTheRequestedProject()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		var firstRoot = temporary.CreateFolder("first");
+		var secondRoot = temporary.CreateFolder("second");
+		using var store = CreateStore(temporary.Path);
+		var first = CreateSession(firstRoot, 61, new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		var second = CreateSession(secondRoot, 62, new DateTimeOffset(2026, 9, 20, 1, 2, 4, TimeSpan.Zero));
+		await store.StartSession(first, cancellationToken);
+		await store.StartSession(second, cancellationToken);
+
+		var removed = await store.ClearAsync(firstRoot, cancellationToken);
+
+		Assert.Equal(1, removed);
+		var remaining = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+		Assert.Equal(second.Id, remaining.Id);
+	}
+
+	[Fact]
+	public async Task InvalidExplicitProjectFilterNeverListsOrClearsAllSessions()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			temporary.Path,
+			63,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 5, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+
+		var listed = await store.ListSessionsAsync(" ", cancellationToken: cancellationToken);
+		var removed = await store.ClearAsync(" ", cancellationToken);
+
+		Assert.Empty(listed);
+		Assert.Equal(0, removed);
+		Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+	}
+
+	[Fact]
+	public void ReceiptFormatterProducesStableMarkdownAndJsonContracts()
+	{
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		var totals = new AgentJournalTotals(1, 120, 30, 1, 2, 3, 0);
+		var session = new AgentJournalSession(
+			"20260920-010203-42",
+			started,
+			started.AddSeconds(2),
+			42,
+			started.AddMinutes(-1),
+			"sample-client",
+			"1.2.3",
+			AgentJournalMode.Live,
+			[new AgentJournalRoot("project-root", "sample")],
+			AgentJournalToolSet.Reduced,
+			"5.2.0",
+			HidePrivateData: true,
+			totals,
+			IsLive: false);
+		var call = CreateCall(1) with
+		{
+			Arguments = new Dictionary<string, string>(StringComparer.Ordinal)
+			{
+				["path"] = "src/Program.cs"
+			},
+			Notices = [AgentJournalNoticeCodes.OutsideSelection]
+		};
+		var receipt = new AgentJournalReceipt(
+			session,
+			totals,
+			[new AgentJournalDeliveredPath("src/Program.cs", 1)],
+			[call]);
+		var formatter = new AgentJournalReceiptFormatter();
+
+		var markdown = formatter.FormatMarkdown(receipt);
+		var json = formatter.FormatJson(receipt);
+
+		var expectedMarkdown = string.Join(Environment.NewLine,
+		[
+			"# DevProjex agent journal 20260920-010203-42",
+			"",
+			"- Started: 2026-09-20T01:02:03.0000000Z",
+			"- Ended: 2026-09-20T01:02:05.0000000Z",
+			"- Client: sample-client 1.2.3",
+			"- Mode: Live",
+			"- Tool set: Reduced",
+			"",
+			"## Totals",
+			"",
+			"| Calls | Characters | Estimated tokens | Files | Secrets masked | Private data masked | Errors |",
+			"|---:|---:|---:|---:|---:|---:|---:|",
+			"|1|120|30|1|2|3|0|",
+			"",
+			"## Delivered paths",
+			"",
+			"| Path | Calls |",
+			"|---|---:|",
+			"|src/Program.cs|1|",
+			"",
+			"## Calls",
+			"",
+			"| # | UTC | Tool | Duration ms | Characters | Tokens | Files | Error |",
+			"|---:|---|---|---:|---:|---:|---:|---|",
+			"|1|2026-09-20T01:02:04.0000000Z|get_file|10|120|30|1||",
+			""
+		]);
+		const string expectedJson = """
+			{
+			  "schema": "devprojex-agent-journal",
+			  "version": 1,
+			  "receipt": {
+			    "session": {
+			      "id": "20260920-010203-42",
+			      "startedUtc": "2026-09-20T01:02:03+00:00",
+			      "endedUtc": "2026-09-20T01:02:05+00:00",
+			      "pid": 42,
+			      "processStartUtc": "2026-09-20T01:01:03+00:00",
+			      "clientName": "sample-client",
+			      "clientVersion": "1.2.3",
+			      "mode": "Live",
+			      "roots": [{ "configuredPath": "project-root", "name": "sample" }],
+			      "toolSet": "Reduced",
+			      "serverVersion": "5.2.0",
+			      "hidePrivateData": true,
+			      "totals": { "calls": 1, "resultCharacters": 120, "estimatedTokens": 30, "filesDelivered": 1, "secretsMasked": 2, "privateDataMasked": 3, "errors": 0 },
+			      "isLive": false
+			    },
+			    "totals": { "calls": 1, "resultCharacters": 120, "estimatedTokens": 30, "filesDelivered": 1, "secretsMasked": 2, "privateDataMasked": 3, "errors": 0 },
+			    "deliveredPaths": [{ "path": "src/Program.cs", "calls": 1 }],
+			    "calls": [{
+			      "sequence": 1,
+			      "utc": "2026-09-20T01:02:04+00:00",
+			      "tool": "get_file",
+			      "rootIndex": 0,
+			      "arguments": { "path": "src/Program.cs" },
+			      "revision": 2,
+			      "durationMs": 10,
+			      "resultCharacters": 120,
+			      "estimatedTokens": 30,
+			      "filesDelivered": 1,
+			      "deliveredPaths": ["src/Program.cs"],
+			      "additionalDeliveredPaths": 0,
+			      "secretsMasked": 2,
+			      "privateDataMasked": 3,
+			      "notices": ["outside-selection"],
+			      "errorCode": null
+			    }]
+			  }
+			}
+			""";
+		Assert.Equal(expectedMarkdown, markdown);
+		using var expectedDocument = JsonDocument.Parse(expectedJson);
+		using var actualDocument = JsonDocument.Parse(json);
+		Assert.Equal(
+			JsonSerializer.Serialize(expectedDocument.RootElement),
+			JsonSerializer.Serialize(actualDocument.RootElement));
+	}
+
+	private static AgentJournalStore CreateStore(
+		string stateRoot,
+		AgentJournalRetentionPolicy? retention = null) =>
+		new(
+			() => stateRoot,
+			activeSessionProvider: static () => [],
+			retention: retention);
+
+	private static AgentJournalSession CreateSession(
+		string root,
+		int pid,
+		DateTimeOffset startedUtc) =>
+		new(
+			AgentJournalStore.CreateSessionId(startedUtc, pid),
+			startedUtc,
+			EndedUtc: null,
+			pid,
+			startedUtc.AddMinutes(-1),
+			"sample-client",
+			"1.2.3",
+			AgentJournalMode.Live,
+			[new AgentJournalRoot(Path.GetFullPath(root), "sample")],
+			AgentJournalToolSet.Reduced,
+			"5.2.0",
+			HidePrivateData: true,
+			AgentJournalTotals.Empty,
+			IsLive: false);
+
+	private static AgentJournalCall CreateCall(long sequence) =>
+		new(
+			sequence,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 4, TimeSpan.Zero),
+			"get_file",
+			RootIndex: 0,
+			new Dictionary<string, string>(StringComparer.Ordinal)
+			{
+				["path"] = "src/Program.cs",
+				["ignored"] = "must not be stored"
+			},
+			Revision: 2,
+			DurationMs: 10,
+			ResultCharacters: 120,
+			EstimatedTokens: 30,
+			FilesDelivered: 1,
+			DeliveredPaths: ["src/Program.cs"],
+			AdditionalDeliveredPaths: 0,
+			SecretsMasked: 2,
+			PrivateDataMasked: 3,
+			Notices: [AgentJournalNoticeCodes.OutsideSelection, "unrecognized-notice"],
+			ErrorCode: null);
+}

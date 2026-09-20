@@ -36,6 +36,17 @@ internal sealed class McpLiveContextState(
 
 	public int RefreshProfile(string projectRoot) => ReadCurrentProfile(projectRoot).Revision;
 
+	public int? CurrentInvocationRevision(string projectRoot)
+	{
+		var normalizedRoot = PathUtility.Normalize(projectRoot);
+		lock (sync)
+		{
+			return states.TryGetValue(normalizedRoot, out var state) && state.Initialized
+				? state.Revision
+				: null;
+		}
+	}
+
 	public bool HasSelectedFileCount(string projectRoot, int revision)
 	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
