@@ -31,6 +31,18 @@ public sealed class TerminalWorkspaceCommandParserTests
 	}
 
 	[Theory]
+	[InlineData("set activity on", true)]
+	[InlineData("set ACTIVITY OFF", false)]
+	internal void Parse_AgentActivityUsesTheSharedToggleGrammar(string text, bool expected)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal("activity", result.Command!.Target);
+		Assert.Equal(expected, result.Command.Enabled);
+	}
+
+	[Theory]
 	[InlineData("set git off", "none")]
 	[InlineData("set git none", "none")]
 	[InlineData("set git gitignore", "gitignore")]
@@ -181,14 +193,50 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal(TerminalWorkspaceMcpAction.Print, result.Command.McpAction);
 	}
 
+	[Theory]
+	[InlineData("mcp log", TerminalWorkspaceMcpAction.ShowLog, null, null, null)]
+	[InlineData("mcp log last", TerminalWorkspaceMcpAction.ShowLog, "last", null, null)]
+	[InlineData("mcp log session session-42", TerminalWorkspaceMcpAction.ShowLog, "session-42", null, null)]
+	[InlineData("mcp log export receipt.md", TerminalWorkspaceMcpAction.ExportLog, "last", "receipt.md", ProjectContextDocumentFormat.Markdown)]
+	[InlineData("mcp log export receipt.json json", TerminalWorkspaceMcpAction.ExportLog, "last", "receipt.json", ProjectContextDocumentFormat.Json)]
+	[InlineData("mcp log export receipt.md markdown session session-42", TerminalWorkspaceMcpAction.ExportLog, "session-42", "receipt.md", ProjectContextDocumentFormat.Markdown)]
+	[InlineData("mcp log clear", TerminalWorkspaceMcpAction.ClearLog, null, null, null)]
+	internal void Parse_McpLogUsesBoundedSelectorsAndFormats(
+		string text,
+		TerminalWorkspaceMcpAction expectedAction,
+		string? expectedSession,
+		string? expectedDestination,
+		ProjectContextDocumentFormat? expectedFormat)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal(expectedAction, result.Command!.McpAction);
+		Assert.Equal(expectedSession, result.Command.Target);
+		Assert.Equal(expectedDestination, result.Command.Destination);
+		Assert.Equal(expectedFormat, result.Command.Format);
+	}
+
+	[Theory]
+	[InlineData("mcp log session")]
+	[InlineData("mcp log export")]
+	[InlineData("mcp log export receipt.md xml")]
+	[InlineData("mcp log clear extra")]
+	public void Parse_McpLogRejectsIncompleteOrUnsupportedForms(string text)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.False(result.IsSuccess);
+	}
+
 	[Fact]
-	public void CompletionOffersMcpConnectAndClients()
+	public void CompletionOffersMcpConnectionsAndJournalActions()
 	{
 		var action = _parser.GetCompletion("mcp ", 4, Context);
 		var clients = _parser.GetCompletion("mcp connect ", 12, Context);
 
 		Assert.Equal(
-			["connect", "claude-code", "codex", "cursor", "vscode", "json"],
+			["connect", "log", "claude-code", "codex", "cursor", "vscode", "json"],
 			action.Candidates.Select(static item => item.Token));
 		Assert.Equal(
 			["claude-code", "codex", "cursor", "vscode", "json"],
@@ -197,6 +245,14 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal(["live", "standard"], modes.Candidates.Select(static item => item.Token));
 		var connectionModes = _parser.GetCompletion("mcp connect codex ", 18, Context);
 		Assert.Equal(["live", "standard"], connectionModes.Candidates.Select(static item => item.Token));
+		var logActions = _parser.GetCompletion("mcp log ", 8, Context);
+		Assert.Equal(
+			["session", "last", "export", "clear"],
+			logActions.Candidates.Select(static item => item.Token));
+		var exportFormats = _parser.GetCompletion("mcp log export receipt.md ", 26, Context);
+		Assert.Equal(
+			["markdown", "json", "session", "last"],
+			exportFormats.Candidates.Select(static item => item.Token));
 	}
 
 	[Theory]

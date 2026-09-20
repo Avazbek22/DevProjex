@@ -216,12 +216,10 @@ configuration fragment is needed.
 
 **Live context** connects an MCP session to the checked tree in an open DevProjex
 window through the shared local project profile. The compact **MCP** menu, between
-File and Git, has a **Live context** submenu that registers and opens Claude Code,
-Codex, Cursor, or VS Code, plus a manual JSON fallback for other clients. Desktop
-connections always include `--live`. After a successful connection, an optional PATH
-dialog can offer the platform-appropriate terminal setup. The window
-title names an active client or session count, saved focused paths are restored on reopen,
-and disabling secret protection while a live session exists requires confirmation.
+File and Git, has **Live context**, **Standard**, **Journal**, and documentation
+entries. Desktop connections always include `--live`. After a successful connection,
+an optional PATH dialog can offer the platform-appropriate terminal setup. The window
+title names an active client or session count, and saved focused paths are restored on reopen.
 Live mode has three separate rules: **focus** keeps tree, search, analysis, dependency,
 and pack operations inside the checked selection; **access boundaries** still enforce
 the configured filters and secret protection, while a directly named readable file may
@@ -229,6 +227,10 @@ be returned with an outside-focus notice; **saved results** stay pinned to the r
 that created them and must be rebuilt explicitly after the window selection changes.
 
 Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`. `related_files` answers "what does this file actually use, and who uses it" from a static dependency index over up to 16 seed files, so following a thread never widens the selection. `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
+
+The local **agent journal** records metadata and counts for MCP sessions, never file
+bodies or detected secret values. Read it from the GUI, TUI, or CLI, and export a
+Markdown or JSON **context receipt** showing calls, delivered paths, and totals.
 
 The server enforces hard security boundaries on top of DevProjex's read-only design:
 

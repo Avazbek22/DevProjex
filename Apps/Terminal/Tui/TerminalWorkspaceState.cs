@@ -15,23 +15,34 @@ public sealed record TerminalTreeRow(
 	TreeNodeDescriptor Node,
 	int Depth,
 	bool IsExpanded,
-	TerminalTreeCheckState CheckState)
+	TerminalTreeCheckState CheckState,
+	bool ShowAgentActivity = false,
+	bool HasAgentActivity = false)
 {
-	private readonly string _displayText = BuildDisplayText(Node, Depth, IsExpanded, CheckState);
-	private readonly int _displayWidth = ResolveDisplayWidth(Node, Depth);
+	private readonly string _displayText = BuildDisplayText(
+		Node,
+		Depth,
+		IsExpanded,
+		CheckState,
+		ShowAgentActivity,
+		HasAgentActivity);
+	private readonly int _displayWidth = ResolveDisplayWidth(Node, Depth, ShowAgentActivity);
 
 	public int DisplayWidth => _displayWidth;
 
 	public override string ToString() => _displayText;
 
-	private static int ResolveDisplayWidth(TreeNodeDescriptor node, int depth) =>
-		depth * 2 + 6 + TerminalTextEscaping.EscapeSingleLine(node.DisplayName).GetColumns();
+	private static int ResolveDisplayWidth(TreeNodeDescriptor node, int depth, bool showAgentActivity) =>
+		depth * 2 + 6 + (showAgentActivity ? 2 : 0) +
+		TerminalTextEscaping.EscapeSingleLine(node.DisplayName).GetColumns();
 
 	private static string BuildDisplayText(
 		TreeNodeDescriptor node,
 		int depth,
 		bool isExpanded,
-		TerminalTreeCheckState checkState)
+		TerminalTreeCheckState checkState,
+		bool showAgentActivity,
+		bool hasAgentActivity)
 	{
 		var indentation = new string(' ', depth * 2);
 		var disclosure = node.IsDirectory
@@ -43,7 +54,8 @@ public sealed record TerminalTreeRow(
 			TerminalTreeCheckState.Indeterminate => "[-]",
 			_ => "[ ]"
 		};
-		return $"{indentation}{disclosure} {check} {TerminalTextEscaping.EscapeSingleLine(node.DisplayName)}";
+		var activity = showAgentActivity ? hasAgentActivity ? "A " : "  " : string.Empty;
+		return $"{indentation}{disclosure} {check} {activity}{TerminalTextEscaping.EscapeSingleLine(node.DisplayName)}";
 	}
 }
 
@@ -61,6 +73,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	private readonly HashSet<string> _expandedPaths = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly HashSet<string> _selectedFiles = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly HashSet<string> _selectedEmptyDirectories = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly HashSet<string> _agentActivityPaths = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly Dictionary<string, TreeNodeDescriptor> _nodesByPath = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly Dictionary<string, string?> _parentsByPath = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly Dictionary<string, TerminalTreeCheckState> _checkStates = new(ProjectTreePathIdentity.CanonicalComparer);
@@ -76,6 +89,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	private long _revision;
 	private string _treeFilterQuery = string.Empty;
 	private bool _usesUncheckedWholeTreePresentation;
+	private bool _showAgentActivity;
 	private bool _disposed;
 
 	public TerminalWorkspaceState(ProjectContextPlan plan)
@@ -121,6 +135,17 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 	public ProjectContextPlan Plan { get; private set; }
 	public ObservableCollection<TerminalTreeRow> VisibleRows => _visibleRows;
+
+	internal void SetAgentActivity(bool enabled, IEnumerable<string>? paths)
+	{
+		var next = paths?.ToHashSet(ProjectTreePathIdentity.CanonicalComparer) ?? [];
+		if (_showAgentActivity == enabled && _agentActivityPaths.SetEquals(next))
+			return;
+		_showAgentActivity = enabled;
+		_agentActivityPaths.Clear();
+		_agentActivityPaths.UnionWith(next);
+		RebuildVisibleRows();
+	}
 	public int VisibleRowWidth { get; private set; } = 1;
 	public int SelectedFileCount =>
 		HasImplicitWholeTreeSelection ? Plan.IncludedFiles.Count : _selectedFiles.Count;
@@ -820,7 +845,9 @@ public sealed class TerminalWorkspaceState : IDisposable
 				current,
 				currentDepth,
 				descendantMatches,
-				GetCheckState(current)));
+				GetCheckState(current),
+				_showAgentActivity,
+				_agentActivityPaths.Contains(current.FullPath)));
 			for (var index = current.Children.Count - 1; index >= 0; index--)
 			{
 				var child = current.Children[index];
@@ -842,7 +869,13 @@ public sealed class TerminalWorkspaceState : IDisposable
 		{
 			var (current, currentDepth) = stack.Pop();
 			var expanded = current.IsDirectory && _expandedPaths.Contains(current.FullPath);
-			rows.Add(new TerminalTreeRow(current, currentDepth, expanded, GetCheckState(current)));
+			rows.Add(new TerminalTreeRow(
+				current,
+				currentDepth,
+				expanded,
+				GetCheckState(current),
+				_showAgentActivity,
+				_agentActivityPaths.Contains(current.FullPath)));
 			if (!expanded)
 				continue;
 

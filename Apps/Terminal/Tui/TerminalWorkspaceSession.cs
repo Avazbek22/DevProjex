@@ -7,6 +7,7 @@ using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.AgentJournal;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
@@ -54,6 +55,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private ProjectSelectionProfile? _localProfileBaseline;
 	private readonly LiveSessionRegistry _liveSessionRegistry;
 	private readonly TerminalExportDestinationHistory _exportDestinations = new();
+	private readonly Lazy<AgentJournalStore> _agentJournalStore;
+	private readonly AgentJournalReceiptFormatter _agentJournalReceiptFormatter = new();
 
 	private TerminalWorkspaceScreen _screen;
 	private TerminalWorkspaceLayoutMode _layoutMode;
@@ -74,7 +77,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private int _workspacePersistencePending;
 	private bool _previewSearchInProgress;
 	private bool _compressionUnavailableNotified;
+	private bool _agentActivityEnabled;
+	private int _agentJournalRefreshInProgress;
 	private IReadOnlyList<LiveSessionRecord> _liveSessions = [];
+	private TerminalAgentJournalSnapshot? _agentJournalSnapshot;
 
 	private TerminalWelcomeContext? _welcomeContext;
 	private RecentProjectsDb? _recentProjectsSnapshot;
@@ -176,6 +182,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			environment);
 		_commandHistory = new TerminalCommandHistory(
 			services.TerminalSettingsStore.LoadCommandHistory());
+		_agentActivityEnabled = services.TerminalSettingsStore.LoadAgentActivityEnabled();
+		_agentJournalStore = new Lazy<AgentJournalStore>(() => new AgentJournalStore(
+			() => Path.GetDirectoryName(services.LiveSessionRegistry.DirectoryPath)!,
+			activeSessionProvider: () => services.LiveSessionRegistry.ReadActive()));
 		_commandHistoryPersistence = new TerminalCommandHistoryPersistenceQueue(
 			services.TerminalSettingsStore.SaveCommandStateAsync,
 			_settingsPersistenceCts.Token);
@@ -1580,6 +1590,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 
 		_selectedTreePath = _state.VisibleRows[selected].Node.FullPath;
+		if (_agentActivityEnabled && _status is not null &&
+			!_operations.IsRunning(WorkspaceOperationKind.TransientStatus))
+		{
+			_status.Text = BuildStatus(_state, _application.Screen.Width);
+		}
 		ScheduleSelectedFilePreviewSync(_selectedTreePath);
 	}
 
@@ -1639,11 +1654,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var compressionUnavailable = GetCurrentCompressionAvailability(state)?.IsUnavailable == true;
 		if (width < 80)
 		{
+			var compactActivity = BuildAgentActivityIndicator(compact: true);
 			return $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
 				   $"~{tokens:N0} tok  " +
 				   $"{warningCount:N0} W  {errorCount:N0} E" +
 				   (compressionUnavailable ? "  C!" : string.Empty) +
-				   (_liveSessions.Count > 0 ? "  Live context" : string.Empty);
+				   (_liveSessions.Count > 0 ? "  Live context" : string.Empty) +
+				   (compactActivity is null ? string.Empty : $"  {compactActivity}");
 		}
 
 		var separator = _environment.SupportsUnicode ? PanelSeparator : " | ";
@@ -1660,9 +1677,27 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			parts.Add(L("Compression.Metrics.Unavailable"));
 		if (_liveSessions.Count > 0)
 			parts.Add(BuildLiveSessionIndicator(_liveSessions));
+		if (BuildAgentActivityIndicator(compact: false) is { } activity)
+			parts.Add(activity);
 		return string.Join(
 			separator,
 			parts);
+	}
+
+	private string? BuildAgentActivityIndicator(bool compact)
+	{
+		if (!_agentActivityEnabled || _agentJournalSnapshot is not { } snapshot ||
+			snapshot.LatestCall is not { } latest)
+		{
+			return null;
+		}
+
+		var focusedTreePath = CaptureCurrentTreePath();
+		return TerminalAgentJournalPresentation.BuildActivityIndicator(
+			snapshot,
+			focusedTreePath,
+			compact,
+			AgentJournalText);
 	}
 
 	private CodeCompressionAvailabilitySnapshot? GetCurrentCompressionAvailability(
@@ -5365,6 +5400,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_settingsPersistenceCts.Cancel();
 		_settingsPersistenceCts.Dispose();
 		_selectionProfilePersistence.Dispose();
+		if (_agentJournalStore.IsValueCreated)
+			_agentJournalStore.Value.Dispose();
 		_operationGate.Dispose();
 	}
 

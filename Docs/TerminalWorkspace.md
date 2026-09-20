@@ -194,6 +194,12 @@ When an MCP live session exists for the open root and the terminal is at least
 session count when more than one is active. Below 80 columns the compact status
 shows only `Live context`.
 
+`set activity on|off` controls the persisted **Agent activity** projection. When it
+is on, the status line adds the latest MCP tool and the live session's call count.
+Files delivered by that session carry `A` in a dedicated tree marker column; focusing
+one adds its delivery count to the status line. Turning the setting off removes the
+projection without changing or deleting the journal.
+
 When filtering changes which options are available, a newly discovered option is
 selected by default. An option already seen during the session keeps its explicit
 checked or unchecked state if it disappears and later returns. This is the same
@@ -240,6 +246,7 @@ inline ghost suffix as soon as a token can be completed:
 | Syntax | Session action |
 |---|---|
 | `set <option> on\|off` | toggle one content or exclusion option; legacy `set gitignore` and `set tracked` remain supported |
+| `set activity on\|off` | show or hide the persisted live agent-activity status and tree markers |
 | `set git off\|gitignore\|tracked\|staged\|changes\|diff:<ref>..<ref>` | select the Git axis without changing profiles |
 | `all types\|exclusions\|content on\|off` | apply the framed **All** action |
 | `type <.ext> [<.ext>...] on\|off` | toggle available file extensions |
@@ -263,6 +270,9 @@ inline ghost suffix as soon as a token can be completed:
 | `profile reset` | reset the current project to default settings after confirmation |
 | `mcp [claude-code\|codex\|cursor\|vscode\|json] [live\|standard]` | print a connection fragment without changing client configuration |
 | `mcp connect <claude-code\|codex\|cursor\|vscode\|json> [live\|standard]` | connect the selected MCP client to the open project; mode defaults to `live`, and `json` shows the manual configuration |
+| `mcp log [session <id>\|last]` | open the project journal; choose a session to inspect its calls and totals |
+| `mcp log export <path> [markdown\|json] [session <id>\|last]` | write a context receipt with the shared receipt formatter; format defaults to Markdown and session defaults to `last` |
+| `mcp log clear` | clear completed journal sessions for the project after confirmation |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
 | `diagnostics` | show every diagnostic in a scrollable overlay |
@@ -302,6 +312,9 @@ Examples:
 :related src/App.cs --direction dependencies --depth 2
 :mcp codex standard
 :mcp connect codex standard
+:mcp log last
+:mcp log export "../agent receipt.md" markdown last
+:set activity on
 :refresh
 :language ja
 :open "../sample project"
