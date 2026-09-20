@@ -1584,7 +1584,7 @@ internal sealed class DevProjexMcpTools(
 				resolvedRequests.Add(new McpResolvedFileReadRequest(
 					item,
 					PhysicalPath: null,
-					UnavailableReason: exception.Code));
+					UnavailableReason: liveContext is null ? null : exception.Code));
 			}
 		}
 

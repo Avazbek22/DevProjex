@@ -4,6 +4,11 @@ internal sealed class McpProjectRootJail(
 	McpRootRegistry localRoots,
 	McpProjectSourceResolver? projectSources = null)
 {
+	public string ResolveConfiguredRoot(string projectRoot) =>
+		projectSources is not null && projectSources.TryGetRemoteRoot(projectRoot, out _)
+			? projectRoot
+			: localRoots.ResolveConfiguredRoot(projectRoot);
+
 	public string ResolveExistingPath(
 		string projectRoot,
 		string path,

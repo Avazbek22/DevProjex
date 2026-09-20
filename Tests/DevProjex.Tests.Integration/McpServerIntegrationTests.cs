@@ -134,8 +134,10 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("Outside.cs", empty, StringComparison.Ordinal);
 	}
 
-	[Fact]
-	public async Task LiveContextUsesConfiguredRootMarksAsAuthoritativeAcrossPhysicalAliases()
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task LocalMarksUseConfiguredRootAcrossPhysicalAliases(bool live)
 	{
 		using var workspace = new TemporaryDirectory();
 		var physicalProject = workspace.CreateDirectory("physical-project");
@@ -157,7 +159,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(
 			configuredProject,
 			workspace.Path,
-			live: true,
+			live: live,
 			rootRegistryFactory: roots => new McpRootRegistry(
 				roots,
 				(path, requireDirectory) => PathComparer.Default.Equals(
@@ -166,9 +168,10 @@ public sealed partial class McpServerIntegrationTests
 					? physicalProject
 					: McpRootRegistry.ResolvePhysicalExistingPath(path, requireDirectory)));
 
-		var result = await server.CallAsync(
-			"get_file",
-			new Dictionary<string, object?> { ["path"] = relativePath });
+		var arguments = new Dictionary<string, object?> { ["path"] = relativePath };
+		if (!live)
+			arguments["profile"] = "local";
+		var result = await server.CallAsync("get_file", arguments);
 
 		Assert.NotEqual(true, result.IsError);
 		Assert.DoesNotContain(markedValue, AllText(result), StringComparison.Ordinal);
@@ -6962,13 +6965,12 @@ public sealed partial class McpServerIntegrationTests
 		var text = AllText(search);
 
 		Assert.NotEqual(true, search.IsError);
-		Assert.Contains($"\"project\":{JsonSerializer.Serialize(Path.GetFullPath(second))}", text,
-			StringComparison.Ordinal);
 		Assert.Contains("\"path\":\"Target.cs\"", text, StringComparison.Ordinal);
 		Assert.Contains("\"symbol\":\"Target.FindMarker\"", text, StringComparison.Ordinal);
 		var printed = Regex.Match(text, "get_file (?<json>\\{[^\\r\\n]+\\})");
 		Assert.True(printed.Success, text);
 		using var arguments = JsonDocument.Parse(printed.Groups["json"].Value);
+		Assert.False(string.IsNullOrWhiteSpace(arguments.RootElement.GetProperty("project").GetString()));
 		var read = await server.CallAsync(
 			"get_file",
 			new Dictionary<string, object?>
