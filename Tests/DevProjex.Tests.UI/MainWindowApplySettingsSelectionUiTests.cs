@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
 
@@ -499,6 +500,40 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	[AvaloniaFact(Timeout = 120_000)]
+	public async Task DisablingSecretProtectionWithLiveSessionAppliesWithoutConfirmation()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var registry = new LiveSessionRegistry(() => project.AppDataPath);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { LiveSessionRegistry = registry })
+			.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+		await using var liveSession = registry.Start([project.RootPath]);
+
+		try
+		{
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			await UiTestDriver.ClickApplySettingsAsync(window)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+			await UiTestDriver.ClickApplySettingsAsync(window)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+			Assert.False(UiTestDriver.GetViewModel(window).HideSecretsOption!.IsChecked);
+			Assert.Equal((false, false), UiTestDriver.GetAppliedContentRedactionState(window));
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window)
+				.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+		}
+	}
 
 	[AvaloniaFact]
 	public async Task GitPull_RestoresStoredAppliedRedactionInsteadOfCommittingDraft()

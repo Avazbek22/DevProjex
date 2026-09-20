@@ -69,10 +69,7 @@ public sealed class McpConnectionUiTests
 		"Terminal.Tui.Command.Mcp.Schema",
 		"Terminal.Tui.Command.Related.Title",
 		"Terminal.Tui.Command.Related.Description",
-		"Terminal.Tui.Command.Related.Schema",
-		"Dialog.LiveContext.Secrets.Title",
-		"Dialog.LiveContext.Secrets.Message",
-		"Dialog.LiveContext.Secrets.Apply"
+		"Terminal.Tui.Command.Related.Schema"
 	];
 
 	[Fact]
@@ -304,40 +301,6 @@ public sealed class McpConnectionUiTests
 					$"{key} is empty in {Path.GetFileName(file)}.");
 			}
 		}
-	}
-
-	[Fact]
-	public void SecretProtectionMessages_StateThatMcpResponsesRemainRedacted()
-	{
-		foreach (var file in Directory.GetFiles(GetLocalizationDirectory(), "*.json"))
-		{
-			using var document = JsonDocument.Parse(File.ReadAllText(file));
-			var message = document.RootElement
-				.GetProperty("Dialog.LiveContext.Secrets.Message")
-				.GetString();
-			Assert.Contains("MCP", message, StringComparison.Ordinal);
-		}
-	}
-
-	[Theory]
-	[InlineData(true, false, true, true)]
-	[InlineData(true, false, false, false)]
-	[InlineData(true, true, true, false)]
-	[InlineData(false, false, true, false)]
-	[InlineData(false, true, true, false)]
-	[InlineData(true, true, false, false)]
-	public void SecretProtectionConfirmation_OnlyGuardsLiveEnabledToDisabledTransition(
-		bool wasEnabled,
-		bool willBeEnabled,
-		bool hasLiveSession,
-		bool expected)
-	{
-		Assert.Equal(
-			expected,
-			MainWindow.ShouldConfirmSecretProtectionDisable(
-				wasEnabled,
-				willBeEnabled,
-				hasLiveSession));
 	}
 
 	private static LocalizationService CreateLocalization()
