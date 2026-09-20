@@ -95,29 +95,29 @@ internal sealed class ProjectTreeSelectionSnapshot
             checkedStateRecalculations);
     }
 
-	public IReadOnlyCollection<string>? CaptureProfileSelection(TreeNodeDescriptor fullTreeRoot)
-	{
-		ArgumentNullException.ThrowIfNull(fullTreeRoot);
-		if (!PathComparer.Default.Equals(ProjectPath, fullTreeRoot.FullPath))
-			return null;
+    public IReadOnlyCollection<string>? CaptureProfileSelection(TreeNodeDescriptor fullTreeRoot)
+    {
+        ArgumentNullException.ThrowIfNull(fullTreeRoot);
+        if (!PathComparer.Default.Equals(ProjectPath, fullTreeRoot.FullPath))
+            return null;
 
-		var root = new TreeNodeViewModel(
-			fullTreeRoot,
-			parent: null,
-			icon: null,
-			childrenFactory: BuildChildren);
-		_ = Restore(root);
-		return ProjectTreeUiState.CaptureProfileSelection(root);
+        var root = new TreeNodeViewModel(
+            fullTreeRoot,
+            parent: null,
+            icon: null,
+            childrenFactory: BuildChildren);
+        _ = Restore(root);
+        return ProjectTreeUiState.CaptureProfileSelection(root);
 
-		static IReadOnlyList<TreeNodeViewModel> BuildChildren(TreeNodeViewModel parent) =>
-			parent.Descriptor.Children
-				.Select(child => new TreeNodeViewModel(
-					child,
-					parent,
-					icon: null,
-					childrenFactory: BuildChildren))
-				.ToArray();
-	}
+        static IReadOnlyList<TreeNodeViewModel> BuildChildren(TreeNodeViewModel parent) =>
+            parent.Descriptor.Children
+                .Select(child => new TreeNodeViewModel(
+                    child,
+                    parent,
+                    icon: null,
+                    childrenFactory: BuildChildren))
+                .ToArray();
+    }
 
     private IReadOnlyCollection<string> BuildPathsToResolve()
     {
