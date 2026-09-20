@@ -301,8 +301,8 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => viewModel.AgentActivityVisible &&
-				      viewModel.TreeNodes.SelectMany(static root => root.Flatten())
-					      .All(static node => node.AgentDeliveryCount == 0),
+					  viewModel.TreeNodes.SelectMany(static root => root.Flatten())
+						  .All(static node => node.AgentDeliveryCount == 0),
 				"project reopen to clear the previous delivery trace");
 
 			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
@@ -315,7 +315,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				window,
 				() => viewModel.TreeNodes.SelectMany(static root => root.Flatten())
 					.Any(node => PathComparer.Default.Equals(node.FullPath, deliveredPath) &&
-					             node.AgentDeliveryCount == 1),
+								 node.AgentDeliveryCount == 1),
 				"a post-reopen call to create a new delivery trace");
 		}
 		finally
@@ -396,9 +396,9 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	public async Task JournalAndDeliveryTraceSnapshotsCoverEnglishRussianLightAndDark()
 	{
 		if (!string.Equals(
-			    Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_AGENT_JOURNAL"),
-			    "1",
-			    StringComparison.Ordinal))
+				Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_AGENT_JOURNAL"),
+				"1",
+				StringComparison.Ordinal))
 		{
 			return;
 		}
@@ -448,8 +448,8 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 						await UiTestDriver.WaitForConditionAsync(
 							window,
 							() => viewModel.AgentActivityVisible &&
-							      viewModel.TreeNodes.SelectMany(static root => root.Flatten())
-								      .Any(static node => node.AgentDeliveryCount > 0),
+								  viewModel.TreeNodes.SelectMany(static root => root.Flatten())
+									  .Any(static node => node.AgentDeliveryCount > 0),
 							"agent activity snapshot state");
 						foreach (var node in viewModel.TreeNodes.SelectMany(static root => root.Flatten()))
 							node.IsExpanded = true;
