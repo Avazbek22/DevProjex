@@ -40,24 +40,59 @@ internal sealed record TerminalAgentJournalSessionRow(AgentJournalSession Sessio
 {
 	public override string ToString()
 	{
-		var started = Session.StartedUtc.UtcDateTime.ToString(
-			"yyyy-MM-dd HH:mm:ss'Z'",
+		var started = Session.StartedUtc.ToLocalTime().ToString(
+			"yyyy-MM-dd HH:mm:ss",
 			CultureInfo.InvariantCulture);
 		var mode = Session.Mode.ToString().ToLowerInvariant();
-		var client = TerminalTextEscaping.EscapeSingleLine(Session.ClientName);
-		return $"{started} | {mode} | {client} | " +
-		       $"{Session.Totals.Calls.ToString("N0", CultureInfo.InvariantCulture)} calls | " +
-		       $"{Session.Totals.FilesDelivered.ToString("N0", CultureInfo.InvariantCulture)} files" +
-		       (Session.Totals.Errors > 0
-			       ? $" | {Session.Totals.Errors.ToString("N0", CultureInfo.InvariantCulture)} errors"
-			       : string.Empty);
+		var client = TerminalTextEscaping.EscapeSingleLine(
+			string.IsNullOrWhiteSpace(Session.ClientVersion)
+				? Session.ClientName
+				: Session.ClientName + " " + Session.ClientVersion);
+		var projects = TerminalTextEscaping.EscapeSingleLine(
+			string.Join(", ", Session.Roots.Select(static root => root.Name)));
+		var end = Session.EndedUtc ?? DateTimeOffset.UtcNow;
+		var duration = end > Session.StartedUtc ? end - Session.StartedUtc : TimeSpan.Zero;
+		var formattedDuration = duration.TotalHours >= 1
+			? duration.ToString("h\\:mm\\:ss", CultureInfo.InvariantCulture)
+			: duration.ToString("m\\:ss", CultureInfo.InvariantCulture);
+		return $"{TerminalTextEscaping.EscapeSingleLine(Session.Id)} | {started} | {client} | {mode} | " +
+		       $"{projects} | {Session.Totals.Calls.ToString(CultureInfo.InvariantCulture)} | " +
+		       $"{Session.Totals.ResultCharacters.ToString(CultureInfo.InvariantCulture)} | " +
+		       $"{Session.Totals.EstimatedTokens.ToString(CultureInfo.InvariantCulture)} | " +
+		       $"{Session.Totals.FilesDelivered.ToString(CultureInfo.InvariantCulture)} | " +
+		       $"{(Session.Totals.SecretsMasked + Session.Totals.PrivateDataMasked).ToString(CultureInfo.InvariantCulture)} | " +
+		       $"{formattedDuration} | {(Session.IsLive ? "yes" : "no")}";
 	}
 }
 
 internal static class TerminalAgentJournalPresentation
 {
+	internal const string SessionHeader =
+		"Session | Started | Client | Mode | Project | Calls | Characters | Tokens | Files | Masked | Duration | Live";
 	private const string CallHeader =
-		"UTC | Tool | Duration | Characters | Tokens | Files | Secrets | Private data | Result";
+		"# | UTC | Tool | Root | Revision | Duration ms | Characters | Tokens | Files | Masked | Notices | Error";
+
+	public static string BuildActivityIndicator(
+		TerminalAgentJournalSnapshot snapshot,
+		string? focusedTreePath,
+		bool compact)
+	{
+		ArgumentNullException.ThrowIfNull(snapshot);
+		ArgumentNullException.ThrowIfNull(snapshot.LatestCall);
+		var tool = TerminalTextEscaping.EscapeSingleLine(snapshot.LatestCall.Tool);
+		if (!string.IsNullOrWhiteSpace(focusedTreePath) &&
+			snapshot.DeliveredPathCalls.TryGetValue(focusedTreePath, out var deliveredCalls))
+		{
+			return compact
+				? $"A F:{deliveredCalls:N0} {tool} ({snapshot.TotalCalls:N0})"
+				: $"Agent activity: focused file delivered in {deliveredCalls:N0} " +
+				  (deliveredCalls == 1 ? "call" : "calls") +
+				  $"; {tool} ({snapshot.TotalCalls:N0} calls)";
+		}
+		return compact
+			? $"A {tool} ({snapshot.TotalCalls:N0})"
+			: $"Agent activity: {tool} ({snapshot.TotalCalls:N0} calls)";
+	}
 
 	public static string BuildCallDetails(
 		AgentJournalSession session,
@@ -79,24 +114,30 @@ internal static class TerminalAgentJournalPresentation
 
 		foreach (var call in calls.OrderBy(static call => call.Sequence))
 		{
-			output.Append(call.Utc.UtcDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
+			output.Append(call.Sequence.ToString(CultureInfo.InvariantCulture))
+				.Append(" | ")
+				.Append(call.Utc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture))
 				.Append(" | ")
 				.Append(TerminalTextEscaping.EscapeSingleLine(call.Tool))
 				.Append(" | ")
-				.Append(call.DurationMs.ToString("N0", CultureInfo.InvariantCulture))
-				.Append(" ms | ")
-				.Append(call.ResultCharacters.ToString("N0", CultureInfo.InvariantCulture))
+				.Append(call.RootIndex?.ToString(CultureInfo.InvariantCulture) ?? "-")
 				.Append(" | ")
-				.Append(call.EstimatedTokens.ToString("N0", CultureInfo.InvariantCulture))
+				.Append(call.Revision?.ToString(CultureInfo.InvariantCulture) ?? "-")
 				.Append(" | ")
-				.Append(call.FilesDelivered.ToString("N0", CultureInfo.InvariantCulture))
+				.Append(call.DurationMs.ToString(CultureInfo.InvariantCulture))
 				.Append(" | ")
-				.Append(call.SecretsMasked.ToString("N0", CultureInfo.InvariantCulture))
+				.Append(call.ResultCharacters.ToString(CultureInfo.InvariantCulture))
 				.Append(" | ")
-				.Append(call.PrivateDataMasked.ToString("N0", CultureInfo.InvariantCulture))
+				.Append(call.EstimatedTokens.ToString(CultureInfo.InvariantCulture))
+				.Append(" | ")
+				.Append(call.FilesDelivered.ToString(CultureInfo.InvariantCulture))
+				.Append(" | ")
+				.Append((call.SecretsMasked + call.PrivateDataMasked).ToString(CultureInfo.InvariantCulture))
+				.Append(" | ")
+				.Append(TerminalTextEscaping.EscapeSingleLine(string.Join(',', call.Notices)))
 				.Append(" | ")
 				.AppendLine(call.ErrorCode is null
-					? "ok"
+					? "-"
 					: TerminalTextEscaping.EscapeSingleLine(call.ErrorCode));
 		}
 

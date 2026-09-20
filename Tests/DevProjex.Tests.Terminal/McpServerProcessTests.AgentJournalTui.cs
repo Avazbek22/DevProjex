@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ProjectProfiles;
@@ -15,7 +16,8 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("project/global.json", "{}");
 		workspace.WriteFile("project/src/App.cs", "class App { }");
 		workspace.WriteFile("project/docs/Notes.md", "# Notes");
-		var exportPath = Path.Combine(workspace.Path, "tui-receipt.json");
+		var exportPath = Path.Combine(workspace.Path, "tui-receipt.md");
+		var cliExportPath = Path.Combine(workspace.Path, "cli-receipt.md");
 		string? dataRoot = null;
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			project,
@@ -80,7 +82,7 @@ public sealed partial class McpServerProcessTests
 				cancellationToken: TestContext.Current.CancellationToken);
 
 			await terminal.SendAsync(
-				$":mcp log export \"{exportPath}\" json last\r",
+				$":mcp log export \"{exportPath}\" markdown last\r",
 				TestContext.Current.CancellationToken);
 			await terminal.WaitForScreenAsync(
 				"Agent journal exported",
@@ -97,9 +99,14 @@ public sealed partial class McpServerProcessTests
 			var receipt = Assert.IsType<AgentJournalReceipt>(await store.ReadReceiptAsync(
 				session.Id,
 				TestContext.Current.CancellationToken));
-			var expected = new AgentJournalReceiptFormatter().FormatJson(receipt);
+			var cli = RunJournalExport(dataRoot!, project, session.Id, cliExportPath);
+			Assert.Equal(CommandLineExitCodes.Success, cli.ExitCode);
+			Assert.Empty(cli.StandardError);
 			Assert.Equal(
-				expected,
+				await File.ReadAllBytesAsync(cliExportPath, TestContext.Current.CancellationToken),
+				await File.ReadAllBytesAsync(exportPath, TestContext.Current.CancellationToken));
+			Assert.Equal(
+				new AgentJournalReceiptFormatter().FormatMarkdown(receipt),
 				await File.ReadAllTextAsync(exportPath, TestContext.Current.CancellationToken));
 		}
 
@@ -109,6 +116,36 @@ public sealed partial class McpServerProcessTests
 			await terminal.WaitForExitAsync(
 				timeout: TimeSpan.FromSeconds(30),
 				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	private static TerminalTestProcessResult RunJournalExport(
+		string dataRoot,
+		string project,
+		string sessionId,
+		string outputPath)
+	{
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("--language");
+		startInfo.ArgumentList.Add("en");
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("log");
+		startInfo.ArgumentList.Add(project);
+		startInfo.ArgumentList.Add("--session");
+		startInfo.ArgumentList.Add(sessionId);
+		startInfo.ArgumentList.Add("--format");
+		startInfo.ArgumentList.Add("markdown");
+		startInfo.ArgumentList.Add("--output");
+		startInfo.ArgumentList.Add(outputPath);
+		startInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
+		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = dataRoot;
+		return TerminalTestProcess.Run(startInfo);
 	}
 
 	private static async Task CallAsync(

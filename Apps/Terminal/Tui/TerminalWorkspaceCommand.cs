@@ -293,7 +293,8 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandVerb.Mcp,
 			TerminalWorkspaceCommandGrammar.McpConnection,
 			"mcp",
-			"mcp [client] [live|standard] | mcp connect <client> | mcp log ...",
+			"mcp [client] [live|standard] | mcp connect <client> | mcp log [session <id>|last] | " +
+			"mcp log export <path> [markdown|json] [session <id>|last] | mcp log clear",
 			"mcp codex live",
 			static (session, command) => session.ExecuteMcpCommand(command)),
 		Define(

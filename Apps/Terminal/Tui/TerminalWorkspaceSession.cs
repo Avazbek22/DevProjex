@@ -1692,18 +1692,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return null;
 		}
 
-		var tool = TerminalTextEscaping.EscapeSingleLine(latest.Tool);
-		var indicator = compact
-			? $"A {tool} ({snapshot.TotalCalls:N0})"
-			: $"Agent activity: {tool} ({snapshot.TotalCalls:N0} calls)";
-		if (!string.IsNullOrWhiteSpace(_selectedTreePath) &&
-			snapshot.DeliveredPathCalls.TryGetValue(_selectedTreePath, out var deliveredCalls))
-		{
-			indicator += compact
-				? $" F:{deliveredCalls:N0}"
-				: $"; focused file delivered in {deliveredCalls:N0} calls";
-		}
-		return indicator;
+		var focusedTreePath = CaptureCurrentTreePath();
+		return TerminalAgentJournalPresentation.BuildActivityIndicator(
+			snapshot,
+			focusedTreePath,
+			compact);
 	}
 
 	private CodeCompressionAvailabilitySnapshot? GetCurrentCompressionAvailability(

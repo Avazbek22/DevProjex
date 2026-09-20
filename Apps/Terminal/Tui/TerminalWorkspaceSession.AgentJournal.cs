@@ -221,10 +221,19 @@ internal sealed partial class TerminalWorkspaceSession
 		var list = new ListView
 		{
 			X = 1,
-			Y = 0,
+			Y = 1,
 			Width = Dim.Fill(1),
 			Height = Math.Clamp(rows.Count, 3, 8),
 			SchemeName = TerminalWorkspaceTheme.List
+		};
+		var sessionHeader = new Label
+		{
+			X = 1,
+			Y = 0,
+			Width = Dim.Fill(1),
+			Height = 1,
+			Text = TerminalAgentJournalPresentation.SessionHeader,
+			SchemeName = TerminalWorkspaceTheme.Base
 		};
 		list.SetSource(rows);
 		list.SelectedItem = 0;
@@ -251,7 +260,7 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 
 		list.ValueChanged += (_, _) => UpdateDetails();
-		dialog.Add(list, details);
+		dialog.Add(sessionHeader, list, details);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Close")));
 		UpdateDetails();
 		RunOverlay(dialog, list);
