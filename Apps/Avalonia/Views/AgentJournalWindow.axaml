@@ -1,0 +1,174 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:DevProjex.Avalonia.ViewModels"
+        x:Class="DevProjex.Avalonia.Views.AgentJournalWindow"
+        x:DataType="vm:AgentJournalWindowViewModel"
+        x:CompileBindings="True"
+        Name="JournalWindow"
+        Title="{Binding WindowTitle}"
+        Width="1500"
+        Height="720"
+        MinWidth="760"
+        MinHeight="500"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="avares://DevProjex/AppIcon/app.ico"
+        Background="{DynamicResource AppBackgroundBrush}">
+  <Window.Styles>
+    <Style Selector="Border.journal-card">
+      <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <Style Selector="Border.journal-header">
+      <Setter Property="Background" Value="{DynamicResource MenuPressedBrush}" />
+      <Setter Property="Padding" Value="8,6" />
+    </Style>
+    <Style Selector="TextBlock.journal-column">
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.journal-heading">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="ListBox.journal-list ListBoxItem">
+      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+  </Window.Styles>
+
+  <Grid RowDefinitions="Auto,2*,3*,Auto" Margin="14" RowSpacing="10">
+    <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+      <CheckBox Name="CurrentProjectOnlyCheckBox"
+                Content="{Binding CurrentProjectText}"
+                IsChecked="{Binding CurrentProjectOnly, Mode=TwoWay}"
+                IsEnabled="{Binding HasCurrentProject}"
+                AutomationProperties.Name="{Binding CurrentProjectText}"
+                IsCheckedChanged="OnProjectFilterChanged" />
+      <Button Grid.Column="1"
+              Name="ExportJournalButton"
+              Content="{Binding ExportText}"
+              IsEnabled="{Binding HasSelectedSession}"
+              AutomationProperties.Name="{Binding ExportText}"
+              Click="OnExport" />
+      <Button Grid.Column="2"
+              Name="ClearJournalButton"
+              Content="{Binding ClearText}"
+              AutomationProperties.Name="{Binding ClearText}"
+              Click="OnClear" />
+    </Grid>
+
+    <Border Grid.Row="1" Classes="journal-card">
+      <Grid RowDefinitions="Auto,*">
+        <Grid Grid.Row="0"
+              Classes="journal-header"
+              ColumnDefinitions="110,150,80,*,70,90,90,70,220,110"
+              ColumnSpacing="8">
+          <TextBlock Classes="journal-heading" Text="{Binding TimeText}" />
+          <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding ClientText}" />
+          <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ModeText}" />
+          <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ProjectText}" />
+          <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding CallsText}" />
+          <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding CharactersText}" />
+          <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding TokensText}" />
+          <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding FilesText}" />
+          <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding MaskedText}" />
+          <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding DurationText}" />
+        </Grid>
+        <ListBox Grid.Row="1"
+                 Name="JournalSessionsList"
+                 Classes="journal-list"
+                 ItemsSource="{Binding Sessions}"
+                 SelectedItem="{Binding SelectedSession, Mode=TwoWay}"
+                 SelectionChanged="OnSessionSelectionChanged"
+                 AutomationProperties.Name="{Binding WindowTitle}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:AgentJournalSessionViewModel">
+              <Grid ColumnDefinitions="110,150,80,*,70,90,90,70,220,110" ColumnSpacing="8">
+                <TextBlock Classes="journal-column" Text="{Binding Time}" />
+                <TextBlock Grid.Column="1" Classes="journal-column" Text="{Binding Client}" />
+                <Grid Grid.Column="2" ColumnDefinitions="Auto,*" ColumnSpacing="4">
+                  <TextBlock Text="●" IsVisible="{Binding IsLive}" Foreground="{DynamicResource AppAccentBrush}" />
+                  <TextBlock Grid.Column="1" Classes="journal-column" Text="{Binding Mode}" />
+                </Grid>
+                <TextBlock Grid.Column="3" Classes="journal-column" Text="{Binding Project}" />
+                <TextBlock Grid.Column="4" Classes="journal-column" Text="{Binding Calls}" />
+                <TextBlock Grid.Column="5" Classes="journal-column" Text="{Binding Characters}" />
+                <TextBlock Grid.Column="6" Classes="journal-column" Text="{Binding Tokens}" />
+                <TextBlock Grid.Column="7" Classes="journal-column" Text="{Binding Files}" />
+                <TextBlock Grid.Column="8" Classes="journal-column" Text="{Binding Masked}" />
+                <TextBlock Grid.Column="9" Classes="journal-column" Text="{Binding Duration}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Grid>
+    </Border>
+
+    <Border Grid.Row="2" Classes="journal-card">
+      <Grid RowDefinitions="Auto,*">
+        <Grid Grid.Row="0"
+              Classes="journal-header"
+              ColumnDefinitions="48,80,125,*,70,110,85,80,65,200,*,100"
+              ColumnSpacing="8">
+          <TextBlock Classes="journal-heading" Text="{Binding NumberText}" />
+          <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding TimeText}" />
+          <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ToolText}" />
+          <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ArgumentsText}" />
+          <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding RevisionText}" />
+          <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding DurationText}" />
+          <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding CharactersText}" />
+          <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding TokensText}" />
+          <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding FilesText}" />
+          <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding MaskedText}" />
+          <TextBlock Grid.Column="10" Classes="journal-heading" Text="{Binding NoticesText}" />
+          <TextBlock Grid.Column="11" Classes="journal-heading" Text="{Binding ErrorText}" />
+        </Grid>
+        <ListBox Grid.Row="1"
+                 Name="JournalCallsList"
+                 Classes="journal-list"
+                 ItemsSource="{Binding Calls}"
+                 AutomationProperties.Name="{Binding CallsText}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:AgentJournalCallViewModel">
+              <Grid ColumnDefinitions="48,80,125,*,70,110,85,80,65,200,*,100" ColumnSpacing="8">
+                <TextBlock Classes="journal-column" Text="{Binding Sequence}" />
+                <TextBlock Grid.Column="1" Classes="journal-column" Text="{Binding Time}" />
+                <TextBlock Grid.Column="2" Classes="journal-column" Text="{Binding Tool}" />
+                <TextBlock Grid.Column="3" Classes="journal-column" Text="{Binding Arguments}" />
+                <TextBlock Grid.Column="4" Classes="journal-column" Text="{Binding Revision}" />
+                <TextBlock Grid.Column="5" Classes="journal-column" Text="{Binding Duration}" />
+                <TextBlock Grid.Column="6" Classes="journal-column" Text="{Binding Characters}" />
+                <TextBlock Grid.Column="7" Classes="journal-column" Text="{Binding Tokens}" />
+                <TextBlock Grid.Column="8" Classes="journal-column" Text="{Binding Files}" />
+                <TextBlock Grid.Column="9" Classes="journal-column" Text="{Binding Masked}" />
+                <TextBlock Grid.Column="10" Classes="journal-column" Text="{Binding Notices}" />
+                <TextBlock Grid.Column="11" Classes="journal-column" Text="{Binding Error}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <TextBlock Name="JournalEmptyText"
+                   Text="{Binding EmptyText}"
+                   IsVisible="{Binding IsEmpty}"
+                   TextWrapping="Wrap"
+                   TextAlignment="Center"
+                   MaxWidth="520"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   Opacity="0.72" />
+      </Grid>
+    </Border>
+
+    <TextBlock Grid.Row="3"
+               Name="JournalFooterText"
+               Text="{Binding FooterText}"
+               TextWrapping="Wrap"
+               Opacity="0.78"
+               AutomationProperties.Name="{Binding FooterText}" />
+  </Grid>
+</Window>

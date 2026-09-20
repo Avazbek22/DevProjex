@@ -1035,9 +1035,12 @@ public partial class MainWindow
         _zipDownloadService = services.ZipDownloadService;
         _terminalCommandSetupService = services.TerminalCommandSetupService;
         _liveSessionRegistry = services.LiveSessionRegistry;
-		_desktopControlServerFactory = services.DesktopControlServerFactory;
+        _agentJournalReader = services.AgentJournalReader;
+        _agentJournalReceiptFormatter = services.AgentJournalReceiptFormatter;
+        _agentActivityPreferenceStore = services.AgentActivityPreferenceStore;
+        _desktopControlServerFactory = services.DesktopControlServerFactory;
         _sessionMetrics = services.SessionMetricsRecorder;
-		_backgroundTasks = new BackgroundTaskRegistry(
+        _backgroundTasks = new BackgroundTaskRegistry(
 			_windowLifetimeCts.Token,
 			ReportBackgroundTaskFailure);
 		_secretRedactionSession = services.SecretRedactionSession;
@@ -1440,13 +1443,19 @@ public partial class MainWindow
         Closed += OnWindowClosed;
         Activated += OnActivated;
         Deactivated += OnDeactivated;
-		StartLiveSessionObservation();
+        StartLiveSessionObservation();
+        InitializeAgentActivity();
 
         _elevationAttempted = startupOptions.ElevationAttempted ||
                               _desktopStartupRequest?.ElevationAttempted == true;
 
         // Store event handlers for proper unsubscription
-        _languageChangedHandler = (_, _) => ApplyLocalization();
+        _languageChangedHandler = (_, _) =>
+        {
+            ApplyLocalization();
+            if (_viewModel.IsAgentActivityEnabled)
+                RefreshAgentActivityPresentation();
+        };
         _localization.LanguageChanged += _languageChangedHandler;
 
         var app = global::Avalonia.Application.Current;

@@ -157,6 +157,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private int _applySettingsInProgress;
     private bool _hasPendingFilterSettingsChanges;
     private bool _statusMetricsVisible;
+    private bool _isAgentActivityEnabled;
+    private string _agentActivityText = string.Empty;
     private bool _statusPreviewSelectionVisible;
     private bool _statusProgressIsIndeterminate = true;
     private double _statusProgressValue;
@@ -516,9 +518,38 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-	public bool IsProjectLoadInProgress
-	{
-		get => _isProjectLoadInProgress;
+    public bool IsAgentActivityEnabled
+    {
+        get => _isAgentActivityEnabled;
+        set
+        {
+            if (_isAgentActivityEnabled == value) return;
+            _isAgentActivityEnabled = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(AgentActivityVisible));
+        }
+    }
+
+    public string AgentActivityText
+    {
+        get => _agentActivityText;
+        private set
+        {
+            if (string.Equals(_agentActivityText, value, StringComparison.Ordinal)) return;
+            _agentActivityText = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(AgentActivityVisible));
+        }
+    }
+
+    public bool AgentActivityVisible =>
+        IsAgentActivityEnabled && !IsCompactModeEffective && !string.IsNullOrEmpty(AgentActivityText);
+
+    public void SetAgentActivityText(string? text) => AgentActivityText = text ?? string.Empty;
+
+    public bool IsProjectLoadInProgress
+    {
+        get => _isProjectLoadInProgress;
 		internal set
 		{
 			if (_isProjectLoadInProgress == value)
@@ -1158,6 +1189,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(TreeItemSpacing));
         RaisePropertyChanged(nameof(TreeItemPadding));
         RaisePropertyChanged(nameof(TreeTextMargin));
+        RaisePropertyChanged(nameof(AgentActivityVisible));
     }
 
     // Methods for toggle behavior (click on active = disable)
@@ -1709,6 +1741,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuMcp { get; private set; } = string.Empty;
     public string MenuMcpLiveContext { get; private set; } = string.Empty;
     public string MenuMcpStandard { get; private set; } = string.Empty;
+    public string MenuMcpJournal { get; private set; } = string.Empty;
     public string MenuMcpDocumentation { get; private set; } = string.Empty;
     public string MenuMcpOpenClaudeCode { get; private set; } = string.Empty;
     public string MenuMcpOpenCodex { get; private set; } = string.Empty;
@@ -1730,6 +1763,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuViewMica { get; private set; } = string.Empty;
     public string MenuViewAcrylic { get; private set; } = string.Empty;
     public string MenuViewCompactMode { get; private set; } = string.Empty;
+    public string MenuViewAgentActivity { get; private set; } = string.Empty;
     public string MenuViewAnimations { get; private set; } = string.Empty;
     public string MenuViewTreeExpansionAnimation { get; private set; } = string.Empty;
     public string MenuViewStatusMetricsAnimation { get; private set; } = string.Empty;
@@ -1914,6 +1948,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuMcp = _localization["Menu.Mcp"];
         MenuMcpLiveContext = _localization["Menu.Mcp.LiveContext"];
         MenuMcpStandard = _localization["Menu.Mcp.Standard"];
+        MenuMcpJournal = _localization["Menu.Mcp.Journal"];
         MenuMcpDocumentation = _localization["Menu.Mcp.Documentation"];
         MenuMcpOpenClaudeCode = _localization["Menu.Mcp.OpenClaudeCode"];
         MenuMcpOpenCodex = _localization["Menu.Mcp.OpenCodex"];
@@ -1933,6 +1968,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuViewMica = _localization["Menu.View.Mica"];
         MenuViewAcrylic = _localization["Menu.View.Acrylic"];
         MenuViewCompactMode = _localization["Menu.View.CompactMode"];
+        MenuViewAgentActivity = _localization["Menu.View.AgentActivity"];
         MenuViewAnimations = _localization["Menu.View.Animations"];
         MenuViewTreeExpansionAnimation =
             _localization["Menu.View.TreeExpansionAnimation"];
@@ -2107,6 +2143,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuMcp));
         RaisePropertyChanged(nameof(MenuMcpLiveContext));
         RaisePropertyChanged(nameof(MenuMcpStandard));
+        RaisePropertyChanged(nameof(MenuMcpJournal));
         RaisePropertyChanged(nameof(MenuMcpDocumentation));
         RaisePropertyChanged(nameof(MenuMcpOpenClaudeCode));
         RaisePropertyChanged(nameof(MenuMcpOpenCodex));
@@ -2126,6 +2163,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuViewMica));
         RaisePropertyChanged(nameof(MenuViewAcrylic));
         RaisePropertyChanged(nameof(MenuViewCompactMode));
+        RaisePropertyChanged(nameof(MenuViewAgentActivity));
         RaisePropertyChanged(nameof(MenuViewAnimations));
         RaisePropertyChanged(nameof(MenuViewTreeExpansionAnimation));
         RaisePropertyChanged(nameof(MenuViewStatusMetricsAnimation));

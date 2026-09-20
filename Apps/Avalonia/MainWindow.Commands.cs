@@ -335,7 +335,7 @@ public partial class MainWindow
         var confirmed = await MessageDialog.ShowConfirmationAsync(
             this,
             _localization["Dialog.ResetData.Title"],
-            _localization["Dialog.ResetData.Message"],
+            $"{_localization["Dialog.ResetData.Message"]}\n\n{_localization["AgentJournal.Clear.AllMessage"]}",
             _localization["Dialog.ResetData.Confirm"],
             _localization["Dialog.Cancel"]);
 
@@ -347,6 +347,23 @@ public partial class MainWindow
 
         _treeSelectionProfiles.CancelPending();
         var result = _projectProfiles.ClearAllProfiles();
+        try
+        {
+            await _agentJournalReader.ClearAsync(
+                projectRoot: null,
+                _windowLifetimeCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) when (_windowLifetimeCts?.IsCancellationRequested == true)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceWarning("Agent journal could not be cleared: {0}", exception.GetType().Name);
+            _toastService.Show(_localization["Toast.Data.Reset.Failed"]);
+            e.Handled = true;
+            return;
+        }
         _toastService.Show(_localization[ResolveResetDataResultLocalizationKey(result)]);
         e.Handled = true;
     }
@@ -597,9 +614,10 @@ public partial class MainWindow
     private void SyncSearchAndFilterVisualStateFromFlags() =>
         _searchFilterController.SyncVisualState();
 
-	private Task PrepareSearchAndFilterForProjectLoadAsync()
-	{
-		_previewSearchController.ClearProjectState();
+    private Task PrepareSearchAndFilterForProjectLoadAsync()
+    {
+        ResetAgentActivityForProjectOpen();
+        _previewSearchController.ClearProjectState();
 		return _searchFilterController.PrepareForProjectLoadAsync();
 	}
 
