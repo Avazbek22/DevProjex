@@ -623,9 +623,10 @@ public sealed partial class McpServerProcessTests
 			IReadOnlyList<string>? arguments = null,
 			bool allowFileGitTransport = false,
 			IReadOnlyDictionary<string, string>? environment = null,
-			Implementation? clientInfo = null)
+			Implementation? clientInfo = null,
+			string? executable = null)
 		{
-			var startInfo = new ProcessStartInfo("dotnet")
+			var startInfo = new ProcessStartInfo(executable ?? "dotnet")
 			{
 				UseShellExecute = false,
 				RedirectStandardInput = true,
@@ -636,9 +637,12 @@ public sealed partial class McpServerProcessTests
 			};
 			// Only the terminal test host grants the local file transport that a synthetic origin
 			// needs; it serves the same MCP server from the same libraries as the shipped host.
-			startInfo.ArgumentList.Add(allowFileGitTransport
-				? PublishedApplicationLocator.FindTerminalTestHostAssembly()
-				: PublishedApplicationLocator.FindApplicationAssembly());
+			if (executable is null)
+			{
+				startInfo.ArgumentList.Add(allowFileGitTransport
+					? PublishedApplicationLocator.FindTerminalTestHostAssembly()
+					: PublishedApplicationLocator.FindApplicationAssembly());
+			}
 			if (allowFileGitTransport)
 				startInfo.ArgumentList.Add(TerminalTransportPolicyProtocol.TerminalCommandArgument);
 			startInfo.ArgumentList.Add("mcp");

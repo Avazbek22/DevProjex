@@ -207,6 +207,11 @@ jobs:
             }
           }
 
+          ./Scripts/Test-InstalledHeadlessArtifact.ps1 `
+            -Executable $binary `
+            -WorkingRoot (Join-Path $env:RUNNER_TEMP 'devprojex-nuget-command-smoke') `
+            -ExpectedVersion '${{ inputs.display_version }}'
+
           $sample = Join-Path $env:RUNNER_TEMP 'devprojex-headless-sample'
           New-Item -ItemType Directory -Path $sample -Force | Out-Null
           @'
@@ -238,11 +243,15 @@ jobs:
           }
           if ($IsWindows) {
             node Scripts/smoke-headless-mcp.mjs $env:ComSpec $sample /d /s /c $binary
+            if ($LASTEXITCODE -ne 0) { throw 'NuGet MCP read workflow failed.' }
+            node Scripts/smoke-headless-mcp.mjs $env:ComSpec $sample --live /d /s /c $binary
           }
           else {
             node Scripts/smoke-headless-mcp.mjs $binary $sample
+            if ($LASTEXITCODE -ne 0) { throw 'NuGet MCP read workflow failed.' }
+            node Scripts/smoke-headless-mcp.mjs $binary $sample --live
           }
-          if ($LASTEXITCODE -ne 0) { throw 'NuGet MCP initialize smoke failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet live MCP read workflow failed.' }
 
       - name: Smoke npx through a local registry
         shell: pwsh

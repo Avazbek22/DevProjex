@@ -1,69 +1,128 @@
 import { spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
-const [command, root, ...prefixArguments] = process.argv.slice(2);
+const [command, root, ...rawPrefixArguments] = process.argv.slice(2);
 if (!command || !root) {
-  throw new Error('Usage: node smoke-headless-mcp.mjs <command> <root> [prefix arguments...]');
+  throw new Error('Usage: node smoke-headless-mcp.mjs <command> <root> [--live] [prefix arguments...]');
 }
 
-const child = spawn(command, [...prefixArguments, 'mcp', '--root', root], {
-  shell: false,
-  windowsHide: true,
-  stdio: ['pipe', 'pipe', 'pipe'],
-});
-let stdout = '';
+const liveIndex = rawPrefixArguments.indexOf('--live');
+const live = liveIndex >= 0;
+const prefixArguments = rawPrefixArguments.filter((_, index) => index !== liveIndex);
+const probeRoot = join(root, 'McpSmoke');
+mkdirSync(probeRoot, { recursive: true });
+writeFileSync(join(probeRoot, 'Probe.txt'), 'artifactNeedle\n', 'utf8');
+writeFileSync(join(probeRoot, 'Large.txt'), `large-marker\n${'x'.repeat(70_000)}`, 'utf8');
+
+const child = spawn(
+  command,
+  [...prefixArguments, 'mcp', '--root', root, ...(live ? ['--live'] : [])],
+  {
+    shell: false,
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
 let stderr = '';
-let settled = false;
+let stdoutBuffer = '';
+let nextId = 1;
+const pending = new Map();
 
-const result = new Promise((resolve, reject) => {
-  const timeout = setTimeout(() => reject(new Error(`MCP initialize timed out. stderr: ${stderr}`)), 30_000);
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (chunk) => { stderr += chunk; });
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (chunk) => {
-    stdout += chunk;
-    for (const line of stdout.split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      try {
-        const message = JSON.parse(line);
-        if (message.id === 1 && message.result?.serverInfo) {
-          clearTimeout(timeout);
-          settled = true;
-          resolve(message.result);
-          return;
-        }
-      } catch {
-        // Wait for a complete JSON line.
-      }
+child.stderr.setEncoding('utf8');
+child.stderr.on('data', (chunk) => { stderr += chunk; });
+child.stdout.setEncoding('utf8');
+child.stdout.on('data', (chunk) => {
+  stdoutBuffer += chunk;
+  while (true) {
+    const newline = stdoutBuffer.indexOf('\n');
+    if (newline < 0) break;
+    const line = stdoutBuffer.slice(0, newline).trim();
+    stdoutBuffer = stdoutBuffer.slice(newline + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.id !== undefined && pending.has(message.id)) {
+      const request = pending.get(message.id);
+      pending.delete(message.id);
+      if (message.error) request.reject(new Error(JSON.stringify(message.error)));
+      else request.resolve(message.result);
     }
-  });
-  child.on('error', (error) => {
-    clearTimeout(timeout);
-    reject(error);
-  });
-  child.on('exit', (code) => {
-    if (!settled) {
-      clearTimeout(timeout);
-      reject(new Error(`MCP server exited ${code}. stderr: ${stderr}`));
-    }
-  });
+  }
+});
+child.on('error', (error) => {
+  for (const request of pending.values()) request.reject(error);
+  pending.clear();
+});
+child.on('exit', (code) => {
+  if (pending.size === 0) return;
+  const error = new Error(`MCP server exited ${code}. stderr: ${stderr}`);
+  for (const request of pending.values()) request.reject(error);
+  pending.clear();
 });
 
-child.stdin.write(`${JSON.stringify({
-  jsonrpc: '2.0',
-  id: 1,
-  method: 'initialize',
-  params: {
+function send(method, params) {
+  const id = nextId++;
+  const result = new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+  return result;
+}
+
+function notify(method, params = {}) {
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
+}
+
+async function callTool(name, args = {}) {
+  const result = await send('tools/call', { name, arguments: args });
+  if (result?.isError) throw new Error(`${name} failed: ${toolText(result)}`);
+  return result;
+}
+
+function toolText(result) {
+  return (result?.content ?? [])
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text)
+    .join('\n');
+}
+
+const timeout = setTimeout(() => {
+  child.kill();
+}, 60_000);
+
+try {
+  const initialized = await send('initialize', {
     protocolVersion: '2025-06-18',
     capabilities: {},
     clientInfo: { name: 'devprojex-headless-smoke', version: '1.0.0' },
-  },
-})}\n`);
+  });
+  if (!initialized?.protocolVersion) throw new Error('MCP initialize response has no protocolVersion.');
+  notify('notifications/initialized');
 
-try {
-  const initialized = await result;
-  if (!initialized.protocolVersion) throw new Error('MCP initialize response has no protocolVersion.');
-  process.stdout.write(`MCP initialize OK: ${initialized.serverInfo.name}\n`);
+  const listed = toolText(await callTool('list_projects'));
+  if (!listed.includes(basename(root))) {
+    throw new Error(`list_projects did not return the configured root: ${listed}`);
+  }
+  const tree = toolText(await callTool('get_tree', { format: 'text' }));
+  if (!tree.includes('Probe.txt')) throw new Error(`get_tree omitted the probe file: ${tree}`);
+  const search = toolText(await callTool('search_project', {
+    pattern: 'artifactNeedle',
+    context_lines: 0,
+    ignore_case: false,
+  }));
+  if (!search.includes('McpSmoke/Probe.txt')) throw new Error(`search_project missed the probe: ${search}`);
+  const file = toolText(await callTool('get_file', { path: 'McpSmoke/Probe.txt' }));
+  if (!file.includes('artifactNeedle')) throw new Error(`get_file missed the probe content: ${file}`);
+  const packed = toolText(await callTool('pack_context', {
+    paths: ['McpSmoke/Large.txt'],
+    view: 'content',
+    format: 'text',
+  }));
+  const packId = /Pack stored as '([^']+)'/.exec(packed)?.[1];
+  if (!packId) throw new Error(`pack_context did not store the large pack: ${packed}`);
+  const page = toolText(await callTool('read_pack', { pack_id: packId }));
+  if (!page.includes('large-marker')) throw new Error(`read_pack omitted the marker: ${page}`);
+
+  process.stdout.write(`MCP read workflow OK (${live ? 'live' : 'snapshot'}): ${initialized.serverInfo.name}\n`);
 } finally {
+  clearTimeout(timeout);
   child.stdin.end();
   child.kill();
 }
