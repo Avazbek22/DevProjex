@@ -16,6 +16,8 @@ public sealed class AgentJournalDocumentationContractTests
 		Assert.Contains("Terminal Workspace", server, StringComparison.Ordinal);
 		Assert.Contains("CLI", server, StringComparison.Ordinal);
 		Assert.Contains("context receipt", server, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("120", server, StringComparison.Ordinal);
+		Assert.Contains("0.036 ms", server, StringComparison.Ordinal);
 	}
 
 	[Fact]
