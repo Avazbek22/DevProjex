@@ -337,6 +337,53 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		}
 	}
 
+	[Theory]
+	[InlineData(CodeTransformKinds.Bodies, false)]
+	[InlineData(CodeTransformKinds.Bodies, true)]
+	[InlineData(CodeTransformKinds.Comments, false)]
+	[InlineData(CodeTransformKinds.Comments, true)]
+	[InlineData(CodeTransformKinds.BlankLines, false)]
+	[InlineData(CodeTransformKinds.BlankLines, true)]
+	public async Task CompressionOnlyConsumerReceivesEveryTransformedFile(
+		CodeTransformKinds transform,
+		bool withRedaction)
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("consumer-project");
+		var path = Path.Combine(projectRoot, "Sample.cs");
+		const string marker = "ConsumerMarkerSecret";
+		File.WriteAllText(path, $"sealed class {marker}\n{{\n    // comment\n\n    string Run() => \"value\";\n}}\n");
+		using var compression = CodeCompressionFactory.CreateSession();
+		using var secrets = withRedaction ? new SecretRedactionSession(new ExactValueDetector(marker)) : null;
+		var context = new ContentTransformationContext(
+			new CodeCompressionContext(projectRoot, compression, transform),
+			secrets is null ? null : new SecretRedactionContext(projectRoot, secrets));
+		var observed = new List<TransformedTextFile>();
+
+		await using var result = await new SecretRedactionOutputPreparer(new FileContentAnalyzer())
+			.ConsumeTransformedTextAsync(
+				context,
+				[path],
+				(file, _) =>
+				{
+					observed.Add(file);
+					return ValueTask.CompletedTask;
+				},
+				TestContext.Current.CancellationToken);
+
+		var file = Assert.Single(observed);
+		Assert.Equal(path, file.Path);
+		if (withRedaction)
+		{
+			Assert.DoesNotContain(marker, file.Content, StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[", file.Content, StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.Contains(marker, file.Content, StringComparison.Ordinal);
+		}
+	}
+
 	[Fact]
 	public void LocalProfileRoundTripsCompressionAsAnOptInTransformation()
 	{
@@ -1264,8 +1311,8 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			foreach (var value in values)
 			{
 				for (var offset = 0;
-				     (offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0;
-				     offset += value.Length)
+					 (offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0;
+					 offset += value.Length)
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 					findings.Add(new DetectedSecret(
@@ -1563,10 +1610,10 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			new("Sample", SourceRoot, true, false, "folder",
 				_files
 					.Where(path => includeReservedNotice ||
-					               !string.Equals(
-						               Path.GetFileName(path),
-						               ProjectCopyExportService.TransformationNoticeFileName,
-						               StringComparison.Ordinal))
+								   !string.Equals(
+									   Path.GetFileName(path),
+									   ProjectCopyExportService.TransformationNoticeFileName,
+									   StringComparison.Ordinal))
 					.Select(path => new TreeNodeDescriptor(
 					Path.GetFileName(path),
 					path,

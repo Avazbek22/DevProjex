@@ -40,6 +40,7 @@ internal sealed class McpProjectService(
 		serverExclusions ?? McpServerBaseline.DefaultExclusions;
 
 	public bool HidePrivateData => hidePrivateData;
+	internal static bool IsPrivateDataHidden(ProjectContextPlan plan) => plan.Selection.HidePrivateData == true;
 	internal long PlanMembershipBuildCount => Volatile.Read(ref planMembershipBuildCount);
 	internal long ProfileCatalogReadCount => Volatile.Read(ref profileCatalogReadCount);
 
@@ -912,7 +913,8 @@ internal sealed class McpProjectService(
 				services.RedactionSession,
 				SecretRedactionFeatureSelection.Resolve(
 					hideSecrets: true,
-					hidePrivateData)))!;
+					hidePrivateData: IsPrivateDataHidden(plan)),
+				PersistentMarksAreAuthoritative: liveContext is not null))!;
 	}
 
 	public string ResolveProtectedDocumentRoot(ProjectContextPlan plan)
@@ -1025,6 +1027,24 @@ internal sealed class McpProjectService(
 					McpErrorCodes.ProjectUnavailable,
 					$"{McpErrorCodes.ProjectUnavailable}: selection changed during packing; retry");
 			}
+		}
+	}
+
+	internal static void EnsureMeasuredSourcesCurrent(
+		PreparedSecretRedactionOutput measured,
+		IReadOnlyList<string> paths)
+	{
+		ArgumentNullException.ThrowIfNull(measured);
+		ArgumentNullException.ThrowIfNull(paths);
+		try
+		{
+			measured.EnsureSourceVersionsCurrent(paths);
+		}
+		catch (SecretDetectionException)
+		{
+			throw new McpToolException(
+				McpErrorCodes.ProjectUnavailable,
+				$"{McpErrorCodes.ProjectUnavailable}: project content changed after token admission; retry this call.");
 		}
 	}
 

@@ -48,7 +48,7 @@ internal static class McpEffectiveFilters
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var description =
-			$"git: {ProjectSelectionTokens.ToToken(plan.Selection)}; exclusions: {DescribeExclusions(plan.Selection.Exclusions)}";
+			$"git: {DescribeGitMode(plan.Selection)}; exclusions: {DescribeExclusions(plan.Selection.Exclusions)}";
 		return plan.FileSizeFilter is null
 			? description
 			: $"{description}; max_file_bytes: {plan.FileSizeFilter.MaximumFileBytes.ToString(CultureInfo.InvariantCulture)}";
@@ -67,8 +67,13 @@ internal static class McpEffectiveFilters
 	/// Footer for tree-bearing responses: the agent reads which filters were active next to
 	/// the tree they shaped, and learns who can change them.
 	/// </summary>
-	public static string Notice(ProjectContextPlan plan, bool agentExclusions) =>
-		$"[Effective filters] {Describe(plan)}. " + WideningHint(agentExclusions);
+	public static string Notice(ProjectContextPlan plan, bool agentExclusions)
+	{
+		var trusted = $"[Effective filters] {Describe(plan)}. " + WideningHint(agentExclusions);
+		return DescribeUntrustedGitScope(plan.Selection) is { } scope
+			? trusted + "\n" + McpSpotlight.Wrap(scope)
+			: trusted;
+	}
 
 	public static string WideningHint(bool agentExclusions) =>
 		agentExclusions
@@ -116,9 +121,19 @@ internal static class McpEffectiveFilters
 			return PathSelectionEmptyNotice;
 		if (isGitNarrowing)
 		{
-			return $"[Empty selection] stage=git-scope. Git reports no files for this scope (git: {ProjectSelectionTokens.ToToken(plan.Selection)}).";
+			return $"[Empty selection] stage=git-scope. Git reports no files for this scope (git: {DescribeGitMode(plan.Selection)}).";
 		}
 
 		return ProjectSelectionEmptyNotice;
 	}
+
+	private static string DescribeGitMode(ProjectSelectionSpec selection) =>
+		selection.GitMode == GitFilteringMode.Diff
+			? "diff"
+			: ProjectSelectionTokens.ToToken(selection);
+
+	private static string? DescribeUntrustedGitScope(ProjectSelectionSpec selection) =>
+		selection.GitMode == GitFilteringMode.Diff
+			? $"[Effective git scope] {ProjectSelectionTokens.ToToken(selection)}"
+			: null;
 }

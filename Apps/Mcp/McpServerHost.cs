@@ -155,7 +155,8 @@ public static class McpServerHost
 		IReadOnlySet<string>? remoteHosts = null,
 		McpToolSet toolSet = McpToolSet.Full,
 		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters,
-		bool live = false)
+		bool live = false,
+		Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
@@ -165,7 +166,7 @@ public static class McpServerHost
 		ValidateGitMode(gitMode);
 		ValidateExclusions(exclusions);
 
-		var rootRegistry = new McpRootRegistry(roots);
+		var rootRegistry = rootRegistryFactory?.Invoke(roots) ?? new McpRootRegistry(roots);
 		using var projectSources = new McpProjectSourceResolver(
 			rootRegistry,
 			allowRemote,

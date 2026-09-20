@@ -28,7 +28,8 @@ public static class SecretRedactionFeatureSelection
 public sealed record SecretRedactionContext(
 	string ProjectRoot,
 	SecretRedactionSession Session,
-	SecretRedactionFeatures Features = SecretRedactionFeatures.Secrets)
+	SecretRedactionFeatures Features = SecretRedactionFeatures.Secrets,
+	bool PersistentMarksAreAuthoritative = false)
 {
 	public Task EnsureWarmUpAsync(CancellationToken cancellationToken) =>
 		Session.EnsureWarmUpAsync(Features, cancellationToken);

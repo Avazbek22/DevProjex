@@ -6,10 +6,18 @@ public sealed class McpRootRegistry
 	private readonly IReadOnlyList<string> _configuredRoots;
 	private readonly Dictionary<string, List<string>> _lexicalRootsByPhysical;
 	private readonly Dictionary<string, List<string>> _rootsByName;
+	private readonly Func<string, bool, string> _physicalPathResolver;
 
-	public McpRootRegistry(IEnumerable<string> roots)
+	public McpRootRegistry(IEnumerable<string> roots) : this(roots, ResolvePhysicalExistingPath)
+	{
+	}
+
+	internal McpRootRegistry(
+		IEnumerable<string> roots,
+		Func<string, bool, string> physicalPathResolver)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
+		_physicalPathResolver = physicalPathResolver ?? throw new ArgumentNullException(nameof(physicalPathResolver));
 		var normalized = new List<string>();
 		var configured = new List<string>();
 		var lexicalRootsByPhysical = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -19,7 +27,7 @@ public sealed class McpRootRegistry
 				throw new ArgumentException("MCP roots cannot be empty.", nameof(roots));
 			var lexicalRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
 			var physical = McpRootJailFileStreamOpener.ResolveDirectoryPath(
-				ResolvePhysicalExistingPath(root, requireDirectory: true));
+				_physicalPathResolver(root, true));
 			if (!normalized.Contains(physical, StringComparer.Ordinal))
 			{
 				normalized.Add(physical);
@@ -84,7 +92,7 @@ public sealed class McpRootRegistry
 		// reject it. A root listed at startup stays addressable through the name lookup above and
 		// through the comparison here, both of them in memory.
 		if (McpRemoteProviderPath.ReachesRemoteProvider(requestedProject) &&
-		    !IsConfiguredRootSpelling(requestedProject))
+			!IsConfiguredRootSpelling(requestedProject))
 		{
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
@@ -98,7 +106,7 @@ public sealed class McpRootRegistry
 		try
 		{
 			physical = McpRootJailFileStreamOpener.ResolveDirectoryPath(
-				ResolvePhysicalExistingPath(requestedProject, requireDirectory: true));
+				_physicalPathResolver(requestedProject, true));
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
 		{
@@ -124,7 +132,7 @@ public sealed class McpRootRegistry
 		if (path is null)
 			return false;
 		return IsRecordedSpelling(path) ||
-		       (CanonicalSpelling(path) is { } canonical && IsRecordedSpelling(canonical));
+			   (CanonicalSpelling(path) is { } canonical && IsRecordedSpelling(canonical));
 	}
 
 	private bool IsRecordedSpelling(string spelling) =>
@@ -186,7 +194,7 @@ public sealed class McpRootRegistry
 		string physical;
 		try
 		{
-			physical = ResolvePhysicalExistingPath(candidate, requireDirectory);
+			physical = _physicalPathResolver(candidate, requireDirectory);
 		}
 		catch (FileNotFoundException)
 		{
@@ -250,14 +258,14 @@ public sealed class McpRootRegistry
 			throw new FileNotFoundException("Path was not found.", fullPath);
 
 		var pathRoot = Path.GetPathRoot(fullPath) ??
-		               throw new ArgumentException("The path has no filesystem root.", nameof(path));
+					   throw new ArgumentException("The path has no filesystem root.", nameof(path));
 		var current = Path.TrimEndingDirectorySeparator(pathRoot);
 		if (current.Length == 0)
 			current = pathRoot;
 		var relative = Path.GetRelativePath(pathRoot, fullPath);
 		foreach (var segment in relative.Split(
-			         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-			         StringSplitOptions.RemoveEmptyEntries))
+					 [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+					 StringSplitOptions.RemoveEmptyEntries))
 		{
 			var candidate = Path.Combine(current, segment);
 			// Each segment is opened in turn, so each one reports itself.
