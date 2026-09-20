@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 
 const [command, root, ...rawPrefixArguments] = process.argv.slice(2);
 if (!command || !root) {
@@ -10,13 +11,18 @@ if (!command || !root) {
 
 const liveIndex = rawPrefixArguments.indexOf('--live');
 const live = liveIndex >= 0;
-const prefixArguments = rawPrefixArguments.filter((_, index) => index !== liveIndex);
+const fixtureReadyIndex = rawPrefixArguments.indexOf('--fixture-ready');
+const fixtureReady = fixtureReadyIndex >= 0;
+const prefixArguments = rawPrefixArguments.filter(
+  (_, index) => index !== liveIndex && index !== fixtureReadyIndex);
 const probeRoot = join(root, 'McpSmoke');
-const processTemp = join(dirname(root), `.devprojex-mcp-smoke-${randomUUID()}`);
-mkdirSync(probeRoot, { recursive: true });
+const processTemp = join(tmpdir(), `.devprojex-mcp-smoke-${randomUUID()}`);
 mkdirSync(processTemp, { recursive: true });
-writeFileSync(join(probeRoot, 'Probe.txt'), 'artifactNeedle\n', 'utf8');
-writeFileSync(join(probeRoot, 'Large.txt'), `large-marker\n${'x'.repeat(70_000)}`, 'utf8');
+if (!fixtureReady) {
+  mkdirSync(probeRoot, { recursive: true });
+  writeFileSync(join(probeRoot, 'Probe.txt'), 'artifactNeedle\n', 'utf8');
+  writeFileSync(join(probeRoot, 'Large.txt'), `large-marker\n${'x'.repeat(70_000)}`, 'utf8');
+}
 
 const child = spawn(
   command,
