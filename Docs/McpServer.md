@@ -320,6 +320,30 @@ packs. When a step wants more than one file or more than one range, send one
 batched `get_file` call instead of several single reads; see
 [Search, then one batched read](#search-then-one-batched-read).
 
+## Agent journal
+
+Each MCP server session writes a local agent journal. A session records the client
+name and version, Standard or Live mode, configured roots, tool set, server version,
+start and end times, and aggregate counts. Each call records the tool name, a bounded
+set of address and mode arguments, profile revision, duration, result-character and
+estimated-token counts, delivered relative paths, masking counts, fixed notice codes,
+and an error code when the call failed. The journal does not store file contents,
+tool-result bodies, detected secret values, or masked private-data values.
+
+Journal files live under the per-user DevProjex state directory in its
+`agent-journal` folder. Retention keeps at most 200 sessions and removes entries
+older than 30 days. **Journal…** in the desktop MCP menu, `mcp log` in Terminal
+Workspace, and the CLI journal commands read the same records. Clearing can be
+limited to the current project; Terminal Workspace refuses to clear a journal
+while a Live session for that project is active.
+
+A context receipt is a Markdown or JSON snapshot of one session. It contains the
+session metadata, totals, delivered-path counts, and call rows, so a user can retain
+evidence of what context was made available without retaining the returned file
+bodies. GUI, Terminal Workspace, and CLI exports use the same receipt formatter.
+Per-call storage is queued after the result has been accounted for; journal file I/O
+is not awaited on the MCP tool response path.
+
 ## Security Model
 
 - Every local project is pinned when the process starts. With `--allow-remote`, a
@@ -1556,7 +1580,8 @@ winget and ZIP paths remain stable while their installation directory is unchang
 the macOS path remains stable while the `.app` bundle stays in place. AppImage
 configurations name the AppImage itself, so moving it requires reconnecting.
 
-The Desktop **MCP** menu contains **Live context ▸** and **Documentation**. The live
+The Desktop **MCP** menu contains **Live context ▸**, **Standard ▸**, **Journal…**,
+and **Documentation**. The live
 submenu contains **Open in Claude Code**, **Open in Codex**, **Open in Cursor**,
 **Open in VS Code**, and **Other clients…**; those five actions are enabled only with
 an open project.
@@ -1580,9 +1605,7 @@ the window states that the server is connected, names the launch failure, and pr
 a manual launch command to copy. A successful open shows no connection toast. The optional
 PATH prompt appears only after a successful connection: Windows can install or repair
 the command, while macOS and Linux show the shell-profile line to copy. Dismissing that
-prompt does not suppress future checks. The title shows the live client name or active-session count. If a
-live session exists, applying a transition from enabled to disabled secret protection
-requires confirmation; other settings and sessions in Standard mode do not add it.
+prompt does not suppress future checks. The title shows the live client name or active-session count.
 
 The CLI performs the connection by default:
 

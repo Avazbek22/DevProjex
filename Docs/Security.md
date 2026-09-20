@@ -42,6 +42,13 @@ Temporary redaction data is stored in private per-user directories. After an
 abnormal termination it can remain until a later DevProjex startup runs the
 scavenger, which removes stale directories once they are more than 24 hours old.
 
+The agent journal is local application state and never leaves the machine unless
+the user explicitly exports a context receipt. It contains session metadata,
+bounded arguments, paths, notices, and counts, but no project file contents,
+tool-result bodies, detected secret values, or masked private-data values. Journal
+recording does not change the telemetry-free guarantee: DevProjex does not transmit
+the journal or collect it as telemetry.
+
 ## What is not guaranteed
 
 - Secret detection is not proof that output is safe or clean. It covers reviewed
