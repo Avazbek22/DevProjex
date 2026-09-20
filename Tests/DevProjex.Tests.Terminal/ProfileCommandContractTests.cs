@@ -69,7 +69,7 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
-	public void TextProfileDistinguishesEmptySelectedPathsFromUnrestrictedCollections()
+	public void TextProfileDistinguishesEmptyCollectionsFromUnrestrictedCollections()
 	{
 		using var workspace = new TemporaryDirectory();
 		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
@@ -81,20 +81,44 @@ public sealed class ProfileCommandContractTests
 			SelectedPaths: []);
 
 		var text = handler.BuildText(selection);
-		var all = services.Localization["Terminal.Profile.All"];
-
 		Assert.Contains(
-			$"{services.Localization["Terminal.Analysis.Roots"]}: {all}",
+			$"{services.Localization["Terminal.Analysis.Roots"]}: none",
 			text,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			$"{services.Localization["Terminal.Analysis.Extensions"]}: {all}",
+			$"{services.Localization["Terminal.Analysis.Extensions"]}: none",
 			text,
 			StringComparison.Ordinal);
 		Assert.Contains(
 			$"{services.Localization["Terminal.Profile.SelectedPaths"]}: none",
 			text,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void TextProfileDistinguishesUnrestrictedCollectionsFromExplicitValues()
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var handler = new ProfileCommandHandler(services, new TestTerminalEnvironment());
+
+		var unrestricted = handler.BuildText(new ProjectSelectionSpec(
+			Roots: null,
+			Extensions: null,
+			SelectedPaths: null));
+		var explicitValues = handler.BuildText(new ProjectSelectionSpec(
+			Roots: ["src"],
+			Extensions: [".cs"],
+			SelectedPaths: ["src/App.cs"]));
+
+		var all = services.Localization["Terminal.Profile.All"];
+		Assert.Contains($"{services.Localization["Terminal.Analysis.Roots"]}: {all}", unrestricted);
+		Assert.Contains($"{services.Localization["Terminal.Analysis.Extensions"]}: {all}", unrestricted);
+		Assert.Contains($"{services.Localization["Terminal.Profile.SelectedPaths"]}: {all}", unrestricted);
+		Assert.Contains($"{services.Localization["Terminal.Analysis.Roots"]}: src", explicitValues);
+		Assert.Contains($"{services.Localization["Terminal.Analysis.Extensions"]}: .cs", explicitValues);
+		Assert.Contains($"{services.Localization["Terminal.Profile.SelectedPaths"]}: src/App.cs", explicitValues);
 	}
 
 	[Fact]
