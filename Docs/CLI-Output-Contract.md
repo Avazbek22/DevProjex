@@ -455,6 +455,43 @@ stderr.
 contains validation messages. The document is written before an invalid profile
 returns usage exit code `2`.
 
+## MCP Agent Journal JSON
+
+`mcp log [PROJECT] --format json` emits the stable session-list document:
+
+```json
+{
+  "schema": "devprojex-agent-journal",
+  "version": 1,
+  "sessions": []
+}
+```
+
+Each `sessions` item contains `id`, `startedUtc`, nullable `endedUtc`, `pid`,
+`processStartUtc`, `clientName`, `clientVersion`, `mode`, `roots`, `toolSet`,
+`serverVersion`, `hidePrivateData`, `totals`, and `isLive`. Each root contains
+`configuredPath` and `name`. `mode` is `Live` or `Standard`; `toolSet` is `Full`
+or `Reduced`. `totals` contains `calls`, `resultCharacters`, `estimatedTokens`,
+`filesDelivered`, `secretsMasked`, `privateDataMasked`, and `errors`.
+
+With `--session ID` or `--last`, JSON uses the same `schema` and `version` and
+adds one `receipt` object instead of `sessions`. The receipt contains `session`,
+`totals`, `deliveredPaths`, and `calls`. A delivered-path entry contains `path`
+and `calls`. A call contains `sequence`, `utc`, `tool`, nullable `rootIndex`,
+`arguments`, nullable `revision`, `durationMs`, `resultCharacters`,
+`estimatedTokens`, `filesDelivered`, `deliveredPaths`,
+`additionalDeliveredPaths`, `secretsMasked`, `privateDataMasked`, `notices`, and
+nullable `errorCode`. Arguments are a fixed safe subset and delivered paths are
+relative to a session root; source content and detected values never enter the
+document. At most 200 paths are present in one call, with the remainder counted
+by `additionalDeliveredPaths`.
+
+Text without a session selector is a human table. Text with a selector is a call
+table. Markdown with a selector is the shared context receipt. `--output` writes
+the selected representation without changing it and returns destination-conflict
+exit code `4` if the path already exists. `--clear` requires `--yes` and writes no
+JSON document.
+
 ## Doctor JSON
 
 `doctor --format json` emits the stable schema:

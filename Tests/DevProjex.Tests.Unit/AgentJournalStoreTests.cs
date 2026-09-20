@@ -94,28 +94,118 @@ public sealed class AgentJournalStoreTests
 	public void ReceiptFormatterProducesStableMarkdownAndJsonContracts()
 	{
 		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
-		var session = CreateSession("C:\\work", 42, started) with
+		var totals = new AgentJournalTotals(1, 120, 30, 1, 2, 3, 0);
+		var session = new AgentJournalSession(
+			"20260920-010203-42",
+			started,
+			started.AddSeconds(2),
+			42,
+			started.AddMinutes(-1),
+			"sample-client",
+			"1.2.3",
+			AgentJournalMode.Live,
+			[new AgentJournalRoot("project-root", "sample")],
+			AgentJournalToolSet.Reduced,
+			"5.2.0",
+			HidePrivateData: true,
+			totals,
+			IsLive: false);
+		var call = CreateCall(1) with
 		{
-			EndedUtc = started.AddSeconds(2),
-			Totals = new AgentJournalTotals(1, 120, 30, 1, 2, 3, 0)
+			Arguments = new Dictionary<string, string>(StringComparer.Ordinal)
+			{
+				["path"] = "src/Program.cs"
+			}
 		};
 		var receipt = new AgentJournalReceipt(
 			session,
-			session.Totals,
+			totals,
 			[new AgentJournalDeliveredPath("src/Program.cs", 1)],
-			[CreateCall(1)]);
+			[call]);
 		var formatter = new AgentJournalReceiptFormatter();
 
 		var markdown = formatter.FormatMarkdown(receipt);
 		var json = formatter.FormatJson(receipt);
 
-		Assert.Contains("# DevProjex agent journal 20260920-010203-42", markdown, StringComparison.Ordinal);
-		Assert.Contains("|1|120|30|1|2|3|0|", markdown, StringComparison.Ordinal);
-		Assert.Contains("|src/Program.cs|1|", markdown, StringComparison.Ordinal);
-		using var document = JsonDocument.Parse(json);
-		Assert.Equal("devprojex-agent-journal", document.RootElement.GetProperty("schema").GetString());
-		Assert.Equal(1, document.RootElement.GetProperty("version").GetInt32());
-		Assert.Equal(30, document.RootElement.GetProperty("receipt").GetProperty("totals").GetProperty("estimatedTokens").GetInt64());
+		var expectedMarkdown = string.Join(Environment.NewLine,
+		[
+			"# DevProjex agent journal 20260920-010203-42",
+			"",
+			"- Started: 2026-09-20T01:02:03.0000000Z",
+			"- Ended: 2026-09-20T01:02:05.0000000Z",
+			"- Client: sample-client 1.2.3",
+			"- Mode: Live",
+			"- Tool set: Reduced",
+			"",
+			"## Totals",
+			"",
+			"| Calls | Characters | Estimated tokens | Files | Secrets masked | Private data masked | Errors |",
+			"|---:|---:|---:|---:|---:|---:|---:|",
+			"|1|120|30|1|2|3|0|",
+			"",
+			"## Delivered paths",
+			"",
+			"| Path | Calls |",
+			"|---|---:|",
+			"|src/Program.cs|1|",
+			"",
+			"## Calls",
+			"",
+			"| # | UTC | Tool | Duration ms | Characters | Tokens | Files | Error |",
+			"|---:|---|---|---:|---:|---:|---:|---|",
+			"|1|2026-09-20T01:02:04.0000000Z|get_file|10|120|30|1||",
+			""
+		]);
+		const string expectedJson = """
+			{
+			  "schema": "devprojex-agent-journal",
+			  "version": 1,
+			  "receipt": {
+			    "session": {
+			      "id": "20260920-010203-42",
+			      "startedUtc": "2026-09-20T01:02:03+00:00",
+			      "endedUtc": "2026-09-20T01:02:05+00:00",
+			      "pid": 42,
+			      "processStartUtc": "2026-09-20T01:01:03+00:00",
+			      "clientName": "sample-client",
+			      "clientVersion": "1.2.3",
+			      "mode": "Live",
+			      "roots": [{ "configuredPath": "project-root", "name": "sample" }],
+			      "toolSet": "Reduced",
+			      "serverVersion": "5.2.0",
+			      "hidePrivateData": true,
+			      "totals": { "calls": 1, "resultCharacters": 120, "estimatedTokens": 30, "filesDelivered": 1, "secretsMasked": 2, "privateDataMasked": 3, "errors": 0 },
+			      "isLive": false
+			    },
+			    "totals": { "calls": 1, "resultCharacters": 120, "estimatedTokens": 30, "filesDelivered": 1, "secretsMasked": 2, "privateDataMasked": 3, "errors": 0 },
+			    "deliveredPaths": [{ "path": "src/Program.cs", "calls": 1 }],
+			    "calls": [{
+			      "sequence": 1,
+			      "utc": "2026-09-20T01:02:04+00:00",
+			      "tool": "get_file",
+			      "rootIndex": 0,
+			      "arguments": { "path": "src/Program.cs" },
+			      "revision": 2,
+			      "durationMs": 10,
+			      "resultCharacters": 120,
+			      "estimatedTokens": 30,
+			      "filesDelivered": 1,
+			      "deliveredPaths": ["src/Program.cs"],
+			      "additionalDeliveredPaths": 0,
+			      "secretsMasked": 2,
+			      "privateDataMasked": 3,
+			      "notices": ["outside-selection"],
+			      "errorCode": null
+			    }]
+			  }
+			}
+			""";
+		Assert.Equal(expectedMarkdown, markdown);
+		using var expectedDocument = JsonDocument.Parse(expectedJson);
+		using var actualDocument = JsonDocument.Parse(json);
+		Assert.Equal(
+			JsonSerializer.Serialize(expectedDocument.RootElement),
+			JsonSerializer.Serialize(actualDocument.RootElement));
 	}
 
 	private static AgentJournalStore CreateStore(
