@@ -12,6 +12,7 @@
         MinHeight="500"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
+        TransparencyLevelHint="None"
         Icon="avares://DevProjex/AppIcon/app.ico"
         Background="{DynamicResource AppBackgroundBrush}">
   <Window.Styles>
@@ -41,7 +42,11 @@
     </Style>
   </Window.Styles>
 
-  <Grid RowDefinitions="Auto,2*,3*,Auto" Margin="14" RowSpacing="10">
+  <Grid Name="JournalSurface"
+        RowDefinitions="Auto,2*,3*,Auto"
+        Margin="14"
+        RowSpacing="10"
+        Background="{DynamicResource AppBackgroundBrush}">
     <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
       <CheckBox Name="CurrentProjectOnlyCheckBox"
                 Content="{Binding CurrentProjectText}"
@@ -62,33 +67,33 @@
               Click="OnClear" />
     </Grid>
 
-    <Border Grid.Row="1" Classes="journal-card">
+    <Border Grid.Row="1" Name="JournalSessionsSurface" Classes="journal-card">
       <Grid RowDefinitions="Auto,*">
-        <Grid Grid.Row="0"
-              Classes="journal-header"
-              ColumnDefinitions="110,150,80,*,70,90,90,70,220,110"
-              ColumnSpacing="8">
-          <TextBlock Classes="journal-heading" Text="{Binding TimeText}" />
-          <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding ClientText}" />
-          <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ModeText}" />
-          <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ProjectText}" />
-          <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding CallsText}" />
-          <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding CharactersText}" />
-          <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding TokensText}" />
-          <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding FilesText}" />
-          <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding MaskedText}" />
-          <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding DurationText}" />
-        </Grid>
+        <Border Grid.Row="0" Name="JournalSessionsHeader" Classes="journal-header">
+          <Grid ColumnDefinitions="110,150,80,*,70,90,90,70,140,110" ColumnSpacing="8">
+            <TextBlock Classes="journal-heading" Text="{Binding TimeText}" />
+            <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding ClientText}" />
+            <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ModeText}" />
+            <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ProjectText}" />
+            <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding CallsText}" />
+            <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding CharactersText}" />
+            <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding TokensText}" />
+            <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding FilesText}" />
+            <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding MaskedText}" />
+            <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding DurationText}" />
+          </Grid>
+        </Border>
         <ListBox Grid.Row="1"
                  Name="JournalSessionsList"
                  Classes="journal-list"
+                 Background="{DynamicResource AppPanelBrush}"
                  ItemsSource="{Binding Sessions}"
                  SelectedItem="{Binding SelectedSession, Mode=TwoWay}"
                  SelectionChanged="OnSessionSelectionChanged"
                  AutomationProperties.Name="{Binding WindowTitle}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:AgentJournalSessionViewModel">
-              <Grid ColumnDefinitions="110,150,80,*,70,90,90,70,220,110" ColumnSpacing="8">
+              <Grid ColumnDefinitions="110,150,80,*,70,90,90,70,140,110" ColumnSpacing="8">
                 <TextBlock Classes="journal-column" Text="{Binding Time}" />
                 <TextBlock Grid.Column="1" Classes="journal-column" Text="{Binding Client}" />
                 <Grid Grid.Column="2" ColumnDefinitions="Auto,*" ColumnSpacing="4">
@@ -100,7 +105,10 @@
                 <TextBlock Grid.Column="5" Classes="journal-column" Text="{Binding Characters}" />
                 <TextBlock Grid.Column="6" Classes="journal-column" Text="{Binding Tokens}" />
                 <TextBlock Grid.Column="7" Classes="journal-column" Text="{Binding Files}" />
-                <TextBlock Grid.Column="8" Classes="journal-column" Text="{Binding Masked}" />
+                <TextBlock Grid.Column="8"
+                           Classes="journal-column"
+                           Text="{Binding MaskedCompact}"
+                           ToolTip.Tip="{Binding Masked}" />
                 <TextBlock Grid.Column="9" Classes="journal-column" Text="{Binding Duration}" />
               </Grid>
             </DataTemplate>
@@ -109,33 +117,33 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="2" Classes="journal-card">
+    <Border Grid.Row="2" Name="JournalCallsSurface" Classes="journal-card">
       <Grid RowDefinitions="Auto,*">
-        <Grid Grid.Row="0"
-              Classes="journal-header"
-              ColumnDefinitions="48,80,125,*,70,110,85,80,65,200,*,100"
-              ColumnSpacing="8">
-          <TextBlock Classes="journal-heading" Text="{Binding NumberText}" />
-          <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding TimeText}" />
-          <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ToolText}" />
-          <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ArgumentsText}" />
-          <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding RevisionText}" />
-          <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding DurationText}" />
-          <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding CharactersText}" />
-          <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding TokensText}" />
-          <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding FilesText}" />
-          <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding MaskedText}" />
-          <TextBlock Grid.Column="10" Classes="journal-heading" Text="{Binding NoticesText}" />
-          <TextBlock Grid.Column="11" Classes="journal-heading" Text="{Binding ErrorText}" />
-        </Grid>
+        <Border Grid.Row="0" Name="JournalCallsHeader" Classes="journal-header">
+          <Grid ColumnDefinitions="48,80,125,*,70,110,85,80,65,140,*,100" ColumnSpacing="8">
+            <TextBlock Classes="journal-heading" Text="{Binding NumberText}" />
+            <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding TimeText}" />
+            <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ToolText}" />
+            <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ArgumentsText}" />
+            <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding RevisionText}" />
+            <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding DurationText}" />
+            <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding CharactersText}" />
+            <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding TokensText}" />
+            <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding FilesText}" />
+            <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding MaskedText}" />
+            <TextBlock Grid.Column="10" Classes="journal-heading" Text="{Binding NoticesText}" />
+            <TextBlock Grid.Column="11" Classes="journal-heading" Text="{Binding ErrorText}" />
+          </Grid>
+        </Border>
         <ListBox Grid.Row="1"
                  Name="JournalCallsList"
                  Classes="journal-list"
+                 Background="{DynamicResource AppPanelBrush}"
                  ItemsSource="{Binding Calls}"
                  AutomationProperties.Name="{Binding CallsText}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:AgentJournalCallViewModel">
-              <Grid ColumnDefinitions="48,80,125,*,70,110,85,80,65,200,*,100" ColumnSpacing="8">
+              <Grid ColumnDefinitions="48,80,125,*,70,110,85,80,65,140,*,100" ColumnSpacing="8">
                 <TextBlock Classes="journal-column" Text="{Binding Sequence}" />
                 <TextBlock Grid.Column="1" Classes="journal-column" Text="{Binding Time}" />
                 <TextBlock Grid.Column="2" Classes="journal-column" Text="{Binding Tool}" />
@@ -145,14 +153,18 @@
                 <TextBlock Grid.Column="6" Classes="journal-column" Text="{Binding Characters}" />
                 <TextBlock Grid.Column="7" Classes="journal-column" Text="{Binding Tokens}" />
                 <TextBlock Grid.Column="8" Classes="journal-column" Text="{Binding Files}" />
-                <TextBlock Grid.Column="9" Classes="journal-column" Text="{Binding Masked}" />
+                <TextBlock Grid.Column="9"
+                           Classes="journal-column"
+                           Text="{Binding MaskedCompact}"
+                           ToolTip.Tip="{Binding Masked}" />
                 <TextBlock Grid.Column="10" Classes="journal-column" Text="{Binding Notices}" />
                 <TextBlock Grid.Column="11" Classes="journal-column" Text="{Binding Error}" />
               </Grid>
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
-        <TextBlock Name="JournalEmptyText"
+        <TextBlock Grid.Row="1"
+                   Name="JournalEmptyText"
                    Text="{Binding EmptyText}"
                    IsVisible="{Binding IsEmpty}"
                    TextWrapping="Wrap"
@@ -164,11 +176,18 @@
       </Grid>
     </Border>
 
-    <TextBlock Grid.Row="3"
-               Name="JournalFooterText"
-               Text="{Binding FooterText}"
-               TextWrapping="Wrap"
-               Opacity="0.78"
-               AutomationProperties.Name="{Binding FooterText}" />
+    <Border Grid.Row="3"
+            Name="JournalFooterSurface"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="6"
+            Padding="8,5">
+      <TextBlock Name="JournalFooterText"
+                 Text="{Binding FooterText}"
+                 TextWrapping="Wrap"
+                 Opacity="0.78"
+                 AutomationProperties.Name="{Binding FooterText}" />
+    </Border>
   </Grid>
 </Window>

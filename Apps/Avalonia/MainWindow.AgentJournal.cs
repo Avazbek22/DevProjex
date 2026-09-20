@@ -237,15 +237,18 @@ public partial class MainWindow
             " · ",
             NormalizeClientName(session.ClientName),
             tool,
-            _localization.Format(
+            AgentActivityPresentation.FormatCount(
+                _localization,
                 "AgentActivity.Status.Files",
-                AgentJournalPresentation.FormatNumber(latestCall.FilesDelivered)),
-            _localization.Format(
+                latestCall.FilesDelivered),
+            AgentActivityPresentation.FormatCount(
+                _localization,
                 "AgentActivity.Status.Tokens",
-                AgentJournalPresentation.FormatNumber(session.Totals.EstimatedTokens)),
-            _localization.Format(
+                session.Totals.EstimatedTokens),
+            AgentActivityPresentation.FormatCount(
+                _localization,
                 "AgentActivity.Status.Calls",
-                AgentJournalPresentation.FormatNumber(session.Totals.Calls)));
+                session.Totals.Calls));
     }
 
     private static string TryResolveActivityArgument(IReadOnlyDictionary<string, string> arguments)

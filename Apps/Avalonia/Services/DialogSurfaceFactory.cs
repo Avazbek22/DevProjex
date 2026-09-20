@@ -3,7 +3,8 @@ namespace DevProjex.Avalonia.Services;
 internal sealed record DialogSurfaceBrushes(
     IBrush? Background,
     IBrush? Panel,
-    IBrush? Border);
+    IBrush? Border,
+    IBrush? Header = null);
 
 internal static class DialogSurfaceFactory
 {
@@ -25,6 +26,7 @@ internal static class DialogSurfaceFactory
         var appBackground = TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush");
         var appPanel = TryGetThemeBrush(app, themeVariant, "AppPanelBrush");
         var appBorder = TryGetThemeBrush(app, themeVariant, "AppBorderBrush");
+        var menuPressed = TryGetThemeBrush(app, themeVariant, "MenuPressedBrush");
 
         return new DialogSurfaceBrushes(
             TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor") ??
@@ -32,7 +34,8 @@ internal static class DialogSurfaceFactory
             owner?.Background ??
             CreateDefaultFallbackBrush(themeVariant),
             TryGetThemeColorBrush(app, themeVariant, "AppPanelColor") ?? appPanel,
-            TryGetThemeColorBrush(app, themeVariant, "AppBorderColor") ?? appBorder);
+            TryGetThemeColorBrush(app, themeVariant, "AppBorderColor") ?? appBorder,
+            TryGetThemeColorBrush(app, themeVariant, "MenuPressedColor") ?? menuPressed);
     }
 
     public static Window CreateWindow(
@@ -51,12 +54,10 @@ internal static class DialogSurfaceFactory
             Width = width,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
-            RequestedThemeVariant = themeVariant,
-            WindowDecorations = WindowDecorations.Full,
-            TransparencyLevelHint = DialogTransparencyHints,
-            Background = brushes.Background ?? Brushes.Transparent,
             Content = content
         };
+
+        ApplyWindowSurface(dialog, themeVariant, brushes);
 
         if (height is not null)
             dialog.Height = height.Value;
@@ -68,8 +69,23 @@ internal static class DialogSurfaceFactory
         if (minHeight is not null)
             dialog.MinHeight = minHeight.Value;
 
-        ApplyResources(dialog, brushes);
         return dialog;
+    }
+
+    public static void ApplyWindowSurface(
+        Window window,
+        ThemeVariant themeVariant,
+        DialogSurfaceBrushes brushes)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(themeVariant);
+        ArgumentNullException.ThrowIfNull(brushes);
+
+        window.RequestedThemeVariant = themeVariant;
+        window.WindowDecorations = WindowDecorations.Full;
+        window.TransparencyLevelHint = DialogTransparencyHints;
+        window.Background = brushes.Background ?? CreateDefaultFallbackBrush(themeVariant);
+        ApplyResources(window, brushes);
     }
 
     private static void ApplyResources(Window dialog, DialogSurfaceBrushes brushes)
@@ -80,6 +96,8 @@ internal static class DialogSurfaceFactory
             dialog.Resources["AppPanelBrush"] = brushes.Panel;
         if (brushes.Border is not null)
             dialog.Resources["AppBorderBrush"] = brushes.Border;
+        if ((brushes.Header ?? brushes.Panel) is { } header)
+            dialog.Resources["MenuPressedBrush"] = header;
     }
 
     private static IBrush? TryGetThemeBrush(global::Avalonia.Application? app, ThemeVariant themeVariant, string key)

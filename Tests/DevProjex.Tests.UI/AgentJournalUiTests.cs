@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -52,6 +53,13 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				() => journal.ViewModel.Sessions.Count == 2 && journal.ViewModel.Calls.Count == 1,
 				"journal fixture to load");
 			Assert.Contains("outside selection", journal.ViewModel.Calls[0].Notices, StringComparison.Ordinal);
+			Assert.Equal("sec. 2 · priv. 1", journal.ViewModel.Sessions[0].MaskedCompact);
+			Assert.Equal("2 secrets · 1 private", journal.ViewModel.Sessions[0].Masked);
+			var sessionsList = Assert.IsType<ListBox>(journal.FindControl<ListBox>("JournalSessionsList"));
+			var compactMask = Assert.Single(
+				sessionsList.GetVisualDescendants().OfType<TextBlock>(),
+				static text => string.Equals(text.Text, "sec. 2 · priv. 1", StringComparison.Ordinal));
+			Assert.Equal("2 secrets · 1 private", ToolTip.GetTip(compactMask));
 			Assert.Contains(
 				$"≈{AgentJournalPresentation.FormatNumber(1_200)} tokens",
 				journal.ViewModel.FooterText,
@@ -70,6 +78,94 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		finally
 		{
 			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalUsesAnOpaqueOwnerSurfaceAndTracksThemeChanges()
+	{
+		var application = Assert.IsType<App>(global::Avalonia.Application.Current);
+		var originalTheme = application.RequestedThemeVariant;
+		application.RequestedThemeVariant = ThemeVariant.Light;
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with
+			{
+				AgentJournalReader = new RecordingJournalReader(fixture.Sessions, fixture.Calls)
+			});
+
+		try
+		{
+			application.RequestedThemeVariant = ThemeVariant.Light;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			var journalItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "McpJournalMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(journalItem);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.OfType<AgentJournalWindow>().Count() == 1,
+				"opaque agent journal window");
+			var journal = Assert.Single(window.OwnedWindows.OfType<AgentJournalWindow>());
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+
+			AssertOpaqueJournalSurface(journal);
+			var lightBackground = Assert.IsAssignableFrom<ISolidColorBrush>(journal.Background).Color;
+
+			application.RequestedThemeVariant = ThemeVariant.Dark;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => journal.RequestedThemeVariant == ThemeVariant.Dark &&
+					  journal.Background is ISolidColorBrush background &&
+					  background.Color != lightBackground,
+				"agent journal brushes to follow the dark theme");
+			AssertOpaqueJournalSurface(journal);
+		}
+		finally
+		{
+			application.RequestedThemeVariant = originalTheme;
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public void McpConnectionDialogsUseTheSameOpaqueSurfaceContract()
+	{
+		var owner = new Window { Background = Brushes.White };
+		var manual = McpManualConfigurationDialog.CreateDialogWindow(
+			owner,
+			new McpManualConfigurationDialogContent(
+				"Configuration",
+				"Reason",
+				"JSON",
+				"{}",
+				"Paths",
+				[],
+				"Copy",
+				"Close"));
+		var completion = new TaskCompletionSource<McpConnectionPathAction>(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var path = McpConnectionPathDialog.CreateDialogWindow(
+			owner,
+			new McpConnectionPathDialogContent(
+				"PATH",
+				"Body",
+				string.Empty,
+				"Copy",
+				"Set up",
+				"Close",
+				McpConnectionPathAction.None),
+			completion);
+
+		try
+		{
+			AssertOpaqueWindow(manual);
+			AssertOpaqueWindow(path);
+		}
+		finally
+		{
+			manual.Close();
+			path.Close();
+			owner.Close();
 		}
 	}
 
@@ -254,11 +350,24 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			"AgentJournal.Title",
 			"AgentJournal.Empty",
 			"AgentJournal.Footer",
+			"AgentJournal.Masked.Short",
 			"AgentJournal.Notice.OutsideSelection",
 			"AgentJournal.Notice.Unavailable",
 			"AgentActivity.Status.Files",
 			"AgentActivity.Status.Tokens",
 			"AgentActivity.Status.Calls",
+			"AgentActivity.Status.Files.One",
+			"AgentActivity.Status.Files.Few",
+			"AgentActivity.Status.Files.Many",
+			"AgentActivity.Status.Files.Other",
+			"AgentActivity.Status.Tokens.One",
+			"AgentActivity.Status.Tokens.Few",
+			"AgentActivity.Status.Tokens.Many",
+			"AgentActivity.Status.Tokens.Other",
+			"AgentActivity.Status.Calls.One",
+			"AgentActivity.Status.Calls.Few",
+			"AgentActivity.Status.Calls.Many",
+			"AgentActivity.Status.Calls.Other",
 			"AgentActivity.Tree.ToolTip"
 		};
 		var catalog = new JsonLocalizationCatalog();
@@ -271,6 +380,29 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				Assert.False(string.IsNullOrWhiteSpace(value), $"Empty {language}/{key}.");
 			});
 		}
+	}
+
+	[Fact]
+	public void RussianAgentActivityUsesLocalizedPluralFormsAndCompactNumbers()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+
+		Assert.Equal("2 файла", AgentActivityPresentation.FormatCount(
+			localization,
+			"AgentActivity.Status.Files",
+			2));
+		Assert.Equal("5 файлов", AgentActivityPresentation.FormatCount(
+			localization,
+			"AgentActivity.Status.Files",
+			5));
+		Assert.Equal("21 файл", AgentActivityPresentation.FormatCount(
+			localization,
+			"AgentActivity.Status.Files",
+			21));
+		Assert.Equal("1,2K токенов", AgentActivityPresentation.FormatCount(
+			localization,
+			"AgentActivity.Status.Tokens",
+			1_200));
 	}
 
 	[AvaloniaFact]
@@ -503,6 +635,33 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			Assert.NotNull(bitmap);
 			bitmap.Save(path, PngBitmapEncoderOptions.Default);
 		}, DispatcherPriority.Render);
+	}
+
+	private static void AssertOpaqueJournalSurface(AgentJournalWindow journal)
+	{
+		AssertOpaqueWindow(journal);
+		AssertOpaqueBrush(journal.FindControl<Grid>("JournalSurface")?.Background);
+		AssertOpaqueBrush(journal.FindControl<Border>("JournalSessionsSurface")?.Background);
+		AssertOpaqueBrush(journal.FindControl<Border>("JournalSessionsHeader")?.Background);
+		AssertOpaqueBrush(journal.FindControl<ListBox>("JournalSessionsList")?.Background);
+		AssertOpaqueBrush(journal.FindControl<Border>("JournalCallsSurface")?.Background);
+		AssertOpaqueBrush(journal.FindControl<Border>("JournalCallsHeader")?.Background);
+		AssertOpaqueBrush(journal.FindControl<ListBox>("JournalCallsList")?.Background);
+		AssertOpaqueBrush(journal.FindControl<Border>("JournalFooterSurface")?.Background);
+		var emptyText = Assert.IsType<TextBlock>(journal.FindControl<TextBlock>("JournalEmptyText"));
+		Assert.Equal(1, Grid.GetRow(emptyText));
+	}
+
+	private static void AssertOpaqueWindow(Window window)
+	{
+		Assert.Equal([WindowTransparencyLevel.None], window.TransparencyLevelHint);
+		AssertOpaqueBrush(window.Background);
+	}
+
+	private static void AssertOpaqueBrush(IBrush? brush)
+	{
+		var solid = Assert.IsAssignableFrom<ISolidColorBrush>(brush);
+		Assert.Equal(byte.MaxValue, solid.Color.A);
 	}
 
 	private sealed class RecordingFormatter : IAgentJournalReceiptFormatter

@@ -22,6 +22,7 @@ public partial class MainWindow
         }
 
         var window = new AgentJournalWindow(
+            this,
             _agentJournalReader,
             _agentJournalReceiptFormatter,
             _localization,

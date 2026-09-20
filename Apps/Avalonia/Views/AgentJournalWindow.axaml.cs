@@ -13,6 +13,7 @@ internal partial class AgentJournalWindow : Window
     private readonly IAgentJournalReader _reader;
     private readonly IAgentJournalReceiptFormatter _formatter;
     private readonly LocalizationService _localization;
+    private readonly Window? _owner;
     private readonly string? _currentProjectRoot;
     private readonly AgentJournalWindowViewModel _viewModel;
     private readonly CancellationTokenSource _lifetime = new();
@@ -22,6 +23,7 @@ internal partial class AgentJournalWindow : Window
 
     public AgentJournalWindow()
         : this(
+            null,
             new AgentJournalStore(),
             new AgentJournalReceiptFormatter(),
             new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
@@ -34,7 +36,18 @@ internal partial class AgentJournalWindow : Window
         IAgentJournalReceiptFormatter formatter,
         LocalizationService localization,
         string? currentProjectRoot)
+        : this(null, reader, formatter, localization, currentProjectRoot)
     {
+    }
+
+    public AgentJournalWindow(
+        Window? owner,
+        IAgentJournalReader reader,
+        IAgentJournalReceiptFormatter formatter,
+        LocalizationService localization,
+        string? currentProjectRoot)
+    {
+        _owner = owner;
         _reader = reader;
         _formatter = formatter;
         _localization = localization;
@@ -44,12 +57,15 @@ internal partial class AgentJournalWindow : Window
         _viewModel = new AgentJournalWindowViewModel(localization, _currentProjectRoot is not null);
         DataContext = _viewModel;
         InitializeComponent();
+        ApplyDialogSurface();
 
         _refreshTimer = new DispatcherTimer { Interval = SessionRefreshInterval };
         _refreshTimer.Tick += OnRefreshTimerTick;
         Opened += OnOpened;
         Closed += OnClosed;
         _localization.LanguageChanged += OnLanguageChanged;
+        if (global::Avalonia.Application.Current is { } application)
+            application.ActualThemeVariantChanged += OnActualThemeVariantChanged;
     }
 
     internal AgentJournalWindowViewModel ViewModel => _viewModel;
@@ -117,6 +133,8 @@ internal partial class AgentJournalWindow : Window
         _lifetime.Cancel();
         _lifetime.Dispose();
         _localization.LanguageChanged -= OnLanguageChanged;
+        if (global::Avalonia.Application.Current is { } application)
+            application.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
         Opened -= OnOpened;
         Closed -= OnClosed;
     }
@@ -273,6 +291,10 @@ internal partial class AgentJournalWindow : Window
             _localization.Format(
                 "AgentJournal.Masked",
                 AgentJournalPresentation.FormatNumber(session.Totals.SecretsMasked),
+                AgentJournalPresentation.FormatNumber(session.Totals.PrivateDataMasked)),
+            _localization.Format(
+                "AgentJournal.Masked.Short",
+                AgentJournalPresentation.FormatNumber(session.Totals.SecretsMasked),
                 AgentJournalPresentation.FormatNumber(session.Totals.PrivateDataMasked)));
     }
 
@@ -280,6 +302,10 @@ internal partial class AgentJournalWindow : Window
         call,
         _localization.Format(
             "AgentJournal.Masked",
+            AgentJournalPresentation.FormatNumber(call.SecretsMasked),
+            AgentJournalPresentation.FormatNumber(call.PrivateDataMasked)),
+        _localization.Format(
+            "AgentJournal.Masked.Short",
             AgentJournalPresentation.FormatNumber(call.SecretsMasked),
             AgentJournalPresentation.FormatNumber(call.PrivateDataMasked)),
         string.Join(", ", call.Notices.Select(FormatNotice)));
@@ -309,5 +335,14 @@ internal partial class AgentJournalWindow : Window
     {
         _viewModel.UpdateLocalization();
         _ = RefreshSafelyAsync();
+    }
+
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e) => ApplyDialogSurface();
+
+    private void ApplyDialogSurface()
+    {
+        var theme = DialogSurfaceFactory.ResolveThemeVariant(_owner);
+        var brushes = DialogSurfaceFactory.ResolveBrushes(_owner, theme);
+        DialogSurfaceFactory.ApplyWindowSurface(this, theme, brushes);
     }
 }
