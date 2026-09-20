@@ -335,7 +335,7 @@ public partial class MainWindow
         var confirmed = await MessageDialog.ShowConfirmationAsync(
             this,
             _localization["Dialog.ResetData.Title"],
-            _localization["Dialog.ResetData.Message"],
+            $"{_localization["Dialog.ResetData.Message"]}\n\n{_localization["AgentJournal.Clear.AllMessage"]}",
             _localization["Dialog.ResetData.Confirm"],
             _localization["Dialog.Cancel"]);
 

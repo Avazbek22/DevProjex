@@ -1,8 +1,11 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Avalonia.Media.Imaging;
+using Avalonia.Styling;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Views;
 using DevProjex.Application.Services;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
@@ -67,6 +70,51 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		finally
 		{
 			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalWithoutProjectShowsAllSessionsAndExplainsAnEmptyJournal()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var journal = new AgentJournalWindow(
+			new RecordingJournalReader(fixture.Sessions, fixture.Calls),
+			new RecordingFormatter(),
+			localization,
+			currentProjectRoot: null);
+		UiTestDriver.TrackTopLevelWindow(journal);
+		journal.Show();
+		try
+		{
+			await journal.RefreshAsync();
+			Assert.False(journal.ViewModel.HasCurrentProject);
+			Assert.False(journal.ViewModel.CurrentProjectOnly);
+			Assert.Equal(2, journal.ViewModel.Sessions.Count);
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(journal);
+		}
+
+		var empty = new AgentJournalWindow(
+			new RecordingJournalReader(
+				[],
+				new Dictionary<string, IReadOnlyList<AgentJournalCall>>(StringComparer.Ordinal)),
+			new RecordingFormatter(),
+			localization,
+			currentProjectRoot: null);
+		UiTestDriver.TrackTopLevelWindow(empty);
+		empty.Show();
+		try
+		{
+			await empty.RefreshAsync();
+			Assert.True(empty.ViewModel.IsEmpty);
+			Assert.Contains("MCP menu", empty.ViewModel.EmptyText, StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(empty);
 		}
 	}
 
@@ -196,6 +244,114 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		Assert.False(new AgentActivityPreferenceStore(() => root).Load());
 	}
 
+	[Fact]
+	public void AgentJournalStringsExistInEveryInterfaceLanguage()
+	{
+		var requiredKeys = new[]
+		{
+			"Menu.Mcp.Journal",
+			"Menu.View.AgentActivity",
+			"AgentJournal.Title",
+			"AgentJournal.Empty",
+			"AgentJournal.Footer",
+			"AgentJournal.Notice.OutsideSelection",
+			"AgentJournal.Notice.Unavailable",
+			"AgentActivity.Status.Files",
+			"AgentActivity.Status.Tokens",
+			"AgentActivity.Status.Calls",
+			"AgentActivity.Tree.ToolTip"
+		};
+		var catalog = new JsonLocalizationCatalog();
+		foreach (var language in Enum.GetValues<AppLanguage>())
+		{
+			var localized = catalog.Get(language);
+			Assert.All(requiredKeys, key =>
+			{
+				Assert.True(localized.TryGetValue(key, out var value), $"Missing {language}/{key}.");
+				Assert.False(string.IsNullOrWhiteSpace(value), $"Empty {language}/{key}.");
+			});
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ReopeningProjectClearsPriorDeliveriesAndTracksOnlyLaterCalls()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var reader = new RecordingJournalReader(fixture.Sessions, fixture.Calls);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { AgentJournalReader = reader });
+
+		try
+		{
+			var activity = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "AgentActivityMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(activity);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.TreeNodes.SelectMany(static root => root.Flatten())
+					.Any(static node => node.AgentDeliveryCount > 0),
+				"the initial delivery trace");
+
+			await UiTestDriver.OpenFolderAsync(
+				window,
+				workspace.Project.RootPath,
+				fromDialog: false,
+				recordRecentFolder: false);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.AgentActivityVisible &&
+				      viewModel.TreeNodes.SelectMany(static root => root.Flatten())
+					      .All(static node => node.AgentDeliveryCount == 0),
+				"project reopen to clear the previous delivery trace");
+
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
+			var deliveredPath = Path.GetFullPath(Path.Combine(
+				workspace.Project.RootPath,
+				"src",
+				"AppHost",
+				"Program.cs"));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.TreeNodes.SelectMany(static root => root.Flatten())
+					.Any(node => PathComparer.Default.Equals(node.FullPath, deliveredPath) &&
+					             node.AgentDeliveryCount == 1),
+				"a post-reopen call to create a new delivery trace");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StandardSessionDoesNotAddLiveContextTitleSuffix()
+	{
+		var appDataPath = Path.Combine(
+			workspace.Project.AppDataPath,
+			"standard-title",
+			Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(appDataPath);
+		var registry = new LiveSessionRegistry(() => appDataPath);
+		await using var session = registry.Start(
+			[workspace.Project.RootPath],
+			AgentJournalMode.Standard);
+		session.UpdateClient("codex", "5.2");
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.DoesNotContain("Live context", window.Title ?? string.Empty, StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task ResetDataClearsTheEntireJournalAfterConfirmation()
 	{
@@ -213,6 +369,12 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				() => window.OwnedWindows.Count == 1,
 				"reset data confirmation");
 			var confirmation = Assert.Single(window.OwnedWindows);
+			Assert.Contains(
+				"agent journal",
+				string.Join(
+					' ',
+					confirmation.GetVisualDescendants().OfType<TextBlock>().Select(static text => text.Text)),
+				StringComparison.OrdinalIgnoreCase);
 			var confirm = Assert.Single(
 				confirmation.GetVisualDescendants().OfType<Button>(),
 				static button => Equals(button.Content, "Delete"));
@@ -228,6 +390,111 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		{
 			await UiTestDriver.CloseWindowAsync(window);
 		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalAndDeliveryTraceSnapshotsCoverEnglishRussianLightAndDark()
+	{
+		var outputRoot = Path.Combine(
+			Path.GetTempPath(),
+			"devprojex-journal-b",
+			"snapshots");
+		Directory.CreateDirectory(outputRoot);
+		var application = Assert.IsType<App>(global::Avalonia.Application.Current);
+		var originalTheme = application.RequestedThemeVariant;
+		try
+		{
+			foreach (var (language, languageCode) in new[]
+			{
+				(AppLanguage.En, "en"),
+				(AppLanguage.Ru, "ru")
+			})
+			{
+				foreach (var (theme, themeCode) in new[]
+				{
+					(ThemeVariant.Light, "light"),
+					(ThemeVariant.Dark, "dark")
+				})
+				{
+					application.RequestedThemeVariant = theme;
+					var fixture = JournalFixture.Create(workspace.Project.RootPath);
+					var reader = new RecordingJournalReader(fixture.Sessions, fixture.Calls);
+					LocalizationService? localization = null;
+					var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+						workspace.Project,
+						configureServices: services =>
+						{
+							localization = services.Localization;
+							return services with { AgentJournalReader = reader };
+						});
+					try
+					{
+						application.RequestedThemeVariant = theme;
+						localization!.SetLanguage(language);
+						await UiTestDriver.WaitForSettledFramesAsync(frameCount: 12);
+						var activity = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+							window,
+							"AgentActivityMenuItem");
+						await UiTestDriver.RaiseMenuItemClickAsync(activity);
+						var viewModel = UiTestDriver.GetViewModel(window);
+						await UiTestDriver.WaitForConditionAsync(
+							window,
+							() => viewModel.AgentActivityVisible &&
+							      viewModel.TreeNodes.SelectMany(static root => root.Flatten())
+								      .Any(static node => node.AgentDeliveryCount > 0),
+							"agent activity snapshot state");
+						foreach (var node in viewModel.TreeNodes.SelectMany(static root => root.Flatten()))
+							node.IsExpanded = true;
+						await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+						await SaveSnapshotAsync(
+							window,
+							Path.Combine(outputRoot, $"tree-{languageCode}-{themeCode}.png"));
+
+						var journal = new AgentJournalWindow(
+							reader,
+							new RecordingFormatter(),
+							localization,
+							workspace.Project.RootPath);
+						UiTestDriver.TrackTopLevelWindow(journal);
+						journal.Show(window);
+						try
+						{
+							await journal.RefreshAsync();
+							await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+							await SaveSnapshotAsync(
+								journal,
+								Path.Combine(outputRoot, $"journal-{languageCode}-{themeCode}.png"));
+						}
+						finally
+						{
+							await UiTestDriver.CloseTopLevelWindowAsync(journal);
+						}
+					}
+					finally
+					{
+						await UiTestDriver.CloseWindowAsync(window);
+					}
+				}
+			}
+		}
+		finally
+		{
+			application.RequestedThemeVariant = originalTheme;
+		}
+
+		var snapshots = Directory.GetFiles(outputRoot, "*.png", SearchOption.TopDirectoryOnly);
+		Assert.Equal(8, snapshots.Length);
+		Assert.All(snapshots, path => Assert.True(new FileInfo(path).Length > 1_000, path));
+	}
+
+	private static async Task SaveSnapshotAsync(TopLevel topLevel, string path)
+	{
+		await topLevel.Dispatcher.InvokeAsync(() =>
+		{
+			using var bitmap = topLevel.CaptureRenderedFrame();
+			Assert.NotNull(bitmap);
+			bitmap.Save(path, PngBitmapEncoderOptions.Default);
+		}, DispatcherPriority.Render);
 	}
 
 	private sealed class RecordingFormatter : IAgentJournalReceiptFormatter

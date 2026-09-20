@@ -244,9 +244,11 @@ internal partial class AgentJournalWindow : Window
             {
                 if (!string.Equals(change.SessionId, sessionId, StringComparison.Ordinal))
                     continue;
-                await Dispatcher.UIThread.InvokeAsync(
-                    RefreshSafelyAsync,
-                    DispatcherPriority.Background);
+				Task refresh = Task.CompletedTask;
+				await Dispatcher.UIThread.InvokeAsync(
+					() => refresh = RefreshSafelyAsync(),
+					DispatcherPriority.Background);
+				await refresh;
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
