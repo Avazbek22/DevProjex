@@ -1661,6 +1661,8 @@ public partial class MainWindow : Window
                 icon,
                 BuildDeferredChildViewModels,
                 OnTreeNodeCheckedChanged);
+        if (_viewModel.IsAgentActivityEnabled)
+            ApplyAgentDeliveryToNode(node);
 
         if (!materializeChildrenNow || descriptor.Children.Count == 0)
             return node;

@@ -186,10 +186,12 @@ public partial class MainWindow
                 _previewBar.SizeChanged -= OnPreviewBarSizeChanged;
             DetachRecentMenuHandlers();
             DetachTreeFontMenuHandlers();
-			StopLiveSessionObservation();
-			_secretRedactionSession.SnapshotPublished -= OnSecretRedactionSnapshotPublished;
-			_codeCompressionSession.SnapshotPublished -= OnCodeCompressionSnapshotPublished;
-			_secretRedactionSession.Reset();
+            ClearAgentActivityPresentation();
+            StopLiveSessionObservation();
+            (_agentJournalReader as IDisposable)?.Dispose();
+            _secretRedactionSession.SnapshotPublished -= OnSecretRedactionSnapshotPublished;
+            _codeCompressionSession.SnapshotPublished -= OnCodeCompressionSnapshotPublished;
+            _secretRedactionSession.Reset();
 			_codeCompressionSession.Reset();
 
             // Unsubscribe from tunneled/bubbled events

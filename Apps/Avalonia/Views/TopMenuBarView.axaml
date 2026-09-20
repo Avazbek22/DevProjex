@@ -203,6 +203,10 @@
                     AutomationProperties.Name="{Binding MenuMcpOtherClients}"
                     Click="OnMcpStandardOtherClients" />
         </MenuItem>
+        <MenuItem Name="McpJournalMenuItem"
+                  Header="{Binding MenuMcpJournal}"
+                  AutomationProperties.Name="{Binding MenuMcpJournal}"
+                  Click="OnMcpJournal" />
         <MenuItem Name="McpDocumentationMenuItem"
                   Header="{Binding MenuMcpDocumentation}"
                   AutomationProperties.Name="{Binding MenuMcpDocumentation}"
@@ -275,6 +279,15 @@
                       IsHitTestVisible="False"/>
           </MenuItem.Header>
         </MenuItem>
+        <MenuItem Name="AgentActivityMenuItem"
+                  Click="OnToggleAgentActivity">
+          <MenuItem.Header>
+            <CheckBox Content="{Binding MenuViewAgentActivity}"
+                      IsChecked="{Binding IsAgentActivityEnabled}"
+                      IsHitTestVisible="False"
+                      AutomationProperties.Name="{Binding MenuViewAgentActivity}" />
+          </MenuItem.Header>
+        </MenuItem>
       </MenuItem>
       <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />
@@ -323,7 +336,9 @@
         </MenuItem>
         <Separator />
         <MenuItem Header="{Binding MenuHelpResetSettings}" Click="OnResetSettings" />
-        <MenuItem Header="{Binding MenuHelpResetData}" Click="OnResetData" />
+        <MenuItem Name="ResetDataMenuItem"
+                  Header="{Binding MenuHelpResetData}"
+                  Click="OnResetData" />
       </MenuItem>
     </Menu>
 

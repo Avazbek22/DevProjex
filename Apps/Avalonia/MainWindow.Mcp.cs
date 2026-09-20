@@ -7,6 +7,35 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow
 {
+    private readonly IAgentJournalReader _agentJournalReader;
+    private readonly IAgentJournalReceiptFormatter _agentJournalReceiptFormatter;
+    private AgentJournalWindow? _agentJournalWindow;
+
+    private void OnMcpJournalRequested(object? sender, RoutedEventArgs e)
+    {
+        if (_agentJournalWindow is { } existing)
+        {
+            existing.Show();
+            existing.Activate();
+            e.Handled = true;
+            return;
+        }
+
+        var window = new AgentJournalWindow(
+            _agentJournalReader,
+            _agentJournalReceiptFormatter,
+            _localization,
+            _viewModel.IsProjectLoaded ? _currentPath : null);
+        _agentJournalWindow = window;
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_agentJournalWindow, window))
+                _agentJournalWindow = null;
+        };
+        window.Show(this);
+        e.Handled = true;
+    }
+
     private async void OnMcpConnectionRequested(object? sender, McpConnectionRequestedEventArgs e)
     {
         McpConnectionRequest? request = null;

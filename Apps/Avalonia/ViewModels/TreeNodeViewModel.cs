@@ -25,6 +25,8 @@ public sealed class TreeNodeViewModel(
     private int _searchSelfMatchEpoch;
     private int _searchDescendantMatchEpoch;
     private bool _deferredChildCheckedState;
+    private int _agentDeliveryCount;
+    private string _agentDeliveryToolTip = string.Empty;
     private readonly ResettableObservableCollection<TreeNodeViewModel> _children =
         new(descriptor.Children.Count);
     private Func<TreeNodeViewModel, IReadOnlyList<TreeNodeViewModel>>? _childrenFactory = childrenFactory;
@@ -89,6 +91,27 @@ public sealed class TreeNodeViewModel(
     }
 
     public string FullPath => Descriptor.FullPath;
+
+    public bool HasAgentDelivery => _agentDeliveryCount > 0;
+    public int AgentDeliveryCount => _agentDeliveryCount;
+    public string AgentDeliveryToolTip => _agentDeliveryToolTip;
+
+    public void SetAgentDelivery(int count, string toolTip)
+    {
+        var normalized = Math.Max(0, count);
+        var normalizedToolTip = normalized == 0 ? string.Empty : toolTip;
+        if (_agentDeliveryCount == normalized &&
+            string.Equals(_agentDeliveryToolTip, normalizedToolTip, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _agentDeliveryCount = normalized;
+        _agentDeliveryToolTip = normalizedToolTip;
+        RaisePropertyChanged(nameof(AgentDeliveryCount));
+        RaisePropertyChanged(nameof(AgentDeliveryToolTip));
+        RaisePropertyChanged(nameof(HasAgentDelivery));
+    }
 
     public bool? IsChecked
     {
@@ -349,6 +372,8 @@ public sealed class TreeNodeViewModel(
             current._hasHighlightedDisplay = false;
             current._searchSelfMatchEpoch = 0;
             current._searchDescendantMatchEpoch = 0;
+            current._agentDeliveryCount = 0;
+            current._agentDeliveryToolTip = string.Empty;
             current.Icon = null;
             current.Parent = null;
             current.Descriptor = null!;

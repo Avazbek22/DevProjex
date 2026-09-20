@@ -185,18 +185,23 @@ public sealed class McpConnectionUiTests
 
 		var live = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpLiveContextMenuItem"));
 		var standard = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpStandardMenuItem"));
+		var journal = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpJournalMenuItem"));
 		var documentation = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpDocumentationMenuItem"));
 		var topLevelMcpItems = Assert.IsType<MenuItem>(items[mcpIndex]).Items.OfType<MenuItem>().ToArray();
 		Assert.Collection(
 			topLevelMcpItems,
 			item => Assert.Same(live, item),
 			item => Assert.Same(standard, item),
+			item => Assert.Same(journal, item),
 			item => Assert.Same(documentation, item));
 		Assert.Equal(viewModel.MenuMcpLiveContext, live.Header);
 		Assert.Equal(viewModel.MenuMcpLiveContext, AutomationProperties.GetName(live));
 		Assert.Equal(viewModel.MenuMcpStandard, standard.Header);
 		Assert.Equal(viewModel.MenuMcpStandard, AutomationProperties.GetName(standard));
+		Assert.Equal(viewModel.MenuMcpJournal, journal.Header);
+		Assert.Equal(viewModel.MenuMcpJournal, AutomationProperties.GetName(journal));
 		Assert.True(live.IsEnabled);
+		Assert.True(journal.IsEnabled);
 		Assert.True(documentation.IsEnabled);
 
 		var connectItems = new[]

@@ -5,6 +5,7 @@ using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.AppInstances;
+using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
@@ -122,6 +123,9 @@ public static class AvaloniaCompositionRoot
         var terminalCommandSetupService = new TerminalCommandSetupService();
         var localAppDataProvider = appDataPathProvider ?? UserDataPathResolver.GetStateRoot;
         var liveSessionRegistry = new LiveSessionRegistry(localAppDataProvider);
+        var agentJournalStore = new AgentJournalStore(
+            localAppDataProvider,
+            activeSessionProvider: () => liveSessionRegistry.ReadActive());
         var sessionMetricsRecorder = sessionMetrics.Enabled
             ? new SessionMetricsRecorder(sessionMetrics, localAppDataProvider)
             : SessionMetricsRecorder.Disabled;
@@ -190,9 +194,12 @@ public static class AvaloniaCompositionRoot
             TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService,
             SessionMetricsRecorder: sessionMetricsRecorder,
-			SecretRedactionSession: secretRedactionSession,
-			CodeCompressionSession: codeCompressionSession,
-			ProjectPathLauncher: projectPathLauncher,
-            LiveSessionRegistry: liveSessionRegistry);
+            SecretRedactionSession: secretRedactionSession,
+            CodeCompressionSession: codeCompressionSession,
+            ProjectPathLauncher: projectPathLauncher,
+            LiveSessionRegistry: liveSessionRegistry,
+            AgentJournalReader: agentJournalStore,
+            AgentJournalReceiptFormatter: new AgentJournalReceiptFormatter(),
+            AgentActivityPreferenceStore: new AgentActivityPreferenceStore(localAppDataProvider));
     }
 }
