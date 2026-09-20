@@ -6,7 +6,7 @@
         x:CompileBindings="True"
         Name="JournalWindow"
         Title="{Binding WindowTitle}"
-        Width="1380"
+        Width="1500"
         Height="720"
         MinWidth="760"
         MinHeight="500"
@@ -66,7 +66,7 @@
       <Grid RowDefinitions="Auto,*">
         <Grid Grid.Row="0"
               Classes="journal-header"
-              ColumnDefinitions="110,150,80,*,70,90,90,70,150,85"
+              ColumnDefinitions="110,150,80,*,70,90,90,70,220,110"
               ColumnSpacing="8">
           <TextBlock Classes="journal-heading" Text="{Binding TimeText}" />
           <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding ClientText}" />
@@ -88,7 +88,7 @@
                  AutomationProperties.Name="{Binding WindowTitle}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:AgentJournalSessionViewModel">
-              <Grid ColumnDefinitions="110,150,80,*,70,90,90,70,150,85" ColumnSpacing="8">
+              <Grid ColumnDefinitions="110,150,80,*,70,90,90,70,220,110" ColumnSpacing="8">
                 <TextBlock Classes="journal-column" Text="{Binding Time}" />
                 <TextBlock Grid.Column="1" Classes="journal-column" Text="{Binding Client}" />
                 <Grid Grid.Column="2" ColumnDefinitions="Auto,*" ColumnSpacing="4">
@@ -113,7 +113,7 @@
       <Grid RowDefinitions="Auto,*">
         <Grid Grid.Row="0"
               Classes="journal-header"
-              ColumnDefinitions="48,80,125,*,70,80,85,80,65,150,*,100"
+              ColumnDefinitions="48,80,125,*,70,110,85,80,65,200,*,100"
               ColumnSpacing="8">
           <TextBlock Classes="journal-heading" Text="{Binding NumberText}" />
           <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding TimeText}" />
@@ -135,7 +135,7 @@
                  AutomationProperties.Name="{Binding CallsText}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:AgentJournalCallViewModel">
-              <Grid ColumnDefinitions="48,80,125,*,70,80,85,80,65,150,*,100" ColumnSpacing="8">
+              <Grid ColumnDefinitions="48,80,125,*,70,110,85,80,65,200,*,100" ColumnSpacing="8">
                 <TextBlock Classes="journal-column" Text="{Binding Sequence}" />
                 <TextBlock Grid.Column="1" Classes="journal-column" Text="{Binding Time}" />
                 <TextBlock Grid.Column="2" Classes="journal-column" Text="{Binding Tool}" />

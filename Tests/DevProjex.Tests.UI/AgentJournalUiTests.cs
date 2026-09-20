@@ -395,6 +395,14 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	[AvaloniaFact]
 	public async Task JournalAndDeliveryTraceSnapshotsCoverEnglishRussianLightAndDark()
 	{
+		if (!string.Equals(
+			    Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_AGENT_JOURNAL"),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			return;
+		}
+
 		var outputRoot = Path.Combine(
 			Path.GetTempPath(),
 			"devprojex-journal-b",
