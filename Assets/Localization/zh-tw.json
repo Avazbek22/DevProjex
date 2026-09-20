@@ -780,6 +780,7 @@
   "Terminal.Tui.Progress.Elapsed": "耗時",
   "Terminal.Tui.SearchNoResults": "沒有符合的樹項目。",
   "Terminal.Tui.MultiSelectHint": "空間切換一個項目。僅切換此部分的所有變更。",
+  "Terminal.Tui.Error.ProfilePersistence": "無法儲存專案選擇。變更仍在等待中；請在關閉前重試。",
   "Terminal.Tui.Error.ProfileUnavailable": "所選的設定檔不可用或無效。",
   "Terminal.Tui.Welcome.RecentDescription": "開啟最近的項目：",
   "Terminal.Tui.Welcome.HelpBody": "DEVPROJEX終端\n無需離開終端即可準備受控的專案上下文。\n\n歡迎\n開啟目前資料夾、選擇其他資料夾、複製儲存庫，或從「最近的工作空間」開啟本機資料夾和Git儲存庫。清單只讀取已儲存的歷史記錄，不會存取網路；僅在選取項目後檢查儲存庫快取。可從操作面板選擇「使用設定檔開啟專案」。\n\n工作空間\n專案樹用於控制選取。預覽以ASCII、JSON、XML或Markdown顯示「樹」、「內容」或「樹+內容」。參數面板包含「內容處理」、「排除規則」和「檔案類型」三個獨立的小面板。按Ctrl+P可開啟包括匯出和桌面操作在內的所有操作。\n\n導覽\n使用↑/↓或j/k移動，Enter開啟，Space切換，Tab/F6切換窗格，Shift反向移動，/搜尋，?開啟上下文說明。Esc關閉一層浮動視窗或清除目前搜尋。\n\n操作\n耗時操作會顯示實際進度。Esc或Ctrl+C會先取消目前操作並保持終端工作空間開啟。只有在根畫面選擇「結束」或按q才會關閉。",

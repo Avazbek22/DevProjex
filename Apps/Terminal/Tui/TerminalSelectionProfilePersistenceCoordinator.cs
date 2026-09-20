@@ -8,27 +8,39 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 	private static readonly TimeSpan PersistenceDelay = TimeSpan.FromSeconds(2);
 	private readonly Func<string, ProjectSelectionProfile, CancellationToken, Task> _persistAsync;
 	private readonly Func<CancellationToken, Task> _delayAsync;
+	private readonly Func<TimeSpan, CancellationToken, Task> _retryDelayAsync;
+	private readonly Action<Exception>? _failureCallback;
+	private readonly int _maxBackgroundAttempts;
 	private readonly SemaphoreSlim _writeGate = new(1, 1);
 	private readonly object _sync = new();
 	private PendingWrite? _pending;
 	private CancellationTokenSource? _delayCts;
+	private Task _activePersistence = Task.CompletedTask;
 	private long _version;
 	private int _disposed;
 
 	public TerminalSelectionProfilePersistenceCoordinator(
-		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync)
+		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
+		Action<Exception>? failureCallback = null)
 		: this(
 			persistAsync,
-			static cancellationToken => Task.Delay(PersistenceDelay, cancellationToken))
+			static cancellationToken => Task.Delay(PersistenceDelay, cancellationToken),
+			failureCallback: failureCallback)
 	{
 	}
 
 	internal TerminalSelectionProfilePersistenceCoordinator(
 		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
-		Func<CancellationToken, Task> delayAsync)
+		Func<CancellationToken, Task> delayAsync,
+		Func<TimeSpan, CancellationToken, Task>? retryDelayAsync = null,
+		Action<Exception>? failureCallback = null,
+		int maxBackgroundAttempts = 3)
 	{
 		_persistAsync = persistAsync ?? throw new ArgumentNullException(nameof(persistAsync));
 		_delayAsync = delayAsync ?? throw new ArgumentNullException(nameof(delayAsync));
+		_retryDelayAsync = retryDelayAsync ?? Task.Delay;
+		_failureCallback = failureCallback;
+		_maxBackgroundAttempts = Math.Max(1, maxBackgroundAttempts);
 	}
 
 	public void Schedule(string projectPath, ProjectSelectionProfile profile)
@@ -56,24 +68,42 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 				version);
 		}
 
-		_ = PersistAfterDelayAsync(version, token);
+		lock (_sync)
+		{
+			if (_disposed == 0 && version == _version)
+				_activePersistence = PersistAfterDelayAsync(version, token);
+		}
 	}
 
 	public async Task FlushAsync(CancellationToken cancellationToken = default)
 	{
-		PendingWrite? pending;
-		lock (_sync)
+		while (true)
 		{
-			_delayCts?.Cancel();
-			_delayCts?.Dispose();
-			_delayCts = null;
-			pending = _pending;
-			_pending = null;
-			_version = checked(_version + 1);
-		}
+			Task active;
+			lock (_sync)
+			{
+				_delayCts?.Cancel();
+				_delayCts?.Dispose();
+				_delayCts = null;
+				active = _activePersistence;
+			}
 
-		if (pending is not null)
-			await PersistAsync(pending, cancellationToken).ConfigureAwait(false);
+			await active.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+			PendingWrite? pending;
+			lock (_sync)
+				pending = _pending;
+			if (pending is null)
+				return;
+
+			var persisted = await PersistVersionAsync(
+				pending.Version,
+				cancellationToken,
+				_maxBackgroundAttempts,
+				reportFailure: true).ConfigureAwait(false);
+			if (!persisted)
+				return;
+		}
 	}
 
 	private async Task PersistAfterDelayAsync(long version, CancellationToken cancellationToken)
@@ -87,32 +117,64 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 			return;
 		}
 
-		PendingWrite? pending;
-		lock (_sync)
-		{
-			if (_disposed != 0 || version != _version || _pending?.Version != version)
-				return;
+		await PersistVersionAsync(
+			version,
+			CancellationToken.None,
+			_maxBackgroundAttempts,
+			reportFailure: true).ConfigureAwait(false);
+	}
 
-			pending = _pending;
-			_pending = null;
+	private async Task<bool> PersistVersionAsync(
+		long version,
+		CancellationToken cancellationToken,
+		int attempts,
+		bool reportFailure)
+	{
+		Exception? lastFailure = null;
+		for (var attempt = 0; attempt < attempts; attempt++)
+		{
+			PendingWrite? pending;
+			lock (_sync)
+			{
+				if (_disposed != 0 || _pending?.Version != version)
+					return true;
+				pending = _pending;
+			}
+
+			try
+			{
+				await PersistAsync(pending, cancellationToken).ConfigureAwait(false);
+				lock (_sync)
+				{
+					if (_pending?.Version == version)
+						_pending = null;
+				}
+				return true;
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				throw;
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+				lastFailure = exception;
+				if (attempt + 1 < attempts)
+				{
+					await _retryDelayAsync(
+						TimeSpan.FromMilliseconds(100 * (attempt + 1)),
+						cancellationToken).ConfigureAwait(false);
+				}
+			}
 		}
 
-		if (pending is null)
-			return;
-
-		try
-		{
-			await PersistAsync(pending, cancellationToken).ConfigureAwait(false);
-		}
-		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-		{
-		}
-		catch (Exception exception)
+		if (lastFailure is not null && reportFailure)
 		{
 			Trace.TraceWarning(
 				"Terminal project selection persistence failed: {0}",
-				exception.GetType().Name);
+				lastFailure.GetType().Name);
+			_failureCallback?.Invoke(lastFailure);
 		}
+		return false;
 	}
 
 	private async Task PersistAsync(PendingWrite pending, CancellationToken cancellationToken)

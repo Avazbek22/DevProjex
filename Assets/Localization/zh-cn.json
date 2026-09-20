@@ -780,6 +780,7 @@
   "Terminal.Tui.Progress.Elapsed": "用时",
   "Terminal.Tui.SearchNoResults": "没有匹配的树项目。",
   "Terminal.Tui.MultiSelectHint": "空间切换一个项目。仅切换此部分的所有更改。",
+  "Terminal.Tui.Error.ProfilePersistence": "无法保存项目选择。更改仍在等待中；请在关闭前重试。",
   "Terminal.Tui.Error.ProfileUnavailable": "所选的设置文件不可用或无效。",
   "Terminal.Tui.Welcome.RecentDescription": "打开最近的项目：",
   "Terminal.Tui.Welcome.HelpBody": "DEVPROJEX终端\n无需离开终端即可准备受控的项目上下文。\n\n欢迎\n打开当前文件夹、选择其他文件夹、克隆存储库，或从“最近的工作空间”打开本地文件夹和Git存储库。列表只读取已保存的历史记录，不访问网络；仅在选中项目后检查存储库缓存。可从操作面板选择“使用设置文件打开项目”。\n\n工作空间\n项目树用于控制选择。预览以ASCII、JSON、XML或Markdown显示“树”“内容”或“树+内容”。参数面板包含“内容处理”“排除规则”和“文件类型”三个独立的小面板。按Ctrl+P可打开包括导出和桌面操作在内的所有操作。\n\n导航\n使用↑/↓或j/k移动，Enter打开，Space切换，Tab/F6切换窗格，Shift反向移动，/搜索，?打开上下文帮助。Esc关闭一层浮层或清除当前搜索。\n\n操作\n耗时操作会显示实际进度。Esc或Ctrl+C会先取消当前操作并保持终端工作空间打开。只有在根界面选择“退出”或按q才会关闭。",

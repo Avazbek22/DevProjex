@@ -180,7 +180,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		_operations = new AsyncOperationCoordinator(_sessionCts.Token);
 		_selectionProfilePersistence = new TerminalSelectionProfilePersistenceCoordinator(
-			PersistLocalProfileAsync);
+			PersistLocalProfileAsync,
+			exception => _application.Invoke(() =>
+			{
+				if (!_stopping && !_disposed)
+				{
+					ShowError(
+						"DPX-TUI-PROFILE-SAVE-FAILED",
+						L("Terminal.Tui.Error.ProfilePersistence"));
+				}
+			}));
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
 		_terminalHeight = Math.Max(_environment.Height, initialScreen.Height);

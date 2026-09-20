@@ -73,7 +73,6 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void FlushLocalProfilePersistence()
 	{
-		ScheduleLocalProfilePersistence();
 		_selectionProfilePersistence.FlushAsync().GetAwaiter().GetResult();
 	}
 
