@@ -72,6 +72,52 @@ public sealed class TerminalAgentJournalPresentationTests
 		Assert.Contains(Path.GetFullPath(Path.Combine(workspace.Path, "README.md")), paths);
 	}
 
+	[Fact]
+	public void ActivitySnapshotKeepsTheLatestCallAndPerPathCounts()
+	{
+		using var workspace = new TemporaryDirectory();
+		var first = CreateCall(1, "get_tree", ["src/App.cs"]);
+		var latest = CreateCall(2, "get_file", ["src/App.cs", "README.md"]);
+		var session = CreateSession() with { Totals = CreateSession().Totals with { Calls = 2 } };
+		var receipt = new AgentJournalReceipt(
+			session,
+			session.Totals,
+			[
+				new AgentJournalDeliveredPath("src/App.cs", 2),
+				new AgentJournalDeliveredPath("README.md", 1)
+			],
+			[first, latest]);
+
+		var snapshot = TerminalAgentJournalSnapshot.Create(workspace.Path, receipt);
+
+		Assert.Equal("get_file", snapshot.LatestCall?.Tool);
+		Assert.Equal(2, snapshot.TotalCalls);
+		Assert.Equal(
+			2,
+			snapshot.DeliveredPathCalls[Path.GetFullPath(Path.Combine(workspace.Path, "src", "App.cs"))]);
+	}
+
+	private static AgentJournalCall CreateCall(
+		long sequence,
+		string tool,
+		IReadOnlyList<string> paths) => new(
+		sequence,
+		new DateTimeOffset(2026, 9, 20, 8, 15, 30, TimeSpan.Zero).AddSeconds(sequence),
+		tool,
+		0,
+		new Dictionary<string, string>(),
+		7,
+		12,
+		80,
+		20,
+		paths.Count,
+		paths,
+		0,
+		0,
+		0,
+		[],
+		null);
+
 	private static AgentJournalSession CreateSession() => new(
 		"session-42",
 		new DateTimeOffset(2026, 9, 20, 8, 0, 0, TimeSpan.Zero),

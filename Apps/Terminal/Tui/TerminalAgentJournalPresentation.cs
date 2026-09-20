@@ -5,6 +5,37 @@ using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
 
+internal sealed record TerminalAgentJournalSnapshot(
+	AgentJournalSession Session,
+	AgentJournalCall? LatestCall,
+	long TotalCalls,
+	IReadOnlyDictionary<string, long> DeliveredPathCalls)
+{
+	public static TerminalAgentJournalSnapshot Create(
+		string projectRoot,
+		AgentJournalReceipt receipt)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(receipt);
+		var paths = new Dictionary<string, long>(ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var delivered in receipt.DeliveredPaths)
+		{
+			if (TerminalAgentJournalPresentation.TryResolveDeliveredPath(
+					projectRoot,
+					delivered.Path,
+					out var path))
+			{
+				paths[path] = delivered.Calls;
+			}
+		}
+		return new TerminalAgentJournalSnapshot(
+			receipt.Session,
+			receipt.Calls.OrderBy(static call => call.Sequence).LastOrDefault(),
+			receipt.Totals.Calls,
+			paths);
+	}
+}
+
 internal sealed record TerminalAgentJournalSessionRow(AgentJournalSession Session)
 {
 	public override string ToString()
@@ -95,29 +126,40 @@ internal static class TerminalAgentJournalPresentation
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(receipt);
-		var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
 		var paths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var delivered in receipt.DeliveredPaths)
 		{
-			if (string.IsNullOrWhiteSpace(delivered.Path) || Path.IsPathFullyQualified(delivered.Path))
-				continue;
-			try
-			{
-				var candidate = Path.GetFullPath(Path.Combine(root, delivered.Path));
-				var relative = Path.GetRelativePath(root, candidate);
-				if (relative == ".." ||
-					relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-					Path.IsPathFullyQualified(relative))
-				{
-					continue;
-				}
-				paths.Add(candidate);
-			}
-			catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
-			{
-				// Invalid journal addresses are ignored instead of being projected into the tree.
-			}
+			if (TryResolveDeliveredPath(projectRoot, delivered.Path, out var path))
+				paths.Add(path);
 		}
 		return paths;
+	}
+
+	internal static bool TryResolveDeliveredPath(
+		string projectRoot,
+		string deliveredPath,
+		out string path)
+	{
+		path = string.Empty;
+		if (string.IsNullOrWhiteSpace(deliveredPath) || Path.IsPathFullyQualified(deliveredPath))
+			return false;
+		try
+		{
+			var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
+			var candidate = Path.GetFullPath(Path.Combine(root, deliveredPath));
+			var relative = Path.GetRelativePath(root, candidate);
+			if (relative == ".." ||
+				relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+				Path.IsPathFullyQualified(relative))
+			{
+				return false;
+			}
+			path = candidate;
+			return true;
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return false;
+		}
 	}
 }

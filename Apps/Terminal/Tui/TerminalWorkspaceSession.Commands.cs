@@ -81,6 +81,11 @@ internal sealed partial class TerminalWorkspaceSession
 		if (command.Target == "activity")
 		{
 			_agentActivityEnabled = enabled;
+			if (!enabled)
+				_agentJournalSnapshot = null;
+			_state.SetAgentActivity(
+				enabled,
+				enabled ? _agentJournalSnapshot?.DeliveredPathCalls.Keys : null);
 			TrackBackgroundTask(_services.TerminalSettingsStore.SaveAgentActivityEnabledAsync(
 				enabled,
 				_settingsPersistenceCts.Token));
@@ -456,6 +461,12 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return InvalidCommandExecution();
+		if (command.McpAction is TerminalWorkspaceMcpAction.ShowLog or
+			TerminalWorkspaceMcpAction.ExportLog or
+			TerminalWorkspaceMcpAction.ClearLog)
+		{
+			return ExecuteAgentJournalCommand(command);
+		}
 
 		McpConnectionClient? client = command.Target switch
 		{
