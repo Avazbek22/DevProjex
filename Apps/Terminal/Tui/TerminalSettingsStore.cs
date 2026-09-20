@@ -48,6 +48,8 @@ public sealed class TerminalSettingsStore
 			: null;
 	}
 
+	public bool LoadAgentActivityEnabled() => LoadDocument()?.AgentActivityEnabled == true;
+
 	public TerminalProjectSettings? LoadProjectSettings(string projectRoot)
 	{
 		var normalizedRoot = NormalizeProjectRoot(projectRoot);
@@ -119,6 +121,15 @@ public sealed class TerminalSettingsStore
 	{
 		await UpdateAsync(
 			current => current with { Language = AppLanguageUtility.ToCode(language) },
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	public async Task SaveAgentActivityEnabledAsync(
+		bool enabled,
+		CancellationToken cancellationToken = default)
+	{
+		await UpdateAsync(
+			current => current with { AgentActivityEnabled = enabled },
 			cancellationToken).ConfigureAwait(false);
 	}
 
@@ -313,7 +324,8 @@ public sealed class TerminalSettingsStore
 		TerminalScreenMode ScreenMode,
 		IReadOnlyList<string>? CommandHistory = null,
 		string? Language = null,
-		IReadOnlyList<TerminalProjectSettings>? Projects = null);
+		IReadOnlyList<TerminalProjectSettings>? Projects = null,
+		bool? AgentActivityEnabled = null);
 
 	private static string NormalizeProjectRoot(string root) =>
 		Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));

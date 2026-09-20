@@ -82,6 +82,34 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
+	public async Task AgentActivityRoundTripsWithoutOverwritingOtherTerminalSettings()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		await store.SaveLanguageAsync(AppLanguage.Ja, TestContext.Current.CancellationToken);
+		await store.SaveCommandHistoryAsync(["mcp log"], TestContext.Current.CancellationToken);
+
+		await store.SaveAgentActivityEnabledAsync(true, TestContext.Current.CancellationToken);
+
+		var reloaded = new TerminalSettingsStore(() => workspace.Path);
+		Assert.True(reloaded.LoadAgentActivityEnabled());
+		Assert.Equal(AppLanguage.Ja, reloaded.LoadLanguage());
+		Assert.Equal(["mcp log"], reloaded.LoadCommandHistory());
+
+		await reloaded.SaveAgentActivityEnabledAsync(false, TestContext.Current.CancellationToken);
+		Assert.False(new TerminalSettingsStore(() => workspace.Path).LoadAgentActivityEnabled());
+	}
+
+	[Fact]
+	public void AgentActivityDefaultsToOffWhenTheSettingIsAbsent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+
+		Assert.False(store.LoadAgentActivityEnabled());
+	}
+
+	[Fact]
 	public async Task CommandStatePersistsHistoryAndLanguageInOneAtomicUpdate()
 	{
 		using var workspace = new TemporaryDirectory();

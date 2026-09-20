@@ -78,6 +78,15 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 		if (command.Enabled is not { } enabled)
 			return InvalidCommandExecution();
+		if (command.Target == "activity")
+		{
+			_agentActivityEnabled = enabled;
+			TrackBackgroundTask(_services.TerminalSettingsStore.SaveAgentActivityEnabledAsync(
+				enabled,
+				_settingsPersistenceCts.Token));
+			RefreshWorkspace();
+			return ToggleCommandResult("Agent activity", enabled);
+		}
 
 		var content = ProjectPresentationCatalog.ContentTransformations.FirstOrDefault(
 			descriptor => string.Equals(descriptor.Token, command.Target, StringComparison.Ordinal));

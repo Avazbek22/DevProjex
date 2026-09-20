@@ -12,9 +12,11 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] AggregateTargets = ["types", "exclusions", "content"];
 	private static readonly string[] ExportTargets = ["context", "zip", "folder"];
 	private static readonly string[] ProfileTargets = ["save", "load", "show", "reset"];
-	private static readonly string[] McpTargets = ["connect"];
+	private static readonly string[] McpTargets = ["connect", "log"];
 	private static readonly string[] McpClients = ["claude-code", "codex", "cursor", "vscode", "json"];
 	private static readonly string[] McpModes = ["live", "standard"];
+	private static readonly string[] McpLogTargets = ["session", "last", "export", "clear"];
+	private static readonly string[] McpLogFormats = ["markdown", "json"];
 	private static readonly string[] RelatedOptions = ["--direction", "--depth"];
 	private static readonly string[] RelatedDirections = ["dependencies", "dependents", "both"];
 	private static readonly string[] RelatedDepths = Enumerable.Range(1, 10)
@@ -28,7 +30,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		.. ProjectPresentationCatalog.Exclusions.Select(static item => item.Token),
 		"gitignore",
 		"tracked",
-		"git"
+		"git",
+		"activity"
 	];
 
 	private delegate TerminalWorkspaceCommandParseResult GrammarParser(
@@ -537,6 +540,9 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
 	{
+		if (tokens.Count >= 2 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase))
+			return ParseMcpLog(definition, tokens);
+
 		if (tokens.Count >= 2 && Contains(McpTargets, tokens[1].Value))
 		{
 			if (tokens.Count > 4)
@@ -566,6 +572,99 @@ internal sealed class TerminalWorkspaceCommandParser
 			definition,
 			Target: tokens.Count >= 2 ? Normalize(tokens[1].Value, McpClients) : "claude-code",
 			Text: tokens.Count == 3 ? Normalize(tokens[2].Value, McpModes) : "live"));
+	}
+
+	private static TerminalWorkspaceCommandParseResult ParseMcpLog(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count == 2)
+		{
+			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+				definition,
+				McpAction: TerminalWorkspaceMcpAction.ShowLog));
+		}
+
+		if (!Contains(McpLogTargets, tokens[2].Value))
+			return Unknown(tokens[2], McpLogTargets);
+		var target = Normalize(tokens[2].Value, McpLogTargets);
+		switch (target)
+		{
+			case "last":
+				if (tokens.Count > 3)
+					return Unexpected(tokens[3]);
+				return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+					definition,
+					Target: "last",
+					McpAction: TerminalWorkspaceMcpAction.ShowLog));
+			case "session":
+				if (tokens.Count < 4)
+					return Missing(tokens, ["id"]);
+				if (tokens.Count > 4)
+					return Unexpected(tokens[4]);
+				return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+					definition,
+					Target: tokens[3].Value,
+					McpAction: TerminalWorkspaceMcpAction.ShowLog));
+			case "clear":
+				if (tokens.Count > 3)
+					return Unexpected(tokens[3]);
+				return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+					definition,
+					McpAction: TerminalWorkspaceMcpAction.ClearLog));
+			case "export":
+				return ParseMcpLogExport(definition, tokens);
+			default:
+				throw new ArgumentOutOfRangeException(nameof(tokens));
+		}
+	}
+
+	private static TerminalWorkspaceCommandParseResult ParseMcpLogExport(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count < 4)
+			return Missing(tokens, ["path"]);
+
+		var index = 4;
+		var format = ProjectContextDocumentFormat.Markdown;
+		if (tokens.Count > index && Contains(McpLogFormats, tokens[index].Value))
+		{
+			format = string.Equals(tokens[index].Value, "json", StringComparison.OrdinalIgnoreCase)
+				? ProjectContextDocumentFormat.Json
+				: ProjectContextDocumentFormat.Markdown;
+			index++;
+		}
+
+		var session = "last";
+		if (tokens.Count > index)
+		{
+			if (string.Equals(tokens[index].Value, "last", StringComparison.OrdinalIgnoreCase))
+			{
+				index++;
+			}
+			else if (string.Equals(tokens[index].Value, "session", StringComparison.OrdinalIgnoreCase))
+			{
+				index++;
+				if (tokens.Count <= index)
+					return Missing(tokens, ["id"]);
+				session = tokens[index].Value;
+				index++;
+			}
+			else
+			{
+				return Unknown(tokens[index], [.. McpLogFormats, "session", "last"]);
+			}
+		}
+
+		if (tokens.Count > index)
+			return Unexpected(tokens[index]);
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Target: session,
+			Format: format,
+			Destination: tokens[3].Value,
+			McpAction: TerminalWorkspaceMcpAction.ExportLog));
 	}
 
 	private static TerminalWorkspaceCommandParseResult ParseRelated(
@@ -791,10 +890,22 @@ internal sealed class TerminalWorkspaceCommandParser
 		argumentIndex switch
 		{
 			0 => new CompletionCandidateSource(McpTargets, McpClients),
-			1 when tokens.Count > 1 && Contains(McpTargets, tokens[1].Value) =>
+			1 when tokens.Count > 1 && string.Equals(tokens[1].Value, "connect", StringComparison.OrdinalIgnoreCase) =>
 				new CompletionCandidateSource(McpClients),
-			2 when tokens.Count > 2 && Contains(McpTargets, tokens[1].Value) && Contains(McpClients, tokens[2].Value) =>
+			2 when tokens.Count > 2 && string.Equals(tokens[1].Value, "connect", StringComparison.OrdinalIgnoreCase) && Contains(McpClients, tokens[2].Value) =>
 				new CompletionCandidateSource(McpModes),
+			1 when tokens.Count > 1 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) =>
+				new CompletionCandidateSource(McpLogTargets),
+			2 when tokens.Count > 2 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
+			                    string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
+				new CompletionCandidateSource(ResolvePathCompletions(current, context.WorkingDirectory)),
+			3 when tokens.Count > 3 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
+			                    string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
+				new CompletionCandidateSource(McpLogFormats, ["session", "last"]),
+			4 when tokens.Count > 4 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
+			                    string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) &&
+			                    Contains(McpLogFormats, tokens[4].Value) =>
+				new CompletionCandidateSource(["session", "last"]),
 			1 when tokens.Count > 1 && Contains(McpClients, tokens[1].Value) =>
 				new CompletionCandidateSource(McpModes),
 			_ => default

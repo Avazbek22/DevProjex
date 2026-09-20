@@ -74,6 +74,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private int _workspacePersistencePending;
 	private bool _previewSearchInProgress;
 	private bool _compressionUnavailableNotified;
+	private bool _agentActivityEnabled;
 	private IReadOnlyList<LiveSessionRecord> _liveSessions = [];
 
 	private TerminalWelcomeContext? _welcomeContext;
@@ -176,6 +177,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			environment);
 		_commandHistory = new TerminalCommandHistory(
 			services.TerminalSettingsStore.LoadCommandHistory());
+		_agentActivityEnabled = services.TerminalSettingsStore.LoadAgentActivityEnabled();
 		_commandHistoryPersistence = new TerminalCommandHistoryPersistenceQueue(
 			services.TerminalSettingsStore.SaveCommandStateAsync,
 			_settingsPersistenceCts.Token);

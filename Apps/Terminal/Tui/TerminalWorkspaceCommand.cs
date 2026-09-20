@@ -90,7 +90,10 @@ internal sealed record TerminalWorkspaceCommand(
 internal enum TerminalWorkspaceMcpAction
 {
 	Print,
-	Connect
+	Connect,
+	ShowLog,
+	ExportLog,
+	ClearLog
 }
 
 internal enum TerminalWorkspaceCommandErrorCode
@@ -290,7 +293,7 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandVerb.Mcp,
 			TerminalWorkspaceCommandGrammar.McpConnection,
 			"mcp",
-			"mcp [client] [live|standard] | mcp connect <client>",
+			"mcp [client] [live|standard] | mcp connect <client> | mcp log ...",
 			"mcp codex live",
 			static (session, command) => session.ExecuteMcpCommand(command)),
 		Define(
