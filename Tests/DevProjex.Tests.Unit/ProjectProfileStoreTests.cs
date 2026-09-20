@@ -201,11 +201,11 @@ public sealed class ProjectProfileStoreTests
 		var backupPath = primaryPath + ".bak";
 		await File.WriteAllTextAsync(
 			primaryPath,
-			"{\"schemaVersion\":4,\"profiles\":{\"future\":{}}}",
+			"{\"schemaVersion\":5,\"profiles\":{\"future\":{}}}",
 			TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(
 			backupPath,
-			"{\"schemaVersion\":3,\"profiles\":{}}",
+			"{\"schemaVersion\":4,\"profiles\":{}}",
 			TestContext.Current.CancellationToken);
 		var primaryBefore = await File.ReadAllBytesAsync(primaryPath, TestContext.Current.CancellationToken);
 		var backupBefore = await File.ReadAllBytesAsync(backupPath, TestContext.Current.CancellationToken);

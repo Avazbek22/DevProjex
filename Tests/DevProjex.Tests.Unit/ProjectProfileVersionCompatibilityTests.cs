@@ -19,6 +19,7 @@ public sealed class ProjectProfileVersionCompatibilityTests
 		Assert.Null(lookup.Profile!.SelectedPaths);
 		Assert.True(store.TrySaveProfile(project, lookup.Profile));
 		using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
+		Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		var persisted = document.RootElement.GetProperty("profiles").GetProperty(PathUtility.Normalize(project));
 		Assert.Equal(1, persisted.GetProperty("selectedPathsSemanticsVersion").GetInt32());
 		Assert.Equal(JsonValueKind.Null, persisted.GetProperty("selectedPaths").ValueKind);
@@ -44,6 +45,7 @@ public sealed class ProjectProfileVersionCompatibilityTests
 		Assert.True(store.TrySaveProfile(project, lookup.Profile));
 
 		using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
+		Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		var persisted = document.RootElement.GetProperty("profiles").GetProperty(PathUtility.Normalize(project));
 		Assert.Equal(1, persisted.GetProperty("selectedPathsSemanticsVersion").GetInt32());
 		Assert.Equal(
@@ -81,6 +83,7 @@ public sealed class ProjectProfileVersionCompatibilityTests
 			new ProjectSelectionProfile([], [], [], SelectedPaths: [])));
 
 		using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
+		Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		var profile = document.RootElement.GetProperty("profiles").GetProperty(PathUtility.Normalize(project));
 		Assert.Equal(1, profile.GetProperty("selectedPathsSemanticsVersion").GetInt32());
 		Assert.Empty(profile.GetProperty("selectedPaths").EnumerateArray());
