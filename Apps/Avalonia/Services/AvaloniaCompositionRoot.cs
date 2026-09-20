@@ -55,6 +55,9 @@ public static class AvaloniaCompositionRoot
         SessionMetricsOptions sessionMetrics,
         Func<string>? appDataPathProvider)
     {
+		if (appDataPathProvider is null)
+			_ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
+
         var desktopPlatform = DesktopPlatformResolver.Resolve();
         var localizationCatalog = new JsonLocalizationCatalog();
         var localization = new LocalizationService(

@@ -431,7 +431,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
 			var root = document.RootElement;
-			Assert.Equal(3, root.GetProperty("schemaVersion").GetInt32());
+			Assert.Equal(4, root.GetProperty("schemaVersion").GetInt32());
 			var persisted = root.GetProperty("profiles").GetProperty(PathUtility.Normalize(projectPath));
 			Assert.False(persisted.GetProperty("rootFolderStates").GetProperty("docs").GetBoolean());
 			Assert.False(persisted.GetProperty("extensionStates").GetProperty(".csv").GetBoolean());

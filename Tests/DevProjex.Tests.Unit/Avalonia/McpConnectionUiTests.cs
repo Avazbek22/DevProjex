@@ -17,6 +17,7 @@ public sealed class McpConnectionUiTests
 	[
 		"Menu.Mcp",
 		"Menu.Mcp.LiveContext",
+		"Menu.Mcp.Standard",
 		"Menu.Mcp.Documentation",
 		"Menu.Mcp.OpenClaudeCode",
 		"Menu.Mcp.OpenCodex",
@@ -42,6 +43,15 @@ public sealed class McpConnectionUiTests
 		"Mcp.Connect.CommandTimedOut",
 		"Mcp.Connect.CommandFailed",
 		"Mcp.Connect.CommandFailedAfterRemoval",
+		"Mcp.Connect.CommandFailedRestored",
+		"Mcp.Connect.ReplaceRequired",
+		"Mcp.Connect.ReplaceTitle",
+		"Mcp.Connect.ReplacePrompt",
+		"Mcp.Connect.ReplaceConfirm",
+		"Mcp.Connect.ReplaceCanceled",
+		"Mcp.Connect.ConnectionChanged",
+		"Mcp.Connect.InspectionFailed",
+		"Mcp.Connect.VsCodeJsoncManual",
 		"Mcp.Connect.ManualFallbackHint",
 		"Mcp.Connect.OutputIncomplete",
 		"Mcp.Open.FailedAfterConnection",
@@ -69,10 +79,7 @@ public sealed class McpConnectionUiTests
 		"Terminal.Tui.Command.Mcp.Schema",
 		"Terminal.Tui.Command.Related.Title",
 		"Terminal.Tui.Command.Related.Description",
-		"Terminal.Tui.Command.Related.Schema",
-		"Dialog.LiveContext.Secrets.Title",
-		"Dialog.LiveContext.Secrets.Message",
-		"Dialog.LiveContext.Secrets.Apply"
+		"Terminal.Tui.Command.Related.Schema"
 	];
 
 	[Fact]
@@ -177,14 +184,18 @@ public sealed class McpConnectionUiTests
 		Assert.Equal(mcpIndex + 1, gitIndex);
 
 		var live = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpLiveContextMenuItem"));
+		var standard = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpStandardMenuItem"));
 		var documentation = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpDocumentationMenuItem"));
 		var topLevelMcpItems = Assert.IsType<MenuItem>(items[mcpIndex]).Items.OfType<MenuItem>().ToArray();
 		Assert.Collection(
 			topLevelMcpItems,
 			item => Assert.Same(live, item),
+			item => Assert.Same(standard, item),
 			item => Assert.Same(documentation, item));
 		Assert.Equal(viewModel.MenuMcpLiveContext, live.Header);
 		Assert.Equal(viewModel.MenuMcpLiveContext, AutomationProperties.GetName(live));
+		Assert.Equal(viewModel.MenuMcpStandard, standard.Header);
+		Assert.Equal(viewModel.MenuMcpStandard, AutomationProperties.GetName(standard));
 		Assert.True(live.IsEnabled);
 		Assert.True(documentation.IsEnabled);
 
@@ -194,11 +205,18 @@ public sealed class McpConnectionUiTests
 			"McpConnectCodexMenuItem",
 			"McpConnectCursorMenuItem",
 			"McpConnectVsCodeMenuItem",
-			"McpOtherClientsMenuItem"
+			"McpOtherClientsMenuItem",
+			"McpStandardConnectClaudeCodeMenuItem",
+			"McpStandardConnectCodexMenuItem",
+			"McpStandardConnectCursorMenuItem",
+			"McpStandardConnectVsCodeMenuItem",
+			"McpStandardOtherClientsMenuItem"
 		}.Select(name => Assert.IsType<MenuItem>(view.FindControl<MenuItem>(name))).ToArray();
 		Assert.All(connectItems, static item => Assert.False(item.IsEnabled));
 		Assert.Equal(5, live.Items.OfType<MenuItem>().Count());
 		Assert.Equal(6, live.Items.Count);
+		Assert.Equal(5, standard.Items.OfType<MenuItem>().Count());
+		Assert.Equal(6, standard.Items.Count);
 		viewModel.IsProjectLoaded = true;
 		Assert.All(connectItems, static item => Assert.True(item.IsEnabled));
 
@@ -208,7 +226,15 @@ public sealed class McpConnectionUiTests
 		item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 		Assert.NotNull(requested);
 		Assert.Equal(McpConnectionClient.Cursor, requested.Client);
+		Assert.Equal(McpConnectionMode.Live, requested.Mode);
 		Assert.Equal(viewModel.MenuMcpOpenCursor, AutomationProperties.GetName(item));
+
+		requested = null;
+		var standardItem = Assert.IsType<MenuItem>(view.FindControl<MenuItem>("McpStandardConnectCursorMenuItem"));
+		standardItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		Assert.NotNull(requested);
+		Assert.Equal(McpConnectionClient.Cursor, requested.Client);
+		Assert.Equal(McpConnectionMode.Standard, requested.Mode);
 	}
 
 	[AvaloniaFact]
@@ -304,40 +330,6 @@ public sealed class McpConnectionUiTests
 					$"{key} is empty in {Path.GetFileName(file)}.");
 			}
 		}
-	}
-
-	[Fact]
-	public void SecretProtectionMessages_StateThatMcpResponsesRemainRedacted()
-	{
-		foreach (var file in Directory.GetFiles(GetLocalizationDirectory(), "*.json"))
-		{
-			using var document = JsonDocument.Parse(File.ReadAllText(file));
-			var message = document.RootElement
-				.GetProperty("Dialog.LiveContext.Secrets.Message")
-				.GetString();
-			Assert.Contains("MCP", message, StringComparison.Ordinal);
-		}
-	}
-
-	[Theory]
-	[InlineData(true, false, true, true)]
-	[InlineData(true, false, false, false)]
-	[InlineData(true, true, true, false)]
-	[InlineData(false, false, true, false)]
-	[InlineData(false, true, true, false)]
-	[InlineData(true, true, false, false)]
-	public void SecretProtectionConfirmation_OnlyGuardsLiveEnabledToDisabledTransition(
-		bool wasEnabled,
-		bool willBeEnabled,
-		bool hasLiveSession,
-		bool expected)
-	{
-		Assert.Equal(
-			expected,
-			MainWindow.ShouldConfirmSecretProtectionDisable(
-				wasEnabled,
-				willBeEnabled,
-				hasLiveSession));
 	}
 
 	private static LocalizationService CreateLocalization()

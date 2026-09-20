@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
 
@@ -260,6 +261,67 @@ public sealed class MainWindowApplySettingsSelectionUiTests
     }
 
     [AvaloniaFact]
+    public async Task FilteredSelectionPersistenceKeepsHiddenCheckedPathsAcrossReopen()
+    {
+        using var project = UiTestProject.CreateDefault();
+        var firstPath = Path.Combine(project.RootPath, "A.cs");
+        var addedPath = Path.Combine(project.RootPath, "B.cs");
+        var hiddenPath = Path.Combine(project.RootPath, "T.cs");
+        var uncheckedPath = Path.Combine(project.RootPath, "U.cs");
+        await File.WriteAllTextAsync(firstPath, "class A {}", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(addedPath, "class B {}", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(hiddenPath, "class T {}", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(uncheckedPath, "class U {}", TestContext.Current.CancellationToken);
+        var appDataPath = Path.Combine(project.AppDataPath, "filtered-selection-profile");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            appDataPathOverride: appDataPath);
+        try
+        {
+            SelectOnlyPaths(window, firstPath, hiddenPath);
+            await UiTestDriver.OpenFilterAsync(window);
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(filterBar.FilterBoxControl),
+                "B.cs");
+            await UiTestDriver.WaitForFilterAppliedAsync(window, "B.cs");
+            FindNodeByPath(window, addedPath)!.IsChecked = true;
+            await GetTreeSelectionPersistence(window)
+                .FlushAsync(TestContext.Current.CancellationToken);
+
+            var store = new DevProjex.Infrastructure.ProjectProfiles.ProjectProfileStore(() => appDataPath);
+            var persisted = store.LookupProfile(project.RootPath, TimeSpan.FromSeconds(1));
+            Assert.Equal(ProjectProfileLookupStatus.Found, persisted.Status);
+            Assert.Equal(["A.cs", "B.cs", "T.cs"], persisted.Profile!.SelectedPaths);
+
+            await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            await GetSearchFilterController(window).CloseFilterAsync();
+            Assert.Equal(
+                [firstPath, addedPath, hiddenPath],
+                UiTestDriver.GetCheckedTreePaths(window));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+        }
+
+        var reopened = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            appDataPathOverride: appDataPath);
+        try
+        {
+            Assert.Equal(
+                [firstPath, addedPath, hiddenPath],
+                UiTestDriver.GetCheckedTreePaths(reopened));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(reopened);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task StructuralApply_RealTreeCheckboxSelectionSurvivesGraphReplacement()
     {
         using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
@@ -499,6 +561,40 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	[AvaloniaFact(Timeout = 120_000)]
+	public async Task DisablingSecretProtectionWithLiveSessionAppliesWithoutConfirmation()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var registry = new LiveSessionRegistry(() => project.AppDataPath);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { LiveSessionRegistry = registry })
+			.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+		await using var liveSession = registry.Start([project.RootPath]);
+
+		try
+		{
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			await UiTestDriver.ClickApplySettingsAsync(window)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+			await UiTestDriver.ClickApplySettingsAsync(window)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+			Assert.False(UiTestDriver.GetViewModel(window).HideSecretsOption!.IsChecked);
+			Assert.Equal((false, false), UiTestDriver.GetAppliedContentRedactionState(window));
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window)
+				.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+		}
+	}
 
 	[AvaloniaFact]
 	public async Task GitPull_RestoresStoredAppliedRedactionInsteadOfCommittingDraft()
@@ -1011,6 +1107,16 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         return snapshot is null
             ? null
             : Assert.IsType<ProjectTreeSelectionSnapshot>(snapshot);
+    }
+
+    private static DevProjex.Avalonia.Coordinators.TreeSelectionProfilePersistenceCoordinator
+        GetTreeSelectionPersistence(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_treeSelectionProfiles",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        return Assert.IsType<DevProjex.Avalonia.Coordinators.TreeSelectionProfilePersistenceCoordinator>(
+            field?.GetValue(window));
     }
 
     private static async Task InvokePrivateTaskAsync(MainWindow window, string methodName)

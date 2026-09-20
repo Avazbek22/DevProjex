@@ -52,6 +52,66 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 		Assert.Equal(["src"], written!.SelectedPaths);
 	}
 
+	[Fact]
+	public async Task FailedBackgroundWriteRemainsPendingAndFlushRetriesIt()
+	{
+		var delay = new ControlledDelay();
+		var firstAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var attempts = 0;
+		ProjectSelectionProfile? written = null;
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			(_, profile, _) =>
+			{
+				attempts++;
+				if (attempts == 1)
+				{
+					firstAttempt.TrySetResult();
+					throw new IOException("locked");
+				}
+				written = profile;
+				return Task.CompletedTask;
+			},
+			delay.WaitAsync,
+			maxBackgroundAttempts: 1);
+
+		coordinator.Schedule("project", CreateProfile(["src"]));
+		await delay.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
+		delay.Release();
+		await firstAttempt.Task.WaitAsync(TestContext.Current.CancellationToken);
+		await coordinator.FlushAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, attempts);
+		Assert.Equal(["src"], written!.SelectedPaths);
+	}
+
+	[Fact]
+	public async Task FlushWaitsForAnActiveWriteInsteadOfStartingACompetingWrite()
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var attempts = 0;
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			async (_, _, _) =>
+			{
+				attempts++;
+				writeStarted.TrySetResult();
+				await releaseWrite.Task;
+			},
+			delay.WaitAsync);
+
+		coordinator.Schedule("project", CreateProfile(["src"]));
+		await delay.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
+		delay.Release();
+		await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		var flush = coordinator.FlushAsync(TestContext.Current.CancellationToken);
+
+		Assert.False(flush.IsCompleted);
+		releaseWrite.TrySetResult();
+		await flush;
+		Assert.Equal(1, attempts);
+	}
+
 	private static ProjectSelectionProfile CreateProfile(IReadOnlyCollection<string>? selectedPaths) =>
 		new([], [".cs"], [], SelectedPaths: selectedPaths);
 

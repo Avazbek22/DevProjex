@@ -173,6 +173,36 @@
                     AutomationProperties.Name="{Binding MenuMcpOtherClients}"
                     Click="OnMcpOtherClients" />
         </MenuItem>
+        <MenuItem Name="McpStandardMenuItem"
+                  Header="{Binding MenuMcpStandard}"
+                  AutomationProperties.Name="{Binding MenuMcpStandard}">
+          <MenuItem Name="McpStandardConnectClaudeCodeMenuItem"
+                    Header="{Binding MenuMcpOpenClaudeCode}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOpenClaudeCode}"
+                    Click="OnMcpStandardConnectClaudeCode" />
+          <MenuItem Name="McpStandardConnectCodexMenuItem"
+                    Header="{Binding MenuMcpOpenCodex}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOpenCodex}"
+                    Click="OnMcpStandardConnectCodex" />
+          <MenuItem Name="McpStandardConnectCursorMenuItem"
+                    Header="{Binding MenuMcpOpenCursor}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOpenCursor}"
+                    Click="OnMcpStandardConnectCursor" />
+          <MenuItem Name="McpStandardConnectVsCodeMenuItem"
+                    Header="{Binding MenuMcpOpenVsCode}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOpenVsCode}"
+                    Click="OnMcpStandardConnectVsCode" />
+          <Separator />
+          <MenuItem Name="McpStandardOtherClientsMenuItem"
+                    Header="{Binding MenuMcpOtherClients}"
+                    IsEnabled="{Binding IsProjectLoaded}"
+                    AutomationProperties.Name="{Binding MenuMcpOtherClients}"
+                    Click="OnMcpStandardOtherClients" />
+        </MenuItem>
         <MenuItem Name="McpDocumentationMenuItem"
                   Header="{Binding MenuMcpDocumentation}"
                   AutomationProperties.Name="{Binding MenuMcpDocumentation}"

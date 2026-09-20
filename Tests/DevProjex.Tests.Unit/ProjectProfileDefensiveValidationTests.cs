@@ -155,7 +155,7 @@ public sealed class ProjectProfileDefensiveValidationTests
 		store.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
 		File.WriteAllText(
 			store.GetPath() + ".bak",
-			"{\"schemaVersion\":4,\"profiles\":{}}");
+			"{\"schemaVersion\":5,\"profiles\":{}}");
 
 		var lookup = store.LookupProfile(project, TimeSpan.FromSeconds(1));
 

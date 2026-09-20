@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -73,7 +74,6 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void FlushLocalProfilePersistence()
 	{
-		ScheduleLocalProfilePersistence();
 		_selectionProfilePersistence.FlushAsync().GetAwaiter().GetResult();
 	}
 
@@ -104,28 +104,25 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		await Task.Run(() =>
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var lookup = _services.LocalProfileStore.LookupProfile(
+			ProjectSelectionProfile? baseline;
+			lock (_localProfileBaselineSync)
+				baseline = _localProfileBaseline;
+			var result = ProjectProfileMergeWriter.TryMerge(
+				_services.LocalProfileStore,
 				projectPath,
-				TimeSpan.FromSeconds(5));
-			if (lookup is { Status: ProjectProfileLookupStatus.Found, Profile: not null })
-			{
-				profile = profile with
-				{
-					SelectedRootFolders = lookup.Profile.SelectedRootFolders.ToArray(),
-					RootFolderStates = lookup.Profile.RootFolderStates is null
-						? null
-						: new Dictionary<string, bool>(
-							lookup.Profile.RootFolderStates,
-							ProjectTreePathIdentity.CanonicalComparer),
-					MarkedSecrets = lookup.Profile.MarkedSecrets?.ToArray()
-				};
-			}
-
-			cancellationToken.ThrowIfCancellationRequested();
-			var result = _services.LocalProfileStore.TrySaveProfileWithResult(projectPath, profile);
+				profile,
+				baseline,
+				ProjectProfileMergeFields.Extensions |
+				ProjectProfileMergeFields.IgnoreOptions |
+				ProjectProfileMergeFields.ExtensionStates |
+				ProjectProfileMergeFields.IgnoreOptionStates |
+				ProjectProfileMergeFields.SelectedPaths,
+				TimeSpan.FromSeconds(5),
+				cancellationToken: cancellationToken);
 			if (!result.Succeeded)
 				throw new IOException("The terminal project profile could not be saved.");
+			lock (_localProfileBaselineSync)
+				_localProfileBaseline = profile;
 		}, cancellationToken).ConfigureAwait(false);
 	}
 }

@@ -9,7 +9,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	IProjectProfileStore,
 	IPersistentSecretMarkStore
 {
-	private const int CurrentSchemaVersion = 3;
+	private const int CurrentSchemaVersion = 4;
 	private const int CurrentSelectedPathsSemanticsVersion = 1;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";

@@ -21,15 +21,17 @@ public partial class MainWindow
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
             request = new McpConnectionRequest(
                 e.Client,
-                McpConnectionMode.Live,
+                e.Mode,
                 executablePath,
                 Path.GetFullPath(_currentPath));
             var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
-            var result = await _mcpConnectionService.ConnectAsync(request, cancellationToken);
+            var result = await ConnectMcpClientAsync(request, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
             if (result.Succeeded)
             {
+                if (result.Replaced)
+                    _toastService.Show(result.UserMessage);
                 var launchResult = await _mcpClientLaunchService.OpenAsync(
                     new McpClientLaunchRequest(request.Client, request.ProjectRoot),
                     cancellationToken);
@@ -60,6 +62,45 @@ public partial class MainWindow
                 ManualConfiguration: TryCreatePrintableConfiguration(request));
             await ShowMcpManualConfigurationAsync(result, request);
         }
+    }
+
+    private async Task<McpConnectionResult> ConnectMcpClientAsync(
+        McpConnectionRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.Client != McpConnectionClient.Codex ||
+            _mcpConnectionService is not IMcpConnectionReplacementService replacementService)
+        {
+            return await _mcpConnectionService.ConnectAsync(request, cancellationToken);
+        }
+
+        var inspection = await replacementService.InspectAsync(request, cancellationToken);
+        if (!inspection.RequiresProjectReplacement ||
+            string.IsNullOrWhiteSpace(inspection.ExistingProjectRoot))
+        {
+            return await _mcpConnectionService.ConnectAsync(request, cancellationToken);
+        }
+
+        var confirmed = await MessageDialog.ShowConfirmationAsync(
+            this,
+            _localization["Mcp.Connect.ReplaceTitle"],
+            _localization.Format(
+                "Mcp.Connect.ReplacePrompt",
+                inspection.ExistingProjectRoot,
+                request.ProjectRoot),
+            _localization["Mcp.Connect.ReplaceConfirm"],
+            _localization["Dialog.Cancel"]);
+        if (!confirmed)
+        {
+            return new McpConnectionResult(
+                McpConnectionStatus.InvalidConfiguration,
+                _localization["Mcp.Connect.ReplaceCanceled"]);
+        }
+
+        return await replacementService.ReplaceAsync(
+            request,
+            inspection.ExistingProjectRoot,
+            cancellationToken);
     }
 
     private void OnMcpDocumentationRequested(object? sender, RoutedEventArgs e)

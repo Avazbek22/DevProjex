@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Processes;
@@ -315,6 +316,7 @@ internal enum McpProjectConfigurationError
 	None,
 	ResourceUnavailable,
 	InvalidData,
+	JsoncRequiresManualUpdate,
 	AccessDenied,
 	OperationFailed
 }
@@ -362,16 +364,19 @@ internal sealed class McpProjectConfigurationWriter
 		JsonObject root;
 		if (File.Exists(targetPath))
 		{
+			var text = string.Empty;
 			try
 			{
 				var file = new FileInfo(targetPath);
 				if (file.Length > MaximumConfigurationBytes)
 					return Failure(targetPath, McpProjectConfigurationError.InvalidData);
-				var text = await File.ReadAllTextAsync(targetPath, cancellationToken).ConfigureAwait(false);
+				text = await File.ReadAllTextAsync(targetPath, cancellationToken).ConfigureAwait(false);
 				root = JsonNode.Parse(text) as JsonObject ?? throw new JsonException();
 			}
 			catch (JsonException)
 			{
+				if (request.Client == McpConnectionClient.VsCode && IsValidJsonc(text))
+					return Failure(targetPath, McpProjectConfigurationError.JsoncRequiresManualUpdate);
 				return Failure(targetPath, McpProjectConfigurationError.InvalidData);
 			}
 			catch (UnauthorizedAccessException)
@@ -436,6 +441,25 @@ internal sealed class McpProjectConfigurationWriter
 		}
 	}
 
+	private static bool IsValidJsonc(string text)
+	{
+		try
+		{
+			return JsonNode.Parse(
+				text,
+				nodeOptions: null,
+				documentOptions: new JsonDocumentOptions
+				{
+					CommentHandling = JsonCommentHandling.Skip,
+					AllowTrailingCommas = true
+				}) is JsonObject;
+		}
+		catch (JsonException)
+		{
+			return false;
+		}
+	}
+
 	private static McpProjectConfigurationWriteResult Failure(
 		string path,
 		McpProjectConfigurationError error) =>
@@ -477,7 +501,28 @@ internal sealed class McpProjectConfigurationWriter
 	}
 }
 
-public sealed class McpConnectionService : IMcpConnectionService
+public sealed record McpConnectionInspection(
+	bool Exists,
+	string? ExistingProjectRoot,
+	bool RequiresProjectReplacement,
+	string? ErrorMessage = null)
+{
+	public bool Succeeded => ErrorMessage is null;
+}
+
+public interface IMcpConnectionReplacementService
+{
+	Task<McpConnectionInspection> InspectAsync(
+		McpConnectionRequest request,
+		CancellationToken cancellationToken = default);
+
+	Task<McpConnectionResult> ReplaceAsync(
+		McpConnectionRequest request,
+		string expectedExistingProjectRoot,
+		CancellationToken cancellationToken = default);
+}
+
+public sealed class McpConnectionService : IMcpConnectionService, IMcpConnectionReplacementService
 {
 	private static readonly TimeSpan ClientCommandTimeout = TimeSpan.FromSeconds(15);
 	private static readonly string[] ClaudeDesktopConfigurationPaths =
@@ -547,12 +592,65 @@ public sealed class McpConnectionService : IMcpConnectionService
 		};
 	}
 
+	public async Task<McpConnectionInspection> InspectAsync(
+		McpConnectionRequest request,
+		CancellationToken cancellationToken = default)
+	{
+		ValidateRequest(request);
+		if (request.Client is not (McpConnectionClient.ClaudeCode or McpConnectionClient.Codex))
+			return new McpConnectionInspection(false, null, false);
+
+		var commandName = request.Client == McpConnectionClient.ClaudeCode ? "claude" : "codex";
+		var executable = _locator.Find(commandName);
+		if (executable is null)
+		{
+			return new McpConnectionInspection(
+				false,
+				null,
+				false,
+				_localization.Format("Mcp.Connect.ClientNotFound", DisplayName(request.Client)));
+		}
+
+		var read = await ReadExistingConnectionAsync(
+			request,
+			executable,
+			cancellationToken).ConfigureAwait(false);
+		if (read.Error is not null)
+			return new McpConnectionInspection(false, null, false, read.Error);
+		if (read.Snapshot is null)
+			return new McpConnectionInspection(false, null, false);
+
+		var differentProject = request.Client == McpConnectionClient.Codex &&
+			!PathsEqual(read.Snapshot.ProjectRoot, request.ProjectRoot);
+		return new McpConnectionInspection(
+			true,
+			read.Snapshot.ProjectRoot,
+			differentProject);
+	}
+
+	public Task<McpConnectionResult> ReplaceAsync(
+		McpConnectionRequest request,
+		string expectedExistingProjectRoot,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(expectedExistingProjectRoot);
+		ValidateRequest(request);
+		return ConnectCommandLineClientAsync(
+			request,
+			request.Client == McpConnectionClient.ClaudeCode ? "claude" : "codex",
+			request.Client == McpConnectionClient.ClaudeCode ? "Mcp.Connect.ClaudeCode" : "Mcp.Connect.Codex",
+			request.Client == McpConnectionClient.ClaudeCode ? "claude" : "codex",
+			cancellationToken,
+			expectedExistingProjectRoot: Path.GetFullPath(expectedExistingProjectRoot));
+	}
+
 	private async Task<McpConnectionResult> ConnectCommandLineClientAsync(
 		McpConnectionRequest request,
 		string commandName,
 		string localizationPrefix,
 		string nextCommand,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		string? expectedExistingProjectRoot = null)
 	{
 		var executable = _locator.Find(commandName);
 		var manual = CreatePrintableConfiguration(request);
@@ -565,34 +663,110 @@ public sealed class McpConnectionService : IMcpConnectionService
 		}
 
 		var output = new List<string>();
+		var existing = await ReadExistingConnectionAsync(
+			request,
+			executable,
+			cancellationToken).ConfigureAwait(false);
+		AppendOutput(output, "get", existing.ProcessResult);
+		if (existing.Error is not null)
+		{
+			if (existing.ProcessResult.Succeeded)
+			{
+				return new McpConnectionResult(
+					McpConnectionStatus.ProcessFailed,
+					WithManualFallback(existing.Error),
+					ManualConfiguration: manual,
+					CommandOutput: string.Join(Environment.NewLine, output));
+			}
+			return CreateProcessFailure(
+				request,
+				existing.ProcessResult,
+				output,
+				manual,
+				previousConnectionRemoved: false);
+		}
+
+		var snapshot = existing.Snapshot;
+		if (request.Client == McpConnectionClient.Codex &&
+			snapshot is not null &&
+			!PathsEqual(snapshot.ProjectRoot, request.ProjectRoot))
+		{
+			if (expectedExistingProjectRoot is null)
+			{
+				return new McpConnectionResult(
+					McpConnectionStatus.InvalidConfiguration,
+					_localization.Format(
+						"Mcp.Connect.ReplaceRequired",
+						snapshot.ProjectRoot,
+						request.ProjectRoot),
+					ManualConfiguration: manual,
+					CommandOutput: string.Join(Environment.NewLine, output));
+			}
+			if (!PathsEqual(snapshot.ProjectRoot, expectedExistingProjectRoot))
+			{
+				return new McpConnectionResult(
+					McpConnectionStatus.InvalidConfiguration,
+					_localization["Mcp.Connect.ConnectionChanged"],
+					ManualConfiguration: manual,
+					CommandOutput: string.Join(Environment.NewLine, output));
+			}
+		}
+
 		IReadOnlyList<string> removeArguments = request.Client == McpConnectionClient.ClaudeCode
 			? ["mcp", "remove", "devprojex", "--scope", "local"]
 			: ["mcp", "remove", "devprojex"];
-		var remove = await RunClientCommandAsync(
-			executable,
-			removeArguments,
-			request.ProjectRoot,
-			cancellationToken).ConfigureAwait(false);
-		AppendOutput(output, "remove", remove);
-		var missingServer = IsMissingServer(request.Client, remove);
-		var replaced = remove.Succeeded && !missingServer;
-		if (!remove.Succeeded && !missingServer)
-			return CreateProcessFailure(request, remove, output, manual, previousConnectionRemoved: false);
-
-		var arguments = new List<string>
+		var replaced = snapshot is not null;
+		if (replaced)
 		{
-			"mcp", "add", "devprojex", "--", request.ExecutablePath, "mcp", "--root", request.ProjectRoot
-		};
-		if (request.Mode == McpConnectionMode.Live)
-			arguments.Add("--live");
-		var add = await RunClientCommandAsync(
-			executable,
-			arguments,
-			request.ProjectRoot,
-			cancellationToken).ConfigureAwait(false);
+			var remove = await RunClientCommandAsync(
+				executable,
+				removeArguments,
+				request.ProjectRoot,
+				cancellationToken).ConfigureAwait(false);
+			AppendOutput(output, "remove", remove);
+			if (!remove.Succeeded)
+				return CreateProcessFailure(request, remove, output, manual, previousConnectionRemoved: false);
+		}
+
+		var arguments = CreateAddArguments(request.Client, request.ExecutablePath, request.ProjectRoot, request.Mode);
+		McpConnectionProcessResult add;
+		try
+		{
+			add = await RunClientCommandAsync(
+				executable,
+				arguments,
+				request.ProjectRoot,
+				cancellationToken).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && snapshot is not null)
+		{
+			await TryRestoreConnectionAsync(
+				request,
+				executable,
+				removeArguments,
+				snapshot,
+				output).ConfigureAwait(false);
+			throw;
+		}
 		AppendOutput(output, "add", add);
 		if (!add.Succeeded)
-			return CreateProcessFailure(request, add, output, manual, previousConnectionRemoved: replaced);
+		{
+			if (snapshot is null)
+				return CreateProcessFailure(request, add, output, manual, previousConnectionRemoved: false);
+			var restored = await TryRestoreConnectionAsync(
+				request,
+				executable,
+				removeArguments,
+				snapshot,
+				output).ConfigureAwait(false);
+			return CreateProcessFailure(
+				request,
+				add,
+				output,
+				manual,
+				previousConnectionRemoved: true,
+				previousConnectionRestored: restored);
+		}
 
 		var status = replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected;
 		return new McpConnectionResult(
@@ -645,7 +819,8 @@ public sealed class McpConnectionService : IMcpConnectionService
 		McpConnectionProcessResult processResult,
 		IReadOnlyList<string> output,
 		string manual,
-		bool previousConnectionRemoved)
+		bool previousConnectionRemoved,
+		bool previousConnectionRestored = false)
 	{
 		var status = processResult.TimedOut
 			? McpConnectionStatus.TimedOut
@@ -655,7 +830,12 @@ public sealed class McpConnectionService : IMcpConnectionService
 			: processResult.StartError ?? processResult.CombinedOutput;
 		if (string.IsNullOrWhiteSpace(detail))
 			detail = _localization["Mcp.Connect.UnknownError"];
-		var message = previousConnectionRemoved
+		var message = previousConnectionRestored
+			? _localization.Format(
+				"Mcp.Connect.CommandFailedRestored",
+				DisplayName(request.Client),
+				detail)
+			: previousConnectionRemoved
 			? _localization.Format(
 				"Mcp.Connect.CommandFailedAfterRemoval",
 				DisplayName(request.Client),
@@ -675,6 +855,8 @@ public sealed class McpConnectionService : IMcpConnectionService
 	{
 		McpProjectConfigurationError.ResourceUnavailable => _localization["Desktop.Error.ResourceUnavailable"],
 		McpProjectConfigurationError.InvalidData => _localization["Desktop.Error.InvalidData"],
+		McpProjectConfigurationError.JsoncRequiresManualUpdate =>
+			_localization["Mcp.Connect.VsCodeJsoncManual"],
 		McpProjectConfigurationError.AccessDenied => _localization["Desktop.Error.AccessDenied"],
 		McpProjectConfigurationError.OperationFailed => _localization["Desktop.Error.OperationFailed"],
 		_ => _localization["Mcp.Connect.UnknownError"]
@@ -692,6 +874,180 @@ public sealed class McpConnectionService : IMcpConnectionService
 				projectRoot,
 				ClientCommandTimeout),
 			cancellationToken);
+
+	private async Task<ExistingConnectionRead> ReadExistingConnectionAsync(
+		McpConnectionRequest request,
+		string executable,
+		CancellationToken cancellationToken)
+	{
+		IReadOnlyList<string> arguments = request.Client == McpConnectionClient.Codex
+			? ["mcp", "get", "devprojex", "--json"]
+			: ["mcp", "get", "devprojex"];
+		var result = await RunClientCommandAsync(
+			executable,
+			arguments,
+			request.ProjectRoot,
+			cancellationToken).ConfigureAwait(false);
+		if (IsMissingServer(request.Client, result))
+			return new ExistingConnectionRead(result, null, null);
+		if (!result.Succeeded)
+		{
+			var detail = result.TimedOut
+				? _localization["Mcp.Connect.CommandTimedOut"]
+				: result.StartError ?? result.CombinedOutput;
+			return new ExistingConnectionRead(
+				result,
+				null,
+				_localization.Format(
+					"Mcp.Connect.CommandFailed",
+					DisplayName(request.Client),
+					string.IsNullOrWhiteSpace(detail) ? _localization["Mcp.Connect.UnknownError"] : detail));
+		}
+
+		if (!TryParseExistingConnection(request.Client, result.StandardOutput, out var snapshot))
+		{
+			return new ExistingConnectionRead(
+				result,
+				null,
+				_localization.Format(
+					"Mcp.Connect.CommandFailed",
+					DisplayName(request.Client),
+					_localization["Mcp.Connect.InspectionFailed"]));
+		}
+		return new ExistingConnectionRead(result, snapshot, null);
+	}
+
+	private async Task<bool> TryRestoreConnectionAsync(
+		McpConnectionRequest request,
+		string executable,
+		IReadOnlyList<string> removeArguments,
+		CommandLineConnectionSnapshot snapshot,
+		ICollection<string> output)
+	{
+		using var recoveryCts = new CancellationTokenSource(ClientCommandTimeout);
+		var cleanup = await RunClientCommandAsync(
+			executable,
+			removeArguments,
+			request.ProjectRoot,
+			recoveryCts.Token).ConfigureAwait(false);
+		AppendOutput(output, "rollback-remove", cleanup);
+		if (!cleanup.Succeeded && !IsMissingServer(request.Client, cleanup))
+			return false;
+
+		var restore = await RunClientCommandAsync(
+			executable,
+			CreateAddArguments(request.Client, snapshot.Command, snapshot.ProjectRoot, snapshot.Mode),
+			request.ProjectRoot,
+			recoveryCts.Token).ConfigureAwait(false);
+		AppendOutput(output, "rollback-add", restore);
+		return restore.Succeeded;
+	}
+
+	private static List<string> CreateAddArguments(
+		McpConnectionClient client,
+		string executablePath,
+		string projectRoot,
+		McpConnectionMode mode)
+	{
+		var arguments = client == McpConnectionClient.ClaudeCode
+			? new List<string> { "mcp", "add", "--scope", "local", "devprojex", "--" }
+			: ["mcp", "add", "devprojex", "--"];
+		arguments.AddRange([executablePath, "mcp", "--root", projectRoot]);
+		if (mode == McpConnectionMode.Live)
+			arguments.Add("--live");
+		return arguments;
+	}
+
+	private static bool TryParseExistingConnection(
+		McpConnectionClient client,
+		string output,
+		out CommandLineConnectionSnapshot snapshot)
+	{
+		if (client == McpConnectionClient.Codex)
+			return TryParseCodexConnection(output, out snapshot);
+		return TryParseClaudeConnection(output, out snapshot);
+	}
+
+	private static bool TryParseCodexConnection(
+		string output,
+		out CommandLineConnectionSnapshot snapshot)
+	{
+		snapshot = default!;
+		try
+		{
+			using var document = JsonDocument.Parse(output);
+			var transport = document.RootElement.GetProperty("transport");
+			if (!string.Equals(transport.GetProperty("type").GetString(), "stdio", StringComparison.OrdinalIgnoreCase))
+				return false;
+			var command = transport.GetProperty("command").GetString();
+			var arguments = transport.GetProperty("args")
+				.EnumerateArray()
+				.Select(static value => value.GetString() ?? string.Empty)
+				.ToArray();
+			return TryCreateSnapshot(command, arguments, out snapshot);
+		}
+		catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+		{
+			return false;
+		}
+	}
+
+	private static bool TryParseClaudeConnection(
+		string output,
+		out CommandLineConnectionSnapshot snapshot)
+	{
+		snapshot = default!;
+		var lines = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+		var command = lines.FirstOrDefault(static line => line.TrimStart().StartsWith("Command: ", StringComparison.Ordinal));
+		var args = lines.FirstOrDefault(static line => line.TrimStart().StartsWith("Args: ", StringComparison.Ordinal));
+		if (command is null || args is null)
+			return false;
+		var commandValue = command.TrimStart()["Command: ".Length..].Trim();
+		var argumentText = args.TrimStart()["Args: ".Length..].Trim();
+		const string prefix = "mcp --root ";
+		if (!argumentText.StartsWith(prefix, StringComparison.Ordinal))
+			return false;
+		var live = argumentText.EndsWith(" --live", StringComparison.Ordinal);
+		var root = live
+			? argumentText[prefix.Length..^" --live".Length]
+			: argumentText[prefix.Length..];
+		return TryCreateSnapshot(
+			commandValue,
+			live ? ["mcp", "--root", root, "--live"] : ["mcp", "--root", root],
+			out snapshot);
+	}
+
+	private static bool TryCreateSnapshot(
+		string? command,
+		IReadOnlyList<string> arguments,
+		out CommandLineConnectionSnapshot snapshot)
+	{
+		snapshot = default!;
+		var rootIndex = arguments
+			.Select((value, index) => (value, index))
+			.FirstOrDefault(static pair => pair.value == "--root")
+			.index;
+		if (string.IsNullOrWhiteSpace(command) ||
+			arguments.Count < 3 ||
+			arguments[0] != "mcp" ||
+			rootIndex <= 0 ||
+			rootIndex + 1 >= arguments.Count ||
+			!Path.IsPathFullyQualified(arguments[rootIndex + 1]))
+			return false;
+		snapshot = new CommandLineConnectionSnapshot(
+			command,
+			Path.GetFullPath(arguments[rootIndex + 1]),
+			arguments.Contains("--live", StringComparer.Ordinal)
+				? McpConnectionMode.Live
+				: McpConnectionMode.Standard);
+		return true;
+	}
+
+	private static bool PathsEqual(string left, string right) =>
+		string.Equals(
+			Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+			Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+			OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
 	private static bool IsMissingServer(
 		McpConnectionClient client,
@@ -761,4 +1117,14 @@ public sealed class McpConnectionService : IMcpConnectionService
 		if (!Path.IsPathFullyQualified(request.ProjectRoot))
 			throw new ArgumentException("The project root must be absolute.", nameof(request));
 	}
+
+	private sealed record CommandLineConnectionSnapshot(
+		string Command,
+		string ProjectRoot,
+		McpConnectionMode Mode);
+
+	private sealed record ExistingConnectionRead(
+		McpConnectionProcessResult ProcessResult,
+		CommandLineConnectionSnapshot? Snapshot,
+		string? Error);
 }

@@ -1708,6 +1708,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuCopyTreeAndContent { get; private set; } = string.Empty;
     public string MenuMcp { get; private set; } = string.Empty;
     public string MenuMcpLiveContext { get; private set; } = string.Empty;
+    public string MenuMcpStandard { get; private set; } = string.Empty;
     public string MenuMcpDocumentation { get; private set; } = string.Empty;
     public string MenuMcpOpenClaudeCode { get; private set; } = string.Empty;
     public string MenuMcpOpenCodex { get; private set; } = string.Empty;
@@ -1912,6 +1913,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuCopyTreeAndContent = _localization["Menu.Copy.TreeAndContent"];
         MenuMcp = _localization["Menu.Mcp"];
         MenuMcpLiveContext = _localization["Menu.Mcp.LiveContext"];
+        MenuMcpStandard = _localization["Menu.Mcp.Standard"];
         MenuMcpDocumentation = _localization["Menu.Mcp.Documentation"];
         MenuMcpOpenClaudeCode = _localization["Menu.Mcp.OpenClaudeCode"];
         MenuMcpOpenCodex = _localization["Menu.Mcp.OpenCodex"];
@@ -2104,6 +2106,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuCopyTreeAndContent));
         RaisePropertyChanged(nameof(MenuMcp));
         RaisePropertyChanged(nameof(MenuMcpLiveContext));
+        RaisePropertyChanged(nameof(MenuMcpStandard));
         RaisePropertyChanged(nameof(MenuMcpDocumentation));
         RaisePropertyChanged(nameof(MenuMcpOpenClaudeCode));
         RaisePropertyChanged(nameof(MenuMcpOpenCodex));

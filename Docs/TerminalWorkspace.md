@@ -262,7 +262,7 @@ inline ghost suffix as soon as a token can be completed:
 | `profile show` | show the effective settings and tree selection |
 | `profile reset` | reset the current project to default settings after confirmation |
 | `mcp [claude-code\|codex\|cursor\|vscode\|json] [live\|standard]` | print a connection fragment without changing client configuration |
-| `mcp connect <claude-code\|codex\|cursor\|vscode\|json>` | connect the selected MCP client to the open project in live mode; `json` shows the manual configuration |
+| `mcp connect <claude-code\|codex\|cursor\|vscode\|json> [live\|standard]` | connect the selected MCP client to the open project; mode defaults to `live`, and `json` shows the manual configuration |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
 | `diagnostics` | show every diagnostic in a scrollable overlay |
@@ -301,6 +301,7 @@ Examples:
 :copy content markdown
 :related src/App.cs --direction dependencies --depth 2
 :mcp codex standard
+:mcp connect codex standard
 :refresh
 :language ja
 :open "../sample project"
@@ -314,13 +315,18 @@ Oversized OSC 52 payloads are never truncated; the command reports an error and
 directs the user to `export` instead. A view or format supplied to `copy` applies
 only to that operation.
 
-`mcp connect` always registers live mode and never opens another terminal or
-editor, because Terminal Workspace is already interactive. Its localized result
+`mcp connect` defaults to live mode and accepts `live` or `standard`; it never opens
+another terminal or editor, because Terminal Workspace is already interactive. Its localized result
 appears both in the workspace status line and in a scrollable output panel. A
 missing command-line client or another failure shows the same reason together with
 the manual fallback configuration. Cursor and VS Code update their project files;
 the other client behaviors match `devprojex mcp connect`. The older `mcp` form
 continues to print a fragment and accepts an explicit live or standard mode.
+Because Codex uses one shared `devprojex` registration, replacing a registration
+that points at another project requires confirmation showing both roots. Claude Code
+uses a project-local registration and does not need that cross-project confirmation.
+If replacement fails or is canceled after removal, the previous registration is
+restored before the operation completes.
 
 `related` uses the same dependency engine and text renderer as the direct CLI.
 Depth `1` shows direct relations; larger values walk only resolved edges and emit
@@ -335,7 +341,12 @@ renders that hint in brackets instead of relying on dim color.
 
 Debounced tree selection, expansion, focus, view, and format state is flushed
 before leaving a workspace or exiting, so an immediate exit cannot discard the
-last accepted interaction.
+last accepted interaction. A workspace that made no profile change does not write
+a new profile revision. When Desktop and Terminal Workspace are open together,
+each save reapplies only the fields changed in that window to the latest stored
+revision; a transient write failure keeps the newest selection pending for a
+bounded retry and is reported in the Terminal Workspace error panel if flushing
+still cannot commit it.
 
 `language` without an argument shows the current language and all supported codes.
 A mistyped code reports only the nearest candidates and points back to the

@@ -125,7 +125,7 @@ public sealed class InfrastructureJsonPersistenceTests
 			.Single()
 			.Value;
 
-		Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("rootFolderStates").ValueKind);
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("extensionStates").ValueKind);
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("ignoreOptionStates").ValueKind);
@@ -164,7 +164,7 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.True(loaded.IgnoreOptionStates[IgnoreOptionId.SmartIgnore]);
 
 		using var document = JsonDocument.Parse(File.ReadAllText(storePath));
-		Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
 	}
 
 	[Fact]
@@ -559,7 +559,7 @@ public sealed class InfrastructureJsonPersistenceTests
 		File.WriteAllText(fileSet.PrimaryPath, payload);
 		File.WriteAllText(fileSet.BackupPath, payload);
 		const UnixFileMode legacyMode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
-		                                UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+										UnixFileMode.GroupRead | UnixFileMode.OtherRead;
 		File.SetUnixFileMode(fileSet.PrimaryPath, legacyMode);
 		File.SetUnixFileMode(fileSet.BackupPath, legacyMode);
 

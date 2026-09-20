@@ -1,4 +1,5 @@
 using DevProjex.Application.Models;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -64,6 +65,18 @@ public sealed class ProjectProfilePersistenceCoordinator(
             return;
 
         var profile = CaptureCurrentProfile(currentPath!);
+        if (profileStore is ProjectProfileStore)
+        {
+            var merged = await PersistMergedAsync(
+                currentPath!,
+                profile,
+                readiness.RecoveredSnapshot?.Profile,
+                ProjectProfileMergeFields.AllSelections,
+                cancellationToken).ConfigureAwait(false);
+            if (!merged)
+                throw new IOException("The project profile could not be saved without overwriting a newer revision.");
+            return;
+        }
         await _pendingWrites
 			.PersistAsync(
 				currentPath!,
@@ -91,6 +104,18 @@ public sealed class ProjectProfilePersistenceCoordinator(
 			: CaptureProfileForSelectionWrite(currentPath!, selectedPaths);
         if (profile is null)
             return;
+        if (profileStore is ProjectProfileStore)
+        {
+            var merged = await PersistMergedAsync(
+                currentPath!,
+                profile,
+                readiness.RecoveredSnapshot?.Profile,
+                ProjectProfileMergeFields.SelectedPaths,
+                cancellationToken).ConfigureAwait(false);
+            if (!merged)
+                throw new IOException("The project selection could not be saved without overwriting a newer revision.");
+            return;
+        }
 
         await _pendingWrites
             .PersistAsync(
@@ -298,7 +323,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
 
 		var normalizedPath = Path.GetFullPath(currentPath!);
 		if (CanPersistNormalizedPath(normalizedPath))
-			return new ProfilePersistenceReadiness(true, null);
+			return new ProfilePersistenceReadiness(true, GetSuccessfulSnapshot(normalizedPath));
 		if (!ShouldRetryProfileLoadForPersistence(normalizedPath))
 			return default;
 
@@ -308,6 +333,57 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		       CanPersistNormalizedPath(normalizedPath)
 			? new ProfilePersistenceReadiness(true, snapshot)
 			: default;
+	}
+
+	private ProjectProfileLoadSnapshot? GetSuccessfulSnapshot(string normalizedPath)
+	{
+		lock (_loadStateSync)
+		{
+			return _loadStates.TryGetValue(normalizedPath, out var state)
+				? state.SuccessfulSnapshot
+				: null;
+		}
+	}
+
+	private async Task<bool> PersistMergedAsync(
+		string projectPath,
+		ProjectSelectionProfile candidate,
+		ProjectSelectionProfile? baseline,
+		ProjectProfileMergeFields fields,
+		CancellationToken cancellationToken)
+	{
+		var result = await Task.Run(
+			() => ProjectProfileMergeWriter.TryMerge(
+				profileStore,
+				projectPath,
+				candidate,
+				baseline,
+				fields,
+				GuiLookupTimeout,
+				cancellationToken: cancellationToken),
+			cancellationToken).ConfigureAwait(false);
+		if (!result.Succeeded || result.PersistedProfile is null)
+			return false;
+
+		var normalizedPath = Path.GetFullPath(projectPath);
+		lock (_loadStateSync)
+		{
+			if (_loadStates.TryGetValue(normalizedPath, out var state))
+			{
+				var previous = state.SuccessfulSnapshot;
+				var snapshot = new ProjectProfileLoadSnapshot(
+					ProjectProfileLookupStatus.Found,
+					result.PersistedProfile,
+					previous?.PersistentMarks);
+				_loadStates[normalizedPath] = state with
+				{
+					Status = ProjectProfileLookupStatus.Found,
+					SuccessfulSnapshot = snapshot,
+					RetryPersistenceLoad = false
+				};
+			}
+		}
+		return true;
 	}
 
 	private bool ShouldRetryProfileLoadForPersistence(string normalizedPath)
