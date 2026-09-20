@@ -222,7 +222,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Add `--open` to open the client after a successful registration", normalizedCommandLine, StringComparison.Ordinal);
 		Assert.Contains("`--print` and `--open` are mutually exclusive", normalizedCommandLine, StringComparison.Ordinal);
 		Assert.Contains("`--open` is rejected for the manual-only `json` client", normalizedCommandLine, StringComparison.Ordinal);
-		Assert.Contains("The Desktop **MCP** menu contains **Live context ▸** and **Documentation**", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains(
+			"The Desktop **MCP** menu contains **Live context ▸**, **Standard ▸**, **Journal…**, and **Documentation**",
+			normalizedServer,
+			StringComparison.Ordinal);
 		Assert.Contains("**Open in Claude Code**, **Open in Codex**, **Open in Cursor**", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("A successful open shows no connection toast", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("Terminal Workspace's `mcp connect` uses live mode", normalizedServer, StringComparison.Ordinal);
