@@ -19,6 +19,16 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		"path", "paths", "pattern", "mode", "symbols", "symbol", "limit", "detail", "max_tokens",
 		"direction", "depth", "pack_id"
 	};
+	private static readonly IReadOnlySet<string> AllowedNotices = new HashSet<string>(StringComparer.Ordinal)
+	{
+		AgentJournalNoticeCodes.OutsideSelection,
+		AgentJournalNoticeCodes.StalePack,
+		AgentJournalNoticeCodes.SearchPartial,
+		AgentJournalNoticeCodes.MatchesOmitted,
+		AgentJournalNoticeCodes.BudgetSkipped,
+		AgentJournalNoticeCodes.MissingPath,
+		AgentJournalNoticeCodes.Unavailable
+	};
 	private readonly Func<string> stateRoot;
 	private readonly TimeProvider clock;
 	private readonly Func<IReadOnlyList<LiveSessionRecord>> activeSessions;
@@ -104,6 +114,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
 		Sweep();
 		var requestedRoot = TryNormalizeRoot(projectRoot);
+		if (projectRoot is not null && requestedRoot is null)
+			return [];
 		var live = ActiveSessionKeys();
 		var sessions = new List<AgentJournalSession>();
 		foreach (var path in EnumerateSessionFiles())
@@ -185,6 +197,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
 		var requestedRoot = TryNormalizeRoot(projectRoot);
+		if (projectRoot is not null && requestedRoot is null)
+			return 0;
 		var removed = 0;
 		foreach (var path in EnumerateSessionFiles())
 		{
@@ -448,7 +462,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			AdditionalDeliveredPaths = Math.Max(0, call.AdditionalDeliveredPaths + paths.Length - storedPaths.Length),
 			SecretsMasked = Math.Max(0, call.SecretsMasked),
 			PrivateDataMasked = Math.Max(0, call.PrivateDataMasked),
-			Notices = call.Notices.Select(static notice => BoundSingleLine(notice, 64)).Distinct(StringComparer.Ordinal).ToArray(),
+			Notices = call.Notices.Where(static notice => AllowedNotices.Contains(notice)).Distinct(StringComparer.Ordinal).ToArray(),
 			ErrorCode = call.ErrorCode is null ? null : BoundSingleLine(call.ErrorCode, 128)
 		};
 	}

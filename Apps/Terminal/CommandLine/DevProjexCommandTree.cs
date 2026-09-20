@@ -5,6 +5,7 @@ using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Terminal.Tui;
 using DevProjex.Mcp;
+using DevProjex.Infrastructure.AgentJournal;
 
 namespace DevProjex.Terminal.CommandLine;
 
@@ -101,6 +102,7 @@ public sealed class DevProjexCommandTree
 	{
 		var command = new Command("mcp", L("Terminal.Command.Mcp"));
 		command.Subcommands.Add(BuildMcpConnectCommand());
+		command.Subcommands.Add(BuildMcpLogCommand());
 		var roots = new Option<string[]>("--root")
 		{
 			Description = L("Terminal.Option.McpRoot"),
@@ -254,6 +256,115 @@ public sealed class DevProjexCommandTree
 		});
 		return command;
 	}
+
+	private Command BuildMcpLogCommand()
+	{
+		var command = new Command("log", "Inspect or clear the local MCP agent journal.");
+		var project = ProjectArgument();
+		var session = new Option<string?>("--session")
+		{
+			Description = "Show one session by ID.",
+			HelpName = "ID"
+		};
+		var last = new Option<bool>("--last")
+		{
+			Description = "Show the newest matching session."
+		};
+		var format = new Option<string>("--format", "-f")
+		{
+			Description = "Write text, JSON, or a Markdown context receipt.",
+			HelpName = "text|json|markdown",
+			DefaultValueFactory = _ => "text"
+		};
+		var outputPath = new Option<string?>("--output", "-o")
+		{
+			Description = "Write output to a new file.",
+			HelpName = "PATH"
+		};
+		var clear = new Option<bool>("--clear")
+		{
+			Description = "Delete matching journal sessions."
+		};
+		var yes = new Option<bool>("--yes", "-y")
+		{
+			Description = "Confirm journal deletion."
+		};
+		format.CompletionSources.Add(["text", "json", "markdown"]);
+		format.Validators.Add(result =>
+		{
+			if (result.GetValueOrDefault<string>() is not ("text" or "json" or "markdown"))
+				result.AddError("--format must be text, json, or markdown.");
+		});
+		outputPath.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.FilesAndDirectories));
+		command.Arguments.Add(project);
+		command.Options.Add(session);
+		command.Options.Add(last);
+		command.Options.Add(format);
+		command.Options.Add(outputPath);
+		command.Options.Add(clear);
+		command.Options.Add(yes);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(session) is not null && result.GetValue(last))
+				result.AddError("--session and --last cannot be combined.");
+			if (result.GetValue(clear) && !result.GetValue(yes))
+				result.AddError("--clear requires --yes.");
+			if (result.GetValue(clear) &&
+				(result.GetValue(session) is not null || result.GetValue(last)))
+			{
+				result.AddError("--clear cannot be combined with --session or --last.");
+			}
+			if (result.GetValue(clear) && result.GetValue(outputPath) is not null)
+				result.AddError("--clear cannot be combined with --output.");
+			if (result.GetResult(format) is { Tokens.Count: 1 } formatResult &&
+				formatResult.Tokens[0].Value == "markdown" &&
+				result.GetValue(session) is null &&
+				!result.GetValue(last))
+			{
+				result.AddError("markdown output requires --session or --last.");
+			}
+		});
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex mcp log .",
+			"devprojex mcp log . --last",
+			"devprojex mcp log . --session 20260920-010203-42 --format markdown",
+			"devprojex mcp log . --format json --output journal.json",
+			"devprojex mcp log . --clear --yes");
+		command.SetAction((parseResult, cancellationToken) =>
+			CommandExecution.RunAsync(
+				environment,
+				_output.Get(parseResult),
+				async () =>
+				{
+					using var store = new AgentJournalStore(_serviceFactory.AppDataPathProvider);
+					return await new AgentJournalCommandHandler(
+							store,
+							new AgentJournalReceiptFormatter(),
+							environment)
+						.RunAsync(
+							parseResult.GetValue(project),
+							parseResult.GetValue(session),
+							parseResult.GetValue(last),
+							ParseAgentJournalFormat(parseResult.GetValue(format)),
+							parseResult.GetValue(outputPath),
+							parseResult.GetValue(clear),
+							cancellationToken)
+						.ConfigureAwait(false);
+				},
+				_localization));
+		return command;
+	}
+
+	private static AgentJournalOutputFormat ParseAgentJournalFormat(string? value) => value switch
+	{
+		"text" => AgentJournalOutputFormat.Text,
+		"json" => AgentJournalOutputFormat.Json,
+		"markdown" => AgentJournalOutputFormat.Markdown,
+		_ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
+	};
 
 	private Command BuildMcpConnectCommand()
 	{
