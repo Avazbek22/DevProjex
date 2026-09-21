@@ -87,7 +87,8 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(8, session.Totals.Calls);
 		Assert.True(session.Totals.ResultCharacters > 0);
 		Assert.True(session.Totals.EstimatedTokens > 0);
-		Assert.Contains(calls, call => call.Tool == "pack_context" && call.DeliveredPaths.Count >= 3);
+		Assert.DoesNotContain(calls, call => call.Tool == "pack_context" && call.DeliveredPaths.Count > 0);
+		Assert.Contains(calls, call => call.Tool == "read_pack" && call.DeliveredPaths.Count > 0);
 		Assert.Contains(calls, call => call.Tool == "search_project" && call.DeliveredPaths.Contains("src/Program.cs"));
 		Assert.Contains(calls, call => call.Tool == "get_file" && call.DeliveredPaths.Contains("Outside.cs"));
 		Assert.Equal(live, calls.Single(call => call.Tool == "get_file").Notices.Contains(AgentJournalNoticeCodes.OutsideSelection));
