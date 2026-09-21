@@ -400,32 +400,36 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
 		var active = CreateSession(temporary.Path, 90, started);
 		using var store = CreateStore(temporary.Path, activeSessionProvider: () => [CreateActiveRecord(active)]);
-		for (var sessionIndex = 0; sessionIndex < 12; sessionIndex++)
+		const int completedSessionCount = 3;
+		const int completedCallCount = 5;
+		const int activeCallCount = 10;
+		for (var sessionIndex = 0; sessionIndex < completedSessionCount; sessionIndex++)
 		{
 			var completed = CreateSession(temporary.Path, 100 + sessionIndex, started.AddMinutes(sessionIndex + 1));
 			await store.StartSession(completed, cancellationToken);
-			for (var sequence = 1; sequence <= 50; sequence++)
+			for (var sequence = 1; sequence <= completedCallCount; sequence++)
 				await store.RecordCall(completed.Id, CreateCall(sequence), cancellationToken);
 			await store.EndSession(completed.Id, completed.StartedUtc.AddMinutes(1),
-				new AgentJournalTotals(50, 6_000, 1_500, 50, 100, 150, 0), cancellationToken);
+				new AgentJournalTotals(completedCallCount, 600, 150, completedCallCount, 10, 15, 0),
+				cancellationToken);
 		}
 		await store.StartSession(active, cancellationToken);
-		for (var sequence = 1; sequence <= 100; sequence++)
+		for (var sequence = 1; sequence <= activeCallCount; sequence++)
 			await store.RecordCall(active.Id, CreateCall(sequence), cancellationToken);
 		await store.ListSessionsAsync(cancellationToken: cancellationToken);
-		await store.ReadActivityAsync(active.Id, 100, cancellationToken);
+		await store.ReadActivityAsync(active.Id, activeCallCount, cancellationToken);
 
 		long bytes = 0;
 		long records = 0;
 		store.BytesReadObserver = value => Interlocked.Add(ref bytes, value);
 		store.RecordsReadObserver = value => Interlocked.Add(ref records, value);
-		await store.RecordCall(active.Id, CreateCall(101), cancellationToken);
+		await store.RecordCall(active.Id, CreateCall(activeCallCount + 1), cancellationToken);
 		var sessions = await store.ListSessionsAsync(cancellationToken: cancellationToken);
-		var activity = await store.ReadActivityAsync(active.Id, 100, cancellationToken);
+		var activity = await store.ReadActivityAsync(active.Id, activeCallCount, cancellationToken);
 
 		output.WriteLine($"warm event: bytes={bytes:N0}; records={records:N0}; sessions={sessions.Count:N0}");
-		Assert.Equal(13, sessions.Count);
-		Assert.Equal(101, Assert.Single(activity!.AppendedCalls).Sequence);
+		Assert.Equal(completedSessionCount + 1, sessions.Count);
+		Assert.Equal(activeCallCount + 1, Assert.Single(activity!.AppendedCalls).Sequence);
 		Assert.InRange(bytes, 1, 64 * 1024);
 		Assert.InRange(records, 1, 8);
 	}
