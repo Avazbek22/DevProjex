@@ -543,7 +543,7 @@ internal sealed class McpProjectService(
 
 	private bool IsChangeInsideProvenIgnoredSubtree(string normalizedRoot, FileSystemEventArgs eventArgs)
 	{
-		if (eventArgs.ChangeType != WatcherChangeTypes.Changed || string.IsNullOrEmpty(eventArgs.Name))
+		if (string.IsNullOrEmpty(eventArgs.Name))
 			return false;
 
 		var hasCachedPlan = false;
@@ -563,38 +563,47 @@ internal sealed class McpProjectService(
 		if (!hasCachedPlan)
 			return false;
 
-		try
-		{
-			var changedPath = Path.GetFullPath(eventArgs.Name, normalizedRoot);
-			var relative = Path.GetRelativePath(normalizedRoot, changedPath);
-			if (Path.IsPathFullyQualified(relative) || relative == ".." ||
-				relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-			{
-				return false;
-			}
+		if (!IsIgnoredPath(eventArgs.Name))
+			return false;
+		return eventArgs is not RenamedEventArgs renamed ||
+			!string.IsNullOrEmpty(renamed.OldName) && IsIgnoredPath(renamed.OldName);
 
-			for (var directory = Directory.Exists(changedPath) ? changedPath : Path.GetDirectoryName(changedPath);
-				 !string.IsNullOrEmpty(directory) &&
-				 !PathComparer.Default.Equals(directory, normalizedRoot);
-				 directory = Path.GetDirectoryName(directory))
+		bool IsIgnoredPath(string name)
+		{
+			try
 			{
-				if (provenIgnoredMonitorSubtrees.ContainsKey(directory))
-					return true;
-				var name = Path.GetFileName(directory);
-				if (SmartArtifactIgnoreMatcher.Default.IsCandidateName(name) &&
-					SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(directory, name))
+				var changedPath = Path.GetFullPath(name, normalizedRoot);
+				var relative = Path.GetRelativePath(normalizedRoot, changedPath);
+				if (Path.IsPathFullyQualified(relative) || relative == ".." ||
+					relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
 				{
-					provenIgnoredMonitorSubtrees.TryAdd(directory, 0);
-					return true;
+					return false;
+				}
+
+				for (var directory = Directory.Exists(changedPath) ? changedPath : Path.GetDirectoryName(changedPath);
+					 !string.IsNullOrEmpty(directory) &&
+					 !PathComparer.Default.Equals(directory, normalizedRoot);
+					 directory = Path.GetDirectoryName(directory))
+				{
+					if (provenIgnoredMonitorSubtrees.ContainsKey(directory))
+						return true;
+					var directoryName = Path.GetFileName(directory);
+					if (SmartArtifactIgnoreMatcher.Default.IsCandidateName(directoryName) &&
+						SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(directory, directoryName))
+					{
+						provenIgnoredMonitorSubtrees.TryAdd(directory, 0);
+						return true;
+					}
 				}
 			}
+			catch (Exception exception) when (exception is
+				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+				   NotSupportedException or ArgumentException)
+			{
+			}
+
+			return false;
 		}
-		catch (Exception exception) when (exception is
-			   IOException or UnauthorizedAccessException or System.Security.SecurityException or
-			   NotSupportedException or ArgumentException)
-		{
-		}
-		return false;
 	}
 
 	private void RemoveCachedRoot(string normalizedRoot)
