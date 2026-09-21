@@ -86,19 +86,26 @@ public sealed partial class McpServerProcessTests
 			"project/App.cs",
 			$"public sealed class App {{ public int Run() {{ var value = \"{implementation}\"; return value.Length; }} }}\n");
 		var dataRoot = workspace.CreateDirectory("data");
-		new ProjectProfileStore(() => dataRoot).SaveProfile(
-			project,
-			new ProjectSelectionProfile(
-				SelectedRootFolders: [],
-				SelectedExtensions: [".cs"],
-				SelectedIgnoreOptions: [IgnoreOptionId.CompressCode],
-				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
-				{
-					[IgnoreOptionId.CompressCode] = true
-				}));
 
 		await using (var standard = await ActualMcpProcess.StartAsync(project, dataRoot))
 		{
+			var listed = await CallAsync(
+				standard,
+				"list_projects",
+				new Dictionary<string, object?>());
+			var canonicalProject = Assert.Single(Structured(listed).GetProperty("projects").EnumerateArray())
+				.GetProperty("path")
+				.GetString()!;
+			new ProjectProfileStore(() => dataRoot).SaveProfile(
+				canonicalProject,
+				new ProjectSelectionProfile(
+					SelectedRootFolders: [],
+					SelectedExtensions: [".cs"],
+					SelectedIgnoreOptions: [IgnoreOptionId.CompressCode],
+					IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.CompressCode] = true
+					}));
 			var text = AllProcessText(await CallAsync(
 				standard,
 				"get_file",
