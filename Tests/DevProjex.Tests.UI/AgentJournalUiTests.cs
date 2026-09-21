@@ -340,6 +340,43 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
+	public async Task JournalRefreshKeepsTheNewestProjectFilterResult()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var outside = fixture.LiveSession with
+		{
+			Id = "outside-session",
+			Roots = [new AgentJournalRoot(Path.Combine(workspace.Project.RootPath, "..", "outside"), "Outside")]
+		};
+		var reader = new OverlappingRefreshJournalReader(fixture.LiveSession, outside);
+		var journal = new AgentJournalWindow(
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(journal);
+
+		try
+		{
+			var filteredRefresh = journal.RefreshAsync();
+			await reader.FirstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+			journal.ViewModel.CurrentProjectOnly = false;
+			var allProjectsRefresh = journal.RefreshAsync();
+			reader.ReleaseFirstRequest.TrySetResult();
+			await Task.WhenAll(filteredRefresh, allProjectsRefresh);
+
+			Assert.Equal(
+				["live-session", "outside-session"],
+				journal.ViewModel.Sessions.Select(static row => row.Session.Id).Order().ToArray());
+		}
+		finally
+		{
+			reader.ReleaseFirstRequest.TrySetResult();
+			await UiTestDriver.CloseTopLevelWindowAsync(journal);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task AgentActivityShowsLiveStatusMarksDeliveredFilesAndClearsWithoutChangingTreeState()
 	{
 		var fixture = JournalFixture.Create(workspace.Project.RootPath);
@@ -829,6 +866,56 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		}
 	}
 
+	private sealed class OverlappingRefreshJournalReader(
+		AgentJournalSession currentProjectSession,
+		AgentJournalSession outsideSession) : IAgentJournalReader
+	{
+		private int _requestCount;
+
+		public AgentJournalRetentionPolicy Retention => AgentJournalRetentionPolicy.Default;
+		public TaskCompletionSource FirstRequestStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource ReleaseFirstRequest { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public async ValueTask<IReadOnlyList<AgentJournalSession>> ListSessionsAsync(
+			string? projectRoot = null,
+			int limit = 200,
+			CancellationToken cancellationToken = default)
+		{
+			var request = Interlocked.Increment(ref _requestCount);
+			if (request == 1)
+			{
+				FirstRequestStarted.TrySetResult();
+				await ReleaseFirstRequest.Task.WaitAsync(cancellationToken);
+				return [currentProjectSession];
+			}
+
+			return [currentProjectSession, outsideSession];
+		}
+
+		public ValueTask<IReadOnlyList<AgentJournalCall>> ReadCallsAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<IReadOnlyList<AgentJournalCall>>([]);
+
+		public ValueTask<AgentJournalReceipt?> ReadReceiptAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<AgentJournalReceipt?>(null);
+
+		public async IAsyncEnumerable<AgentJournalChange> WatchChangesAsync(
+			string sessionId,
+			[EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			await Task.CompletedTask;
+			yield break;
+		}
+
+		public ValueTask<int> ClearAsync(
+			string? projectRoot = null,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(0);
+	}
+
 	private sealed class RecordingJournalReader(
 		IEnumerable<AgentJournalSession> sessions,
 		IReadOnlyDictionary<string, IReadOnlyList<AgentJournalCall>> calls) : IAgentJournalReader
@@ -979,7 +1066,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				started.AddSeconds(2),
 				"search_project",
 				0,
-				new Dictionary<string, string> { ["query"] = "Configure" },
+				new Dictionary<string, string> { ["pattern"] = "Configure" },
 				7,
 				25,
 				1_200,

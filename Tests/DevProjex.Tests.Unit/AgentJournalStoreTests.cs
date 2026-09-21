@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.AgentJournal;
+using DevProjex.Infrastructure.LiveContext;
 
 namespace DevProjex.Tests.Unit;
 
@@ -72,6 +73,36 @@ public sealed class AgentJournalStoreTests
 	}
 
 	[Fact]
+	public async Task RetentionKeepsAnActiveSessionWhenCompletedSessionsReachTheLimit()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		var active = CreateSession(temporary.Path, 50, started);
+		using var store = CreateStore(
+			temporary.Path,
+			new AgentJournalRetentionPolicy(TimeSpan.FromDays(30), 2),
+			() => [CreateActiveRecord(active)]);
+		foreach (var session in new[]
+				 {
+					 active,
+					 CreateSession(temporary.Path, 51, started.AddSeconds(1)),
+					 CreateSession(temporary.Path, 52, started.AddSeconds(2))
+				 })
+		{
+			await store.StartSession(session, cancellationToken);
+			File.SetLastWriteTimeUtc(
+				Path.Combine(store.DirectoryPath, session.Id + ".jsonl"),
+				session.StartedUtc.UtcDateTime);
+		}
+
+		var sessions = await store.ListSessionsAsync(cancellationToken: cancellationToken);
+
+		Assert.Contains(sessions, session => session.Id == active.Id);
+		Assert.True(File.Exists(Path.Combine(store.DirectoryPath, active.Id + ".jsonl")));
+	}
+
+	[Fact]
 	public async Task ClearCanRemoveOnlySessionsForTheRequestedProject()
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;
@@ -89,6 +120,32 @@ public sealed class AgentJournalStoreTests
 		Assert.Equal(1, removed);
 		var remaining = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
 		Assert.Equal(second.Id, remaining.Id);
+	}
+
+	[Fact]
+	public async Task ClearKeepsActiveSessionsInTheRequestedProject()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		var active = CreateSession(temporary.Path, 61, started);
+		using var store = CreateStore(
+			temporary.Path,
+			activeSessionProvider: () => [CreateActiveRecord(active)]);
+		var completed = CreateSession(temporary.Path, 62, started.AddSeconds(1));
+		await store.StartSession(active, cancellationToken);
+		await store.StartSession(completed, cancellationToken);
+		await store.EndSession(
+			completed.Id,
+			completed.StartedUtc.AddSeconds(1),
+			AgentJournalTotals.Empty,
+			cancellationToken);
+
+		var removed = await store.ClearAsync(temporary.Path, cancellationToken);
+
+		Assert.Equal(1, removed);
+		var remaining = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+		Assert.Equal(active.Id, remaining.Id);
 	}
 
 	[Fact]
@@ -232,11 +289,22 @@ public sealed class AgentJournalStoreTests
 
 	private static AgentJournalStore CreateStore(
 		string stateRoot,
-		AgentJournalRetentionPolicy? retention = null) =>
+		AgentJournalRetentionPolicy? retention = null,
+		Func<IReadOnlyList<LiveSessionRecord>>? activeSessionProvider = null) =>
 		new(
 			() => stateRoot,
-			activeSessionProvider: static () => [],
+			activeSessionProvider: activeSessionProvider ?? (static () => []),
 			retention: retention);
+
+	private static LiveSessionRecord CreateActiveRecord(AgentJournalSession session) =>
+		new(
+			session.Pid,
+			session.ProcessStartUtc,
+			session.ClientName,
+			session.ClientVersion,
+			session.Roots.Select(static root => root.ConfiguredPath).ToArray(),
+			session.StartedUtc,
+			session.Mode);
 
 	private static AgentJournalSession CreateSession(
 		string root,

@@ -1046,7 +1046,7 @@
       <ItemsControl Name="ToastHost"
                     ItemsSource="{Binding ToastItems}"
                     IsVisible="{Binding HasToastItems}"
-                    IsHitTestVisible="False"
+                    IsHitTestVisible="True"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Bottom"
                     Margin="0,0,0,38">
@@ -1058,6 +1058,9 @@
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:ToastMessageViewModel">
             <Border Background="{DynamicResource ToastSurfaceBrush}"
+                    PointerEntered="OnToastPointerEntered"
+                    PointerExited="OnToastPointerExited"
+                    PointerPressed="OnToastPointerPressed"
                     CornerRadius="8"
                     Padding="14,10"
                     Opacity="{Binding Opacity}"

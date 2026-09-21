@@ -401,8 +401,8 @@ public sealed class McpClientLaunchService : IMcpClientLaunchService
 				manualCommand);
 		}
 
-		var request = BuildTerminalRequest(clientExecutable, projectRoot);
-		if (request is null)
+		var requests = BuildTerminalRequests(clientExecutable, projectRoot);
+		if (requests.Count == 0)
 		{
 			return new McpClientLaunchResult(
 				McpClientLaunchStatus.Failed,
@@ -410,13 +410,18 @@ public sealed class McpClientLaunchService : IMcpClientLaunchService
 				manualCommand);
 		}
 
-		var attempt = await _processRunner.StartAsync(request, cancellationToken).ConfigureAwait(false);
-		return attempt.Succeeded
-			? new McpClientLaunchResult(McpClientLaunchStatus.Opened)
-			: new McpClientLaunchResult(
-				McpClientLaunchStatus.Failed,
-				FormatAttemptError(attempt, "Mcp.Open.TerminalStartFailed"),
-				manualCommand);
+		McpClientLaunchAttemptResult? lastAttempt = null;
+		foreach (var launchRequest in requests)
+		{
+			lastAttempt = await _processRunner.StartAsync(launchRequest, cancellationToken).ConfigureAwait(false);
+			if (lastAttempt.Succeeded)
+				return new McpClientLaunchResult(McpClientLaunchStatus.Opened);
+		}
+
+		return new McpClientLaunchResult(
+			McpClientLaunchStatus.Failed,
+			FormatAttemptError(lastAttempt!, "Mcp.Open.TerminalStartFailed"),
+			manualCommand);
 	}
 
 	private async Task<McpClientLaunchResult> OpenEditorAsync(
@@ -492,15 +497,20 @@ public sealed class McpClientLaunchService : IMcpClientLaunchService
 			TerminateOnCancellation: false);
 	}
 
-	private McpClientLaunchProcessRequest? BuildTerminalRequest(
+	private IReadOnlyList<McpClientLaunchProcessRequest> BuildTerminalRequests(
 		string clientExecutable,
-		string projectRoot) => _options.Platform switch
+		string projectRoot)
+	{
+		if (_options.Platform == TerminalCommandHostPlatform.Linux)
+			return BuildLinuxTerminalRequests(clientExecutable, projectRoot);
+		var request = _options.Platform switch
 		{
 			TerminalCommandHostPlatform.Windows => BuildWindowsTerminalRequest(clientExecutable, projectRoot),
 			TerminalCommandHostPlatform.MacOS => BuildMacTerminalRequest(clientExecutable, projectRoot),
-			TerminalCommandHostPlatform.Linux => BuildLinuxTerminalRequest(clientExecutable, projectRoot),
 			_ => null
 		};
+		return request is null ? [] : [request];
+	}
 
 	private McpClientLaunchProcessRequest BuildWindowsTerminalRequest(
 		string clientExecutable,
@@ -590,10 +600,11 @@ public sealed class McpClientLaunchService : IMcpClientLaunchService
 				CreateNoWindow: true));
 	}
 
-	private McpClientLaunchProcessRequest? BuildLinuxTerminalRequest(
+	private IReadOnlyList<McpClientLaunchProcessRequest> BuildLinuxTerminalRequests(
 		string clientExecutable,
 		string projectRoot)
 	{
+		var requests = new List<McpClientLaunchProcessRequest>();
 		foreach (var command in LinuxTerminalCommands)
 		{
 			var terminal = _locator.Find(command);
@@ -606,11 +617,11 @@ public sealed class McpClientLaunchService : IMcpClientLaunchService
 				"xfce4-terminal" => ["--execute", clientExecutable],
 				_ => ["-e", clientExecutable]
 			};
-			return ObserveDispatcher(
-				new McpClientLaunchProcessRequest(terminal, arguments, projectRoot));
+			requests.Add(ObserveDispatcher(
+				new McpClientLaunchProcessRequest(terminal, arguments, projectRoot)));
 		}
 
-		return null;
+		return requests;
 	}
 
 	private static string BuildEditorUrl(string scheme, string projectRoot)
