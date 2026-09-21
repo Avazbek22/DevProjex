@@ -167,6 +167,80 @@ public sealed class ProjectProfileMergeWriterTests
 		Assert.Contains("HidePrivateData", traceText.ToString(), StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void IndependentExtensionChangesFromTwoWindowsAreMergedPerExtension()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("data");
+		var firstStore = new ProjectProfileStore(() => appData);
+		var secondStore = new ProjectProfileStore(() => appData);
+		var baseline = CreateProfileWithExtensions((".cs", false), (".md", false));
+		Assert.True(firstStore.TrySaveProfile(project, baseline));
+
+		var firstWindow = CreateProfileWithExtensions((".cs", true), (".md", false));
+		var secondWindow = CreateProfileWithExtensions((".cs", false), (".md", true));
+
+		Assert.True(ProjectProfileMergeWriter.TryMerge(
+			firstStore,
+			project,
+			firstWindow,
+			baseline,
+			ProjectProfileMergeFields.Extensions | ProjectProfileMergeFields.ExtensionStates,
+			TimeSpan.FromSeconds(1),
+			cancellationToken: TestContext.Current.CancellationToken).Succeeded);
+		Assert.True(ProjectProfileMergeWriter.TryMerge(
+			secondStore,
+			project,
+			secondWindow,
+			baseline,
+			ProjectProfileMergeFields.Extensions | ProjectProfileMergeFields.ExtensionStates,
+			TimeSpan.FromSeconds(1),
+			cancellationToken: TestContext.Current.CancellationToken).Succeeded);
+
+		Assert.True(firstStore.TryLoadProfile(project, out var loaded));
+		Assert.Equal([".cs", ".md"], loaded.SelectedExtensions.Order(StringComparer.OrdinalIgnoreCase));
+		Assert.True(loaded.ExtensionStates![".cs"]);
+		Assert.True(loaded.ExtensionStates[".md"]);
+	}
+
+	[Fact]
+	public void IndependentRootChangesFromTwoWindowsAreMergedPerRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("data");
+		var firstStore = new ProjectProfileStore(() => appData);
+		var secondStore = new ProjectProfileStore(() => appData);
+		var baseline = CreateProfileWithRoots(("src", false), ("docs", false));
+		Assert.True(firstStore.TrySaveProfile(project, baseline));
+
+		var firstWindow = CreateProfileWithRoots(("src", true), ("docs", false));
+		var secondWindow = CreateProfileWithRoots(("src", false), ("docs", true));
+
+		Assert.True(ProjectProfileMergeWriter.TryMerge(
+			firstStore,
+			project,
+			firstWindow,
+			baseline,
+			ProjectProfileMergeFields.RootFolders | ProjectProfileMergeFields.RootFolderStates,
+			TimeSpan.FromSeconds(1),
+			cancellationToken: TestContext.Current.CancellationToken).Succeeded);
+		Assert.True(ProjectProfileMergeWriter.TryMerge(
+			secondStore,
+			project,
+			secondWindow,
+			baseline,
+			ProjectProfileMergeFields.RootFolders | ProjectProfileMergeFields.RootFolderStates,
+			TimeSpan.FromSeconds(1),
+			cancellationToken: TestContext.Current.CancellationToken).Succeeded);
+
+		Assert.True(firstStore.TryLoadProfile(project, out var loaded));
+		Assert.Equal(["docs", "src"], loaded.SelectedRootFolders.Order(StringComparer.OrdinalIgnoreCase));
+		Assert.True(loaded.RootFolderStates!["src"]);
+		Assert.True(loaded.RootFolderStates["docs"]);
+	}
+
 	private static ProjectSelectionProfile CreateProfile(
 		IReadOnlyCollection<string> selectedPaths,
 		bool hidePrivateData)
@@ -203,5 +277,39 @@ public sealed class ProjectProfileMergeWriterTests
 			},
 			IgnoreOptionStates: stateMap,
 			SelectedPaths: ["A.cs"]);
+	}
+
+	private static ProjectSelectionProfile CreateProfileWithExtensions(
+		params (string Extension, bool Selected)[] states)
+	{
+		var stateMap = states.ToDictionary(
+			static pair => pair.Extension,
+			static pair => pair.Selected,
+			StringComparer.OrdinalIgnoreCase);
+		return new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: states.Where(static pair => pair.Selected)
+				.Select(static pair => pair.Extension)
+				.ToArray(),
+			SelectedIgnoreOptions: [],
+			ExtensionStates: stateMap,
+			SelectedPaths: null);
+	}
+
+	private static ProjectSelectionProfile CreateProfileWithRoots(
+		params (string Root, bool Selected)[] states)
+	{
+		var stateMap = states.ToDictionary(
+			static pair => pair.Root,
+			static pair => pair.Selected,
+			ProjectTreePathIdentity.CanonicalComparer);
+		return new ProjectSelectionProfile(
+			SelectedRootFolders: states.Where(static pair => pair.Selected)
+				.Select(static pair => pair.Root)
+				.ToArray(),
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: [],
+			RootFolderStates: stateMap,
+			SelectedPaths: null);
 	}
 }

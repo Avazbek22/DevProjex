@@ -52,8 +52,6 @@ public partial class MainWindow
         {
             if (string.IsNullOrWhiteSpace(_currentPath) || !_viewModel.IsProjectLoaded)
                 return;
-            if (e.Mode == McpConnectionMode.Live)
-                _ = await _treeSelectionProfiles.FlushAsync(cancellationToken);
 
             var snapshot = _terminalCommandSetupService.Probe();
             var executablePath = McpConnectionExecutablePathResolver.Resolve(
@@ -64,7 +62,19 @@ public partial class MainWindow
                 e.Mode,
                 executablePath,
                 Path.GetFullPath(_currentPath));
-            var result = await ConnectMcpClientAsync(request, cancellationToken);
+            var result = await RunAfterSelectionPersistenceAsync(
+                e.Mode,
+                _treeSelectionProfiles.FlushAsync,
+                () => MessageDialog.ShowConfirmationAsync(
+                    this,
+                    _localization["Mcp.Connect.SelectionSaveFailure.Title"],
+                    _localization["Mcp.Connect.SelectionSaveFailure.Message"],
+                    _localization["Mcp.Connect.SelectionSaveFailure.Retry"],
+                    _localization["Dialog.Cancel"]),
+                ct => ConnectMcpClientAsync(request, ct),
+                cancellationToken);
+            if (result is null)
+                return;
             cancellationToken.ThrowIfCancellationRequested();
             if (!CanPresentMcpDialog(windowLifetime))
                 return;
@@ -110,6 +120,29 @@ public partial class MainWindow
                 ManualConfiguration: TryCreatePrintableConfiguration(request));
             await ShowMcpManualConfigurationAsync(result, request);
         }
+    }
+
+    internal static async Task<T?> RunAfterSelectionPersistenceAsync<T>(
+        McpConnectionMode mode,
+        Func<CancellationToken, Task<bool>> flushSelectionAsync,
+        Func<Task<bool>> retryAsync,
+        Func<CancellationToken, Task<T>> connectAsync,
+        CancellationToken cancellationToken)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(flushSelectionAsync);
+        ArgumentNullException.ThrowIfNull(retryAsync);
+        ArgumentNullException.ThrowIfNull(connectAsync);
+        if (mode == McpConnectionMode.Live)
+        {
+            while (!await flushSelectionAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (!await retryAsync().ConfigureAwait(false))
+                    return null;
+            }
+        }
+
+        return await connectAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private bool CanPresentMcpDialog(CancellationTokenSource windowLifetime) =>

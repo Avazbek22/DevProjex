@@ -61,6 +61,9 @@ public sealed class McpConnectionUiTests
 		"Mcp.Connect.VsCodeJsoncManual",
 		"Mcp.Connect.ManualFallbackHint",
 		"Mcp.Connect.OutputIncomplete",
+		"Mcp.Connect.SelectionSaveFailure.Title",
+		"Mcp.Connect.SelectionSaveFailure.Message",
+		"Mcp.Connect.SelectionSaveFailure.Retry",
 		"Mcp.Open.FailedAfterConnection",
 		"Mcp.Open.Succeeded",
 		"Mcp.Open.ClientNotFound",
@@ -88,6 +91,26 @@ public sealed class McpConnectionUiTests
 		"Terminal.Tui.Command.Related.Description",
 		"Terminal.Tui.Command.Related.Schema"
 	];
+
+	[Fact]
+	public async Task LiveConnectionDoesNotStartWhenSelectionSaveIsCanceled()
+	{
+		var connectCalls = 0;
+
+		var result = await MainWindow.RunAfterSelectionPersistenceAsync(
+			McpConnectionMode.Live,
+			_ => Task.FromResult(false),
+			() => Task.FromResult(false),
+			_ =>
+			{
+				connectCalls++;
+				return Task.FromResult("connected");
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Null(result);
+		Assert.Equal(0, connectCalls);
+	}
 
 	[Fact]
 	public void PathPromptPolicy_OnlyOffersTheThreeActionableStatesOnSupportedPlatforms()

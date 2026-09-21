@@ -1,5 +1,6 @@
 using Avalonia.Automation;
 using Avalonia.VisualTree;
+using System.Reflection;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.TerminalCommands;
 using DevProjex.Kernel.Abstractions;
@@ -63,7 +64,7 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
-	public async Task LiveConnectionContinuesWhenSelectionPersistenceFailsAndKeepsFailureVisible()
+	public async Task LiveConnectionStopsWhenSelectionPersistenceFailsAndCancelIsChosen()
 	{
 		var profileStore = new BlockingProjectProfileStore
 		{
@@ -94,10 +95,10 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 			await UiTestDriver.RaiseMenuItemClickAsync(cursor);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => service.Requests.Count == 1 &&
+				() => window.OwnedWindows.Count == 1 &&
 					  UiTestDriver.GetViewModel(window).SelectionPersistenceStatusText ==
 					  "Selection not saved; agent uses previous selection",
-				"the live connection and persistent selection failure status");
+				"the selection save failure dialog");
 
 			var viewModel = UiTestDriver.GetViewModel(window);
 			Assert.True(viewModel.SelectionPersistenceStatusVisible);
@@ -105,11 +106,93 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 				"storage unavailable",
 				viewModel.SelectionPersistenceStatusHelpText,
 				StringComparison.Ordinal);
+			Assert.Empty(service.Requests);
+			var dialog = Assert.Single(window.OwnedWindows);
+			var cancel = Assert.Single(
+				dialog.GetVisualDescendants().OfType<Button>(),
+				static button => button.Classes.Contains("primary-action"));
+			await UiTestDriver.RaiseButtonClickAsync(cancel);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 0,
+				"the selection save failure dialog to close");
+			Assert.Empty(service.Requests);
 		}
 		finally
 		{
+			profileStore.WriteFailure = null;
 			await UiTestDriver.CloseWindowAsync(window);
 		}
+	}
+
+	[AvaloniaFact]
+	public async Task ProjectSwitchWaitsForAUserDecisionWhenSelectionCannotBeSaved()
+	{
+		using var nextProject = UiTestProject.CreateDefault();
+		var profileStore = new BlockingProjectProfileStore
+		{
+			WriteFailure = new IOException("storage unavailable")
+		};
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { ProjectProfileStore = profileStore });
+
+		try
+		{
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			root.IsChecked = root.IsChecked != true;
+			var switchTask = await UiTestDriver.BeginOpenFolderAsync(window, nextProject.RootPath);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"the selection save decision before switching projects");
+
+			Assert.False(switchTask.IsCompleted);
+			var dialog = Assert.Single(window.OwnedWindows);
+			var stay = Assert.Single(
+				dialog.GetVisualDescendants().OfType<Button>(),
+				static button => Equals(button.Content, "Stay"));
+			await UiTestDriver.RaiseButtonClickAsync(stay);
+			await switchTask;
+			var currentPath = Assert.IsType<string>(typeof(MainWindow)
+				.GetField("_currentPath", BindingFlags.Instance | BindingFlags.NonPublic)!
+				.GetValue(window));
+			Assert.Equal(Path.GetFullPath(workspace.Project.RootPath), currentPath);
+		}
+		finally
+		{
+			profileStore.WriteFailure = null;
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task WindowCloseWaitsForExplicitContinueWhenSelectionCannotBeSaved()
+	{
+		var profileStore = new BlockingProjectProfileStore
+		{
+			WriteFailure = new IOException("storage unavailable")
+		};
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { ProjectProfileStore = profileStore });
+		var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+		root.IsChecked = root.IsChecked != true;
+
+		window.Close();
+		await UiTestDriver.WaitForConditionAsync(
+			window,
+			() => window.OwnedWindows.Count == 1,
+			"the selection save decision before closing");
+		Assert.True(window.IsVisible);
+
+		var dialog = Assert.Single(window.OwnedWindows);
+		var continueWithoutSaving = Assert.Single(
+			dialog.GetVisualDescendants().OfType<Button>(),
+			static button => Equals(button.Content, "Exit without saving"));
+		await UiTestDriver.RaiseButtonClickAsync(continueWithoutSaving);
+		await window.ShutdownCompletion.WaitAsync(TestContext.Current.CancellationToken);
+		Assert.False(window.IsVisible);
 	}
 
 	[AvaloniaFact]
@@ -539,7 +622,7 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 		private readonly ManualResetEventSlim _writeRelease = new(initialState: false);
 
 		public bool BlockWrites { get; set; }
-		public Exception? WriteFailure { get; init; }
+		public Exception? WriteFailure { get; set; }
 		public TaskCompletionSource WriteStarted { get; } =
 			new(TaskCreationOptions.RunContinuationsAsynchronously);
 
