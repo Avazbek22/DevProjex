@@ -95,16 +95,12 @@ internal sealed partial class TerminalWorkspaceSession
 
 	internal string BuildLiveSessionIndicator(IReadOnlyList<LiveSessionRecord> sessions)
 	{
-		ArgumentNullException.ThrowIfNull(sessions);
-		return sessions.Count switch
-		{
-			0 => string.Empty,
-			1 => $"Live context ({LiveSessionRegistry.FormatClientName(sessions[0].ClientName)})",
-			_ => $"Live context ({NormalizeLocalizedText(
-				_services.Localization.Format("LiveContext.Title.Sessions", sessions.Count),
+		return TerminalAgentJournalPresentation.BuildLiveSessionIndicator(
+			sessions,
+			count => NormalizeLocalizedText(
+				_services.Localization.Format("LiveContext.Title.Sessions", count),
 				_options.Plain,
-				_environment.SupportsUnicode)})"
-		};
+				_environment.SupportsUnicode));
 	}
 
 	private static bool HaveSameLiveSessions(
