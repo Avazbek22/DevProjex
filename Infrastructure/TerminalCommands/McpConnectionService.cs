@@ -534,13 +534,15 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	private readonly McpClientExecutableLocator _locator;
 	private readonly IMcpConnectionProcessRunner _processRunner;
 	private readonly McpProjectConfigurationWriter _configurationWriter;
+	private readonly IMcpCodexUserConfigurationReader _codexUserConfigurationReader;
 
 	public McpConnectionService(LocalizationService localization)
 		: this(
 			localization,
 			new McpClientExecutableLocator(),
 			new McpConnectionProcessRunner(),
-			new McpProjectConfigurationWriter())
+			new McpProjectConfigurationWriter(),
+			new McpCodexUserConfigurationReader())
 	{
 	}
 
@@ -548,12 +550,15 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		LocalizationService localization,
 		McpClientExecutableLocator locator,
 		IMcpConnectionProcessRunner processRunner,
-		McpProjectConfigurationWriter configurationWriter)
+		McpProjectConfigurationWriter configurationWriter,
+		IMcpCodexUserConfigurationReader? codexUserConfigurationReader = null)
 	{
 		_localization = localization ?? throw new ArgumentNullException(nameof(localization));
 		_locator = locator ?? throw new ArgumentNullException(nameof(locator));
 		_processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
 		_configurationWriter = configurationWriter ?? throw new ArgumentNullException(nameof(configurationWriter));
+		_codexUserConfigurationReader =
+			codexUserConfigurationReader ?? new McpCodexUserConfigurationReader();
 	}
 
 	public string CreatePrintableConfiguration(McpConnectionRequest request)
@@ -880,15 +885,46 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		string executable,
 		CancellationToken cancellationToken)
 	{
-		IReadOnlyList<string> arguments = request.Client == McpConnectionClient.Codex
-			? ["mcp", "get", "devprojex", "--json"]
-			: ["mcp", "get", "devprojex"];
+		if (request.Client == McpConnectionClient.Codex)
+		{
+			var read = _codexUserConfigurationReader.Read();
+			var localRead = new McpConnectionProcessResult(0, string.Empty, string.Empty);
+			if (!read.Succeeded)
+			{
+				return new ExistingConnectionRead(
+					localRead,
+					null,
+					_localization.Format(
+						"Mcp.Connect.CommandFailed",
+						DisplayName(request.Client),
+						_localization["Mcp.Connect.InspectionFailed"]));
+			}
+			if (read.Connection is null)
+				return new ExistingConnectionRead(localRead, null, null);
+			if (!TryCreateSnapshot(
+					read.Connection.Command,
+					read.Connection.Arguments,
+					read.Connection.Environment,
+					out var codexSnapshot))
+			{
+				return new ExistingConnectionRead(
+					localRead,
+					null,
+					_localization.Format(
+						"Mcp.Connect.CommandFailed",
+						DisplayName(request.Client),
+						_localization["Mcp.Connect.InspectionFailed"]));
+			}
+			return new ExistingConnectionRead(localRead, codexSnapshot, null);
+		}
+
+		IReadOnlyList<string> arguments = ["mcp", "get", "devprojex", "--json"];
 		var result = await RunClientCommandAsync(
 			executable,
 			arguments,
 			request.ProjectRoot,
 			cancellationToken).ConfigureAwait(false);
-		if (IsMissingServer(request.Client, result))
+		if (IsMissingServer(request.Client, result, McpClientCommandOperation.Get))
 			return new ExistingConnectionRead(result, null, null);
 		if (!result.Succeeded)
 		{
@@ -931,12 +967,13 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			request.ProjectRoot,
 			recoveryCts.Token).ConfigureAwait(false);
 		AppendOutput(output, "rollback-remove", cleanup);
-		if (!cleanup.Succeeded && !IsMissingServer(request.Client, cleanup))
+		if (!cleanup.Succeeded &&
+			!IsMissingServer(request.Client, cleanup, McpClientCommandOperation.Remove))
 			return false;
 
 		var restore = await RunClientCommandAsync(
 			executable,
-			CreateAddArguments(request.Client, snapshot.Command, snapshot.ProjectRoot, snapshot.Mode),
+			CreateRestoreArguments(request.Client, snapshot),
 			request.ProjectRoot,
 			recoveryCts.Token).ConfigureAwait(false);
 		AppendOutput(output, "rollback-add", restore);
@@ -955,6 +992,31 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		arguments.AddRange([executablePath, "mcp", "--root", projectRoot]);
 		if (mode == McpConnectionMode.Live)
 			arguments.Add("--live");
+		return arguments;
+	}
+
+	private static List<string> CreateRestoreArguments(
+		McpConnectionClient client,
+		CommandLineConnectionSnapshot snapshot)
+	{
+		if (client == McpConnectionClient.ClaudeCode)
+		{
+			var payload = JsonSerializer.Serialize(new
+			{
+				type = "stdio",
+				command = snapshot.Command,
+				args = snapshot.Arguments,
+				env = snapshot.Environment
+			});
+			return ["mcp", "add-json", "--scope", "local", "devprojex", payload];
+		}
+
+		var arguments = new List<string> { "mcp", "add", "devprojex" };
+		foreach (var pair in snapshot.Environment)
+			arguments.AddRange(["--env", $"{pair.Key}={pair.Value}"]);
+		arguments.Add("--");
+		arguments.Add(snapshot.Command);
+		arguments.AddRange(snapshot.Arguments);
 		return arguments;
 	}
 
@@ -984,7 +1046,11 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				.EnumerateArray()
 				.Select(static value => value.GetString() ?? string.Empty)
 				.ToArray();
-			return TryCreateSnapshot(command, arguments, out snapshot);
+			return TryCreateSnapshot(
+				command,
+				arguments,
+				new Dictionary<string, string>(StringComparer.Ordinal),
+				out snapshot);
 		}
 		catch (Exception exception) when (exception is JsonException or InvalidOperationException)
 		{
@@ -997,6 +1063,9 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		out CommandLineConnectionSnapshot snapshot)
 	{
 		snapshot = default!;
+		if (TryParseClaudeJsonConnection(output, out snapshot))
+			return true;
+
 		var lines = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
 		var command = lines.FirstOrDefault(static line => line.TrimStart().StartsWith("Command: ", StringComparison.Ordinal));
 		var args = lines.FirstOrDefault(static line => line.TrimStart().StartsWith("Args: ", StringComparison.Ordinal));
@@ -1014,12 +1083,55 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		return TryCreateSnapshot(
 			commandValue,
 			live ? ["mcp", "--root", root, "--live"] : ["mcp", "--root", root],
+			new Dictionary<string, string>(StringComparer.Ordinal),
 			out snapshot);
+	}
+
+	private static bool TryParseClaudeJsonConnection(
+		string output,
+		out CommandLineConnectionSnapshot snapshot)
+	{
+		snapshot = default!;
+		try
+		{
+			using var document = JsonDocument.Parse(output);
+			var root = document.RootElement;
+			if (root.TryGetProperty("server", out var server))
+				root = server;
+			if (root.TryGetProperty("type", out var type) &&
+				!string.Equals(type.GetString(), "stdio", StringComparison.OrdinalIgnoreCase))
+			{
+				return false;
+			}
+			var command = root.GetProperty("command").GetString();
+			var arguments = root.GetProperty("args")
+				.EnumerateArray()
+				.Select(static value => value.GetString() ?? string.Empty)
+				.ToArray();
+			var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+			if (root.TryGetProperty("env", out var environmentElement))
+			{
+				if (environmentElement.ValueKind != JsonValueKind.Object)
+					return false;
+				foreach (var property in environmentElement.EnumerateObject())
+				{
+					if (property.Value.ValueKind != JsonValueKind.String)
+						return false;
+					environment[property.Name] = property.Value.GetString() ?? string.Empty;
+				}
+			}
+			return TryCreateSnapshot(command, arguments, environment, out snapshot);
+		}
+		catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+		{
+			return false;
+		}
 	}
 
 	private static bool TryCreateSnapshot(
 		string? command,
 		IReadOnlyList<string> arguments,
+		IReadOnlyDictionary<string, string> environment,
 		out CommandLineConnectionSnapshot snapshot)
 	{
 		snapshot = default!;
@@ -1036,6 +1148,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			return false;
 		snapshot = new CommandLineConnectionSnapshot(
 			command,
+			arguments.ToArray(),
+			new Dictionary<string, string>(environment, StringComparer.Ordinal),
 			Path.GetFullPath(arguments[rootIndex + 1]),
 			arguments.Contains("--live", StringComparer.Ordinal)
 				? McpConnectionMode.Live
@@ -1051,7 +1165,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 
 	private static bool IsMissingServer(
 		McpConnectionClient client,
-		McpConnectionProcessResult result)
+		McpConnectionProcessResult result,
+		McpClientCommandOperation operation)
 	{
 		if (result.TimedOut || result.StartError is not null)
 			return false;
@@ -1065,12 +1180,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			.Any(line => client switch
 			{
 				McpConnectionClient.ClaudeCode =>
-					line.Equals(
-						"No local-scoped MCP server found with name: devprojex",
-						StringComparison.OrdinalIgnoreCase) ||
-					line.Equals(
-						"No MCP server named \"devprojex\" in local scope",
-						StringComparison.OrdinalIgnoreCase),
+					IsClaudeMissingServerLine(line, operation),
 				McpConnectionClient.Codex =>
 					line.Equals(
 						"No MCP server named 'devprojex' found",
@@ -1080,6 +1190,37 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 						StringComparison.OrdinalIgnoreCase),
 				_ => false
 			});
+	}
+
+	private static bool IsClaudeMissingServerLine(
+		string line,
+		McpClientCommandOperation operation)
+	{
+		if (operation == McpClientCommandOperation.Remove)
+		{
+			return line.Equals(
+					"No local-scoped MCP server found with name: devprojex",
+					StringComparison.OrdinalIgnoreCase) ||
+				line.Equals(
+					"No MCP server named \"devprojex\" in local scope",
+					StringComparison.OrdinalIgnoreCase);
+		}
+
+		return line.Equals(
+				"No MCP server found with name: devprojex",
+				StringComparison.OrdinalIgnoreCase) ||
+			line.Equals(
+				"No MCP server found with name: \"devprojex\"",
+				StringComparison.OrdinalIgnoreCase) ||
+			line.Equals(
+				"No MCP server found with name: 'devprojex'",
+				StringComparison.OrdinalIgnoreCase) ||
+			line.Equals(
+				"No local-scoped MCP server found with name: devprojex",
+				StringComparison.OrdinalIgnoreCase) ||
+			line.Equals(
+				"No MCP server named \"devprojex\" in local scope",
+				StringComparison.OrdinalIgnoreCase);
 	}
 
 	private void AppendOutput(
@@ -1120,8 +1261,16 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 
 	private sealed record CommandLineConnectionSnapshot(
 		string Command,
+		IReadOnlyList<string> Arguments,
+		IReadOnlyDictionary<string, string> Environment,
 		string ProjectRoot,
 		McpConnectionMode Mode);
+
+	private enum McpClientCommandOperation
+	{
+		Get,
+		Remove
+	}
 
 	private sealed record ExistingConnectionRead(
 		McpConnectionProcessResult ProcessResult,

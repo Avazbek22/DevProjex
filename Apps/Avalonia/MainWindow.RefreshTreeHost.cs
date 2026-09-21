@@ -6,6 +6,8 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow : IRefreshTreePipelineHost
 {
+    private BuildTreeResult? _selectionPersistenceTree;
+
     MainWindowViewModel IRefreshTreePipelineHost.ViewModel => _viewModel;
 
     TreeRefreshInput? IRefreshTreePipelineHost.CaptureTreeRefreshInput(bool preserveCheckedPaths)
@@ -162,6 +164,8 @@ public partial class MainWindow : IRefreshTreePipelineHost
             _lastInteractiveFilterUsedInMemory = usedInMemoryFilter;
         UpdateCurrentTreeInventory(input, result, interactiveFilter, usedInMemoryFilter);
         _metrics.InvalidateComputedCaches();
+        if (string.IsNullOrWhiteSpace(input.NameFilter))
+            _selectionPersistenceTree = result.Tree;
 
         if (!interactiveFilter)
         {

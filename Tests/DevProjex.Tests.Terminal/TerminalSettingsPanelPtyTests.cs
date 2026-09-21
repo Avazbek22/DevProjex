@@ -6,6 +6,57 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalSettingsPanelPtyTests
 {
+	[Fact(Timeout = 120_000)]
+	public async Task QuitRequiresExplicitChoiceWhenSelectionCannotBeSaved()
+	{
+		using var project = CreatePanelProject(initializeGit: false);
+		string? dataRoot = null;
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 160,
+			rows: 50,
+			initializeDataRoot: path => dataRoot = path);
+		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
+		var profileDirectory = Path.Combine(Assert.IsType<string>(dataRoot), "DevProjex");
+		Directory.CreateDirectory(profileDirectory);
+		var lockPath = Path.Combine(profileDirectory, "project-profiles.json.lock");
+
+		using (var heldLock = new FileStream(
+			       lockPath,
+			       FileMode.OpenOrCreate,
+			       FileAccess.ReadWrite,
+			       FileShare.None))
+		{
+			await terminal.SendAsync(":select all on\r", TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				"Selection:",
+				timeout: TimeSpan.FromSeconds(10),
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				"Exit DevProjex Terminal?",
+				timeout: TimeSpan.FromSeconds(10),
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+
+			var failure = await terminal.WaitForScreenAsync(
+				"Selection not saved",
+				timeout: TimeSpan.FromSeconds(30),
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains("Stay", failure, StringComparison.Ordinal);
+			Assert.Contains("Retry", failure, StringComparison.Ordinal);
+			Assert.Contains("Exit without saving", failure, StringComparison.Ordinal);
+			await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+			await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+			await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+			await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(
+				CommandLineExitCodes.Success,
+				await terminal.WaitForExitAsync(
+					cancellationToken: TestContext.Current.CancellationToken));
+		}
+	}
+
 	[Fact(Timeout = 90_000)]
 	public async Task PlainNonGitWorkspaceOmitsTheInapplicableGitAxis()
 	{
