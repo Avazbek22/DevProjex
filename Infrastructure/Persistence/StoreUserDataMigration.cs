@@ -16,6 +16,7 @@ public static class StoreUserDataMigration
 	private const string ProductFolderName = "DevProjex";
 	private const string BackupFolderName = "DevProjex.v5.1-store-backup";
 	private const string LockFileName = ".devprojex-store-migration.lock";
+	private const string CompletionMarkerFileName = ".devprojex-store-migration.completed";
 
 	public static StoreUserDataMigrationStatus TryMigrateCurrentWindowsPackage()
 	{
@@ -54,8 +55,14 @@ public static class StoreUserDataMigration
 			using var migrationLock = TryAcquireLock(lockPath);
 			if (migrationLock is null)
 				return StoreUserDataMigrationStatus.TemporarilyUnavailable;
-			if (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any())
+			var completionMarker = Path.Combine(configurationRoot, CompletionMarkerFileName);
+			if (File.Exists(completionMarker))
 				return StoreUserDataMigrationStatus.AlreadyInitialized;
+			if (HasInitializedData(destination))
+			{
+				WriteCompletionMarker(completionMarker);
+				return StoreUserDataMigrationStatus.AlreadyInitialized;
+			}
 
 			var backup = Path.Combine(configurationRoot, BackupFolderName);
 			if (!Directory.Exists(backup))
@@ -66,7 +73,10 @@ public static class StoreUserDataMigration
 			{
 				CopyDirectory(backup, staging);
 				if (Directory.Exists(destination))
+				{
+					RemoveTransientInitializationArtifacts(destination);
 					Directory.Delete(destination, recursive: false);
+				}
 				Directory.Move(staging, destination);
 			}
 			finally
@@ -75,6 +85,7 @@ public static class StoreUserDataMigration
 					Directory.Delete(staging, recursive: true);
 			}
 
+			WriteCompletionMarker(completionMarker);
 			return StoreUserDataMigrationStatus.Migrated;
 		}
 		catch (Exception exception) when (exception is
@@ -87,6 +98,38 @@ public static class StoreUserDataMigration
 			return StoreUserDataMigrationStatus.Failed;
 		}
 	}
+
+	private static bool HasInitializedData(string destination)
+	{
+		if (!Directory.Exists(destination))
+			return false;
+
+		return Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories)
+			.Any(static path => !IsTransientInitializationArtifact(path));
+	}
+
+	private static void RemoveTransientInitializationArtifacts(string destination)
+	{
+		foreach (var file in Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories))
+		{
+			if (IsTransientInitializationArtifact(file))
+				File.Delete(file);
+		}
+
+		foreach (var directory in Directory.EnumerateDirectories(destination, "*", SearchOption.AllDirectories)
+			         .OrderByDescending(static path => path.Length))
+		{
+			if (!Directory.EnumerateFileSystemEntries(directory).Any())
+				Directory.Delete(directory, recursive: false);
+		}
+	}
+
+	private static bool IsTransientInitializationArtifact(string path) =>
+		path.EndsWith(".lock", StringComparison.OrdinalIgnoreCase) ||
+		path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
+
+	private static void WriteCompletionMarker(string path) =>
+		File.WriteAllText(path, "completed");
 
 	private static FileStream? TryAcquireLock(string path)
 	{

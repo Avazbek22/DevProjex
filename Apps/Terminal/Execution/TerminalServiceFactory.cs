@@ -60,6 +60,7 @@ public sealed class TerminalServiceFactory(
 
 	public TerminalServices Create(AppLanguage language)
 	{
+		_ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
 		if (_servicesProvider is not null)
 			return _servicesProvider(language);
 		_fullServiceCreationObserver?.Invoke();
@@ -229,6 +230,7 @@ public sealed class TerminalServiceFactory(
 
 	internal TerminalCacheServiceScope CreateCacheScope(AppLanguage language)
 	{
+		_ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
 		if (_servicesProvider is not null)
 		{
 			var fullScope = CreateScope(language);
@@ -254,6 +256,7 @@ public sealed class TerminalServiceFactory(
 
 	internal TerminalRecentServiceScope CreateRecentScope(AppLanguage language)
 	{
+		_ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
 		if (_servicesProvider is not null)
 		{
 			var fullScope = CreateScope(language);

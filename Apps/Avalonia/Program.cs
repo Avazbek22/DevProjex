@@ -1,4 +1,5 @@
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.Persistence;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
 
@@ -12,6 +13,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        _ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
         args = DesktopLaunchRequestStore.PromoteInternalInvocation(args);
         var hasPendingDesktopRequest =
             DesktopLaunchRequestStore.HasPendingRequest ||
