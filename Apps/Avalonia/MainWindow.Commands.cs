@@ -345,7 +345,15 @@ public partial class MainWindow
             return;
         }
 
-        _treeSelectionProfiles.CancelPending();
+        var lifetimeToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+        try
+        {
+            await _treeSelectionProfiles.CancelPendingAndDrainAsync(lifetimeToken);
+        }
+        catch (OperationCanceledException) when (lifetimeToken.IsCancellationRequested)
+        {
+            return;
+        }
         var result = _projectProfiles.ClearAllProfiles();
         try
         {
