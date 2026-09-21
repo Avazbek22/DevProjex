@@ -21,6 +21,25 @@ public enum McpConnectionMode
 
 public static class McpConnectionFragmentGenerator
 {
+	public const string AppImageExtractAndRunVariable = "APPIMAGE_EXTRACT_AND_RUN";
+
+	public static IReadOnlyDictionary<string, string> GetRequiredServerEnvironment()
+	{
+		var enabledByEnvironment = string.Equals(
+			Environment.GetEnvironmentVariable(AppImageExtractAndRunVariable),
+			"1",
+			StringComparison.Ordinal);
+		var enabledByArgument = Environment.GetCommandLineArgs().Contains(
+			"--appimage-extract-and-run",
+			StringComparer.Ordinal);
+		return enabledByEnvironment || enabledByArgument
+			? new Dictionary<string, string>(StringComparer.Ordinal)
+			{
+				[AppImageExtractAndRunVariable] = "1"
+			}
+			: new Dictionary<string, string>(StringComparer.Ordinal);
+	}
+
 	public static string Generate(
 		McpConnectionClient client,
 		McpConnectionMode mode,
@@ -55,7 +74,11 @@ public static class McpConnectionFragmentGenerator
 		Func<string, string> quoteArgument = IsWindowsAbsolutePath(executablePath)
 			? QuotePowerShellArgument
 			: QuotePosixShellArgument;
-		var builder = new StringBuilder("claude mcp add devprojex -- ");
+		var builder = new StringBuilder("cd ");
+		builder.Append(quoteArgument(projectRoot));
+		builder.Append(" && claude mcp add --scope local devprojex");
+		AppendClaudeEnvironment(builder, GetRequiredServerEnvironment());
+		builder.Append(" -- ");
 		builder.Append(quoteArgument(executablePath));
 		builder.Append(" mcp --root ");
 		builder.Append(quoteArgument(projectRoot));
@@ -70,9 +93,18 @@ public static class McpConnectionFragmentGenerator
 		string projectRoot)
 	{
 		var arguments = BuildArguments(mode, projectRoot);
-		return "[mcp_servers.devprojex]" + Environment.NewLine +
-			   $"command = {ToTomlString(executablePath)}" + Environment.NewLine +
-			   $"args = [{string.Join(", ", arguments.Select(ToTomlString))}]";
+		var builder = new StringBuilder()
+			.Append("[mcp_servers.devprojex]").AppendLine()
+			.Append("command = ").Append(ToTomlString(executablePath)).AppendLine()
+			.Append("args = [").Append(string.Join(", ", arguments.Select(ToTomlString))).Append(']');
+		var environment = GetRequiredServerEnvironment();
+		if (environment.Count > 0)
+		{
+			builder.AppendLine().Append("[mcp_servers.devprojex.env]");
+			foreach (var pair in environment)
+				builder.AppendLine().Append(pair.Key).Append(" = ").Append(ToTomlString(pair.Value));
+		}
+		return builder.ToString();
 	}
 
 	private static string BuildJson(
@@ -80,15 +112,19 @@ public static class McpConnectionFragmentGenerator
 		string executablePath,
 		string projectRoot)
 	{
+		var environment = GetRequiredServerEnvironment();
+		var server = new Dictionary<string, object?>(StringComparer.Ordinal)
+		{
+			["command"] = executablePath,
+			["args"] = BuildArguments(mode, projectRoot)
+		};
+		if (environment.Count > 0)
+			server["env"] = environment;
 		var payload = new
 		{
 			mcpServers = new
 			{
-				devprojex = new
-				{
-					command = executablePath,
-					args = BuildArguments(mode, projectRoot)
-				}
+				devprojex = server
 			}
 		};
 		return JsonSerializer.Serialize(payload, new JsonSerializerOptions
@@ -102,16 +138,20 @@ public static class McpConnectionFragmentGenerator
 		string executablePath,
 		string projectRoot)
 	{
+		var environment = GetRequiredServerEnvironment();
+		var server = new Dictionary<string, object?>(StringComparer.Ordinal)
+		{
+			["type"] = "stdio",
+			["command"] = executablePath,
+			["args"] = BuildArguments(mode, projectRoot)
+		};
+		if (environment.Count > 0)
+			server["env"] = environment;
 		var payload = new
 		{
 			servers = new
 			{
-				devprojex = new
-				{
-					type = "stdio",
-					command = executablePath,
-					args = BuildArguments(mode, projectRoot)
-				}
+				devprojex = server
 			}
 		};
 		return JsonSerializer.Serialize(payload, new JsonSerializerOptions
@@ -124,6 +164,19 @@ public static class McpConnectionFragmentGenerator
 		mode == McpConnectionMode.Live
 			? ["mcp", "--root", projectRoot, "--live"]
 			: ["mcp", "--root", projectRoot];
+
+	private static void AppendClaudeEnvironment(
+		StringBuilder builder,
+		IReadOnlyDictionary<string, string> environment)
+	{
+		foreach (var pair in environment)
+		{
+			builder.Append(" -e ");
+			builder.Append(pair.Key);
+			builder.Append('=');
+			builder.Append(pair.Value);
+		}
+	}
 
 	private static string QuotePowerShellArgument(string value)
 	{

@@ -1,4 +1,10 @@
 {
+    "Mcp.Connect.ProjectConfigurationWritten":  "{0}: a configuração foi escrita em {1}.",
+    "Mcp.Connect.Cursor.NextStep":  "Reinicie o Cursor neste projeto.",
+    "Mcp.Connect.VsCode.NextStep":  "No VS Code, execute MCP: List Servers, escolha devprojex, selecione Enable/Start e confirme a confiança na área de trabalho.",
+    "Mcp.Connect.ManualConfigurationRestart":  "Utilize este JSON para configurar o MCP manualmente. Feche completamente o Claude Desktop, volte a iniciá-lo e verifique Manage connectors.",
+    "Mcp.Connect.Codex.ResponseHint":  "O Codex pode abreviar as páginas de resposta do servidor antes de as entregar ao modelo; se o conteúdo estiver limitado, leia intervalos menores.",
+    "Mcp.Connect.Codex.ProjectOverride":  "O .codex/config.toml do projeto sobrepõe-se ao registo global do devprojex. A configuração do projeto não foi alterada.",
     "Menu.File":  "Arquivo",
     "Menu.File.Open":  "Abrir pasta...",
     "Menu.File.OpenNewWindow":  "Nova janela",

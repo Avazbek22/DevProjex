@@ -28,7 +28,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		];
 		var search = _tools.Single(tool => tool.ProtocolTool.Name == "search_project").ProtocolTool;
 		search.Description = searchBodyCharacters == 0
-			? search.Description?.Replace(" The best unique declaration includes up to 1,800 protected body characters within the same cap; read the rest with one batched get_file requests call.",
+			? search.Description?.Replace(" The best unique declaration includes up to 1,800 protected body characters within the same cap.",
 				string.Empty, StringComparison.Ordinal)
 			: search.Description?.Replace("1,800", searchBodyCharacters.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 		if (toolSet == McpToolSet.Reduced)
@@ -48,7 +48,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			foreach (var tool in _tools)
 			{
 				var schema = tool.ProtocolTool.InputSchema.GetRawText()
-					.Replace(StandardProfileDescription, LiveProfileDescription, StringComparison.Ordinal);
+					.Replace(StandardProfileDescription, LiveProfileDescription, StringComparison.Ordinal)
+					.Replace(StandardExclusionsDescription, LiveExclusionsDescription, StringComparison.Ordinal);
 				tool.ProtocolTool.InputSchema = ParseSchema(schema);
 			}
 		}
@@ -159,7 +160,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		      "type": "array",
 		      "maxItems": {{ProjectSelectionTokens.Exclusions.Count}},
 		      "items": { "type": "string", "enum": [{{tokens}}] },
-		      "description": "Full exclusion set for this call: [] disables every toggle for the widest scan, while omission keeps the server baseline; analyze echoes the result. Overrides profile exclusions. Tokens ignore case and reject duplicates; hidden-* uses platform attributes, while Unix dot names use dot-*."
+		      "description": "{{StandardExclusionsDescription}} Tokens ignore case and reject duplicates; hidden-* uses platform attributes, while Unix dot names use dot-*."
 		    }
 		""";
 	}
@@ -240,12 +241,18 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string LiveProfileDescription =
 		"Selection profile in live mode: omit it or use local; standard and portable profiles are rejected because the window profile is the only selection source.";
 
+	private const string StandardExclusionsDescription =
+		"Per-call exclusions can replace startup exclusions; paths and patterns only narrow the resulting selection.";
+
+	private const string LiveExclusionsDescription =
+		"Additional exclusions for this call. An empty array keeps the window and startup filters unchanged.";
+
 	private const string CompactDetailProperty = """
 	"detail": {
 	  "type": "string",
 	  "enum": ["full", "compact", "signatures"],
 	  "default": "full",
-	  "description": "Content transform: full keeps text, compact removes comments and blank lines, and signatures keeps supported code signatures; other languages remain unchanged."
+	  "description": "Content transform: full adds no transformations; transformations enabled by the active profile still apply. Compact removes comments and blank lines, and signatures keeps supported code signatures; other languages remain unchanged."
 	}
 	""";
 

@@ -122,7 +122,8 @@ internal sealed class McpProjectService(
 			{
 				throw new McpToolException(
 					McpErrorCodes.ProjectUnavailable,
-					$"{McpErrorCodes.ProjectUnavailable}: saved window selection is temporarily unreadable and no earlier snapshot is available; retry this call.");
+					$"{McpErrorCodes.ProjectUnavailable}: " +
+					McpLiveContextState.FormatReadFailure(liveSnapshot.ReadFailure, revision: null));
 			}
 			if (liveSnapshot.Profile is { } localProfile)
 			{
@@ -1086,9 +1087,7 @@ internal sealed class McpProjectService(
 
 			// Name the filters and who can widen them. A remedy that cannot work on this
 			// server — the old "repeat the selection arguments" — sends an agent in circles.
-			var remedy = agentExclusions
-				? "Pass the exclusions value of the call that listed it, or exclusions: [] to turn every toggle off; Git filtering is set on the server startup line."
-				: $"Per-call arguments cannot widen these filters; only the server startup line can ({McpEffectiveFilters.StartupFlags}).";
+			var remedy = McpEffectiveFilters.WideningHint(agentExclusions, liveContext is not null);
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: file '{requestedPath}' is not in the effective project selection " +

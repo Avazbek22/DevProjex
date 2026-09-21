@@ -540,11 +540,10 @@ public sealed partial class McpServerProcessTests
 		var untrustedEnd = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
 		Assert.True(text.IndexOf("src/App.cs P.App.One 5-5", StringComparison.Ordinal) < untrustedEnd);
 		Assert.True(
-			text.IndexOf("[Read declarations]", StringComparison.Ordinal) > untrustedEnd,
+			text.IndexOf("[Next read]", StringComparison.Ordinal) > untrustedEnd,
 			"The instruction must be trusted text, outside the untrusted block.");
 		Assert.Contains(
-			"[Read declarations] To read any declaration listed above in full, call get_file with " +
-			"its path and symbol; for several of them, one get_file requests call.",
+			"[Next read] Read only declarations needed for the task; batch known selections in one get_file call.",
 			text,
 			StringComparison.Ordinal);
 	}
@@ -577,7 +576,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("first-body-evidence", body, StringComparison.Ordinal);
 		Assert.DoesNotContain("second-body-evidence", body, StringComparison.Ordinal);
 		Assert.Contains(
-			"[Declaration body] shown=1/2; read the other 1 declaration separately with get_file.",
+			"[Declaration body] shown=1/2 · other declarations=1.",
 			text,
 			StringComparison.Ordinal);
 	}
@@ -606,7 +605,7 @@ public sealed partial class McpServerProcessTests
 		Assert.InRange(body.Length, 1, 1_800);
 		var truncation = Regex.Match(
 			text,
-			@"\[Declaration body truncated: (?<remaining>[0-9]+) line\(s\) remain; call get_file with the arguments above\.\]",
+			@"\[Declaration body truncated: (?<remaining>[0-9]+) line\(s\) remain\.\]",
 			RegexOptions.None,
 			TimeSpan.FromSeconds(2));
 		Assert.True(truncation.Success, text);
@@ -660,7 +659,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("App.cs P.App.Run 4-4", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("Best declaration body", text, StringComparison.Ordinal);
 		Assert.Contains(
-			"[Declaration body] omitted because the selected symbol is not unique in its file; use its listed range.",
+			"[Declaration body] omitted because the selected symbol is not unique in its file.",
 			text,
 			StringComparison.Ordinal);
 	}
@@ -727,7 +726,7 @@ public sealed partial class McpServerProcessTests
 				["pattern"] = "route-marker-(alpha|beta)",
 				["context_lines"] = 0
 			})));
-		Assert.Contains("[Read declarations]", searched, StringComparison.Ordinal);
+		Assert.Contains("[Next read] Read only declarations needed for the task", searched, StringComparison.Ordinal);
 		var selectors = Regex.Matches(
 			SpotlightBody(searched),
 			@"^(?<path>src/[^ ]+\.cs) (?<symbol>[^ ]+) (?<start>[0-9]+)-(?<end>[0-9]+)$",

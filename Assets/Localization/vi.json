@@ -1,4 +1,10 @@
 {
+  "Mcp.Connect.ProjectConfigurationWritten": "{0}: cấu hình đã được ghi vào {1}.",
+  "Mcp.Connect.Cursor.NextStep": "Khởi động lại Cursor trong dự án này.",
+  "Mcp.Connect.VsCode.NextStep": "Trong VS Code, chạy MCP: List Servers, chọn devprojex, chọn Enable/Start rồi xác nhận tin cậy không gian làm việc.",
+  "Mcp.Connect.ManualConfigurationRestart": "Dùng JSON này để cấu hình MCP thủ công. Đóng hoàn toàn Claude Desktop, mở lại rồi kiểm tra Manage connectors.",
+  "Mcp.Connect.Codex.ResponseHint": "Codex có thể rút gọn các trang phản hồi của máy chủ trước khi chuyển cho mô hình; nếu nội dung bị giới hạn, hãy đọc các phạm vi nhỏ hơn.",
+  "Mcp.Connect.Codex.ProjectOverride": ".codex/config.toml của dự án ghi đè đăng ký devprojex toàn cục. Cấu hình dự án không bị thay đổi.",
   "Menu.File": "Tệp",
   "Menu.File.Open": "Mở thư mục...",
   "Menu.File.OpenNewWindow": "Cửa sổ mới",

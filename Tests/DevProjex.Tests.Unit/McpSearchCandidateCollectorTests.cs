@@ -225,7 +225,7 @@ public sealed class McpSearchCandidateCollectorTests
 
 		Assert.Contains("[Search boundary] partial", notice, StringComparison.Ordinal);
 		Assert.Contains($"limits={expected}", notice, StringComparison.Ordinal);
-		Assert.Contains("continue with read_pack", notice, StringComparison.Ordinal);
+		Assert.DoesNotContain("continue", notice, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -244,7 +244,7 @@ public sealed class McpSearchCandidateCollectorTests
 
 		Assert.Contains("matches retained=5000/8000", notice, StringComparison.Ordinal);
 		Assert.Contains("matches written=151", notice, StringComparison.Ordinal);
-		Assert.Contains("continue the search", notice, StringComparison.Ordinal);
+		Assert.DoesNotContain("continue", notice, StringComparison.Ordinal);
 	}
 
 	private static IReadOnlyList<string> Collect(IEnumerable<McpSearchCandidate> source, int capacity)

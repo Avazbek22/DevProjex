@@ -1,4 +1,10 @@
 {
+  "Mcp.Connect.ProjectConfigurationWritten": "{0}: konfiguratsiya {1} fayliga yozildi.",
+  "Mcp.Connect.Cursor.NextStep": "Cursor dasturini shu loyihada qayta ishga tushiring.",
+  "Mcp.Connect.VsCode.NextStep": "VS Code ichida MCP: List Servers buyrug‘ini bajaring, devprojex-ni tanlang, Enable/Start-ni bosing va ish maydoniga ishonchni tasdiqlang.",
+  "Mcp.Connect.ManualConfigurationRestart": "Bu JSON-dan MCP-ni qo‘lda sozlash uchun foydalaning. Claude Desktop-ni to‘liq yoping, qayta ishga tushiring va Manage connectors-ni tekshiring.",
+  "Mcp.Connect.Codex.ResponseHint": "Codex server javobi sahifalarini modelga uzatishdan oldin qisqartirishi mumkin; kontent cheklansa, kichikroq oraliqlarni o‘qing.",
+  "Mcp.Connect.Codex.ProjectOverride": "Loyihadagi .codex/config.toml global devprojex ro‘yxatini bekor qiladi. Loyiha konfiguratsiyasi o‘zgartirilmadi.",
   "Menu.File": "Fayl",
   "Menu.File.Open": "Jildni ochish...",
   "Menu.File.OpenNewWindow": "Yangi oyna",
