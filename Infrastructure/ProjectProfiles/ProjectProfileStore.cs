@@ -15,6 +15,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	private const string FileName = "project-profiles.json";
 	private static readonly DateTimeOffset MaximumSafeProfileTimestamp = DateTimeOffset.MaxValue.AddDays(-1);
 	private static readonly TimeSpan ClearLockTimeout = TimeSpan.FromMilliseconds(200);
+	private const int IdentityPrefixBytes = 4 * 1024;
 
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -29,6 +30,10 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
 	private readonly PersistentSecretMarkStore _persistentMarks = new(
 		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot);
+	private ProfileReadSnapshot? _readSnapshot;
+	private long _documentParseCount;
+
+	internal long DocumentParseCount => Interlocked.Read(ref _documentParseCount);
 
 	public bool EnsureStorageExists()
 	{
@@ -275,6 +280,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 					return ProjectProfileClearStatus.Partial;
 
+				InvalidateReadSnapshot();
 				File.Delete(fileSet.PrimaryPath);
 				File.Delete(fileSet.BackupPath);
 				return ProjectProfileClearStatus.Cleared;
@@ -334,14 +340,13 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 					ProjectProfileLookupStatus.InvalidStorage,
 					null);
 			}
-			var primaryStatus = LoadFromPath(
-				fileSet.PrimaryPath,
-				out var primaryDb,
-				out var primaryRequiresRewrite);
-			var backupStatus = LoadFromPath(
-				fileSet.BackupPath,
-				out var backupDb,
-				out var backupRequiresRewrite);
+			var documents = LoadReadSnapshot(fileSet);
+			var primaryStatus = documents.Primary.Status;
+			var primaryDb = documents.Primary.Database;
+			var primaryRequiresRewrite = documents.Primary.RequiresRewrite;
+			var backupStatus = documents.Backup.Status;
+			var backupDb = documents.Backup.Database;
+			var backupRequiresRewrite = documents.Backup.RequiresRewrite;
 			if (primaryStatus == ProfileDocumentLoadStatus.FutureSchema ||
 				backupStatus == ProfileDocumentLoadStatus.FutureSchema)
 			{
@@ -587,12 +592,98 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private bool TrySaveInternal(JsonStoreFileSet fileSet, ProjectProfileDb db)
 	{
+		InvalidateReadSnapshot();
 		return JsonStorePersistence.TryWriteAtomic(
 			fileSet,
 			db,
 			SerializerOptions,
 			ProjectProfileStorageLimits.MaximumJsonBytes);
 	}
+
+	private ProfileReadSnapshot LoadReadSnapshot(JsonStoreFileSet fileSet)
+	{
+		var primaryBefore = TryCaptureDocumentIdentity(fileSet.PrimaryPath);
+		var backupBefore = TryCaptureDocumentIdentity(fileSet.BackupPath);
+		if (primaryBefore is { } primaryIdentity &&
+			backupBefore is { } backupIdentity &&
+			_readSnapshot is { } cached &&
+			PathComparer.Default.Equals(cached.PrimaryPath, fileSet.PrimaryPath) &&
+			PathComparer.Default.Equals(cached.BackupPath, fileSet.BackupPath) &&
+			cached.PrimaryIdentity == primaryIdentity &&
+			cached.BackupIdentity == backupIdentity)
+		{
+			return cached;
+		}
+
+		var primary = LoadReadDocument(fileSet.PrimaryPath, primaryBefore);
+		var backup = LoadReadDocument(fileSet.BackupPath, backupBefore);
+		var primaryAfter = TryCaptureDocumentIdentity(fileSet.PrimaryPath);
+		var backupAfter = TryCaptureDocumentIdentity(fileSet.BackupPath);
+		var loaded = new ProfileReadSnapshot(
+			fileSet.PrimaryPath,
+			fileSet.BackupPath,
+			primaryAfter ?? DocumentIdentity.Unavailable,
+			backupAfter ?? DocumentIdentity.Unavailable,
+			primary,
+			backup);
+		_readSnapshot = primaryBefore is { } stablePrimaryBefore &&
+			backupBefore is { } stableBackupBefore &&
+			primaryAfter is { } stablePrimaryAfter &&
+			backupAfter is { } stableBackupAfter &&
+			stablePrimaryBefore == stablePrimaryAfter &&
+			stableBackupBefore == stableBackupAfter
+				? loaded
+				: null;
+		return loaded;
+	}
+
+	private ReadDocument LoadReadDocument(string path, DocumentIdentity? identity)
+	{
+		var status = LoadFromPath(path, out var database, out var requiresRewrite);
+		if (identity is { Exists: true })
+			Interlocked.Increment(ref _documentParseCount);
+		return new ReadDocument(status, database, requiresRewrite);
+	}
+
+	private static DocumentIdentity? TryCaptureDocumentIdentity(string path)
+	{
+		try
+		{
+			var info = new FileInfo(path);
+			info.Refresh();
+			if (!info.Exists)
+				return DocumentIdentity.Missing;
+
+			using var stream = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				IdentityPrefixBytes,
+				FileOptions.SequentialScan);
+			Span<byte> prefix = stackalloc byte[IdentityPrefixBytes];
+			var read = stream.Read(prefix);
+			var hash = 14695981039346656037UL;
+			for (var index = 0; index < read; index++)
+			{
+				hash ^= prefix[index];
+				hash *= 1099511628211UL;
+			}
+			return new DocumentIdentity(
+				Available: true,
+				Exists: true,
+				stream.Length,
+				info.LastWriteTimeUtc.Ticks,
+				read,
+				hash);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return null;
+		}
+	}
+
+	private void InvalidateReadSnapshot() => _readSnapshot = null;
 
 	private static ProjectProfileDb CreateDefaultDb()
 	{
@@ -1167,6 +1258,31 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		requiresRewrite |= sourceSchemaVersion != CurrentSchemaVersion ||
 						   profiles.Count != database.Profiles.Count;
 		return true;
+	}
+
+	private sealed record ProfileReadSnapshot(
+		string PrimaryPath,
+		string BackupPath,
+		DocumentIdentity PrimaryIdentity,
+		DocumentIdentity BackupIdentity,
+		ReadDocument Primary,
+		ReadDocument Backup);
+
+	private sealed record ReadDocument(
+		ProfileDocumentLoadStatus Status,
+		ProjectProfileDb Database,
+		bool RequiresRewrite);
+
+	private readonly record struct DocumentIdentity(
+		bool Available,
+		bool Exists,
+		long Length,
+		long LastWriteUtcTicks,
+		int PrefixLength,
+		ulong PrefixHash)
+	{
+		public static DocumentIdentity Missing { get; } = new(true, false, 0, 0, 0, 0);
+		public static DocumentIdentity Unavailable { get; } = new(false, false, 0, 0, 0, 0);
 	}
 
 	private enum ProfileDocumentLoadStatus
