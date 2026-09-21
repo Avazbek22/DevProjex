@@ -26,6 +26,12 @@ if (args.FirstOrDefault() == "live-roots")
 	return;
 }
 
+if (args.FirstOrDefault() == "pack-attribution")
+{
+	PackAttributionBenchmark.Run(args[1..]);
+	return;
+}
+
 var options = BenchmarkOptions.Parse(args);
 var temporaryCorpus = options.SyntheticFileCount is null ? null : SyntheticCorpus.Create(options.SyntheticFileCount.Value);
 var root = temporaryCorpus?.Path ?? options.Root ?? throw new ArgumentException("Specify --root or --synthetic-files.");
@@ -251,6 +257,101 @@ internal static class SearchDeclarationBenchmark
 		double ElapsedMilliseconds,
 		long AllocatedBytes,
 		long VisitedDeclarations);
+}
+
+internal static class PackAttributionBenchmark
+{
+	public static void Run(string[] arguments)
+	{
+		var repetitions = 5;
+		if (arguments.Length > 0)
+		{
+			if (arguments.Length != 2 || arguments[0] != "--repetitions")
+				throw new ArgumentException("Only --repetitions is supported.");
+			repetitions = int.Parse(arguments[1], CultureInfo.InvariantCulture);
+		}
+		if (repetitions < 3)
+			throw new ArgumentOutOfRangeException(nameof(repetitions));
+
+		Console.WriteLine(
+			"files,legacy_median_ms,legacy_spread_ms,indexed_median_ms,indexed_spread_ms,legacy_median_alloc_bytes,indexed_median_alloc_bytes");
+		foreach (var count in new[] { 1_000, 10_000, 100_000 })
+		{
+			var paths = Enumerable.Range(0, count)
+				.Select(index => new McpStoredJournalPath(
+					$"src/File{index:D6}.cs",
+					0,
+					0,
+					[new McpStoredLineRange(index * 3 + 1, index * 3 + 2)]))
+				.ToArray();
+			var context = new McpStoredJournalContext("root", null, paths);
+			var selected = paths[count / 2];
+			var page = $"header\n{selected.RelativePath}\nbody";
+			var startLine = count / 2 * 3 + 1;
+			_ = MeasureLegacy(paths, page);
+			_ = MeasureIndexed(context, startLine);
+			var legacy = Enumerable.Range(0, repetitions)
+				.Select(_ => MeasureLegacy(paths, page))
+				.ToArray();
+			var indexed = Enumerable.Range(0, repetitions)
+				.Select(_ => MeasureIndexed(context, startLine))
+				.ToArray();
+			if (legacy.SelectMany(static sample => sample.Paths).Select(static path => path.RelativePath)
+					.SequenceEqual(indexed.SelectMany(static sample => sample.Paths).Select(static path => path.RelativePath)) is false)
+			{
+				throw new InvalidOperationException("Attribution result changed.");
+			}
+			var legacyElapsed = legacy.Select(static sample => sample.ElapsedMilliseconds).Order().ToArray();
+			var indexedElapsed = indexed.Select(static sample => sample.ElapsedMilliseconds).Order().ToArray();
+			var legacyAllocations = legacy.Select(static sample => sample.AllocatedBytes).Order().ToArray();
+			var indexedAllocations = indexed.Select(static sample => sample.AllocatedBytes).Order().ToArray();
+			Console.WriteLine(string.Join(',',
+				count.ToString(CultureInfo.InvariantCulture),
+				FormatValue(MedianValue(legacyElapsed)),
+				FormatValue(legacyElapsed[^1] - legacyElapsed[0]),
+				FormatValue(MedianValue(indexedElapsed)),
+				FormatValue(indexedElapsed[^1] - indexedElapsed[0]),
+				MedianValue(legacyAllocations).ToString(CultureInfo.InvariantCulture),
+				MedianValue(indexedAllocations).ToString(CultureInfo.InvariantCulture)));
+		}
+	}
+
+	private static PackAttributionSample MeasureLegacy(
+		IReadOnlyList<McpStoredJournalPath> paths,
+		string page)
+	{
+		var allocated = GC.GetAllocatedBytesForCurrentThread();
+		var timer = Stopwatch.StartNew();
+		var result = paths.Where(path => page.Contains(path.RelativePath, StringComparison.Ordinal)).ToArray();
+		timer.Stop();
+		return new PackAttributionSample(
+			timer.Elapsed.TotalMilliseconds,
+			GC.GetAllocatedBytesForCurrentThread() - allocated,
+			result);
+	}
+
+	private static PackAttributionSample MeasureIndexed(
+		McpStoredJournalContext context,
+		int startLine)
+	{
+		var allocated = GC.GetAllocatedBytesForCurrentThread();
+		var timer = Stopwatch.StartNew();
+		var result = context.PathsForPage(startLine, startLine + 1);
+		timer.Stop();
+		return new PackAttributionSample(
+			timer.Elapsed.TotalMilliseconds,
+			GC.GetAllocatedBytesForCurrentThread() - allocated,
+			result);
+	}
+
+	private static double MedianValue(double[] values) => values[values.Length / 2];
+	private static long MedianValue(long[] values) => values[values.Length / 2];
+	private static string FormatValue(double value) => value.ToString("0.000000", CultureInfo.InvariantCulture);
+
+	private readonly record struct PackAttributionSample(
+		double ElapsedMilliseconds,
+		long AllocatedBytes,
+		IReadOnlyList<McpStoredJournalPath> Paths);
 }
 
 internal static class LiveRootRetentionBenchmark
