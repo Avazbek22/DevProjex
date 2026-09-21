@@ -6,6 +6,7 @@ using Tomlyn.Model;
 
 namespace DevProjex.Tests.Unit;
 
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class McpConnectionFragmentGeneratorTests
 {
 	public static TheoryData<int, string, string> StructuredFragmentCases
@@ -78,7 +79,7 @@ public sealed class McpConnectionFragmentGeneratorTests
 		const string root = "/Users/me/My Project";
 
 		Assert.Equal(
-			"claude mcp add devprojex -- \"/Applications/DevProjex.app/Contents/MacOS/DevProjex\" mcp --root \"/Users/me/My Project\" --live",
+			"cd \"/Users/me/My Project\" && claude mcp add --scope local devprojex -- \"/Applications/DevProjex.app/Contents/MacOS/DevProjex\" mcp --root \"/Users/me/My Project\" --live",
 			McpConnectionFragmentGenerator.Generate(
 				McpConnectionClient.ClaudeCode,
 				McpConnectionMode.Live,
@@ -93,6 +94,44 @@ public sealed class McpConnectionFragmentGeneratorTests
 				McpConnectionMode.Standard,
 				executable,
 				root));
+	}
+
+	[Fact]
+	public void Generate_AppImageExtractionFallbackCarriesTheRequiredEnvironment()
+	{
+		var previous = Environment.GetEnvironmentVariable("APPIMAGE_EXTRACT_AND_RUN");
+		try
+		{
+			Environment.SetEnvironmentVariable("APPIMAGE_EXTRACT_AND_RUN", "1");
+
+			var json = McpConnectionFragmentGenerator.Generate(
+				McpConnectionClient.Json,
+				McpConnectionMode.Live,
+				"/home/me/DevProjex.AppImage",
+				"/home/me/project");
+			var codex = McpConnectionFragmentGenerator.Generate(
+				McpConnectionClient.Codex,
+				McpConnectionMode.Live,
+				"/home/me/DevProjex.AppImage",
+				"/home/me/project");
+			var claude = McpConnectionFragmentGenerator.Generate(
+				McpConnectionClient.ClaudeCode,
+				McpConnectionMode.Live,
+				"/home/me/DevProjex.AppImage",
+				"/home/me/project");
+
+			using var document = JsonDocument.Parse(json);
+			Assert.Equal(
+				"1",
+				document.RootElement.GetProperty("mcpServers").GetProperty("devprojex")
+					.GetProperty("env").GetProperty("APPIMAGE_EXTRACT_AND_RUN").GetString());
+			Assert.Contains("APPIMAGE_EXTRACT_AND_RUN = \"1\"", codex, StringComparison.Ordinal);
+			Assert.Contains("-e APPIMAGE_EXTRACT_AND_RUN=1", claude, StringComparison.Ordinal);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("APPIMAGE_EXTRACT_AND_RUN", previous);
+		}
 	}
 
 	[Theory]
@@ -185,8 +224,8 @@ public sealed class McpConnectionFragmentGeneratorTests
 			var (executable, root) = pathCases[index];
 			var parsed = parsedFragments[index];
 
-			Assert.Equal(["mcp", "add", "devprojex"], parsed.Take(3));
-			var connectionArguments = parsed.Skip(3).ToList();
+			Assert.Equal(["mcp", "add", "--scope", "local", "devprojex"], parsed.Take(5));
+			var connectionArguments = parsed.Skip(5).ToList();
 			if (connectionArguments.FirstOrDefault() == "--")
 				connectionArguments.RemoveAt(0);
 			AssertConnection(
@@ -318,7 +357,9 @@ public sealed class McpConnectionFragmentGeneratorTests
 	private static async Task<IReadOnlyList<string[]>> ParseWithPowerShellAsync(
 		IReadOnlyList<string> fragments)
 	{
-		const string script = "$payload = ConvertFrom-Json $env:DPX_CONNECTION_FRAGMENT; " +
+		const string script = "Remove-Item Alias:cd -ErrorAction SilentlyContinue; " +
+							  "Set-Item Function:cd -Value { param([string]$Path) }; " +
+							  "$payload = ConvertFrom-Json $env:DPX_CONNECTION_FRAGMENT; " +
 							  "Set-Item -Path ('Function:' + $payload.command) " +
 							  "-Value { $script:capturedArgs = @($args) }; " +
 							  "$results = [System.Collections.Generic.List[object]]::new(); " +
@@ -327,11 +368,10 @@ public sealed class McpConnectionFragmentGeneratorTests
 							  "Invoke-Expression $fragment; " +
 							  "$results.Add([object[]]$script:capturedArgs) }; " +
 							  "[Console]::Out.Write((ConvertTo-Json -Compress -Depth 4 -InputObject $results))";
-		var command = fragments[0].Split(' ', 2, StringSplitOptions.RemoveEmptyEntries)[0];
 		var result = await RunShellAsync(
 			"pwsh",
 			["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-			JsonSerializer.Serialize(new { command, fragments }));
+			JsonSerializer.Serialize(new { command = "claude", fragments }));
 		return JsonSerializer.Deserialize<string[][]>(result) ?? [];
 	}
 
@@ -347,7 +387,7 @@ public sealed class McpConnectionFragmentGeneratorTests
 
 	private static async Task<string[]> RunPosixShellAsync(string fragment)
 	{
-		const string script = "claude() { printf '%s\\n' \"$@\"; }; eval \"$DPX_CONNECTION_FRAGMENT\"";
+		const string script = "cd() { :; }; claude() { printf '%s\\n' \"$@\"; }; eval \"$DPX_CONNECTION_FRAGMENT\"";
 		var result = await RunShellAsync("/bin/sh", ["-c", script], fragment);
 		return result.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 	}
