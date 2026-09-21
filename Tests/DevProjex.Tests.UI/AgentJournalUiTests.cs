@@ -929,6 +929,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			var activity = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "AgentActivityMenuItem");
 			await UiTestDriver.RaiseMenuItemClickAsync(activity);
 			var viewModel = UiTestDriver.GetViewModel(window);
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => viewModel.TreeNodes.SelectMany(static root => root.Flatten())
@@ -947,7 +948,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 						  .All(static node => node.AgentDeliveryCount == 0),
 				"project reopen to clear the previous delivery trace");
 
-			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall with { Sequence = 3 });
 			var deliveredPath = Path.GetFullPath(Path.Combine(
 				workspace.Project.RootPath,
 				"src",
