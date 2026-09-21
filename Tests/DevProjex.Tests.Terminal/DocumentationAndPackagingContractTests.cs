@@ -439,7 +439,7 @@ public sealed class DocumentationAndPackagingContractTests
 		var normalizedSecurity = Regex.Replace(security, @"\s+", " ");
 
 		Assert.Contains("### Service notices repeat only when they change", server, StringComparison.Ordinal);
-		Assert.Contains("### What a connection costs", server, StringComparison.Ordinal);
+		Assert.Contains("### MCP catalog size", server, StringComparison.Ordinal);
 		Assert.Contains(
 			"`[Unchanged] effective filters, protection.`",
 			normalizedServer,
