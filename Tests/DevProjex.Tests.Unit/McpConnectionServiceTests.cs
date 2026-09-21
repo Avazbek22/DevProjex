@@ -150,9 +150,11 @@ public sealed class McpConnectionServiceTests
 	{
 		using var project = new TemporaryDirectory();
 		var client = (McpConnectionClient)clientValue;
-		var runner = new RecordingProcessRunner(
-			new McpConnectionProcessResult(1, string.Empty, missingServerMessage),
-			new McpConnectionProcessResult(0, "added", string.Empty));
+		var runner = client == McpConnectionClient.Codex
+			? new RecordingProcessRunner(new McpConnectionProcessResult(0, "added", string.Empty))
+			: new RecordingProcessRunner(
+				new McpConnectionProcessResult(1, string.Empty, missingServerMessage),
+				new McpConnectionProcessResult(0, "added", string.Empty));
 		var (service, clientExecutable) = CreateCommandLineService(project.Path, commandName, runner);
 		var devProjexExecutable = Path.Combine(project.Path, "DevProjex.exe");
 
@@ -163,15 +165,15 @@ public sealed class McpConnectionServiceTests
 		Assert.Equal(McpConnectionStatus.Connected, result.Status);
 		Assert.False(result.Replaced);
 		Assert.Equal(commandName, result.NextCommand);
-		Assert.Equal(2, runner.Requests.Count);
-		var expectedGetArguments = client == McpConnectionClient.ClaudeCode
-			? new[] { "mcp", "get", "devprojex" }
-			: ["mcp", "get", "devprojex", "--json"];
-		AssertProcessRequest(
-			runner.Requests[0],
-			clientExecutable,
-			project.Path,
-			expectedGetArguments);
+		Assert.Equal(client == McpConnectionClient.Codex ? 1 : 2, runner.Requests.Count);
+		if (client == McpConnectionClient.ClaudeCode)
+		{
+			AssertProcessRequest(
+				runner.Requests[0],
+				clientExecutable,
+				project.Path,
+				["mcp", "get", "devprojex", "--json"]);
+		}
 		var expectedAddArguments = client == McpConnectionClient.ClaudeCode
 			? new[]
 			{
@@ -183,11 +185,12 @@ public sealed class McpConnectionServiceTests
 				"mcp", "--root", project.Path, "--live"
 			];
 		AssertProcessRequest(
-			runner.Requests[1],
+			runner.Requests[client == McpConnectionClient.Codex ? 0 : 1],
 			clientExecutable,
 			project.Path,
 			expectedAddArguments);
-		Assert.Contains($"get: {missingServerMessage}", result.CommandOutput, StringComparison.Ordinal);
+		if (client == McpConnectionClient.ClaudeCode)
+			Assert.Contains($"get: {missingServerMessage}", result.CommandOutput, StringComparison.Ordinal);
 		Assert.Contains("add: added", result.CommandOutput, StringComparison.Ordinal);
 	}
 
@@ -216,11 +219,10 @@ public sealed class McpConnectionServiceTests
 	}
 
 	[Fact]
-	public async Task Connect_Codex_MissingServerWithZeroExitCodeReportsNewConnection()
+	public async Task Connect_Codex_MissingUserEntryReportsNewConnection()
 	{
 		using var project = new TemporaryDirectory();
 		var runner = new RecordingProcessRunner(
-			new McpConnectionProcessResult(0, "No MCP server named 'devprojex' found.", string.Empty),
 			new McpConnectionProcessResult(0, "Added global MCP server 'devprojex'.", string.Empty));
 		var (service, _) = CreateCommandLineService(project.Path, "codex", runner);
 
@@ -234,6 +236,7 @@ public sealed class McpConnectionServiceTests
 
 		Assert.Equal(McpConnectionStatus.Connected, result.Status);
 		Assert.False(result.Replaced);
+		Assert.Single(runner.Requests);
 	}
 
 	[Fact]
@@ -255,6 +258,89 @@ public sealed class McpConnectionServiceTests
 		Assert.Equal(McpConnectionStatus.ProcessFailed, result.Status);
 		Assert.Single(runner.Requests);
 		Assert.Contains("node: not found", result.UserMessage, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("No MCP server found with name: devprojex")]
+	[InlineData("No MCP server found with name: \"devprojex\"")]
+	[InlineData("No MCP server found with name: 'devprojex'\nConfigured MCP servers:\n- other")]
+	public async Task Connect_Claude_MissingGetOutputAddsFirstConnection(string missingOutput)
+	{
+		using var project = new TemporaryDirectory();
+		var runner = new RecordingProcessRunner(
+			new McpConnectionProcessResult(1, string.Empty, missingOutput),
+			new McpConnectionProcessResult(0, "added", string.Empty));
+		var (service, _) = CreateCommandLineService(project.Path, "claude", runner);
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.ClaudeCode,
+				McpConnectionMode.Standard,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.Connected, result.Status);
+		Assert.Equal(["mcp", "get", "devprojex", "--json"], runner.Requests[0].Arguments);
+		Assert.Equal(2, runner.Requests.Count);
+	}
+
+	[Fact]
+	public async Task Connect_Codex_UnreadableUserConfigurationDoesNotRemoveOrAdd()
+	{
+		using var project = new TemporaryDirectory();
+		var runner = new RecordingProcessRunner();
+		var (service, _) = CreateCommandLineService(
+			project.Path,
+			"codex",
+			runner,
+			new StubCodexUserConfigurationReader(new McpCodexUserConfigurationRead(false, null)));
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Codex,
+				McpConnectionMode.Standard,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.ProcessFailed, result.Status);
+		Assert.True(result.RequiresManualConfiguration);
+		Assert.Empty(runner.Requests);
+	}
+
+	[Fact]
+	public void CodexUserConfiguration_InvalidServerTableFailsClosed()
+	{
+		var configurationPath = Path.Combine(Path.GetTempPath(), "codex-reader", "config.toml");
+		var reader = new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
+		{
+			CodexHomeProvider = () => Path.GetDirectoryName(configurationPath),
+			FileExists = path => string.Equals(path, configurationPath, StringComparison.OrdinalIgnoreCase),
+			ReadAllText = _ => "mcp_servers = 42"
+		});
+
+		var result = reader.Read();
+
+		Assert.False(result.Succeeded);
+		Assert.Null(result.Connection);
+	}
+
+	[Fact]
+	public void CodexUserConfiguration_MissingServerIsAnEstablishedEmptyLayer()
+	{
+		var configurationPath = Path.Combine(Path.GetTempPath(), "codex-reader", "config.toml");
+		var reader = new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
+		{
+			CodexHomeProvider = () => Path.GetDirectoryName(configurationPath),
+			FileExists = path => string.Equals(path, configurationPath, StringComparison.OrdinalIgnoreCase),
+			ReadAllText = _ => "model = \"gpt-5\""
+		});
+
+		var result = reader.Read();
+
+		Assert.True(result.Succeeded);
+		Assert.Null(result.Connection);
 	}
 
 	[Fact]
@@ -290,7 +376,6 @@ public sealed class McpConnectionServiceTests
 	{
 		using var project = new TemporaryDirectory();
 		var runner = new RecordingProcessRunner(
-			new McpConnectionProcessResult(1, string.Empty, "No MCP server named 'devprojex' found."),
 			new McpConnectionProcessResult(5, "partial output", "permission denied"));
 		var (service, _) = CreateCommandLineService(project.Path, "codex", runner);
 
@@ -307,7 +392,7 @@ public sealed class McpConnectionServiceTests
 		Assert.Contains("partial output", result.CommandOutput, StringComparison.Ordinal);
 		Assert.Contains("permission denied", result.CommandOutput, StringComparison.Ordinal);
 		Assert.Contains("Use manual configuration", result.UserMessage, StringComparison.Ordinal);
-		Assert.Equal(2, runner.Requests.Count);
+		Assert.Single(runner.Requests);
 	}
 
 	[Fact]
@@ -315,10 +400,6 @@ public sealed class McpConnectionServiceTests
 	{
 		using var project = new TemporaryDirectory();
 		var runner = new RecordingProcessRunner(
-			new McpConnectionProcessResult(
-				1,
-				string.Empty,
-				"No MCP server named 'devprojex' found."),
 			new McpConnectionProcessResult(
 				0,
 				"added",
@@ -369,9 +450,15 @@ public sealed class McpConnectionServiceTests
 		using var currentProject = new TemporaryDirectory();
 		using var previousProject = new TemporaryDirectory();
 		var previousExecutable = Path.Combine(previousProject.Path, "DevProjex.exe");
-		var runner = new RecordingProcessRunner(
-			CodexConnection(previousExecutable, previousProject.Path, live: true));
-		var (service, _) = CreateCommandLineService(currentProject.Path, "codex", runner);
+		var runner = new RecordingProcessRunner();
+		var (service, _) = CreateCommandLineService(
+			currentProject.Path,
+			"codex",
+			runner,
+			CreateCodexConfigurationReader(
+				previousExecutable,
+				["mcp", "--root", previousProject.Path, "--live"],
+				new Dictionary<string, string>()));
 		var request = Request(
 			McpConnectionClient.Codex,
 			McpConnectionMode.Standard,
@@ -383,8 +470,36 @@ public sealed class McpConnectionServiceTests
 		Assert.True(inspection.Exists);
 		Assert.True(inspection.RequiresProjectReplacement);
 		Assert.Equal(previousProject.Path, inspection.ExistingProjectRoot);
-		Assert.Single(runner.Requests);
-		Assert.Equal(["mcp", "get", "devprojex", "--json"], runner.Requests[0].Arguments);
+		Assert.Empty(runner.Requests);
+	}
+
+	[Fact]
+	public async Task Inspect_Codex_UsesUserConfigurationInsteadOfProjectConfiguration()
+	{
+		using var currentProject = new TemporaryDirectory();
+		using var userProject = new TemporaryDirectory();
+		using var projectConfiguration = new TemporaryDirectory();
+		var userExecutable = Path.Combine(userProject.Path, "DevProjex.exe");
+		var projectExecutable = Path.Combine(projectConfiguration.Path, "DevProjex.exe");
+		var runner = new RecordingProcessRunner(
+			CodexConnection(projectExecutable, projectConfiguration.Path, live: true));
+		var reader = CreateCodexConfigurationReader(
+			userExecutable,
+			["mcp", "--root", userProject.Path, "--hide-private-data"],
+			new Dictionary<string, string> { ["DPX_MODE"] = "safe" });
+		var (service, _) = CreateCommandLineService(currentProject.Path, "codex", runner, reader);
+
+		var inspection = await service.InspectAsync(
+			Request(
+				McpConnectionClient.Codex,
+				McpConnectionMode.Standard,
+				Path.Combine(currentProject.Path, "DevProjex.exe"),
+				currentProject.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(inspection.Exists);
+		Assert.Equal(userProject.Path, inspection.ExistingProjectRoot);
+		Assert.Empty(runner.Requests);
 	}
 
 	[Fact]
@@ -392,9 +507,16 @@ public sealed class McpConnectionServiceTests
 	{
 		using var currentProject = new TemporaryDirectory();
 		using var previousProject = new TemporaryDirectory();
-		var runner = new RecordingProcessRunner(
-			CodexConnection(Path.Combine(previousProject.Path, "DevProjex.exe"), previousProject.Path, live: true));
-		var (service, _) = CreateCommandLineService(currentProject.Path, "codex", runner);
+		var runner = new RecordingProcessRunner();
+		var previousExecutable = Path.Combine(previousProject.Path, "DevProjex.exe");
+		var (service, _) = CreateCommandLineService(
+			currentProject.Path,
+			"codex",
+			runner,
+			CreateCodexConfigurationReader(
+				previousExecutable,
+				["mcp", "--root", previousProject.Path, "--live"],
+				new Dictionary<string, string>()));
 
 		var result = await service.ConnectAsync(
 			Request(
@@ -407,7 +529,7 @@ public sealed class McpConnectionServiceTests
 		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
 		Assert.Contains(previousProject.Path, result.UserMessage, StringComparison.Ordinal);
 		Assert.Contains(currentProject.Path, result.UserMessage, StringComparison.Ordinal);
-		Assert.Single(runner.Requests);
+		Assert.Empty(runner.Requests);
 	}
 
 	[Fact]
@@ -416,13 +538,28 @@ public sealed class McpConnectionServiceTests
 		using var currentProject = new TemporaryDirectory();
 		using var previousProject = new TemporaryDirectory();
 		var previousExecutable = Path.Combine(previousProject.Path, "DevProjex.exe");
+		var previousArguments = new[]
+		{
+			"mcp", "--root", previousProject.Path, "--hide-private-data", "--live"
+		};
+		var previousEnvironment = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["DPX_PROFILE"] = "private",
+			["DPX_CHANNEL"] = "stable"
+		};
 		var runner = new RecordingProcessRunner(
-			CodexConnection(previousExecutable, previousProject.Path, live: true),
 			new McpConnectionProcessResult(0, "removed", string.Empty),
 			new McpConnectionProcessResult(5, string.Empty, "permission denied"),
 			new McpConnectionProcessResult(1, string.Empty, "No MCP server named 'devprojex' found."),
 			new McpConnectionProcessResult(0, "restored", string.Empty));
-		var (service, _) = CreateCommandLineService(currentProject.Path, "codex", runner);
+		var (service, _) = CreateCommandLineService(
+			currentProject.Path,
+			"codex",
+			runner,
+			CreateCodexConfigurationReader(
+				previousExecutable,
+				previousArguments,
+				previousEnvironment));
 		var request = Request(
 			McpConnectionClient.Codex,
 			McpConnectionMode.Standard,
@@ -436,10 +573,67 @@ public sealed class McpConnectionServiceTests
 
 		Assert.Equal(McpConnectionStatus.ProcessFailed, result.Status);
 		Assert.Contains("restored", result.UserMessage, StringComparison.OrdinalIgnoreCase);
-		Assert.Equal(5, runner.Requests.Count);
+		Assert.Equal(4, runner.Requests.Count);
 		Assert.Equal(
-			["mcp", "add", "devprojex", "--", previousExecutable, "mcp", "--root", previousProject.Path, "--live"],
-			runner.Requests[4].Arguments);
+			[
+				"mcp", "add", "devprojex",
+				"--env", "DPX_PROFILE=private",
+				"--env", "DPX_CHANNEL=stable",
+				"--", previousExecutable,
+				"mcp", "--root", previousProject.Path, "--hide-private-data", "--live"
+			],
+			runner.Requests[3].Arguments);
+	}
+
+	[Fact]
+	public async Task Replace_Claude_AddFailureRestoresOriginalJsonEntry()
+	{
+		using var project = new TemporaryDirectory();
+		var previousExecutable = Path.Combine(project.Path, "previous.exe");
+		var previousArguments = new[]
+		{
+			"mcp", "--root", project.Path, "--hide-private-data", "--live"
+		};
+		var previousEnvironment = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["DPX_PROFILE"] = "private"
+		};
+		var runner = new RecordingProcessRunner(
+			ClaudeJsonConnection(previousExecutable, previousArguments, previousEnvironment),
+			new McpConnectionProcessResult(0, "removed", string.Empty),
+			new McpConnectionProcessResult(5, string.Empty, "permission denied"),
+			new McpConnectionProcessResult(
+				1,
+				string.Empty,
+				"No local-scoped MCP server found with name: devprojex"),
+			new McpConnectionProcessResult(0, "restored", string.Empty));
+		var (service, _) = CreateCommandLineService(project.Path, "claude", runner);
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.ClaudeCode,
+				McpConnectionMode.Standard,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.ProcessFailed, result.Status);
+		Assert.Contains("restored", result.UserMessage, StringComparison.OrdinalIgnoreCase);
+		Assert.Equal(
+			["mcp", "get", "devprojex", "--json"],
+			runner.Requests[0].Arguments);
+		Assert.Equal(
+			["mcp", "add-json", "--scope", "local", "devprojex"],
+			runner.Requests[4].Arguments.Take(5));
+		using var restored = JsonDocument.Parse(runner.Requests[4].Arguments[5]);
+		Assert.Equal("stdio", restored.RootElement.GetProperty("type").GetString());
+		Assert.Equal(previousExecutable, restored.RootElement.GetProperty("command").GetString());
+		Assert.Equal(
+			previousArguments,
+			restored.RootElement.GetProperty("args").EnumerateArray().Select(static value => value.GetString()));
+		Assert.Equal(
+			"private",
+			restored.RootElement.GetProperty("env").GetProperty("DPX_PROFILE").GetString());
 	}
 
 	[Fact]
@@ -450,10 +644,15 @@ public sealed class McpConnectionServiceTests
 		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
 			TestContext.Current.CancellationToken);
 		var previousExecutable = Path.Combine(previousProject.Path, "DevProjex.exe");
-		var runner = new CancelingAddProcessRunner(
-			CodexConnection(previousExecutable, previousProject.Path, live: false),
-			cancellation);
-		var (service, _) = CreateCommandLineService(currentProject.Path, "codex", runner);
+		var runner = new CancelingAddProcessRunner(cancellation);
+		var (service, _) = CreateCommandLineService(
+			currentProject.Path,
+			"codex",
+			runner,
+			CreateCodexConfigurationReader(
+				previousExecutable,
+				["mcp", "--root", previousProject.Path],
+				new Dictionary<string, string>()));
 		var request = Request(
 			McpConnectionClient.Codex,
 			McpConnectionMode.Live,
@@ -465,10 +664,10 @@ public sealed class McpConnectionServiceTests
 			previousProject.Path,
 			cancellation.Token));
 
-		Assert.Equal(5, runner.Requests.Count);
+		Assert.Equal(4, runner.Requests.Count);
 		Assert.Equal(
 			["mcp", "add", "devprojex", "--", previousExecutable, "mcp", "--root", previousProject.Path],
-			runner.Requests[4].Arguments);
+			runner.Requests[3].Arguments);
 	}
 
 	[Fact]
@@ -832,7 +1031,8 @@ public sealed class McpConnectionServiceTests
 	private static (McpConnectionService Service, string ClientExecutable) CreateCommandLineService(
 		string projectRoot,
 		string commandName,
-		IMcpConnectionProcessRunner runner)
+		IMcpConnectionProcessRunner runner,
+		IMcpCodexUserConfigurationReader? codexUserConfigurationReader = null)
 	{
 		var bin = Path.Combine(projectRoot, "client-bin");
 		var clientExecutable = Path.GetFullPath(Path.Combine(bin, commandName + ".exe"));
@@ -842,17 +1042,51 @@ public sealed class McpConnectionServiceTests
 			PathVariableProvider = () => bin,
 			FileExists = path => string.Equals(path, clientExecutable, StringComparison.OrdinalIgnoreCase)
 		});
-		return (CreateService(locator, runner), clientExecutable);
+		return (CreateService(locator, runner, codexUserConfigurationReader), clientExecutable);
 	}
 
 	private static McpConnectionService CreateService(
 		McpClientExecutableLocator locator,
-		IMcpConnectionProcessRunner runner) =>
+		IMcpConnectionProcessRunner runner,
+		IMcpCodexUserConfigurationReader? codexUserConfigurationReader = null) =>
 		new(
 			CreateLocalization(),
 			locator,
 			runner,
-			new McpProjectConfigurationWriter());
+			new McpProjectConfigurationWriter(),
+			codexUserConfigurationReader ?? new StubCodexUserConfigurationReader(
+				new McpCodexUserConfigurationRead(true, null)));
+
+	private static IMcpCodexUserConfigurationReader CreateCodexConfigurationReader(
+		string command,
+		IReadOnlyList<string> arguments,
+		IReadOnlyDictionary<string, string> environment)
+	{
+		var configPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "codex-home-contract", "config.toml"));
+		var escapedCommand = command.Replace("\\", "\\\\", StringComparison.Ordinal);
+		var serializedArguments = string.Join(
+			", ",
+			arguments.Select(value => $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal)}\""));
+		var serializedEnvironment = string.Join(
+			Environment.NewLine,
+			environment.Select(pair =>
+				$"{pair.Key} = \"{pair.Value.Replace("\\", "\\\\", StringComparison.Ordinal)}\""));
+		var source = $"""
+			[mcp_servers.devprojex]
+			command = "{escapedCommand}"
+			args = [{serializedArguments}]
+			[mcp_servers.devprojex.env]
+			{serializedEnvironment}
+			""";
+		return new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
+		{
+			CodexHomeProvider = () => Path.GetDirectoryName(configPath),
+			FileExists = path => string.Equals(path, configPath, StringComparison.OrdinalIgnoreCase),
+			ReadAllText = path => string.Equals(path, configPath, StringComparison.OrdinalIgnoreCase)
+				? source
+				: throw new FileNotFoundException()
+		});
+	}
 
 	private static McpConnectionRequest Request(
 		McpConnectionClient client,
@@ -936,6 +1170,22 @@ public sealed class McpConnectionServiceTests
 			""",
 			string.Empty);
 
+	private static McpConnectionProcessResult ClaudeJsonConnection(
+		string executable,
+		IReadOnlyList<string> arguments,
+		IReadOnlyDictionary<string, string> environment) =>
+		new(
+			0,
+			JsonSerializer.Serialize(new
+			{
+				name = "devprojex",
+				type = "stdio",
+				command = executable,
+				args = arguments,
+				env = environment
+			}),
+			string.Empty);
+
 	private static LocalizationService CreateLocalization()
 	{
 		var values = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -996,8 +1246,13 @@ public sealed class McpConnectionServiceTests
 		}
 	}
 
+	private sealed class StubCodexUserConfigurationReader(McpCodexUserConfigurationRead result)
+		: IMcpCodexUserConfigurationReader
+	{
+		public McpCodexUserConfigurationRead Read() => result;
+	}
+
 	private sealed class CancelingAddProcessRunner(
-		McpConnectionProcessResult existing,
 		CancellationTokenSource cancellation) : IMcpConnectionProcessRunner
 	{
 		public List<McpConnectionProcessRequest> Requests { get; } = [];
@@ -1009,14 +1264,13 @@ public sealed class McpConnectionServiceTests
 			Requests.Add(request);
 			return Requests.Count switch
 			{
-				1 => Task.FromResult(existing),
-				2 => Task.FromResult(new McpConnectionProcessResult(0, "removed", string.Empty)),
-				3 => CancelAdd(),
-				4 => Task.FromResult(new McpConnectionProcessResult(
+				1 => Task.FromResult(new McpConnectionProcessResult(0, "removed", string.Empty)),
+				2 => CancelAdd(),
+				3 => Task.FromResult(new McpConnectionProcessResult(
 					1,
 					string.Empty,
 					"No MCP server named 'devprojex' found.")),
-				5 => Task.FromResult(new McpConnectionProcessResult(0, "restored", string.Empty)),
+				4 => Task.FromResult(new McpConnectionProcessResult(0, "restored", string.Empty)),
 				_ => throw new InvalidOperationException("Unexpected MCP client command.")
 			};
 		}
