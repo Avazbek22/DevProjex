@@ -929,6 +929,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			var activity = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "AgentActivityMenuItem");
 			await UiTestDriver.RaiseMenuItemClickAsync(activity);
 			var viewModel = UiTestDriver.GetViewModel(window);
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => viewModel.AgentActivityVisible &&
