@@ -498,7 +498,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 		var document = XDocument.Load(viewFile);
 		var root = Assert.IsType<XElement>(document.Root);
 
-		Assert.Equal("800", root.Attribute("MinWidth")?.Value);
+		Assert.Equal("1063", root.Attribute("MinWidth")?.Value);
 	}
 
 	[Fact]
