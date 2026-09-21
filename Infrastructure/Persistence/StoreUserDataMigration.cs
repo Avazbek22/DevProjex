@@ -117,7 +117,7 @@ public static class StoreUserDataMigration
 		}
 
 		foreach (var directory in Directory.EnumerateDirectories(destination, "*", SearchOption.AllDirectories)
-			         .OrderByDescending(static path => path.Length))
+					 .OrderByDescending(static path => path.Length))
 		{
 			if (!Directory.EnumerateFileSystemEntries(directory).Any())
 				Directory.Delete(directory, recursive: false);
