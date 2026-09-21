@@ -3,6 +3,58 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 {
 	[Fact]
+	public async Task Schedule_PublishesPendingSavingAndIdleStates()
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			async (_, _, cancellationToken) =>
+			{
+				writeStarted.TrySetResult();
+				await releaseWrite.Task.WaitAsync(cancellationToken);
+			},
+			delay.WaitAsync);
+
+		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
+		coordinator.Schedule(@"C:\Project", ["src"]);
+		Assert.Equal(SelectionPersistencePhase.Pending, coordinator.State.Phase);
+
+		delay.Release();
+		await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(SelectionPersistencePhase.Saving, coordinator.State.Phase);
+
+		releaseWrite.TrySetResult();
+		await WaitForStateAsync(coordinator, SelectionPersistencePhase.Idle);
+		Assert.Null(coordinator.State.FailureReason);
+	}
+
+	[Fact]
+	public async Task FailedWrite_RemainsFailedUntilThePendingSelectionIsSaved()
+	{
+		var delay = new ControlledDelay();
+		var attempts = 0;
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			(_, _, _) =>
+			{
+				attempts++;
+				if (attempts == 1)
+					throw new IOException("profile is locked");
+				return Task.CompletedTask;
+			},
+			delay.WaitAsync);
+
+		coordinator.Schedule(@"C:\Project", ["src"]);
+		delay.Release();
+		await WaitForStateAsync(coordinator, SelectionPersistencePhase.Failed);
+
+		Assert.Equal("profile is locked", coordinator.State.FailureReason);
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
+		Assert.Equal(2, attempts);
+	}
+
+	[Fact]
 	public async Task Schedule_CoalescesToTheLatestSelectionAfterTheDelay()
 	{
 		var delays = new Queue<ControlledDelay>();
@@ -134,6 +186,7 @@ public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 		await delay.Canceled.Task.WaitAsync(TestContext.Current.CancellationToken);
 
 		Assert.Equal(0, writeCount);
+		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
 	}
 
 	private sealed class ControlledDelay
@@ -161,5 +214,32 @@ public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 		}
 
 		public void Release() => _release.TrySetResult();
+	}
+
+	private static async Task WaitForStateAsync(
+		TreeSelectionProfilePersistenceCoordinator coordinator,
+		SelectionPersistencePhase phase)
+	{
+		if (coordinator.State.Phase == phase)
+			return;
+
+		var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		void OnStateChanged(object? sender, EventArgs args)
+		{
+			if (coordinator.State.Phase == phase)
+				reached.TrySetResult();
+		}
+
+		coordinator.StateChanged += OnStateChanged;
+		try
+		{
+			if (coordinator.State.Phase == phase)
+				return;
+			await reached.Task.WaitAsync(TestContext.Current.CancellationToken);
+		}
+		finally
+		{
+			coordinator.StateChanged -= OnStateChanged;
+		}
 	}
 }

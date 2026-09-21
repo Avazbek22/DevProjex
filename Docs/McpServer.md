@@ -499,10 +499,11 @@ Every tool publishes one short `anthropic/searchHint` in `_meta` as optional dis
 help. No tool publishes `anthropic/alwaysLoad`; clients that do not recognize the hint
 can ignore it without changing any route or result.
 
-### What a connection costs
+### MCP catalog size
 
-Before a client asks anything about a project it has already paid for the tool schemas and the
-server instructions. Measured on 2026-09-13 from the characters a client received:
+Before a client asks anything about a project, it receives the tool schemas and server
+instructions. The measurements below describe data sent to the client on 2026-09-13.
+How much model context that data uses depends on the client and how it loads tools:
 
 | Payload | Characters |
 |---|---:|
@@ -1627,6 +1628,11 @@ for manual installation. Malformed JSON is likewise never overwritten.
 Desktop configuration paths on Windows and macOS. After applying that JSON, completely
 close Claude Desktop and start it again, then verify the server under **Manage
 connectors**.
+
+Live context uses `--live`; Standard does not follow the window selection. For a
+first-call check, inspect DevProjex with `/mcp` in Claude Code or run
+`codex mcp list`. Then ask: “Through DevProjex, show the tree of the current selection.”
+That call appears in the agent journal.
 
 A missing command or failed client process uses the same manual-configuration window.
 If removing an existing Claude Code or Codex entry succeeds but adding its replacement

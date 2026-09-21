@@ -83,6 +83,7 @@ internal partial class AgentJournalWindow : Window
     }
 
     internal AgentJournalWindowViewModel ViewModel => _viewModel;
+    internal Func<string, Task>? OperationErrorPresenter { get; set; }
 
     internal async Task UpdateProjectContextAsync(
         string? currentProjectRoot,
@@ -154,22 +155,49 @@ internal partial class AgentJournalWindow : Window
         bool json,
         CancellationToken cancellationToken = default)
     {
-        var session = _viewModel.SelectedSession?.Session;
-        if (session is null)
-            return;
-        var receipt = await _reader.ReadReceiptAsync(session.Id, cancellationToken);
-        if (receipt is null)
-            return;
-        var text = json ? _formatter.FormatJson(receipt) : _formatter.FormatMarkdown(receipt);
-        await File.WriteAllTextAsync(path, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
+        try
+        {
+            var session = _viewModel.SelectedSession?.Session;
+            if (session is null)
+                return;
+            var receipt = await _reader.ReadReceiptAsync(session.Id, cancellationToken);
+            if (receipt is null)
+                return;
+            var text = json ? _formatter.FormatJson(receipt) : _formatter.FormatMarkdown(receipt);
+            await File.WriteAllTextAsync(
+                path,
+                text,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await ShowOperationErrorAsync("AgentJournal.ExportFailed", exception);
+        }
     }
 
     internal async Task<int> ClearCurrentScopeAsync(CancellationToken cancellationToken = default)
     {
-        var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
-        var removed = await _reader.ClearAsync(root, cancellationToken);
-        await RefreshAsync(cancellationToken);
-        return removed;
+        try
+        {
+            var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
+            var removed = await _reader.ClearAsync(root, cancellationToken);
+            await RefreshAsync(cancellationToken);
+            return removed;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await ShowOperationErrorAsync("AgentJournal.ClearFailed", exception);
+            return 0;
+        }
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -223,31 +251,41 @@ internal partial class AgentJournalWindow : Window
 
     private async void OnExport(object? sender, RoutedEventArgs e)
     {
-        if (_viewModel.SelectedSession is null)
-            return;
-        var markdown = new FilePickerFileType("Markdown") { Patterns = ["*.md"] };
-        var json = new FilePickerFileType("JSON") { Patterns = ["*.json"] };
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        try
         {
-            Title = _localization["AgentJournal.Export"],
-            SuggestedFileName = $"devprojex-journal-{_viewModel.SelectedSession.Session.Id}",
-            DefaultExtension = "md",
-            FileTypeChoices = [markdown, json]
-        });
-        if (file is null)
-            return;
+            if (_viewModel.SelectedSession is null)
+                return;
+            var markdown = new FilePickerFileType("Markdown") { Patterns = ["*.md"] };
+            var json = new FilePickerFileType("JSON") { Patterns = ["*.json"] };
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = _localization["AgentJournal.Export"],
+                SuggestedFileName = $"devprojex-journal-{_viewModel.SelectedSession.Session.Id}",
+                DefaultExtension = "md",
+                FileTypeChoices = [markdown, json]
+            });
+            if (file is null)
+                return;
 
-        var receipt = await _reader.ReadReceiptAsync(
-            _viewModel.SelectedSession.Session.Id,
-            _lifetime.Token);
-        if (receipt is null)
-            return;
-        var exportJson = string.Equals(Path.GetExtension(file.Name), ".json", StringComparison.OrdinalIgnoreCase);
-        var text = exportJson ? _formatter.FormatJson(receipt) : _formatter.FormatMarkdown(receipt);
-        await using var stream = await file.OpenWriteAsync();
-        stream.SetLength(0);
-        await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
-        await writer.WriteAsync(text.AsMemory(), _lifetime.Token);
+            var receipt = await _reader.ReadReceiptAsync(
+                _viewModel.SelectedSession.Session.Id,
+                _lifetime.Token);
+            if (receipt is null)
+                return;
+            var exportJson = string.Equals(Path.GetExtension(file.Name), ".json", StringComparison.OrdinalIgnoreCase);
+            var text = exportJson ? _formatter.FormatJson(receipt) : _formatter.FormatMarkdown(receipt);
+            await using var stream = await file.OpenWriteAsync();
+            stream.SetLength(0);
+            await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+            await writer.WriteAsync(text.AsMemory(), _lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            await ShowOperationErrorAsync("AgentJournal.ExportFailed", exception);
+        }
     }
 
     private async void OnClear(object? sender, RoutedEventArgs e)
@@ -267,6 +305,18 @@ internal partial class AgentJournalWindow : Window
             height: 170);
         if (confirmed)
             await ClearCurrentScopeAsync(_lifetime.Token);
+    }
+
+    private Task ShowOperationErrorAsync(string key, Exception exception)
+    {
+        var message = _localization.Format(key, exception.Message);
+        return OperationErrorPresenter is { } presenter
+            ? presenter(message)
+            : MessageDialog.ShowAsync(
+                this,
+                _viewModel.WindowTitle,
+                message,
+                _localization["Dialog.OK"]);
     }
 
     private async Task RefreshSafelyAsync()

@@ -218,7 +218,8 @@ configuration fragment is needed.
 **Live context** connects an MCP session to the checked tree in an open DevProjex
 window through the shared local project profile. The compact **MCP** menu, between
 File and Git, has **Live context**, **Standard**, **Journal**, and documentation
-entries. Desktop connections always include `--live`. After a successful connection,
+entries. Live context uses `--live`; Standard does not follow the window selection.
+After a successful connection,
 an optional PATH dialog can offer the platform-appropriate terminal setup. The window
 title names an active client or session count, and saved focused paths are restored on reopen.
 Live mode has three separate rules: **focus** keeps tree, search, analysis, dependency,
@@ -226,6 +227,10 @@ and pack operations inside the checked selection; **access boundaries** still en
 the configured filters and secret protection, while a directly named readable file may
 be returned with an outside-focus notice; **saved results** stay pinned to the revision
 that created them and must be rebuilt explicitly after the window selection changes.
+
+For a first-call check, inspect DevProjex with `/mcp` in Claude Code or run
+`codex mcp list`. Then ask: “Through DevProjex, show the tree of the current selection.”
+That call appears in the agent journal.
 
 Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`. `related_files` answers "what does this file actually use, and who uses it" from a static dependency index over up to 16 seed files, so following a thread never widens the selection. `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
 

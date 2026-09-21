@@ -5,6 +5,11 @@ GitHub release page.
 
 ## Windows
 
+GitHub release builds are unsigned, so Windows may show a warning; verify that the
+download came from the DevProjex GitHub release page before running it. An MCP client
+used for connection must be installed on Windows. Connecting to a client inside WSL
+is not supported in v5.2. These notes do not apply to the Microsoft Store build.
+
 - Download and run `DevProjex.v<version>.win-x64.exe` or
   `DevProjex.v<version>.win-arm64.exe`.
 - Install with WinGet: `winget install OlimoffDev.DevProjex`.
@@ -45,7 +50,13 @@ curl -fL "https://github.com/Avazbek22/DevProjex/releases/download/v<version>/De
 ./DevProjex
 ```
 
-Move `DevProjex` to a directory on `PATH` if you want a system-wide command.
+Moving the `DevProjex` file to a directory on `PATH` does not create the lowercase
+`devprojex` command used by the documentation. Use **Help → Terminal command setup**,
+or create an executable launcher with the expected name:
+
+```bash
+sudo ln -s "$(pwd)/DevProjex" /usr/local/bin/devprojex
+```
 
 ## macOS
 

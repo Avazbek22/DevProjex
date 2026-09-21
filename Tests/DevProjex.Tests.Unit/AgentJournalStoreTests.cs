@@ -3,7 +3,7 @@ using DevProjex.Infrastructure.LiveContext;
 
 namespace DevProjex.Tests.Unit;
 
-public sealed class AgentJournalStoreTests
+public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 {
 	[Fact]
 	public async Task SessionAndCallRoundTripThroughJsonLines()
@@ -202,6 +202,90 @@ public sealed class AgentJournalStoreTests
 		Assert.Equal(session.Id, restored.Id);
 		var call = Assert.Single(await store.ReadCallsAsync(session.Id, cancellationToken));
 		Assert.Contains("history-recovered", call.Notices);
+	}
+
+	[Fact(Timeout = 5_000)]
+	public async Task WatcherResetsItsTailWhenTheSessionFileIsRecreated()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			temporary.Path,
+			76,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		await using var changes = store.WatchChangesAsync(session.Id, cancellationToken)
+			.GetAsyncEnumerator(cancellationToken);
+
+		Assert.True(await changes.MoveNextAsync());
+		Assert.Equal(1, changes.Current.Sequence);
+		File.Delete(Path.Combine(store.DirectoryPath, session.Id + ".jsonl"));
+		await store.RecordCall(
+			session.Id,
+			CreateCall(1) with
+			{
+				Arguments = new Dictionary<string, string>(StringComparer.Ordinal)
+				{
+					["path"] = new string('a', 4_000)
+				}
+			},
+			cancellationToken);
+
+		Assert.True(await changes.MoveNextAsync());
+		Assert.Equal(1, changes.Current.Sequence);
+		var recovered = Assert.Single(await store.ReadCallsAsync(session.Id, cancellationToken));
+		Assert.Contains("history-recovered", recovered.Notices);
+	}
+
+	[Fact(Timeout = 20_000)]
+	public async Task WatcherReadsOnlyTheAppendedTailOfALongSession()
+	{
+		const int callCount = 5_000;
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			temporary.Path,
+			77,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		var path = Path.Combine(store.DirectoryPath, session.Id + ".jsonl");
+		var seedLines = await File.ReadAllLinesAsync(path, cancellationToken);
+		var builder = new StringBuilder(seedLines[0].Length + seedLines[1].Length * callCount);
+		builder.AppendLine(seedLines[0]);
+		for (var sequence = 1; sequence <= callCount; sequence++)
+		{
+			builder.AppendLine(seedLines[1].Replace(
+				"\"sequence\":1,",
+				$"\"sequence\":{sequence.ToString(CultureInfo.InvariantCulture)},",
+				StringComparison.Ordinal));
+		}
+		await File.WriteAllTextAsync(path, builder.ToString(), cancellationToken);
+
+		long observedBytes = 0;
+		store.TailBytesReadObserver = bytes => Interlocked.Add(ref observedBytes, bytes);
+		await using var changes = store.WatchChangesAsync(session.Id, cancellationToken)
+			.GetAsyncEnumerator(cancellationToken);
+		for (var sequence = 1; sequence <= callCount; sequence++)
+		{
+			Assert.True(await changes.MoveNextAsync());
+			Assert.Equal(sequence, changes.Current.Sequence);
+		}
+		var bytesBeforeAppend = Volatile.Read(ref observedBytes);
+		await store.RecordCall(session.Id, CreateCall(callCount + 1), cancellationToken);
+		var previousImplementationBytes = new FileInfo(path).Length;
+
+		Assert.True(await changes.MoveNextAsync());
+		Assert.Equal(callCount + 1, changes.Current.Sequence);
+		var tailBytes = Volatile.Read(ref observedBytes) - bytesBeforeAppend;
+
+		output.WriteLine(
+			$"5,000-event watcher bytes: before={previousImplementationBytes:N0}; after={tailBytes:N0}");
+		Assert.InRange(tailBytes, 1, seedLines[1].Length * 2L);
+		Assert.True(tailBytes * 100 < previousImplementationBytes);
 	}
 
 	[Fact]

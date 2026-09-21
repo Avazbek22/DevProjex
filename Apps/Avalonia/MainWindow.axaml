@@ -260,7 +260,7 @@
                           GitBranchSwitchRequested="OnGitBranchSwitch" />
 
     <Border DockPanel.Dock="Bottom" Classes="status-strip" IsVisible="{Binding IsProjectLoaded}">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
         <!-- Left: Tree metrics -->
         <controls:StatusMetricWaveText Name="StatusTreeMetricsWave"
                                        Grid.Column="0"
@@ -276,8 +276,22 @@
                                        AutomationProperties.Name="{Binding StatusTreeLabel}"
                                        AutomationProperties.HelpText="{Binding StatusTreeStatsText}" />
 
+        <TextBlock Grid.Column="1"
+                   Name="SelectionPersistenceStatusText"
+                   Text="{Binding SelectionPersistenceStatusText}"
+                   IsVisible="{Binding SelectionPersistenceStatusVisible}"
+                   MaxWidth="420"
+                   Margin="14,0,0,0"
+                   TextTrimming="CharacterEllipsis"
+                   FontSize="12"
+                   Foreground="{DynamicResource AppTextBrush}"
+                   VerticalAlignment="Center"
+                   ToolTip.Tip="{Binding SelectionPersistenceStatusHelpText}"
+                   AutomationProperties.Name="{Binding SelectionPersistenceStatusText}"
+                   AutomationProperties.HelpText="{Binding SelectionPersistenceStatusHelpText}" />
+
         <!-- Center: Progress bar with operation text -->
-        <StackPanel Grid.Column="1"
+        <StackPanel Grid.Column="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
@@ -316,7 +330,7 @@
           </Button>
         </StackPanel>
 
-        <StackPanel Grid.Column="1"
+        <StackPanel Grid.Column="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
@@ -330,7 +344,7 @@
 
         <!-- Right: Content metrics -->
         <controls:StatusMetricWaveText Name="StatusContentMetricsWave"
-                                       Grid.Column="2"
+                                       Grid.Column="3"
                                        Label="{Binding StatusContentLabel}"
                                        Text="{Binding StatusContentStatsText}"
                                        TextFontSize="12"
@@ -343,7 +357,7 @@
                                        AutomationProperties.Name="{Binding StatusContentLabel}"
                                        AutomationProperties.HelpText="{Binding StatusContentStatsText}" />
 
-        <TextBlock Grid.Column="3"
+        <TextBlock Grid.Column="4"
                    Name="AgentActivityStatusText"
                    Text="{Binding AgentActivityText}"
                    IsVisible="{Binding AgentActivityVisible}"
@@ -606,6 +620,8 @@
                                       Spacing="{DynamicResource TreeItemSpacingResource}">
                             <CheckBox IsThreeState="True"
                                       IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
+                                      ToolTip.Tip="{Binding $parent[Window].DataContext.TreeSelectionFocusHelp}"
+                                      AutomationProperties.HelpText="{Binding $parent[Window].DataContext.TreeSelectionFocusHelp}"
                                       VerticalAlignment="Center" />
                             <Image Source="{CompiledBinding Icon}"
                                    Width="{DynamicResource TreeIconSizeResource}"

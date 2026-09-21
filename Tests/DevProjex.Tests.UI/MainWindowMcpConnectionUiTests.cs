@@ -10,6 +10,109 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 {
 	[AvaloniaFact]
+	public async Task LiveConnectionWaitsForPendingSelectionPersistence()
+	{
+		var profileStore = new BlockingProjectProfileStore();
+		var service = new RecordingMcpConnectionService(_ => new McpConnectionResult(
+			McpConnectionStatus.Connected,
+			"Cursor connected"));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with
+			{
+				ProjectProfileStore = profileStore,
+				McpConnectionService = service,
+				McpClientLaunchService = new RecordingMcpClientLaunchService(
+					_ => new McpClientLaunchResult(McpClientLaunchStatus.Opened)),
+				TerminalCommandSetupService = new StubTerminalCommandSetupService(
+					CreateTerminalSnapshot(workspace.Project.RootPath, TerminalCommandSetupState.Installed))
+			});
+
+		try
+		{
+			profileStore.BlockWrites = true;
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			root.IsChecked = root.IsChecked != true;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).SelectionPersistenceStatusVisible,
+				"the pending selection persistence status");
+			Assert.Equal(
+				"Saving selection…",
+				UiTestDriver.GetViewModel(window).SelectionPersistenceStatusText);
+
+			var cursor = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+				window,
+				"McpConnectCursorMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(cursor);
+			await profileStore.WriteStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+			Assert.Empty(service.Requests);
+
+			profileStore.ReleaseWrite();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => service.Requests.Count == 1,
+				"the live connection after selection persistence");
+			Assert.False(UiTestDriver.GetViewModel(window).SelectionPersistenceStatusVisible);
+		}
+		finally
+		{
+			profileStore.ReleaseWrite();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task LiveConnectionContinuesWhenSelectionPersistenceFailsAndKeepsFailureVisible()
+	{
+		var profileStore = new BlockingProjectProfileStore
+		{
+			WriteFailure = new IOException("storage unavailable")
+		};
+		var service = new RecordingMcpConnectionService(_ => new McpConnectionResult(
+			McpConnectionStatus.Connected,
+			"Cursor connected"));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with
+			{
+				ProjectProfileStore = profileStore,
+				McpConnectionService = service,
+				McpClientLaunchService = new RecordingMcpClientLaunchService(
+					_ => new McpClientLaunchResult(McpClientLaunchStatus.Opened)),
+				TerminalCommandSetupService = new StubTerminalCommandSetupService(
+					CreateTerminalSnapshot(workspace.Project.RootPath, TerminalCommandSetupState.Installed))
+			});
+
+		try
+		{
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			root.IsChecked = root.IsChecked != true;
+			var cursor = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+				window,
+				"McpConnectCursorMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(cursor);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => service.Requests.Count == 1 &&
+					  UiTestDriver.GetViewModel(window).SelectionPersistenceStatusText ==
+					  "Selection not saved; agent uses previous selection",
+				"the live connection and persistent selection failure status");
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.True(viewModel.SelectionPersistenceStatusVisible);
+			Assert.Contains(
+				"storage unavailable",
+				viewModel.SelectionPersistenceStatusHelpText,
+				StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task OpenMenus_PassLiveAndStandardModesAndOpenClientWithoutSuccessToast()
 	{
 		var service = new RecordingMcpConnectionService(request => new McpConnectionResult(
@@ -429,6 +532,60 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 		}
 
 		public string CreatePrintableConfiguration(McpConnectionRequest request) => "{}";
+	}
+
+	private sealed class BlockingProjectProfileStore : IProjectProfileStore
+	{
+		private readonly ManualResetEventSlim _writeRelease = new(initialState: false);
+
+		public bool BlockWrites { get; set; }
+		public Exception? WriteFailure { get; init; }
+		public TaskCompletionSource WriteStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public bool EnsureStorageExists() => true;
+
+		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+		{
+			profile = null!;
+			return false;
+		}
+
+		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout) =>
+			new(ProjectProfileLookupStatus.Missing, null);
+
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		{
+			WaitIfBlocked();
+			return true;
+		}
+
+		public bool TrySaveProfile(
+			string localProjectPath,
+			ProjectSelectionProfile profile,
+			DateTimeOffset updatedUtc)
+		{
+			WaitIfBlocked();
+			return true;
+		}
+
+		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
+			_ = TrySaveProfile(localProjectPath, profile);
+
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
+
+		public void ReleaseWrite() => _writeRelease.Set();
+
+		private void WaitIfBlocked()
+		{
+			if (BlockWrites)
+			{
+				WriteStarted.TrySetResult();
+				_writeRelease.Wait(TestContext.Current.CancellationToken);
+			}
+			if (WriteFailure is not null)
+				throw WriteFailure;
+		}
 	}
 
 	private sealed class ReplacementMcpConnectionService(string existingProjectRoot)

@@ -12,6 +12,10 @@ public static class AvaloniaHeadlessTestApp
         var captureSnapshots = string.Equals(
             Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_AGENT_JOURNAL"),
             "1",
+			StringComparison.Ordinal) ||
+			string.Equals(
+				Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_JOURNAL_TAILS"),
+				"1",
             StringComparison.Ordinal);
         var builder = AppBuilder.Configure<App>();
         if (captureSnapshots)

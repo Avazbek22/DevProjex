@@ -157,6 +157,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private int _applySettingsInProgress;
     private bool _hasPendingFilterSettingsChanges;
     private bool _statusMetricsVisible;
+	private string _selectionPersistenceStatusText = string.Empty;
+	private string _selectionPersistenceStatusHelpText = string.Empty;
     private bool _isAgentActivityEnabled;
     private string _agentActivityText = string.Empty;
     private bool _statusPreviewSelectionVisible;
@@ -425,6 +427,30 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
         }
     }
+
+	public string SelectionPersistenceStatusText => _selectionPersistenceStatusText;
+
+	public string SelectionPersistenceStatusHelpText => _selectionPersistenceStatusHelpText;
+
+	public bool SelectionPersistenceStatusVisible =>
+		!IsCompactModeEffective && !string.IsNullOrEmpty(_selectionPersistenceStatusText);
+
+	internal void SetSelectionPersistenceStatus(string? text, string? helpText)
+	{
+		text ??= string.Empty;
+		helpText ??= string.Empty;
+		if (string.Equals(_selectionPersistenceStatusText, text, StringComparison.Ordinal) &&
+			string.Equals(_selectionPersistenceStatusHelpText, helpText, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		_selectionPersistenceStatusText = text;
+		_selectionPersistenceStatusHelpText = helpText;
+		RaisePropertyChanged(nameof(SelectionPersistenceStatusText));
+		RaisePropertyChanged(nameof(SelectionPersistenceStatusHelpText));
+		RaisePropertyChanged(nameof(SelectionPersistenceStatusVisible));
+	}
 
     public string Title
     {
@@ -1190,6 +1216,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(TreeItemPadding));
         RaisePropertyChanged(nameof(TreeTextMargin));
         RaisePropertyChanged(nameof(AgentActivityVisible));
+		RaisePropertyChanged(nameof(SelectionPersistenceStatusVisible));
     }
 
     // Methods for toggle behavior (click on active = disable)
@@ -1748,6 +1775,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuMcpOpenCursor { get; private set; } = string.Empty;
     public string MenuMcpOpenVsCode { get; private set; } = string.Empty;
     public string MenuMcpOtherClients { get; private set; } = string.Empty;
+    public string MenuMcpOpenClaudeCodeLiveHelp { get; private set; } = string.Empty;
+    public string MenuMcpOpenCodexLiveHelp { get; private set; } = string.Empty;
+    public string MenuMcpOpenCursorLiveHelp { get; private set; } = string.Empty;
+    public string MenuMcpOpenVsCodeLiveHelp { get; private set; } = string.Empty;
+    public string MenuMcpOpenClaudeCodeStandardHelp { get; private set; } = string.Empty;
+    public string MenuMcpOpenCodexStandardHelp { get; private set; } = string.Empty;
+    public string MenuMcpOpenCursorStandardHelp { get; private set; } = string.Empty;
+    public string MenuMcpOpenVsCodeStandardHelp { get; private set; } = string.Empty;
+    public string MenuMcpOtherClientsHelp { get; private set; } = string.Empty;
+    public string MenuMcpJournalHelp { get; private set; } = string.Empty;
+    public string TreeSelectionFocusHelp { get; private set; } = string.Empty;
     public ObservableCollection<ToastMessageViewModel> ToastItems { get; private set; } = [];
     public bool HasToastItems => ToastItems.Count > 0;
     public string MenuView { get; private set; } = string.Empty;
@@ -1955,6 +1993,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuMcpOpenCursor = _localization["Menu.Mcp.OpenCursor"];
         MenuMcpOpenVsCode = _localization["Menu.Mcp.OpenVsCode"];
         MenuMcpOtherClients = _localization["Menu.Mcp.OtherClients"];
+        MenuMcpOpenClaudeCodeLiveHelp = _localization.Format("Menu.Mcp.OpenTerminal.Live.Help", "Claude Code");
+        MenuMcpOpenCodexLiveHelp = _localization.Format("Menu.Mcp.OpenTerminal.Live.Help", "Codex");
+        MenuMcpOpenCursorLiveHelp = _localization.Format("Menu.Mcp.OpenProject.Live.Help", "Cursor");
+        MenuMcpOpenVsCodeLiveHelp = _localization.Format("Menu.Mcp.OpenProject.Live.Help", "VS Code");
+        MenuMcpOpenClaudeCodeStandardHelp = _localization.Format("Menu.Mcp.OpenTerminal.Standard.Help", "Claude Code");
+        MenuMcpOpenCodexStandardHelp = _localization.Format("Menu.Mcp.OpenTerminal.Standard.Help", "Codex");
+        MenuMcpOpenCursorStandardHelp = _localization.Format("Menu.Mcp.OpenProject.Standard.Help", "Cursor");
+        MenuMcpOpenVsCodeStandardHelp = _localization.Format("Menu.Mcp.OpenProject.Standard.Help", "VS Code");
+        MenuMcpOtherClientsHelp = _localization["Menu.Mcp.OtherClients.Help"];
+        MenuMcpJournalHelp = _localization["Menu.Mcp.Journal.Help"];
+        TreeSelectionFocusHelp = _localization["Tree.Selection.Focus.Help"];
+        if (HideSecretsOption is not null)
+            HideSecretsOption.HelpText = _localization["Settings.HideSecrets.Help"];
         MenuView = _localization["Menu.View"];
         MenuViewExpandAll = _localization["Menu.View.ExpandAll"];
         MenuViewCollapseAll = _localization["Menu.View.CollapseAll"];
@@ -2150,6 +2201,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuMcpOpenCursor));
         RaisePropertyChanged(nameof(MenuMcpOpenVsCode));
         RaisePropertyChanged(nameof(MenuMcpOtherClients));
+        RaisePropertyChanged(nameof(MenuMcpOpenClaudeCodeLiveHelp));
+        RaisePropertyChanged(nameof(MenuMcpOpenCodexLiveHelp));
+        RaisePropertyChanged(nameof(MenuMcpOpenCursorLiveHelp));
+        RaisePropertyChanged(nameof(MenuMcpOpenVsCodeLiveHelp));
+        RaisePropertyChanged(nameof(MenuMcpOpenClaudeCodeStandardHelp));
+        RaisePropertyChanged(nameof(MenuMcpOpenCodexStandardHelp));
+        RaisePropertyChanged(nameof(MenuMcpOpenCursorStandardHelp));
+        RaisePropertyChanged(nameof(MenuMcpOpenVsCodeStandardHelp));
+        RaisePropertyChanged(nameof(MenuMcpOtherClientsHelp));
+        RaisePropertyChanged(nameof(MenuMcpJournalHelp));
+        RaisePropertyChanged(nameof(TreeSelectionFocusHelp));
         RaisePropertyChanged(nameof(MenuView));
         RaisePropertyChanged(nameof(MenuViewExpandAll));
         RaisePropertyChanged(nameof(MenuViewCollapseAll));
@@ -2347,6 +2409,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 				!GitFilteringModeResolver.IsGitFilteringOption(option.Id)));
 		HideSecretsOption = IgnoreOptions.FirstOrDefault(
 			static option => option.Id == IgnoreOptionId.HideSecrets);
+        if (HideSecretsOption is not null)
+            HideSecretsOption.HelpText = _localization["Settings.HideSecrets.Help"];
 		HidePrivateDataOption = IgnoreOptions.FirstOrDefault(
 			static option => option.Id == IgnoreOptionId.HidePrivateData);
 		SynchronizeContentProcessingOptions(contentTransformationIds);
