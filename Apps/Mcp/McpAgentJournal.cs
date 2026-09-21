@@ -8,6 +8,7 @@ namespace DevProjex.Mcp;
 
 internal sealed partial class McpAgentJournal : IAsyncDisposable
 {
+	private const int MaximumQueuedEvents = 1_000;
 	private static readonly IReadOnlySet<string> ScalarArguments = new HashSet<string>(StringComparer.Ordinal)
 	{
 		"path", "mode", "detail", "max_tokens", "direction", "pack_id"
@@ -31,8 +32,14 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 	private readonly McpRootRegistry roots;
 	private readonly AgentJournalSession session;
 	private readonly TimeProvider clock;
-	private readonly Channel<Func<CancellationToken, ValueTask>> operations = Channel.CreateUnbounded<Func<CancellationToken, ValueTask>>(
-		new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+	private readonly Channel<JournalOperation> operations = Channel.CreateBounded<JournalOperation>(
+		new BoundedChannelOptions(MaximumQueuedEvents)
+		{
+			SingleReader = true,
+			SingleWriter = false,
+			AllowSynchronousContinuations = false,
+			FullMode = BoundedChannelFullMode.DropOldest
+		});
 	private readonly CancellationTokenSource shutdown = new();
 	private readonly Task pump;
 	private readonly AsyncLocal<Invocation?> invocation = new();
@@ -40,6 +47,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 	private AgentJournalTotals totals = AgentJournalTotals.Empty;
 	private long sequence;
 	private long lostEvents;
+	private int completeSessionRequested;
 	private int startState;
 	private int disposed;
 
@@ -260,19 +268,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			current.PrivateDataMasked,
 			current.Notices.ToArray(),
 			result.IsError == true ? CaptureErrorCode(trustedText) : null);
-		operations.Writer.TryWrite(async token =>
-		{
-			if (await TryWriteWithRetryAsync(
-					ct => writer.RecordCall(session.Id, call, ct),
-				token).ConfigureAwait(false))
-			{
-				AddTotals(call);
-			}
-			else
-			{
-				Interlocked.Increment(ref lostEvents);
-			}
-		});
+		operations.Writer.TryWrite(new JournalOperation(call));
 	}
 
 	public async ValueTask DisposeAsync()
@@ -280,25 +276,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		if (Interlocked.Exchange(ref disposed, 1) != 0)
 			return;
 		if (Volatile.Read(ref startState) == 2)
-		{
-			operations.Writer.TryWrite(async token =>
-			{
-				var lost = Volatile.Read(ref lostEvents);
-				if (lost > 0)
-				{
-					var marker = CreateIncompleteHistoryMarker(lost);
-					await TryWriteWithRetryAsync(
-						ct => writer.RecordCall(session.Id, marker, ct),
-						token).ConfigureAwait(false);
-				}
-				AgentJournalTotals completed;
-				lock (totalsSync)
-					completed = totals;
-				await TryWriteWithRetryAsync(
-					ct => writer.EndSession(session.Id, clock.GetUtcNow(), completed, ct),
-					token).ConfigureAwait(false);
-			});
-		}
+			Volatile.Write(ref completeSessionRequested, 1);
 		operations.Writer.TryComplete();
 		try
 		{
@@ -313,13 +291,19 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 
 	private async Task RunPumpAsync()
 	{
+		long lastProcessedSequence = 0;
 		try
 		{
 			await foreach (var operation in operations.Reader.ReadAllAsync(shutdown.Token).ConfigureAwait(false))
 			{
 				try
 				{
-					await operation(shutdown.Token).ConfigureAwait(false);
+					var call = operation.Call;
+					var skipped = Math.Max(0, call.Sequence - lastProcessedSequence - 1);
+					if (skipped > 0)
+						Interlocked.Add(ref lostEvents, skipped);
+					lastProcessedSequence = Math.Max(lastProcessedSequence, call.Sequence);
+					await WriteCallAsync(call, shutdown.Token).ConfigureAwait(false);
 				}
 				catch (Exception exception) when (exception is not OperationCanceledException)
 				{
@@ -330,6 +314,58 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
 		{
 		}
+		if (Volatile.Read(ref completeSessionRequested) != 0)
+		{
+			var submitted = Volatile.Read(ref sequence);
+			if (submitted > lastProcessedSequence)
+				Interlocked.Add(ref lostEvents, submitted - lastProcessedSequence);
+			await CompleteSessionAsync(shutdown.Token).ConfigureAwait(false);
+		}
+	}
+
+	private async ValueTask WriteCallAsync(AgentJournalCall call, CancellationToken cancellationToken)
+	{
+		var pendingLoss = Interlocked.Exchange(ref lostEvents, 0);
+		var persistedCall = pendingLoss > 0
+			? AttachIncompleteHistory(call, pendingLoss)
+			: call;
+		if (await TryWriteWithRetryAsync(
+				ct => writer.RecordCall(session.Id, persistedCall, ct),
+				cancellationToken).ConfigureAwait(false))
+		{
+			AddTotals(call);
+			return;
+		}
+		Interlocked.Add(ref lostEvents, pendingLoss + 1);
+	}
+
+	private async ValueTask CompleteSessionAsync(CancellationToken cancellationToken)
+	{
+		var lost = Volatile.Read(ref lostEvents);
+		if (lost > 0)
+		{
+			var marker = CreateIncompleteHistoryMarker(lost);
+			await TryWriteWithRetryAsync(
+				ct => writer.RecordCall(session.Id, marker, ct),
+				cancellationToken).ConfigureAwait(false);
+		}
+		AgentJournalTotals completed;
+		lock (totalsSync)
+			completed = totals;
+		await TryWriteWithRetryAsync(
+			ct => writer.EndSession(session.Id, clock.GetUtcNow(), completed, ct),
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	private static AgentJournalCall AttachIncompleteHistory(AgentJournalCall call, long lost)
+	{
+		var arguments = call.Arguments.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
+		arguments["lost_events"] = lost.ToString(CultureInfo.InvariantCulture);
+		return call with
+		{
+			Arguments = arguments,
+			Notices = call.Notices.Append(HistoryIncompleteNotice).Distinct(StringComparer.Ordinal).ToArray()
+		};
 	}
 
 	private void AddTotals(AgentJournalCall call)
@@ -596,4 +632,6 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 				owner.invocation.Value = previous;
 		}
 	}
+
+	private sealed record JournalOperation(AgentJournalCall Call);
 }
