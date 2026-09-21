@@ -1,7 +1,9 @@
-# Desktop agent journal
+# Agent journal
 
-The desktop journal shows what project context local MCP clients received. It is
-an on-device history: open **MCP → Journal…** to inspect it. The command is
+The journal shows what project context local MCP clients received without storing
+file bodies or detected values. It is an on-device history shared by Desktop,
+Terminal Workspace, and the CLI. In Desktop, open **MCP → Journal…** to inspect
+it. The command is
 available before a project is opened. In that state the window shows sessions
 from all projects. With a project open, **Current project only** is selected by
 default and can be cleared to show the complete journal.
@@ -19,6 +21,19 @@ colors.
 **Clear** asks for confirmation and clears the current project when the filter
 is selected, or the complete journal when it is not. **Reset data** also clears
 the complete journal together with saved local project data.
+
+Terminal Workspace uses `mcp log`, `mcp log last`, and `mcp log export <path>
+[markdown|json] [last|session <id>]`. The direct CLI exposes the same records:
+
+```shell
+devprojex mcp log /path/to/project --last
+devprojex mcp log /path/to/project --last --format markdown
+devprojex mcp log /path/to/project --last --format json
+```
+
+Token counts are estimates derived from returned character counts, not tokenizer
+output. An empty journal means that no matching local MCP session has written a
+record yet; connect a client and complete a tool call before looking for it.
 
 ## Agent activity
 

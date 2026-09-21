@@ -204,10 +204,11 @@ DevProjex ships a built-in **secure [Model Context Protocol](https://modelcontex
 devprojex mcp --root /path/to/project
 ```
 
-Connect from the Desktop **MCP → Live context** submenu, from Terminal Workspace
-with `mcp connect <client>`, or from the CLI with
-`devprojex mcp connect . --client <client>`. Desktop registers the live server and
-opens Claude Code, Codex, Cursor, or VS Code. Terminal Workspace registers without
+Connect from the Desktop **MCP → Live context** or **MCP → Standard** submenu,
+from Terminal Workspace with `mcp connect <client> [live|standard]`, or from the CLI with
+`devprojex mcp connect . --client <client>`. Desktop registers the selected server mode and
+opens Claude Code, Codex, Cursor, or VS Code; the chosen submenu controls whether
+the registration follows the checked tree. Terminal Workspace registers without
 opening another terminal, while the CLI opens the client only when `--open` is given.
 Claude Code and Codex are configured through their installed command; Cursor and
 VS Code receive a project-local `.cursor/mcp.json` or `.vscode/mcp.json`. Existing
@@ -357,7 +358,7 @@ Detection runs a pinned, reviewed [Gitleaks](https://github.com/gitleaks/gitleak
 
 ## Documentation 📚
 
-[Installation](Docs/Installation.md) · [Smart Ignore](Docs/SmartIgnore.md) · [Hide Secrets](Docs/HideSecrets.md) · [Hide private data](Docs/HidePrivateData.md) · [Code Compression](Docs/CodeCompression.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [MCP Server](Docs/McpServer.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+[Installation](Docs/Installation.md) · [Smart Ignore](Docs/SmartIgnore.md) · [Hide Secrets](Docs/HideSecrets.md) · [Hide private data](Docs/HidePrivateData.md) · [Code Compression](Docs/CodeCompression.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [MCP Server](Docs/McpServer.md) · [Agent Journal](Docs/AgentJournal.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ---
 
