@@ -199,13 +199,16 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		var requestedRoot = TryNormalizeRoot(projectRoot);
 		if (projectRoot is not null && requestedRoot is null)
 			return 0;
+		var live = ActiveSessionKeys();
 		var removed = 0;
 		foreach (var path in EnumerateSessionFiles())
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			var content = await ReadContentAsync(path, cancellationToken).ConfigureAwait(false);
+			if (content.Session is not null && IsActive(content.Session, live))
+				continue;
 			if (requestedRoot is not null)
 			{
-				var content = await ReadContentAsync(path, cancellationToken).ConfigureAwait(false);
 				if (content.Session is null || !ContainsRoot(content.Session.Roots, requestedRoot))
 					continue;
 			}
@@ -380,10 +383,16 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			.OrderByDescending(static file => file.LastWriteTimeUtc)
 			.ThenByDescending(static file => file.Name, StringComparer.Ordinal)
 			.ToArray();
+		var live = ActiveSessionKeys();
 		for (var index = 0; index < files.Length; index++)
 		{
 			if (index < Retention.MaximumSessions && files[index].LastWriteTimeUtc >= cutoff.UtcDateTime)
 				continue;
+			if (!TryReadSessionHeader(files[index].FullName, out var session) ||
+				session is not null && IsActive(session, live))
+			{
+				continue;
+			}
 			try
 			{
 				files[index].Delete();
@@ -391,6 +400,41 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 			{
 			}
+		}
+	}
+
+	private static bool TryReadSessionHeader(string path, out AgentJournalSession? session)
+	{
+		session = null;
+		try
+		{
+			using var stream = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				bufferSize: 4096,
+				FileOptions.SequentialScan);
+			using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+			var line = reader.ReadLine();
+			if (line is null || line.Length > MaximumLineCharacters)
+				return true;
+			try
+			{
+				var record = JsonSerializer.Deserialize(
+					line,
+					AgentJournalJsonSerializerContext.Default.AgentJournalLine);
+				if (record?.Type == "session")
+					session = record.Session;
+			}
+			catch (JsonException)
+			{
+			}
+			return true;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return false;
 		}
 	}
 
@@ -516,6 +560,11 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 
 	private static bool ContainsRoot(IReadOnlyList<AgentJournalRoot> roots, string requestedRoot) =>
 		roots.Any(root => PathComparer.Default.Equals(TryNormalizeRoot(root.ConfiguredPath), requestedRoot));
+
+	private static bool IsActive(
+		AgentJournalSession session,
+		IReadOnlySet<(int Pid, long StartTicks)> live) =>
+		live.Contains((session.Pid, session.ProcessStartUtc.UtcTicks));
 
 	private static string? TryNormalizeRoot(string? path)
 	{

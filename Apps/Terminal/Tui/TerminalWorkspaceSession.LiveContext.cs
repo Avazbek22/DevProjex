@@ -19,7 +19,9 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		var sessions = _state is null
 			? Array.Empty<LiveSessionRecord>()
-			: _liveSessionRegistry.ReadActive(_state.Plan.SourceRoot);
+			: _liveSessionRegistry.ReadActive(_state.Plan.SourceRoot)
+				.Where(static session => session.Mode == AgentJournalMode.Live)
+				.ToArray();
 		if (!force && HaveSameLiveSessions(_liveSessions, sessions))
 			return;
 

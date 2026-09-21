@@ -253,7 +253,7 @@ public partial class MainWindow
 
     private static string TryResolveActivityArgument(IReadOnlyDictionary<string, string> arguments)
     {
-        foreach (var key in new[] { "query", "symbol", "path", "focus" })
+        foreach (var key in new[] { "pattern", "query", "symbol", "path", "focus" })
         {
             if (!arguments.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
                 continue;
