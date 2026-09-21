@@ -8,7 +8,8 @@ internal sealed class AgentJournalSessionViewModel(
     string project,
     string mode,
     string duration,
-    string masked) : ViewModelBase
+    string masked,
+    string maskedCompact) : ViewModelBase
 {
     public AgentJournalSession Session { get; } = session;
     public string Time => Session.StartedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
@@ -20,6 +21,7 @@ internal sealed class AgentJournalSessionViewModel(
     public string Tokens => AgentJournalPresentation.FormatNumber(Session.Totals.EstimatedTokens);
     public string Files => AgentJournalPresentation.FormatNumber(Session.Totals.FilesDelivered);
     public string Masked { get; } = masked;
+    public string MaskedCompact { get; } = maskedCompact;
     public string Duration { get; } = duration;
     public bool IsLive => Session.IsLive && Session.Mode == AgentJournalMode.Live;
 }
@@ -27,6 +29,7 @@ internal sealed class AgentJournalSessionViewModel(
 internal sealed class AgentJournalCallViewModel(
     AgentJournalCall call,
     string masked,
+    string maskedCompact,
     string notices) : ViewModelBase
 {
     public AgentJournalCall Call { get; } = call;
@@ -40,6 +43,7 @@ internal sealed class AgentJournalCallViewModel(
     public string Tokens => AgentJournalPresentation.FormatNumber(Call.EstimatedTokens);
     public string Files => Call.FilesDelivered.ToString(CultureInfo.CurrentCulture);
     public string Masked { get; } = masked;
+    public string MaskedCompact { get; } = maskedCompact;
     public string Notices { get; } = notices;
     public string Error => Call.ErrorCode ?? string.Empty;
 }
@@ -105,6 +109,7 @@ internal sealed class AgentJournalWindowViewModel : ViewModelBase
     }
 
     public bool IsEmpty => !IsLoading && Sessions.Count == 0;
+    public bool HasSessions => Sessions.Count > 0;
 
     public string FooterText
     {
@@ -151,6 +156,7 @@ internal sealed class AgentJournalWindowViewModel : ViewModelBase
         SelectedSession = Sessions.FirstOrDefault(item =>
             string.Equals(item.Session.Id, selectedId, StringComparison.Ordinal)) ?? Sessions.FirstOrDefault();
         RaisePropertyChanged(nameof(IsEmpty));
+        RaisePropertyChanged(nameof(HasSessions));
     }
 
     public void ReplaceCalls(IReadOnlyList<AgentJournalCallViewModel> calls)
@@ -202,6 +208,26 @@ internal static class AgentJournalPresentation
         _ => value.ToString("N0", CultureInfo.CurrentCulture)
     };
 
+    public static string FormatNumber(long value, AppLanguage language)
+    {
+        CultureInfo culture;
+        try
+        {
+            culture = CultureInfo.GetCultureInfo(AppLanguageUtility.ToCode(language));
+        }
+        catch (CultureNotFoundException)
+        {
+            culture = CultureInfo.CurrentCulture;
+        }
+
+        return value switch
+        {
+            >= 1_000_000 => (value / 1_000_000d).ToString("0.#M", culture),
+            >= 1_000 => (value / 1_000d).ToString("0.#K", culture),
+            _ => value.ToString("N0", culture)
+        };
+    }
+
     public static string FormatDuration(long durationMs) => durationMs switch
     {
         < 1_000 => $"{durationMs.ToString(CultureInfo.CurrentCulture)} ms",
@@ -234,4 +260,40 @@ internal static class AgentJournalPresentation
 
     private static string CollapseLine(string value) =>
         string.Join(' ', value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
+}
+
+internal static class AgentActivityPresentation
+{
+    public static string FormatCount(
+        LocalizationService localization,
+        string key,
+        long count)
+    {
+        var plural = ResolvePlural(localization.CurrentLanguage, count);
+        return localization.Format(
+            $"{key}.{plural}",
+            AgentJournalPresentation.FormatNumber(count, localization.CurrentLanguage));
+    }
+
+    private static string ResolvePlural(AppLanguage language, long count)
+    {
+        var absolute = count == long.MinValue ? long.MaxValue : Math.Abs(count);
+        var modulo10 = absolute % 10;
+        var modulo100 = absolute % 100;
+        return language switch
+        {
+            AppLanguage.Ru or AppLanguage.Uk => modulo10 == 1 && modulo100 != 11
+                ? "One"
+                : modulo10 is >= 2 and <= 4 && modulo100 is not (>= 12 and <= 14)
+                    ? "Few"
+                    : "Many",
+            AppLanguage.Pl => absolute == 1
+                ? "One"
+                : modulo10 is >= 2 and <= 4 && modulo100 is not (>= 12 and <= 14)
+                    ? "Few"
+                    : "Many",
+            AppLanguage.Fr => absolute is 0 or 1 ? "One" : "Other",
+            _ => absolute == 1 ? "One" : "Other"
+        };
+    }
 }

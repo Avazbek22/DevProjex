@@ -219,7 +219,7 @@ request-scoped choice rather than a standalone command.
 | Analyze | direct action | `analyze` | `analyze` | `analyze` |
 | Export context | direct action | `export` | `export context` | `pack_context` |
 | Connect MCP client | MCP menu | `mcp connect` | `mcp connect` | none by design |
-| Inspect MCP journal | none by design | none by design | `mcp log` | none by design |
+| Agent journal and context receipt | direct action | `mcp log`<br>`mcp log export` | `mcp log` | none by design |
 | Diagnostics | none by design | `diagnostics` | `doctor` | none by design |
 
 ## Version

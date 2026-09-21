@@ -3,7 +3,8 @@ namespace DevProjex.Avalonia.Services;
 internal sealed record DialogSurfaceBrushes(
     IBrush? Background,
     IBrush? Panel,
-    IBrush? Border);
+    IBrush? Border,
+    IBrush? Header = null);
 
 internal static class DialogSurfaceFactory
 {
@@ -22,18 +23,50 @@ internal static class DialogSurfaceFactory
     public static DialogSurfaceBrushes ResolveBrushes(Window? owner, ThemeVariant themeVariant)
     {
         var app = global::Avalonia.Application.Current;
-        var appBackground = TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush");
-        var appPanel = TryGetThemeBrush(app, themeVariant, "AppPanelBrush");
-        var appBorder = TryGetThemeBrush(app, themeVariant, "AppBorderBrush");
+        var ownerBackgroundColor = TryGetThemeColorBrush(owner, themeVariant, "AppBackgroundColor");
+        var appBackgroundColor = TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor");
+        var background = ResolveBackgroundBrush(
+            TryGetThemeBrush(owner, themeVariant, "AppBackgroundBrush"),
+            ownerBackgroundColor,
+            appBackgroundColor,
+            TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush"),
+            owner?.Background,
+            themeVariant);
 
         return new DialogSurfaceBrushes(
-            TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor") ??
-            appBackground ??
-            owner?.Background ??
-            CreateDefaultFallbackBrush(themeVariant),
-            TryGetThemeColorBrush(app, themeVariant, "AppPanelColor") ?? appPanel,
-            TryGetThemeColorBrush(app, themeVariant, "AppBorderColor") ?? appBorder);
+            background,
+            ResolveSecondaryBrush(owner, app, themeVariant, "AppPanelBrush", "AppPanelColor"),
+            ResolveSecondaryBrush(owner, app, themeVariant, "AppBorderBrush", "AppBorderColor"),
+            ResolveSecondaryBrush(owner, app, themeVariant, "MenuPressedBrush", "MenuPressedColor"));
     }
+
+    private static IBrush? ResolveSecondaryBrush(
+        Window? owner,
+        global::Avalonia.Application? app,
+        ThemeVariant themeVariant,
+        string brushKey,
+        string colorKey) =>
+        TryGetThemeBrush(owner, themeVariant, brushKey) ??
+        TryGetThemeColorBrush(owner, themeVariant, colorKey) ??
+        TryGetThemeColorBrush(app, themeVariant, colorKey) ??
+        TryGetThemeBrush(app, themeVariant, brushKey);
+
+    private static IBrush ResolveBackgroundBrush(
+        IBrush? ownerBrush,
+        IBrush? ownerColor,
+        IBrush? appColor,
+        IBrush? appBrush,
+        IBrush? ownerBackground,
+        ThemeVariant themeVariant)
+    {
+        var candidate = IsVisibleSolidBrush(ownerBrush)
+            ? ownerBrush
+            : (IsVisibleSolidBrush(appBrush) ? appBrush : null) ?? ownerColor ?? appColor ?? ownerBackground;
+        return EnsureOpaque(candidate ?? CreateDefaultFallbackBrush(themeVariant), themeVariant);
+    }
+
+    private static bool IsVisibleSolidBrush(IBrush? brush) =>
+        brush is ISolidColorBrush { Color.A: > 0 };
 
     public static Window CreateWindow(
         string title,
@@ -51,12 +84,10 @@ internal static class DialogSurfaceFactory
             Width = width,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
-            RequestedThemeVariant = themeVariant,
-            WindowDecorations = WindowDecorations.Full,
-            TransparencyLevelHint = DialogTransparencyHints,
-            Background = brushes.Background ?? Brushes.Transparent,
             Content = content
         };
+
+        ApplyWindowSurface(dialog, themeVariant, brushes);
 
         if (height is not null)
             dialog.Height = height.Value;
@@ -68,8 +99,25 @@ internal static class DialogSurfaceFactory
         if (minHeight is not null)
             dialog.MinHeight = minHeight.Value;
 
-        ApplyResources(dialog, brushes);
         return dialog;
+    }
+
+    public static void ApplyWindowSurface(
+        Window window,
+        ThemeVariant themeVariant,
+        DialogSurfaceBrushes brushes)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(themeVariant);
+        ArgumentNullException.ThrowIfNull(brushes);
+
+        window.RequestedThemeVariant = themeVariant;
+        window.WindowDecorations = WindowDecorations.Full;
+        window.TransparencyLevelHint = DialogTransparencyHints;
+        window.Background = EnsureOpaque(
+            brushes.Background ?? CreateDefaultFallbackBrush(themeVariant),
+            themeVariant);
+        ApplyResources(window, brushes);
     }
 
     private static void ApplyResources(Window dialog, DialogSurfaceBrushes brushes)
@@ -80,6 +128,8 @@ internal static class DialogSurfaceFactory
             dialog.Resources["AppPanelBrush"] = brushes.Panel;
         if (brushes.Border is not null)
             dialog.Resources["AppBorderBrush"] = brushes.Border;
+        if ((brushes.Header ?? brushes.Panel) is { } header)
+            dialog.Resources["MenuPressedBrush"] = header;
     }
 
     private static IBrush? TryGetThemeBrush(global::Avalonia.Application? app, ThemeVariant themeVariant, string key)
@@ -89,11 +139,35 @@ internal static class DialogSurfaceFactory
             : null;
     }
 
+    private static IBrush? TryGetThemeBrush(Window? owner, ThemeVariant themeVariant, string key)
+    {
+        return owner?.TryFindResource(key, themeVariant, out var resource) == true
+            ? resource as IBrush
+            : null;
+    }
+
     private static IBrush? TryGetThemeColorBrush(global::Avalonia.Application? app, ThemeVariant themeVariant, string key)
     {
         if (app?.TryFindResource(key, themeVariant, out var resource) == true && resource is Color color)
             return new SolidColorBrush(color);
         return null;
+    }
+
+    private static IBrush? TryGetThemeColorBrush(Window? owner, ThemeVariant themeVariant, string key)
+    {
+        if (owner?.TryFindResource(key, themeVariant, out var resource) == true && resource is Color color)
+            return new SolidColorBrush(color);
+        return null;
+    }
+
+    private static IBrush EnsureOpaque(IBrush brush, ThemeVariant themeVariant)
+    {
+        if (brush is SolidColorBrush { Color.A: byte.MaxValue })
+            return brush;
+        if (brush is not ISolidColorBrush solid)
+            return CreateDefaultFallbackBrush(themeVariant);
+        var color = solid.Color;
+        return new SolidColorBrush(Color.FromArgb(byte.MaxValue, color.R, color.G, color.B));
     }
 
     private static IBrush CreateDefaultFallbackBrush(ThemeVariant themeVariant)
