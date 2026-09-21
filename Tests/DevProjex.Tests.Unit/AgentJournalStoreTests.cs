@@ -72,6 +72,29 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 	}
 
 	[Fact]
+	public async Task WriterPreservesACompleteRecordThatOnlyLostItsTrailingNewline()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			temporary.Path,
+			46,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 7, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		var path = Path.Combine(store.DirectoryPath, session.Id + ".jsonl");
+		await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read))
+			stream.SetLength(stream.Length - 1);
+
+		await store.RecordCall(session.Id, CreateCall(2), cancellationToken);
+
+		var calls = await store.ReadCallsAsync(session.Id, cancellationToken);
+		Assert.Equal([1L, 2L], calls.Select(static call => call.Sequence));
+		Assert.DoesNotContain("history-recovered", calls[1].Notices);
+	}
+
+	[Fact]
 	public async Task RecoveredTotalsIncludeARecordedCallThatReportsEarlierLostEvents()
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;

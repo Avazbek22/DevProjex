@@ -503,6 +503,26 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			}
 			cursor = start;
 		}
+		var trailingLength = stream.Length - completeLength;
+		if (trailingLength <= MaximumLineCharacters)
+		{
+			var trailing = new byte[checked((int)trailingLength)];
+			stream.Position = completeLength;
+			await stream.ReadExactlyAsync(trailing, cancellationToken).ConfigureAwait(false);
+			using var line = new MemoryStream(
+				trailing,
+				index: 0,
+				count: trailing.Length,
+				writable: false,
+				publiclyVisible: true);
+			if (TryDeserializeLine(line, out _))
+			{
+				stream.Position = stream.Length;
+				await stream.WriteAsync(new byte[] { (byte)'\n' }, cancellationToken).ConfigureAwait(false);
+				await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+				return false;
+			}
+		}
 
 		stream.SetLength(completeLength);
 		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
