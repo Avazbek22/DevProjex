@@ -89,6 +89,31 @@ public sealed class McpAgentJournalTests
 		await journal.DisposeAsync();
 	}
 
+	[Fact]
+	public async Task FailedSessionStartDoesNotAppendCallsOrAnEndRecord()
+	{
+		using var temporary = new TemporaryDirectory();
+		var root = temporary.CreateFolder("project");
+		var writer = new StartFailureWriter();
+		var journal = new McpAgentJournal(
+			writer,
+			new McpRootRegistry([root]),
+			AgentJournalMode.Standard,
+			AgentJournalToolSet.Full,
+			"5.2.0",
+			hidePrivateData: false,
+			pid: 44,
+			processStartUtc: new DateTimeOffset(2026, 9, 20, 1, 0, 0, TimeSpan.Zero));
+
+		await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
+		using (journal.BeginCall("list_projects", new CallToolRequestParams { Name = "list_projects" }))
+			journal.Complete(McpToolResults.TextSuccess("unchanged"));
+		await journal.DisposeAsync();
+
+		Assert.Equal(0, writer.CallAttempts);
+		Assert.Equal(0, writer.EndAttempts);
+	}
+
 	private sealed class RecordingWriter : IAgentJournalWriter
 	{
 		public List<AgentJournalSession> Sessions { get; } = [];
@@ -132,5 +157,30 @@ public sealed class McpAgentJournalTests
 			AgentJournalTotals totals,
 			CancellationToken cancellationToken = default) =>
 			ValueTask.FromException(new IOException("unavailable"));
+	}
+
+	private sealed class StartFailureWriter : IAgentJournalWriter
+	{
+		public int CallAttempts { get; private set; }
+		public int EndAttempts { get; private set; }
+
+		public ValueTask StartSession(AgentJournalSession session, CancellationToken cancellationToken = default) =>
+			ValueTask.FromException(new IOException("unavailable"));
+
+		public ValueTask RecordCall(string sessionId, AgentJournalCall call, CancellationToken cancellationToken = default)
+		{
+			CallAttempts++;
+			return ValueTask.CompletedTask;
+		}
+
+		public ValueTask EndSession(
+			string sessionId,
+			DateTimeOffset endedUtc,
+			AgentJournalTotals totals,
+			CancellationToken cancellationToken = default)
+		{
+			EndAttempts++;
+			return ValueTask.CompletedTask;
+		}
 	}
 }
