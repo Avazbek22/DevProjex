@@ -341,6 +341,32 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 		}
 	}
 
+    [AvaloniaFact]
+    public async Task ClosingWindowDuringConnectionCancelsWithoutOpeningADialog()
+    {
+        var service = new BlockingMcpConnectionService();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            workspace.Project,
+            configureServices: services => services with
+            {
+                McpConnectionService = service,
+                TerminalCommandSetupService = new StubTerminalCommandSetupService(
+                    CreateTerminalSnapshot(workspace.Project.RootPath, TerminalCommandSetupState.Installed))
+            });
+
+        var cursor = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+            window,
+            "McpConnectCursorMenuItem");
+        await UiTestDriver.RaiseMenuItemClickAsync(cursor);
+        await service.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await UiTestDriver.CloseWindowAsync(window);
+
+        Assert.True(service.Canceled.Task.IsCompletedSuccessfully);
+        Assert.Empty(window.OwnedWindows);
+        await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
 	private static TerminalCommandSetupSnapshot CreateTerminalSnapshot(
 		string root,
 		TerminalCommandSetupState state)
@@ -377,6 +403,33 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 		public string CreatePrintableConfiguration(McpConnectionRequest request) =>
 			"{\"mcpServers\":{\"devprojex\":{}}}";
 	}
+
+    private sealed class BlockingMcpConnectionService : IMcpConnectionService
+    {
+        public TaskCompletionSource<bool> Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> Canceled { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<McpConnectionResult> ConnectAsync(
+            McpConnectionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Entered.TrySetResult(true);
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Canceled.TrySetResult(true);
+                throw;
+            }
+            throw new UnreachableException();
+        }
+
+        public string CreatePrintableConfiguration(McpConnectionRequest request) => "{}";
+    }
 
 	private sealed class ReplacementMcpConnectionService(string existingProjectRoot)
 		: IMcpConnectionService, IMcpConnectionReplacementService

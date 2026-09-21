@@ -40,6 +40,10 @@ public partial class MainWindow
     private async void OnMcpConnectionRequested(object? sender, McpConnectionRequestedEventArgs e)
     {
         McpConnectionRequest? request = null;
+        var windowLifetime = _windowLifetimeCts;
+        if (windowLifetime is null)
+            return;
+        var cancellationToken = windowLifetime.Token;
         try
         {
             if (string.IsNullOrWhiteSpace(_currentPath) || !_viewModel.IsProjectLoaded)
@@ -54,9 +58,10 @@ public partial class MainWindow
                 e.Mode,
                 executablePath,
                 Path.GetFullPath(_currentPath));
-            var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
             var result = await ConnectMcpClientAsync(request, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            if (!CanPresentMcpDialog(windowLifetime))
+                return;
 
             if (result.Succeeded)
             {
@@ -64,20 +69,29 @@ public partial class MainWindow
                     new McpClientLaunchRequest(request.Client, request.ProjectRoot),
                     cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
+                if (!CanPresentMcpDialog(windowLifetime))
+                    return;
                 if (!launchResult.Succeeded)
+                {
                     await ShowMcpLaunchFailureAsync(request, launchResult);
-                await ShowMcpConnectionPathPromptAsync(snapshot);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!CanPresentMcpDialog(windowLifetime))
+                        return;
+                }
+                await ShowMcpConnectionPathPromptAsync(snapshot, windowLifetime);
                 return;
             }
 
             await ShowMcpManualConfigurationAsync(result, request);
         }
-        catch (OperationCanceledException) when (_windowLifetimeCts?.IsCancellationRequested == true)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Window shutdown owns cancellation of an in-flight connection.
         }
         catch (Exception exception)
         {
+            if (!CanPresentMcpDialog(windowLifetime))
+                return;
             if (request is null)
             {
                 await ShowErrorAsync(ResolveDesktopExceptionMessage(exception));
@@ -92,6 +106,11 @@ public partial class MainWindow
         }
     }
 
+    private bool CanPresentMcpDialog(CancellationTokenSource windowLifetime) =>
+        ReferenceEquals(_windowLifetimeCts, windowLifetime) &&
+        !windowLifetime.IsCancellationRequested &&
+        IsVisible;
+
     private async Task<McpConnectionResult> ConnectMcpClientAsync(
         McpConnectionRequest request,
         CancellationToken cancellationToken)
@@ -103,6 +122,13 @@ public partial class MainWindow
         }
 
         var inspection = await replacementService.InspectAsync(request, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_windowLifetimeCts is not { } windowLifetime || !CanPresentMcpDialog(windowLifetime))
+        {
+            return new McpConnectionResult(
+                McpConnectionStatus.InvalidConfiguration,
+                string.Empty);
+        }
         if (!inspection.RequiresProjectReplacement ||
             string.IsNullOrWhiteSpace(inspection.ExistingProjectRoot))
         {
@@ -118,6 +144,13 @@ public partial class MainWindow
                 request.ProjectRoot),
             _localization["Mcp.Connect.ReplaceConfirm"],
             _localization["Dialog.Cancel"]);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CanPresentMcpDialog(windowLifetime))
+        {
+            return new McpConnectionResult(
+                McpConnectionStatus.InvalidConfiguration,
+                string.Empty);
+        }
         if (!confirmed)
         {
             return new McpConnectionResult(
@@ -192,26 +225,40 @@ public partial class MainWindow
         }
     }
 
-    private async Task ShowMcpConnectionPathPromptAsync(TerminalCommandSetupSnapshot snapshot)
+    private async Task ShowMcpConnectionPathPromptAsync(
+        TerminalCommandSetupSnapshot snapshot,
+        CancellationTokenSource windowLifetime)
     {
+        if (!CanPresentMcpDialog(windowLifetime))
+            return;
+        var cancellationToken = windowLifetime.Token;
         var platform = DetectTerminalCommandPlatform();
         if (!McpConnectionPathPromptPolicy.ShouldShow(snapshot.State, platform))
             return;
 
         var content = McpConnectionPathPromptPolicy.Create(_localization, snapshot, platform);
         var action = await McpConnectionPathDialog.ShowAsync(this, content);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CanPresentMcpDialog(windowLifetime))
+            return;
         if (action == McpConnectionPathAction.None)
             return;
 
         if (action == McpConnectionPathAction.ConfigurePath)
         {
             var pathResult = await Task.Run(_terminalCommandSetupService.ConfigurePath);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!CanPresentMcpDialog(windowLifetime))
+                return;
             if (!pathResult.Success)
                 await ShowErrorAsync(ResolveTerminalCommandSetupFailureMessage());
             return;
         }
 
         var installResult = await Task.Run(_terminalCommandSetupService.InstallOrRepair);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CanPresentMcpDialog(windowLifetime))
+            return;
         if (!installResult.Success)
         {
             await ShowErrorAsync(ResolveTerminalCommandSetupFailureMessage());
@@ -221,6 +268,9 @@ public partial class MainWindow
         if (RequiresTerminalCommandPathConfiguration(installResult.Snapshot))
         {
             var pathResult = await Task.Run(_terminalCommandSetupService.ConfigurePath);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!CanPresentMcpDialog(windowLifetime))
+                return;
             if (!pathResult.Success)
                 await ShowErrorAsync(ResolveTerminalCommandSetupFailureMessage());
         }
