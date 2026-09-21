@@ -2664,7 +2664,6 @@ public sealed partial class McpServerIntegrationTests
 			options: null,
 			TestContext.Current.CancellationToken);
 		var getFile = tools.Single(static tool => tool.Name == "get_file").ProtocolTool.Description!;
-		var search = tools.Single(static tool => tool.Name == "search_project").ProtocolTool.Description!;
 		var instructions = server.Client.ServerInstructions!;
 
 		// The route states when one request should replace several independent reads.
@@ -2676,13 +2675,11 @@ public sealed partial class McpServerIntegrationTests
 			"requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]",
 			getFile,
 			StringComparison.Ordinal);
-		Assert.Contains("one batched get_file requests call", search, StringComparison.Ordinal);
-		Assert.Contains("one batched get_file call", instructions, StringComparison.Ordinal);
+		Assert.Contains("one batched call for several", instructions, StringComparison.Ordinal);
 		Assert.Contains("One local root is configured", instructions, StringComparison.Ordinal);
-		Assert.Contains("When one location is known", instructions, StringComparison.Ordinal);
-		Assert.Contains("only when a multi-file document is needed", instructions, StringComparison.Ordinal);
-		Assert.Single(
-			Regex.Matches(instructions, "batched get_file", RegexOptions.None, TimeSpan.FromSeconds(2)));
+		Assert.Contains("Use get_file for known locations", instructions, StringComparison.Ordinal);
+		Assert.Contains("pack_context for multi-file documents", instructions, StringComparison.Ordinal);
+		Assert.Single(Regex.Matches(instructions, "one batched", RegexOptions.None, TimeSpan.FromSeconds(2)));
 	}
 
 	[Fact]
@@ -2739,7 +2736,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains($"include_patterns=[\"{descriptionPattern}\"]", description, StringComparison.Ordinal);
 		Assert.Contains($"include_patterns=[\"{instructionPattern}\"]", instructions, StringComparison.Ordinal);
 		Assert.Contains("in one call", description, StringComparison.Ordinal);
-		Assert.Contains("instead of walking them separately", instructions, StringComparison.Ordinal);
+		Assert.Contains("do not walk separately", instructions, StringComparison.Ordinal);
 
 		var tree = AllText(await server.CallAsync(
 			"get_tree",
@@ -3804,7 +3801,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
 		Assert.Contains("\n[1 additional observed matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
 		Assert.Contains(
-			"[Next read] Narrow pattern, paths, or include_patterns and rerun the search.",
+			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
 			text,
 			StringComparison.Ordinal);
 		AssertTrustedTrailerOutsideSpotlight(
@@ -7151,8 +7148,15 @@ public sealed partial class McpServerIntegrationTests
 	public void ServerInstructionSentencesDoNotStartWithLowercaseLetters(int rootCount)
 	{
 		var instructions = McpServerHost.BuildInstructions(rootCount);
+		var prose = instructions.Replace(
+			"list_projects reports startup defaults, not live-profile settings.",
+			"List-projects reports startup defaults, not live-profile settings.",
+			StringComparison.Ordinal).Replace(
+			"read_pack pages:",
+			"Read-pack pages:",
+			StringComparison.Ordinal);
 
-		Assert.DoesNotMatch("(?:^|[.!?]\\s+)[a-z]", instructions);
+		Assert.DoesNotMatch("(?:^|[.!?]\\s+)[a-z]", prose);
 	}
 
 	[Fact]

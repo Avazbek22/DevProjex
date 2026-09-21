@@ -150,7 +150,7 @@ public sealed partial class McpServerProcessTests
 			text,
 			@"^(?:\d+:needle-\d{3}-😀-a{290}|\d+:needle-\d{3}-b{296})$",
 			RegexOptions.Multiline).Count;
-		var additionalMatch = Regex.Match(text, @"\[(\d+) additional observed matches not shown;");
+		var additionalMatch = Regex.Match(text, @"\[(\d+) additional observed matches not shown\.\]");
 
 		Assert.NotEqual(true, result.IsError);
 		Assert.InRange(shown, 1, 199);
@@ -213,9 +213,16 @@ public sealed partial class McpServerProcessTests
 		var wideText = AllProcessText(wide).Replace("\r\n", "\n", StringComparison.Ordinal);
 		Assert.NotEqual(true, wide.IsError);
 		Assert.True(wideText.Length <= 18_000, $"Wide search returned {wideText.Length} characters.");
+		Assert.StartsWith(
+			"[Search boundary] partial; retained matches are available below.",
+			wideText,
+			StringComparison.Ordinal);
 		Assert.Contains("[Search truncated]", wideText, StringComparison.Ordinal);
-		Assert.Contains("Narrow the pattern", wideText, StringComparison.Ordinal);
-		Assert.Contains("lower context_lines", wideText, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
+			wideText,
+			StringComparison.Ordinal);
+		Assert.Single(Regex.Matches(wideText, @"\[Next read\]"));
 		// 40 files carry 20 matching lines each, and the counters stay exact under the cap.
 		Assert.Contains("[Search observed] matches=800 · matching-files=40 within inspected sources", wideText, StringComparison.Ordinal);
 		// Matches are grouped under their path, so a shown match is a numbered line; the paths
@@ -226,7 +233,7 @@ public sealed partial class McpServerProcessTests
 		var headings = Regex.Matches(wideText, @"^src/Module\d{2}\.ts$", RegexOptions.Multiline).Count;
 		Assert.InRange(headings, 1, 40);
 		Assert.Equal(shown, Regex.Matches(wideText, @"^\d+:", RegexOptions.Multiline).Count);
-		var additional = Regex.Match(wideText, @"\[(\d+) additional observed matches not shown;");
+		var additional = Regex.Match(wideText, @"\[(\d+) additional observed matches not shown\.\]");
 		Assert.True(additional.Success, wideText);
 		Assert.Equal(800, shown + int.Parse(additional.Groups[1].Value));
 
