@@ -222,6 +222,32 @@ public sealed class McpClientLaunchServiceTests
 			Assert.Single(setup.ProcessRunner.Requests).ExecutablePath);
 	}
 
+	[Fact]
+	public async Task Open_LinuxTriesTheNextAvailableTerminalAfterAnEarlyFailure()
+	{
+		using var project = new TemporaryDirectory();
+		var setup = CreateService(
+			TerminalCommandHostPlatform.Linux,
+			availableCommands: ["codex", "x-terminal-emulator", "gnome-terminal"],
+			processResults:
+			[
+				new McpClientLaunchAttemptResult(false, "first terminal unavailable"),
+				new McpClientLaunchAttemptResult(true)
+			]);
+
+		var result = await setup.Service.OpenAsync(
+			new McpClientLaunchRequest(McpConnectionClient.Codex, project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.Succeeded);
+		Assert.Equal(
+			[
+				setup.Executables["x-terminal-emulator"],
+				setup.Executables["gnome-terminal"]
+			],
+			setup.ProcessRunner.Requests.Select(static request => request.ExecutablePath));
+	}
+
 	[Theory]
 	[InlineData((int)McpConnectionClient.Cursor, "cursor", "cursor")]
 	[InlineData((int)McpConnectionClient.VsCode, "vscode", "code")]
