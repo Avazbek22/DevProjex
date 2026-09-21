@@ -65,6 +65,21 @@ public partial class MainWindow : Window
     private void UpdateToastHostLayout()
         => _workspacePresentation.UpdateToastHostLayout();
 
+    private static void OnToastPointerEntered(object? sender, PointerEventArgs e)
+        => ResolveToast(sender)?.PauseDismissal();
+
+    private static void OnToastPointerExited(object? sender, PointerEventArgs e)
+        => ResolveToast(sender)?.ResumeDismissal();
+
+    private static void OnToastPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        ResolveToast(sender)?.Dismiss();
+        e.Handled = true;
+    }
+
+    private static ToastMessageViewModel? ResolveToast(object? sender)
+        => (sender as Control)?.DataContext as ToastMessageViewModel;
+
     private void CaptureSplitPaneLayout()
         => _workspacePresentation.CaptureSplitPaneLayout();
 
