@@ -34,7 +34,15 @@ clearing saved local project data.
 If an active journal file disappears, the writer recreates its session header
 and marks the next event as recovered. Temporary write failures are retried. If
 a call still cannot be written, session totals exclude it and the receipt and
-readers show `History is incomplete: N events could not be recorded.`
+readers show `History is incomplete: N events could not be recorded.` Journal
+calls enter a non-blocking queue capped at 1,000 events. When a stalled store
+fills it, the oldest pending calls are dropped and the next successful event
+reports them through the same incomplete-history notice.
+
+Readers following a live session retain their byte position and read only newly
+appended complete JSONL records. If the journal file is truncated or recreated,
+the reader safely restarts at the new header and recognizes the recovery event.
+Export and clear failures are shown in the journal window and do not close it.
 
 Terminal Workspace uses `mcp log`, `mcp log last`, and `mcp log export <path>
 [markdown|json] [last|session <id>]`. The direct CLI exposes the same records:
