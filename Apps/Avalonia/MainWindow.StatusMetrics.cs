@@ -105,13 +105,14 @@ public partial class MainWindow
 
     private IReadOnlyCollection<string>? CaptureProfileSelectionFrontier()
     {
-		if (_interactiveFilterSelectionSnapshot is { } filterSnapshot &&
-		    _filterBaseTree is { } fullTree &&
-		    !string.IsNullOrWhiteSpace(_currentPath) &&
-		    filterSnapshot.IsForProject(_currentPath))
-		{
-			return filterSnapshot.CaptureProfileSelection(fullTree.Root);
-		}
+        if (_interactiveFilterSelectionSnapshot is { } filterSnapshot &&
+            _selectionPersistenceTree is { } fullTree &&
+            !string.IsNullOrWhiteSpace(_currentPath) &&
+            filterSnapshot.IsForProject(_currentPath) &&
+            PathComparer.Default.Equals(fullTree.Root.FullPath, _currentPath))
+        {
+            return filterSnapshot.CaptureProfileSelection(fullTree.Root);
+        }
 
         return _viewModel.TreeNodes.FirstOrDefault() is { } root
             ? ProjectTreeUiState.CaptureProfileSelection(root)

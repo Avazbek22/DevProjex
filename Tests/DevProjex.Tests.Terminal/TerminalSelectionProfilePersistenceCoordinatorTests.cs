@@ -2,6 +2,38 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 {
+	private static readonly string[] FailureChoiceKeys =
+	[
+		"Terminal.Tui.ProfileSaveFailure.Title",
+		"Terminal.Tui.ProfileSaveFailure.Message",
+		"Terminal.Tui.ProfileSaveFailure.Stay",
+		"Terminal.Tui.ProfileSaveFailure.ExitWithoutSaving",
+		"Terminal.Tui.ProfileSaveFailure.ContinueWithoutSaving"
+	];
+
+	[Fact]
+	public void PersistenceFailureChoicesExistInEveryLocalization()
+	{
+		var localizationDirectory = Path.Combine(
+			PublishedApplicationLocator.FindRepositoryRoot(),
+			"Assets",
+			"Localization");
+		var files = Directory.GetFiles(localizationDirectory, "*.json");
+
+		Assert.Equal(20, files.Length);
+		foreach (var file in files)
+		{
+			using var document = JsonDocument.Parse(File.ReadAllText(file));
+			foreach (var key in FailureChoiceKeys)
+			{
+				Assert.True(document.RootElement.TryGetProperty(key, out var value),
+					$"Missing {key} in {Path.GetFileName(file)}");
+				Assert.False(string.IsNullOrWhiteSpace(value.GetString()),
+					$"Empty {key} in {Path.GetFileName(file)}");
+			}
+		}
+	}
+
 	[Fact]
 	public async Task Schedule_CoalescesSelectionChangesAndPreservesNullEmptyDistinction()
 	{
@@ -46,7 +78,7 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 
 		coordinator.Schedule("project", CreateProfile(["src"]));
 		await delay.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
-		await coordinator.FlushAsync(TestContext.Current.CancellationToken);
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
 
 		Assert.True(delay.Canceled.Task.IsCompleted);
 		Assert.Equal(["src"], written!.SelectedPaths);
@@ -78,7 +110,7 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 		await delay.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
 		delay.Release();
 		await firstAttempt.Task.WaitAsync(TestContext.Current.CancellationToken);
-		await coordinator.FlushAsync(TestContext.Current.CancellationToken);
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
 
 		Assert.Equal(2, attempts);
 		Assert.Equal(["src"], written!.SelectedPaths);
@@ -108,8 +140,34 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 
 		Assert.False(flush.IsCompleted);
 		releaseWrite.TrySetResult();
-		await flush;
+		Assert.True(await flush);
 		Assert.Equal(1, attempts);
+	}
+
+	[Fact]
+	public async Task FlushReportsFailureAfterRetriesAndRetainsPendingSelection()
+	{
+		var delay = new ControlledDelay();
+		var attempts = 0;
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			(_, _, _) =>
+			{
+				attempts++;
+				throw new IOException("locked");
+			},
+			delay.WaitAsync,
+			retryDelayAsync: static (_, _) => Task.CompletedTask,
+			maxBackgroundAttempts: 2);
+
+		coordinator.Schedule("project", CreateProfile(["src"]));
+		await delay.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		Assert.False(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(2, attempts);
+
+		coordinator.DiscardPending();
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(2, attempts);
 	}
 
 	private static ProjectSelectionProfile CreateProfile(IReadOnlyCollection<string>? selectedPaths) =>

@@ -47,6 +47,28 @@ public sealed class StoreUserDataMigrationTests
 	}
 
 	[Fact]
+	public void StoreLockCreatedByTerminalDoesNotBlockLaterPackageMigration()
+	{
+		using var workspace = new TemporaryDirectory();
+		var configuration = workspace.CreateFolder("roaming");
+		var local = workspace.CreateFolder("local");
+		var source = CreateSource(local);
+		File.WriteAllText(Path.Combine(source, "project-profiles.json"), "legacy");
+		var destination = Directory.CreateDirectory(Path.Combine(configuration, "DevProjex")).FullName;
+		File.WriteAllText(Path.Combine(destination, "terminal-settings.json.lock"), string.Empty);
+
+		var first = StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+		var second = StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+
+		Assert.Equal(StoreUserDataMigrationStatus.Migrated, first);
+		Assert.Equal(StoreUserDataMigrationStatus.AlreadyInitialized, second);
+		Assert.Equal(
+			"legacy",
+			File.ReadAllText(Path.Combine(destination, "project-profiles.json")));
+		Assert.True(File.Exists(Path.Combine(configuration, ".devprojex-store-migration.completed")));
+	}
+
+	[Fact]
 	public void ConcurrentMigrationLockLeavesBothTreesUntouched()
 	{
 		using var workspace = new TemporaryDirectory();

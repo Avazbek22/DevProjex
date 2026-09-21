@@ -322,6 +322,44 @@ public sealed class MainWindowApplySettingsSelectionUiTests
     }
 
     [AvaloniaFact]
+    public async Task StructuralApplyWhileFilteredPersistsHiddenCheckedPaths()
+    {
+        using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+        var visiblePath = Path.Combine(project.RootPath, "A.cs");
+        var hiddenPath = Path.Combine(project.RootPath, "T.cs");
+        await File.WriteAllTextAsync(visiblePath, "class A {}", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(hiddenPath, "class T {}", TestContext.Current.CancellationToken);
+        var appDataPath = Path.Combine(project.AppDataPath, "filtered-structural-apply-profile");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            appDataPathOverride: appDataPath);
+        try
+        {
+            SelectOnlyPaths(window, visiblePath, hiddenPath);
+            await UiTestDriver.OpenFilterAsync(window);
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(filterBar.FilterBoxControl),
+                "A.cs");
+            await UiTestDriver.WaitForFilterAppliedAsync(window, "A.cs");
+            Assert.Null(FindNodeByPath(window, hiddenPath));
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFolders);
+            await UiTestDriver.ClickApplySettingsAsync(window);
+
+            var store = new DevProjex.Infrastructure.ProjectProfiles.ProjectProfileStore(() => appDataPath);
+            var persisted = store.LookupProfile(project.RootPath, TimeSpan.FromSeconds(1));
+            Assert.Equal(ProjectProfileLookupStatus.Found, persisted.Status);
+            Assert.Equal(["A.cs", "T.cs"], persisted.Profile!.SelectedPaths);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task StructuralApply_RealTreeCheckboxSelectionSurvivesGraphReplacement()
     {
         using var project = UiTestProject.CreateWithDynamicIgnoreEntries();

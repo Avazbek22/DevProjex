@@ -75,7 +75,9 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 		}
 	}
 
-	public async Task FlushAsync(CancellationToken cancellationToken = default)
+	public async Task<bool> FlushAsync(
+		CancellationToken cancellationToken = default,
+		bool reportFailure = true)
 	{
 		while (true)
 		{
@@ -94,15 +96,27 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 			lock (_sync)
 				pending = _pending;
 			if (pending is null)
-				return;
+				return true;
 
 			var persisted = await PersistVersionAsync(
 				pending.Version,
 				cancellationToken,
 				_maxBackgroundAttempts,
-				reportFailure: true).ConfigureAwait(false);
+				reportFailure).ConfigureAwait(false);
 			if (!persisted)
-				return;
+				return false;
+		}
+	}
+
+	public void DiscardPending()
+	{
+		lock (_sync)
+		{
+			_delayCts?.Cancel();
+			_delayCts?.Dispose();
+			_delayCts = null;
+			_pending = null;
+			_version = checked(_version + 1);
 		}
 	}
 
