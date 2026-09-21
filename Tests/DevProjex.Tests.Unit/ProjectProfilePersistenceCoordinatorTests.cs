@@ -885,6 +885,68 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 		}
 	}
 
+	[Fact]
+	public async Task ConcurrentExternalOptionValueDoesNotBecomeTheLocalInteractionBaseline()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectPath = workspace.CreateFolder("project");
+		var appDataPath = workspace.CreateFolder("app-data");
+		var storeA = new ProjectProfileStore(() => appDataPath);
+		var storeB = new ProjectProfileStore(() => appDataPath);
+		var initial = new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: [".cs"],
+			SelectedIgnoreOptions: [],
+			IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.HidePrivateData] = false,
+				[IgnoreOptionId.EmptyFolders] = false
+			});
+		Assert.True(storeA.TrySaveProfile(projectPath, initial));
+		var (viewModelA, selectionA) = CreateSelectionCoordinator(projectPath);
+		var (viewModelB, selectionB) = CreateSelectionCoordinator(projectPath);
+		AddIgnoreOptions(viewModelA);
+		AddIgnoreOptions(viewModelB);
+		selectionA.AcceptCurrentSelectionsAsApplied(projectPath);
+		selectionB.AcceptCurrentSelectionsAsApplied(projectPath);
+		using (selectionA)
+		using (selectionB)
+		using (var sessionA = new SecretRedactionSession(new EmptySecretDetector(), storeA))
+		using (var sessionB = new SecretRedactionSession(new EmptySecretDetector(), storeB))
+		{
+			var coordinatorA = new ProjectProfilePersistenceCoordinator(viewModelA, selectionA, storeA, sessionA);
+			var coordinatorB = new ProjectProfilePersistenceCoordinator(viewModelB, selectionB, storeB, sessionB);
+			await coordinatorA.LoadSnapshotAsync(projectPath, TestContext.Current.CancellationToken);
+			await coordinatorB.LoadSnapshotAsync(projectPath, TestContext.Current.CancellationToken);
+
+			viewModelA.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HidePrivateData).IsChecked = true;
+			selectionA.AcceptCurrentSelectionsAsApplied(projectPath);
+			await coordinatorA.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);
+
+			viewModelB.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.EmptyFolders).IsChecked = true;
+			selectionB.AcceptCurrentSelectionsAsApplied(projectPath);
+			await coordinatorB.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);
+			await coordinatorB.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);
+
+			Assert.True(storeA.TryLoadProfile(projectPath, out var loaded));
+			Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.HidePrivateData]);
+			Assert.True(loaded.IgnoreOptionStates[IgnoreOptionId.EmptyFolders]);
+		}
+	}
+
+	private static void AddIgnoreOptions(MainWindowViewModel viewModel)
+	{
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+			IgnoreOptionId.HidePrivateData,
+			"private data",
+			false));
+		viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+			IgnoreOptionId.EmptyFolders,
+			"empty folders",
+			false));
+	}
+
 	private static ProjectSelectionProfile CreateProfile(string extension) => new(
 		SelectedRootFolders: [],
 		SelectedExtensions: [extension],
