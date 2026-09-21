@@ -5,6 +5,36 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow
 {
+	private void OnTreeSelectionPersistenceStateChanged(object? sender, EventArgs args)
+	{
+		if (Dispatcher.UIThread.CheckAccess())
+		{
+			RefreshTreeSelectionPersistenceStatus();
+			return;
+		}
+
+		Dispatcher.UIThread.Post(RefreshTreeSelectionPersistenceStatus);
+	}
+
+	private void RefreshTreeSelectionPersistenceStatus()
+	{
+		var state = _treeSelectionProfiles.State;
+		var text = state.Phase switch
+		{
+			SelectionPersistencePhase.Pending or SelectionPersistencePhase.Saving =>
+				_localization["SelectionPersistence.Saving"],
+			SelectionPersistencePhase.Failed =>
+				_localization["SelectionPersistence.Failed"],
+			_ => string.Empty
+		};
+		var helpText = state.Phase == SelectionPersistencePhase.Failed
+			? _localization.Format(
+				"SelectionPersistence.Failed.Help",
+				state.FailureReason ?? _localization["SelectionPersistence.Failed"])
+			: text;
+		_viewModel.SetSelectionPersistenceStatus(text, helpText);
+	}
+
     private bool IsBackgroundMetricsActive()
         => _metrics.IsBackgroundActive;
 

@@ -43,6 +43,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	private readonly ConcurrentDictionary<string, AgentJournalSession> sessionHeaders = new(StringComparer.Ordinal);
 	private int disposed;
 
+	internal Action<long>? TailBytesReadObserver { get; set; }
+
 	public AgentJournalStore(
 		Func<string>? stateRootProvider = null,
 		TimeProvider? timeProvider = null,
@@ -191,22 +193,126 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
 		var path = ResolveSessionPath(sessionId);
 		long lastSequence = 0;
+		long offset = 0;
+		var observedFile = false;
+		var missingAfterObservation = false;
+		DateTime observedCreationUtc = default;
 		var ended = false;
 		while (!ended)
 		{
-			var content = await ReadContentAsync(path, cancellationToken).ConfigureAwait(false);
-			foreach (var call in content.Calls.Where(call => call.Sequence > lastSequence))
+			if (!File.Exists(path))
+			{
+				missingAfterObservation |= observedFile;
+				await Task.Delay(ChangePollInterval, clock, cancellationToken).ConfigureAwait(false);
+				continue;
+			}
+			TailReadResult tail;
+			try
+			{
+				var file = new FileInfo(path);
+				var reset = observedFile &&
+					(missingAfterObservation || file.Length < offset || file.CreationTimeUtc != observedCreationUtc);
+				if (reset)
+				{
+					offset = 0;
+					lastSequence = 0;
+				}
+				observedFile = true;
+				missingAfterObservation = false;
+				observedCreationUtc = file.CreationTimeUtc;
+				tail = await ReadTailAsync(path, offset, cancellationToken).ConfigureAwait(false);
+				offset = tail.Offset;
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+				missingAfterObservation = true;
+				await Task.Delay(ChangePollInterval, clock, cancellationToken).ConfigureAwait(false);
+				continue;
+			}
+			foreach (var call in tail.Calls.Where(call => call.Sequence > lastSequence))
 			{
 				lastSequence = call.Sequence;
 				yield return new AgentJournalChange(sessionId, AgentJournalChangeKind.CallAppended, call.Sequence);
 			}
-			if (content.End is not null)
+			if (tail.Ended)
 			{
 				ended = true;
 				yield return new AgentJournalChange(sessionId, AgentJournalChangeKind.SessionEnded);
 				continue;
 			}
 			await Task.Delay(ChangePollInterval, clock, cancellationToken).ConfigureAwait(false);
+		}
+	}
+
+	private async ValueTask<TailReadResult> ReadTailAsync(
+		string path,
+		long offset,
+		CancellationToken cancellationToken)
+	{
+		await using var stream = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete,
+			bufferSize: 4096,
+			FileOptions.Asynchronous | FileOptions.SequentialScan);
+		if (stream.Length <= offset)
+			return new TailReadResult(offset, [], Ended: false);
+		stream.Position = offset;
+		var calls = new List<AgentJournalCall>();
+		var buffer = new byte[8192];
+		using var pending = new MemoryStream();
+		var lineTooLong = false;
+		var completeOffset = offset;
+		var absoluteOffset = offset;
+		var ended = false;
+		while (await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false) is var read && read > 0)
+		{
+			TailBytesReadObserver?.Invoke(read);
+			for (var index = 0; index < read; index++)
+			{
+				var value = buffer[index];
+				absoluteOffset++;
+				if (value != (byte)'\n')
+				{
+					if (!lineTooLong)
+					{
+						pending.WriteByte(value);
+						lineTooLong = pending.Length > MaximumLineCharacters;
+					}
+					continue;
+				}
+				completeOffset = absoluteOffset;
+				if (!lineTooLong && pending.Length > 0 && TryDeserializeLine(pending, out var record))
+				{
+					if (record.Call is not null)
+						calls.Add(record.Call);
+					ended |= record.Type == "end" && record.End is not null;
+				}
+				pending.SetLength(0);
+				lineTooLong = false;
+			}
+		}
+		return new TailReadResult(completeOffset, calls, ended);
+	}
+
+	private static bool TryDeserializeLine(MemoryStream line, out AgentJournalLine record)
+	{
+		var length = checked((int)line.Length);
+		var span = line.GetBuffer().AsSpan(0, length);
+		if (!span.IsEmpty && span[^1] == (byte)'\r')
+			span = span[..^1];
+		try
+		{
+			record = JsonSerializer.Deserialize(
+				span,
+				AgentJournalJsonSerializerContext.Default.AgentJournalLine)!;
+			return record is not null;
+		}
+		catch (JsonException)
+		{
+			record = null!;
+			return false;
 		}
 	}
 
@@ -666,4 +772,9 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		public List<AgentJournalCall> Calls { get; } = [];
 		public AgentJournalEnd? End { get; set; }
 	}
+
+	private sealed record TailReadResult(
+		long Offset,
+		IReadOnlyList<AgentJournalCall> Calls,
+		bool Ended);
 }

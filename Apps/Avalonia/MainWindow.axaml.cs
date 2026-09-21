@@ -256,6 +256,7 @@ public partial class MainWindow : Window
     private void ApplyLocalization()
     {
         _viewModel.UpdateLocalization();
+		RefreshTreeSelectionPersistenceStatus();
         _settingsPanel?.RequestMinimumWidthRefresh();
         RefreshTreeFontMenu();
         RefreshLanguageMenuChecks();
