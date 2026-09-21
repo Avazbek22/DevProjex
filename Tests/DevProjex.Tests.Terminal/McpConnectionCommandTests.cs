@@ -1,9 +1,25 @@
 using DevProjex.Kernel.Abstractions;
+using DevProjex.Infrastructure.ResourceStore;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class McpConnectionCommandTests
 {
+	[Fact]
+	public void TuiConnectionOutput_PrintsTheManualNextStepSeparately()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var output = TerminalWorkspaceSession.BuildMcpConnectionOutput(
+			new McpConnectionResult(
+				McpConnectionStatus.Updated,
+				"Codex connection updated.",
+				NextCommand: "codex"),
+			localization);
+
+		Assert.StartsWith("Codex connection updated.", output, StringComparison.Ordinal);
+		Assert.Contains("Run codex in the project folder.", output, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task HelpDocumentsClientsPrintModeAndRuntimeFailure()
 	{
@@ -30,7 +46,7 @@ public sealed class McpConnectionCommandTests
 		{
 			Result = new McpConnectionResult(
 				McpConnectionStatus.Connected,
-				"Claude Code connected. Run claude in the project folder.",
+				"Claude Code connected.",
 				NextCommand: "claude",
 				CommandOutput: "add: connected")
 		};
@@ -47,6 +63,7 @@ public sealed class McpConnectionCommandTests
 		Assert.Equal(Path.GetFullPath(project), request.ProjectRoot);
 		Assert.Equal(run.ExecutablePath, request.ExecutablePath);
 		Assert.Contains("Claude Code connected", run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Run claude in the project folder.", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("add: connected", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(run.Environment.StandardError);
 		Assert.Empty(connectionService.PrintRequests);
@@ -84,6 +101,7 @@ public sealed class McpConnectionCommandTests
 			Result = new McpConnectionResult(
 				McpConnectionStatus.Connected,
 				"Codex connected.",
+				NextCommand: "codex",
 				CommandOutput: "add: connected")
 		};
 
@@ -100,6 +118,7 @@ public sealed class McpConnectionCommandTests
 		Assert.Contains("add: connected", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Codex", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("opened", run.Environment.StandardOutput, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("Run codex in the project folder.", run.Environment.StandardOutput, StringComparison.Ordinal);
 	}
 
 	[Fact]
