@@ -1,3 +1,4 @@
+using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.LiveContext;
 
 namespace DevProjex.Tests.Terminal;
@@ -144,6 +145,45 @@ public sealed class TerminalAgentJournalPresentationTests
 
 		Assert.Equal([Path.Combine(firstRoot, "src", "App.cs")], first);
 		Assert.Equal([Path.Combine(secondRoot, "src", "App.cs")], second);
+	}
+
+	[Fact]
+	public void ActivityTraceStartsAtTheCurrentProjectOpeningBoundary()
+	{
+		using var workspace = new TemporaryDirectory();
+		var session = CreateSession() with
+		{
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
+		var beforeOpen = new AgentJournalActivitySnapshot(
+			session,
+			CreateCall(2, "get_file", ["src/Old.cs"]),
+			[CreateCall(1, "get_tree", ["src/Old.cs"]), CreateCall(2, "get_file", ["src/Old.cs"])],
+			RequiresReset: false,
+			LastEventUtc: null);
+
+		var opened = TerminalAgentJournalSnapshot.Create(
+			workspace.Path,
+			beforeOpen,
+			previous: null,
+			baselineSequence: 2);
+		var afterOpen = new AgentJournalActivitySnapshot(
+			session with { Totals = session.Totals with { Calls = 4 } },
+			CreateCall(4, "get_file", ["src/New.cs"]),
+			[CreateCall(3, "get_file", ["src/New.cs"]), CreateCall(4, "get_file", ["src/New.cs"])],
+			RequiresReset: false,
+			LastEventUtc: null);
+		var updated = TerminalAgentJournalSnapshot.Create(
+			workspace.Path,
+			afterOpen,
+			opened,
+			baselineSequence: 2);
+
+		Assert.Empty(opened.DeliveredPathCalls);
+		Assert.DoesNotContain(
+			Path.Combine(workspace.Path, "src", "Old.cs"),
+			updated.DeliveredPathCalls.Keys);
+		Assert.Equal(2, updated.DeliveredPathCalls[Path.Combine(workspace.Path, "src", "New.cs")]);
 	}
 
 	[Fact]

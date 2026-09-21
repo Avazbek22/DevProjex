@@ -12,24 +12,40 @@ public sealed class AgentJournalReceiptFormatter : IAgentJournalReceiptFormatter
 	public string FormatMarkdown(AgentJournalReceipt receipt)
 	{
 		ArgumentNullException.ThrowIfNull(receipt);
+		var ended = receipt.Session.EndedUtc is { } endedUtc
+			? endedUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)
+			: receipt.Session.IsLive
+				? "running"
+				: receipt.Calls.Count > 0
+					? "inactive; end time unknown (last event " +
+					  receipt.Calls.Max(static call => call.Utc).UtcDateTime.ToString("O", CultureInfo.InvariantCulture) + ")"
+					: "inactive; end time unknown";
 		var output = new StringBuilder()
 			.Append("# DevProjex agent journal ").AppendLine(EscapeMarkdown(receipt.Session.Id))
 			.AppendLine()
 			.Append("- Started: ").AppendLine(receipt.Session.StartedUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture))
-			.Append("- Ended: ").AppendLine(receipt.Session.EndedUtc?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) ?? "running")
+			.Append("- Ended: ").AppendLine(ended)
 			.Append("- Client: ").Append(EscapeMarkdown(receipt.Session.ClientName));
 		if (!string.IsNullOrWhiteSpace(receipt.Session.ClientVersion))
 			output.Append(' ').Append(EscapeMarkdown(receipt.Session.ClientVersion));
 		var lostEvents = LostEventCount(receipt.Calls);
+		var lossUnknown = receipt.Calls.Any(static call =>
+			call.Notices.Contains("history-incomplete", StringComparer.Ordinal) &&
+			call.Arguments.ContainsKey("lost_events_unknown"));
 		output.AppendLine()
 			.Append("- Mode: ").AppendLine(receipt.Session.Mode.ToString())
 			.Append("- Tool set: ").AppendLine(receipt.Session.ToolSet.ToString());
-		if (lostEvents > 0)
+		if (lostEvents > 0 || lossUnknown)
 		{
 			output.AppendLine()
-				.Append("**History is incomplete: ").Append(lostEvents)
-				.Append(lostEvents == 1 ? " event" : " events")
-				.AppendLine(" could not be recorded.**");
+				.Append("**History is incomplete: ");
+			if (lossUnknown && lostEvents == 0)
+				output.AppendLine("an unknown number of events were not retained.**");
+			else if (lossUnknown)
+				output.Append("at least ").Append(lostEvents).AppendLine(" events were not retained; the exact count is unknown.**");
+			else
+				output.Append(lostEvents).Append(lostEvents == 1 ? " event" : " events")
+					.AppendLine(" could not be recorded.**");
 		}
 		output
 			.AppendLine()
@@ -54,8 +70,8 @@ public sealed class AgentJournalReceiptFormatter : IAgentJournalReceiptFormatter
 		output.AppendLine()
 			.AppendLine("## Calls")
 			.AppendLine()
-			.AppendLine("| # | UTC | Tool | Duration ms | Characters | Tokens | Files | Error |")
-			.AppendLine("|---:|---|---|---:|---:|---:|---:|---|");
+			.AppendLine("| # | UTC | Tool | Duration ms | Characters | Tokens | Files | Notices | Error |")
+			.AppendLine("|---:|---|---|---:|---:|---:|---:|---|---|");
 		foreach (var call in receipt.Calls)
 		{
 			output.Append('|').Append(call.Sequence)
@@ -65,6 +81,7 @@ public sealed class AgentJournalReceiptFormatter : IAgentJournalReceiptFormatter
 				.Append('|').Append(call.ResultCharacters)
 				.Append('|').Append(call.EstimatedTokens)
 				.Append('|').Append(call.FilesDelivered)
+				.Append('|').Append(EscapeMarkdown(string.Join(',', call.Notices)))
 				.Append('|').Append(EscapeMarkdown(call.ErrorCode ?? string.Empty)).AppendLine("|");
 		}
 		return output.ToString();

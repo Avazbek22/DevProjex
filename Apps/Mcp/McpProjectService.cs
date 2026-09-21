@@ -25,11 +25,13 @@ internal sealed class McpProjectService(
 	private readonly ConcurrentDictionary<McpInventoryCacheKey, CachedInventoryEntry> inventoryCache = [];
 	private readonly ConcurrentDictionary<McpProjectionCacheKey, CachedProjectionPlan> projectionCache = [];
 	private readonly Dictionary<string, RootChangeMonitor> rootMonitors = new(PathComparer.Default);
+	private readonly ConcurrentDictionary<string, byte> provenIgnoredMonitorSubtrees = new(PathComparer.Default);
 	private readonly object rootMonitorSync = new();
 	private readonly ConditionalWeakTable<ProjectContextPlan, PlanMembership> planMembership = new();
 	private long cacheGeneration;
 	private long planMembershipBuildCount;
 	private long profileCatalogReadCount;
+	private long rootMonitorGeneration;
 	private int disposed;
 
 	/// <summary>The Git baseline every call starts from when it names no profile.</summary>
@@ -506,13 +508,111 @@ internal sealed class McpProjectService(
 		lock (rootMonitorSync)
 		{
 			if (rootMonitors.TryGetValue(normalizedRoot, out var existing))
-				return existing;
+			{
+				if (existing.IsReliable)
+				{
+					existing.Touch(Interlocked.Increment(ref rootMonitorGeneration));
+					return existing;
+				}
+
+				rootMonitors.Remove(normalizedRoot);
+				existing.Dispose();
+				RemoveCachedRoot(normalizedRoot);
+			}
 			if (rootMonitors.Count >= MaximumRootMonitors)
-				return null;
-			var created = RootChangeMonitor.TryCreate(normalizedRoot);
+			{
+				var oldest = rootMonitors.MinBy(static pair => pair.Value.LastAccessGeneration);
+				if (oldest.Value is not null)
+				{
+					rootMonitors.Remove(oldest.Key);
+					oldest.Value.Dispose();
+					RemoveCachedRoot(oldest.Key);
+				}
+			}
+			var created = RootChangeMonitor.TryCreate(
+				normalizedRoot,
+				eventArgs => IsChangeInsideProvenIgnoredSubtree(normalizedRoot, eventArgs));
 			if (created is not null)
+			{
+				created.Touch(Interlocked.Increment(ref rootMonitorGeneration));
 				rootMonitors.Add(normalizedRoot, created);
+			}
 			return created;
+		}
+	}
+
+	private bool IsChangeInsideProvenIgnoredSubtree(string normalizedRoot, FileSystemEventArgs eventArgs)
+	{
+		if (eventArgs.ChangeType != WatcherChangeTypes.Changed || string.IsNullOrEmpty(eventArgs.Name))
+			return false;
+
+		var hasCachedPlan = false;
+		foreach (var pair in inventoryCache)
+		{
+			if (!PathComparer.Default.Equals(pair.Key.ProjectRoot, normalizedRoot) ||
+				!pair.Value.Value.IsValueCreated ||
+				!pair.Value.Value.Value.IsCompletedSuccessfully)
+			{
+				continue;
+			}
+
+			hasCachedPlan = true;
+			if (pair.Value.Value.Value.Result.Plan.Selection.Exclusions?.Contains(ProjectExclusion.SmartIgnore) != true)
+				return false;
+		}
+		if (!hasCachedPlan)
+			return false;
+
+		try
+		{
+			var changedPath = Path.GetFullPath(eventArgs.Name, normalizedRoot);
+			var relative = Path.GetRelativePath(normalizedRoot, changedPath);
+			if (Path.IsPathFullyQualified(relative) || relative == ".." ||
+				relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+			{
+				return false;
+			}
+
+			for (var directory = Directory.Exists(changedPath) ? changedPath : Path.GetDirectoryName(changedPath);
+				 !string.IsNullOrEmpty(directory) &&
+				 !PathComparer.Default.Equals(directory, normalizedRoot);
+				 directory = Path.GetDirectoryName(directory))
+			{
+				if (provenIgnoredMonitorSubtrees.ContainsKey(directory))
+					return true;
+				var name = Path.GetFileName(directory);
+				if (SmartArtifactIgnoreMatcher.Default.IsCandidateName(name) &&
+					SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(directory, name))
+				{
+					provenIgnoredMonitorSubtrees.TryAdd(directory, 0);
+					return true;
+				}
+			}
+		}
+		catch (Exception exception) when (exception is
+			   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+			   NotSupportedException or ArgumentException)
+		{
+		}
+		return false;
+	}
+
+	private void RemoveCachedRoot(string normalizedRoot)
+	{
+		foreach (var pair in inventoryCache)
+		{
+			if (PathComparer.Default.Equals(pair.Key.ProjectRoot, normalizedRoot))
+				RemoveInventoryEntry(pair.Key, pair.Value);
+		}
+
+		foreach (var path in provenIgnoredMonitorSubtrees.Keys)
+		{
+			var relative = Path.GetRelativePath(normalizedRoot, path);
+			if (!Path.IsPathFullyQualified(relative) && relative != ".." &&
+				!relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+			{
+				provenIgnoredMonitorSubtrees.TryRemove(path, out _);
+			}
 		}
 	}
 
@@ -1662,10 +1762,15 @@ internal sealed class McpProjectService(
 		private readonly FileSystemWatcher watcher;
 		private long revision;
 		private int reliable = 1;
+		private long lastAccessGeneration;
+		private int disposed;
 
-		private RootChangeMonitor(FileSystemWatcher watcher)
+		private readonly Func<FileSystemEventArgs, bool> ignoreChange;
+
+		private RootChangeMonitor(FileSystemWatcher watcher, Func<FileSystemEventArgs, bool> ignoreChange)
 		{
 			this.watcher = watcher;
+			this.ignoreChange = ignoreChange;
 			watcher.Changed += OnChanged;
 			watcher.Created += OnChanged;
 			watcher.Deleted += OnChanged;
@@ -1676,8 +1781,13 @@ internal sealed class McpProjectService(
 
 		public long Revision => Volatile.Read(ref revision);
 		public bool IsReliable => Volatile.Read(ref reliable) != 0;
+		public long LastAccessGeneration => Volatile.Read(ref lastAccessGeneration);
 
-		public static RootChangeMonitor? TryCreate(string root)
+		public void Touch(long generation) => Volatile.Write(ref lastAccessGeneration, generation);
+
+		public static RootChangeMonitor? TryCreate(
+			string root,
+			Func<FileSystemEventArgs, bool> ignoreChange)
 		{
 			try
 			{
@@ -1690,7 +1800,7 @@ internal sealed class McpProjectService(
 								   NotifyFilters.Size |
 								   NotifyFilters.LastWrite |
 								   NotifyFilters.Security
-				});
+				}, ignoreChange);
 			}
 			catch (Exception exception) when (exception is
 				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
@@ -1700,8 +1810,11 @@ internal sealed class McpProjectService(
 			}
 		}
 
-		private void OnChanged(object sender, FileSystemEventArgs eventArgs) =>
-			Interlocked.Increment(ref revision);
+		private void OnChanged(object sender, FileSystemEventArgs eventArgs)
+		{
+			if (!ignoreChange(eventArgs))
+				Interlocked.Increment(ref revision);
+		}
 
 		private void OnError(object sender, ErrorEventArgs eventArgs)
 		{
@@ -1709,7 +1822,14 @@ internal sealed class McpProjectService(
 			Interlocked.Increment(ref revision);
 		}
 
-		public void Dispose() => watcher.Dispose();
+		public void Dispose()
+		{
+			if (Interlocked.Exchange(ref disposed, 1) != 0)
+				return;
+			Volatile.Write(ref reliable, 0);
+			Interlocked.Increment(ref revision);
+			watcher.Dispose();
+		}
 	}
 
 	public void Dispose()

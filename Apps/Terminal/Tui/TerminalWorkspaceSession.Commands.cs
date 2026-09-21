@@ -525,6 +525,7 @@ internal sealed partial class TerminalWorkspaceSession
 			var result = await RunAfterSelectionPersistenceAsync(
 				mode,
 				cancellationToken => _selectionProfilePersistence.FlushAsync(cancellationToken),
+				PromptSelectionPersistenceRetryAsync,
 				async cancellationToken =>
 				{
 					var executablePath = McpConnectionExecutablePathResolver.Resolve(
@@ -543,6 +544,8 @@ internal sealed partial class TerminalWorkspaceSession
 
 			await InvokeAsync(() =>
 			{
+				if (result is null)
+					return true;
 				if (_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
 					_screen == TerminalWorkspaceScreen.Workspace)
 				{
@@ -574,18 +577,43 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 	}
 
-	internal static async Task<T> RunAfterSelectionPersistenceAsync<T>(
+	internal static async Task<T?> RunAfterSelectionPersistenceAsync<T>(
 		McpConnectionMode mode,
 		Func<CancellationToken, Task<bool>> flushSelectionAsync,
+		Func<Task<bool>> retryAsync,
 		Func<CancellationToken, Task<T>> connectAsync,
 		CancellationToken cancellationToken)
+		where T : class
 	{
 		ArgumentNullException.ThrowIfNull(flushSelectionAsync);
+		ArgumentNullException.ThrowIfNull(retryAsync);
 		ArgumentNullException.ThrowIfNull(connectAsync);
 		if (mode == McpConnectionMode.Live)
-			_ = await flushSelectionAsync(cancellationToken).ConfigureAwait(false);
+		{
+			while (!await flushSelectionAsync(cancellationToken).ConfigureAwait(false))
+			{
+				if (!await retryAsync().ConfigureAwait(false))
+					return null;
+			}
+		}
 
 		return await connectAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task<bool> PromptSelectionPersistenceRetryAsync()
+	{
+		var retry = false;
+		await InvokeAsync(() =>
+		{
+			var decision = ShowChoice(
+				L("Terminal.Tui.ProfileSaveFailure.Title"),
+				L("Terminal.Tui.ProfileSaveFailure.Message"),
+				L("Dialog.Cancel"),
+				L("Terminal.Tui.Retry"));
+			retry = decision == 1;
+			return true;
+		}).ConfigureAwait(false);
+		return retry;
 	}
 
 	private async Task<McpConnectionResult> ConnectMcpClientWithConfirmationAsync(

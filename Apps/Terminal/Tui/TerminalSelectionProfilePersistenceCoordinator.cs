@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DevProjex.Application.Selection;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -8,6 +9,7 @@ internal enum TerminalSelectionPersistencePhase
 	Idle,
 	Pending,
 	Saving,
+	Deferred,
 	Failed
 }
 
@@ -18,7 +20,8 @@ internal readonly record struct TerminalSelectionPersistenceState(
 internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposable
 {
 	private static readonly TimeSpan PersistenceDelay = TimeSpan.FromSeconds(2);
-	private readonly Func<string, ProjectSelectionProfile, CancellationToken, Task> _persistAsync;
+	private readonly Func<string, ProjectSelectionProfile, CancellationToken,
+		Task<ProjectProfilePersistenceResult>> _persistAsync;
 	private readonly Func<CancellationToken, Task> _delayAsync;
 	private readonly Func<TimeSpan, CancellationToken, Task> _retryDelayAsync;
 	private readonly Action<Exception>? _failureCallback;
@@ -44,7 +47,8 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 	}
 
 	public TerminalSelectionProfilePersistenceCoordinator(
-		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
+		Func<string, ProjectSelectionProfile, CancellationToken,
+			Task<ProjectProfilePersistenceResult>> persistAsync,
 		Action<Exception>? failureCallback = null)
 		: this(
 			persistAsync,
@@ -53,8 +57,22 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 	{
 	}
 
-	internal TerminalSelectionProfilePersistenceCoordinator(
+	public TerminalSelectionProfilePersistenceCoordinator(
 		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
+		Action<Exception>? failureCallback = null)
+		: this(
+			(projectPath, profile, cancellationToken) => PersistAndReportSavedAsync(
+				persistAsync,
+				projectPath,
+				profile,
+				cancellationToken),
+			failureCallback)
+	{
+	}
+
+	internal TerminalSelectionProfilePersistenceCoordinator(
+		Func<string, ProjectSelectionProfile, CancellationToken,
+			Task<ProjectProfilePersistenceResult>> persistAsync,
 		Func<CancellationToken, Task> delayAsync,
 		Func<TimeSpan, CancellationToken, Task>? retryDelayAsync = null,
 		Action<Exception>? failureCallback = null,
@@ -65,6 +83,35 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 		_retryDelayAsync = retryDelayAsync ?? Task.Delay;
 		_failureCallback = failureCallback;
 		_maxBackgroundAttempts = Math.Max(1, maxBackgroundAttempts);
+	}
+
+	internal TerminalSelectionProfilePersistenceCoordinator(
+		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
+		Func<CancellationToken, Task> delayAsync,
+		Func<TimeSpan, CancellationToken, Task>? retryDelayAsync = null,
+		Action<Exception>? failureCallback = null,
+		int maxBackgroundAttempts = 3)
+		: this(
+			(projectPath, profile, cancellationToken) => PersistAndReportSavedAsync(
+				persistAsync,
+				projectPath,
+				profile,
+				cancellationToken),
+			delayAsync,
+			retryDelayAsync,
+			failureCallback,
+			maxBackgroundAttempts)
+	{
+	}
+
+	private static async Task<ProjectProfilePersistenceResult> PersistAndReportSavedAsync(
+		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
+		string projectPath,
+		ProjectSelectionProfile profile,
+		CancellationToken cancellationToken)
+	{
+		await persistAsync(projectPath, profile, cancellationToken).ConfigureAwait(false);
+		return ProjectProfilePersistenceResult.Saved();
 	}
 
 	public void Schedule(string projectPath, ProjectSelectionProfile profile)
@@ -192,7 +239,18 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 
 			try
 			{
-				await PersistAsync(pending, cancellationToken).ConfigureAwait(false);
+				var result = await PersistAsync(pending, cancellationToken).ConfigureAwait(false);
+				if (!result.Completed)
+				{
+					PublishStateForVersion(
+						version,
+						new TerminalSelectionPersistenceState(
+							result.Disposition == ProjectProfilePersistenceDisposition.Deferred
+								? TerminalSelectionPersistencePhase.Deferred
+								: TerminalSelectionPersistencePhase.Failed,
+							result.Reason));
+					return false;
+				}
 				EventHandler? stateChanged = null;
 				lock (_sync)
 				{
@@ -260,12 +318,14 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 		return StateChanged;
 	}
 
-	private async Task PersistAsync(PendingWrite pending, CancellationToken cancellationToken)
+	private async Task<ProjectProfilePersistenceResult> PersistAsync(
+		PendingWrite pending,
+		CancellationToken cancellationToken)
 	{
 		await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
-			await _persistAsync(
+			return await _persistAsync(
 				pending.ProjectPath,
 				pending.Profile,
 				cancellationToken).ConfigureAwait(false);

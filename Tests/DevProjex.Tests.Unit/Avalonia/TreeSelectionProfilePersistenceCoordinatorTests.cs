@@ -1,5 +1,7 @@
 namespace DevProjex.Tests.Unit.Avalonia;
 
+using DevProjex.Infrastructure.ProjectProfiles;
+
 public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 {
 	[Fact]
@@ -52,6 +54,49 @@ public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
 		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
 		Assert.Equal(2, attempts);
+	}
+
+	[Fact]
+	public async Task DeferredWriteRemainsPendingUntilStorageBecomesAvailable()
+	{
+		var delay = new ControlledDelay();
+		var attempts = 0;
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			(_, _, _) => Task.FromResult(++attempts == 1
+				? ProjectProfilePersistenceResult.Deferred("profile is temporarily unavailable")
+				: ProjectProfilePersistenceResult.Saved()),
+			delay.WaitAsync);
+
+		coordinator.Schedule(@"C:\Project", ["src"]);
+		delay.Release();
+		await WaitForStateAsync(coordinator, SelectionPersistencePhase.Deferred);
+
+		Assert.Equal("profile is temporarily unavailable", coordinator.State.FailureReason);
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
+		Assert.Equal(2, attempts);
+	}
+
+	[Fact]
+	public async Task ProvenUnchangedSelectionClearsThePendingWrite()
+	{
+		var delay = new ControlledDelay();
+		var attempts = 0;
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			(_, _, _) =>
+			{
+				attempts++;
+				return Task.FromResult(ProjectProfilePersistenceResult.Unchanged());
+			},
+			delay.WaitAsync);
+
+		coordinator.Schedule(@"C:\Project", ["src"]);
+		delay.Release();
+		await WaitForStateAsync(coordinator, SelectionPersistencePhase.Idle);
+
+		Assert.Equal(1, attempts);
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(1, attempts);
 	}
 
 	[Fact]

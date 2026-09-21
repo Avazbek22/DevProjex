@@ -764,29 +764,43 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			? ["mcp", "remove", "-s", "local", "devprojex"]
 			: ["mcp", "remove", "devprojex"];
 		var replaced = snapshot is not null;
-		if (replaced)
-		{
-			var remove = await RunClientCommandAsync(
-				executable,
-				removeArguments,
-				request.ProjectRoot,
-				cancellationToken).ConfigureAwait(false);
-			AppendOutput(output, "remove", remove);
-			if (!remove.Succeeded)
-				return CreateProcessFailure(request, remove, output, manual, previousConnectionRemoved: false);
-		}
-
 		var arguments = CreateAddArguments(request.Client, request.ExecutablePath, request.ProjectRoot, request.Mode);
 		McpConnectionProcessResult add;
 		try
 		{
+			if (replaced)
+			{
+				var remove = await RunClientCommandAsync(
+					executable,
+					removeArguments,
+					request.ProjectRoot,
+					cancellationToken).ConfigureAwait(false);
+				AppendOutput(output, "remove", remove);
+				if (!remove.Succeeded)
+				{
+					var restored = await TryRestoreConnectionAsync(
+						request,
+						executable,
+						removeArguments,
+						snapshot,
+						output).ConfigureAwait(false);
+					return CreateProcessFailure(
+						request,
+						remove,
+						output,
+						manual,
+						previousConnectionRemoved: restored,
+						previousConnectionRestored: restored);
+				}
+			}
+
 			add = await RunClientCommandAsync(
 				executable,
 				arguments,
 				request.ProjectRoot,
 				cancellationToken).ConfigureAwait(false);
 		}
-		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && snapshot is not null)
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
 			await TryRestoreConnectionAsync(
 				request,
@@ -826,6 +840,20 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				manual,
 				previousConnectionRemoved: true,
 				previousConnectionRestored: restored);
+		}
+
+		if (request.Client == McpConnectionClient.Codex)
+		{
+			var verificationFailure = await VerifyCodexConnectionAsync(
+				request,
+				executable,
+				removeArguments,
+				snapshot,
+				manual,
+				output,
+				cancellationToken).ConfigureAwait(false);
+			if (verificationFailure is not null)
+				return verificationFailure;
 		}
 
 		var status = replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected;
@@ -908,6 +936,57 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			NextCommand: nextCommand,
 			CommandOutput: string.Join(Environment.NewLine, output),
 			Replaced: true);
+	}
+
+	private async Task<McpConnectionResult?> VerifyCodexConnectionAsync(
+		McpConnectionRequest request,
+		string executable,
+		IReadOnlyList<string> removeArguments,
+		CommandLineConnectionSnapshot? previousSnapshot,
+		string manual,
+		ICollection<string> output,
+		CancellationToken cancellationToken)
+	{
+		var verify = await RunClientCommandAsync(
+			executable,
+			["mcp", "get", "devprojex", "--json"],
+			request.ProjectRoot,
+			cancellationToken).ConfigureAwait(false);
+		AppendOutput(output, "get", verify);
+		if (!verify.Succeeded || !TryParseCodexConnection(verify.StandardOutput, out var effective))
+		{
+			var restored = await TryRestoreConnectionAsync(
+				request,
+				executable,
+				removeArguments,
+				previousSnapshot,
+				output).ConfigureAwait(false);
+			return CreateProcessFailure(
+				request,
+				verify,
+				output.ToArray(),
+				manual,
+				previousConnectionRemoved: previousSnapshot is not null,
+				previousConnectionRestored: restored && previousSnapshot is not null);
+		}
+
+		var expectedArguments = CreateServerArguments(request.ProjectRoot, request.Mode);
+		var requiredEnvironment = McpConnectionFragmentGenerator.GetRequiredServerEnvironment();
+		if (ConnectionMatches(
+				effective,
+				request.ExecutablePath,
+				expectedArguments,
+				requiredEnvironment))
+		{
+			return null;
+		}
+
+		return new McpConnectionResult(
+			McpConnectionStatus.InvalidConfiguration,
+			_localization["Mcp.Connect.Codex.ProjectOverride"],
+			ManualConfiguration: manual,
+			CommandOutput: string.Join(Environment.NewLine, output),
+			Replaced: previousSnapshot is not null);
 	}
 
 	private async Task<McpConnectionResult> ConnectProjectClientAsync(
@@ -1120,19 +1199,50 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		McpConnectionRequest request,
 		string executable,
 		IReadOnlyList<string> removeArguments,
-		CommandLineConnectionSnapshot snapshot,
+		CommandLineConnectionSnapshot? snapshot,
 		ICollection<string> output)
 	{
 		using var recoveryCts = new CancellationTokenSource(ClientCommandTimeout);
-		var cleanup = await RunClientCommandAsync(
+		var actual = await ReadExistingConnectionAsync(
+			request,
 			executable,
-			removeArguments,
-			request.ProjectRoot,
 			recoveryCts.Token).ConfigureAwait(false);
-		AppendOutput(output, "rollback-remove", cleanup);
-		if (!cleanup.Succeeded &&
-			!IsMissingServer(request.Client, cleanup, McpClientCommandOperation.Remove))
+		if (actual.Error is not null)
 			return false;
+		if (snapshot is not null &&
+			actual.Snapshot is not null &&
+			SnapshotsMatch(actual.Snapshot, snapshot))
+		{
+			return true;
+		}
+
+		var expectedArguments = CreateServerArguments(request.ProjectRoot, request.Mode);
+		var requiredEnvironment = McpConnectionFragmentGenerator.GetRequiredServerEnvironment();
+		if (actual.Snapshot is not null &&
+			!ConnectionMatches(
+				actual.Snapshot,
+				request.ExecutablePath,
+				expectedArguments,
+				requiredEnvironment))
+		{
+			return false;
+		}
+
+		if (actual.Snapshot is not null)
+		{
+			var cleanup = await RunClientCommandAsync(
+				executable,
+				removeArguments,
+				request.ProjectRoot,
+				recoveryCts.Token).ConfigureAwait(false);
+			AppendOutput(output, "rollback-remove", cleanup);
+			if (!cleanup.Succeeded &&
+				!IsMissingServer(request.Client, cleanup, McpClientCommandOperation.Remove))
+				return false;
+		}
+
+		if (snapshot is null)
+			return true;
 
 		var restore = await RunClientCommandAsync(
 			executable,
@@ -1142,6 +1252,19 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		AppendOutput(output, "rollback-add", restore);
 		return restore.Succeeded;
 	}
+
+	private static bool SnapshotsMatch(
+		CommandLineConnectionSnapshot left,
+		CommandLineConnectionSnapshot right) =>
+		string.Equals(
+			left.Command,
+			right.Command,
+			OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) &&
+		left.Arguments.SequenceEqual(right.Arguments, StringComparer.Ordinal) &&
+		left.Environment.Count == right.Environment.Count &&
+		left.Environment.All(pair =>
+			right.Environment.TryGetValue(pair.Key, out var value) &&
+			string.Equals(pair.Value, value, StringComparison.Ordinal));
 
 	private static List<string> CreateAddArguments(
 		McpConnectionClient client,

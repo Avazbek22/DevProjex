@@ -281,6 +281,33 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 		Assert.Contains("history-recovered", call.Notices);
 	}
 
+	[Fact]
+	public async Task RecreatedSessionMarksHistoryIncompleteAndTotalsOnlyPersistedCalls()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(temporary.Path, 78, new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		File.Delete(Path.Combine(store.DirectoryPath, session.Id + ".jsonl"));
+
+		await store.RecordCall(session.Id, CreateCall(2), cancellationToken);
+		await store.EndSession(
+			session.Id,
+			session.StartedUtc.AddMinutes(1),
+			new AgentJournalTotals(2, 240, 60, 2, 4, 6, 0),
+			cancellationToken);
+
+		var restored = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+		var call = Assert.Single(await store.ReadCallsAsync(session.Id, cancellationToken));
+		Assert.Equal(1, restored.Totals.Calls);
+		Assert.Equal(120, restored.Totals.ResultCharacters);
+		Assert.Contains("history-recovered", call.Notices);
+		Assert.Contains("history-incomplete", call.Notices);
+		Assert.True(call.Arguments.ContainsKey("lost_events_unknown"));
+	}
+
 	[Fact(Timeout = 5_000)]
 	public async Task WatcherResetsItsTailWhenTheSessionFileIsRecreated()
 	{
@@ -363,6 +390,44 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 			$"5,000-event watcher bytes: before={previousImplementationBytes:N0}; after={tailBytes:N0}");
 		Assert.InRange(tailBytes, 1, seedLines[1].Length * 2L);
 		Assert.True(tailBytes * 100 < previousImplementationBytes);
+	}
+
+	[Fact(Timeout = 20_000)]
+	public async Task WarmSessionListAndActivityReadOnlyTheNewJournalTail()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		var active = CreateSession(temporary.Path, 90, started);
+		using var store = CreateStore(temporary.Path, activeSessionProvider: () => [CreateActiveRecord(active)]);
+		for (var sessionIndex = 0; sessionIndex < 12; sessionIndex++)
+		{
+			var completed = CreateSession(temporary.Path, 100 + sessionIndex, started.AddMinutes(sessionIndex + 1));
+			await store.StartSession(completed, cancellationToken);
+			for (var sequence = 1; sequence <= 50; sequence++)
+				await store.RecordCall(completed.Id, CreateCall(sequence), cancellationToken);
+			await store.EndSession(completed.Id, completed.StartedUtc.AddMinutes(1),
+				new AgentJournalTotals(50, 6_000, 1_500, 50, 100, 150, 0), cancellationToken);
+		}
+		await store.StartSession(active, cancellationToken);
+		for (var sequence = 1; sequence <= 100; sequence++)
+			await store.RecordCall(active.Id, CreateCall(sequence), cancellationToken);
+		await store.ListSessionsAsync(cancellationToken: cancellationToken);
+		await store.ReadActivityAsync(active.Id, 100, cancellationToken);
+
+		long bytes = 0;
+		long records = 0;
+		store.BytesReadObserver = value => Interlocked.Add(ref bytes, value);
+		store.RecordsReadObserver = value => Interlocked.Add(ref records, value);
+		await store.RecordCall(active.Id, CreateCall(101), cancellationToken);
+		var sessions = await store.ListSessionsAsync(cancellationToken: cancellationToken);
+		var activity = await store.ReadActivityAsync(active.Id, 100, cancellationToken);
+
+		output.WriteLine($"warm event: bytes={bytes:N0}; records={records:N0}; sessions={sessions.Count:N0}");
+		Assert.Equal(13, sessions.Count);
+		Assert.Equal(101, Assert.Single(activity!.AppendedCalls).Sequence);
+		Assert.InRange(bytes, 1, 64 * 1024);
+		Assert.InRange(records, 1, 8);
 	}
 
 	[Fact]
@@ -477,9 +542,9 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 			"",
 			"## Calls",
 			"",
-			"| # | UTC | Tool | Duration ms | Characters | Tokens | Files | Error |",
-			"|---:|---|---|---:|---:|---:|---:|---|",
-			"|1|2026-09-20T01:02:04.0000000Z|get_file|10|120|30|1||",
+			"| # | UTC | Tool | Duration ms | Characters | Tokens | Files | Notices | Error |",
+			"|---:|---|---|---:|---:|---:|---:|---|---|",
+			"|1|2026-09-20T01:02:04.0000000Z|get_file|10|120|30|1|outside-selection||",
 			""
 		]);
 		const string expectedJson = """
@@ -532,6 +597,27 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 		Assert.Equal(
 			JsonSerializer.Serialize(expectedDocument.RootElement),
 			JsonSerializer.Serialize(actualDocument.RootElement));
+	}
+
+	[Fact]
+	public void ReceiptForInactiveSessionWithoutEndUsesLastEventAsLowerBound()
+	{
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		var session = CreateSession(Path.GetTempPath(), 79, started) with
+		{
+			IsLive = false,
+			EndedUtc = null,
+			Totals = new AgentJournalTotals(1, 120, 30, 1, 2, 3, 0)
+		};
+		var call = CreateCall(1) with { Utc = started.AddSeconds(7) };
+		var receipt = new AgentJournalReceipt(session, session.Totals, [], [call]);
+
+		var markdown = new AgentJournalReceiptFormatter().FormatMarkdown(receipt);
+
+		Assert.Contains("inactive; end time unknown", markdown, StringComparison.Ordinal);
+		Assert.Contains("2026-09-20T01:02:10.0000000Z", markdown, StringComparison.Ordinal);
+		Assert.DoesNotContain("running", markdown, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("outside-selection", markdown, StringComparison.Ordinal);
 	}
 
 	private static AgentJournalStore CreateStore(

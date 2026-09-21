@@ -2,6 +2,28 @@ namespace DevProjex.Avalonia.Services;
 
 public static class MessageDialog
 {
+    public static async Task<int> ShowChoiceAsync(
+        Window owner,
+        string title,
+        string message,
+        params string[] choices)
+    {
+        ArgumentNullException.ThrowIfNull(choices);
+        ArgumentOutOfRangeException.ThrowIfLessThan(choices.Length, 2);
+        var completion = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
+        var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
+        var dialog = DialogSurfaceFactory.CreateWindow(
+            title,
+            themeVariant,
+            brushes,
+            BuildChoiceContent(message, choices, completion),
+            width: 560,
+            height: 280);
+        dialog.Closed += (_, _) => completion.TrySetResult(0);
+        _ = dialog.ShowDialog(owner);
+        return await completion.Task.ConfigureAwait(false);
+    }
     public static async Task ShowAsync(
         Window owner,
         string title,
@@ -206,6 +228,52 @@ public static class MessageDialog
             (TopLevel.GetTopLevel(panel) as Window)?.Close();
         };
 
+        return panel;
+    }
+
+    private static Control BuildChoiceContent(
+        string message,
+        IReadOnlyList<string> choices,
+        TaskCompletionSource<int> completion)
+    {
+        var text = new TextBlock
+        {
+            Text = message,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(12),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(6)
+        };
+        for (var index = 0; index < choices.Count; index++)
+        {
+            var choiceIndex = index;
+            var button = new Button
+            {
+                Content = choices[index],
+                MinWidth = 110,
+                Margin = new Thickness(6),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            if (index == choices.Count - 1)
+                button.Classes.Add("primary-action");
+            button.Click += (_, _) =>
+            {
+                completion.TrySetResult(choiceIndex);
+                (TopLevel.GetTopLevel(buttonPanel) as Window)?.Close();
+            };
+            buttonPanel.Children.Add(button);
+        }
+
+        var panel = new DockPanel();
+        DockPanel.SetDock(buttonPanel, Dock.Bottom);
+        panel.Children.Add(buttonPanel);
+        panel.Children.Add(text);
         return panel;
     }
 }

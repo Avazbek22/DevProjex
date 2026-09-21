@@ -6,7 +6,7 @@ namespace DevProjex.Tests.Terminal;
 public sealed class McpConnectionCommandTests
 {
 	[Fact]
-	public async Task LiveConnectionWaitsForSelectionPersistenceAndContinuesAfterFailure()
+	public async Task LiveConnectionStopsWhenSelectionPersistenceFailsAndRetryIsCanceled()
 	{
 		var releasePersistence = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 		var persistenceStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -20,6 +20,7 @@ public sealed class McpConnectionCommandTests
 				await releasePersistence.Task.WaitAsync(cancellationToken);
 				return false;
 			},
+			() => Task.FromResult(false),
 			_ =>
 			{
 				connectionStarted = true;
@@ -31,8 +32,30 @@ public sealed class McpConnectionCommandTests
 		Assert.False(connectionStarted);
 		releasePersistence.TrySetResult();
 
-		Assert.Equal("connected", await operation);
-		Assert.True(connectionStarted);
+		Assert.Null(await operation);
+		Assert.False(connectionStarted);
+	}
+
+	[Fact]
+	public async Task LiveConnectionRetriesSelectionPersistenceBeforeConnecting()
+	{
+		var flushAttempts = 0;
+		var retryPrompts = 0;
+
+		var result = await TerminalWorkspaceSession.RunAfterSelectionPersistenceAsync(
+			McpConnectionMode.Live,
+			_ => Task.FromResult(++flushAttempts == 2),
+			() =>
+			{
+				retryPrompts++;
+				return Task.FromResult(true);
+			},
+			_ => Task.FromResult("connected"),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal("connected", result);
+		Assert.Equal(2, flushAttempts);
+		Assert.Equal(1, retryPrompts);
 	}
 
 	[Fact]
@@ -47,6 +70,7 @@ public sealed class McpConnectionCommandTests
 				flushCalled = true;
 				return Task.FromResult(true);
 			},
+			() => Task.FromResult(false),
 			_ => Task.FromResult("connected"),
 			TestContext.Current.CancellationToken);
 

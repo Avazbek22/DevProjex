@@ -84,6 +84,35 @@ public sealed class AgentJournalCommandProcessTests
 		Assert.Single(await reader.ListSessionsAsync(project, cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Fact]
+	public async Task RealCliShowsADeadSessionDurationAsALastEventLowerBound()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		using (var store = new AgentJournalStore(() => dataRoot, activeSessionProvider: static () => []))
+		{
+			var session = new AgentJournalSession(
+				AgentJournalStore.CreateSessionId(started, 84), started, null, 84, started.AddMinutes(-1),
+				"sample-client", "1.0", AgentJournalMode.Standard,
+				[new AgentJournalRoot(project, "project")], AgentJournalToolSet.Full, "5.2.0", false,
+				AgentJournalTotals.Empty, false);
+			await store.StartSession(session, TestContext.Current.CancellationToken);
+			await store.RecordCall(
+				session.Id,
+				new AgentJournalCall(1, started.AddSeconds(7), "get_tree", 0,
+					new Dictionary<string, string>(), null, 1, 10, 3, 0, [], 0, 0, 0, [], null),
+				TestContext.Current.CancellationToken);
+		}
+
+		var result = Run(dataRoot, "mcp", "log", project);
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Contains("≥0:07", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("running", result.StandardOutput, StringComparison.OrdinalIgnoreCase);
+	}
+
 	private static async Task SeedAsync(string dataRoot, string project)
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;

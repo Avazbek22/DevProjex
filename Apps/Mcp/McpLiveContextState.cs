@@ -119,8 +119,8 @@ internal sealed class McpLiveContextState(
 				profile.Value is not { } current ||
 				current.Revision != state.Revision)
 				return;
-			state.EffectiveTree = plan.EffectiveTree;
-			state.PendingChange = ClassifyPendingChange(state.Root, state.PendingChange, state.EffectiveTree);
+			state.EffectiveTree = new WeakReference<TreeNodeDescriptor>(plan.EffectiveTree);
+			state.PendingChange = ClassifyPendingChange(state.Root, state.PendingChange, plan.EffectiveTree);
 			state.SelectedFileCount = plan.IncludedFiles.Count;
 			active.Roots.Add(normalizedRoot);
 		}
@@ -311,7 +311,7 @@ internal sealed class McpLiveContextState(
 			state.PendingChange = ClassifyPendingChange(
 				state.Root,
 				new PendingChange(previousRevision, frontierChanges),
-				state.EffectiveTree);
+				GetEffectiveTree(state));
 			state.Fingerprint = fingerprint;
 			state.Frontier = frontier;
 		}
@@ -457,6 +457,11 @@ internal sealed class McpLiveContextState(
 		return pendingChange with { Changes = classified };
 	}
 
+	private static TreeNodeDescriptor? GetEffectiveTree(RootState state) =>
+		state.EffectiveTree is { } reference && reference.TryGetTarget(out var tree)
+			? tree
+			: null;
+
 	private static void AppendRootNotices(
 		List<string> notices,
 		List<string> untrustedDetails,
@@ -587,7 +592,7 @@ internal sealed class McpLiveContextState(
 		public bool HasSuccessfulSnapshot { get; set; }
 		public ProjectProfileLookupStatus? ReadFailure { get; set; }
 		public int? SelectedFileCount { get; set; }
-		public TreeNodeDescriptor? EffectiveTree { get; set; }
+		public WeakReference<TreeNodeDescriptor>? EffectiveTree { get; set; }
 		public PendingChange? PendingChange { get; set; }
 	}
 

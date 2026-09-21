@@ -2,8 +2,29 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Runtime.CompilerServices;
+using DevProjex.Application.Context;
+using DevProjex.Application.Dependencies;
+using DevProjex.Application.Selection;
+using DevProjex.Kernel;
+using DevProjex.Kernel.Abstractions;
+using DevProjex.Kernel.Contracts;
+using DevProjex.Kernel.Models;
+using DevProjex.Mcp;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+
+if (args.FirstOrDefault() == "search-declarations")
+{
+	SearchDeclarationBenchmark.Run(args[1..]);
+	return;
+}
+
+if (args.FirstOrDefault() == "live-roots")
+{
+	LiveRootRetentionBenchmark.Run(args[1..]);
+	return;
+}
 
 var options = BenchmarkOptions.Parse(args);
 var temporaryCorpus = options.SyntheticFileCount is null ? null : SyntheticCorpus.Create(options.SyntheticFileCount.Value);
@@ -128,6 +149,260 @@ internal sealed record BenchmarkOperation(
 	Func<McpClient, CancellationToken, Task<CallToolResult>> Invoke);
 
 internal readonly record struct Sample(double ElapsedMilliseconds, long ClientAllocatedBytes, int ResponseCharacters);
+
+internal static class SearchDeclarationBenchmark
+{
+	public static void Run(string[] arguments)
+	{
+		var repetitions = 5;
+		for (var index = 0; index < arguments.Length; index++)
+		{
+			if (arguments[index] != "--repetitions" || index + 1 >= arguments.Length)
+				throw new ArgumentException($"Unknown or incomplete argument: {arguments[index]}");
+			repetitions = int.Parse(arguments[++index], CultureInfo.InvariantCulture);
+		}
+		if (repetitions < 3)
+			throw new ArgumentOutOfRangeException(nameof(repetitions), "At least three repetitions are required.");
+
+		Console.WriteLine("declarations,median_ms,min_ms,max_ms,spread_ms,median_alloc_bytes,visited_declarations");
+		foreach (var count in new[] { 1_000, 5_000, 10_000 })
+		{
+			var fixture = CreateFixture(count);
+			_ = Measure(fixture);
+			var samples = Enumerable.Range(0, repetitions).Select(_ => Measure(fixture)).ToArray();
+			var elapsed = samples.Select(static sample => sample.ElapsedMilliseconds).Order().ToArray();
+			var allocations = samples.Select(static sample => sample.AllocatedBytes).Order().ToArray();
+			var visits = samples.Select(static sample => sample.VisitedDeclarations).Distinct().Single();
+			Console.WriteLine(string.Join(',',
+				count.ToString(CultureInfo.InvariantCulture),
+				FormatValue(MedianValue(elapsed)),
+				FormatValue(elapsed[0]),
+				FormatValue(elapsed[^1]),
+				FormatValue(elapsed[^1] - elapsed[0]),
+				MedianValue(allocations).ToString(CultureInfo.InvariantCulture),
+				visits.ToString(CultureInfo.InvariantCulture)));
+		}
+	}
+
+	private static SearchDeclarationFixture CreateFixture(int count)
+	{
+		var content = new System.Text.StringBuilder(count * 40);
+		var declarations = new NavigationDeclaration[count];
+		var matches = new McpSearchMatchContext[count];
+		for (var index = 0; index < count; index++)
+		{
+			var line = index + 1;
+			var text = $"void Method{index:D5}() {{ needle(); }}";
+			var offset = content.Length;
+			content.AppendLine(text);
+			declarations[index] = new NavigationDeclaration(
+				$"Fixture.Method{index:D5}",
+				NavigationSymbolKind.Method,
+				"Fixture",
+				line,
+				line,
+				"benchmark")
+			{
+				StartIndex = offset,
+				EndIndex = content.Length - 1
+			};
+			matches[index] = new McpSearchMatchContext(
+				[line],
+				[new McpTextLineRange(line, offset, text.Length)],
+				StartsNewGroup: false);
+		}
+		return new SearchDeclarationFixture(content.ToString(), declarations, matches);
+	}
+
+	private static SearchDeclarationSample Measure(SearchDeclarationFixture fixture)
+	{
+		var visits = 0L;
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+		var timer = Stopwatch.StartNew();
+		var collector = new McpSearchCandidateCollector(50, 2_000_000);
+		DevProjexMcpTools.AddSearchCandidates(
+			collector,
+			"Fixture.cs",
+			"Fixture.cs",
+			fixture.Content,
+			fixture.Matches,
+			fixture.Declarations,
+			new McpSearchRegex("needle", ignoreCase: false),
+			0,
+			explicitScope: false,
+			declarationVisited: () => visits++);
+		timer.Stop();
+		return new SearchDeclarationSample(
+			timer.Elapsed.TotalMilliseconds,
+			GC.GetAllocatedBytesForCurrentThread() - allocatedBefore,
+			visits);
+	}
+
+	private static double MedianValue(double[] values) => values[values.Length / 2];
+	private static long MedianValue(long[] values) => values[values.Length / 2];
+	private static string FormatValue(double value) => value.ToString("0.000", CultureInfo.InvariantCulture);
+
+	private sealed record SearchDeclarationFixture(
+		string Content,
+		IReadOnlyList<NavigationDeclaration> Declarations,
+		IReadOnlyList<McpSearchMatchContext> Matches);
+
+	private readonly record struct SearchDeclarationSample(
+		double ElapsedMilliseconds,
+		long AllocatedBytes,
+		long VisitedDeclarations);
+}
+
+internal static class LiveRootRetentionBenchmark
+{
+	public static void Run(string[] arguments)
+	{
+		var repetitions = 5;
+		var nodesPerRoot = 10_000;
+		for (var index = 0; index < arguments.Length; index++)
+		{
+			var option = arguments[index];
+			if (index + 1 >= arguments.Length)
+				throw new ArgumentException($"Incomplete argument: {option}");
+			var value = arguments[++index];
+			switch (option)
+			{
+				case "--repetitions":
+					repetitions = int.Parse(value, CultureInfo.InvariantCulture);
+					break;
+				case "--nodes-per-root":
+					nodesPerRoot = int.Parse(value, CultureInfo.InvariantCulture);
+					break;
+				default:
+					throw new ArgumentException($"Unknown argument: {option}");
+			}
+		}
+		if (repetitions < 3)
+			throw new ArgumentOutOfRangeException(nameof(repetitions), "At least three repetitions are required.");
+		if (nodesPerRoot < 1)
+			throw new ArgumentOutOfRangeException(nameof(nodesPerRoot));
+
+		Console.WriteLine("roots,nodes_per_root,median_retained_bytes,min_bytes,max_bytes,spread_bytes");
+		foreach (var rootCount in new[] { 1, 8, 50 })
+		{
+			var samples = Enumerable.Range(0, repetitions)
+				.Select(_ => Measure(rootCount, nodesPerRoot))
+				.Order()
+				.ToArray();
+			Console.WriteLine(string.Join(',',
+				rootCount.ToString(CultureInfo.InvariantCulture),
+				nodesPerRoot.ToString(CultureInfo.InvariantCulture),
+				samples[samples.Length / 2].ToString(CultureInfo.InvariantCulture),
+				samples[0].ToString(CultureInfo.InvariantCulture),
+				samples[^1].ToString(CultureInfo.InvariantCulture),
+				(samples[^1] - samples[0]).ToString(CultureInfo.InvariantCulture)));
+		}
+	}
+
+	private static long Measure(int rootCount, int nodesPerRoot)
+	{
+		var rootBase = Path.Combine(Path.GetTempPath(), "devprojex-live-retention", Guid.NewGuid().ToString("N"));
+		var roots = Enumerable.Range(0, rootCount)
+			.Select(index => Path.Combine(rootBase, $"root-{index:D2}"))
+			.ToArray();
+		try
+		{
+			foreach (var root in roots)
+				Directory.CreateDirectory(root);
+			var state = new McpLiveContextState(
+				new McpRootRegistry(roots),
+				static () => BenchmarkProfileStore.Instance,
+				TimeSpan.Zero);
+			Collect();
+			var before = GC.GetTotalMemory(forceFullCollection: false);
+			foreach (var root in roots)
+			{
+				using var invocation = state.BeginInvocation();
+				_ = state.ReadProfile(root);
+				RecordPlan(state, root, nodesPerRoot);
+			}
+			Collect();
+			var retained = GC.GetTotalMemory(forceFullCollection: false) - before;
+			GC.KeepAlive(state);
+			return Math.Max(0, retained);
+		}
+		finally
+		{
+			Directory.Delete(rootBase, recursive: true);
+		}
+	}
+
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static void RecordPlan(McpLiveContextState state, string root, int nodeCount)
+	{
+		var children = Enumerable.Range(0, nodeCount)
+			.Select(index => new TreeNodeDescriptor(
+				$"File{index}.cs",
+				Path.Combine(root, $"File{index}.cs"),
+				false,
+				false,
+				"csharp",
+				[]))
+			.ToArray();
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", children);
+		state.RecordPlan(root, CreatePlan(root, tree, nodeCount));
+	}
+
+	private static ProjectContextPlan CreatePlan(string root, TreeNodeDescriptor tree, int fileCount) =>
+		new(
+			root,
+			ProjectSelectionSpec.Standard,
+			[],
+			[],
+			[],
+			[],
+			tree,
+			tree,
+			new HashSet<string>(PathComparer.Default),
+			Enumerable.Range(0, fileCount).Select(index => Path.Combine(root, $"File{index}.cs")).ToArray(),
+			[root],
+			new ProjectAnalysisReport(
+				ProjectAnalysisReport.CurrentSchemaVersion,
+				DateTimeOffset.UnixEpoch,
+				root,
+				new ProjectAnalysisSelectionReport([], [], []),
+				new ProjectAnalysisInventoryReport([], [], new ProjectTreeSummaryReport(1, fileCount, 0)),
+				new ProjectAnalysisOutputMetricsReport(ProjectOutputMetricsReport.Empty, ProjectOutputMetricsReport.Empty),
+				new ProjectAnalysisTimingReport(0, 0, 0),
+				new ProjectAnalysisDiagnosticsReport(false, false, [])),
+			[],
+			new ProjectContextGitReadiness(GitFilteringMode.None, 0, false),
+			"live-retention-benchmark");
+
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static void Collect()
+	{
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
+	}
+
+	private sealed class BenchmarkProfileStore : IProjectProfileStore
+	{
+		public static BenchmarkProfileStore Instance { get; } = new();
+
+		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout) =>
+			new(ProjectProfileLookupStatus.Found, new ProjectSelectionProfile([], [], [], SelectedPaths: null));
+
+		public bool EnsureStorageExists() => true;
+		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+		{
+			profile = new ProjectSelectionProfile([], [], [], SelectedPaths: null);
+			return true;
+		}
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile) => true;
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc) => true;
+		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		{
+		}
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
+	}
+}
 
 internal sealed record BenchmarkOptions(
 	string Host,

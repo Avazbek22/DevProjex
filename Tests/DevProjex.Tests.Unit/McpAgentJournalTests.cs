@@ -211,7 +211,7 @@ public sealed class McpAgentJournalTests
 	}
 
 	[Fact]
-	public async Task FailedSessionStartDoesNotAppendCallsOrAnEndRecord()
+	public async Task FailedSessionStartCanRecoverAndReportsCallsMissedBeforeRecovery()
 	{
 		using var temporary = new TemporaryDirectory();
 		var root = temporary.CreateFolder("project");
@@ -229,10 +229,18 @@ public sealed class McpAgentJournalTests
 		await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
 		using (journal.BeginCall("list_projects", new CallToolRequestParams { Name = "list_projects" }))
 			journal.Complete(McpToolResults.TextSuccess("unchanged"));
+		writer.AllowStart = true;
+		await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
+		using (journal.BeginCall("get_tree", new CallToolRequestParams { Name = "get_tree" }))
+			journal.Complete(McpToolResults.TextSuccess("tree"));
 		await journal.DisposeAsync();
 
-		Assert.Equal(0, writer.CallAttempts);
-		Assert.Equal(0, writer.EndAttempts);
+		Assert.Equal(2, writer.StartAttempts);
+		var call = Assert.Single(writer.Calls);
+		Assert.Equal("get_tree", call.Tool);
+		Assert.Contains("history-incomplete", call.Notices);
+		Assert.Equal("1", call.Arguments["lost_events"]);
+		Assert.Single(writer.Ended);
 	}
 
 	[Fact]
@@ -398,7 +406,7 @@ public sealed class McpAgentJournalTests
 		public List<AgentJournalCall> Calls { get; } = [];
 		public List<(DateTimeOffset EndedUtc, AgentJournalTotals Totals)> Ended { get; } = [];
 
-		public ValueTask StartSession(AgentJournalSession session, CancellationToken cancellationToken = default)
+		public virtual ValueTask StartSession(AgentJournalSession session, CancellationToken cancellationToken = default)
 		{
 			Sessions.Add(session);
 			return ValueTask.CompletedTask;
@@ -487,29 +495,42 @@ public sealed class McpAgentJournalTests
 		}
 	}
 
-	private sealed class StartFailureWriter : IAgentJournalWriter
+	private sealed class StartFailureWriter : RecordingWriter
 	{
-		public int CallAttempts { get; private set; }
-		public int EndAttempts { get; private set; }
+		public int StartAttempts { get; private set; }
+		public bool AllowStart { get; set; }
 
-		public ValueTask StartSession(AgentJournalSession session, CancellationToken cancellationToken = default) =>
-			ValueTask.FromException(new IOException("unavailable"));
-
-		public ValueTask RecordCall(string sessionId, AgentJournalCall call, CancellationToken cancellationToken = default)
+		public override ValueTask StartSession(AgentJournalSession session, CancellationToken cancellationToken = default)
 		{
-			CallAttempts++;
-			return ValueTask.CompletedTask;
+			StartAttempts++;
+			return AllowStart
+				? base.StartSession(session, cancellationToken)
+				: ValueTask.FromException(new IOException("unavailable"));
 		}
+	}
 
-		public ValueTask EndSession(
-			string sessionId,
-			DateTimeOffset endedUtc,
-			AgentJournalTotals totals,
-			CancellationToken cancellationToken = default)
-		{
-			EndAttempts++;
-			return ValueTask.CompletedTask;
-		}
+	[Fact]
+	public async Task SessionStartStopsRetryingAfterThreeFailedAttempts()
+	{
+		using var temporary = new TemporaryDirectory();
+		var writer = new StartFailureWriter();
+		await using var journal = new McpAgentJournal(
+			writer,
+			new McpRootRegistry([temporary.CreateFolder("project")]),
+			AgentJournalMode.Standard,
+			AgentJournalToolSet.Full,
+			"5.2.0",
+			hidePrivateData: false,
+			pid: 146,
+			processStartUtc: new DateTimeOffset(2026, 9, 20, 1, 0, 0, TimeSpan.Zero));
+
+		for (var attempt = 0; attempt < 3; attempt++)
+			await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
+		writer.AllowStart = true;
+		await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
+
+		Assert.Equal(3, writer.StartAttempts);
+		Assert.Empty(writer.Sessions);
 	}
 
 	private sealed class CanceledStartWriter : IAgentJournalWriter

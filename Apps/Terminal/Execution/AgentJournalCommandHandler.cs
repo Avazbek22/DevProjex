@@ -188,8 +188,19 @@ internal sealed class AgentJournalCommandHandler(
 
 	private string FormatDuration(AgentJournalSession session)
 	{
+		if (session.EndedUtc is null && !session.IsLive)
+		{
+			if (!AgentJournalSessionHistory.TryGet(session, out var history) || history.LastEventUtc is null)
+				return "unknown";
+			return "≥" + FormatDuration(session.StartedUtc, history.LastEventUtc.Value);
+		}
 		var end = session.EndedUtc ?? clock.GetUtcNow();
-		var duration = end > session.StartedUtc ? end - session.StartedUtc : TimeSpan.Zero;
+		return FormatDuration(session.StartedUtc, end);
+	}
+
+	private static string FormatDuration(DateTimeOffset started, DateTimeOffset end)
+	{
+		var duration = end > started ? end - started : TimeSpan.Zero;
 		return duration.TotalHours >= 1
 			? duration.ToString("h\\:mm\\:ss", CultureInfo.InvariantCulture)
 			: duration.ToString("m\\:ss", CultureInfo.InvariantCulture);
