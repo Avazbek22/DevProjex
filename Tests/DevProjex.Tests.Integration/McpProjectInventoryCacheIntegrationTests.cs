@@ -349,6 +349,62 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		Assert.Equal(buildsAfterInitial + 1, buildCount);
 	}
 
+	[Theory]
+	[InlineData(WatcherChangeTypes.Changed)]
+	[InlineData(WatcherChangeTypes.Created)]
+	[InlineData(WatcherChangeTypes.Deleted)]
+	public async Task EveryEventInsideAProvenIgnoredArtifactTreeKeepsTheInventory(
+		WatcherChangeTypes changeType)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/Anchor.cs", "anchor\n");
+		workspace.CreateFile("project/node_modules/.package-lock.json", "{}\n");
+		workspace.CreateFile("project/node_modules/package/index.js", "module.exports = 1;\n");
+		await using var harness = CreateHarness(project);
+
+		_ = await BuildAsync(harness.Service);
+
+		Assert.True(IsIgnoredMonitorChange(
+			harness.Service,
+			new FileSystemEventArgs(changeType, ".", "node_modules/package/index.js")));
+	}
+
+	[Fact]
+	public async Task RenameIsIgnoredOnlyWhenBothPathsAreInsideTheProvenIgnoredTree()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/Anchor.cs", "anchor\n");
+		workspace.CreateFile("project/node_modules/.package-lock.json", "{}\n");
+		workspace.CreateFile("project/node_modules/package/index.js", "module.exports = 1;\n");
+		await using var harness = CreateHarness(project);
+
+		_ = await BuildAsync(harness.Service);
+
+		Assert.True(IsIgnoredMonitorChange(
+			harness.Service,
+			new RenamedEventArgs(
+				WatcherChangeTypes.Renamed,
+				".",
+				"node_modules/package/new.js",
+				"node_modules/package/index.js")));
+		Assert.False(IsIgnoredMonitorChange(
+			harness.Service,
+			new RenamedEventArgs(
+				WatcherChangeTypes.Renamed,
+				".",
+				"node_modules/package/Anchor.cs",
+				"Anchor.cs")));
+		Assert.False(IsIgnoredMonitorChange(
+			harness.Service,
+			new RenamedEventArgs(
+				WatcherChangeTypes.Renamed,
+				".",
+				"Anchor.cs",
+				"node_modules/package/index.js")));
+	}
+
 	[Fact(Timeout = 60_000)]
 	public async Task BuildPlan_RepeatedInvalidationKeepsInventoryAndProjectionStorageBounded()
 	{
@@ -483,12 +539,17 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	}
 
 	private static bool IsIgnoredMonitorChange(McpProjectService service, string name)
+		=> IsIgnoredMonitorChange(
+			service,
+			new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name));
+
+	private static bool IsIgnoredMonitorChange(McpProjectService service, FileSystemEventArgs eventArgs)
 	{
 		var monitor = GetMonitor(service);
 		var ignoreChange = (Func<FileSystemEventArgs, bool>)monitor.GetType()
 			.GetField("ignoreChange", BindingFlags.Instance | BindingFlags.NonPublic)!
 			.GetValue(monitor)!;
-		return ignoreChange(new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name));
+		return ignoreChange(eventArgs);
 	}
 
 	private static void RaiseWatcherError(McpProjectService service)
