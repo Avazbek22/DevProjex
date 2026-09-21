@@ -23,21 +23,24 @@ internal static class DialogSurfaceFactory
     public static DialogSurfaceBrushes ResolveBrushes(Window? owner, ThemeVariant themeVariant)
     {
         var app = global::Avalonia.Application.Current;
-        var appBackground = TryGetThemeBrush(owner, themeVariant, "AppBackgroundBrush") ??
-                            TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush");
         var appPanel = TryGetThemeBrush(owner, themeVariant, "AppPanelBrush") ??
                        TryGetThemeBrush(app, themeVariant, "AppPanelBrush");
         var appBorder = TryGetThemeBrush(owner, themeVariant, "AppBorderBrush") ??
                         TryGetThemeBrush(app, themeVariant, "AppBorderBrush");
         var menuPressed = TryGetThemeBrush(owner, themeVariant, "MenuPressedBrush") ??
                           TryGetThemeBrush(app, themeVariant, "MenuPressedBrush");
+        var ownerBackgroundColor = TryGetThemeColorBrush(owner, themeVariant, "AppBackgroundColor");
+        var appBackgroundColor = TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor");
+        var background = ResolveBackgroundBrush(
+            TryGetThemeBrush(owner, themeVariant, "AppBackgroundBrush"),
+            ownerBackgroundColor,
+            appBackgroundColor,
+            TryGetThemeBrush(app, themeVariant, "AppBackgroundBrush"),
+            owner?.Background,
+            themeVariant);
 
         return new DialogSurfaceBrushes(
-            appBackground ??
-            TryGetThemeColorBrush(owner, themeVariant, "AppBackgroundColor") ??
-            TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor") ??
-            owner?.Background ??
-            CreateDefaultFallbackBrush(themeVariant),
+            background,
             appPanel ??
             TryGetThemeColorBrush(owner, themeVariant, "AppPanelColor") ??
             TryGetThemeColorBrush(app, themeVariant, "AppPanelColor"),
@@ -48,6 +51,23 @@ internal static class DialogSurfaceFactory
             TryGetThemeColorBrush(owner, themeVariant, "MenuPressedColor") ??
             TryGetThemeColorBrush(app, themeVariant, "MenuPressedColor"));
     }
+
+    private static IBrush ResolveBackgroundBrush(
+        IBrush? ownerBrush,
+        IBrush? ownerColor,
+        IBrush? appColor,
+        IBrush? appBrush,
+        IBrush? ownerBackground,
+        ThemeVariant themeVariant)
+    {
+        var candidate = IsVisibleSolidBrush(ownerBrush)
+            ? ownerBrush
+            : (IsVisibleSolidBrush(appBrush) ? appBrush : null) ?? ownerColor ?? appColor ?? ownerBackground;
+        return EnsureOpaque(candidate ?? CreateDefaultFallbackBrush(themeVariant), themeVariant);
+    }
+
+    private static bool IsVisibleSolidBrush(IBrush? brush) =>
+        brush is ISolidColorBrush { Color.A: > 0 };
 
     public static Window CreateWindow(
         string title,
@@ -146,9 +166,7 @@ internal static class DialogSurfaceFactory
         if (brush is not ISolidColorBrush solid)
             return CreateDefaultFallbackBrush(themeVariant);
         var color = solid.Color;
-        return color.A == byte.MaxValue
-            ? brush
-            : new SolidColorBrush(Color.FromArgb(byte.MaxValue, color.R, color.G, color.B));
+        return new SolidColorBrush(Color.FromArgb(byte.MaxValue, color.R, color.G, color.B));
     }
 
     private static IBrush CreateDefaultFallbackBrush(ThemeVariant themeVariant)

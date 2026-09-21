@@ -122,6 +122,10 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			application.RequestedThemeVariant = ThemeVariant.Dark;
 			await UiTestDriver.WaitForConditionAsync(
 				window,
+				() => window.ActualThemeVariant == ThemeVariant.Dark,
+				"the journal owner to follow the application dark theme");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
 				() => journal.RequestedThemeVariant == ThemeVariant.Dark &&
 					  journal.Background is ISolidColorBrush background &&
 					  background.Color != lightBackground,

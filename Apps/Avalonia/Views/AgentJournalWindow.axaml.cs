@@ -70,7 +70,7 @@ internal partial class AgentJournalWindow : Window
         _localization.LanguageChanged += OnLanguageChanged;
         if (_owner is not null)
             _owner.ActualThemeVariantChanged += OnActualThemeVariantChanged;
-        else if (global::Avalonia.Application.Current is { } application)
+        if (global::Avalonia.Application.Current is { } application)
             application.ActualThemeVariantChanged += OnActualThemeVariantChanged;
     }
 
@@ -142,7 +142,7 @@ internal partial class AgentJournalWindow : Window
         _localization.LanguageChanged -= OnLanguageChanged;
         if (_owner is not null)
             _owner.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
-        else if (global::Avalonia.Application.Current is { } application)
+        if (global::Avalonia.Application.Current is { } application)
             application.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
         Opened -= OnOpened;
         Closed -= OnClosed;
