@@ -373,9 +373,9 @@ public sealed class AvaloniaCompiledBindingContractTests
 
 		var avaloniaDirectory = Path.Combine(repositoryRoot, "Apps", "Avalonia");
 		foreach (var viewFile in Directory.EnumerateFiles(
-			         avaloniaDirectory,
-			         "*.axaml",
-			         SearchOption.AllDirectories))
+					 avaloniaDirectory,
+					 "*.axaml",
+					 SearchOption.AllDirectories))
 		{
 			if (PathComparer.Default.Equals(viewFile, styleFile))
 				continue;
@@ -384,7 +384,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 			Assert.DoesNotContain(
 				viewDocument.Descendants(),
 				element => element.Name.LocalName == "Style" &&
-				           element.Attribute("Selector")?.Value == "ToolTip");
+						   element.Attribute("Selector")?.Value == "ToolTip");
 		}
 
 		var appSource = File.ReadAllText(Path.Combine(avaloniaDirectory, "App.axaml.cs"));
@@ -447,11 +447,11 @@ public sealed class AvaloniaCompiledBindingContractTests
 			"Arrow",
 			avaloniaNamespace);
 		foreach (var selector in new[]
-		         {
-			         "ScrollViewer.preview-scroll ScrollBar",
-			         "ScrollViewer.preview-scroll RepeatButton",
-			         "ScrollViewer.preview-scroll Thumb"
-		         })
+				 {
+					 "ScrollViewer.preview-scroll ScrollBar",
+					 "ScrollViewer.preview-scroll RepeatButton",
+					 "ScrollViewer.preview-scroll Thumb"
+				 })
 		{
 			AssertCursorSetter(
 				styles,
@@ -469,7 +469,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 		var previewScrollViewer = Assert.Single(
 			windowRoot.Descendants(avaloniaNamespace + "ScrollViewer"),
 			element => element.Attribute("Name")?.Value ==
-			           "PreviewTextScrollViewer");
+					   "PreviewTextScrollViewer");
 		Assert.Null(previewScrollViewer.Attribute("Cursor"));
 	}
 
@@ -498,7 +498,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 		var document = XDocument.Load(viewFile);
 		var root = Assert.IsType<XElement>(document.Root);
 
-		Assert.Equal("1063", root.Attribute("MinWidth")?.Value);
+		Assert.Equal("800", root.Attribute("MinWidth")?.Value);
 	}
 
 	[Fact]
@@ -532,11 +532,11 @@ public sealed class AvaloniaCompiledBindingContractTests
 		var compactSectionAll = Assert.Single(
 			styles,
 			element => element.Attribute("Selector")?.Value ==
-			           "Window.compact-mode CheckBox.section-all");
+					   "Window.compact-mode CheckBox.section-all");
 		var compactBullet = Assert.Single(
 			styles,
 			element => element.Attribute("Selector")?.Value ==
-			           "Window.compact-mode CheckBox.section-all /template/ Border#NormalRectangle");
+					   "Window.compact-mode CheckBox.section-all /template/ Border#NormalRectangle");
 
 		Assert.DoesNotContain(
 			compactSectionAll.Descendants(avaloniaNamespace + "Setter"),
@@ -544,7 +544,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 		Assert.DoesNotContain(
 			styles,
 			element => element.Attribute("Selector")?.Value ==
-			           "Window.compact-mode CheckBox.section-all /template/ ContentPresenter");
+					   "Window.compact-mode CheckBox.section-all /template/ ContentPresenter");
 		Assert.Equal(
 			"18",
 			compactBullet.Elements(avaloniaNamespace + "Setter")
@@ -575,7 +575,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 		var borderStyle = Assert.Single(
 			styles,
 			element => element.Attribute("Selector")?.Value ==
-			           "Border.drop-zone-animating Rectangle.drop-zone-border");
+					   "Border.drop-zone-animating Rectangle.drop-zone-border");
 		var borderAnimation = Assert.Single(
 			borderStyle.Descendants(avaloniaNamespace + "Animation"));
 		Assert.Equal("0:0:0.8", borderAnimation.Attribute("Duration")?.Value);
@@ -597,7 +597,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 		var iconStyle = Assert.Single(
 			styles,
 			element => element.Attribute("Selector")?.Value ==
-			           "Border.drop-zone-animating Viewbox.drop-zone-icon");
+					   "Border.drop-zone-animating Viewbox.drop-zone-icon");
 		var iconAnimation = Assert.Single(
 			iconStyle.Descendants(avaloniaNamespace + "Animation"));
 		Assert.Equal("0:0:2.1", iconAnimation.Attribute("Duration")?.Value);
@@ -628,7 +628,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 		while (directory is not null)
 		{
 			if (Directory.Exists(Path.Combine(directory, ".git")) ||
-			    File.Exists(Path.Combine(directory, "DevProjex.sln")))
+				File.Exists(Path.Combine(directory, "DevProjex.sln")))
 			{
 				return directory;
 			}
