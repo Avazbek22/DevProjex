@@ -15,6 +15,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	public const int MaximumDeliveredPaths = 200;
 	public const int MaximumArgumentValueCharacters = 4096;
 	private const int MaximumLineCharacters = 2 * 1024 * 1024;
+	private const int TailBoundaryProbeBytes = 64;
 	private static readonly TimeSpan ChangePollInterval = TimeSpan.FromMilliseconds(250);
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> ArgumentDetectors = new(
 		static () => [new GitleaksSecretDetector(), new PrivateDataDetector()],
@@ -196,7 +197,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		long offset = 0;
 		var observedFile = false;
 		var missingAfterObservation = false;
-		DateTime observedCreationUtc = default;
+		byte[] observedBoundary = [];
 		var ended = false;
 		while (!ended)
 		{
@@ -210,8 +211,11 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			try
 			{
 				var file = new FileInfo(path);
+				var boundaryChanged = observedFile && file.Length >= offset &&
+					!await TailBoundaryMatchesAsync(path, offset, observedBoundary, cancellationToken)
+						.ConfigureAwait(false);
 				var reset = observedFile &&
-					(missingAfterObservation || file.Length < offset || file.CreationTimeUtc != observedCreationUtc);
+					(missingAfterObservation || file.Length < offset || boundaryChanged);
 				if (reset)
 				{
 					offset = 0;
@@ -219,9 +223,9 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 				}
 				observedFile = true;
 				missingAfterObservation = false;
-				observedCreationUtc = file.CreationTimeUtc;
 				tail = await ReadTailAsync(path, offset, cancellationToken).ConfigureAwait(false);
 				offset = tail.Offset;
+				observedBoundary = await ReadTailBoundaryAsync(path, offset, cancellationToken).ConfigureAwait(false);
 			}
 			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 			{
@@ -242,6 +246,45 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			}
 			await Task.Delay(ChangePollInterval, clock, cancellationToken).ConfigureAwait(false);
 		}
+	}
+
+	private async ValueTask<bool> TailBoundaryMatchesAsync(
+		string path,
+		long offset,
+		byte[] expected,
+		CancellationToken cancellationToken)
+	{
+		var actual = await ReadTailBoundaryAsync(path, offset, cancellationToken).ConfigureAwait(false);
+		return actual.AsSpan().SequenceEqual(expected);
+	}
+
+	private async ValueTask<byte[]> ReadTailBoundaryAsync(
+		string path,
+		long offset,
+		CancellationToken cancellationToken)
+	{
+		var length = checked((int)Math.Min(offset, TailBoundaryProbeBytes));
+		if (length == 0)
+			return [];
+		await using var stream = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete,
+			bufferSize: TailBoundaryProbeBytes,
+			FileOptions.Asynchronous | FileOptions.RandomAccess);
+		stream.Position = offset - length;
+		var boundary = new byte[length];
+		var totalRead = 0;
+		while (totalRead < boundary.Length)
+		{
+			var read = await stream.ReadAsync(boundary.AsMemory(totalRead), cancellationToken).ConfigureAwait(false);
+			if (read == 0)
+				return boundary[..totalRead];
+			totalRead += read;
+			TailBytesReadObserver?.Invoke(read);
+		}
+		return boundary;
 	}
 
 	private async ValueTask<TailReadResult> ReadTailAsync(
