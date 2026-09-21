@@ -203,6 +203,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						L("Terminal.Tui.Error.ProfilePersistence"));
 				}
 			}));
+		_selectionProfilePersistence.StateChanged += OnSelectionPersistenceStateChanged;
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
 		_terminalHeight = Math.Max(_environment.Height, initialScreen.Height);
@@ -1657,11 +1658,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (width < 80)
 		{
 			var compactActivity = BuildAgentActivityIndicator(compact: true);
+			var compactSelectionPersistence = BuildSelectionPersistenceIndicator();
 			return $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
 				   $"~{tokens:N0} tok  " +
 				   $"{warningCount:N0} W  {errorCount:N0} E" +
 				   (compressionUnavailable ? "  C!" : string.Empty) +
 				   (_liveSessions.Count > 0 ? "  Live context" : string.Empty) +
+				   (compactSelectionPersistence is null ? string.Empty : $"  {compactSelectionPersistence}") +
 				   (compactActivity is null ? string.Empty : $"  {compactActivity}");
 		}
 
@@ -1679,11 +1682,37 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			parts.Add(L("Compression.Metrics.Unavailable"));
 		if (_liveSessions.Count > 0)
 			parts.Add(BuildLiveSessionIndicator(_liveSessions));
+		if (BuildSelectionPersistenceIndicator() is { } selectionPersistence)
+			parts.Add(selectionPersistence);
 		if (BuildAgentActivityIndicator(compact: false) is { } activity)
 			parts.Add(activity);
 		return string.Join(
 			separator,
 			parts);
+	}
+
+	private string? BuildSelectionPersistenceIndicator() =>
+		_selectionProfilePersistence.State.Phase switch
+		{
+			TerminalSelectionPersistencePhase.Pending or TerminalSelectionPersistencePhase.Saving =>
+				L("SelectionPersistence.Saving"),
+			TerminalSelectionPersistencePhase.Failed =>
+				L("SelectionPersistence.Failed"),
+			_ => null
+		};
+
+	private void OnSelectionPersistenceStateChanged(object? sender, EventArgs args)
+	{
+		_application.Invoke(() =>
+		{
+			if (_stopping || _disposed || _status is null || _state is null ||
+				_operations.IsRunning(WorkspaceOperationKind.TransientStatus))
+			{
+				return;
+			}
+
+			_status.Text = BuildStatus(_state, _application.Screen.Width);
+		});
 	}
 
 	private string? BuildAgentActivityIndicator(bool compact)
@@ -5401,6 +5430,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_sessionCts.Dispose();
 		_settingsPersistenceCts.Cancel();
 		_settingsPersistenceCts.Dispose();
+		_selectionProfilePersistence.StateChanged -= OnSelectionPersistenceStateChanged;
 		_selectionProfilePersistence.Dispose();
 		if (_agentJournalStore.IsValueCreated)
 			_agentJournalStore.Value.Dispose();

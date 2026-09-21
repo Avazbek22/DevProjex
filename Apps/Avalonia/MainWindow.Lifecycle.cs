@@ -222,6 +222,7 @@ public partial class MainWindow
             _searchFilterController.Dispose();
             _workspacePresentation.Dispose();
             _selectionCoordinator.Dispose();
+			_treeSelectionProfiles.StateChanged -= OnTreeSelectionPersistenceStateChanged;
             _treeSelectionProfiles.Dispose();
             _themeBrushCoordinator.Dispose();
             _applicationUpdates.Dispose();

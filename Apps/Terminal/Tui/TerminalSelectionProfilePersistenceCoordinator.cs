@@ -3,6 +3,18 @@ using DevProjex.Application.Selection;
 
 namespace DevProjex.Terminal.Tui;
 
+internal enum TerminalSelectionPersistencePhase
+{
+	Idle,
+	Pending,
+	Saving,
+	Failed
+}
+
+internal readonly record struct TerminalSelectionPersistenceState(
+	TerminalSelectionPersistencePhase Phase,
+	string? FailureReason = null);
+
 internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposable
 {
 	private static readonly TimeSpan PersistenceDelay = TimeSpan.FromSeconds(2);
@@ -16,8 +28,20 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 	private PendingWrite? _pending;
 	private CancellationTokenSource? _delayCts;
 	private Task _activePersistence = Task.CompletedTask;
+	private TerminalSelectionPersistenceState _state = new(TerminalSelectionPersistencePhase.Idle);
 	private long _version;
 	private int _disposed;
+
+	public event EventHandler? StateChanged;
+
+	public TerminalSelectionPersistenceState State
+	{
+		get
+		{
+			lock (_sync)
+				return _state;
+		}
+	}
 
 	public TerminalSelectionProfilePersistenceCoordinator(
 		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
@@ -52,6 +76,7 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 
 		CancellationToken token;
 		long version;
+		EventHandler? stateChanged;
 		lock (_sync)
 		{
 			if (_disposed != 0)
@@ -66,7 +91,10 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 				Path.GetFullPath(projectPath),
 				ProjectSelectionProfileBuilder.Clone(profile),
 				version);
+			stateChanged = SetStateLocked(new TerminalSelectionPersistenceState(
+				TerminalSelectionPersistencePhase.Pending));
 		}
+		stateChanged?.Invoke(this, EventArgs.Empty);
 
 		lock (_sync)
 		{
@@ -110,6 +138,7 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 
 	public void DiscardPending()
 	{
+		EventHandler? stateChanged;
 		lock (_sync)
 		{
 			_delayCts?.Cancel();
@@ -117,7 +146,10 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 			_delayCts = null;
 			_pending = null;
 			_version = checked(_version + 1);
+			stateChanged = SetStateLocked(new TerminalSelectionPersistenceState(
+				TerminalSelectionPersistencePhase.Idle));
 		}
+		stateChanged?.Invoke(this, EventArgs.Empty);
 	}
 
 	private async Task PersistAfterDelayAsync(long version, CancellationToken cancellationToken)
@@ -154,15 +186,24 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 					return true;
 				pending = _pending;
 			}
+			PublishStateForVersion(
+				version,
+				new TerminalSelectionPersistenceState(TerminalSelectionPersistencePhase.Saving));
 
 			try
 			{
 				await PersistAsync(pending, cancellationToken).ConfigureAwait(false);
+				EventHandler? stateChanged = null;
 				lock (_sync)
 				{
 					if (_pending?.Version == version)
+					{
 						_pending = null;
+						stateChanged = SetStateLocked(new TerminalSelectionPersistenceState(
+							TerminalSelectionPersistencePhase.Idle));
+					}
 				}
+				stateChanged?.Invoke(this, EventArgs.Empty);
 				return true;
 			}
 			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -188,7 +229,35 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 				lastFailure.GetType().Name);
 			_failureCallback?.Invoke(lastFailure);
 		}
+		if (lastFailure is not null)
+		{
+			PublishStateForVersion(
+				version,
+				new TerminalSelectionPersistenceState(
+					TerminalSelectionPersistencePhase.Failed,
+					lastFailure.Message));
+		}
 		return false;
+	}
+
+	private void PublishStateForVersion(long version, TerminalSelectionPersistenceState state)
+	{
+		EventHandler? stateChanged;
+		lock (_sync)
+		{
+			if (_disposed != 0 || _pending?.Version != version)
+				return;
+			stateChanged = SetStateLocked(state);
+		}
+		stateChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private EventHandler? SetStateLocked(TerminalSelectionPersistenceState state)
+	{
+		if (_state == state)
+			return null;
+		_state = state;
+		return StateChanged;
 	}
 
 	private async Task PersistAsync(PendingWrite pending, CancellationToken cancellationToken)
