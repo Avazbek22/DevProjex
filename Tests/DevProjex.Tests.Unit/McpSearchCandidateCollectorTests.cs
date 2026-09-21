@@ -250,6 +250,36 @@ public sealed class McpSearchCandidateCollectorTests
 	}
 
 	[Fact]
+	public void RetainedCandidateKeepsOnlyReplacementCountsForItsRenderedLines()
+	{
+		const string content = "secret needle\nplain needle\n";
+		var scan = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("needle", ignoreCase: false),
+			0,
+			10,
+			CancellationToken.None);
+		var collector = new McpSearchCandidateCollector(10, 10_000);
+
+		DevProjexMcpTools.AddSearchCandidates(
+			collector,
+			"Fixture.cs",
+			"Fixture.cs",
+			content,
+			scan.Matches,
+			[],
+			new McpSearchRegex("needle", ignoreCase: false),
+			0,
+			explicitScope: false,
+			protectionCountsByLine: new Dictionary<int, int> { [1] = 2, [9] = 7 });
+
+		var retained = collector.Snapshot();
+		Assert.Equal(2, retained.Count);
+		Assert.Equal([new McpSearchProtectedLine(1, 2)], retained[0].ProtectedLines);
+		Assert.Empty(retained[1].ProtectedLines!);
+	}
+
+	[Fact]
 	public void CompleteBoundaryStatesThatEveryEligibleSourceWasInspected()
 	{
 		var notice = DevProjexMcpTools.FormatSearchBoundaryNotice(Boundary(), false);

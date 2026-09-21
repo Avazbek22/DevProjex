@@ -92,6 +92,7 @@ internal sealed class DevProjexMcpTools(
 	private readonly McpProjectOperationGate _projectOperation = new();
 	private readonly McpServiceNoticeMemo serviceNotices = new();
 	private static readonly IReadOnlySet<string> EmptyArgumentNames = McpJsonArguments.FreezeAllowed();
+	private static readonly IReadOnlyDictionary<int, int> EmptyProtectionCounts = new Dictionary<int, int>();
 	private static readonly IReadOnlySet<string> ReadPackArgumentNames =
 		McpJsonArguments.FreezeAllowed("pack_id", "start_line", "end_line", "start_column");
 	private readonly IReadOnlySet<string> getTreeArgumentNames = Allowed(agentExclusions,
@@ -987,7 +988,6 @@ internal sealed class DevProjexMcpTools(
 				MaximumStoredSearchMatches,
 				MaximumStoredSearchCharacters);
 			var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
-			var protectedSearchFiles = new Dictionary<string, TransformedTextFile>(StringComparer.Ordinal);
 			await using var searched = await Projects.ConsumeSearchTextAsync(
 				plan with { IncludedFiles = inspectedFiles },
 				(file, token) =>
@@ -1000,6 +1000,7 @@ internal sealed class DevProjexMcpTools(
 					IReadOnlyList<NavigationDeclaration>? navigation = null;
 					McpNavigationDeclarationIndex? navigationIndex = null;
 					McpSearchDeclarationPreviewCache? declarationPreviews = null;
+					IReadOnlyDictionary<int, int>? protectionCountsByLine = null;
 					var priorityState = new McpSearchFilePriorityState();
 					var scan = McpSearchTextScanner.ScanEach(
 						file.Content,
@@ -1008,6 +1009,7 @@ internal sealed class DevProjexMcpTools(
 						file.ReplacementRanges,
 						match =>
 						{
+							protectionCountsByLine ??= BuildRedactionLineCounts(file);
 							navigation ??= McpSearchSymbols.CaptureNavigation(
 								Projects.DependencyFactsEngine,
 								relative,
@@ -1019,8 +1021,9 @@ internal sealed class DevProjexMcpTools(
 									relative,
 									file.Content,
 									navigation,
-									searchBodyCharacters,
-									token);
+								searchBodyCharacters,
+								token,
+								protectionCountsByLine);
 							AddSearchCandidates(
 								candidates,
 								relative,
@@ -1033,13 +1036,13 @@ internal sealed class DevProjexMcpTools(
 								explicitScope: HasItems(paths),
 								priorityState,
 								declarationPreviews,
-								navigationIndex);
+								navigationIndex,
+								protectionCountsByLine: protectionCountsByLine);
 						},
 						token);
 					totalMatches += scan.TotalMatches;
 					if (scan.TotalMatches > 0)
 					{
-						protectedSearchFiles[relative] = file;
 						matchingFiles++;
 						McpSearchExecutionHooks.AfterScan?.Invoke(relative);
 						var annotatedFiles = candidates.SelectFilesForAnnotation(McpSearchSymbols.MaximumAnnotatedFiles);
@@ -1262,7 +1265,7 @@ internal sealed class DevProjexMcpTools(
 					plan.SourceRoot,
 					rendered.WrittenHits.Select(static hit => hit.RelativePath)
 						.Distinct(ProjectTreePathIdentity.CanonicalComparer));
-				RecordSearchProtection(searched.Snapshot, protectedSearchFiles, rendered, declarationPreview);
+				RecordSearchProtection(searched.Snapshot, candidateSnapshot, rendered, declarationPreview);
 				retained = true;
 				return result;
 			}
@@ -1833,7 +1836,7 @@ internal sealed class DevProjexMcpTools(
 
 	private void RecordSearchProtection(
 		SecretRedactionSnapshot? snapshot,
-		IReadOnlyDictionary<string, TransformedTextFile> protectedFiles,
+		IReadOnlyList<McpSearchCandidate> candidates,
 		McpSearchRenderSlice rendered,
 		McpSearchDeclarationPreview? declarationPreview)
 	{
@@ -1859,22 +1862,48 @@ internal sealed class DevProjexMcpTools(
 				lines.Add(line);
 		}
 
+		var countsByPath = new Dictionary<string, Dictionary<int, int>>(StringComparer.Ordinal);
+		foreach (var candidate in candidates)
+		{
+			if (candidate.ProtectedLines is not { Count: > 0 } protectedLines)
+				continue;
+			if (!countsByPath.TryGetValue(candidate.Group.RelativePath, out var lineCounts))
+			{
+				lineCounts = [];
+				countsByPath.Add(candidate.Group.RelativePath, lineCounts);
+			}
+			foreach (var item in protectedLines)
+				lineCounts.TryAdd(item.LineNumber, item.ReplacementCount);
+		}
+		if (declarationPreview is { ProtectedLines.Count: > 0 } protectedPreview)
+		{
+			if (!countsByPath.TryGetValue(protectedPreview.Declaration.RelativePath, out var lineCounts))
+			{
+				lineCounts = [];
+				countsByPath.Add(protectedPreview.Declaration.RelativePath, lineCounts);
+			}
+			foreach (var item in protectedPreview.ProtectedLines)
+				lineCounts.TryAdd(item.LineNumber, item.ReplacementCount);
+		}
+
 		foreach (var (relativePath, lines) in returnedLines)
 		{
-			if (protectedFiles.TryGetValue(relativePath, out var file))
-				journal.RecordProtection(CountRedactionsOnLines(file, lines), snapshot);
+			if (!countsByPath.TryGetValue(relativePath, out var lineCounts))
+				continue;
+			var replacementCount = lines.Sum(line => lineCounts.GetValueOrDefault(line));
+			var counts = ResolveProtectionCounts(replacementCount, snapshot);
+			journal.RecordProtection(counts.Secrets, counts.PrivateData);
 		}
 	}
 
-	private static int CountRedactionsOnLines(TransformedTextFile file, IEnumerable<int> returnedLines)
+	private static IReadOnlyDictionary<int, int> BuildRedactionLineCounts(TransformedTextFile file)
 	{
-		var lineSet = returnedLines.ToHashSet();
-		if (lineSet.Count == 0 || file.ReplacementRanges.Count == 0)
-			return 0;
-		var ranges = file.ReplacementRanges.OrderBy(static range => range.Start).ToArray();
+		if (file.ReplacementRanges.Count == 0)
+			return EmptyProtectionCounts;
+		var counts = new Dictionary<int, int>();
+		var ranges = file.ReplacementRanges.OrderBy(static range => range.Start);
 		var sourceIndex = 0;
 		var line = 1;
-		var count = 0;
 		var skipLineFeed = false;
 		foreach (var range in ranges)
 		{
@@ -1898,10 +1927,15 @@ internal sealed class DevProjexMcpTools(
 					line++;
 				}
 			}
-			if (lineSet.Contains(line))
-				count++;
+			counts[line] = counts.GetValueOrDefault(line) + 1;
 		}
-		return count;
+		return counts;
+	}
+
+	private static int CountRedactionsOnLines(TransformedTextFile file, IEnumerable<int> returnedLines)
+	{
+		var counts = BuildRedactionLineCounts(file);
+		return returnedLines.Distinct().Sum(line => counts.GetValueOrDefault(line));
 	}
 
 	private static (long Secrets, long PrivateData) ResolveProtectionCounts(
@@ -3312,7 +3346,8 @@ internal sealed class DevProjexMcpTools(
 		McpSearchFilePriorityState? priorityState = null,
 		McpSearchDeclarationPreviewCache? declarationPreviews = null,
 		McpNavigationDeclarationIndex? declarationIndex = null,
-		Action? declarationVisited = null)
+		Action? declarationVisited = null,
+		IReadOnlyDictionary<int, int>? protectionCountsByLine = null)
 	{
 		priorityState ??= new McpSearchFilePriorityState();
 		declarationIndex ??= new McpNavigationDeclarationIndex(declarations, declarationVisited);
@@ -3350,6 +3385,14 @@ internal sealed class DevProjexMcpTools(
 					[matchLine],
 					rendered);
 				var stableText = rendered.First(item => item.IsMatch).Text;
+				var protectedLines = protectionCountsByLine is not { Count: > 0 }
+					? null
+					: rendered
+						.Where(item => protectionCountsByLine.ContainsKey(item.LineNumber))
+						.Select(item => new McpSearchProtectedLine(
+							item.LineNumber,
+							protectionCountsByLine[item.LineNumber]))
+						.ToArray();
 				collector.Consider(new McpSearchCandidate(
 					group,
 					matchLine,
@@ -3363,7 +3406,8 @@ internal sealed class DevProjexMcpTools(
 					stableText,
 					checked(rendered.Sum(static item => item.Text.Length + Environment.NewLine.Length) +
 							relativePath.Length + Environment.NewLine.Length),
-					declaration is null ? null : declarationPreviews?.Get(declaration)));
+					declaration is null ? null : declarationPreviews?.Get(declaration),
+					protectedLines));
 			}
 		}
 	}
