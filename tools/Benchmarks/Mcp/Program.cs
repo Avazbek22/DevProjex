@@ -2,7 +2,14 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Runtime.CompilerServices;
+using DevProjex.Application.Context;
 using DevProjex.Application.Dependencies;
+using DevProjex.Application.Selection;
+using DevProjex.Kernel;
+using DevProjex.Kernel.Abstractions;
+using DevProjex.Kernel.Contracts;
+using DevProjex.Kernel.Models;
 using DevProjex.Mcp;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -10,6 +17,12 @@ using ModelContextProtocol.Protocol;
 if (args.FirstOrDefault() == "search-declarations")
 {
 	SearchDeclarationBenchmark.Run(args[1..]);
+	return;
+}
+
+if (args.FirstOrDefault() == "live-roots")
+{
+	LiveRootRetentionBenchmark.Run(args[1..]);
 	return;
 }
 
@@ -238,6 +251,157 @@ internal static class SearchDeclarationBenchmark
 		double ElapsedMilliseconds,
 		long AllocatedBytes,
 		long VisitedDeclarations);
+}
+
+internal static class LiveRootRetentionBenchmark
+{
+	public static void Run(string[] arguments)
+	{
+		var repetitions = 5;
+		var nodesPerRoot = 10_000;
+		for (var index = 0; index < arguments.Length; index++)
+		{
+			var option = arguments[index];
+			if (index + 1 >= arguments.Length)
+				throw new ArgumentException($"Incomplete argument: {option}");
+			var value = arguments[++index];
+			switch (option)
+			{
+				case "--repetitions":
+					repetitions = int.Parse(value, CultureInfo.InvariantCulture);
+					break;
+				case "--nodes-per-root":
+					nodesPerRoot = int.Parse(value, CultureInfo.InvariantCulture);
+					break;
+				default:
+					throw new ArgumentException($"Unknown argument: {option}");
+			}
+		}
+		if (repetitions < 3)
+			throw new ArgumentOutOfRangeException(nameof(repetitions), "At least three repetitions are required.");
+		if (nodesPerRoot < 1)
+			throw new ArgumentOutOfRangeException(nameof(nodesPerRoot));
+
+		Console.WriteLine("roots,nodes_per_root,median_retained_bytes,min_bytes,max_bytes,spread_bytes");
+		foreach (var rootCount in new[] { 1, 8, 50 })
+		{
+			var samples = Enumerable.Range(0, repetitions)
+				.Select(_ => Measure(rootCount, nodesPerRoot))
+				.Order()
+				.ToArray();
+			Console.WriteLine(string.Join(',',
+				rootCount.ToString(CultureInfo.InvariantCulture),
+				nodesPerRoot.ToString(CultureInfo.InvariantCulture),
+				samples[samples.Length / 2].ToString(CultureInfo.InvariantCulture),
+				samples[0].ToString(CultureInfo.InvariantCulture),
+				samples[^1].ToString(CultureInfo.InvariantCulture),
+				(samples[^1] - samples[0]).ToString(CultureInfo.InvariantCulture)));
+		}
+	}
+
+	private static long Measure(int rootCount, int nodesPerRoot)
+	{
+		var rootBase = Path.Combine(Path.GetTempPath(), "devprojex-live-retention", Guid.NewGuid().ToString("N"));
+		var roots = Enumerable.Range(0, rootCount)
+			.Select(index => Path.Combine(rootBase, $"root-{index:D2}"))
+			.ToArray();
+		try
+		{
+			foreach (var root in roots)
+				Directory.CreateDirectory(root);
+			var state = new McpLiveContextState(
+				new McpRootRegistry(roots),
+				static () => BenchmarkProfileStore.Instance,
+				TimeSpan.Zero);
+			Collect();
+			var before = GC.GetTotalMemory(forceFullCollection: false);
+			foreach (var root in roots)
+			{
+				using var invocation = state.BeginInvocation();
+				_ = state.ReadProfile(root);
+				RecordPlan(state, root, nodesPerRoot);
+			}
+			Collect();
+			var retained = GC.GetTotalMemory(forceFullCollection: false) - before;
+			GC.KeepAlive(state);
+			return Math.Max(0, retained);
+		}
+		finally
+		{
+			Directory.Delete(rootBase, recursive: true);
+		}
+	}
+
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static void RecordPlan(McpLiveContextState state, string root, int nodeCount)
+	{
+		var children = Enumerable.Range(0, nodeCount)
+			.Select(index => new TreeNodeDescriptor(
+				$"File{index}.cs",
+				Path.Combine(root, $"File{index}.cs"),
+				false,
+				false,
+				"csharp",
+				[]))
+			.ToArray();
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", children);
+		state.RecordPlan(root, CreatePlan(root, tree, nodeCount));
+	}
+
+	private static ProjectContextPlan CreatePlan(string root, TreeNodeDescriptor tree, int fileCount) =>
+		new(
+			root,
+			ProjectSelectionSpec.Standard,
+			[],
+			[],
+			[],
+			[],
+			tree,
+			tree,
+			new HashSet<string>(PathComparer.Default),
+			Enumerable.Range(0, fileCount).Select(index => Path.Combine(root, $"File{index}.cs")).ToArray(),
+			[root],
+			new ProjectAnalysisReport(
+				ProjectAnalysisReport.CurrentSchemaVersion,
+				DateTimeOffset.UnixEpoch,
+				root,
+				new ProjectAnalysisSelectionReport([], [], []),
+				new ProjectAnalysisInventoryReport([], [], new ProjectTreeSummaryReport(1, fileCount, 0)),
+				new ProjectAnalysisOutputMetricsReport(ProjectOutputMetricsReport.Empty, ProjectOutputMetricsReport.Empty),
+				new ProjectAnalysisTimingReport(0, 0, 0),
+				new ProjectAnalysisDiagnosticsReport(false, false, [])),
+			[],
+			new ProjectContextGitReadiness(GitFilteringMode.None, 0, false),
+			"live-retention-benchmark");
+
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static void Collect()
+	{
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
+	}
+
+	private sealed class BenchmarkProfileStore : IProjectProfileStore
+	{
+		public static BenchmarkProfileStore Instance { get; } = new();
+
+		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout) =>
+			new(ProjectProfileLookupStatus.Found, new ProjectSelectionProfile([], [], [], SelectedPaths: null));
+
+		public bool EnsureStorageExists() => true;
+		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+		{
+			profile = new ProjectSelectionProfile([], [], [], SelectedPaths: null);
+			return true;
+		}
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile) => true;
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc) => true;
+		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		{
+		}
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
+	}
 }
 
 internal sealed record BenchmarkOptions(

@@ -26,3 +26,10 @@ network calls. It reports elapsed time, allocations, and the number of declarati
 ```powershell
 dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- search-declarations --repetitions 5
 ```
+
+The live-state retention measurement creates 1, 8, and 50 in-memory roots and reports the
+managed bytes retained after their effective plans leave scope:
+
+```powershell
+dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- live-roots --nodes-per-root 10000 --repetitions 5
+```
