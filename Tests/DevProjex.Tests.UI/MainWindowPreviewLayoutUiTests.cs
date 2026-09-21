@@ -142,13 +142,18 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
 
 			var settingsIsland = UiTestDriver.GetRequiredControl<Border>(window, "SettingsIsland");
+			var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
 			var previewIsland = UiTestDriver.GetRequiredControl<Border>(window, "PreviewIsland");
 			var settingsWidth = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
+			var settingsContainerWidth = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
 			var previewWidth = UiTestDriver.GetBoundsInWindow(previewIsland, window).Width;
 
 			Assert.True(
 				settingsWidth >= WorkspacePresentationController.SettingsPanelMinimumWidth,
 				$"Settings width was {settingsWidth:F2} at {width:F0}x{height:F0}.");
+			Assert.True(
+				settingsContainerWidth >= settingsWidth + WorkspacePresentationController.PreviewSettingsSplitterWidth,
+				$"Settings carrier width was {settingsContainerWidth:F2} for a {settingsWidth:F2} panel.");
 			if (width <= WorkspacePresentationController.MinimumWindowWidth)
 			{
 				Assert.True(
