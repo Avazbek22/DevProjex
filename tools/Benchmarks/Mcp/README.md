@@ -19,3 +19,10 @@ Use `--only related_files` (or a comma-separated operation list) for a focused r
 Client allocation is measured in the benchmark process. Server-side content-pipeline
 counters are asserted by targeted integration tests so the measurement protocol does
 not add a diagnostic field to MCP responses.
+
+The declaration lookup microbenchmark uses generated source in memory and performs no server or
+network calls. It reports elapsed time, allocations, and the number of declaration records visited:
+
+```powershell
+dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- search-declarations --repetitions 5
+```

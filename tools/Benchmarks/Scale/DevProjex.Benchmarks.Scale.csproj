@@ -6,7 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="ModelContextProtocol" />
-    <ProjectReference Include="..\..\..\Apps\Mcp\DevProjex.Mcp.csproj" />
+    <ProjectReference Include="..\..\..\Apps\Avalonia\DevProjex.Avalonia.csproj" />
   </ItemGroup>
 </Project>

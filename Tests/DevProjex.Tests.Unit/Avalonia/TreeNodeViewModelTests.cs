@@ -1119,6 +1119,41 @@ public sealed class TreeNodeViewModelTests
         Assert.True(root.Children[2].IsChecked);
     }
 
+    [Fact]
+    public void WideLazyBranchReusesEveryPreservedChildByCanonicalPath()
+    {
+        const int count = 10_000;
+        var descriptors = Enumerable.Range(0, count)
+            .Select(index => new TreeNodeDescriptor(
+                $"File{index:D5}.cs",
+                $@"C:\Root\File{index:D5}.cs",
+                false,
+                false,
+                "icon",
+                []))
+            .ToArray();
+        var root = new TreeNodeViewModel(
+            CreateDescriptor("Root", descriptors),
+            null,
+            null,
+            BuildChildrenFromDescriptor);
+        var original = root.Children.ToArray();
+        for (var index = 0; index < original.Length; index += 2)
+            original[index].SetCheckedForTreeStateRestore(true);
+
+        Assert.True(root.TryReleaseChildrenToLazyState());
+        var rebuilt = root.Children;
+
+        Assert.Equal(count, rebuilt.Count);
+        for (var index = 0; index < rebuilt.Count; index++)
+        {
+            if ((index & 1) == 0)
+                Assert.Same(original[index], rebuilt[index]);
+            else
+                Assert.NotSame(original[index], rebuilt[index]);
+        }
+    }
+
     #endregion
 
     private static TreeNodeViewModel CreateNode(string name)
