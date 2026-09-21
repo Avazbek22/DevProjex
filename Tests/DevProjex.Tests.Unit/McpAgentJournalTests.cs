@@ -352,6 +352,46 @@ public sealed class McpAgentJournalTests
 		Assert.Contains("History is incomplete: 1 event", new AgentJournalReceiptFormatter().FormatMarkdown(receipt));
 	}
 
+	[Fact(Timeout = 10_000)]
+	public async Task SlowWriterKeepsTheQueueBoundedAndReportsDroppedCalls()
+	{
+		using var temporary = new TemporaryDirectory();
+		var writer = new BlockingWriter();
+		await using var journal = new McpAgentJournal(
+			writer,
+			new McpRootRegistry([temporary.CreateFolder("project")]),
+			AgentJournalMode.Standard,
+			AgentJournalToolSet.Full,
+			"5.2.0",
+			hidePrivateData: false,
+			pid: 49,
+			processStartUtc: new DateTimeOffset(2026, 9, 20, 1, 0, 0, TimeSpan.Zero));
+		await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
+
+		RecordCall(journal);
+		await writer.FirstCallStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		for (var index = 0; index < 1_101; index++)
+			RecordCall(journal);
+
+		writer.ReleaseFirstCall.TrySetResult();
+		await journal.DisposeAsync();
+
+		Assert.Contains(writer.Calls, static call => call.Sequence == 1);
+		Assert.Contains(writer.Calls, static call => call.Sequence == 1_102);
+		Assert.True(writer.Calls.Count < 1_102);
+		var incomplete = Assert.Single(writer.Calls, static call =>
+			call.Notices.Contains("history-incomplete", StringComparer.Ordinal));
+		Assert.Equal("101", incomplete.Arguments["lost_events"]);
+	}
+
+	private static void RecordCall(McpAgentJournal journal)
+	{
+		using (journal.BeginCall("list_projects", new CallToolRequestParams { Name = "list_projects" }))
+			journal.Complete(McpToolResults.TextSuccess("ok"));
+	}
+
 	private class RecordingWriter : IAgentJournalWriter
 	{
 		public List<AgentJournalSession> Sessions { get; } = [];
@@ -421,6 +461,30 @@ public sealed class McpAgentJournalTests
 			CancellationToken cancellationToken = default) => call.Tool == "journal"
 			? base.RecordCall(sessionId, call, cancellationToken)
 			: ValueTask.FromException(new IOException("unavailable"));
+	}
+
+	private sealed class BlockingWriter : RecordingWriter
+	{
+		private int _started;
+
+		public TaskCompletionSource FirstCallStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public TaskCompletionSource ReleaseFirstCall { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public override async ValueTask RecordCall(
+			string sessionId,
+			AgentJournalCall call,
+			CancellationToken cancellationToken = default)
+		{
+			if (Interlocked.CompareExchange(ref _started, 1, 0) == 0)
+			{
+				FirstCallStarted.TrySetResult();
+				await ReleaseFirstCall.Task.WaitAsync(cancellationToken);
+			}
+			await base.RecordCall(sessionId, call, cancellationToken);
+		}
 	}
 
 	private sealed class StartFailureWriter : IAgentJournalWriter
