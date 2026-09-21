@@ -157,12 +157,12 @@ internal partial class AgentJournalWindow : Window
     {
         try
         {
-        var session = _viewModel.SelectedSession?.Session;
-        if (session is null)
-            return;
+            var session = _viewModel.SelectedSession?.Session;
+            if (session is null)
+                return;
             var receipt = await _reader.ReadReceiptAsync(session.Id, cancellationToken);
             if (receipt is null)
-            return;
+                return;
             var text = json ? _formatter.FormatJson(receipt) : _formatter.FormatMarkdown(receipt);
             await File.WriteAllTextAsync(
                 path,
@@ -183,21 +183,21 @@ internal partial class AgentJournalWindow : Window
     internal async Task<int> ClearCurrentScopeAsync(CancellationToken cancellationToken = default)
     {
         try
-    {
+        {
             var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
             var removed = await _reader.ClearAsync(root, cancellationToken);
             await RefreshAsync(cancellationToken);
             return removed;
-    }
+        }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-    {
+        {
             throw;
-    }
+        }
         catch (Exception exception)
-    {
+        {
             await ShowOperationErrorAsync("AgentJournal.ClearFailed", exception);
             return 0;
-    }
+        }
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -243,11 +243,11 @@ internal partial class AgentJournalWindow : Window
                 _loadedSessionId,
                 _viewModel.SelectedSession?.Session.Id,
                 StringComparison.Ordinal))
-    {
+        {
             return;
-    }
+        }
         await LoadSelectedSessionSafelyAsync(reloadSelected: true);
-}
+    }
 
     private async void OnExport(object? sender, RoutedEventArgs e)
     {

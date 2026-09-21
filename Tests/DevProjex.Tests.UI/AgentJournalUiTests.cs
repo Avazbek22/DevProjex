@@ -500,7 +500,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				var tip = Assert.IsType<string>(ToolTip.GetTip(item));
 				Assert.False(string.IsNullOrWhiteSpace(tip));
 				Assert.Equal(tip, AutomationProperties.GetHelpText(item));
-		}
+			}
 
 			var projectTree = Assert.IsAssignableFrom<TreeView>(window.FindControl<Control>("ProjectTree"));
 			var rootCheckBox = Assert.Single(
@@ -529,44 +529,44 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		var outputRoot = Path.Combine(Path.GetTempPath(), "devprojex-tails", "screenshots");
 		var capture = string.Equals(
 			Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_JOURNAL_TAILS"),
-				"1",
+			"1",
 			StringComparison.Ordinal);
 		if (capture)
-		Directory.CreateDirectory(outputRoot);
+			Directory.CreateDirectory(outputRoot);
 		foreach (var (language, code) in new[]
 		{
 			(AppLanguage.Ru, "ru"),
 			(AppLanguage.De, "de")
-			})
-			{
-					var fixture = JournalFixture.Create(workspace.Project.RootPath);
-					LocalizationService? localization = null;
+		})
+		{
+			var fixture = JournalFixture.Create(workspace.Project.RootPath);
+			LocalizationService? localization = null;
 			var owner = await UiTestDriver.CreateLoadedMainWindowAsync(
-						workspace.Project,
-						configureServices: services =>
-						{
-							localization = services.Localization;
+				workspace.Project,
+				configureServices: services =>
+				{
+					localization = services.Localization;
 					return services with
 					{
 						AgentJournalReader = new RecordingJournalReader(fixture.Sessions, fixture.Calls)
-		};
+					};
 				});
 			localization!.SetLanguage(language);
 			var journal = new AgentJournalWindow(
-			owner,
+				owner,
 				new RecordingJournalReader(fixture.Sessions, fixture.Calls),
-			new RecordingFormatter(),
-			localization,
-			workspace.Project.RootPath,
+				new RecordingFormatter(),
+				localization,
+				workspace.Project.RootPath,
 				() => workspace.Project.RootPath)
-		{
+			{
 				Width = AgentJournalWindow.MinimumWindowWidth,
 				Height = AgentJournalWindow.MinimumWindowHeight
 			};
 			UiTestDriver.TrackTopLevelWindow(journal);
 			journal.Show(owner);
 			try
-		{
+			{
 				await journal.RefreshAsync();
 				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
 				var sessionsHeader = Assert.IsType<Grid>(
@@ -587,20 +587,20 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				Assert.Equal(TextWrapping.Wrap, notice.TextWrapping);
 				Assert.Equal(journal.ViewModel.Calls[0].Notices, ToolTip.GetTip(notice));
 				if (capture)
-	{
+				{
 					var snapshotPath = Path.Combine(outputRoot, $"journal-minimum-{code}.png");
 					await SaveSnapshotAsync(journal, snapshotPath);
-		Assert.True(
+					Assert.True(
 						new FileInfo(snapshotPath).Length > 1_000,
 						$"{snapshotPath}; bounds={journal.Bounds.Size}; client={journal.ClientSize}");
-	}
-	}
+				}
+			}
 			finally
-	{
+			{
 				await UiTestDriver.CloseTopLevelWindowAsync(journal);
 				await UiTestDriver.CloseWindowAsync(owner);
-	}
-	}
+			}
+		}
 	}
 
 	[AvaloniaFact]
@@ -615,13 +615,13 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			workspace.Project.RootPath)
 		{
 			OperationErrorPresenter = message =>
-		{
+			{
 				errors.Add(message);
 				return Task.CompletedTask;
-		}
+			}
 		};
 		try
-	{
+		{
 			await journal.RefreshAsync();
 
 			var exception = await Record.ExceptionAsync(() => journal.ExportSelectedToPathAsync(
@@ -630,7 +630,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 
 			Assert.Null(exception);
 			Assert.Equal("Could not export the journal: read failed", Assert.Single(errors));
-			}
+		}
 		finally
 		{
 			journal.Close();
@@ -649,13 +649,13 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			workspace.Project.RootPath)
 		{
 			OperationErrorPresenter = message =>
-		{
+			{
 				errors.Add(message);
 				return Task.CompletedTask;
-		}
-			};
+			}
+		};
 		try
-				{
+		{
 			await journal.RefreshAsync();
 
 			var exception = await Record.ExceptionAsync(() => journal.ClearCurrentScopeAsync());
@@ -666,8 +666,8 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		finally
 		{
 			journal.Close();
+		}
 	}
-}
 
 	[AvaloniaFact]
 	public async Task JournalRefreshKeepsTheNewestProjectFilterResult()
