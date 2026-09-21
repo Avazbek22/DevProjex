@@ -137,9 +137,9 @@ internal sealed partial class TerminalWorkspaceSession
 			CaptureLocalProfile(state));
 	}
 
-	private void FlushLocalProfilePersistence()
+	private bool FlushLocalProfilePersistence()
 	{
-		_selectionProfilePersistence.FlushAsync().GetAwaiter().GetResult();
+		return _selectionProfilePersistence.FlushAsync().GetAwaiter().GetResult();
 	}
 
 	private static ProjectSelectionProfile CaptureLocalProfile(TerminalWorkspaceState state)

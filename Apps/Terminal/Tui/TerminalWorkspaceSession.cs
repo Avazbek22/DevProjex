@@ -75,6 +75,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private long _treePreviewSyncRequestId;
 	private long _workspacePersistenceRequestId;
 	private int _workspacePersistencePending;
+	private bool _discardSelectionProfilePersistenceOnExit;
 	private bool _previewSearchInProgress;
 	private bool _compressionUnavailableNotified;
 	private bool _agentActivityEnabled;
@@ -373,7 +374,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	public async Task CompleteAsync()
 	{
 		await FlushPendingWorkspacePersistenceAsync().ConfigureAwait(false);
-		await _selectionProfilePersistence.FlushAsync().ConfigureAwait(false);
+		if (!_discardSelectionProfilePersistenceOnExit)
+			_ = await _selectionProfilePersistence.FlushAsync().ConfigureAwait(false);
 		_stopping = true;
 		await _commandHistoryPersistence.CompleteAsync().ConfigureAwait(false);
 		_settingsPersistenceCts.CancelAfter(SettingsPersistenceShutdownBudget);
@@ -5456,7 +5458,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return false;
 		}
 		FlushPendingWorkspacePersistence();
-		FlushLocalProfilePersistence();
+		if (!TryFlushLocalProfilePersistence(exiting: false))
+			return false;
 		leave();
 		return true;
 	}
@@ -5472,8 +5475,36 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (!Confirm(L("Terminal.Tui.Exit"), L("Terminal.Tui.ConfirmExit")))
 			return false;
 		FlushPendingWorkspacePersistence();
-		FlushLocalProfilePersistence();
+		if (!TryFlushLocalProfilePersistence(exiting: true))
+			return false;
 		RequestExit();
+		return true;
+	}
+
+	private bool TryFlushLocalProfilePersistence(bool exiting)
+	{
+		while (!_selectionProfilePersistence.FlushAsync(reportFailure: false).GetAwaiter().GetResult())
+		{
+			var decision = ShowChoice(
+				L("Terminal.Tui.ProfileSaveFailure.Title"),
+				L("Terminal.Tui.ProfileSaveFailure.Message"),
+				L("Terminal.Tui.ProfileSaveFailure.Stay"),
+				L("Terminal.Tui.Retry"),
+				exiting
+					? L("Terminal.Tui.ProfileSaveFailure.ExitWithoutSaving")
+					: L("Terminal.Tui.ProfileSaveFailure.ContinueWithoutSaving"));
+			switch (decision)
+			{
+				case 1:
+					continue;
+				case 2:
+					_selectionProfilePersistence.DiscardPending();
+					_discardSelectionProfilePersistenceOnExit = exiting;
+					return true;
+				default:
+					return false;
+			}
+		}
 		return true;
 	}
 
