@@ -10,14 +10,17 @@ internal static class McpToolResults
 
 	public static CallToolResult TextSuccess(
 		string text,
-		bool advertiseLargeResult = false) =>
-		new()
+		bool advertiseLargeResult = false)
+	{
+		McpSpotlight.EnsureBalanced(text);
+		return new CallToolResult
 		{
 			Content = [new TextContentBlock { Text = text }],
 			Meta = advertiseLargeResult
 				? new System.Text.Json.Nodes.JsonObject { [MaxResultSizeKey] = 200_000 }
 				: null
 		};
+	}
 
 	public static CallToolResult StructuredSuccess(object value, string? notice = null) =>
 		StructuredSuccess(value, notice, static (_, trailer) => trailer);
@@ -36,7 +39,10 @@ internal static class McpToolResults
 		notice = completeNotice(spotlighted.Length, notice);
 		List<ContentBlock> content = [new TextContentBlock { Text = spotlighted }];
 		if (!string.IsNullOrWhiteSpace(notice))
+		{
+			McpSpotlight.EnsureBalanced(notice);
 			content.Add(new TextContentBlock { Text = notice });
+		}
 		return new CallToolResult { Content = content };
 	}
 
@@ -60,7 +66,10 @@ internal static class McpToolResults
 			new TextContentBlock { Text = spotlighted }
 		];
 		if (!string.IsNullOrWhiteSpace(notice))
+		{
+			McpSpotlight.EnsureBalanced(notice);
 			content.Add(new TextContentBlock { Text = notice });
+		}
 		return new CallToolResult
 		{
 			Content = content,
@@ -76,7 +85,7 @@ internal static class McpToolResults
 				new TextContentBlock
 				{
 					Text = $"{exception.Code}: request failed.\n\n" +
-					       McpSpotlight.Wrap(McpTextEscaping.EscapeSingleLine(exception.Message))
+						   McpSpotlight.Wrap(McpTextEscaping.EscapeSingleLine(exception.Message))
 				}
 			],
 			IsError = true
@@ -90,9 +99,16 @@ internal static class McpToolResults
 				new TextContentBlock
 				{
 					Text = $"DPX-MCP-OPERATION-FAILED: the operation could not be completed ({exception.GetType().Name}). " +
-					       "Verify the project is readable and retry with narrower paths or patterns."
+						   "Verify the project is readable and retry with narrower paths or patterns."
 				}
 			],
 			IsError = true
 		};
+
+	public static void EnsureBalanced(CallToolResult result)
+	{
+		ArgumentNullException.ThrowIfNull(result);
+		foreach (var block in result.Content.OfType<TextContentBlock>())
+			McpSpotlight.EnsureBalanced(block.Text);
+	}
 }

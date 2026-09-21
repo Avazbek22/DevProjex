@@ -195,7 +195,10 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.Contains("[Search boundary] partial", Text(result), StringComparison.Ordinal);
 		Assert.Contains("limits=response-characters", Text(result), StringComparison.Ordinal);
-		Assert.Contains("narrow pattern, paths, or include_patterns", Text(result), StringComparison.Ordinal);
+		Assert.Contains(
+			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
+			Text(result),
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

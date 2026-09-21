@@ -2,7 +2,39 @@ using System.Globalization;
 
 namespace DevProjex.Mcp;
 
-internal sealed record McpGetFileRange(int RequestIndex, int RangeIndex, int StartLine, int EndLine);
+internal enum McpGetFileRangeDeliveryStatus
+{
+	Ok,
+	Partial,
+	NotReturned
+}
+
+internal sealed record McpGetFileRange(int RequestIndex, int RangeIndex, int StartLine, int EndLine)
+{
+	public McpGetFileRangeDeliveryStatus ClassifyDelivery(McpTextPage page)
+	{
+		if (page.TotalLines <= 0 || page.StartLine <= 0 || page.EndLine < page.StartLine)
+			return McpGetFileRangeDeliveryStatus.NotReturned;
+		var effectiveEndLine = Math.Min(EndLine, page.TotalLines);
+		if (StartLine > effectiveEndLine || page.EndLine < StartLine || page.StartLine > effectiveEndLine)
+			return McpGetFileRangeDeliveryStatus.NotReturned;
+		var entireRangeReturned = page.StartLine <= StartLine && page.EndLine >= effectiveEndLine;
+		var endLineWasReturnedOnlyInPart = page.CharacterLimitReached && page.StartLine == page.EndLine &&
+			StartLine <= page.EndLine && effectiveEndLine >= page.EndLine;
+		return entireRangeReturned && !endLineWasReturnedOnlyInPart
+			? McpGetFileRangeDeliveryStatus.Ok
+			: McpGetFileRangeDeliveryStatus.Partial;
+	}
+
+	public McpGetFileRange? ContinueAtLine(int nextLine)
+	{
+		if (nextLine <= 0)
+			throw new ArgumentOutOfRangeException(nameof(nextLine));
+		if (nextLine > EndLine)
+			return null;
+		return this with { StartLine = Math.Max(StartLine, nextLine) };
+	}
+}
 
 internal sealed record McpGetFileRequest(
 	int Index,
@@ -38,8 +70,8 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 		if (arguments.Contains("start_line") || arguments.Contains("end_line") || arguments.Contains("start_column"))
 			throw Invalid("start_line, end_line, and start_column are valid only with 'path'");
 		if (!arguments.TryGetElement("requests", out var requestsElement) ||
-		    requestsElement.ValueKind != JsonValueKind.Array ||
-		    requestsElement.GetArrayLength() is < 1 or > MaximumFiles)
+			requestsElement.ValueKind != JsonValueKind.Array ||
+			requestsElement.GetArrayLength() is < 1 or > MaximumFiles)
 		{
 			throw Invalid($"'requests' must be an array with 1 to {MaximumFiles} entries");
 		}
@@ -54,8 +86,8 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 				throw InvalidEntry(requestIndex, "must be an object");
 			ValidatePropertyNames(requestElement, requestIndex, "path", "ranges", "symbol");
 			if (!requestElement.TryGetProperty("path", out var pathElement) ||
-			    pathElement.ValueKind != JsonValueKind.String ||
-			    string.IsNullOrWhiteSpace(pathElement.GetString()))
+				pathElement.ValueKind != JsonValueKind.String ||
+				string.IsNullOrWhiteSpace(pathElement.GetString()))
 			{
 				throw InvalidEntry(requestIndex, "path must be a non-whitespace string");
 			}
@@ -70,7 +102,7 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 			if (hasSymbol)
 			{
 				if (symbolElement.ValueKind != JsonValueKind.String ||
-				    string.IsNullOrWhiteSpace(symbolElement.GetString()))
+					string.IsNullOrWhiteSpace(symbolElement.GetString()))
 					throw InvalidEntry(requestIndex, "symbol must be a non-whitespace string");
 				symbol = symbolElement.GetString()!;
 				if (McpUnicodeLength.ExceedsScalarValueCount(symbol, 512))
@@ -80,7 +112,7 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 					throw InvalidEntry(requestIndex, $"the call must contain at most {MaximumRanges} file selections");
 			}
 			else if (hasRanges &&
-			         (rangesElement.ValueKind != JsonValueKind.Array || rangesElement.GetArrayLength() == 0))
+					 (rangesElement.ValueKind != JsonValueKind.Array || rangesElement.GetArrayLength() == 0))
 			{
 				throw InvalidEntry(requestIndex, "ranges must be a non-empty array");
 			}
@@ -94,8 +126,8 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 			var ranges = new List<McpGetFileRange>(hasRanges ? rangesElement.GetArrayLength() : 1);
 			var rangeIndex = 0;
 			foreach (var rangeElement in hasRanges
-			         ? rangesElement.EnumerateArray().ToArray()
-			         : Array.Empty<JsonElement>())
+					 ? rangesElement.EnumerateArray().ToArray()
+					 : Array.Empty<JsonElement>())
 			{
 				rangeIndex++;
 				totalRanges++;
@@ -134,8 +166,8 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 		if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) && number > 0)
 			return number;
 		if (value.ValueKind == JsonValueKind.String &&
-		    int.TryParse(value.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out number) &&
-		    number > 0)
+			int.TryParse(value.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out number) &&
+			number > 0)
 		{
 			return number;
 		}
@@ -153,7 +185,7 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 		foreach (var property in element.EnumerateObject())
 		{
 			if (property.NameEquals(first) || property.NameEquals(second) ||
-			    third is not null && property.NameEquals(third))
+				third is not null && property.NameEquals(third))
 				continue;
 			throw rangeIndex is null
 				? InvalidEntry(requestIndex, $"contains unknown property '{property.Name}'")

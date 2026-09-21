@@ -145,7 +145,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Checked nodes are focus", normalizedServer, StringComparison.Ordinal);
 		string[] liveContextOutputContracts =
 		[
-			"[Live context] the named path is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.",
+			"[Live context] 1 named file(s) returned outside the current focus; effective filters still apply.",
 			"[Live context] revision 16 · 128 files selected in the window",
 			"[Live context] revision 16 · 128 files selected in the window · root 1 of 2",
 			"[Live context] changed since revision 14: +2 folders, -1 file",
@@ -156,8 +156,8 @@ public sealed class DocumentationAndPackagingContractTests
 			"[Live context] no window selection saved for this root; using server defaults.",
 			"[Live context] no window selection saved for this root; using server defaults. If the DevProjex window runs on Windows, live context across WSL is not supported yet.",
 			"[Live context] the window selects no files; tick files in the DevProjex window.",
-			"[Live context] saved window selection could not be read; using revision 16. Retry this call.",
-			"[Live context] saved window selection could not be read; retry this call.",
+			"[Live context] Saved selection is busy. Retry this call once.",
+			"[Live context] Saved selection is invalid or incompatible. Ask the user to repair it or update DevProjex; retry after that.",
 			"[Live context] pack built at revision 14.",
 			"[Live context] pack built at revision 14; window is at revision 16. Call pack_context again to include the current selection.",
 			"[Live context] search result built at revision 14; window is at revision 16. Call search_project again to include the current selection.",
@@ -171,10 +171,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("including an error result", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("latest plan built for that root", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("Before the first plan is built, the count is `0`", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("locked, malformed, otherwise unreadable", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("unsupported future schema", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("saved profile is busy", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("malformed document or unsupported future schema", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("no usable backup is available", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("A usable backup initializes revision 1 instead", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("usable backup initializes revision 1 instead", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("does not silently use server defaults", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("genuinely absent profile", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("Three rules stay separate", normalizedServer, StringComparison.Ordinal);
@@ -267,7 +267,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("### Batch `get_file`", server, StringComparison.Ordinal);
 		Assert.Contains("one to eight records", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("at most sixteen whole-file, range, or symbol selections", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("`ok` when complete, `partial`", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("`ok` when its original interval is wholly inside the returned coverage, `partial`", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`--remote-hosts`", server, StringComparison.Ordinal);
 		Assert.Contains("[Remote] commit=<sha>", server, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Remote] commit=<sha> branch=<name>", server, StringComparison.Ordinal);
@@ -341,7 +341,7 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("### Reading a declaration by name", server, StringComparison.Ordinal);
 		Assert.Contains("### The search result carries the selector", server, StringComparison.Ordinal);
 		Assert.Contains("Declarations found (path, symbol, lines):", server, StringComparison.Ordinal);
-		Assert.Contains("[Read declarations]", server, StringComparison.Ordinal);
+		Assert.Contains("[Next read] Read only declarations needed for the task", server, StringComparison.Ordinal);
 		Assert.Contains("Best declaration body (1 of 3):", server, StringComparison.Ordinal);
 		Assert.Contains("Exact ordinal equality with the full printed name or its last segment", normalized,
 			StringComparison.Ordinal);
@@ -441,15 +441,15 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("### Service notices repeat only when they change", server, StringComparison.Ordinal);
 		Assert.Contains("### MCP catalog size", server, StringComparison.Ordinal);
 		Assert.Contains(
-			"`[Unchanged] filters, protection; see list_projects.`",
+			"`[Unchanged] effective filters, protection.`",
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"`[Unchanged] filters; see list_projects.`",
+			"`[Unchanged] effective filters.`",
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"`[Unchanged] protection; see list_projects.`",
+			"`[Unchanged] protection.`",
 			normalizedServer,
 			StringComparison.Ordinal);
 		Assert.Contains(
