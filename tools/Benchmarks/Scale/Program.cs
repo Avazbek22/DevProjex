@@ -4,8 +4,14 @@ using System.Reflection;
 using DevProjex.Avalonia.ViewModels;
 using DevProjex.Kernel.Contracts;
 
+if (args.FirstOrDefault() == "profile-reads")
+{
+	ProfileReadBenchmark.Run(args[1..]);
+	return;
+}
+
 if (args.FirstOrDefault() != "tree-realization")
-	throw new ArgumentException("Specify tree-realization.");
+	throw new ArgumentException("Specify tree-realization or profile-reads.");
 
 var repetitions = ReadRepetitions(args[1..]);
 Console.WriteLine(
