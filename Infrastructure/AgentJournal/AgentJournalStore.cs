@@ -16,8 +16,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	private static readonly TimeSpan ChangePollInterval = TimeSpan.FromMilliseconds(250);
 	private static readonly IReadOnlySet<string> AllowedArguments = new HashSet<string>(StringComparer.Ordinal)
 	{
-		"path", "paths", "pattern", "mode", "symbols", "symbol", "limit", "detail", "max_tokens",
-		"direction", "depth", "pack_id"
+		"path", "paths", "query_present", "query_length", "mode", "symbols", "symbol_length",
+		"symbol_class", "limit", "detail", "max_tokens", "direction", "depth", "pack_id", "lost_events"
 	};
 	private static readonly IReadOnlySet<string> AllowedNotices = new HashSet<string>(StringComparer.Ordinal)
 	{
@@ -27,12 +27,15 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		AgentJournalNoticeCodes.MatchesOmitted,
 		AgentJournalNoticeCodes.BudgetSkipped,
 		AgentJournalNoticeCodes.MissingPath,
-		AgentJournalNoticeCodes.Unavailable
+		AgentJournalNoticeCodes.Unavailable,
+		"history-recovered",
+		"history-incomplete"
 	};
 	private readonly Func<string> stateRoot;
 	private readonly TimeProvider clock;
 	private readonly Func<IReadOnlyList<LiveSessionRecord>> activeSessions;
 	private readonly ConcurrentDictionary<string, SemaphoreSlim> fileLocks = new(StringComparer.Ordinal);
+	private readonly ConcurrentDictionary<string, AgentJournalSession> sessionHeaders = new(StringComparer.Ordinal);
 	private int disposed;
 
 	public AgentJournalStore(
@@ -65,6 +68,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
 		ValidateSession(session);
+		var normalizedSession = NormalizeSession(session);
+		sessionHeaders[session.Id] = normalizedSession;
 		Sweep();
 		Directory.CreateDirectory(DirectoryPath);
 		var path = ResolveSessionPath(session.Id);
@@ -74,7 +79,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		{
 			await WriteLineAsync(
 				path,
-				new AgentJournalLine("session", Session: NormalizeSession(session)),
+				new AgentJournalLine("session", Session: normalizedSession),
 				FileMode.CreateNew,
 				cancellationToken).ConfigureAwait(false);
 		}
@@ -156,10 +161,19 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		if (content.Session is null)
 			return null;
 		var session = MaterializeSession(content, ActiveSessionKeys());
+		var multipleRoots = session.Roots.Count > 1;
 		var delivered = content.Calls
-			.SelectMany(static call => call.DeliveredPaths.Distinct(ProjectTreePathIdentity.CanonicalComparer))
-			.GroupBy(static path => path, ProjectTreePathIdentity.CanonicalComparer)
-			.Select(static group => new AgentJournalDeliveredPath(group.Key, group.LongCount()))
+			.SelectMany(call => call.DeliveredPaths
+				.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+				.Select(path => new
+				{
+					call.RootIndex,
+					Path = multipleRoots
+						? $"root {(call.RootIndex ?? -1) + 1}: {path}"
+						: path
+				}))
+			.GroupBy(static item => (item.RootIndex, item.Path))
+			.Select(static group => new AgentJournalDeliveredPath(group.Key.Path, group.LongCount()))
 			.OrderBy(static item => item.Path, ProjectTreePathIdentity.CanonicalComparer)
 			.ToArray();
 		return new AgentJournalReceipt(session, session.Totals, delivered, content.Calls);
@@ -200,13 +214,18 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		if (projectRoot is not null && requestedRoot is null)
 			return 0;
 		var removed = 0;
+		var live = ActiveSessionKeys();
 		foreach (var path in EnumerateSessionFiles())
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			var content = await ReadContentAsync(path, cancellationToken).ConfigureAwait(false);
+			if (content.Session is null)
+				continue;
+			if (live.Contains((content.Session.Pid, content.Session.ProcessStartUtc.UtcTicks)))
+				continue;
 			if (requestedRoot is not null)
 			{
-				var content = await ReadContentAsync(path, cancellationToken).ConfigureAwait(false);
-				if (content.Session is null || !ContainsRoot(content.Session.Roots, requestedRoot))
+				if (!ContainsRoot(content.Session.Roots, requestedRoot))
 					continue;
 			}
 			try
@@ -228,6 +247,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		foreach (var gate in fileLocks.Values)
 			gate.Dispose();
 		fileLocks.Clear();
+		sessionHeaders.Clear();
 	}
 
 	private async ValueTask AppendAsync(
@@ -242,7 +262,26 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		try
 		{
 			if (!File.Exists(path))
-				throw new FileNotFoundException("The journal session does not exist.", path);
+			{
+				if (!sessionHeaders.TryGetValue(sessionId, out var header))
+					throw new FileNotFoundException("The journal session does not exist.", path);
+				Directory.CreateDirectory(DirectoryPath);
+				await WriteLineAsync(
+					path,
+					new AgentJournalLine("session", Session: header),
+					FileMode.CreateNew,
+					cancellationToken).ConfigureAwait(false);
+				if (line.Call is { } recoveredCall)
+				{
+					line = line with
+					{
+						Call = recoveredCall with
+						{
+							Notices = recoveredCall.Notices.Append("history-recovered").ToArray()
+						}
+					};
+				}
+			}
 			await WriteLineAsync(path, line, FileMode.Append, cancellationToken).ConfigureAwait(false);
 		}
 		finally
@@ -375,6 +414,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		if (Retention.MaximumAge <= TimeSpan.Zero || Retention.MaximumSessions <= 0)
 			throw new InvalidOperationException("Journal retention must keep a positive age and session count.");
 		var cutoff = clock.GetUtcNow() - Retention.MaximumAge;
+		var live = ActiveSessionKeys();
 		var files = EnumerateSessionFiles()
 			.Select(path => new FileInfo(path))
 			.OrderByDescending(static file => file.LastWriteTimeUtc)
@@ -384,6 +424,9 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		{
 			if (index < Retention.MaximumSessions && files[index].LastWriteTimeUtc >= cutoff.UtcDateTime)
 				continue;
+			var header = TryReadSessionHeader(files[index].FullName);
+			if (header is not null && live.Contains((header.Pid, header.ProcessStartUtc.UtcTicks)))
+				continue;
 			try
 			{
 				files[index].Delete();
@@ -391,6 +434,25 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 			{
 			}
+		}
+	}
+
+	private static AgentJournalSession? TryReadSessionHeader(string path)
+	{
+		try
+		{
+			using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+			using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+			var line = reader.ReadLine();
+			if (string.IsNullOrEmpty(line) || line.Length > MaximumLineCharacters)
+				return null;
+			return JsonSerializer.Deserialize(
+				line,
+				AgentJournalJsonSerializerContext.Default.AgentJournalLine)?.Session;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+		{
+			return null;
 		}
 	}
 

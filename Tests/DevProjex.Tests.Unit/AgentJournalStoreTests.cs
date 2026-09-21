@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.AgentJournal;
+using DevProjex.Infrastructure.LiveContext;
 
 namespace DevProjex.Tests.Unit;
 
@@ -89,6 +90,88 @@ public sealed class AgentJournalStoreTests
 		Assert.Equal(1, removed);
 		var remaining = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
 		Assert.Equal(second.Id, remaining.Id);
+	}
+
+	[Fact]
+	public async Task ClearPreservesActiveSessionsAndRemovesCompletedSessions()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		var active = CreateSession(temporary.Path, 71, started);
+		var completed = CreateSession(temporary.Path, 72, started.AddSeconds(1));
+		using var store = new AgentJournalStore(
+			() => temporary.Path,
+			activeSessionProvider: () =>
+			[
+				new LiveSessionRecord(
+					active.Pid,
+					active.ProcessStartUtc,
+					"sample-client",
+					"1.0",
+					[temporary.Path],
+					started.AddSeconds(2),
+					AgentJournalMode.Standard)
+			]);
+		await store.StartSession(active, cancellationToken);
+		await store.StartSession(completed, cancellationToken);
+		await store.EndSession(completed.Id, started.AddMinutes(1), AgentJournalTotals.Empty, cancellationToken);
+
+		var removed = await store.ClearAsync(temporary.Path, cancellationToken);
+
+		Assert.Equal(1, removed);
+		var remaining = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+		Assert.Equal(active.Id, remaining.Id);
+		Assert.True(remaining.IsLive);
+	}
+
+	[Fact]
+	public async Task RetentionNeverDeletesAnActiveSession()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		var now = new DateTimeOffset(2026, 9, 20, 2, 0, 0, TimeSpan.Zero);
+		var active = CreateSession(temporary.Path, 73, now.AddDays(-10));
+		using var store = new AgentJournalStore(
+			() => temporary.Path,
+			new FixedTimeProvider(now),
+			() =>
+			[
+				new LiveSessionRecord(
+					active.Pid,
+					active.ProcessStartUtc,
+					"sample-client",
+					"1.0",
+					[temporary.Path],
+					now,
+					AgentJournalMode.Live)
+			],
+			new AgentJournalRetentionPolicy(TimeSpan.FromDays(1), 1));
+		await store.StartSession(active, cancellationToken);
+		var path = Path.Combine(store.DirectoryPath, active.Id + ".jsonl");
+		File.SetLastWriteTimeUtc(path, now.AddDays(-10).UtcDateTime);
+
+		var sessions = await store.ListSessionsAsync(cancellationToken: cancellationToken);
+
+		Assert.Equal(active.Id, Assert.Single(sessions).Id);
+	}
+
+	[Fact]
+	public async Task WriterRecreatesADeletedActiveSessionBeforeAppending()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(temporary.Path, 74, new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		File.Delete(Path.Combine(store.DirectoryPath, session.Id + ".jsonl"));
+
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+
+		var restored = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+		Assert.Equal(session.Id, restored.Id);
+		var call = Assert.Single(await store.ReadCallsAsync(session.Id, cancellationToken));
+		Assert.Contains("history-recovered", call.Notices);
 	}
 
 	[Fact]
@@ -280,4 +363,9 @@ public sealed class AgentJournalStoreTests
 			PrivateDataMasked: 3,
 			Notices: [AgentJournalNoticeCodes.OutsideSelection, "unrecognized-notice"],
 			ErrorCode: null);
+
+	private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+	{
+		public override DateTimeOffset GetUtcNow() => utcNow;
+	}
 }

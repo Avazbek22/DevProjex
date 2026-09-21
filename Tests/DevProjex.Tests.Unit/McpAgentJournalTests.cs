@@ -89,7 +89,75 @@ public sealed class McpAgentJournalTests
 		await journal.DisposeAsync();
 	}
 
-	private sealed class RecordingWriter : IAgentJournalWriter
+	[Fact]
+	public async Task SearchTextAndSymbolValuesAreNotPersisted()
+	{
+		using var temporary = new TemporaryDirectory();
+		var root = temporary.CreateFolder("project");
+		var writer = new RecordingWriter();
+		await using var journal = new McpAgentJournal(
+			writer,
+			new McpRootRegistry([root]),
+			AgentJournalMode.Live,
+			AgentJournalToolSet.Reduced,
+			"5.2.0",
+			hidePrivateData: true,
+			pid: 44,
+			processStartUtc: new DateTimeOffset(2026, 9, 20, 1, 0, 0, TimeSpan.Zero));
+		await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
+		const string searchText = "find token ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA and person@example.com";
+		const string symbolText = "person@example.com";
+		var request = new CallToolRequestParams
+		{
+			Name = "search_project",
+			Arguments = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+			{
+				["pattern"] = JsonSerializer.SerializeToElement(searchText),
+				["mode"] = JsonSerializer.SerializeToElement("regex"),
+				["symbol"] = JsonSerializer.SerializeToElement(symbolText)
+			}
+		};
+
+		using (journal.BeginCall("search_project", request))
+			journal.Complete(McpToolResults.TextSuccess("no matches"));
+		await journal.DisposeAsync();
+
+		var call = Assert.Single(writer.Calls);
+		Assert.DoesNotContain(searchText, call.Arguments.Values);
+		Assert.DoesNotContain(symbolText, call.Arguments.Values);
+		Assert.Equal(searchText.Length.ToString(CultureInfo.InvariantCulture), call.Arguments["query_length"]);
+		Assert.Equal("true", call.Arguments["query_present"]);
+		Assert.Equal("regex", call.Arguments["mode"]);
+		Assert.Equal(symbolText.Length.ToString(CultureInfo.InvariantCulture), call.Arguments["symbol_length"]);
+		Assert.Equal("expression", call.Arguments["symbol_class"]);
+	}
+
+	[Fact]
+	public async Task TransientCallWriteIsRetriedBeforeTotalsAreFinalized()
+	{
+		using var temporary = new TemporaryDirectory();
+		var writer = new FailsFirstCallWriter();
+		await using var journal = new McpAgentJournal(
+			writer,
+			new McpRootRegistry([temporary.CreateFolder("project")]),
+			AgentJournalMode.Standard,
+			AgentJournalToolSet.Full,
+			"5.2.0",
+			hidePrivateData: false,
+			pid: 45,
+			processStartUtc: new DateTimeOffset(2026, 9, 20, 1, 0, 0, TimeSpan.Zero));
+		await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
+		using (journal.BeginCall("list_projects", new CallToolRequestParams { Name = "list_projects" }))
+			journal.Complete(McpToolResults.TextSuccess("ok"));
+
+		await journal.DisposeAsync();
+
+		Assert.Equal(2, writer.RecordAttempts);
+		Assert.Single(writer.Calls);
+		Assert.Equal(1, Assert.Single(writer.Ended).Totals.Calls);
+	}
+
+	private class RecordingWriter : IAgentJournalWriter
 	{
 		public List<AgentJournalSession> Sessions { get; } = [];
 		public List<AgentJournalCall> Calls { get; } = [];
@@ -101,7 +169,7 @@ public sealed class McpAgentJournalTests
 			return ValueTask.CompletedTask;
 		}
 
-		public ValueTask RecordCall(string sessionId, AgentJournalCall call, CancellationToken cancellationToken = default)
+		public virtual ValueTask RecordCall(string sessionId, AgentJournalCall call, CancellationToken cancellationToken = default)
 		{
 			Calls.Add(call);
 			return ValueTask.CompletedTask;
@@ -132,5 +200,21 @@ public sealed class McpAgentJournalTests
 			AgentJournalTotals totals,
 			CancellationToken cancellationToken = default) =>
 			ValueTask.FromException(new IOException("unavailable"));
+	}
+
+	private sealed class FailsFirstCallWriter : RecordingWriter
+	{
+		public int RecordAttempts { get; private set; }
+
+		public override ValueTask RecordCall(
+			string sessionId,
+			AgentJournalCall call,
+			CancellationToken cancellationToken = default)
+		{
+			RecordAttempts++;
+			return RecordAttempts == 1
+				? ValueTask.FromException(new IOException("temporarily unavailable"))
+				: base.RecordCall(sessionId, call, cancellationToken);
+		}
 	}
 }
