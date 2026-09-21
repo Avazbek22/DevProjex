@@ -817,7 +817,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		long errors = 0;
 		foreach (var call in calls)
 		{
-			if (call.Notices.Contains("history-incomplete", StringComparer.Ordinal))
+			if (IsIncompleteHistoryMarker(call))
 				continue;
 			count++;
 			characters = SaturatingAdd(characters, call.ResultCharacters);
@@ -830,6 +830,11 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		}
 		return new AgentJournalTotals(count, characters, tokens, files, secrets, privateData, errors);
 	}
+
+	private static bool IsIncompleteHistoryMarker(AgentJournalCall call) =>
+		string.Equals(call.Tool, "journal", StringComparison.Ordinal) &&
+		call.Notices.Contains("history-incomplete", StringComparer.Ordinal) &&
+		call.Arguments.ContainsKey("lost_events");
 
 	private static long SaturatingAdd(long left, long right) =>
 		left > long.MaxValue - right ? long.MaxValue : left + right;
