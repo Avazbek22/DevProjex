@@ -44,7 +44,8 @@ internal sealed class AgentJournalCommandHandler(
 		{
 			var removed = await reader.ClearAsync(normalizedRoot, cancellationToken).ConfigureAwait(false);
 			return await WriteAsync(
-				$"Cleared {removed.ToString(CultureInfo.InvariantCulture)} agent journal session(s).{Environment.NewLine}",
+				$"Cleared {removed.ToString(CultureInfo.InvariantCulture)} completed agent journal session(s); " +
+				$"active sessions were preserved.{Environment.NewLine}",
 				outputPath,
 				cancellationToken).ConfigureAwait(false);
 		}
@@ -140,6 +141,7 @@ internal sealed class AgentJournalCommandHandler(
 
 	private static string FormatCalls(AgentJournalReceipt receipt)
 	{
+		var lostEvents = LostEventCount(receipt.Calls);
 		var rows = new List<string[]>
 		{
 			new[] { "#", "UTC", "Tool", "Root", "Revision", "Duration ms", "Characters", "Tokens", "Files", "Masked", "Notices", "Error" }
@@ -159,8 +161,20 @@ internal sealed class AgentJournalCommandHandler(
 			string.Join(',', call.Notices),
 			call.ErrorCode ?? "-"
 		}));
-		return string.Join(Environment.NewLine, TerminalColumnLayout.Format(rows)) + Environment.NewLine;
+		var table = string.Join(Environment.NewLine, TerminalColumnLayout.Format(rows)) + Environment.NewLine;
+		return lostEvents > 0
+			? $"History is incomplete: {lostEvents.ToString(CultureInfo.InvariantCulture)} " +
+			  $"{(lostEvents == 1 ? "event" : "events")} could not be recorded.{Environment.NewLine}{table}"
+			: table;
 	}
+
+	private static long LostEventCount(IEnumerable<AgentJournalCall> calls) => calls
+		.Where(static call => call.Notices.Contains("history-incomplete", StringComparer.Ordinal))
+		.Select(static call => call.Arguments.TryGetValue("lost_events", out var value) &&
+			long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+				? Math.Max(0, parsed)
+				: 0)
+		.Sum();
 
 	private static string FormatSessionsJson(IReadOnlyList<AgentJournalSession> sessions) =>
 		JsonSerializer.Serialize(

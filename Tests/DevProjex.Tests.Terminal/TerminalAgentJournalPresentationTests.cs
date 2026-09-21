@@ -1,3 +1,5 @@
+using DevProjex.Infrastructure.LiveContext;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalAgentJournalPresentationTests
@@ -54,14 +56,18 @@ public sealed class TerminalAgentJournalPresentationTests
 	public void DeliveredPathsMatchCanonicalProjectPathsOnly()
 	{
 		using var workspace = new TemporaryDirectory();
+		var session = CreateSession() with
+		{
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
 		var receipt = new AgentJournalReceipt(
-			CreateSession(),
+			session,
 			AgentJournalTotals.Empty,
 			[
 				new AgentJournalDeliveredPath("src/App.cs", 2),
 				new AgentJournalDeliveredPath("README.md", 1)
 			],
-			[]);
+			[CreateCall(1, "get_file", ["src/App.cs", "README.md"])]);
 
 		var paths = TerminalAgentJournalPresentation.BuildDeliveredPathSet(
 			workspace.Path,
@@ -77,7 +83,11 @@ public sealed class TerminalAgentJournalPresentationTests
 		using var workspace = new TemporaryDirectory();
 		var first = CreateCall(1, "get_tree", ["src/App.cs"]);
 		var latest = CreateCall(2, "get_file", ["src/App.cs", "README.md"]);
-		var session = CreateSession() with { Totals = CreateSession().Totals with { Calls = 2 } };
+		var session = CreateSession() with
+		{
+			Totals = CreateSession().Totals with { Calls = 2 },
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
 		var receipt = new AgentJournalReceipt(
 			session,
 			session.Totals,
@@ -109,6 +119,67 @@ public sealed class TerminalAgentJournalPresentationTests
 	}
 
 	[Fact]
+	public void DeliveredPathsAreFilteredByTheMatchingRootIndex()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstRoot = workspace.CreateDirectory("first");
+		var secondRoot = workspace.CreateDirectory("second");
+		var session = CreateSession() with
+		{
+			Roots =
+			[
+				new AgentJournalRoot(firstRoot, "first"),
+				new AgentJournalRoot(secondRoot, "second")
+			]
+		};
+		var calls = new[]
+		{
+			CreateCall(1, "get_file", ["src/App.cs"]) with { RootIndex = 0 },
+			CreateCall(2, "get_file", ["src/App.cs"]) with { RootIndex = 1 }
+		};
+		var receipt = new AgentJournalReceipt(session, session.Totals, [], calls);
+
+		var first = TerminalAgentJournalPresentation.BuildDeliveredPathSet(firstRoot, receipt);
+		var second = TerminalAgentJournalPresentation.BuildDeliveredPathSet(secondRoot, receipt);
+
+		Assert.Equal([Path.Combine(firstRoot, "src", "App.cs")], first);
+		Assert.Equal([Path.Combine(secondRoot, "src", "App.cs")], second);
+	}
+
+	[Fact]
+	public void IncompleteHistoryIsNamedInCallDetails()
+	{
+		var marker = CreateCall(3, "journal", []) with
+		{
+			Arguments = new Dictionary<string, string> { ["lost_events"] = "2" },
+			Notices = ["history-incomplete"]
+		};
+
+		var text = TerminalAgentJournalPresentation.BuildCallDetails(CreateSession(), [marker]);
+
+		Assert.Contains("History is incomplete: 2 events", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void IncompleteHistoryUsesLocalizedCount()
+	{
+		var marker = CreateCall(3, "journal", []) with
+		{
+			Arguments = new Dictionary<string, string> { ["lost_events"] = "2" },
+			Notices = ["history-incomplete"]
+		};
+
+		var text = TerminalAgentJournalPresentation.BuildCallDetails(
+			CreateSession(),
+			[marker],
+			(key, fallback) => key == "AgentJournal.Notice.HistoryIncomplete"
+				? "Localized incomplete: {0}"
+				: fallback);
+
+		Assert.Contains("Localized incomplete: 2", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void JournalPresentationUsesTheSharedLocalizationKeys()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -119,7 +190,10 @@ public sealed class TerminalAgentJournalPresentationTests
 			return fallback;
 		}
 		var call = CreateCall(1, "get_file", ["src/App.cs"]);
-		var session = CreateSession();
+		var session = CreateSession() with
+		{
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
 		var receipt = new AgentJournalReceipt(
 			session,
 			session.Totals,
@@ -142,6 +216,33 @@ public sealed class TerminalAgentJournalPresentationTests
 		Assert.Contains("Menu.View.AgentActivity", keys);
 		Assert.Contains("AgentActivity.Tree.ToolTip", keys);
 		Assert.Contains("AgentActivity.Status.Calls", keys);
+	}
+
+	[Fact]
+	public void LiveIndicatorIgnoresStandardSessions()
+	{
+		var now = new DateTimeOffset(2026, 9, 20, 8, 0, 0, TimeSpan.Zero);
+		var standard = new LiveSessionRecord(
+			42,
+			now,
+			"standard-client",
+			"1.0",
+			[@"C:\work\project"],
+			now,
+			AgentJournalMode.Standard);
+		var live = standard with
+		{
+			Pid = 43,
+			ClientName = "live-client",
+			Mode = AgentJournalMode.Live
+		};
+
+		Assert.Equal(
+			string.Empty,
+			TerminalAgentJournalPresentation.BuildLiveSessionIndicator([standard], null));
+		Assert.Equal(
+			"Live context (live-client)",
+			TerminalAgentJournalPresentation.BuildLiveSessionIndicator([standard, live], null));
 	}
 
 	private static AgentJournalCall CreateCall(

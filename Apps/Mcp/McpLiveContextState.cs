@@ -162,14 +162,14 @@ internal sealed class McpLiveContextState(
 		}
 	}
 
-	public void RefreshStoredResult(McpStoredResultContext? stored)
+	public bool RefreshStoredResult(McpStoredResultContext? stored)
 	{
 		if (stored is null)
-			return;
+			return false;
 
 		var current = ReadCurrentProfile(stored.Root);
 		if (current.Revision == stored.Revision)
-			return;
+			return false;
 		var refreshTool = McpStoredResultAdvice.RefreshTool(toolSet, stored.Kind);
 		var advice = refreshTool is null
 			? string.Empty
@@ -177,6 +177,7 @@ internal sealed class McpLiveContextState(
 		invocation.Value?.AdditionalNotices.Add(
 			$"[Live context] {McpStoredResultAdvice.ResultName(stored.Kind)} built at revision {stored.Revision}; " +
 			$"window is at revision {current.Revision}.{advice}");
+		return true;
 	}
 
 	public CallToolResult AppendNotices(CallToolResult result)

@@ -324,23 +324,32 @@ batched `get_file` call instead of several single reads; see
 
 Each MCP server session writes a local agent journal. A session records the client
 name and version, Standard or Live mode, configured roots, tool set, server version,
-start and end times, and aggregate counts. Each call records the tool name, a bounded
-set of address and mode arguments, profile revision, duration, result-character and
-estimated-token counts, delivered relative paths, masking counts, fixed notice codes,
-and an error code when the call failed. The journal does not store file contents,
-tool-result bodies, detected secret values, or masked private-data values.
+start and end times, and aggregate counts. Each call records the tool name, bounded
+execution parameters, profile revision, duration, result-character and estimated-token
+counts, delivered relative paths, masking counts, fixed notice codes, and an error code
+when the call failed. It records query and symbol presence, length, and class rather
+than their text, and checks every other string value for secrets and private data before
+queueing it. The journal does not store file contents, tool-result bodies,
+search-query text, symbol-selector text, detected secret values, or masked
+private-data values.
 
 Journal files live under the per-user DevProjex state directory in its
 `agent-journal` folder. Retention keeps at most 200 sessions and removes entries
-older than 30 days. **Journal…** in the desktop MCP menu, `mcp log` in Terminal
-Workspace, and the CLI journal commands read the same records. Clearing can be
-limited to the current project; Terminal Workspace refuses to clear a journal
-while a Live session for that project is active.
+older than 30 days. Active Standard and Live sessions are exempt from both retention
+and clearing. **Journal…** in the desktop MCP menu, `mcp log` in Terminal Workspace,
+and the CLI journal commands read the same records. Clearing can be limited to the
+current project and removes completed sessions while preserving active ones.
 
 A context receipt is a Markdown or JSON snapshot of one session. It contains the
 session metadata, totals, delivered-path counts, and call rows, so a user can retain
 evidence of what context was made available without retaining the returned file
-bodies. GUI, Terminal Workspace, and CLI exports use the same receipt formatter.
+bodies. A delivered path is counted only when its text was actually returned, not
+when a stored result was merely prepared; `read_pack` accounts for the page it returns.
+For multiple roots, exports retain the root number as part of path identity. GUI,
+Terminal Workspace, and CLI exports use the same receipt formatter. A recreated
+active journal is marked on its next event. If a call remains unwritten after bounded
+retries, totals exclude it and readers mark the history incomplete with the number of
+lost events.
 Per-call storage is queued after the result has been accounted for; journal file I/O
 is not awaited on the MCP tool response path. On a 400-file latency probe with 120
 repetitions per arm, median call time was 1.784 ms without recording and 1.820 ms

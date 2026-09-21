@@ -11,10 +11,13 @@ public partial class MainWindow
     private readonly IAgentJournalReceiptFormatter _agentJournalReceiptFormatter;
     private AgentJournalWindow? _agentJournalWindow;
 
-    private void OnMcpJournalRequested(object? sender, RoutedEventArgs e)
+    private async void OnMcpJournalRequested(object? sender, RoutedEventArgs e)
     {
         if (_agentJournalWindow is { } existing)
         {
+            await existing.UpdateProjectContextAsync(
+                _viewModel.IsProjectLoaded ? _currentPath : null,
+                _windowLifetimeCts?.Token ?? CancellationToken.None);
             existing.Show();
             existing.Activate();
             e.Handled = true;
@@ -26,7 +29,8 @@ public partial class MainWindow
             _agentJournalReader,
             _agentJournalReceiptFormatter,
             _localization,
-            _viewModel.IsProjectLoaded ? _currentPath : null);
+            _viewModel.IsProjectLoaded ? _currentPath : null,
+            () => _viewModel.IsProjectLoaded ? _currentPath : null);
         _agentJournalWindow = window;
         window.Closed += (_, _) =>
         {

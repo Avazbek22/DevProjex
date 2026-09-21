@@ -237,6 +237,22 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			return _packs.TryGetValue(packId, out var entry) ? entry.LiveContext : null;
 	}
 
+	internal void RecordJournalContext(string packId, McpStoredJournalContext context)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		lock (_sync)
+		{
+			if (_packs.TryGetValue(packId, out var entry))
+				entry.JournalContext = context;
+		}
+	}
+
+	internal McpStoredJournalContext? GetJournalContext(string packId)
+	{
+		lock (_sync)
+			return _packs.TryGetValue(packId, out var entry) ? entry.JournalContext : null;
+	}
+
 	public string Resolve(string packId) => ResolveDocument(packId).Path;
 
 	internal McpPackDocument ResolveDocument(string packId)
@@ -700,6 +716,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		public int ActiveReaders { get; set; }
 		public McpStoredResultKind Kind { get; } = kind;
 		public McpStoredResultContext? LiveContext { get; set; }
+		public McpStoredJournalContext? JournalContext { get; set; }
 	}
 
 	private sealed class PackReservation(McpPackRegistry owner, McpStoredResultKind kind) : IDisposable
@@ -963,6 +980,16 @@ internal sealed record McpStoredResultContext(
 	string Root,
 	int Revision,
 	McpStoredResultKind Kind);
+
+internal sealed record McpStoredJournalContext(
+	string SourceRoot,
+	int? Revision,
+	IReadOnlyList<McpStoredJournalPath> Paths);
+
+internal sealed record McpStoredJournalPath(
+	string RelativePath,
+	long SecretsMasked,
+	long PrivateDataMasked);
 
 internal readonly record struct McpPackLineCheckpoint(int LineNumber, long ByteOffset);
 

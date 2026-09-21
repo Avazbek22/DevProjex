@@ -1,7 +1,10 @@
 # Agent journal
 
 The journal shows what project context local MCP clients received without storing
-file bodies or detected values. It is an on-device history shared by Desktop,
+file bodies, detected values, or the text of search queries and symbol selectors.
+It stores bounded execution parameters and counters instead. Every remaining
+string value is checked by the same secret and private-data detectors before it
+is queued. It is an on-device history shared by Desktop,
 Terminal Workspace, and the CLI. In Desktop, open **MCP → Journal…** to inspect
 it. The command is
 available before a project is opened. In that state the window shows sessions
@@ -14,13 +17,24 @@ delivered files, masked values, and duration. A live session is marked and its
 row is refreshed while calls arrive. The lower table lists the selected
 session's calls, including their arguments, selection revision, duration,
 result size, delivered files, masking counters, notices, and stable error code.
+“Delivered” means that the file was present in text actually returned to the
+client; preparing or retaining a stored pack does not count as delivery. A
+`read_pack` call records the paths represented by its returned page. With
+multiple roots, path identity includes both the root number and relative path.
 Notices such as reading outside the selection are plain text facts, not warning
 colors.
 
 **Export…** writes the common receipt representation as Markdown or JSON.
-**Clear** asks for confirmation and clears the current project when the filter
-is selected, or the complete journal when it is not. **Reset data** also clears
-the complete journal together with saved local project data.
+**Clear** asks for confirmation and clears completed sessions for the current
+project when the filter is selected, or completed sessions from the complete
+journal when it is not. Active Standard and Live sessions are preserved by both
+manual clearing and retention. **Reset data** applies the same protection while
+clearing saved local project data.
+
+If an active journal file disappears, the writer recreates its session header
+and marks the next event as recovered. Temporary write failures are retried. If
+a call still cannot be written, session totals exclude it and the receipt and
+readers show `History is incomplete: N events could not be recorded.`
 
 Terminal Workspace uses `mcp log`, `mcp log last`, and `mcp log export <path>
 [markdown|json] [last|session <id>]`. The direct CLI exposes the same records:
@@ -32,8 +46,10 @@ devprojex mcp log /path/to/project --last --format json
 ```
 
 Token counts are estimates derived from returned character counts, not tokenizer
-output. An empty journal means that no matching local MCP session has written a
-record yet; connect a client and complete a tool call before looking for it.
+output. In Terminal Workspace an empty journal says how to connect with
+`:mcp connect codex` or `:mcp connect claude-code`. An empty journal means that
+no matching local MCP session has written a record yet; connect a client and
+complete a tool call before looking for it.
 
 ## Agent activity
 

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Channels;
 using DevProjex.Infrastructure.AgentJournal;
+using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Mcp;
 
@@ -9,7 +10,22 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 {
 	private static readonly IReadOnlySet<string> ScalarArguments = new HashSet<string>(StringComparer.Ordinal)
 	{
-		"path", "pattern", "mode", "symbol", "detail", "max_tokens", "direction", "pack_id"
+		"path", "mode", "detail", "max_tokens", "direction", "pack_id"
+	};
+	private static readonly Lazy<IReadOnlyList<ISecretDetector>> ArgumentDetectors = new(
+		static () => [new GitleaksSecretDetector(), new PrivateDataDetector()],
+		LazyThreadSafetyMode.ExecutionAndPublication);
+	private const string RedactedArgumentMarker = "[redacted]";
+	private const string HistoryIncompleteNotice = "history-incomplete";
+	private static readonly IReadOnlySet<string> SupportedNotices = new HashSet<string>(StringComparer.Ordinal)
+	{
+		AgentJournalNoticeCodes.OutsideSelection,
+		AgentJournalNoticeCodes.StalePack,
+		AgentJournalNoticeCodes.SearchPartial,
+		AgentJournalNoticeCodes.MatchesOmitted,
+		AgentJournalNoticeCodes.BudgetSkipped,
+		AgentJournalNoticeCodes.MissingPath,
+		AgentJournalNoticeCodes.Unavailable
 	};
 	private readonly IAgentJournalWriter writer;
 	private readonly McpRootRegistry roots;
@@ -23,6 +39,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 	private readonly object totalsSync = new();
 	private AgentJournalTotals totals = AgentJournalTotals.Empty;
 	private long sequence;
+	private long lostEvents;
 	private int startState;
 	private int disposed;
 
@@ -110,6 +127,42 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		current.Revision = revision;
 	}
 
+	public void RecordStoredContext(string sourceRoot, int? revision)
+	{
+		var current = invocation.Value;
+		if (current is null)
+			return;
+		current.RootIndex = ResolveRootIndex(sourceRoot);
+		current.Revision = revision;
+	}
+
+	public void RecordProtection(long secretsMasked, long privateDataMasked)
+	{
+		var current = invocation.Value;
+		if (current is null)
+			return;
+		current.SecretsMasked += Math.Max(0, secretsMasked);
+		current.PrivateDataMasked += Math.Max(0, privateDataMasked);
+	}
+
+	public void RecordProtection(int replacementCount, SecretRedactionSnapshot? snapshot)
+	{
+		var current = invocation.Value;
+		if (current is null || snapshot is null || replacementCount <= 0)
+			return;
+		var secrets = Math.Max(0, snapshot.SecretRedactedCount);
+		var privateData = Math.Max(0, snapshot.PrivateDataRedactedCount);
+		if (privateData == 0)
+			current.SecretsMasked += replacementCount;
+		else if (secrets == 0)
+			current.PrivateDataMasked += replacementCount;
+		else if (replacementCount == secrets + privateData)
+		{
+			current.SecretsMasked += secrets;
+			current.PrivateDataMasked += privateData;
+		}
+	}
+
 	public void RecordDeliveredPaths(string sourceRoot, IEnumerable<string> paths)
 	{
 		var current = invocation.Value;
@@ -142,6 +195,42 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		current.PrivateDataMasked = Math.Max(current.PrivateDataMasked, snapshot.PrivateDataRedactedCount);
 	}
 
+	public void RecordProtection(
+		IReadOnlyList<EffectiveRedactionFinding> findings,
+		int startLine,
+		int endLine)
+	{
+		var current = invocation.Value;
+		if (current is null || findings.Count == 0 || endLine < startLine)
+			return;
+		var returned = findings.Where(finding => finding.LineNumber >= startLine && finding.LineNumber <= endLine);
+		current.SecretsMasked += returned.LongCount(static finding =>
+			finding.Category == RedactionFindingCategory.Secrets);
+		current.PrivateDataMasked += returned.LongCount(static finding =>
+			finding.Category == RedactionFindingCategory.PrivateData);
+	}
+
+	public void RecordProtection(
+		IReadOnlyList<EffectiveRedactionFinding> findings,
+		IReadOnlySet<int> returnedLines)
+	{
+		var current = invocation.Value;
+		if (current is null || findings.Count == 0 || returnedLines.Count == 0)
+			return;
+		var returned = findings.Where(finding => returnedLines.Contains(finding.LineNumber));
+		current.SecretsMasked += returned.LongCount(static finding =>
+			finding.Category == RedactionFindingCategory.Secrets);
+		current.PrivateDataMasked += returned.LongCount(static finding =>
+			finding.Category == RedactionFindingCategory.PrivateData);
+	}
+
+	public void RecordNotice(string notice)
+	{
+		var current = invocation.Value;
+		if (current is not null && SupportedNotices.Contains(notice))
+			current.Notices.Add(notice);
+	}
+
 	public void Complete(CallToolResult result)
 	{
 		var current = invocation.Value;
@@ -169,10 +258,21 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			Math.Max(0, paths.Length - storedPaths.Length),
 			current.SecretsMasked,
 			current.PrivateDataMasked,
-			CaptureNotices(trustedText),
+			current.Notices.ToArray(),
 			result.IsError == true ? CaptureErrorCode(trustedText) : null);
-		AddTotals(call);
-		operations.Writer.TryWrite(token => writer.RecordCall(session.Id, call, token));
+		operations.Writer.TryWrite(async token =>
+		{
+			if (await TryWriteWithRetryAsync(
+					ct => writer.RecordCall(session.Id, call, ct),
+				token).ConfigureAwait(false))
+			{
+				AddTotals(call);
+			}
+			else
+			{
+				Interlocked.Increment(ref lostEvents);
+			}
+		});
 	}
 
 	public async ValueTask DisposeAsync()
@@ -181,10 +281,23 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			return;
 		if (Volatile.Read(ref startState) == 2)
 		{
-			AgentJournalTotals completed;
-			lock (totalsSync)
-				completed = totals;
-			operations.Writer.TryWrite(token => writer.EndSession(session.Id, clock.GetUtcNow(), completed, token));
+			operations.Writer.TryWrite(async token =>
+			{
+				var lost = Volatile.Read(ref lostEvents);
+				if (lost > 0)
+				{
+					var marker = CreateIncompleteHistoryMarker(lost);
+					await TryWriteWithRetryAsync(
+						ct => writer.RecordCall(session.Id, marker, ct),
+						token).ConfigureAwait(false);
+				}
+				AgentJournalTotals completed;
+				lock (totalsSync)
+					completed = totals;
+				await TryWriteWithRetryAsync(
+					ct => writer.EndSession(session.Id, clock.GetUtcNow(), completed, ct),
+					token).ConfigureAwait(false);
+			});
 		}
 		operations.Writer.TryComplete();
 		try
@@ -234,6 +347,54 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		}
 	}
 
+	private AgentJournalCall CreateIncompleteHistoryMarker(long lost) => new(
+		Interlocked.Increment(ref sequence),
+		clock.GetUtcNow(),
+		"journal",
+		RootIndex: null,
+		new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["lost_events"] = lost.ToString(CultureInfo.InvariantCulture)
+		},
+		Revision: null,
+		DurationMs: 0,
+		ResultCharacters: 0,
+		EstimatedTokens: 0,
+		FilesDelivered: 0,
+		DeliveredPaths: [],
+		AdditionalDeliveredPaths: 0,
+		SecretsMasked: 0,
+		PrivateDataMasked: 0,
+		Notices: [HistoryIncompleteNotice],
+		ErrorCode: null);
+
+	private static async ValueTask<bool> TryWriteWithRetryAsync(
+		Func<CancellationToken, ValueTask> operation,
+		CancellationToken cancellationToken)
+	{
+		const int maximumAttempts = 3;
+		for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+		{
+			try
+			{
+				await operation(cancellationToken).ConfigureAwait(false);
+				return true;
+			}
+			catch (Exception exception) when (
+				exception is IOException or UnauthorizedAccessException &&
+				attempt < maximumAttempts)
+			{
+				await Task.Yield();
+			}
+			catch (Exception exception) when (exception is not OperationCanceledException)
+			{
+				Trace.TraceWarning("MCP journal record could not be written: {0}", exception.GetType().Name);
+				return false;
+			}
+		}
+		return false;
+	}
+
 	private int? ResolveRootIndex(string sourceRoot)
 	{
 		for (var index = 0; index < roots.Roots.Count; index++)
@@ -259,7 +420,19 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 				if (captured.Length == 0)
 					continue;
 			}
-			result[name] = captured;
+			result[name] = SanitizeArgumentValue(captured);
+		}
+		if (source.TryGetValue("pattern", out var pattern) && pattern.ValueKind == JsonValueKind.String)
+		{
+			var value = pattern.GetString() ?? string.Empty;
+			result["query_present"] = bool.TrueString.ToLowerInvariant();
+			result["query_length"] = value.Length.ToString(CultureInfo.InvariantCulture);
+		}
+		if (source.TryGetValue("symbol", out var symbol) && symbol.ValueKind == JsonValueKind.String)
+		{
+			var value = symbol.GetString() ?? string.Empty;
+			result["symbol_length"] = value.Length.ToString(CultureInfo.InvariantCulture);
+			result["symbol_class"] = ClassifySymbol(value);
 		}
 		if (source.TryGetValue("paths", out var paths))
 			result["paths"] = CountValues(paths).ToString(CultureInfo.InvariantCulture);
@@ -276,6 +449,37 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		CopyAlias(source, result, "max_results", "limit");
 		CopyAlias(source, result, "max_depth", "depth");
 		return result;
+	}
+
+	private static string SanitizeArgumentValue(string value)
+	{
+		if (string.IsNullOrEmpty(value))
+			return value;
+		try
+		{
+			foreach (var detector in ArgumentDetectors.Value)
+				if (detector.Detect("agent-journal-value.txt", value).Count > 0)
+					return RedactedArgumentMarker;
+			return value;
+		}
+		catch (SecretDetectionException)
+		{
+			return RedactedArgumentMarker;
+		}
+	}
+
+	private static string ClassifySymbol(string value)
+	{
+		if (value.Length == 0)
+			return "empty";
+		if (value.All(static character => char.IsLetterOrDigit(character) || character == '_'))
+			return "simple";
+		if (value.All(static character =>
+				char.IsLetterOrDigit(character) || character is '_' or '.' or ':' or '+' or '`'))
+		{
+			return "qualified";
+		}
+		return "expression";
 	}
 
 	private string? TryMakeProjectRelative(string path)
@@ -310,25 +514,6 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		JsonValueKind.String => 1,
 		_ => 0
 	};
-
-	private static IReadOnlyList<string> CaptureNotices(string text)
-	{
-		var notices = new List<string>();
-		Add(AgentJournalNoticeCodes.OutsideSelection, text.Contains("outside the current window selection", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.StalePack, text.Contains("built at revision", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.SearchPartial, text.Contains("Results are partial", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.MatchesOmitted, text.Contains("additional observed matches not shown", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.BudgetSkipped, text.Contains("budget", StringComparison.OrdinalIgnoreCase) && text.Contains("skipped", StringComparison.OrdinalIgnoreCase));
-		Add(AgentJournalNoticeCodes.MissingPath, text.Contains("DPX-SELECTION-PATH-MISSING", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.Unavailable, text.Contains("[Batch unavailable]", StringComparison.Ordinal));
-		return notices;
-
-		void Add(string code, bool condition)
-		{
-			if (condition)
-				notices.Add(code);
-		}
-	}
 
 	private static string ExtractTrustedText(string text)
 	{
@@ -393,6 +578,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		public int FilesDelivered { get; set; }
 		public long SecretsMasked { get; set; }
 		public long PrivateDataMasked { get; set; }
+		public HashSet<string> Notices { get; } = new(StringComparer.Ordinal);
 	}
 
 	private sealed class InvocationScope(

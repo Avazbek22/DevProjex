@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DevProjex.Infrastructure.AgentJournal;
+using DevProjex.Infrastructure.LiveContext;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -38,9 +39,49 @@ public sealed class AgentJournalCommandProcessTests
 		Assert.Equal(CommandLineExitCodes.UsageError, refused.ExitCode);
 		Assert.Contains("DPX-CLI-INVALID-SYNTAX", refused.StandardError, StringComparison.Ordinal);
 		Assert.Equal(CommandLineExitCodes.Success, cleared.ExitCode);
-		Assert.Contains("Cleared 1 agent journal session", cleared.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Cleared 1 completed agent journal session", cleared.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("active sessions were preserved", cleared.StandardOutput, StringComparison.Ordinal);
 		Assert.Equal(CommandLineExitCodes.Success, empty.ExitCode);
 		Assert.Contains("No agent journal sessions found", empty.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealCliClearPreservesAnActiveSession()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		var registry = new LiveSessionRegistry(() => dataRoot);
+		await using var live = registry.Start([project], AgentJournalMode.Standard);
+		var active = Assert.Single(registry.ReadActive(project));
+		using (var store = new AgentJournalStore(() => dataRoot))
+		{
+			await store.StartSession(
+				new AgentJournalSession(
+					AgentJournalStore.CreateSessionId(DateTimeOffset.UtcNow, active.Pid),
+					DateTimeOffset.UtcNow,
+					EndedUtc: null,
+					active.Pid,
+					active.ProcessStartUtc,
+					"sample-client",
+					"1.0",
+					AgentJournalMode.Standard,
+					[new AgentJournalRoot(project, "project")],
+					AgentJournalToolSet.Full,
+					"5.2.0",
+					HidePrivateData: false,
+					AgentJournalTotals.Empty,
+					IsLive: true),
+				TestContext.Current.CancellationToken);
+		}
+
+		var cleared = Run(dataRoot, "mcp", "log", project, "--clear", "--yes");
+
+		Assert.Equal(CommandLineExitCodes.Success, cleared.ExitCode);
+		Assert.Contains("Cleared 0 completed agent journal session", cleared.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("active sessions were preserved", cleared.StandardOutput, StringComparison.Ordinal);
+		using var reader = new AgentJournalStore(() => dataRoot);
+		Assert.Single(await reader.ListSessionsAsync(project, cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	private static async Task SeedAsync(string dataRoot, string project)

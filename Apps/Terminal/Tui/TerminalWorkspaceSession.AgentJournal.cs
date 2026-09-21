@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using DevProjex.Kernel.Models;
 using DevProjex.Terminal.Execution;
 using Terminal.Gui.App;
@@ -21,16 +22,15 @@ internal sealed partial class TerminalWorkspaceSession
 			return InvalidCommandExecution();
 		if (command.McpAction == TerminalWorkspaceMcpAction.ClearLog)
 		{
-			if (_liveSessions.Count > 0)
-			{
-				return TerminalWorkspaceCommandExecutionResult.Failure(
-					"End live MCP sessions before clearing their journal.");
-			}
+			var projectName = Path.GetFileName(Path.TrimEndingDirectorySeparator(_state.Plan.SourceRoot));
 			if (!Confirm(
 				AgentJournalText("AgentJournal.Clear.Title", "Clear agent journal"),
-				AgentJournalText(
-					"AgentJournal.Clear.ProjectMessage",
-					"Clear journal sessions for this project?")))
+				string.Format(
+					CultureInfo.CurrentCulture,
+					AgentJournalText(
+						"AgentJournal.Clear.ProjectMessage",
+						"Delete the history for project “{0}”? Project files will not be changed."),
+					projectName)))
 				return TerminalWorkspaceCommandExecutionResult.Deferred();
 		}
 
@@ -70,7 +70,9 @@ internal sealed partial class TerminalWorkspaceSession
 					{
 						_agentJournalSnapshot = null;
 						_state?.SetAgentActivity(_agentActivityEnabled, null);
-						ShowTransientStatus($"Agent journal cleared ({removed:N0} sessions).", TerminalWorkspaceTheme.Success);
+						ShowTransientStatus(
+							$"Completed journal sessions cleared ({removed:N0}); active sessions preserved.",
+							TerminalWorkspaceTheme.Success);
 						return true;
 					}).ConfigureAwait(false);
 					break;
@@ -210,7 +212,9 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			ShowScrollableOverlay(
 				AgentJournalTitle,
-				AgentJournalText("AgentJournal.Empty", "No journal sessions for this project."),
+				AgentJournalText(
+					"AgentJournal.Empty.Tui",
+					"The journal is empty. Connect an agent: :mcp connect codex or :mcp connect claude-code"),
 				TerminalWorkspaceTheme.Dialog,
 				preferredWidth: 72,
 				preferredHeight: 10);
