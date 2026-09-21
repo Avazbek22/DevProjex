@@ -175,6 +175,36 @@ public sealed class AgentJournalStoreTests
 	}
 
 	[Fact]
+	public async Task ReceiptKeepsEqualRelativePathsDistinctAcrossRoots()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		var firstRoot = temporary.CreateFolder("first");
+		var secondRoot = temporary.CreateFolder("second");
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			firstRoot,
+			75,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero)) with
+		{
+			Roots =
+				[
+					new AgentJournalRoot(firstRoot, "first"),
+					new AgentJournalRoot(secondRoot, "second")
+				]
+		};
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1) with { RootIndex = 0 }, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(2) with { RootIndex = 1 }, cancellationToken);
+
+		var receipt = Assert.IsType<AgentJournalReceipt>(await store.ReadReceiptAsync(session.Id, cancellationToken));
+
+		Assert.Equal(2, receipt.DeliveredPaths.Count);
+		Assert.Contains(receipt.DeliveredPaths, static item => item.Path == "root 1: src/Program.cs");
+		Assert.Contains(receipt.DeliveredPaths, static item => item.Path == "root 2: src/Program.cs");
+	}
+
+	[Fact]
 	public async Task InvalidExplicitProjectFilterNeverListsOrClearsAllSessions()
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;

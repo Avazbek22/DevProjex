@@ -17,6 +17,16 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		LazyThreadSafetyMode.ExecutionAndPublication);
 	private const string RedactedArgumentMarker = "[redacted]";
 	private const string HistoryIncompleteNotice = "history-incomplete";
+	private static readonly IReadOnlySet<string> SupportedNotices = new HashSet<string>(StringComparer.Ordinal)
+	{
+		AgentJournalNoticeCodes.OutsideSelection,
+		AgentJournalNoticeCodes.StalePack,
+		AgentJournalNoticeCodes.SearchPartial,
+		AgentJournalNoticeCodes.MatchesOmitted,
+		AgentJournalNoticeCodes.BudgetSkipped,
+		AgentJournalNoticeCodes.MissingPath,
+		AgentJournalNoticeCodes.Unavailable
+	};
 	private readonly IAgentJournalWriter writer;
 	private readonly McpRootRegistry roots;
 	private readonly AgentJournalSession session;
@@ -110,6 +120,42 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		current.Revision = revision;
 	}
 
+	public void RecordStoredContext(string sourceRoot, int? revision)
+	{
+		var current = invocation.Value;
+		if (current is null)
+			return;
+		current.RootIndex = ResolveRootIndex(sourceRoot);
+		current.Revision = revision;
+	}
+
+	public void RecordProtection(long secretsMasked, long privateDataMasked)
+	{
+		var current = invocation.Value;
+		if (current is null)
+			return;
+		current.SecretsMasked += Math.Max(0, secretsMasked);
+		current.PrivateDataMasked += Math.Max(0, privateDataMasked);
+	}
+
+	public void RecordProtection(int replacementCount, SecretRedactionSnapshot? snapshot)
+	{
+		var current = invocation.Value;
+		if (current is null || snapshot is null || replacementCount <= 0)
+			return;
+		var secrets = Math.Max(0, snapshot.SecretRedactedCount);
+		var privateData = Math.Max(0, snapshot.PrivateDataRedactedCount);
+		if (privateData == 0)
+			current.SecretsMasked += replacementCount;
+		else if (secrets == 0)
+			current.PrivateDataMasked += replacementCount;
+		else if (replacementCount == secrets + privateData)
+		{
+			current.SecretsMasked += secrets;
+			current.PrivateDataMasked += privateData;
+		}
+	}
+
 	public void RecordDeliveredPaths(string sourceRoot, IEnumerable<string> paths)
 	{
 		var current = invocation.Value;
@@ -142,6 +188,42 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		current.PrivateDataMasked = Math.Max(current.PrivateDataMasked, snapshot.PrivateDataRedactedCount);
 	}
 
+	public void RecordProtection(
+		IReadOnlyList<EffectiveRedactionFinding> findings,
+		int startLine,
+		int endLine)
+	{
+		var current = invocation.Value;
+		if (current is null || findings.Count == 0 || endLine < startLine)
+			return;
+		var returned = findings.Where(finding => finding.LineNumber >= startLine && finding.LineNumber <= endLine);
+		current.SecretsMasked += returned.LongCount(static finding =>
+			finding.Category == RedactionFindingCategory.Secrets);
+		current.PrivateDataMasked += returned.LongCount(static finding =>
+			finding.Category == RedactionFindingCategory.PrivateData);
+	}
+
+	public void RecordProtection(
+		IReadOnlyList<EffectiveRedactionFinding> findings,
+		IReadOnlySet<int> returnedLines)
+	{
+		var current = invocation.Value;
+		if (current is null || findings.Count == 0 || returnedLines.Count == 0)
+			return;
+		var returned = findings.Where(finding => returnedLines.Contains(finding.LineNumber));
+		current.SecretsMasked += returned.LongCount(static finding =>
+			finding.Category == RedactionFindingCategory.Secrets);
+		current.PrivateDataMasked += returned.LongCount(static finding =>
+			finding.Category == RedactionFindingCategory.PrivateData);
+	}
+
+	public void RecordNotice(string notice)
+	{
+		var current = invocation.Value;
+		if (current is not null && SupportedNotices.Contains(notice))
+			current.Notices.Add(notice);
+	}
+
 	public void Complete(CallToolResult result)
 	{
 		var current = invocation.Value;
@@ -169,7 +251,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			Math.Max(0, paths.Length - storedPaths.Length),
 			current.SecretsMasked,
 			current.PrivateDataMasked,
-			CaptureNotices(trustedText),
+			current.Notices.ToArray(),
 			result.IsError == true ? CaptureErrorCode(trustedText) : null);
 		operations.Writer.TryWrite(async token =>
 		{
@@ -426,25 +508,6 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		_ => 0
 	};
 
-	private static IReadOnlyList<string> CaptureNotices(string text)
-	{
-		var notices = new List<string>();
-		Add(AgentJournalNoticeCodes.OutsideSelection, text.Contains("outside the current window selection", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.StalePack, text.Contains("built at revision", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.SearchPartial, text.Contains("Results are partial", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.MatchesOmitted, text.Contains("additional observed matches not shown", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.BudgetSkipped, text.Contains("budget", StringComparison.OrdinalIgnoreCase) && text.Contains("skipped", StringComparison.OrdinalIgnoreCase));
-		Add(AgentJournalNoticeCodes.MissingPath, text.Contains("DPX-SELECTION-PATH-MISSING", StringComparison.Ordinal));
-		Add(AgentJournalNoticeCodes.Unavailable, text.Contains("[Batch unavailable]", StringComparison.Ordinal));
-		return notices;
-
-		void Add(string code, bool condition)
-		{
-			if (condition)
-				notices.Add(code);
-		}
-	}
-
 	private static string ExtractTrustedText(string text)
 	{
 		const string openingPrefix = "<untrusted-data-";
@@ -508,6 +571,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		public int FilesDelivered { get; set; }
 		public long SecretsMasked { get; set; }
 		public long PrivateDataMasked { get; set; }
+		public HashSet<string> Notices { get; } = new(StringComparer.Ordinal);
 	}
 
 	private sealed class InvocationScope(
