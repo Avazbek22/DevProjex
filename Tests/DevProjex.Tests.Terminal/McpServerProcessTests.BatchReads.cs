@@ -228,7 +228,10 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("[No matches] The pattern matched nothing in 4 inspected selected file(s)", text, StringComparison.Ordinal);
 			Assert.Contains("[Search boundary] partial", text, StringComparison.Ordinal);
 			Assert.Contains("limits=inspection-bytes", text, StringComparison.Ordinal);
-			Assert.Contains("continue the search", text, StringComparison.Ordinal);
+			Assert.Contains(
+				"[Next read] Narrow pattern, paths, or include_patterns and rerun the search.",
+				text,
+				StringComparison.Ordinal);
 		}
 		finally
 		{

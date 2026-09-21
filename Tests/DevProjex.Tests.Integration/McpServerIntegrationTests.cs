@@ -73,7 +73,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.NotEqual(true, (await server.CallAsync("related_files", new Dictionary<string, object?> { ["path"] = "src/Program.cs" })).IsError);
 			var file = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "Outside.cs" });
 			Assert.NotEqual(true, file.IsError);
-			Assert.Equal(live, AllText(file).Contains("outside the current window selection", StringComparison.Ordinal));
+			Assert.Equal(live, AllText(file).Contains("returned outside the current focus", StringComparison.Ordinal));
 		}
 
 		using var journal = new AgentJournalStore(
@@ -151,8 +151,7 @@ public sealed partial class McpServerIntegrationTests
 			"get_file",
 			new Dictionary<string, object?> { ["path"] = "outside/Outside.cs" }));
 		Assert.StartsWith(
-			"[Live context] the named path is outside the current window selection; returned because you named it. " +
-			"Tree, search, pack and related stay within the selection.",
+			"[Live context] 1 named file(s) returned outside the current focus; effective filters still apply.",
 			outside,
 			StringComparison.Ordinal);
 		Assert.Contains("outside-marker", outside, StringComparison.Ordinal);
@@ -161,7 +160,7 @@ public sealed partial class McpServerIntegrationTests
 			new Dictionary<string, object?> { ["path"] = "outside/.Hidden.cs" });
 		Assert.True(filtered.IsError);
 		Assert.Contains(McpErrorCodes.PathNotFound, AllText(filtered), StringComparison.Ordinal);
-		Assert.DoesNotContain("returned because you named it", AllText(filtered), StringComparison.Ordinal);
+		Assert.DoesNotContain("returned outside the current focus", AllText(filtered), StringComparison.Ordinal);
 
 		var pack = AllText(await server.CallAsync("pack_context"));
 		var packId = Regex.Match(pack, "'(?<id>[a-f0-9]{48})'").Groups["id"].Value;
@@ -603,7 +602,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.Contains(visible, tree, StringComparison.Ordinal);
 		Assert.DoesNotContain("hollow", tree, StringComparison.Ordinal);
 		Assert.Contains(
-			"[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders. Paths they hide are absent from every tool; only the server startup line widens them (--exclude, --unrestricted, --allow-agent-exclusions).",
+			"[Effective filters] git: gitignore; exclusions: smart-ignore, empty-folders. An explicit profile can replace startup filters; paths and patterns only narrow the resulting selection.",
 			tree,
 			StringComparison.Ordinal);
 
@@ -650,7 +649,7 @@ public sealed partial class McpServerIntegrationTests
 		// server; the old advice to repeat selection arguments could never work here.
 		Assert.True(hidden.IsError);
 		Assert.Contains("is not in the effective project selection (effective filters: git: gitignore; exclusions: dot-files)", Text(hidden), StringComparison.Ordinal);
-		Assert.Contains("only the server startup line can (--exclude, --unrestricted, --allow-agent-exclusions)", Text(hidden), StringComparison.Ordinal);
+		Assert.Contains("An explicit profile can replace startup filters; paths and patterns only narrow the resulting selection.", Text(hidden), StringComparison.Ordinal);
 		Assert.DoesNotContain("pack_context", Text(hidden), StringComparison.Ordinal);
 		Assert.True(missing.IsError);
 		Assert.StartsWith("DPX-MCP-PATH-NOT-FOUND: request failed.", Text(missing), StringComparison.Ordinal);
@@ -667,9 +666,12 @@ public sealed partial class McpServerIntegrationTests
 			"get_file",
 			new Dictionary<string, object?> { ["path"] = ".hidden.cs" });
 		Assert.True(delegatedHidden.IsError);
-		Assert.Contains("Pass the exclusions value of the call that listed it, or exclusions: [] to turn every toggle off", Text(delegatedHidden), StringComparison.Ordinal);
+		Assert.Contains("Per-call exclusions can replace startup exclusions; paths and patterns only narrow the resulting selection.", Text(delegatedHidden), StringComparison.Ordinal);
 		var delegatedTree = Text(await delegated.CallAsync("get_tree"));
-		Assert.Contains("[Effective filters] git: gitignore; exclusions: dot-files. Paths the exclusions hide stay absent until a call passes exclusions", delegatedTree, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Effective filters] git: gitignore; exclusions: dot-files. Per-call exclusions can replace startup exclusions; paths and patterns only narrow the resulting selection.",
+			delegatedTree,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -766,7 +768,7 @@ public sealed partial class McpServerIntegrationTests
 			"get_tree",
 			new Dictionary<string, object?> { ["tracked_only"] = true }));
 		Assert.Contains(
-			"[Empty selection] stage=git-scope. Git reports no files for this scope (git: tracked).",
+			"[Empty selection] No files survived the effective filters and request selection.",
 			gitSelection,
 			StringComparison.Ordinal);
 
@@ -3801,10 +3803,13 @@ public sealed partial class McpServerIntegrationTests
 		var text = Text(result);
 		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
 		Assert.Contains("\n[1 additional observed matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
-		Assert.Contains("narrow the pattern or filters", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Next read] Narrow pattern, paths, or include_patterns and rerun the search.",
+			text,
+			StringComparison.Ordinal);
 		AssertTrustedTrailerOutsideSpotlight(
 			result,
-			"[1 additional observed matches not shown; narrow the pattern or filters.]");
+			"[1 additional observed matches not shown.]");
 	}
 
 	[Fact]
@@ -7622,7 +7627,9 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var result = normalResults[index];
 			Assert.NotEqual(true, result.IsError);
-			AssertOccurrencesAreSpotlighted(AllText(result), sentinel, resultNames[index]);
+			var resultText = AllText(result);
+			AssertOccurrencesAreSpotlighted(resultText, sentinel, resultNames[index]);
+			AssertBalancedSpotlights(resultText);
 		}
 		var relatedText = AllText(normalResults[5]);
 		Assert.DoesNotContain(hostileKey, relatedText, StringComparison.Ordinal);
@@ -7635,7 +7642,9 @@ public sealed partial class McpServerIntegrationTests
 				tool,
 				new Dictionary<string, object?> { ["unexpected-" + sentinel] = true });
 			Assert.True(error.IsError);
-			AssertOccurrencesAreSpotlighted(AllText(error), sentinel, tool + " error");
+			var errorText = AllText(error);
+			AssertOccurrencesAreSpotlighted(errorText, sentinel, tool + " error");
+			AssertBalancedSpotlights(errorText);
 		}
 
 		await AssertRemoteBranchStaysInsideUntrustedDataAsync(

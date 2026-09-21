@@ -111,11 +111,11 @@ public sealed partial class McpServerIntegrationTests
 		}
 		var outsideText = AllText(results.Single(static item => item.Name == "get_file").Result);
 		Assert.Contains(
-			"[Live context] the named path is outside the current window selection",
+			"[Live context] 1 named file(s) returned outside the current focus; effective filters still apply.",
 			outsideText,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"[Live context] 2 named paths are outside the current window selection",
+			"[Live context] 2 named file(s) returned outside the current focus; effective filters still apply.",
 			AllText(results.Single(static item => item.Name == "get_file-batch").Result),
 			StringComparison.Ordinal);
 		var changedText = AllText(results.Single(static item => item.Name == "changed-profile").Result);

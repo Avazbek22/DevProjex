@@ -4,9 +4,9 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed partial class McpServerProcessTests
 {
-	private const string UnchangedServiceNotice = "[Unchanged] filters, protection; see list_projects.";
-	private const string UnchangedFiltersServiceNotice = "[Unchanged] filters; see list_projects.";
-	private const string UnchangedProtectionServiceNotice = "[Unchanged] protection; see list_projects.";
+	private const string UnchangedServiceNotice = "[Unchanged] effective filters, protection.";
+	private const string UnchangedFiltersServiceNotice = "[Unchanged] effective filters.";
+	private const string UnchangedProtectionServiceNotice = "[Unchanged] protection.";
 
 	[Fact]
 	public async Task RealProcessSendsServiceNoticesOnceWhileTheyKeepSayingTheSameThing()
