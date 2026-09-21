@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" />
+    <ProjectReference Include="..\..\..\Apps\Mcp\DevProjex.Mcp.csproj" />
   </ItemGroup>
 </Project>

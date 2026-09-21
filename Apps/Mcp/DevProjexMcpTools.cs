@@ -3307,7 +3307,8 @@ internal sealed class DevProjexMcpTools(
 		int contextLines,
 		bool explicitScope,
 		McpSearchFilePriorityState? priorityState = null,
-		McpSearchDeclarationPreviewCache? declarationPreviews = null)
+		McpSearchDeclarationPreviewCache? declarationPreviews = null,
+		Action? declarationVisited = null)
 	{
 		priorityState ??= new McpSearchFilePriorityState();
 		foreach (var match in matches)
@@ -3327,7 +3328,7 @@ internal sealed class DevProjexMcpTools(
 				if (rendered.Count == 0)
 					continue;
 
-				var declaration = FindContainingDeclaration(declarations, matchLine);
+				var declaration = FindContainingDeclaration(declarations, matchLine, declarationVisited);
 				var quality = declaration is null
 					? McpDeclarationMatchQuality.None
 					: regex.DeclarationMatchQuality(declaration.Name);
@@ -3364,11 +3365,13 @@ internal sealed class DevProjexMcpTools(
 
 	private static NavigationDeclaration? FindContainingDeclaration(
 		IReadOnlyList<NavigationDeclaration> declarations,
-		int line)
+		int line,
+		Action? declarationVisited)
 	{
 		NavigationDeclaration? best = null;
 		foreach (var declaration in declarations)
 		{
+			declarationVisited?.Invoke();
 			if (line < declaration.StartLine || line > declaration.EndLine)
 				continue;
 			if (best is null ||

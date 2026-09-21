@@ -2,8 +2,16 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using DevProjex.Application.Dependencies;
+using DevProjex.Mcp;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+
+if (args.FirstOrDefault() == "search-declarations")
+{
+	SearchDeclarationBenchmark.Run(args[1..]);
+	return;
+}
 
 var options = BenchmarkOptions.Parse(args);
 var temporaryCorpus = options.SyntheticFileCount is null ? null : SyntheticCorpus.Create(options.SyntheticFileCount.Value);
@@ -128,6 +136,109 @@ internal sealed record BenchmarkOperation(
 	Func<McpClient, CancellationToken, Task<CallToolResult>> Invoke);
 
 internal readonly record struct Sample(double ElapsedMilliseconds, long ClientAllocatedBytes, int ResponseCharacters);
+
+internal static class SearchDeclarationBenchmark
+{
+	public static void Run(string[] arguments)
+	{
+		var repetitions = 5;
+		for (var index = 0; index < arguments.Length; index++)
+		{
+			if (arguments[index] != "--repetitions" || index + 1 >= arguments.Length)
+				throw new ArgumentException($"Unknown or incomplete argument: {arguments[index]}");
+			repetitions = int.Parse(arguments[++index], CultureInfo.InvariantCulture);
+		}
+		if (repetitions < 3)
+			throw new ArgumentOutOfRangeException(nameof(repetitions), "At least three repetitions are required.");
+
+		Console.WriteLine("declarations,median_ms,min_ms,max_ms,spread_ms,median_alloc_bytes,visited_declarations");
+		foreach (var count in new[] { 1_000, 5_000, 10_000 })
+		{
+			var fixture = CreateFixture(count);
+			_ = Measure(fixture);
+			var samples = Enumerable.Range(0, repetitions).Select(_ => Measure(fixture)).ToArray();
+			var elapsed = samples.Select(static sample => sample.ElapsedMilliseconds).Order().ToArray();
+			var allocations = samples.Select(static sample => sample.AllocatedBytes).Order().ToArray();
+			var visits = samples.Select(static sample => sample.VisitedDeclarations).Distinct().Single();
+			Console.WriteLine(string.Join(',',
+				count.ToString(CultureInfo.InvariantCulture),
+				FormatValue(MedianValue(elapsed)),
+				FormatValue(elapsed[0]),
+				FormatValue(elapsed[^1]),
+				FormatValue(elapsed[^1] - elapsed[0]),
+				MedianValue(allocations).ToString(CultureInfo.InvariantCulture),
+				visits.ToString(CultureInfo.InvariantCulture)));
+		}
+	}
+
+	private static SearchDeclarationFixture CreateFixture(int count)
+	{
+		var content = new System.Text.StringBuilder(count * 40);
+		var declarations = new NavigationDeclaration[count];
+		var matches = new McpSearchMatchContext[count];
+		for (var index = 0; index < count; index++)
+		{
+			var line = index + 1;
+			var text = $"void Method{index:D5}() {{ needle(); }}";
+			var offset = content.Length;
+			content.AppendLine(text);
+			declarations[index] = new NavigationDeclaration(
+				$"Fixture.Method{index:D5}",
+				NavigationSymbolKind.Method,
+				"Fixture",
+				line,
+				line,
+				"benchmark")
+			{
+				StartIndex = offset,
+				EndIndex = content.Length - 1
+			};
+			matches[index] = new McpSearchMatchContext(
+				[line],
+				[new McpTextLineRange(line, offset, text.Length)],
+				StartsNewGroup: false);
+		}
+		return new SearchDeclarationFixture(content.ToString(), declarations, matches);
+	}
+
+	private static SearchDeclarationSample Measure(SearchDeclarationFixture fixture)
+	{
+		var visits = 0L;
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+		var timer = Stopwatch.StartNew();
+		var collector = new McpSearchCandidateCollector(50, 2_000_000);
+		DevProjexMcpTools.AddSearchCandidates(
+			collector,
+			"Fixture.cs",
+			"Fixture.cs",
+			fixture.Content,
+			fixture.Matches,
+			fixture.Declarations,
+			new McpSearchRegex("needle", ignoreCase: false),
+			0,
+			explicitScope: false,
+			declarationVisited: () => visits++);
+		timer.Stop();
+		return new SearchDeclarationSample(
+			timer.Elapsed.TotalMilliseconds,
+			GC.GetAllocatedBytesForCurrentThread() - allocatedBefore,
+			visits);
+	}
+
+	private static double MedianValue(double[] values) => values[values.Length / 2];
+	private static long MedianValue(long[] values) => values[values.Length / 2];
+	private static string FormatValue(double value) => value.ToString("0.000", CultureInfo.InvariantCulture);
+
+	private sealed record SearchDeclarationFixture(
+		string Content,
+		IReadOnlyList<NavigationDeclaration> Declarations,
+		IReadOnlyList<McpSearchMatchContext> Matches);
+
+	private readonly record struct SearchDeclarationSample(
+		double ElapsedMilliseconds,
+		long AllocatedBytes,
+		long VisitedDeclarations);
+}
 
 internal sealed record BenchmarkOptions(
 	string Host,
