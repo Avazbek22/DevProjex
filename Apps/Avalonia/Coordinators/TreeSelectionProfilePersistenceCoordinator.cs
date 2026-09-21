@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -7,6 +8,7 @@ internal enum SelectionPersistencePhase
     Idle,
     Pending,
     Saving,
+    Deferred,
     Failed
 }
 
@@ -19,7 +21,8 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
     private static readonly TimeSpan PersistenceDelay =
         UiTimingProfile.Scale(TimeSpan.FromSeconds(2));
 
-    private readonly Func<string, IReadOnlyCollection<string>?, CancellationToken, Task> _persistAsync;
+    private readonly Func<string, IReadOnlyCollection<string>?, CancellationToken,
+        Task<ProjectProfilePersistenceResult>> _persistAsync;
     private readonly Func<CancellationToken, Task> _delayAsync;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly object _sync = new();
@@ -41,19 +44,55 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
     }
 
     public TreeSelectionProfilePersistenceCoordinator(
-        Func<string, IReadOnlyCollection<string>?, CancellationToken, Task> persistAsync)
+        Func<string, IReadOnlyCollection<string>?, CancellationToken,
+            Task<ProjectProfilePersistenceResult>> persistAsync)
         : this(
             persistAsync,
             static cancellationToken => Task.Delay(PersistenceDelay, cancellationToken))
     {
     }
 
+    public TreeSelectionProfilePersistenceCoordinator(
+        Func<string, IReadOnlyCollection<string>?, CancellationToken, Task> persistAsync)
+        : this(
+            (projectPath, selectedPaths, cancellationToken) => PersistAndReportSavedAsync(
+                persistAsync,
+                projectPath,
+                selectedPaths,
+                cancellationToken))
+    {
+    }
+
     internal TreeSelectionProfilePersistenceCoordinator(
-        Func<string, IReadOnlyCollection<string>?, CancellationToken, Task> persistAsync,
+        Func<string, IReadOnlyCollection<string>?, CancellationToken,
+            Task<ProjectProfilePersistenceResult>> persistAsync,
         Func<CancellationToken, Task> delayAsync)
     {
         _persistAsync = persistAsync ?? throw new ArgumentNullException(nameof(persistAsync));
         _delayAsync = delayAsync ?? throw new ArgumentNullException(nameof(delayAsync));
+    }
+
+    internal TreeSelectionProfilePersistenceCoordinator(
+        Func<string, IReadOnlyCollection<string>?, CancellationToken, Task> persistAsync,
+        Func<CancellationToken, Task> delayAsync)
+        : this(
+            (projectPath, selectedPaths, cancellationToken) => PersistAndReportSavedAsync(
+                persistAsync,
+                projectPath,
+                selectedPaths,
+                cancellationToken),
+            delayAsync)
+    {
+    }
+
+    private static async Task<ProjectProfilePersistenceResult> PersistAndReportSavedAsync(
+        Func<string, IReadOnlyCollection<string>?, CancellationToken, Task> persistAsync,
+        string projectPath,
+        IReadOnlyCollection<string>? selectedPaths,
+        CancellationToken cancellationToken)
+    {
+        await persistAsync(projectPath, selectedPaths, cancellationToken).ConfigureAwait(false);
+        return ProjectProfilePersistenceResult.Saved();
     }
 
     public void Schedule(string projectPath, IReadOnlyCollection<string>? selectedPaths)
@@ -191,10 +230,21 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
 
             try
             {
-                await _persistAsync(
+                var result = await _persistAsync(
                     pending.ProjectPath,
                     pending.SelectedPaths,
                     cancellationToken).ConfigureAwait(false);
+                if (!result.Completed)
+                {
+                    PublishStateForVersion(
+                        pending.Version,
+                        new SelectionPersistenceState(
+                            result.Disposition == ProjectProfilePersistenceDisposition.Deferred
+                                ? SelectionPersistencePhase.Deferred
+                                : SelectionPersistencePhase.Failed,
+                            result.Reason));
+                    return false;
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

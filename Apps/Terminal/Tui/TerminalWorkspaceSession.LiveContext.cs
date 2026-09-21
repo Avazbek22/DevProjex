@@ -1,3 +1,4 @@
+using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ProjectProfiles;
 
@@ -5,6 +6,9 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed partial class TerminalWorkspaceSession
 {
+	private string? _agentJournalOpeningRoot;
+	private string? _agentJournalOpeningSessionId;
+	private long _agentJournalOpeningSequence;
 	private bool PollLiveSessions()
 	{
 		if (_stopping || _disposed)
@@ -57,14 +61,34 @@ internal sealed partial class TerminalWorkspaceSession
 				.ConfigureAwait(false);
 			var session = sessions.FirstOrDefault(static candidate =>
 				candidate.IsLive && candidate.Mode == AgentJournalMode.Live);
-			var receipt = session is null
-				? null
-				: await _agentJournalStore.Value
-					.ReadReceiptAsync(session.Id, _sessionCts.Token)
+			AgentJournalActivitySnapshot? activity = null;
+			if (session is not null)
+			{
+				var afterSequence = _agentJournalSnapshot is { } current &&
+					ProjectTreePathIdentity.CanonicalComparer.Equals(_agentJournalOpeningRoot, projectRoot) &&
+					string.Equals(current.Session.Id, session.Id, StringComparison.Ordinal)
+					? current.LatestCall?.Sequence ?? 0
+					: 0;
+				activity = await _agentJournalStore.Value
+					.ReadActivityAsync(session.Id, afterSequence, _sessionCts.Token)
 					.ConfigureAwait(false);
-			var snapshot = receipt is null
+			}
+			if (activity is not null &&
+				(!ProjectTreePathIdentity.CanonicalComparer.Equals(_agentJournalOpeningRoot, projectRoot) ||
+				 !string.Equals(_agentJournalOpeningSessionId, activity.Session.Id, StringComparison.Ordinal)))
+			{
+				_agentJournalOpeningRoot = projectRoot;
+				_agentJournalOpeningSessionId = activity.Session.Id;
+				_agentJournalOpeningSequence = activity.LatestCall?.Sequence ?? 0;
+				_agentJournalSnapshot = null;
+			}
+			var snapshot = activity is null
 				? null
-				: TerminalAgentJournalSnapshot.Create(projectRoot, receipt);
+				: TerminalAgentJournalSnapshot.Create(
+					projectRoot,
+					activity,
+					_agentJournalSnapshot,
+					_agentJournalOpeningSequence);
 			await InvokeAsync(() =>
 			{
 				if (!_agentActivityEnabled || _state is null ||
@@ -158,12 +182,12 @@ internal sealed partial class TerminalWorkspaceSession
 			SelectedPaths: selection.SelectedPaths?.ToArray());
 	}
 
-	private async Task PersistLocalProfileAsync(
+	private async Task<ProjectProfilePersistenceResult> PersistLocalProfileAsync(
 		string projectPath,
 		ProjectSelectionProfile profile,
 		CancellationToken cancellationToken)
 	{
-		await Task.Run(() =>
+		return await Task.Run(() =>
 		{
 			ProjectSelectionProfile? baseline;
 			lock (_localProfileBaselineSync)
@@ -181,9 +205,13 @@ internal sealed partial class TerminalWorkspaceSession
 				TimeSpan.FromSeconds(5),
 				cancellationToken: cancellationToken);
 			if (!result.Succeeded)
-				throw new IOException("The terminal project profile could not be saved.");
+			{
+				return ProjectProfilePersistenceResult.Failed(
+					"The terminal project profile could not be saved.");
+			}
 			lock (_localProfileBaselineSync)
-				_localProfileBaseline = profile;
+				_localProfileBaseline = result.PersistedProfile ?? profile;
+			return ProjectProfilePersistenceResult.Saved();
 		}, cancellationToken).ConfigureAwait(false);
 	}
 }

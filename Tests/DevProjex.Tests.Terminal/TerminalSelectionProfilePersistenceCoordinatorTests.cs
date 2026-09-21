@@ -1,5 +1,7 @@
 namespace DevProjex.Tests.Terminal;
 
+using DevProjex.Infrastructure.ProjectProfiles;
+
 public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 {
 	private static readonly string[] FailureChoiceKeys =
@@ -64,6 +66,51 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
 		Assert.Equal(TerminalSelectionPersistencePhase.Idle, coordinator.State.Phase);
 		Assert.Equal(2, attempts);
+	}
+
+	[Fact]
+	public async Task DeferredStateRemainsUntilThePendingSelectionIsSaved()
+	{
+		var delay = new ControlledDelay();
+		var attempts = 0;
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			(_, _, _) => Task.FromResult(++attempts == 1
+				? ProjectProfilePersistenceResult.Deferred("storage is unavailable")
+				: ProjectProfilePersistenceResult.Saved()),
+			delay.WaitAsync,
+			maxBackgroundAttempts: 1);
+
+		coordinator.Schedule("project", CreateProfile(["src"]));
+		delay.Release();
+		await WaitForStateAsync(coordinator, TerminalSelectionPersistencePhase.Deferred);
+
+		Assert.Equal("storage is unavailable", coordinator.State.FailureReason);
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(TerminalSelectionPersistencePhase.Idle, coordinator.State.Phase);
+		Assert.Equal(2, attempts);
+	}
+
+	[Fact]
+	public async Task ProvenUnchangedSelectionClearsThePendingWrite()
+	{
+		var delay = new ControlledDelay();
+		var attempts = 0;
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			(_, _, _) =>
+			{
+				attempts++;
+				return Task.FromResult(ProjectProfilePersistenceResult.Unchanged());
+			},
+			delay.WaitAsync,
+			maxBackgroundAttempts: 1);
+
+		coordinator.Schedule("project", CreateProfile(["src"]));
+		delay.Release();
+		await WaitForStateAsync(coordinator, TerminalSelectionPersistencePhase.Idle);
+
+		Assert.Equal(1, attempts);
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(1, attempts);
 	}
 
 	[Fact]
