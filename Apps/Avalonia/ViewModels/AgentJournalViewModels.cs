@@ -109,6 +109,7 @@ internal sealed class AgentJournalWindowViewModel : ViewModelBase
     }
 
     public bool IsEmpty => !IsLoading && Sessions.Count == 0;
+    public bool HasSessions => Sessions.Count > 0;
 
     public string FooterText
     {
@@ -155,6 +156,7 @@ internal sealed class AgentJournalWindowViewModel : ViewModelBase
         SelectedSession = Sessions.FirstOrDefault(item =>
             string.Equals(item.Session.Id, selectedId, StringComparison.Ordinal)) ?? Sessions.FirstOrDefault();
         RaisePropertyChanged(nameof(IsEmpty));
+        RaisePropertyChanged(nameof(HasSessions));
     }
 
     public void ReplaceCalls(IReadOnlyList<AgentJournalCallViewModel> calls)

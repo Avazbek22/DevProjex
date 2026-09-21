@@ -9,6 +9,9 @@ namespace DevProjex.Avalonia.Views;
 
 internal partial class AgentJournalWindow : Window
 {
+    internal const double MinimumWindowWidth = 900;
+    internal const double MinimumWindowHeight = 560;
+    private const double OwnerSizeRatio = 0.7;
     private static readonly TimeSpan SessionRefreshInterval = TimeSpan.FromSeconds(5);
     private readonly IAgentJournalReader _reader;
     private readonly IAgentJournalReceiptFormatter _formatter;
@@ -57,6 +60,7 @@ internal partial class AgentJournalWindow : Window
         _viewModel = new AgentJournalWindowViewModel(localization, _currentProjectRoot is not null);
         DataContext = _viewModel;
         InitializeComponent();
+        ApplyInitialSize();
         ApplyDialogSurface();
 
         _refreshTimer = new DispatcherTimer { Interval = SessionRefreshInterval };
@@ -64,7 +68,9 @@ internal partial class AgentJournalWindow : Window
         Opened += OnOpened;
         Closed += OnClosed;
         _localization.LanguageChanged += OnLanguageChanged;
-        if (global::Avalonia.Application.Current is { } application)
+        if (_owner is not null)
+            _owner.ActualThemeVariantChanged += OnActualThemeVariantChanged;
+        else if (global::Avalonia.Application.Current is { } application)
             application.ActualThemeVariantChanged += OnActualThemeVariantChanged;
     }
 
@@ -119,6 +125,7 @@ internal partial class AgentJournalWindow : Window
         if (_loaded)
             return;
         _loaded = true;
+        ApplyDialogSurface();
         _refreshTimer.Start();
         await RefreshSafelyAsync();
     }
@@ -133,7 +140,9 @@ internal partial class AgentJournalWindow : Window
         _lifetime.Cancel();
         _lifetime.Dispose();
         _localization.LanguageChanged -= OnLanguageChanged;
-        if (global::Avalonia.Application.Current is { } application)
+        if (_owner is not null)
+            _owner.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
+        else if (global::Avalonia.Application.Current is { } application)
             application.ActualThemeVariantChanged -= OnActualThemeVariantChanged;
         Opened -= OnOpened;
         Closed -= OnClosed;
@@ -337,12 +346,82 @@ internal partial class AgentJournalWindow : Window
         _ = RefreshSafelyAsync();
     }
 
-    private void OnActualThemeVariantChanged(object? sender, EventArgs e) => ApplyDialogSurface();
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e)
+    {
+        ApplyDialogSurface();
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                if (!_lifetime.IsCancellationRequested)
+                    ApplyDialogSurface();
+            },
+            DispatcherPriority.Render);
+    }
+
+    internal static Size ResolveInitialSize(Size ownerSize)
+    {
+        return new Size(
+            ResolveInitialDimension(ownerSize.Width, MinimumWindowWidth),
+            ResolveInitialDimension(ownerSize.Height, MinimumWindowHeight));
+    }
+
+    private static double ResolveInitialDimension(double ownerDimension, double minimum)
+    {
+        if (!double.IsFinite(ownerDimension) || ownerDimension <= 0)
+            return minimum;
+        return Math.Min(ownerDimension, Math.Max(minimum, ownerDimension * OwnerSizeRatio));
+    }
+
+    private void ApplyInitialSize()
+    {
+        var ownerSize = _owner?.ClientSize ?? default;
+        if (ownerSize.Width <= 0 || ownerSize.Height <= 0)
+            ownerSize = _owner?.Bounds.Size ?? default;
+        var initialSize = ResolveInitialSize(ownerSize);
+        Width = initialSize.Width;
+        Height = initialSize.Height;
+        MinWidth = MinimumWindowWidth;
+        MinHeight = MinimumWindowHeight;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+    }
 
     private void ApplyDialogSurface()
     {
         var theme = DialogSurfaceFactory.ResolveThemeVariant(_owner);
         var brushes = DialogSurfaceFactory.ResolveBrushes(_owner, theme);
         DialogSurfaceFactory.ApplyWindowSurface(this, theme, brushes);
+        var background = Background;
+        var panel = EnsureOpaqueSurface(brushes.Panel, background);
+        var border = brushes.Border ?? panel;
+        var header = EnsureOpaqueSurface(brushes.Header, panel);
+
+        JournalSurface.Background = background;
+        ApplyCardSurface(JournalSessionsSurface, panel, border);
+        JournalSessionsHeader.Background = header;
+        JournalSessionsList.Background = panel;
+        JournalSessionsList.BorderBrush = border;
+        ApplyCardSurface(JournalCallsSurface, panel, border);
+        JournalCallsHeader.Background = header;
+        JournalCallsList.Background = panel;
+        JournalCallsList.BorderBrush = border;
+        JournalFooterSurface.Background = panel;
+        JournalFooterSurface.BorderBrush = border;
+        ApplyCardSurface(JournalEmptySurface, panel, border);
+    }
+
+    private static void ApplyCardSurface(Border surface, IBrush? background, IBrush? border)
+    {
+        surface.Background = background;
+        surface.BorderBrush = border;
+    }
+
+    private static IBrush? EnsureOpaqueSurface(IBrush? brush, IBrush? fallback)
+    {
+        if (brush is not ISolidColorBrush solid)
+            return fallback;
+        var color = solid.Color;
+        return color.A == byte.MaxValue
+            ? brush
+            : new SolidColorBrush(Color.FromArgb(byte.MaxValue, color.R, color.G, color.B));
     }
 }
