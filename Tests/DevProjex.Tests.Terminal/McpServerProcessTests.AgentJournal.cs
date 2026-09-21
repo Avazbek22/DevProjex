@@ -104,6 +104,8 @@ public sealed partial class McpServerProcessTests
 			string.Join('\n', Enumerable.Range(1, 99).Select(static index => $"line {index}")) +
 			$"\nconst string Token = \"{Secret}\";\n");
 		workspace.WriteFile("project/src/Matches.txt", "needle one\nneedle two\n");
+		workspace.WriteFile("project/src/PackA.txt", "first pack file\n");
+		workspace.WriteFile("project/src/PackB.txt", new string('b', 400));
 
 		await using (var server = await ActualMcpProcess.StartAsync(
 			project,
@@ -141,6 +143,16 @@ public sealed partial class McpServerProcessTests
 				server,
 				"search_project",
 				new Dictionary<string, object?> { ["pattern"] = "needle", ["max_results"] = 1 });
+			await AssertSuccessful(
+				server,
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["paths"] = new[] { "src/PackA.txt", "src/PackB.txt" },
+					["view"] = "content",
+					["format"] = "text",
+					["max_tokens"] = 20
+				});
 		}
 
 		using var journal = new AgentJournalStore(() => dataRoot, activeSessionProvider: static () => []);
@@ -156,6 +168,9 @@ public sealed partial class McpServerProcessTests
 		var search = Assert.Single(calls, static call => call.Tool == "search_project");
 		Assert.Contains(AgentJournalNoticeCodes.SearchPartial, search.Notices);
 		Assert.Contains(AgentJournalNoticeCodes.MatchesOmitted, search.Notices);
+		var pack = Assert.Single(calls, static call => call.Tool == "pack_context");
+		Assert.Equal(["src/PackA.txt"], pack.DeliveredPaths);
+		Assert.Contains(AgentJournalNoticeCodes.BudgetSkipped, pack.Notices);
 	}
 
 	private static async Task AssertSuccessful(

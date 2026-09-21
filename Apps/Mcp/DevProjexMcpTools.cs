@@ -778,9 +778,11 @@ internal sealed class DevProjexMcpTools(
 			var retainPack = false;
 			try
 			{
-				var deliveredPackFiles = plan.IncludedFiles.Except(
-					writeResult?.UnscannableFiles.Select(static file => file.Path) ?? [],
-					PathComparer.Default).ToArray();
+				var deliveredPackFiles = writeResult?.TokenBudget is { } tokenBudget
+					? tokenBudget.AdmittedSourceFiles.ToArray()
+					: plan.IncludedFiles.Except(
+						writeResult?.UnscannableFiles.Select(static file => file.Path) ?? [],
+						PathComparer.Default).ToArray();
 				packs.RecordJournalContext(
 					pack.Id,
 					CreateStoredJournalContext(plan, deliveredPackFiles, prepared ?? measured));
