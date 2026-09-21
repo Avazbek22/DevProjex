@@ -33,7 +33,7 @@ internal sealed class WorkspacePresentationController : IDisposable
     internal const double SettingsPanelMinimumWidth = SettingsPanelDefaultWidth;
     internal const double SettingsPanelMaximumWidth = 320.0;
     internal const double SplitTreePaneMinimumWidth = 418.0;
-    internal const double SplitPreviewPaneMinimumWidth = 57.0;
+    internal const double SplitPreviewPaneMinimumWidth = 320.0;
     internal const double TreePreviewSplitterWidth = 4.0;
     internal const double PreviewSettingsSplitterWidth = 4.0;
     internal const double WindowMinimumWidthSafetyPadding = 32.0;

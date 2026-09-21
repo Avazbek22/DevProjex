@@ -127,7 +127,7 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
 
 	[AvaloniaTheory]
 	[InlineData(1214.0, 838.0)]
-	[InlineData(800.0, 600.0)]
+	[InlineData(1063.0, 600.0)]
 	public async Task NarrowWorkspace_KeepsSettingsPanelUsableAndGivesRemainingWidthToPreview(
 		double width,
 		double height)
@@ -154,12 +154,9 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
 			Assert.True(
 				settingsContainerWidth >= settingsWidth + WorkspacePresentationController.PreviewSettingsSplitterWidth,
 				$"Settings carrier width was {settingsContainerWidth:F2} for a {settingsWidth:F2} panel.");
-			if (width <= WorkspacePresentationController.MinimumWindowWidth)
-			{
-				Assert.True(
-					previewWidth < settingsWidth,
-					$"Preview width {previewWidth:F2} should yield before settings width {settingsWidth:F2}.");
-			}
+			Assert.True(
+				previewWidth >= WorkspacePresentationController.SplitPreviewPaneMinimumWidth,
+				$"Preview width was {previewWidth:F2} at {width:F0}x{height:F0}.");
 		}
 		finally
 		{

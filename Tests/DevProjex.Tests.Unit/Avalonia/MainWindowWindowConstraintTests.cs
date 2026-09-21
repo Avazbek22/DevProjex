@@ -13,7 +13,7 @@ public sealed class MainWindowWindowConstraintTests
 			WorkspacePresentationController.SettingsPanelMinimumWidth +
 			WorkspacePresentationController.WindowMinimumWidthSafetyPadding;
 
-		Assert.Equal(800.0, requiredWidth);
+		Assert.Equal(1063.0, requiredWidth);
 		Assert.Equal(WorkspacePresentationController.MinimumWindowWidth, requiredWidth);
 	}
 
