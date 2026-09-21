@@ -44,8 +44,10 @@ scavenger, which removes stale directories once they are more than 24 hours old.
 
 The agent journal is local application state and never leaves the machine unless
 the user explicitly exports a context receipt. It contains session metadata,
-bounded arguments, paths, notices, and counts, but no project file contents,
-tool-result bodies, detected secret values, or masked private-data values. Journal
+bounded execution parameters, paths, notices, and counts, but no project file contents,
+tool-result bodies, search-query text, symbol-selector text, detected
+secret values, or masked private-data values. Remaining string values are checked
+by the existing secret and private-data detectors before they are queued. Journal
 recording does not change the telemetry-free guarantee: DevProjex does not transmit
 the journal or collect it as telemetry.
 

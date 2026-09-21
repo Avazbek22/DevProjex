@@ -12,6 +12,10 @@ public sealed class AgentJournalDocumentationContractTests
 		Assert.Contains("30 days", server, StringComparison.Ordinal);
 		Assert.Contains("200 sessions", server, StringComparison.Ordinal);
 		Assert.Contains("does not store file contents", server, StringComparison.Ordinal);
+		Assert.Contains("search-query text", server, StringComparison.Ordinal);
+		Assert.Contains("Active Standard and Live sessions are exempt", server, StringComparison.Ordinal);
+		Assert.Contains("only when its text was actually returned", server, StringComparison.Ordinal);
+		Assert.Contains("mark the history incomplete", server, StringComparison.Ordinal);
 		Assert.Contains("GUI", server, StringComparison.Ordinal);
 		Assert.Contains("Terminal Workspace", server, StringComparison.Ordinal);
 		Assert.Contains("CLI", server, StringComparison.Ordinal);
@@ -45,6 +49,7 @@ public sealed class AgentJournalDocumentationContractTests
 		Assert.Contains("agent journal", security, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("never leaves the machine", security, StringComparison.Ordinal);
 		Assert.Contains("no project file contents", security, StringComparison.Ordinal);
+		Assert.Contains("search-query text", security, StringComparison.Ordinal);
 		Assert.Contains("does not change the telemetry-free guarantee", security, StringComparison.Ordinal);
 	}
 
