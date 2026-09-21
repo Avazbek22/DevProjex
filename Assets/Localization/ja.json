@@ -1,4 +1,10 @@
 {
+  "Mcp.Connect.ProjectConfigurationWritten": "{0}: 構成を {1} に書き込みました。",
+  "Mcp.Connect.Cursor.NextStep": "このプロジェクトで Cursor を再起動してください。",
+  "Mcp.Connect.VsCode.NextStep": "VS Code で MCP: List Servers を実行し、devprojex、Enable/Start の順に選択して、ワークスペースの信頼を確認してください。",
+  "Mcp.Connect.ManualConfigurationRestart": "この JSON を手動 MCP 構成に使用してください。Claude Desktop を完全に終了して再起動し、Manage connectors を確認してください。",
+  "Mcp.Connect.Codex.ResponseHint": "Codex はモデルに渡す前にサーバー応答ページを短縮する場合があります。内容が制限される場合は、より小さい範囲で読み取ってください。",
+  "Mcp.Connect.Codex.ProjectOverride": "プロジェクトの .codex/config.toml がグローバルな devprojex 登録を上書きしています。プロジェクト構成は変更されていません。",
   "Menu.File": "ファイル",
   "Menu.File.Open": "フォルダーを開く...",
   "Menu.File.OpenNewWindow": "新しいウィンドウ",

@@ -1,4 +1,10 @@
 {
+  "Mcp.Connect.ProjectConfigurationWritten": "{0}: 구성을 {1}에 기록했습니다.",
+  "Mcp.Connect.Cursor.NextStep": "이 프로젝트에서 Cursor를 다시 시작하세요.",
+  "Mcp.Connect.VsCode.NextStep": "VS Code에서 MCP: List Servers를 실행하고 devprojex와 Enable/Start를 차례로 선택한 다음 작업 영역 신뢰를 확인하세요.",
+  "Mcp.Connect.ManualConfigurationRestart": "수동 MCP 구성에 이 JSON을 사용하세요. Claude Desktop을 완전히 종료한 뒤 다시 시작하고 Manage connectors를 확인하세요.",
+  "Mcp.Connect.Codex.ResponseHint": "Codex는 서버 응답 페이지를 모델에 전달하기 전에 줄일 수 있습니다. 내용이 제한되면 더 작은 범위를 읽으세요.",
+  "Mcp.Connect.Codex.ProjectOverride": "프로젝트의 .codex/config.toml이 전역 devprojex 등록을 재정의합니다. 프로젝트 구성은 변경되지 않았습니다.",
   "Menu.File": "파일",
   "Menu.File.Open": "폴더 열기...",
   "Menu.File.OpenNewWindow": "새 창",

@@ -1,4 +1,10 @@
 {
+  "Mcp.Connect.ProjectConfigurationWritten": "{0}: конфігурацію записано до {1}.",
+  "Mcp.Connect.Cursor.NextStep": "Перезапустіть Cursor у цьому проєкті.",
+  "Mcp.Connect.VsCode.NextStep": "У VS Code виконайте MCP: List Servers, виберіть devprojex, потім Enable/Start і підтвердьте довіру до робочої області.",
+  "Mcp.Connect.ManualConfigurationRestart": "Використайте цей JSON для ручного налаштування MCP. Повністю закрийте Claude Desktop, запустіть його знову та перевірте Manage connectors.",
+  "Mcp.Connect.Codex.ResponseHint": "Codex може скоротити сторінку відповіді сервера перед передаванням моделі; якщо вміст обмежено, читайте меншими діапазонами.",
+  "Mcp.Connect.Codex.ProjectOverride": "Проєктний .codex/config.toml перекриває глобальну реєстрацію devprojex. Конфігурацію проєкту не змінено.",
   "Menu.File": "Файл",
   "Menu.File.Open": "Відкрити папку...",
   "Menu.File.OpenNewWindow": "Нове вікно",

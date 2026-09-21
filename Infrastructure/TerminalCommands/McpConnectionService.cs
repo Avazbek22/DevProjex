@@ -415,7 +415,29 @@ internal sealed class McpProjectConfigurationWriter
 			request.ExecutablePath,
 			projectRoot);
 		var generatedRoot = JsonNode.Parse(printable)!.AsObject();
-		servers["devprojex"] = generatedRoot[containerName]!["devprojex"]!.DeepClone();
+		var generatedEntry = generatedRoot[containerName]!["devprojex"]!.AsObject();
+		if (!replaced)
+		{
+			servers["devprojex"] = generatedEntry.DeepClone();
+		}
+		else if (servers["devprojex"] is JsonObject existingEntry)
+		{
+			existingEntry["command"] = generatedEntry["command"]!.DeepClone();
+			existingEntry["args"] = generatedEntry["args"]!.DeepClone();
+			if (generatedEntry["env"] is JsonObject requiredEnvironment)
+			{
+				if (existingEntry["env"] is null)
+					existingEntry["env"] = new JsonObject();
+				if (existingEntry["env"] is not JsonObject existingEnvironment)
+					return Failure(targetPath, McpProjectConfigurationError.InvalidData);
+				foreach (var pair in requiredEnvironment)
+					existingEnvironment[pair.Key] = pair.Value?.DeepClone();
+			}
+		}
+		else
+		{
+			return Failure(targetPath, McpProjectConfigurationError.InvalidData);
+		}
 		try
 		{
 			Directory.CreateDirectory(directory);
@@ -535,6 +557,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	private readonly IMcpConnectionProcessRunner _processRunner;
 	private readonly McpProjectConfigurationWriter _configurationWriter;
 	private readonly IMcpCodexUserConfigurationReader _codexUserConfigurationReader;
+	private readonly IMcpClaudeUserConfigurationReader _claudeUserConfigurationReader;
 
 	public McpConnectionService(LocalizationService localization)
 		: this(
@@ -542,7 +565,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			new McpClientExecutableLocator(),
 			new McpConnectionProcessRunner(),
 			new McpProjectConfigurationWriter(),
-			new McpCodexUserConfigurationReader())
+			new McpCodexUserConfigurationReader(),
+			new McpClaudeUserConfigurationReader())
 	{
 	}
 
@@ -551,7 +575,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		McpClientExecutableLocator locator,
 		IMcpConnectionProcessRunner processRunner,
 		McpProjectConfigurationWriter configurationWriter,
-		IMcpCodexUserConfigurationReader? codexUserConfigurationReader = null)
+		IMcpCodexUserConfigurationReader? codexUserConfigurationReader = null,
+		IMcpClaudeUserConfigurationReader? claudeUserConfigurationReader = null)
 	{
 		_localization = localization ?? throw new ArgumentNullException(nameof(localization));
 		_locator = locator ?? throw new ArgumentNullException(nameof(locator));
@@ -559,6 +584,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		_configurationWriter = configurationWriter ?? throw new ArgumentNullException(nameof(configurationWriter));
 		_codexUserConfigurationReader =
 			codexUserConfigurationReader ?? new McpCodexUserConfigurationReader();
+		_claudeUserConfigurationReader =
+			claudeUserConfigurationReader ?? new McpClaudeUserConfigurationReader();
 	}
 
 	public string CreatePrintableConfiguration(McpConnectionRequest request)
@@ -716,9 +743,25 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 					CommandOutput: string.Join(Environment.NewLine, output));
 			}
 		}
+		if (request.Client == McpConnectionClient.Codex &&
+			snapshot is not null &&
+			existing.CodexConfiguration?.Connection?.HasExtendedFields == true &&
+			_codexUserConfigurationReader is IMcpCodexUserConfigurationStore codexStore)
+		{
+			return await UpdateExtendedCodexConnectionAsync(
+				request,
+				executable,
+				localizationPrefix,
+				nextCommand,
+				manual,
+				output,
+				existing.CodexConfiguration,
+				codexStore,
+				cancellationToken).ConfigureAwait(false);
+		}
 
 		IReadOnlyList<string> removeArguments = request.Client == McpConnectionClient.ClaudeCode
-			? ["mcp", "remove", "devprojex", "--scope", "local"]
+			? ["mcp", "remove", "-s", "local", "devprojex"]
 			: ["mcp", "remove", "devprojex"];
 		var replaced = snapshot is not null;
 		if (replaced)
@@ -756,6 +799,18 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		AppendOutput(output, "add", add);
 		if (!add.Succeeded)
 		{
+			if (request.Client == McpConnectionClient.ClaudeCode &&
+				snapshot is null &&
+				IsClaudeAlreadyExists(add) &&
+				TryReadMatchingClaudeConnection(request, out _))
+			{
+				return new McpConnectionResult(
+					McpConnectionStatus.Updated,
+					_localization[$"{localizationPrefix}.Updated"],
+					NextCommand: nextCommand,
+					CommandOutput: string.Join(Environment.NewLine, output),
+					Replaced: true);
+			}
 			if (snapshot is null)
 				return CreateProcessFailure(request, add, output, manual, previousConnectionRemoved: false);
 			var restored = await TryRestoreConnectionAsync(
@@ -774,12 +829,85 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		}
 
 		var status = replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected;
+		var message = _localization[$"{localizationPrefix}.{(replaced ? "Updated" : "Connected")}"];
+		if (request.Client == McpConnectionClient.Codex)
+			message += " " + _localization["Mcp.Connect.Codex.ResponseHint"];
 		return new McpConnectionResult(
 			status,
-			_localization[$"{localizationPrefix}.{(replaced ? "Updated" : "Connected")}"],
+			message,
 			NextCommand: nextCommand,
 			CommandOutput: string.Join(Environment.NewLine, output),
 			Replaced: replaced);
+	}
+
+	private async Task<McpConnectionResult> UpdateExtendedCodexConnectionAsync(
+		McpConnectionRequest request,
+		string executable,
+		string localizationPrefix,
+		string nextCommand,
+		string manual,
+		ICollection<string> output,
+		McpCodexUserConfigurationRead configuration,
+		IMcpCodexUserConfigurationStore store,
+		CancellationToken cancellationToken)
+	{
+		var arguments = CreateServerArguments(request.ProjectRoot, request.Mode);
+		var requiredEnvironment = McpConnectionFragmentGenerator.GetRequiredServerEnvironment();
+		var write = await store.UpdateConnectionAsync(
+			configuration,
+			request.ExecutablePath,
+			arguments,
+			requiredEnvironment,
+			cancellationToken).ConfigureAwait(false);
+		if (!write.Succeeded)
+		{
+			return new McpConnectionResult(
+				McpConnectionStatus.ProcessFailed,
+				WithManualFallback(_localization.Format(
+					"Mcp.Connect.CommandFailed",
+					DisplayName(request.Client),
+					write.Error ?? _localization["Mcp.Connect.UnknownError"])),
+				ManualConfiguration: manual,
+				Replaced: true);
+		}
+
+		var verify = await RunClientCommandAsync(
+			executable,
+			["mcp", "get", "devprojex", "--json"],
+			request.ProjectRoot,
+			cancellationToken).ConfigureAwait(false);
+		AppendOutput(output, "get", verify);
+		if (!verify.Succeeded || !TryParseCodexConnection(verify.StandardOutput, out var effective))
+		{
+			using var recoveryCts = new CancellationTokenSource(ClientCommandTimeout);
+			var restored = await store.RestoreAsync(configuration, recoveryCts.Token).ConfigureAwait(false);
+			return CreateProcessFailure(
+				request,
+				verify,
+				output.ToArray(),
+				manual,
+				previousConnectionRemoved: true,
+				previousConnectionRestored: restored);
+		}
+		if (!ConnectionMatches(effective, request.ExecutablePath, arguments, requiredEnvironment))
+		{
+			return new McpConnectionResult(
+				McpConnectionStatus.InvalidConfiguration,
+				_localization["Mcp.Connect.Codex.ProjectOverride"],
+				ManualConfiguration: manual,
+				CommandOutput: string.Join(Environment.NewLine, output),
+				Replaced: true);
+		}
+
+		var message = _localization[$"{localizationPrefix}.Updated"];
+		if (request.Client == McpConnectionClient.Codex)
+			message += " " + _localization["Mcp.Connect.Codex.ResponseHint"];
+		return new McpConnectionResult(
+			McpConnectionStatus.Updated,
+			message,
+			NextCommand: nextCommand,
+			CommandOutput: string.Join(Environment.NewLine, output),
+			Replaced: true);
 	}
 
 	private async Task<McpConnectionResult> ConnectProjectClientAsync(
@@ -800,14 +928,15 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				TargetPath: result.TargetPath);
 		}
 
+		var clientName = DisplayName(request.Client);
+		var relativePath = PathUtility.GetPortableRelativePath(request.ProjectRoot, result.TargetPath);
+		var nextStepKey = request.Client == McpConnectionClient.VsCode
+			? "Mcp.Connect.VsCode.NextStep"
+			: "Mcp.Connect.Cursor.NextStep";
 		return new McpConnectionResult(
 			result.Replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected,
-			_localization.Format(
-				"Mcp.Connect.ProjectConfigurationUpdated",
-				DisplayName(request.Client),
-				PathUtility.GetPortableRelativePath(request.ProjectRoot, result.TargetPath),
-				DisplayName(request.Client)),
-			NextCommand: _localization.Format("Mcp.Connect.RestartClient", DisplayName(request.Client)),
+			_localization.Format("Mcp.Connect.ProjectConfigurationWritten", clientName, relativePath),
+			NextCommand: _localization[nextStepKey],
 			TargetPath: result.TargetPath,
 			Replaced: result.Replaced);
 	}
@@ -815,7 +944,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	private McpConnectionResult CreateManualResult(McpConnectionRequest request) =>
 		new(
 			McpConnectionStatus.ManualConfiguration,
-			_localization["Mcp.Connect.ManualConfiguration"],
+			_localization["Mcp.Connect.ManualConfigurationRestart"],
 			ManualConfiguration: CreatePrintableConfiguration(request),
 			SuggestedConfigPaths: ClaudeDesktopConfigurationPaths);
 
@@ -885,6 +1014,40 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		string executable,
 		CancellationToken cancellationToken)
 	{
+		if (request.Client == McpConnectionClient.ClaudeCode)
+		{
+			var read = _claudeUserConfigurationReader.Read(request.ProjectRoot);
+			var localRead = new McpConnectionProcessResult(0, string.Empty, string.Empty);
+			if (!read.Succeeded)
+			{
+				return new ExistingConnectionRead(
+					localRead,
+					null,
+					_localization.Format(
+						"Mcp.Connect.CommandFailed",
+						DisplayName(request.Client),
+						_localization["Mcp.Connect.InspectionFailed"]));
+			}
+			if (read.Connection is null)
+				return new ExistingConnectionRead(localRead, null, null);
+			if (!TryCreateSnapshot(
+					read.Connection.Command,
+					read.Connection.Arguments,
+					read.Connection.Environment,
+					out var claudeSnapshot,
+					read.Connection.RawJson))
+			{
+				return new ExistingConnectionRead(
+					localRead,
+					null,
+					_localization.Format(
+						"Mcp.Connect.CommandFailed",
+						DisplayName(request.Client),
+						_localization["Mcp.Connect.InspectionFailed"]));
+			}
+			return new ExistingConnectionRead(localRead, claudeSnapshot, null);
+		}
+
 		if (request.Client == McpConnectionClient.Codex)
 		{
 			var read = _codexUserConfigurationReader.Read();
@@ -915,7 +1078,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 						DisplayName(request.Client),
 						_localization["Mcp.Connect.InspectionFailed"]));
 			}
-			return new ExistingConnectionRead(localRead, codexSnapshot, null);
+			return new ExistingConnectionRead(localRead, codexSnapshot, null, read);
 		}
 
 		IReadOnlyList<string> arguments = ["mcp", "get", "devprojex", "--json"];
@@ -989,10 +1152,45 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		var arguments = client == McpConnectionClient.ClaudeCode
 			? new List<string> { "mcp", "add", "--scope", "local", "devprojex", "--" }
 			: ["mcp", "add", "devprojex", "--"];
+		var requiredEnvironment = McpConnectionFragmentGenerator.GetRequiredServerEnvironment();
+		if (requiredEnvironment.Count > 0)
+		{
+			arguments.RemoveAt(arguments.Count - 1);
+			foreach (var pair in requiredEnvironment)
+			{
+				arguments.Add(client == McpConnectionClient.ClaudeCode ? "-e" : "--env");
+				arguments.Add($"{pair.Key}={pair.Value}");
+			}
+			arguments.Add("--");
+		}
 		arguments.AddRange([executablePath, "mcp", "--root", projectRoot]);
 		if (mode == McpConnectionMode.Live)
 			arguments.Add("--live");
 		return arguments;
+	}
+
+	private static string[] CreateServerArguments(string projectRoot, McpConnectionMode mode) =>
+		mode == McpConnectionMode.Live
+			? ["mcp", "--root", projectRoot, "--live"]
+			: ["mcp", "--root", projectRoot];
+
+	private static bool ConnectionMatches(
+		CommandLineConnectionSnapshot actual,
+		string expectedCommand,
+		IReadOnlyList<string> expectedArguments,
+		IReadOnlyDictionary<string, string> requiredEnvironment)
+	{
+		if (!string.Equals(
+				actual.Command,
+				expectedCommand,
+				OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
+			!actual.Arguments.SequenceEqual(expectedArguments, StringComparer.Ordinal))
+		{
+			return false;
+		}
+		return requiredEnvironment.All(pair =>
+			actual.Environment.TryGetValue(pair.Key, out var value) &&
+			string.Equals(value, pair.Value, StringComparison.Ordinal));
 	}
 
 	private static List<string> CreateRestoreArguments(
@@ -1001,7 +1199,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	{
 		if (client == McpConnectionClient.ClaudeCode)
 		{
-			var payload = JsonSerializer.Serialize(new
+			var payload = snapshot.RawConfiguration ?? JsonSerializer.Serialize(new
 			{
 				type = "stdio",
 				command = snapshot.Command,
@@ -1046,10 +1244,33 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				.EnumerateArray()
 				.Select(static value => value.GetString() ?? string.Empty)
 				.ToArray();
+			var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+			if (transport.TryGetProperty("env", out var environmentElement) &&
+				environmentElement.ValueKind != JsonValueKind.Null)
+			{
+				if (environmentElement.ValueKind != JsonValueKind.Object)
+					return false;
+				foreach (var property in environmentElement.EnumerateObject())
+				{
+					if (property.Value.ValueKind != JsonValueKind.String)
+						return false;
+					environment[property.Name] = property.Value.GetString() ?? string.Empty;
+				}
+			}
+			else if (transport.TryGetProperty("env_vars", out environmentElement) &&
+				environmentElement.ValueKind == JsonValueKind.Object)
+			{
+				foreach (var property in environmentElement.EnumerateObject())
+				{
+					if (property.Value.ValueKind != JsonValueKind.String)
+						return false;
+					environment[property.Name] = property.Value.GetString() ?? string.Empty;
+				}
+			}
 			return TryCreateSnapshot(
 				command,
 				arguments,
-				new Dictionary<string, string>(StringComparer.Ordinal),
+				environment,
 				out snapshot);
 		}
 		catch (Exception exception) when (exception is JsonException or InvalidOperationException)
@@ -1132,7 +1353,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		string? command,
 		IReadOnlyList<string> arguments,
 		IReadOnlyDictionary<string, string> environment,
-		out CommandLineConnectionSnapshot snapshot)
+		out CommandLineConnectionSnapshot snapshot,
+		string? rawConfiguration = null)
 	{
 		snapshot = default!;
 		var rootIndex = arguments
@@ -1153,7 +1375,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			Path.GetFullPath(arguments[rootIndex + 1]),
 			arguments.Contains("--live", StringComparer.Ordinal)
 				? McpConnectionMode.Live
-				: McpConnectionMode.Standard);
+				: McpConnectionMode.Standard,
+			rawConfiguration);
 		return true;
 	}
 
@@ -1223,6 +1446,47 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				StringComparison.OrdinalIgnoreCase);
 	}
 
+	private bool TryReadMatchingClaudeConnection(
+		McpConnectionRequest request,
+		out CommandLineConnectionSnapshot snapshot)
+	{
+		snapshot = default!;
+		var read = _claudeUserConfigurationReader.Read(request.ProjectRoot);
+		if (!read.Succeeded || read.Connection is null ||
+			!TryCreateSnapshot(
+				read.Connection.Command,
+				read.Connection.Arguments,
+				read.Connection.Environment,
+				out snapshot,
+				read.Connection.RawJson))
+		{
+			return false;
+		}
+		return ConnectionMatches(
+			snapshot,
+			request.ExecutablePath,
+			CreateServerArguments(request.ProjectRoot, request.Mode),
+			McpConnectionFragmentGenerator.GetRequiredServerEnvironment());
+	}
+
+	private static bool IsClaudeAlreadyExists(McpConnectionProcessResult result)
+	{
+		if (result.TimedOut || result.StartError is not null)
+			return false;
+		return result.CombinedOutput
+			.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+			.Select(static line => line.StartsWith("Error: ", StringComparison.OrdinalIgnoreCase)
+				? line[7..]
+				: line)
+			.Any(static line =>
+				line.Equals(
+					"MCP server devprojex already exists in local config",
+					StringComparison.OrdinalIgnoreCase) ||
+				line.Equals(
+					"MCP server with name devprojex already exists in local scope",
+					StringComparison.OrdinalIgnoreCase));
+	}
+
 	private void AppendOutput(
 		ICollection<string> output,
 		string operation,
@@ -1264,7 +1528,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		IReadOnlyList<string> Arguments,
 		IReadOnlyDictionary<string, string> Environment,
 		string ProjectRoot,
-		McpConnectionMode Mode);
+		McpConnectionMode Mode,
+		string? RawConfiguration);
 
 	private enum McpClientCommandOperation
 	{
@@ -1275,5 +1540,6 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	private sealed record ExistingConnectionRead(
 		McpConnectionProcessResult ProcessResult,
 		CommandLineConnectionSnapshot? Snapshot,
-		string? Error);
+		string? Error,
+		McpCodexUserConfigurationRead? CodexConfiguration = null);
 }

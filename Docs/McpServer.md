@@ -1643,7 +1643,10 @@ mode. Terminal Workspace's `mcp connect` uses live mode by default and accepts a
 optional `live|standard` argument. The Store configuration uses the stable WindowsApps alias;
 winget and ZIP paths remain stable while their installation directory is unchanged;
 the macOS path remains stable while the `.app` bundle stays in place. AppImage
-configurations name the AppImage itself, so moving it requires reconnecting.
+configurations name the AppImage itself, so moving it requires reconnecting. When
+DevProjex runs through `APPIMAGE_EXTRACT_AND_RUN=1` or
+`--appimage-extract-and-run`, generated registrations carry
+`APPIMAGE_EXTRACT_AND_RUN=1` into the MCP server process.
 
 The Desktop **MCP** menu contains **Live context ▸**, **Standard ▸**, **Journal…**,
 and **Documentation**. The live and standard submenus both contain **Open in Claude
@@ -1654,16 +1657,30 @@ standard command.
 The first two actions invoke the installed client command, capture its output, replace
 an existing `devprojex` entry, and then open a new terminal at the project root.
 Claude Code stores the entry in the project-local scope selected by its working
-directory; Codex stores it in its global configuration. **Open in Cursor** atomically
-merges only the `devprojex` entry in `.cursor/mcp.json`; **Open in VS Code** does the
-same in `.vscode/mcp.json`, then each action opens the project through its URL scheme
-with its command-line launcher as a fallback.
-Unrelated JSON properties and servers are retained. Valid VS Code JSONC with comments
+directory. DevProjex inspects that entry directly in the project's section of
+`.claude.json`, removes it with local scope, and restores its complete original JSON
+with `add-json` if replacement fails. Codex stores its entry in the user configuration.
+When that TOML table has fields beyond `command`, `args`, and `env`, DevProjex changes
+only `command` and `args`, preserves fields such as `cwd`, `env_vars`, and timeouts,
+and writes a backup before the atomic update. It then checks the effective entry with
+`codex mcp get devprojex --json`; a project `.codex/config.toml` override is reported
+and never rewritten.
+
+**Open in Cursor** atomically merges only `command` and `args` in the `devprojex`
+entry of `.cursor/mcp.json`; **Open in VS Code** does the same in `.vscode/mcp.json`,
+then each action opens the project through its URL scheme with its command-line
+launcher as a fallback. Fields such as `env`, `envFile`, `cwd`, `dev`, and
+`sandboxEnabled`, unrelated JSON properties, and other servers are retained. After
+writing VS Code configuration, run **MCP: List Servers**, choose `devprojex`, select
+**Enable/Start**, and confirm workspace trust. Restart Cursor after its configuration
+is written. Valid VS Code JSONC with comments
 or trailing commas is recognized but not rewritten because rewriting would discard
 comments; DevProjex leaves it byte-for-byte unchanged and presents the configuration
 for manual installation. Malformed JSON is likewise never overwritten.
 **Other clients…** presents the generic `mcpServers` JSON and the standard Claude
-Desktop configuration paths on Windows and macOS.
+Desktop configuration paths on Windows and macOS. After applying that JSON, completely
+close Claude Desktop and start it again, then verify the server under **Manage
+connectors**.
 
 Live context uses `--live`; Standard does not follow the window selection. For a
 first-call check, inspect DevProjex with `/mcp` in Claude Code or run
@@ -1680,6 +1697,8 @@ a manual launch command to copy. A successful open shows no connection toast. Th
 PATH prompt appears only after a successful connection: Windows can install or repair
 the command, while macOS and Linux show the shell-profile line to copy. Dismissing that
 prompt does not suppress future checks. The title shows the live client name or active-session count.
+Codex may shorten a server response page before giving it to the model; when content is
+limited, request smaller file ranges.
 
 The CLI performs the connection by default:
 
@@ -1699,7 +1718,7 @@ rejects `--open`.
 ### Claude Code
 
 ```shell
-claude mcp add devprojex -- devprojex mcp --root /absolute/path/to/project
+cd "/absolute/path/to/project" && claude mcp add --scope local devprojex -- devprojex mcp --root "/absolute/path/to/project"
 ```
 
 ### Claude Desktop

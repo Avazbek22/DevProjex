@@ -1,4 +1,10 @@
 {
+  "Mcp.Connect.ProjectConfigurationWritten": "{0}：設定已寫入 {1}。",
+  "Mcp.Connect.Cursor.NextStep": "請在此專案中重新啟動 Cursor。",
+  "Mcp.Connect.VsCode.NextStep": "在 VS Code 中執行 MCP: List Servers，選取 devprojex，再選取 Enable/Start，並確認信任工作區。",
+  "Mcp.Connect.ManualConfigurationRestart": "請使用此 JSON 手動設定 MCP。完全關閉 Claude Desktop 後重新啟動，然後檢查 Manage connectors。",
+  "Mcp.Connect.Codex.ResponseHint": "Codex 在將伺服器回應頁面傳給模型前可能會縮短內容；若內容受限，請讀取較小的範圍。",
+  "Mcp.Connect.Codex.ProjectOverride": "專案的 .codex/config.toml 會覆寫全域 devprojex 註冊。專案設定未被變更。",
   "Menu.File": "文件",
   "Menu.File.Open": "開啟資料夾...",
   "Menu.File.OpenNewWindow": "新視窗",
