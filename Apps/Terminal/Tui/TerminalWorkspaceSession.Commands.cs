@@ -641,7 +641,7 @@ internal sealed partial class TerminalWorkspaceSession
 				localization.Format("Mcp.Connect.RunInProject", result.NextCommand)));
 		}
 		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
-			sections.Add(TerminalTextEscaping.EscapeSingleLine(result.CommandOutput));
+			System.Diagnostics.Trace.WriteLine($"MCP client command output: {result.CommandOutput}");
 		if (result.SuggestedConfigPaths is not null)
 		{
 			sections.Add(string.Join(

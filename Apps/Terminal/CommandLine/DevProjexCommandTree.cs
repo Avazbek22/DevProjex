@@ -120,11 +120,11 @@ public sealed class DevProjexCommandTree
 		};
 		var live = new Option<bool>("--live")
 		{
-			Description = "Use the DevProjex window selection as the live baseline."
+			Description = L("Terminal.Option.McpLive")
 		};
 		var remoteHosts = new Option<string[]>("--remote-hosts")
 		{
-			Description = "Allow only these comma-separated remote Git hosts when --allow-remote is enabled.",
+			Description = L("Terminal.Option.McpRemoteHosts"),
 			HelpName = "HOST[,HOST...]",
 			Arity = ArgumentArity.OneOrMore,
 			AllowMultipleArgumentsPerToken = false
@@ -132,19 +132,19 @@ public sealed class DevProjexCommandTree
 		var gitMode = CreateMcpGitModeOption();
 		var toolSet = new Option<string>("--tool-set")
 		{
-			Description = "Publish the full tool catalog, or reduced without analyze and pack_context.",
+			Description = L("Terminal.Option.McpToolSet"),
 			HelpName = "full|reduced",
 			DefaultValueFactory = _ => "full"
 		};
 		toolSet.Validators.Add(result =>
 		{
 			if (result.GetValueOrDefault<string>() is not ("full" or "reduced"))
-				result.AddError("--tool-set must be full or reduced.");
+				result.AddError(L("Terminal.Validation.McpToolSet"));
 		});
 		var exclude = CreateMcpExcludeOption();
 		var searchBodyCharacters = new Option<string>("--search-body-chars")
 		{
-			Description = "Limit the search declaration body to 1..16000 characters, or off; default 1800.",
+			Description = L("Terminal.Option.McpSearchBodyCharacters"),
 			HelpName = "off|N",
 			DefaultValueFactory = _ => "1800"
 		};
@@ -497,7 +497,7 @@ public sealed class DevProjexCommandTree
 				_localization.Format("Mcp.Connect.RunInProject", result.NextCommand));
 		}
 		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
-			TerminalTextEscaping.WriteSingleLine(environment.Output, result.CommandOutput);
+			System.Diagnostics.Trace.WriteLine($"MCP client command output: {result.CommandOutput}");
 		if (result.SuggestedConfigPaths is not null)
 		{
 			foreach (var path in result.SuggestedConfigPaths)
@@ -821,32 +821,32 @@ public sealed class DevProjexCommandTree
 	{
 		var command = new Command(
 			"search",
-			"Searches selected project content and names matching declarations.");
+			L("Terminal.Command.Search"));
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex search Configure .",
 			"devprojex search \"class\\s+Widget\" . --regex --format json",
 			"devprojex search Widget . --symbols --search-body-chars 900");
 		var pattern = RequiredArgument("PATTERN");
-		pattern.Description = "Text, regular expression, or symbol name to search for.";
+		pattern.Description = L("Terminal.Argument.SearchPattern");
 		var project = ProjectSourceArgument();
 		var regex = new Option<bool>("--regex")
 		{
-			Description = "Interpret PATTERN as a .NET regular expression."
+			Description = L("Terminal.Option.SearchRegex")
 		};
 		var symbols = new Option<bool>("--symbols")
 		{
-			Description = "Match PATTERN as a complete identifier and name containing declarations."
+			Description = L("Terminal.Option.SearchSymbols")
 		};
 		var maximumResults = new Option<int>("--max")
 		{
-			Description = "Return at most 1..200 matching lines; default 50.",
+			Description = L("Terminal.Option.SearchMaximumResults"),
 			HelpName = "N",
 			DefaultValueFactory = _ => 50
 		};
 		var searchBodyCharacters = new Option<string>("--search-body-chars")
 		{
-			Description = "Limit the best declaration body to 1..16000 characters, or off; default 1800.",
+			Description = L("Terminal.Option.SearchBodyCharacters"),
 			HelpName = "off|N",
 			DefaultValueFactory = _ => "1800"
 		};
@@ -880,12 +880,12 @@ public sealed class DevProjexCommandTree
 			if (result.GetValue(regex) && result.GetValue(symbols))
 			{
 				result.AddError(LocalizedParseError.Create(
-					"--regex and --symbols cannot be used together."));
+					L("Terminal.Validation.SearchModeConflict")));
 			}
 			if (CliParseValue.TryGet(result, maximumResults, out var maximum) && maximum is < 1 or > 200)
 			{
 				result.AddError(LocalizedParseError.Create(
-					"--max must be between 1 and 200."));
+					L("Terminal.Validation.SearchMaximumResults")));
 			}
 			try
 			{

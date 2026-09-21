@@ -3,6 +3,7 @@
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
              x:Class="DevProjex.Avalonia.Views.SettingsPanelView"
              Name="SettingsPanelViewRoot"
+             MinWidth="285"
              x:DataType="vm:MainWindowViewModel"
              x:CompileBindings="True">
   <UserControl.Styles>

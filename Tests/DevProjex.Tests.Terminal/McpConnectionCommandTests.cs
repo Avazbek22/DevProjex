@@ -13,11 +13,15 @@ public sealed class McpConnectionCommandTests
 			new McpConnectionResult(
 				McpConnectionStatus.Updated,
 				"Codex connection updated.",
-				NextCommand: "codex"),
+				NextCommand: "codex",
+				CommandOutput: "get: old registration\nremove: removed\nadd: connected"),
 			localization);
 
 		Assert.StartsWith("Codex connection updated.", output, StringComparison.Ordinal);
 		Assert.Contains("Run codex in the project folder.", output, StringComparison.Ordinal);
+		Assert.DoesNotContain("get: old registration", output, StringComparison.Ordinal);
+		Assert.DoesNotContain("remove: removed", output, StringComparison.Ordinal);
+		Assert.DoesNotContain("add: connected", output, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -64,7 +68,7 @@ public sealed class McpConnectionCommandTests
 		Assert.Equal(run.ExecutablePath, request.ExecutablePath);
 		Assert.Contains("Claude Code connected", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Run claude in the project folder.", run.Environment.StandardOutput, StringComparison.Ordinal);
-		Assert.Contains("add: connected", run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("add: connected", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(run.Environment.StandardError);
 		Assert.Empty(connectionService.PrintRequests);
 		Assert.Empty(run.LaunchService.Requests);
@@ -115,7 +119,7 @@ public sealed class McpConnectionCommandTests
 		Assert.Equal(McpConnectionClient.Codex, request.Client);
 		Assert.Equal(Path.GetFullPath(project), request.ProjectRoot);
 		Assert.Contains("connected", run.Environment.StandardOutput, StringComparison.OrdinalIgnoreCase);
-		Assert.Contains("add: connected", run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("add: connected", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Codex", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("opened", run.Environment.StandardOutput, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("Run codex in the project folder.", run.Environment.StandardOutput, StringComparison.Ordinal);

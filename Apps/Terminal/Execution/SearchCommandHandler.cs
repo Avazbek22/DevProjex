@@ -303,17 +303,26 @@ public sealed class SearchCommandHandler(
 				matchingFiles);
 		}
 
-		var contentBudget = MaximumContentCharacters;
-		while (true)
+		var maximumBudget = MaximumContentCharacters;
+		var minimumBudget = 0;
+		var fittingResult = BuildResult(0);
+		while (minimumBudget <= maximumBudget)
 		{
+			var contentBudget = minimumBudget + ((maximumBudget - minimumBudget) / 2);
 			var result = BuildResult(contentBudget);
-			var serializedLength = Render(result, request.Format).Length;
-			if (serializedLength <= MaximumContentCharacters || contentBudget == 0)
-				return result;
-			contentBudget = Math.Max(
-				0,
-				contentBudget - Math.Max(1, serializedLength - MaximumContentCharacters));
+			var fitsEveryFormat = Enum.GetValues<SearchOutputFormat>()
+				.All(format => Render(result, format).Length <= MaximumContentCharacters);
+			if (fitsEveryFormat)
+			{
+				fittingResult = result;
+				minimumBudget = contentBudget + 1;
+			}
+			else
+			{
+				maximumBudget = contentBudget - 1;
+			}
 		}
+		return fittingResult;
 	}
 
 	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan)
@@ -550,6 +559,9 @@ public sealed class SearchCommandHandler(
 					encounteredMatches = result.Boundary.EncounteredMatches,
 					retainedMatches = result.Boundary.RetainedMatches,
 					writtenMatches = result.Boundary.WrittenMatches,
+					omittedMatches = Math.Max(
+						0,
+						result.Boundary.EncounteredMatches - result.Boundary.WrittenMatches),
 					namedDeclarationFiles = result.Boundary.NamedDeclarationFiles,
 					limits
 				}
