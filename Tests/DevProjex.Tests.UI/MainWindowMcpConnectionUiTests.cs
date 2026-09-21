@@ -1,4 +1,5 @@
 using Avalonia.Automation;
+using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
 using System.Reflection;
 using DevProjex.Application.Services;
@@ -107,6 +108,7 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 				viewModel.SelectionPersistenceStatusHelpText,
 				StringComparison.Ordinal);
 			Assert.Empty(service.Requests);
+			await CaptureIfRequestedAsync(window, "selection-not-saved.png");
 			var dialog = Assert.Single(window.OwnedWindows);
 			var cancel = Assert.Single(
 				dialog.GetVisualDescendants().OfType<Button>(),
@@ -187,12 +189,34 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 		Assert.True(window.IsVisible);
 
 		var dialog = Assert.Single(window.OwnedWindows);
+		await CaptureIfRequestedAsync(dialog, "close-with-unsaved-selection.png");
 		var continueWithoutSaving = Assert.Single(
 			dialog.GetVisualDescendants().OfType<Button>(),
 			static button => Equals(button.Content, "Exit without saving"));
 		await UiTestDriver.RaiseButtonClickAsync(continueWithoutSaving);
 		await window.ShutdownCompletion.WaitAsync(TestContext.Current.CancellationToken);
 		Assert.False(window.IsVisible);
+	}
+
+	private static async Task CaptureIfRequestedAsync(TopLevel topLevel, string fileName)
+	{
+		var outputDirectory = Environment.GetEnvironmentVariable("DEVPROJEX_UI_CAPTURE_DIRECTORY");
+		if (string.IsNullOrWhiteSpace(outputDirectory))
+			return;
+
+		Directory.CreateDirectory(outputDirectory);
+		var path = Path.Combine(outputDirectory, fileName);
+		await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+		await topLevel.Dispatcher.InvokeAsync(() =>
+		{
+			var size = new PixelSize(
+				Math.Max(1, (int)Math.Ceiling(topLevel.Bounds.Width)),
+				Math.Max(1, (int)Math.Ceiling(topLevel.Bounds.Height)));
+			using var frame = new RenderTargetBitmap(size);
+			frame.Render(topLevel);
+			using var output = File.Create(path);
+			frame.Save(output, PngBitmapEncoderOptions.Default);
+		}, DispatcherPriority.Render);
 	}
 
 	[AvaloniaFact]
