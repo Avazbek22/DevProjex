@@ -81,6 +81,11 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			await writer.StartSession(header, cancellationToken).ConfigureAwait(false);
 			Volatile.Write(ref startState, 2);
 		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			Volatile.Write(ref startState, -1);
+			throw;
+		}
 		catch (Exception exception)
 		{
 			Volatile.Write(ref startState, -1);

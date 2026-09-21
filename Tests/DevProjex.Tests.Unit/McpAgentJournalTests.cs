@@ -36,7 +36,7 @@ public sealed class McpAgentJournalTests
 		var result = McpToolResults.TextSuccess(
 			McpSpotlight.Wrap("Results are partial; additional observed matches not shown.\nDPX-MCP-INVALID-ARGUMENTS") +
 			"\n[Live context] the named path is outside the current window selection; returned because you named it.");
-		var original = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		var original = JsonSerializer.SerializeToUtf8Bytes(result);
 
 		using (journal.BeginCall("get_file", request))
 		{
@@ -52,7 +52,7 @@ public sealed class McpAgentJournalTests
 
 		await journal.DisposeAsync();
 
-		Assert.Equal(original, Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text);
+		Assert.Equal(original, JsonSerializer.SerializeToUtf8Bytes(result));
 		var session = Assert.Single(writer.Sessions);
 		Assert.Equal("sample-client", session.ClientName);
 		var call = Assert.Single(writer.Calls);
@@ -112,6 +112,27 @@ public sealed class McpAgentJournalTests
 
 		Assert.Equal(0, writer.CallAttempts);
 		Assert.Equal(0, writer.EndAttempts);
+	}
+
+	[Fact]
+	public async Task CanceledSessionStartPropagatesCancellation()
+	{
+		using var temporary = new TemporaryDirectory();
+		var root = temporary.CreateFolder("project");
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+		await using var journal = new McpAgentJournal(
+			new CanceledStartWriter(),
+			new McpRootRegistry([root]),
+			AgentJournalMode.Standard,
+			AgentJournalToolSet.Full,
+			"5.2.0",
+			hidePrivateData: false,
+			pid: 45,
+			processStartUtc: new DateTimeOffset(2026, 9, 20, 1, 0, 0, TimeSpan.Zero));
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+			await journal.StartAsync("sample-client", "1.0", cancellation.Token));
 	}
 
 	private sealed class RecordingWriter : IAgentJournalWriter
@@ -182,5 +203,21 @@ public sealed class McpAgentJournalTests
 			EndAttempts++;
 			return ValueTask.CompletedTask;
 		}
+	}
+
+	private sealed class CanceledStartWriter : IAgentJournalWriter
+	{
+		public ValueTask StartSession(AgentJournalSession session, CancellationToken cancellationToken = default) =>
+			ValueTask.FromCanceled(cancellationToken);
+
+		public ValueTask RecordCall(string sessionId, AgentJournalCall call, CancellationToken cancellationToken = default) =>
+			ValueTask.CompletedTask;
+
+		public ValueTask EndSession(
+			string sessionId,
+			DateTimeOffset endedUtc,
+			AgentJournalTotals totals,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.CompletedTask;
 	}
 }
