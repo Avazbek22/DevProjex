@@ -63,6 +63,39 @@ public sealed class AgentJournalDocumentationContractTests
 		Assert.Contains("metadata and counts", readme, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void FirstRunDocumentationExplainsModesVerificationAndInstallationBoundaries()
+	{
+		var root = FindRepositoryRoot();
+		var readme = File.ReadAllText(Path.Combine(root, "README.md"));
+		var server = File.ReadAllText(Path.Combine(root, "Docs", "McpServer.md"));
+		var installation = File.ReadAllText(Path.Combine(root, "Docs", "Installation.md"));
+
+		foreach (var document in new[] { readme, server })
+		{
+			Assert.Contains("Live context uses `--live`", document, StringComparison.Ordinal);
+			Assert.Contains("does not follow the window selection", document, StringComparison.Ordinal);
+			Assert.Contains("`/mcp`", document, StringComparison.Ordinal);
+			Assert.Contains("`codex mcp list`", document, StringComparison.Ordinal);
+			Assert.Contains("Through DevProjex, show the tree of the current selection", document, StringComparison.Ordinal);
+			Assert.Contains("appears in the agent journal", document, StringComparison.Ordinal);
+			Assert.DoesNotContain("Desktop connections always include `--live`", document, StringComparison.Ordinal);
+		}
+
+		Assert.Contains("GitHub release builds are unsigned", installation, StringComparison.Ordinal);
+		Assert.Contains("installed on Windows", installation, StringComparison.Ordinal);
+		Assert.Contains("WSL", installation, StringComparison.Ordinal);
+		Assert.Contains("Microsoft Store", installation, StringComparison.Ordinal);
+		Assert.Contains("Help → Terminal command setup", installation, StringComparison.Ordinal);
+		Assert.Contains("/usr/local/bin/devprojex", installation, StringComparison.Ordinal);
+		Assert.DoesNotContain("Move `DevProjex` to a directory on `PATH`", installation, StringComparison.Ordinal);
+
+		Assert.Contains("### MCP catalog size", server, StringComparison.Ordinal);
+		Assert.Contains("data sent to the client", server, StringComparison.Ordinal);
+		Assert.Contains("depends on the client", server, StringComparison.Ordinal);
+		Assert.DoesNotContain("already paid for", server, StringComparison.Ordinal);
+	}
+
 	private static string FindRepositoryRoot()
 	{
 		var current = new DirectoryInfo(AppContext.BaseDirectory);

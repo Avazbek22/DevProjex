@@ -215,6 +215,13 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 			76,
 			new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
 		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		await using var changes = store.WatchChangesAsync(session.Id, cancellationToken)
+			.GetAsyncEnumerator(cancellationToken);
+
+		Assert.True(await changes.MoveNextAsync());
+		Assert.Equal(1, changes.Current.Sequence);
+		File.Delete(Path.Combine(store.DirectoryPath, session.Id + ".jsonl"));
 		await store.RecordCall(
 			session.Id,
 			CreateCall(1) with
@@ -225,13 +232,6 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 				}
 			},
 			cancellationToken);
-		await using var changes = store.WatchChangesAsync(session.Id, cancellationToken)
-			.GetAsyncEnumerator(cancellationToken);
-
-		Assert.True(await changes.MoveNextAsync());
-		Assert.Equal(1, changes.Current.Sequence);
-		File.Delete(Path.Combine(store.DirectoryPath, session.Id + ".jsonl"));
-		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
 
 		Assert.True(await changes.MoveNextAsync());
 		Assert.Equal(1, changes.Current.Sequence);

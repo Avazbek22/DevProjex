@@ -8,6 +8,7 @@ public sealed class IgnoreOptionViewModel(
 {
     private bool _isChecked = isChecked;
     private string _label = label;
+    private string? _helpText;
     private string _statusText = string.Empty;
 	private bool _isWarningStatus;
 
@@ -28,6 +29,19 @@ public sealed class IgnoreOptionViewModel(
             RaisePropertyChanged(nameof(DisplayName));
             RaisePropertyChanged(nameof(CounterText));
             RaisePropertyChanged(nameof(HasCounter));
+            if (_helpText is null)
+                RaisePropertyChanged(nameof(HelpText));
+        }
+    }
+
+    public string HelpText
+    {
+        get => _helpText ?? Label;
+        set
+        {
+            if (string.Equals(_helpText, value, StringComparison.Ordinal)) return;
+            _helpText = value;
+            RaisePropertyChanged();
         }
     }
 
