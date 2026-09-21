@@ -33,3 +33,10 @@ managed bytes retained after their effective plans leave scope:
 ```powershell
 dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- live-roots --nodes-per-root 10000 --repetitions 5
 ```
+
+The stored-page attribution measurement compares scanning every path against the recorded line-range
+index for packs containing 1,000, 10,000, and 100,000 paths:
+
+```powershell
+dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- pack-attribution --repetitions 5
+```

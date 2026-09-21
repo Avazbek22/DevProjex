@@ -29,6 +29,9 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 {
     private const int CommandOutputBufferChars = 64 * 1024;
     private const int CommandErrorBufferChars = 64 * 1024;
+	internal const int MaximumBranchRecords = 10_000;
+	internal const int MaximumBranchRecordCharacters = 4 * 1024;
+	internal const int MaximumBranchOutputCharacters = 16 * 1024 * 1024;
 	internal const int MaximumProgressFrameCharacters = 4 * 1024;
 	internal const string CacheQuotaDiagnostic =
 		"DPX-GIT-CACHE-QUOTA: Git cache size exceeds the configured limit.";
@@ -310,11 +313,17 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
     /// 2. Falls back to "git branch -r" if ls-remote fails
     /// 3. Marks current branch as active
     /// </summary>
-    public async Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
-        string repositoryPath,
-        CancellationToken cancellationToken = default)
+	public async Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
+		string repositoryPath,
+		CancellationToken cancellationToken = default) =>
+		(await GetBranchesWithStatusAsync(repositoryPath, cancellationToken).ConfigureAwait(false)).Branches;
+
+	public async Task<GitBranchListResult> GetBranchesWithStatusAsync(
+		string repositoryPath,
+		CancellationToken cancellationToken = default)
     {
         var branches = new List<GitBranch>();
+		var isIncomplete = false;
 
         try
         {
@@ -322,15 +331,16 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
             var currentBranch = await GetCurrentBranchAsync(repositoryPath, cancellationToken);
 
             // Get local branches to determine which are already checked out
-			var localResult = await RunGitCommandAsync(
+			var localResult = await RunGitBranchCommandAsync(
 				repositoryPath,
 				GitProcessOperation.ListBranches(GitBranchListKind.Local),
 				cancellationToken);
+			isIncomplete |= localResult.IsIncomplete;
             var localBranches = new HashSet<string>(StringComparer.Ordinal);
 
             if (localResult.ExitCode == 0)
             {
-                foreach (var line in localResult.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                foreach (var line in localResult.Lines)
                 {
                     var trimmed = line.Trim();
                     // Current branch has * prefix
@@ -347,8 +357,8 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 			var remoteUrl = await GetVerifiedNetworkRemoteAsync(repositoryPath, cancellationToken)
 				.ConfigureAwait(false);
 			var lsRemoteResult = remoteUrl is null
-				? GitCommandResult.Failed("The saved remote identity is unavailable or changed.")
-				: await RunGitCommandAsync(
+				? GitBranchCommandResult.Failed("The saved remote identity is unavailable or changed.")
+				: await RunGitBranchCommandAsync(
 					repositoryPath,
 					GitProcessOperation.ListBranches(
 						GitBranchListKind.RemoteHeads,
@@ -356,13 +366,14 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 						_allowFileTransport),
 					cancellationToken,
 					askPass: GetAuthenticationSession(repositoryPath)).ConfigureAwait(false);
+			isIncomplete |= lsRemoteResult.IsIncomplete;
 
             var seen = new HashSet<string>(StringComparer.Ordinal);
 
-            if (lsRemoteResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(lsRemoteResult.Output))
+            if (lsRemoteResult.ExitCode == 0 && lsRemoteResult.Lines.Count > 0)
             {
                 // ls-remote output format: "sha1\trefs/heads/branch-name"
-                foreach (var line in lsRemoteResult.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                foreach (var line in lsRemoteResult.Lines)
                 {
                     var trimmed = line.Trim();
                     if (string.IsNullOrEmpty(trimmed))
@@ -395,14 +406,15 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
             {
                 // FALLBACK: If ls-remote fails (network issues, auth problems),
                 // try to use cached remote refs from previous fetch
-				var remoteResult = await RunGitCommandAsync(
+				var remoteResult = await RunGitBranchCommandAsync(
 					repositoryPath,
 					GitProcessOperation.ListBranches(GitBranchListKind.CachedRemote),
 					cancellationToken);
+				isIncomplete |= remoteResult.IsIncomplete;
 
                 if (remoteResult.ExitCode == 0)
                 {
-                    foreach (var line in remoteResult.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    foreach (var line in remoteResult.Lines)
                     {
                         var trimmed = line.Trim();
                         if (string.IsNullOrEmpty(trimmed))
@@ -459,9 +471,10 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
         catch
         {
             // Return empty list on error - UI will show no branches available
+			isIncomplete = true;
         }
 
-        return branches;
+		return new GitBranchListResult(branches, isIncomplete);
     }
 
     /// <summary>
@@ -944,9 +957,72 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
     /// Features:
     /// - Captures stdout and stderr separately
     /// - Reports progress from stderr (git writes progress there)
-    /// - Supports cancellation with process termination
-    /// - Uses UTF-8 encoding for international characters
-    /// </summary>
+	/// - Supports cancellation with process termination
+	/// - Uses UTF-8 encoding for international characters
+	/// </summary>
+	private async Task<GitBranchCommandResult> RunGitBranchCommandAsync(
+		string? workingDirectory,
+		GitProcessOperation operation,
+		CancellationToken cancellationToken,
+		GitAskPassSession? askPass = null)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		var startInfo = _gitExecutable is null
+			? GitProcessStartInfoFactory.Create(workingDirectory, operation, askPass: askPass)
+			: GitProcessStartInfoFactory.CreateForTesting(workingDirectory, operation, _gitExecutable);
+		if (_gitExecutable is not null)
+			askPass?.Apply(startInfo);
+		using var deadlineSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		deadlineSource.CancelAfter(operation.Deadline);
+		var operationToken = deadlineSource.Token;
+		using var process = new Process { StartInfo = startInfo };
+		var lines = new GitBranchLineCollector(
+			MaximumBranchRecords,
+			MaximumBranchRecordCharacters,
+			MaximumBranchOutputCharacters);
+		var errorBuffer = new BoundedLineBuffer(CommandErrorBufferChars);
+
+		process.Start();
+		process.StandardInput.Close();
+		var outputPump = GitProcessLinePump.ReadAsync(
+			process.StandardOutput,
+			MaximumBranchRecordCharacters,
+			lines.Add,
+			operationToken);
+		var errorPump = GitProcessLinePump.ReadAsync(
+			process.StandardError,
+			CommandErrorBufferChars,
+			frame => errorBuffer.Add(frame.Text, frame.ExceededLimit),
+			operationToken);
+
+		try
+		{
+			await WaitForExitOrTerminateAsync(process, operationToken).ConfigureAwait(false);
+			var outputCompleted = await GitProcessOutputReader
+				.WaitForCompletionAfterExitAsync(process, outputPump, errorPump)
+				.ConfigureAwait(false);
+			if (!outputCompleted)
+				return GitBranchCommandResult.Failed("Git process output did not close after exit.");
+		}
+		catch (OperationCanceledException)
+		{
+			await GitProcessOutputReader
+				.ObserveAfterTerminationAsync(process, outputPump, errorPump)
+				.ConfigureAwait(false);
+			if (cancellationToken.IsCancellationRequested)
+				throw;
+			return GitBranchCommandResult.Failed("Git operation exceeded its safety deadline.");
+		}
+
+		if (errorBuffer.ExceededLimit)
+			return GitBranchCommandResult.Failed("Git process error output exceeded the safety limit.");
+		return new GitBranchCommandResult(
+			process.ExitCode,
+			lines.Lines,
+			lines.IsIncomplete,
+			errorBuffer.ToString());
+	}
+
 	private async Task<GitCommandResult> RunGitCommandAsync(
         string? workingDirectory,
 		GitProcessOperation operation,

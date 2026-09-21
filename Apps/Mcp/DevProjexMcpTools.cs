@@ -757,7 +757,8 @@ internal sealed class DevProjexMcpTools(
 								useSourceMappedStructuredPaths: true,
 								writeProgress: writeProgress,
 								maximumEstimatedTokens: maximumEstimatedTokens,
-								ranking: ranking)
+								ranking: ranking,
+								captureFileLineRanges: true)
 							.ConfigureAwait(false);
 						return;
 					}
@@ -775,7 +776,8 @@ internal sealed class DevProjexMcpTools(
 							maximumEstimatedTokens,
 							ranking,
 							admissionResult?.TokenBudget,
-							preserveContentMetrics: admissionResult is not null)
+							preserveContentMetrics: admissionResult is not null,
+							captureFileLineRanges: true)
 						.ConfigureAwait(false);
 					if (admissionResult is not null)
 						writeResult = writeResult with { UnscannableFiles = admissionResult.UnscannableFiles };
@@ -791,7 +793,11 @@ internal sealed class DevProjexMcpTools(
 						PathComparer.Default).ToArray();
 				packs.RecordJournalContext(
 					pack.Id,
-					CreateStoredJournalContext(plan, deliveredPackFiles, prepared ?? measured));
+					CreateStoredJournalContext(
+						plan,
+						deliveredPackFiles,
+						prepared ?? measured,
+						writeResult?.FileLineRanges));
 				var formattedBudgetReport = writeResult?.TokenBudget is { } completedBudget
 					? FormatTokenBudgetReport(completedBudget)
 					: null;
@@ -916,9 +922,7 @@ internal sealed class DevProjexMcpTools(
 				: null;
 			if (journalContext is not null)
 			{
-				var delivered = journalContext.Paths
-					.Where(item => ContainsStoredPath(page.Text, item.RelativePath))
-					.ToArray();
+				var delivered = journalContext.PathsForPage(page.StartLine, page.EndLine);
 				journal?.RecordDeliveredPaths(
 					journalContext.SourceRoot,
 					delivered.Select(static item => item.RelativePath));
@@ -968,6 +972,8 @@ internal sealed class DevProjexMcpTools(
 			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
 			var withheld = new StringBuilder();
 			var withheldByFile = new Dictionary<string, int>(StringComparer.Ordinal);
+			var withheldRanges = new Dictionary<string, List<ProjectContextFileLineRange>>(StringComparer.Ordinal);
+			var withheldNextLine = 1;
 			var withheldStored = 0;
 			var storeHitMatchBound = false;
 			var storeHitCharacterBound = false;
@@ -1128,6 +1134,8 @@ internal sealed class DevProjexMcpTools(
 				}
 
 				withheld.Append(heading);
+				var storedRangeStart = withheldNextLine;
+				withheldNextLine++;
 				storedFile = group.RelativePath;
 
 				foreach (var line in group.Lines)
@@ -1139,9 +1147,19 @@ internal sealed class DevProjexMcpTools(
 						break;
 					}
 					withheld.Append(line.Text).Append(Environment.NewLine);
+					withheldNextLine++;
 					if (line.IsMatch)
 						withheldStored++;
 				}
+				if (!withheldRanges.TryGetValue(group.RelativePath, out var ranges))
+				{
+					ranges = [];
+					withheldRanges.Add(group.RelativePath, ranges);
+				}
+				ranges.Add(new ProjectContextFileLineRange(
+					Path.GetFullPath(group.RelativePath, plan.SourceRoot),
+					storedRangeStart,
+					withheldNextLine - 1));
 				if (storeHitCharacterBound)
 					break;
 			}
@@ -1183,8 +1201,9 @@ internal sealed class DevProjexMcpTools(
 					storedSearch.Id,
 					CreateStoredJournalContext(
 						plan,
-						withheldByFile.Keys.Select(path => Path.GetFullPath(path, plan.SourceRoot)),
-						searched));
+						withheldRanges.Keys.Select(path => Path.GetFullPath(path, plan.SourceRoot)),
+						searched,
+						withheldRanges.Values.SelectMany(static ranges => ranges)));
 			}
 			AppendWithheldDistribution(output, withheldByFile);
 			var additionalMatchesNotice = totalMatches > shownMatches
@@ -1344,6 +1363,7 @@ internal sealed class DevProjexMcpTools(
 				FormatSafeNoFactsNotice(related.Seeds),
 				noRelatedNotice);
 			using var relatedBody = new StringWriter(CultureInfo.InvariantCulture);
+			var relatedRanges = new List<ProjectContextFileLineRange>();
 			WriteRelatedFiles(
 				relatedBody,
 				related,
@@ -1351,7 +1371,11 @@ internal sealed class DevProjexMcpTools(
 				configurationData,
 				coverage.ExtractionFailedFiles,
 				coverage.PartialParseDiagnostics,
-				cancellationToken);
+				cancellationToken,
+				(path, line) => relatedRanges.Add(new ProjectContextFileLineRange(
+					Path.GetFullPath(path, plan.SourceRoot),
+					line + 2,
+					line + 2)));
 			var protectedBody = Projects.RedactSyntheticText(
 				plan,
 				resolvedSeeds[0],
@@ -1399,11 +1423,9 @@ internal sealed class DevProjexMcpTools(
 				pack.Id,
 				CreateStoredJournalContext(
 					plan,
-					related.Seeds.SelectMany(static seed =>
-						new[] { seed.Seed }
-							.Concat(seed.Dependencies.Select(static file => file.Path))
-							.Concat(seed.Dependents.Select(static file => file.Path))),
-					prepared: null));
+					relatedRanges.Select(static range => range.Path),
+					prepared: null,
+					relatedRanges));
 			return McpToolResults.TextSuccess(
 				$"Related-files result stored as '{pack.Id}' ({pack.Characters} characters). " +
 				"Call read_pack with this pack_id to read it.",
@@ -1804,8 +1826,17 @@ internal sealed class DevProjexMcpTools(
 	private McpStoredJournalContext CreateStoredJournalContext(
 		ProjectContextPlan plan,
 		IEnumerable<string> paths,
-		PreparedSecretRedactionOutput? prepared)
+		PreparedSecretRedactionOutput? prepared,
+		IEnumerable<ProjectContextFileLineRange>? fileLineRanges = null)
 	{
+		var rangesByPath = fileLineRanges?
+			.GroupBy(range => Path.GetFullPath(range.Path), PathComparer.Default)
+			.ToDictionary(
+				static group => group.Key,
+				static group => (IReadOnlyList<McpStoredLineRange>)group
+					.Select(static range => new McpStoredLineRange(range.StartLine, range.EndLine))
+					.ToArray(),
+				PathComparer.Default);
 		var storedPaths = paths
 			.Select(path => Path.IsPathFullyQualified(path)
 				? Path.GetFullPath(path)
@@ -1818,20 +1849,14 @@ internal sealed class DevProjexMcpTools(
 				return new McpStoredJournalPath(
 					Path.GetRelativePath(plan.SourceRoot, path).Replace('\\', '/'),
 					counts.Secrets,
-					counts.PrivateData);
+					counts.PrivateData,
+					rangesByPath?.GetValueOrDefault(path) ?? []);
 			})
 			.ToArray();
 		return new McpStoredJournalContext(
 			plan.SourceRoot,
 			liveContext?.CurrentInvocationRevision(plan.SourceRoot),
 			storedPaths);
-	}
-
-	private static bool ContainsStoredPath(string text, string relativePath)
-	{
-		var normalized = relativePath.Replace('\\', '/');
-		return text.Contains(normalized, StringComparison.Ordinal) ||
-			text.Contains(normalized.Replace("/", "\\\\", StringComparison.Ordinal), StringComparison.Ordinal);
 	}
 
 	private void RecordSearchProtection(
@@ -2582,14 +2607,17 @@ internal sealed class DevProjexMcpTools(
 		string? configurationData,
 		IReadOnlyList<string> extractionFailedFiles,
 		IReadOnlyList<DependencyPartialParseDiagnostic> partialParseDiagnostics,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		Action<string, int>? recordPath = null)
 	{
 		var hasLine = false;
+		var currentLine = 0;
 		void StartLine()
 		{
 			if (hasLine)
 				output.Write(Environment.NewLine);
 			hasLine = true;
+			currentLine++;
 		}
 
 		foreach (var seed in result.Seeds)
@@ -2600,6 +2628,7 @@ internal sealed class DevProjexMcpTools(
 				StartLine();
 				output.Write("Seed: ");
 				output.Write(McpTextEscaping.EscapeSingleLine(seed.Seed));
+				recordPath?.Invoke(seed.Seed, currentLine);
 			}
 			if (seed.NoFactsReason is { Length: > 0 })
 			{
@@ -2612,9 +2641,21 @@ internal sealed class DevProjexMcpTools(
 				continue;
 			}
 			if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
-				WriteRelatedSection(output, StartLine, "Dependencies", seed.Dependencies, cancellationToken);
+				WriteRelatedSection(
+					output,
+					StartLine,
+					"Dependencies",
+					seed.Dependencies,
+					cancellationToken,
+					file => recordPath?.Invoke(file.Path, currentLine));
 			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
-				WriteRelatedSection(output, StartLine, "Dependents", seed.Dependents, cancellationToken);
+				WriteRelatedSection(
+					output,
+					StartLine,
+					"Dependents",
+					seed.Dependents,
+					cancellationToken,
+					file => recordPath?.Invoke(file.Path, currentLine));
 		}
 		if (!string.IsNullOrWhiteSpace(configurationData))
 		{
@@ -2655,7 +2696,8 @@ internal sealed class DevProjexMcpTools(
 		Action startLine,
 		string title,
 		IReadOnlyList<RelatedFile> files,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		Action<RelatedFile>? recordPath = null)
 	{
 		startLine();
 		output.Write(title);
@@ -2665,6 +2707,7 @@ internal sealed class DevProjexMcpTools(
 			cancellationToken.ThrowIfCancellationRequested();
 			startLine();
 			output.Write(McpTextEscaping.EscapeSingleLine(file.Path));
+			recordPath?.Invoke(file);
 			output.Write(" — ");
 			for (var index = 0; index < file.Reasons.Count; index++)
 			{
