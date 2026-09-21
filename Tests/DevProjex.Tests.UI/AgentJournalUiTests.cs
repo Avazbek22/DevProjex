@@ -7,6 +7,7 @@ using Avalonia.Styling;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Views;
 using DevProjex.Application.Services;
+using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
@@ -361,6 +362,44 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 
 			Assert.Equal(reads, reader.ReadCallsCount);
 			Assert.Equal(watches, reader.WatchStarts);
+		}
+		finally
+		{
+			journal.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ActiveStandardSessionContinuesUpdatingItsCallRows()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var standard = fixture.LiveSession with { Id = "active-standard", Mode = AgentJournalMode.Standard };
+		var reader = new RecordingJournalReader(
+			[standard],
+			new Dictionary<string, IReadOnlyList<AgentJournalCall>>
+			{
+				[standard.Id] = [fixture.Calls[fixture.LiveSession.Id][0]]
+			});
+		var journal = new AgentJournalWindow(
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath);
+		try
+		{
+			await journal.RefreshAsync();
+			for (var attempt = 0; attempt < 20 && reader.WatchStarts == 0; attempt++)
+				await UiTestDriver.WaitForSettledFramesAsync(2);
+			Assert.Equal(1, reader.WatchStarts);
+
+			for (var sequence = 2; sequence <= 26; sequence++)
+				reader.AppendCall(standard.Id, fixture.SecondCall with { Sequence = sequence });
+
+			for (var attempt = 0; attempt < 20 && journal.ViewModel.Calls.Count != 26; attempt++)
+				await UiTestDriver.WaitForSettledFramesAsync(2);
+			Assert.Equal(26, journal.ViewModel.Calls.Count);
+			Assert.Equal("get_file", journal.ViewModel.Calls[^1].Tool);
+			Assert.InRange(reader.ReadCallsCount, 2, 3);
 		}
 		finally
 		{
@@ -724,9 +763,10 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				window,
 				() => viewModel.AgentActivityVisible &&
 					  viewModel.AgentActivityText.Contains(
-						  "Codex · search_project ·",
-						  StringComparison.Ordinal),
+					  "Codex · search_project ·",
+					  StringComparison.Ordinal),
 				"live agent activity status");
+			Assert.Equal(0, reader.ReadReceiptCount);
 
 			var deliveredPath = Path.GetFullPath(Path.Combine(
 				workspace.Project.RootPath,
@@ -736,9 +776,14 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			var deliveredNode = Assert.Single(
 				viewModel.TreeNodes.SelectMany(static root => root.Flatten()),
 				node => PathComparer.Default.Equals(node.FullPath, deliveredPath));
-			Assert.Equal(1, deliveredNode.AgentDeliveryCount);
-			Assert.Contains("1", deliveredNode.AgentDeliveryToolTip, StringComparison.Ordinal);
+			Assert.Equal(0, deliveredNode.AgentDeliveryCount);
 			var checkedBefore = deliveredNode.IsChecked;
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => deliveredNode.AgentDeliveryCount == 1,
+				"a call after project opening to add the delivery trace");
+			Assert.Contains("1", deliveredNode.AgentDeliveryToolTip, StringComparison.Ordinal);
 
 			var newerSession = fixture.LiveSession with
 			{
@@ -884,6 +929,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			var activity = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "AgentActivityMenuItem");
 			await UiTestDriver.RaiseMenuItemClickAsync(activity);
 			var viewModel = UiTestDriver.GetViewModel(window);
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => viewModel.TreeNodes.SelectMany(static root => root.Flatten())
@@ -902,7 +948,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 						  .All(static node => node.AgentDeliveryCount == 0),
 				"project reopen to clear the previous delivery trace");
 
-			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall with { Sequence = 3 });
 			var deliveredPath = Path.GetFullPath(Path.Combine(
 				workspace.Project.RootPath,
 				"src",
@@ -1103,7 +1149,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			return;
 		}
 
-		var outputRoot = Path.Combine(Path.GetTempPath(), "devprojex-journal-fix");
+		var outputRoot = Path.Combine(Path.GetTempPath(), "devprojex-night-c", "screenshots");
 		Directory.CreateDirectory(outputRoot);
 		var fixture = JournalFixture.Create(workspace.Project.RootPath);
 		var activeReader = new RecordingJournalReader(
@@ -1172,11 +1218,104 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		finally
 		{
 			await UiTestDriver.CloseTopLevelWindowAsync(incompleteJournal);
+		}
+
+		var standard = fixture.LiveSession with { Id = "active-standard", Mode = AgentJournalMode.Standard };
+		var standardReader = new RecordingJournalReader(
+			[standard],
+			new Dictionary<string, IReadOnlyList<AgentJournalCall>>
+			{
+				[standard.Id] = [fixture.Calls[fixture.LiveSession.Id][0]]
+			});
+		var standardJournal = new AgentJournalWindow(
+			owner,
+			standardReader,
+			new RecordingFormatter(),
+			localization,
+			workspace.Project.RootPath,
+			() => workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(standardJournal);
+		standardJournal.Show(owner);
+		try
+		{
+			await standardJournal.RefreshAsync();
+			standardReader.AppendCall(standard.Id, fixture.SecondCall);
+			for (var attempt = 0; attempt < 20 && standardJournal.ViewModel.Calls.Count != 2; attempt++)
+				await UiTestDriver.WaitForSettledFramesAsync(2);
+			Assert.Equal(2, standardJournal.ViewModel.Calls.Count);
+			await SaveSnapshotAsync(standardJournal, Path.Combine(outputRoot, "journal-standard-updating.png"));
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(standardJournal);
+		}
+
+		var recoveredMarker = marker with
+		{
+			Arguments = new Dictionary<string, string>
+			{
+				["lost_events"] = "1",
+				["lost_events_unknown"] = "true"
+			},
+			Notices = ["history-recovered", "history-incomplete"]
+		};
+		var recoveredCalls = fixture.Calls.ToDictionary(
+			static pair => pair.Key,
+			static pair => pair.Value,
+			StringComparer.Ordinal);
+		recoveredCalls[fixture.LiveSession.Id] = [fixture.Calls[fixture.LiveSession.Id][0], recoveredMarker];
+		var recoveredJournal = new AgentJournalWindow(
+			owner,
+			new RecordingJournalReader(fixture.Sessions, recoveredCalls),
+			new RecordingFormatter(),
+			localization,
+			workspace.Project.RootPath,
+			() => workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(recoveredJournal);
+		recoveredJournal.Show(owner);
+		try
+		{
+			await recoveredJournal.RefreshAsync();
+			await UiTestDriver.WaitForSettledFramesAsync(8);
+			await SaveSnapshotAsync(recoveredJournal, Path.Combine(outputRoot, "journal-recovered-history.png"));
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(recoveredJournal);
+		}
+
+		var dead = fixture.LiveSession with { Id = "inactive-unknown-end", IsLive = false, EndedUtc = null };
+		var deadCalls = new[] { fixture.Calls[fixture.LiveSession.Id][0] };
+		AgentJournalSessionHistory.Attach(dead, AgentJournalSessionHistory.FromCalls(deadCalls));
+		var deadJournal = new AgentJournalWindow(
+			owner,
+			new RecordingJournalReader(
+				[dead],
+				new Dictionary<string, IReadOnlyList<AgentJournalCall>> { [dead.Id] = deadCalls }),
+			new RecordingFormatter(),
+			localization,
+			workspace.Project.RootPath,
+			() => workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(deadJournal);
+		deadJournal.Show(owner);
+		try
+		{
+			await deadJournal.RefreshAsync();
+			await UiTestDriver.WaitForSettledFramesAsync(8);
+			Assert.DoesNotContain("running", deadJournal.ViewModel.Sessions[0].Duration, StringComparison.OrdinalIgnoreCase);
+			await SaveSnapshotAsync(deadJournal, Path.Combine(outputRoot, "journal-inactive-unknown-end.png"));
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(deadJournal);
 			await UiTestDriver.CloseWindowAsync(owner);
 		}
 
 		Assert.True(new FileInfo(Path.Combine(outputRoot, "journal-active-after-clear.png")).Length > 1_000);
 		Assert.True(new FileInfo(Path.Combine(outputRoot, "journal-incomplete-history.png")).Length > 1_000);
+		Assert.True(new FileInfo(Path.Combine(outputRoot, "journal-standard-updating.png")).Length > 1_000);
+		Assert.True(new FileInfo(Path.Combine(outputRoot, "journal-recovered-history.png")).Length > 1_000);
+		Assert.True(new FileInfo(Path.Combine(outputRoot, "journal-inactive-unknown-end.png")).Length > 1_000);
 	}
 
 	private static async Task SaveSnapshotAsync(TopLevel topLevel, string path)
@@ -1186,8 +1325,20 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		await topLevel.Dispatcher.InvokeAsync(() =>
 		{
 			using var captured = topLevel.CaptureRenderedFrame();
-			Assert.NotNull(captured);
-			captured.Save(path, PngBitmapEncoderOptions.Default);
+			if (captured is not null)
+			{
+				using var output = new MemoryStream();
+				captured.Save(output, PngBitmapEncoderOptions.Default);
+				File.WriteAllBytes(path, output.ToArray());
+				return;
+			}
+			var width = Math.Max(1, (int)Math.Ceiling(topLevel.Bounds.Width));
+			var height = Math.Max(1, (int)Math.Ceiling(topLevel.Bounds.Height));
+			using var rendered = new RenderTargetBitmap(new PixelSize(width, height), new Vector(96, 96));
+			rendered.Render(topLevel);
+			using var fallbackOutput = new MemoryStream();
+			rendered.Save(fallbackOutput, PngBitmapEncoderOptions.Default);
+			File.WriteAllBytes(path, fallbackOutput.ToArray());
 		}, DispatcherPriority.Render);
 	}
 
@@ -1363,6 +1514,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		public AgentJournalRetentionPolicy Retention => AgentJournalRetentionPolicy.Default;
 		public List<string?> ClearRoots { get; } = [];
 		public int ReadCallsCount { get; private set; }
+		public int ReadReceiptCount { get; private set; }
 		public int WatchStarts { get; private set; }
 
 		public ValueTask<IReadOnlyList<AgentJournalSession>> ListSessionsAsync(
@@ -1394,6 +1546,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			CancellationToken cancellationToken = default)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			ReadReceiptCount++;
 			var session = _sessions.FirstOrDefault(candidate =>
 				string.Equals(candidate.Id, sessionId, StringComparison.Ordinal));
 			if (session is null)

@@ -86,11 +86,25 @@ public sealed class LocalizationToastKeysTests
 	[InlineData(ProjectProfileClearStatus.Busy, "Toast.Data.Reset.Busy")]
 	[InlineData(ProjectProfileClearStatus.FutureSchema, "Toast.Data.Reset.FutureSchema")]
 	[InlineData(ProjectProfileClearStatus.Failed, "Toast.Data.Reset.Failed")]
+	[InlineData(ProjectProfileClearStatus.Partial, "Toast.Data.Reset.Partial")]
 	public void ResetDataResult_MapsToAnExplicitLocalizedMessage(
 		ProjectProfileClearStatus status,
 		string expectedKey)
 	{
 		Assert.Equal(expectedKey, MainWindow.ResolveResetDataResultLocalizationKey(status));
+	}
+
+	[Theory]
+	[InlineData(ProjectProfileClearStatus.Cleared, true)]
+	[InlineData(ProjectProfileClearStatus.Partial, true)]
+	[InlineData(ProjectProfileClearStatus.Busy, false)]
+	[InlineData(ProjectProfileClearStatus.FutureSchema, false)]
+	[InlineData(ProjectProfileClearStatus.Failed, false)]
+	public void ResetDataResult_ClearsJournalOnlyAfterProfileDataWasChanged(
+		ProjectProfileClearStatus status,
+		bool expected)
+	{
+		Assert.Equal(expected, MainWindow.ShouldClearAgentJournalAfterProfileReset(status));
 	}
 
 	private static HashSet<string> ReadKeys(string json)

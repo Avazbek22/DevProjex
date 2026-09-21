@@ -26,6 +26,8 @@ internal partial class AgentJournalWindow : Window
     private string? _loadedSessionId;
     private string? _watchedSessionId;
     private long _lastObservedSequence;
+    private int _callRefreshRequested;
+    private int _callRefreshRunning;
     private readonly DispatcherTimer _refreshTimer;
     private bool _loaded;
     private bool _replacingSessions;
@@ -375,7 +377,7 @@ internal partial class AgentJournalWindow : Window
         }
         _viewModel.FooterText = FormatFooter(session);
 
-        if (!session.IsLive || session.Mode != AgentJournalMode.Live)
+        if (!session.IsLive)
         {
             StopWatchingSession();
             return;
@@ -402,13 +404,18 @@ internal partial class AgentJournalWindow : Window
                 {
                     continue;
                 }
-                Task refresh = Task.CompletedTask;
-                await Dispatcher.UIThread.InvokeAsync(
-                    () => refresh = change.Kind == AgentJournalChangeKind.SessionEnded
-                        ? RefreshSafelyAsync()
-                        : ReloadSelectedCallsAsync(sessionId, cancellationToken),
-                    DispatcherPriority.Background);
-                await refresh;
+                if (change.Kind == AgentJournalChangeKind.SessionEnded)
+                {
+                    Task refresh = Task.CompletedTask;
+                    await Dispatcher.UIThread.InvokeAsync(
+                        () => refresh = RefreshSafelyAsync(),
+                        DispatcherPriority.Background);
+                    await refresh;
+                }
+                else
+                {
+                    RequestSelectedCallsReload(sessionId, cancellationToken);
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -424,6 +431,23 @@ internal partial class AgentJournalWindow : Window
     {
         if (!string.Equals(_loadedSessionId, sessionId, StringComparison.Ordinal))
             return;
+        if (_reader is IAgentJournalActivityReader activityReader)
+        {
+            var activity = await activityReader.ReadActivityAsync(
+                sessionId,
+                Volatile.Read(ref _lastObservedSequence),
+                cancellationToken);
+            if (activity is null)
+                return;
+            if (!activity.RequiresReset)
+            {
+                foreach (var call in activity.AppendedCalls)
+                    _viewModel.Calls.Add(CreateCallRow(call));
+                if (activity.LatestCall is not null)
+                    Volatile.Write(ref _lastObservedSequence, activity.LatestCall.Sequence);
+                return;
+            }
+        }
         var calls = await _reader.ReadCallsAsync(sessionId, cancellationToken);
         _viewModel.ReplaceCalls(calls.Select(CreateCallRow).ToArray());
         if (calls.Count > 0)
@@ -447,7 +471,7 @@ internal partial class AgentJournalWindow : Window
             session,
             AgentJournalPresentation.FormatProject(session),
             mode,
-            AgentJournalPresentation.FormatSessionDuration(session, now),
+            FormatSessionDuration(session, now),
             _localization.Format(
                 "AgentJournal.Masked",
                 AgentJournalPresentation.FormatNumber(session.Totals.SecretsMasked),
@@ -456,6 +480,56 @@ internal partial class AgentJournalWindow : Window
                 "AgentJournal.Masked.Short",
                 AgentJournalPresentation.FormatNumber(session.Totals.SecretsMasked),
                 AgentJournalPresentation.FormatNumber(session.Totals.PrivateDataMasked)));
+    }
+
+    private void RequestSelectedCallsReload(string sessionId, CancellationToken cancellationToken)
+    {
+        Interlocked.Exchange(ref _callRefreshRequested, 1);
+        if (Interlocked.CompareExchange(ref _callRefreshRunning, 1, 0) != 0)
+            return;
+        Dispatcher.UIThread.Post(
+            () => _ = DrainSelectedCallsReloadAsync(sessionId, cancellationToken),
+            DispatcherPriority.Background);
+    }
+
+    private async Task DrainSelectedCallsReloadAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            do
+            {
+                Interlocked.Exchange(ref _callRefreshRequested, 0);
+                await ReloadSelectedCallsAsync(sessionId, cancellationToken);
+            }
+            while (Volatile.Read(ref _callRefreshRequested) != 0 && !cancellationToken.IsCancellationRequested);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceWarning("Agent journal calls could not be refreshed: {0}", exception.GetType().Name);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _callRefreshRunning, 0);
+            if (Volatile.Read(ref _callRefreshRequested) != 0 && !cancellationToken.IsCancellationRequested)
+                RequestSelectedCallsReload(sessionId, cancellationToken);
+        }
+    }
+
+    private static string FormatSessionDuration(AgentJournalSession session, DateTimeOffset now)
+    {
+        if (session.EndedUtc is null && !session.IsLive)
+        {
+            if (!AgentJournalSessionHistory.TryGet(session, out var history) || history.LastEventUtc is null)
+                return "unknown";
+            var lowerBound = history.LastEventUtc.Value >= session.StartedUtc
+                ? history.LastEventUtc.Value - session.StartedUtc
+                : TimeSpan.Zero;
+            return "≥" + lowerBound.ToString("g", CultureInfo.CurrentCulture);
+        }
+        return AgentJournalPresentation.FormatSessionDuration(session, now);
     }
 
     private AgentJournalCallViewModel CreateCallRow(AgentJournalCall call) => new(

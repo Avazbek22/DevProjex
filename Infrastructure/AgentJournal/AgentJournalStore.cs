@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -10,12 +11,13 @@ using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Infrastructure.AgentJournal;
 
-public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJournalReader, IDisposable
+public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJournalReader, IAgentJournalActivityReader, IDisposable
 {
 	public const int MaximumDeliveredPaths = 200;
 	public const int MaximumArgumentValueCharacters = 4096;
 	private const int MaximumLineCharacters = 2 * 1024 * 1024;
 	private const int TailBoundaryProbeBytes = 64;
+	private const int MaximumCachedCalls = 8_192;
 	private static readonly TimeSpan ChangePollInterval = TimeSpan.FromMilliseconds(250);
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> ArgumentDetectors = new(
 		static () => [new GitleaksSecretDetector(), new PrivateDataDetector()],
@@ -23,7 +25,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	private static readonly IReadOnlySet<string> AllowedArguments = new HashSet<string>(StringComparer.Ordinal)
 	{
 		"path", "paths", "query_present", "query_length", "mode", "symbols", "symbol_length",
-		"symbol_class", "limit", "detail", "max_tokens", "direction", "depth", "pack_id", "lost_events"
+		"symbol_class", "limit", "detail", "max_tokens", "direction", "depth", "pack_id", "lost_events",
+		"lost_events_unknown"
 	};
 	private static readonly IReadOnlySet<string> AllowedNotices = new HashSet<string>(StringComparer.Ordinal)
 	{
@@ -42,9 +45,14 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	private readonly Func<IReadOnlyList<LiveSessionRecord>> activeSessions;
 	private readonly ConcurrentDictionary<string, SemaphoreSlim> fileLocks = new(StringComparer.Ordinal);
 	private readonly ConcurrentDictionary<string, AgentJournalSession> sessionHeaders = new(StringComparer.Ordinal);
+	private readonly ConcurrentDictionary<string, byte> incompleteSessions = new(StringComparer.Ordinal);
+	private readonly ConcurrentDictionary<string, SessionSummary> summaries = new(StringComparer.Ordinal);
+	private readonly ConcurrentDictionary<string, SemaphoreSlim> summaryLocks = new(StringComparer.Ordinal);
 	private int disposed;
 
 	internal Action<long>? TailBytesReadObserver { get; set; }
+	internal Action<long>? BytesReadObserver { get; set; }
+	internal Action<long>? RecordsReadObserver { get; set; }
 
 	public AgentJournalStore(
 		Func<string>? stateRootProvider = null,
@@ -106,17 +114,25 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			new AgentJournalLine("call", Call: NormalizeCall(call)),
 			cancellationToken);
 
-	public ValueTask EndSession(
+	public async ValueTask EndSession(
 		string sessionId,
 		DateTimeOffset endedUtc,
 		AgentJournalTotals totals,
-		CancellationToken cancellationToken = default) =>
-		AppendAsync(
+		CancellationToken cancellationToken = default)
+	{
+		if (incompleteSessions.ContainsKey(sessionId))
+		{
+			var content = await ReadContentAsync(ResolveSessionPath(sessionId), cancellationToken).ConfigureAwait(false);
+			totals = SumTotals(content.Calls);
+		}
+		await AppendAsync(
 			sessionId,
 			new AgentJournalLine(
 				"end",
 				End: new AgentJournalEnd(endedUtc.ToUniversalTime(), NormalizeTotals(totals))),
-			cancellationToken);
+			cancellationToken).ConfigureAwait(false);
+		incompleteSessions.TryRemove(sessionId, out _);
+	}
 
 	public async ValueTask<IReadOnlyList<AgentJournalSession>> ListSessionsAsync(
 		string? projectRoot = null,
@@ -134,13 +150,13 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		foreach (var path in EnumerateSessionFiles())
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var content = await ReadContentAsync(path, cancellationToken).ConfigureAwait(false);
-			if (content.Session is null ||
-				(requestedRoot is not null && !ContainsRoot(content.Session.Roots, requestedRoot)))
+			var summary = await ReadSummaryAsync(path, live, cancellationToken).ConfigureAwait(false);
+			if (summary is null ||
+				(requestedRoot is not null && !ContainsRoot(summary.Session.Roots, requestedRoot)))
 			{
 				continue;
 			}
-			sessions.Add(MaterializeSession(content, live));
+			sessions.Add(summary.Session);
 		}
 		return sessions
 			.OrderByDescending(static session => session.StartedUtc)
@@ -157,6 +173,127 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		Sweep();
 		var content = await ReadContentAsync(ResolveSessionPath(sessionId), cancellationToken).ConfigureAwait(false);
 		return content.Calls;
+	}
+
+	private async ValueTask<SessionSummary?> ReadSummaryAsync(
+		string path,
+		IReadOnlySet<(int Pid, long StartTicks)> live,
+		CancellationToken cancellationToken)
+	{
+		if (!File.Exists(path))
+		{
+			summaries.TryRemove(path, out _);
+			return null;
+		}
+		var gate = summaryLocks.GetOrAdd(path, static _ => new SemaphoreSlim(1, 1));
+		await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			var length = new FileInfo(path).Length;
+			if (summaries.TryGetValue(path, out var cached) && length >= cached.Offset)
+			{
+				if (length > cached.Offset)
+				{
+					var tail = await ReadTailAsync(path, cached.Offset, cancellationToken).ConfigureAwait(false);
+					cached.Apply(tail);
+				}
+				cached.RefreshLive(live);
+				return cached;
+			}
+
+			if (!TryReadSessionHeader(path, out var header) || header is null)
+				return null;
+			var end = await TryReadFinalEndAsync(path, cancellationToken).ConfigureAwait(false);
+			SessionSummary summary;
+			if (end is not null)
+			{
+				summary = new SessionSummary(
+					header with { EndedUtc = end.EndedUtc, Totals = end.Totals, IsLive = false },
+					end,
+					length,
+					[],
+					latestCall: null,
+					lastEventUtc: end.EndedUtc);
+			}
+			else
+			{
+				var content = await ReadContentAsync(path, cancellationToken).ConfigureAwait(false);
+				if (content.Session is null)
+					return null;
+				var materialized = MaterializeSession(content, live);
+				var cachedCalls = content.Calls.TakeLast(MaximumCachedCalls).ToArray();
+				summary = new SessionSummary(
+					materialized,
+					content.End,
+					length,
+					cachedCalls,
+					content.Calls.LastOrDefault(),
+					content.Calls.Count == 0 ? null : content.Calls.Max(static call => call.Utc));
+			}
+			summaries[path] = summary;
+			return summary;
+		}
+		finally
+		{
+			gate.Release();
+		}
+	}
+
+	private async ValueTask<AgentJournalEnd?> TryReadFinalEndAsync(
+		string path,
+		CancellationToken cancellationToken)
+	{
+		await using var stream = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete,
+			bufferSize: 4096,
+			FileOptions.Asynchronous | FileOptions.RandomAccess);
+		if (stream.Length == 0)
+			return null;
+		var cursor = stream.Length;
+		var buffer = new byte[4096];
+		using var line = new MemoryStream();
+		var skippedTrailingNewline = false;
+		while (cursor > 0 && line.Length <= MaximumLineCharacters)
+		{
+			var count = checked((int)Math.Min(buffer.Length, cursor));
+			cursor -= count;
+			stream.Position = cursor;
+			await stream.ReadExactlyAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+			BytesReadObserver?.Invoke(count);
+			for (var index = count - 1; index >= 0; index--)
+			{
+				if (buffer[index] == (byte)'\n')
+				{
+					if (!skippedTrailingNewline)
+					{
+						skippedTrailingNewline = true;
+						continue;
+					}
+					var suffix = buffer.AsSpan(index + 1, count - index - 1).ToArray();
+					line.Write(suffix);
+					return DeserializeEnd(line);
+				}
+			}
+			var current = line.ToArray();
+			line.SetLength(0);
+			line.Write(buffer, 0, count);
+			line.Write(current);
+		}
+		return DeserializeEnd(line);
+	}
+
+	private AgentJournalEnd? DeserializeEnd(MemoryStream line)
+	{
+		if (line.Length is 0 or > MaximumLineCharacters)
+			return null;
+		line.Position = 0;
+		if (!TryDeserializeLine(line, out var record) || record.Type != "end")
+			return null;
+		RecordsReadObserver?.Invoke(1);
+		return record.End;
 	}
 
 	public async ValueTask<AgentJournalReceipt?> ReadReceiptAsync(
@@ -238,7 +375,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 				lastSequence = call.Sequence;
 				yield return new AgentJournalChange(sessionId, AgentJournalChangeKind.CallAppended, call.Sequence);
 			}
-			if (tail.Ended)
+			if (tail.End is not null)
 			{
 				ended = true;
 				yield return new AgentJournalChange(sessionId, AgentJournalChangeKind.SessionEnded);
@@ -283,6 +420,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 				return boundary[..totalRead];
 			totalRead += read;
 			TailBytesReadObserver?.Invoke(read);
+			BytesReadObserver?.Invoke(read);
 		}
 		return boundary;
 	}
@@ -300,7 +438,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			bufferSize: 4096,
 			FileOptions.Asynchronous | FileOptions.SequentialScan);
 		if (stream.Length <= offset)
-			return new TailReadResult(offset, [], Ended: false);
+			return new TailReadResult(offset, [], End: null);
 		stream.Position = offset;
 		var calls = new List<AgentJournalCall>();
 		var buffer = new byte[8192];
@@ -308,10 +446,11 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		var lineTooLong = false;
 		var completeOffset = offset;
 		var absoluteOffset = offset;
-		var ended = false;
+		AgentJournalEnd? end = null;
 		while (await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false) is var read && read > 0)
 		{
 			TailBytesReadObserver?.Invoke(read);
+			BytesReadObserver?.Invoke(read);
 			for (var index = 0; index < read; index++)
 			{
 				var value = buffer[index];
@@ -328,15 +467,17 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 				completeOffset = absoluteOffset;
 				if (!lineTooLong && pending.Length > 0 && TryDeserializeLine(pending, out var record))
 				{
+					RecordsReadObserver?.Invoke(1);
 					if (record.Call is not null)
 						calls.Add(record.Call);
-					ended |= record.Type == "end" && record.End is not null;
+					if (record.Type == "end" && record.End is not null)
+						end = record.End;
 				}
 				pending.SetLength(0);
 				lineTooLong = false;
 			}
 		}
-		return new TailReadResult(completeOffset, calls, ended);
+		return new TailReadResult(completeOffset, calls, end);
 	}
 
 	private static bool TryDeserializeLine(MemoryStream line, out AgentJournalLine record)
@@ -398,8 +539,13 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			return;
 		foreach (var gate in fileLocks.Values)
 			gate.Dispose();
+		foreach (var gate in summaryLocks.Values)
+			gate.Dispose();
 		fileLocks.Clear();
+		summaryLocks.Clear();
 		sessionHeaders.Clear();
+		incompleteSessions.Clear();
+		summaries.Clear();
 	}
 
 	private async ValueTask AppendAsync(
@@ -426,13 +572,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 					cancellationToken).ConfigureAwait(false);
 				if (line.Call is { } recoveredCall)
 				{
-					line = line with
-					{
-						Call = recoveredCall with
-						{
-							Notices = recoveredCall.Notices.Append("history-recovered").ToArray()
-						}
-					};
+					incompleteSessions[sessionId] = 0;
+					line = line with { Call = MarkHistoryRecovered(recoveredCall, recoveredCall.Sequence - 1) };
 				}
 			}
 			else
@@ -451,13 +592,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			}
 			if (recoveredTail && line.Call is { } recoveredTailCall)
 			{
-				line = line with
-				{
-					Call = recoveredTailCall with
-					{
-						Notices = recoveredTailCall.Notices.Append("history-recovered").ToArray()
-					}
-				};
+				incompleteSessions[sessionId] = 0;
+				line = line with { Call = MarkHistoryRecovered(recoveredTailCall, 0) };
 			}
 			await WriteLineAsync(path, line, FileMode.Append, cancellationToken).ConfigureAwait(false);
 		}
@@ -465,6 +601,51 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		{
 			gate.Release();
 		}
+	}
+
+	public async ValueTask<AgentJournalActivitySnapshot?> ReadActivityAsync(
+		string sessionId,
+		long afterSequence,
+		CancellationToken cancellationToken = default)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+		ArgumentOutOfRangeException.ThrowIfNegative(afterSequence);
+		var summary = await ReadSummaryAsync(
+			ResolveSessionPath(sessionId),
+			ActiveSessionKeys(),
+			cancellationToken).ConfigureAwait(false);
+		if (summary is null)
+			return null;
+		var oldest = summary.Calls.Count == 0 ? summary.LatestCall?.Sequence ?? 0 : summary.Calls[0].Sequence;
+		var requiresReset = afterSequence > 0 && oldest > afterSequence + 1;
+		var appended = requiresReset
+			? Array.Empty<AgentJournalCall>()
+			: summary.Calls.Where(call => call.Sequence > afterSequence).ToArray();
+		return new AgentJournalActivitySnapshot(
+			summary.Session,
+			summary.LatestCall,
+			appended,
+			requiresReset,
+			summary.LastEventUtc);
+	}
+
+	private static AgentJournalCall MarkHistoryRecovered(AgentJournalCall call, long lostLowerBound)
+	{
+		var arguments = call.Arguments.ToDictionary(
+			static pair => pair.Key,
+			static pair => pair.Value,
+			StringComparer.Ordinal);
+		arguments["lost_events"] = Math.Max(0, lostLowerBound).ToString(CultureInfo.InvariantCulture);
+		arguments["lost_events_unknown"] = "true";
+		return call with
+		{
+			Arguments = arguments,
+			Notices = call.Notices
+				.Append("history-recovered")
+				.Append("history-incomplete")
+				.Distinct(StringComparer.Ordinal)
+				.ToArray()
+		};
 	}
 
 	private static async ValueTask<bool> RepairIncompleteTailAsync(
@@ -560,6 +741,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	{
 		if (!File.Exists(path))
 			return JournalContent.Empty;
+		BytesReadObserver?.Invoke(new FileInfo(path).Length);
 		var content = new JournalContent();
 		await foreach (var line in ReadCompleteLinesAsync(path, cancellationToken).ConfigureAwait(false))
 		{
@@ -576,6 +758,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			{
 				continue;
 			}
+			RecordsReadObserver?.Invoke(1);
 			switch (record?.Type)
 			{
 				case "session" when content.Session is null && record.Session is not null:
@@ -627,12 +810,14 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	{
 		var header = content.Session!;
 		var totals = content.End?.Totals ?? SumTotals(content.Calls);
-		return header with
+		var session = header with
 		{
 			EndedUtc = content.End?.EndedUtc,
 			Totals = totals,
 			IsLive = content.End is null && live.Contains((header.Pid, header.ProcessStartUtc.UtcTicks))
 		};
+		AgentJournalSessionHistory.Attach(session, AgentJournalSessionHistory.FromCalls(content.Calls));
+		return session;
 	}
 
 	private IReadOnlySet<(int Pid, long StartTicks)> ActiveSessionKeys()
@@ -910,8 +1095,80 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		public AgentJournalEnd? End { get; set; }
 	}
 
+	private sealed class SessionSummary(
+		AgentJournalSession session,
+		AgentJournalEnd? end,
+		long offset,
+		IReadOnlyList<AgentJournalCall> initialCalls,
+		AgentJournalCall? latestCall,
+		DateTimeOffset? lastEventUtc)
+	{
+		private readonly List<AgentJournalCall> calls = [.. initialCalls];
+
+		public AgentJournalSession Session { get; private set; } = session;
+		public AgentJournalEnd? End { get; private set; } = end;
+		public long Offset { get; private set; } = offset;
+		public IReadOnlyList<AgentJournalCall> Calls => calls;
+		public AgentJournalCall? LatestCall { get; private set; } = latestCall;
+		public DateTimeOffset? LastEventUtc { get; private set; } = lastEventUtc;
+
+		public void Apply(TailReadResult tail)
+		{
+			Offset = tail.Offset;
+			foreach (var call in tail.Calls)
+			{
+				if (LatestCall is not null && call.Sequence <= LatestCall.Sequence)
+					continue;
+				calls.Add(call);
+				if (calls.Count > MaximumCachedCalls)
+					calls.RemoveRange(0, calls.Count - MaximumCachedCalls);
+				LatestCall = call;
+				LastEventUtc = LastEventUtc is null || call.Utc > LastEventUtc ? call.Utc : LastEventUtc;
+			}
+			if (tail.End is not null)
+			{
+				End = tail.End;
+				LastEventUtc = tail.End.EndedUtc;
+			}
+			var totals = End?.Totals ?? AddTotals(Session.Totals, tail.Calls);
+			Session = Session with { EndedUtc = End?.EndedUtc, Totals = totals };
+		}
+
+		private static AgentJournalTotals AddTotals(
+			AgentJournalTotals totals,
+			IEnumerable<AgentJournalCall> appended)
+		{
+			foreach (var call in appended)
+			{
+				if (IsIncompleteHistoryMarker(call))
+					continue;
+				totals = new AgentJournalTotals(
+					SaturatingAdd(totals.Calls, 1),
+					SaturatingAdd(totals.ResultCharacters, call.ResultCharacters),
+					SaturatingAdd(totals.EstimatedTokens, call.EstimatedTokens),
+					SaturatingAdd(totals.FilesDelivered, call.FilesDelivered),
+					SaturatingAdd(totals.SecretsMasked, call.SecretsMasked),
+					SaturatingAdd(totals.PrivateDataMasked, call.PrivateDataMasked),
+					SaturatingAdd(totals.Errors, call.ErrorCode is null ? 0 : 1));
+			}
+			return totals;
+		}
+
+		public void RefreshLive(IReadOnlySet<(int Pid, long StartTicks)> live) =>
+			RefreshSession(live);
+
+		private void RefreshSession(IReadOnlySet<(int Pid, long StartTicks)> live)
+		{
+			Session = Session with
+			{
+				IsLive = End is null && live.Contains((Session.Pid, Session.ProcessStartUtc.UtcTicks))
+			};
+			AgentJournalSessionHistory.Attach(Session, AgentJournalSessionHistory.FromCalls(calls));
+		}
+	}
+
 	private sealed record TailReadResult(
 		long Offset,
 		IReadOnlyList<AgentJournalCall> Calls,
-		bool Ended);
+		AgentJournalEnd? End);
 }

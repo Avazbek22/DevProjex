@@ -62,6 +62,102 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 		}
 	}
 
+	[Theory]
+	[InlineData(ProjectProfileLookupStatus.InvalidStorage)]
+	[InlineData(ProjectProfileLookupStatus.UnsupportedFutureSchema)]
+	public async Task SelectionPersistReportsDeferredWhenLoadedStorageCannotBeWritten(
+		ProjectProfileLookupStatus status)
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			var store = new StatusProfileStore(new ProjectProfileLookupResult(status, null));
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession);
+
+			_ = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			var result = await persistence.PersistSelectedPathsAsync(
+				projectPath,
+				["src"],
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(ProjectProfilePersistenceDisposition.Deferred, result.Disposition);
+			Assert.Contains(status.ToString(), result.Reason, StringComparison.Ordinal);
+			Assert.Equal(0, store.SaveCount);
+		}
+	}
+
+	[Fact]
+	public async Task SelectionPersistReportsDeferredWhileStorageIsTemporarilyUnavailable()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			var unavailable = new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.TemporarilyUnavailable,
+				null);
+			var store = new StatusProfileStore(unavailable, unavailable);
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession,
+				profileLoadRetryDelays: []);
+
+			_ = await persistence.LoadSnapshotAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+			var result = await persistence.PersistSelectedPathsAsync(
+				projectPath,
+				["src"],
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(ProjectProfilePersistenceDisposition.Deferred, result.Disposition);
+			Assert.Equal(0, store.SaveCount);
+		}
+	}
+
+	[Fact]
+	public async Task SelectionPersistReportsDeferredWhenSelectionStateCannotBeCaptured()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			typeof(SelectionSyncCoordinator)
+				.GetField(
+					"_selectionPersistenceBlockedByIncompleteScan",
+					BindingFlags.Instance | BindingFlags.NonPublic)!
+				.SetValue(selectionCoordinator, true);
+			var store = new StatusProfileStore(
+				new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null));
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession);
+
+			var result = await persistence.PersistSelectedPathsAsync(
+				projectPath,
+				["src"],
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(ProjectProfilePersistenceDisposition.Deferred, result.Disposition);
+			Assert.Contains("incomplete", result.Reason, StringComparison.OrdinalIgnoreCase);
+			Assert.Equal(0, store.SaveCount);
+		}
+	}
+
 	[Fact]
 	public async Task Persist_UsesAppliedSelectionsWithoutWritingCurrentMarkedSecrets()
 	{

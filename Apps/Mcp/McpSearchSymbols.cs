@@ -458,7 +458,8 @@ internal sealed record McpSearchDeclarationPreview(
 	McpSearchDeclaration Declaration,
 	string Text,
 	int RemainingLines,
-	bool IsAddressable);
+	bool IsAddressable,
+	IReadOnlyList<McpSearchProtectedLine>? ProtectedLines = null);
 
 internal sealed class McpSearchDeclarationPreviewCache
 {
@@ -467,6 +468,7 @@ internal sealed class McpSearchDeclarationPreviewCache
 	private readonly IReadOnlyDictionary<string, int> declarationNameCounts;
 	private readonly int maximumCharacters;
 	private readonly CancellationToken cancellationToken;
+	private readonly IReadOnlyDictionary<int, int>? protectionCountsByLine;
 	private readonly Dictionary<DeclarationIdentity, McpSearchDeclarationPreview> previews = [];
 	private int[]? lineStarts;
 
@@ -475,13 +477,15 @@ internal sealed class McpSearchDeclarationPreviewCache
 		string content,
 		IReadOnlyList<NavigationDeclaration> declarations,
 		int maximumCharacters,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyDictionary<int, int>? protectionCountsByLine = null)
 	{
 		this.relativePath = relativePath;
 		this.content = content;
 		declarationNameCounts = CountDeclarationNames(declarations);
 		this.maximumCharacters = maximumCharacters;
 		this.cancellationToken = cancellationToken;
+		this.protectionCountsByLine = protectionCountsByLine;
 	}
 
 	public McpSearchDeclarationPreview Get(NavigationDeclaration declaration)
@@ -492,6 +496,13 @@ internal sealed class McpSearchDeclarationPreviewCache
 
 		lineStarts ??= BuildLineStarts(content, cancellationToken);
 		var body = Slice(declaration.StartLine, declaration.EndLine);
+		var displayedEndLine = declaration.EndLine - body.RemainingLines;
+		var protectedLines = protectionCountsByLine is null
+			? null
+			: protectionCountsByLine
+				.Where(item => item.Key >= declaration.StartLine && item.Key <= displayedEndLine)
+				.Select(static item => new McpSearchProtectedLine(item.Key, item.Value))
+				.ToArray();
 		preview = new McpSearchDeclarationPreview(
 			new McpSearchDeclaration(
 				relativePath,
@@ -500,7 +511,8 @@ internal sealed class McpSearchDeclarationPreviewCache
 				declaration.EndLine),
 			body.Text,
 			body.RemainingLines,
-			declarationNameCounts[declaration.Name] == 1);
+			declarationNameCounts[declaration.Name] == 1,
+			protectedLines);
 		previews[identity] = preview;
 		return preview;
 	}

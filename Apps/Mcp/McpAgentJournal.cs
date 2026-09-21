@@ -44,11 +44,13 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 	private readonly Task pump;
 	private readonly AsyncLocal<Invocation?> invocation = new();
 	private readonly object totalsSync = new();
+	private readonly SemaphoreSlim startGate = new(1, 1);
 	private AgentJournalTotals totals = AgentJournalTotals.Empty;
 	private long sequence;
 	private long lostEvents;
 	private int completeSessionRequested;
 	private int startState;
+	private int startAttempts;
 	private int disposed;
 
 	public McpAgentJournal(
@@ -94,27 +96,36 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		string? clientVersion,
 		CancellationToken cancellationToken)
 	{
-		if (Interlocked.CompareExchange(ref startState, 1, 0) != 0)
+		if (Volatile.Read(ref startState) == 2)
 			return;
-		var header = session with
-		{
-			ClientName = clientName ?? string.Empty,
-			ClientVersion = clientVersion ?? string.Empty
-		};
+		await startGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
+			if (Volatile.Read(ref startState) == 2 || startAttempts >= 3)
+				return;
+			startAttempts++;
+			Volatile.Write(ref startState, 1);
+			var header = session with
+			{
+				ClientName = clientName ?? string.Empty,
+				ClientVersion = clientVersion ?? string.Empty
+			};
 			await writer.StartSession(header, cancellationToken).ConfigureAwait(false);
 			Volatile.Write(ref startState, 2);
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
-			Volatile.Write(ref startState, -1);
+			Volatile.Write(ref startState, 0);
 			throw;
 		}
 		catch (Exception exception)
 		{
-			Volatile.Write(ref startState, -1);
+			Volatile.Write(ref startState, 0);
 			Trace.TraceWarning("MCP journal session could not be started: {0}", exception.GetType().Name);
+		}
+		finally
+		{
+			startGate.Release();
 		}
 	}
 
@@ -242,8 +253,13 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 	public void Complete(CallToolResult result)
 	{
 		var current = invocation.Value;
-		if (current is null || Volatile.Read(ref startState) != 2 || Volatile.Read(ref disposed) != 0)
+		if (current is null || Volatile.Read(ref disposed) != 0)
 			return;
+		if (Volatile.Read(ref startState) != 2)
+		{
+			Interlocked.Increment(ref lostEvents);
+			return;
+		}
 		var text = string.Join('\n', result.Content.OfType<TextContentBlock>().Select(static block => block.Text));
 		var trustedText = ExtractTrustedText(text);
 		var characters = text.Length;
@@ -286,6 +302,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		{
 			shutdown.Cancel();
 			shutdown.Dispose();
+			startGate.Dispose();
 		}
 	}
 
