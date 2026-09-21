@@ -5,6 +5,44 @@ namespace DevProjex.Tests.Integration;
 public sealed partial class McpServerIntegrationTests
 {
 	[Fact]
+	public async Task ReadPackJournalAttributesACharacterLimitedSingleLinePage()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = workspace.CreateDirectory("project/src");
+		File.WriteAllText(Path.Combine(source, "Large.txt"), new string('x', 60_000));
+		var appData = workspace.CreateDirectory("app-data");
+
+		await using (var server = await McpTestServer.StartAsync(project, workspace.Path))
+		{
+			var stored = await server.CallAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["paths"] = new[] { "src/Large.txt" },
+					["view"] = "content",
+					["format"] = "text"
+				});
+			var packId = ExtractPackId(AllText(stored));
+			Assert.NotEmpty(packId);
+			var page = await server.CallAsync(
+				"read_pack",
+				new Dictionary<string, object?> { ["pack_id"] = packId });
+			Assert.NotEqual(true, page.IsError);
+		}
+
+		using var journal = new AgentJournalStore(
+			() => appData,
+			activeSessionProvider: static () => []);
+		var session = Assert.Single(await journal.ListSessionsAsync(
+			project,
+			cancellationToken: TestContext.Current.CancellationToken));
+		var calls = await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken);
+		var read = Assert.Single(calls, static call => call.Tool == "read_pack");
+		Assert.Equal(["src/Large.txt"], read.DeliveredPaths);
+	}
+
+	[Fact]
 	public async Task ReadPackJournalUsesStoredLineRangesInsteadOfPathTextOccurrences()
 	{
 		using var workspace = new TemporaryDirectory();

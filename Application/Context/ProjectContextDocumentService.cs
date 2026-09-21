@@ -56,6 +56,7 @@ public sealed class ProjectContextDocumentService(
 {
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
+	private const int TextFileHeadingAndSpacerLineCount = 2;
 	private const int StructuredTreeFlushNodeInterval = 512;
 	private const int MaximumBoundedReadAhead = 8;
 	internal const long MaximumCompleteSnapshotReadAheadRetainedBytes = 4L * 1024 * 1024;
@@ -919,9 +920,10 @@ public sealed class ProjectContextDocumentService(
 				if (lineTracker is not null)
 				{
 					await streamWriter.FlushAsync(cancellationToken).ConfigureAwait(false);
+					var contentStartLine = lineTracker.CurrentLine + writer.BufferedLineEndingCount;
 					lineTracker.BeginFile(
 						source.Path,
-						lineTracker.CurrentLine + writer.BufferedLineEndingCount);
+						Math.Max(1, contentStartLine - TextFileHeadingAndSpacerLineCount));
 				}
 
 				await writer.WriteAsync(

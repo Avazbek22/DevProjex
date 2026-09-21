@@ -203,6 +203,7 @@ public sealed record FileFacts(
 	public IReadOnlyList<ScalaImportDirective> ScalaImportDirectives { get; init; } = [];
 	public IReadOnlyList<ScalaValueScope> ScalaValueScopes { get; init; } = [];
 	public DependencyPartialParseDiagnostic? PartialParse { get; init; }
+	public bool FactBudgetLimited { get; init; }
 }
 
 public sealed record DependencyEdge(
@@ -230,6 +231,7 @@ public sealed record DependencyFactsCoverage(
 	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
 	public IReadOnlyList<string> ExtractionFailedFiles { get; init; } = [];
 	public IReadOnlyList<DependencyPartialParseDiagnostic> PartialParseDiagnostics { get; init; } = [];
+	public IReadOnlyList<string> FactBudgetLimitedFiles { get; init; } = [];
 }
 
 public sealed record DependencyIndexMetrics(
@@ -237,7 +239,14 @@ public sealed record DependencyIndexMetrics(
 	int ReusedFiles,
 	int ReresolvedFiles,
 	long ElapsedMilliseconds,
-	bool ResolutionCacheHit);
+	bool ResolutionCacheHit)
+{
+	public long AccumulatedFactBytes { get; init; }
+	public long MaximumAccumulatedFactBytes { get; init; }
+	public int FactBudgetLimitedFiles { get; init; }
+	public long ResolverContextEstimatedBytes { get; init; }
+	public long ResolvedIndexEstimatedBytes { get; init; }
+}
 
 /// <summary>
 /// How much an indexing pass learned about one file's bytes while it built the snapshot.

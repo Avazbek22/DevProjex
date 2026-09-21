@@ -32,6 +32,12 @@ if (args.FirstOrDefault() == "pack-attribution")
 	return;
 }
 
+if (args.FirstOrDefault() == "search-retention")
+{
+	SearchRetentionBenchmark.Run(args[1..]);
+	return;
+}
+
 var options = BenchmarkOptions.Parse(args);
 var temporaryCorpus = options.SyntheticFileCount is null ? null : SyntheticCorpus.Create(options.SyntheticFileCount.Value);
 var root = temporaryCorpus?.Path ?? options.Root ?? throw new ArgumentException("Specify --root or --synthetic-files.");
@@ -155,6 +161,99 @@ internal sealed record BenchmarkOperation(
 	Func<McpClient, CancellationToken, Task<CallToolResult>> Invoke);
 
 internal readonly record struct Sample(double ElapsedMilliseconds, long ClientAllocatedBytes, int ResponseCharacters);
+
+internal static class SearchRetentionBenchmark
+{
+	private const int FileCount = 2_000;
+	private const int SourceCharacters = 32 * 1024;
+	private const int CandidateCapacity = 5_000;
+
+	public static void Run(string[] arguments)
+	{
+		var repetitions = 5;
+		if (arguments.Length > 0)
+		{
+			if (arguments.Length != 2 || arguments[0] != "--repetitions")
+				throw new ArgumentException("Only --repetitions is supported.");
+			repetitions = int.Parse(arguments[1], CultureInfo.InvariantCulture);
+		}
+		if (repetitions < 3)
+			throw new ArgumentOutOfRangeException(nameof(repetitions));
+
+		Console.WriteLine(
+			"matching_percent,legacy_median_retained_bytes,legacy_spread_bytes,indexed_median_retained_bytes,indexed_spread_bytes,indexed_peak_bound_bytes");
+		foreach (var matchingPercent in new[] { 1, 50, 100 })
+		{
+			var matchingFiles = checked(FileCount * matchingPercent / 100);
+			var legacy = Enumerable.Range(0, repetitions)
+				.Select(_ => MeasureLegacy(matchingFiles))
+				.Order()
+				.ToArray();
+			var indexed = Enumerable.Range(0, repetitions)
+				.Select(_ => MeasureIndexed(matchingFiles))
+				.Order()
+				.ToArray();
+			var indexedMedian = indexed[indexed.Length / 2];
+			Console.WriteLine(string.Join(',',
+				matchingPercent.ToString(CultureInfo.InvariantCulture),
+				legacy[legacy.Length / 2].ToString(CultureInfo.InvariantCulture),
+				(legacy[^1] - legacy[0]).ToString(CultureInfo.InvariantCulture),
+				indexedMedian.ToString(CultureInfo.InvariantCulture),
+				(indexed[^1] - indexed[0]).ToString(CultureInfo.InvariantCulture),
+				checked(indexedMedian + SourceCharacters * sizeof(char)).ToString(CultureInfo.InvariantCulture)));
+		}
+	}
+
+	private static long MeasureLegacy(int matchingFiles)
+	{
+		Collect();
+		var before = GC.GetTotalMemory(forceFullCollection: false);
+		var retained = new Dictionary<string, string>(matchingFiles, StringComparer.Ordinal);
+		for (var index = 0; index < matchingFiles; index++)
+		{
+			var path = $"src/File{index:D5}.cs";
+			retained.Add(path, string.Concat(path, new string('x', SourceCharacters - path.Length)));
+		}
+		Collect();
+		var bytes = Math.Max(0, GC.GetTotalMemory(forceFullCollection: false) - before);
+		GC.KeepAlive(retained);
+		return bytes;
+	}
+
+	private static long MeasureIndexed(int matchingFiles)
+	{
+		Collect();
+		var before = GC.GetTotalMemory(forceFullCollection: false);
+		var collector = new McpSearchCandidateCollector(CandidateCapacity, int.MaxValue);
+		for (var index = 0; index < matchingFiles; index++)
+		{
+			var path = $"src/File{index:D5}.cs";
+			var text = $"needle-{index:D5}";
+			collector.Consider(new McpSearchCandidate(
+				new McpSearchRenderedGroup(
+					path,
+					path,
+					[1],
+					[new McpSearchGroupLine(1, IsMatch: true, text)]),
+				1,
+				0,
+				text,
+				text.Length,
+				ProtectedLines: [new McpSearchProtectedLine(1, 1)]));
+		}
+		Collect();
+		var bytes = Math.Max(0, GC.GetTotalMemory(forceFullCollection: false) - before);
+		GC.KeepAlive(collector);
+		return bytes;
+	}
+
+	private static void Collect()
+	{
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
+	}
+}
 
 internal static class SearchDeclarationBenchmark
 {
