@@ -497,7 +497,7 @@ public sealed class DevProjexCommandTree
 				_localization.Format("Mcp.Connect.RunInProject", result.NextCommand));
 		}
 		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
-			TerminalTextEscaping.WriteSingleLine(environment.Output, result.CommandOutput);
+			System.Diagnostics.Trace.WriteLine($"MCP client command output: {result.CommandOutput}");
 		if (result.SuggestedConfigPaths is not null)
 		{
 			foreach (var path in result.SuggestedConfigPaths)
