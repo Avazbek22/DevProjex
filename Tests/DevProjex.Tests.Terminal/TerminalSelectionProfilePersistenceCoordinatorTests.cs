@@ -91,6 +91,29 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 	}
 
 	[Fact]
+	public async Task ProvenUnchangedSelectionClearsThePendingWrite()
+	{
+		var delay = new ControlledDelay();
+		var attempts = 0;
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			(_, _, _) =>
+			{
+				attempts++;
+				return Task.FromResult(ProjectProfilePersistenceResult.Unchanged());
+			},
+			delay.WaitAsync,
+			maxBackgroundAttempts: 1);
+
+		coordinator.Schedule("project", CreateProfile(["src"]));
+		delay.Release();
+		await WaitForStateAsync(coordinator, TerminalSelectionPersistencePhase.Idle);
+
+		Assert.Equal(1, attempts);
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(1, attempts);
+	}
+
+	[Fact]
 	public void PersistenceFailureChoicesExistInEveryLocalization()
 	{
 		var localizationDirectory = Path.Combine(
