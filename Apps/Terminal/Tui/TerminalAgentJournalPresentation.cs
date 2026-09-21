@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using DevProjex.Kernel.Models;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
@@ -18,14 +19,17 @@ internal sealed record TerminalAgentJournalSnapshot(
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(receipt);
 		var paths = new Dictionary<string, long>(ProjectTreePathIdentity.CanonicalComparer);
-		foreach (var delivered in receipt.DeliveredPaths)
+		var rootIndex = ResolveRootIndex(projectRoot, receipt.Session.Roots);
+		foreach (var delivered in receipt.Calls
+			.Where(call => call.RootIndex == rootIndex || receipt.Session.Roots.Count == 1 && call.RootIndex is null)
+			.SelectMany(static call => call.DeliveredPaths.Distinct(ProjectTreePathIdentity.CanonicalComparer)))
 		{
 			if (TerminalAgentJournalPresentation.TryResolveDeliveredPath(
 					projectRoot,
-					delivered.Path,
+					delivered,
 					out var path))
 			{
-				paths[path] = delivered.Calls;
+				paths[path] = paths.TryGetValue(path, out var count) ? count + 1 : 1;
 			}
 		}
 		return new TerminalAgentJournalSnapshot(
@@ -33,6 +37,14 @@ internal sealed record TerminalAgentJournalSnapshot(
 			receipt.Calls.OrderBy(static call => call.Sequence).LastOrDefault(),
 			receipt.Totals.Calls,
 			paths);
+	}
+
+	private static int ResolveRootIndex(string projectRoot, IReadOnlyList<AgentJournalRoot> roots)
+	{
+		for (var index = 0; index < roots.Count; index++)
+			if (PathComparer.Default.Equals(PathUtility.Normalize(projectRoot), PathUtility.Normalize(roots[index].ConfiguredPath)))
+				return index;
+		return -1;
 	}
 }
 
@@ -78,6 +90,19 @@ internal sealed record TerminalAgentJournalSessionRow(
 
 internal static class TerminalAgentJournalPresentation
 {
+	public static string BuildLiveSessionIndicator(
+		IReadOnlyList<LiveSessionRecord> sessions,
+		Func<int, string>? multipleSessionsText)
+	{
+		ArgumentNullException.ThrowIfNull(sessions);
+		var live = sessions.Where(static session => session.Mode == AgentJournalMode.Live).ToArray();
+		return live.Length switch
+		{
+			0 => string.Empty,
+			1 => $"Live context ({LiveSessionRegistry.FormatClientName(live[0].ClientName)})",
+			_ => $"Live context ({multipleSessionsText?.Invoke(live.Length) ?? $"{live.Length} sessions"})"
+		};
+	}
 	public static string BuildSessionHeader(Func<string, string, string>? localize = null) => string.Join(
 		" | ",
 		"Session",
@@ -156,6 +181,18 @@ internal static class TerminalAgentJournalPresentation
 			.Append(session.Mode.ToString().ToLowerInvariant())
 			.Append(" | ")
 			.AppendLine(session.IsLive ? "live" : "ended");
+		var lostEvents = LostEventCount(calls);
+		if (lostEvents > 0)
+		{
+			var incompleteHistory = Text(
+				localize,
+				"AgentJournal.Notice.HistoryIncomplete",
+				"History is incomplete: {0} events could not be recorded.");
+			output.AppendLine(string.Format(
+				CultureInfo.CurrentCulture,
+				incompleteHistory,
+				lostEvents));
+		}
 		output.AppendLine()
 			.AppendLine(BuildCallHeader(localize));
 
@@ -225,13 +262,33 @@ internal static class TerminalAgentJournalPresentation
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(receipt);
 		var paths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
-		foreach (var delivered in receipt.DeliveredPaths)
+		var rootIndex = ResolveRootIndex(projectRoot, receipt.Session.Roots);
+		foreach (var delivered in receipt.Calls
+			.Where(call => call.RootIndex == rootIndex || receipt.Session.Roots.Count == 1 && call.RootIndex is null)
+			.SelectMany(static call => call.DeliveredPaths)
+			.Distinct(ProjectTreePathIdentity.CanonicalComparer))
 		{
-			if (TryResolveDeliveredPath(projectRoot, delivered.Path, out var path))
+			if (TryResolveDeliveredPath(projectRoot, delivered, out var path))
 				paths.Add(path);
 		}
 		return paths;
 	}
+
+	private static int ResolveRootIndex(string projectRoot, IReadOnlyList<AgentJournalRoot> roots)
+	{
+		for (var index = 0; index < roots.Count; index++)
+			if (PathComparer.Default.Equals(PathUtility.Normalize(projectRoot), PathUtility.Normalize(roots[index].ConfiguredPath)))
+				return index;
+		return -1;
+	}
+
+	private static long LostEventCount(IEnumerable<AgentJournalCall> calls) => calls
+		.Where(static call => call.Notices.Contains("history-incomplete", StringComparer.Ordinal))
+		.Select(static call => call.Arguments.TryGetValue("lost_events", out var value) &&
+			long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+				? Math.Max(0, parsed)
+				: 0)
+		.Sum();
 
 	internal static bool TryResolveDeliveredPath(
 		string projectRoot,

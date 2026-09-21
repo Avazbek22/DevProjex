@@ -81,7 +81,7 @@ internal sealed class AgentJournalWindowViewModel : ViewModelBase
     }
 
     public bool HasSelectedSession => SelectedSession is not null;
-    public bool HasCurrentProject { get; }
+    public bool HasCurrentProject { get; private set; }
 
     public bool CurrentProjectOnly
     {
@@ -93,6 +93,16 @@ internal sealed class AgentJournalWindowViewModel : ViewModelBase
             _currentProjectOnly = value;
             RaisePropertyChanged();
         }
+    }
+
+    public void SetCurrentProjectAvailable(bool available)
+    {
+        if (HasCurrentProject == available)
+            return;
+        HasCurrentProject = available;
+        if (!available)
+            CurrentProjectOnly = false;
+        RaisePropertyChanged(nameof(HasCurrentProject));
     }
 
     public bool IsLoading

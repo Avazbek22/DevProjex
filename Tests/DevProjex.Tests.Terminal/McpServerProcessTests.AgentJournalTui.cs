@@ -111,9 +111,15 @@ public sealed partial class McpServerProcessTests
 
 			await terminal.SendAsync(":mcp log clear\r", TestContext.Current.CancellationToken);
 			await terminal.WaitForScreenAsync(
-				"End live MCP sessions before clearing their journal.",
+				"Project files will not be changed.",
 				timeout: TimeSpan.FromSeconds(15),
 				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				"active sessions preserved",
+				timeout: TimeSpan.FromSeconds(15),
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.NotNull(await store.ReadReceiptAsync(session.Id, TestContext.Current.CancellationToken));
 		}
 
 		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);

@@ -727,8 +727,6 @@ internal sealed class DevProjexMcpTools(
 					.ConfigureAwait(false);
 			if (measured is not null && prepared is not null)
 				McpProjectService.EnsureMeasuredSourcesCurrent(measured, plan.IncludedFiles);
-			journal?.RecordProtection(prepared?.Snapshot ?? measured?.Snapshot);
-			journal?.RecordDeliveredPaths(plan.SourceRoot, plan.IncludedFiles);
 			operationProgress.Milestone(
 				65,
 				$"transforming content {transformedFileCount}/{transformedFileCount}");
@@ -780,6 +778,14 @@ internal sealed class DevProjexMcpTools(
 			var retainPack = false;
 			try
 			{
+				var deliveredPackFiles = writeResult?.TokenBudget is { } tokenBudget
+					? tokenBudget.AdmittedSourceFiles.ToArray()
+					: plan.IncludedFiles.Except(
+						writeResult?.UnscannableFiles.Select(static file => file.Path) ?? [],
+						PathComparer.Default).ToArray();
+				packs.RecordJournalContext(
+					pack.Id,
+					CreateStoredJournalContext(plan, deliveredPackFiles, prepared ?? measured));
 				var formattedBudgetReport = writeResult?.TokenBudget is { } completedBudget
 					? FormatTokenBudgetReport(completedBudget)
 					: null;
@@ -804,6 +810,12 @@ internal sealed class DevProjexMcpTools(
 							formattedBudgetReport!.Length);
 					if (inlineMessage.Length <= MaximumInlinePackCharacters)
 					{
+						journal?.RecordProtection(prepared?.Snapshot ?? measured?.Snapshot);
+						journal?.RecordDeliveredPaths(
+							plan.SourceRoot,
+							deliveredPackFiles);
+						if (writeResult?.TokenBudget?.SkippedFileCount > 0)
+							journal?.RecordNotice(AgentJournalNoticeCodes.BudgetSkipped);
 						await operationProgress.CompleteAsync(
 								100,
 								$"writing pack {writtenFileCount}/{writtenFileCount}")
@@ -876,7 +888,11 @@ internal sealed class DevProjexMcpTools(
 			var startColumn = arguments.OptionalInteger("start_column", 1, int.MaxValue);
 			ValidateLineRange(start, end);
 			await using var packLease = packs.OpenReadDocument(packId);
-			liveContext?.RefreshStoredResult(packs.GetLiveContext(packId));
+			var journalContext = packs.GetJournalContext(packId);
+			if (journalContext is not null)
+				journal?.RecordStoredContext(journalContext.SourceRoot, journalContext.Revision);
+			if (liveContext?.RefreshStoredResult(packs.GetLiveContext(packId)) == true)
+				journal?.RecordNotice(AgentJournalNoticeCodes.StalePack);
 			var pack = packLease.Document;
 			var page = await ReadFilePageAsync(
 					pack,
@@ -890,6 +906,18 @@ internal sealed class DevProjexMcpTools(
 			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
+			if (journalContext is not null)
+			{
+				var delivered = journalContext.Paths
+					.Where(item => ContainsStoredPath(page.Text, item.RelativePath))
+					.ToArray();
+				journal?.RecordDeliveredPaths(
+					journalContext.SourceRoot,
+					delivered.Select(static item => item.RelativePath));
+				journal?.RecordProtection(
+					delivered.Sum(static item => item.SecretsMasked),
+					delivered.Sum(static item => item.PrivateDataMasked));
+			}
 			return McpToolResults.TextSuccess(
 				AppendTrustedNotices(McpSpotlight.Wrap(page.Text), rangeNotice, characterLimitNotice),
 				advertiseLargeResult: true);
@@ -952,6 +980,7 @@ internal sealed class DevProjexMcpTools(
 				MaximumStoredSearchMatches,
 				MaximumStoredSearchCharacters);
 			var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
+			var protectedSearchFiles = new Dictionary<string, TransformedTextFile>(StringComparer.Ordinal);
 			await using var searched = await Projects.ConsumeSearchTextAsync(
 				plan with { IncludedFiles = inspectedFiles },
 				(file, token) =>
@@ -1000,6 +1029,7 @@ internal sealed class DevProjexMcpTools(
 					totalMatches += scan.TotalMatches;
 					if (scan.TotalMatches > 0)
 					{
+						protectedSearchFiles[relative] = file;
 						matchingFiles++;
 						McpSearchExecutionHooks.AfterScan?.Invoke(relative);
 						var annotatedFiles = candidates.SelectFilesForAnnotation(McpSearchSymbols.MaximumAnnotatedFiles);
@@ -1012,15 +1042,10 @@ internal sealed class DevProjexMcpTools(
 					return ValueTask.CompletedTask;
 				},
 				cancellationToken).ConfigureAwait(false);
-			journal?.RecordProtection(searched.Snapshot);
-
 			// Candidate priority is applied before response sizing, so the retained set and the
 			// displayed slice are both independent of directory traversal order.
 			var candidateSnapshot = candidates.Snapshot();
 			var ordered = BuildOrderedSearchGroups(candidateSnapshot);
-			journal?.RecordDeliveredPaths(
-				plan.SourceRoot,
-				ordered.Select(static group => group.RelativePath).Distinct(ProjectTreePathIdentity.CanonicalComparer));
 			storeHitMatchBound = candidates.MatchCapacityReached;
 			var retentionCharacterBoundReached = candidates.CharacterCapacityReached;
 			var retainedMatches = candidates.Count;
@@ -1046,7 +1071,6 @@ internal sealed class DevProjexMcpTools(
 				declarationReadContext);
 			rendered = bodyLayout.Rendered;
 			declarationPreview = bodyLayout.Preview;
-
 			var output = rendered.Output;
 			var shownMatches = rendered.ShownMatches;
 			var resultGroupTruncated = rendered.Truncated;
@@ -1142,6 +1166,12 @@ internal sealed class DevProjexMcpTools(
 					McpStoredResultKind.Search);
 				if (storedContext is not null)
 					packs.RecordLiveContext(storedSearch.Id, storedContext);
+				packs.RecordJournalContext(
+					storedSearch.Id,
+					CreateStoredJournalContext(
+						plan,
+						withheldByFile.Keys.Select(path => Path.GetFullPath(path, plan.SourceRoot)),
+						searched));
 			}
 			AppendWithheldDistribution(output, withheldByFile);
 			var additionalMatchesNotice = totalMatches > shownMatches
@@ -1180,6 +1210,10 @@ internal sealed class DevProjexMcpTools(
 				retentionCharacterBoundReached,
 				storeHitCharacterBound,
 				searched.UnscannableFiles.Count);
+			if (!boundary.IsComplete)
+				journal?.RecordNotice(AgentJournalNoticeCodes.SearchPartial);
+			if (totalMatches > shownMatches)
+				journal?.RecordNotice(AgentJournalNoticeCodes.MatchesOmitted);
 			// A stored result whose id never reaches the caller is a file nobody can page and
 			// nobody will remove, so it is dropped unless this response carries its id out.
 			var retained = false;
@@ -1212,6 +1246,11 @@ internal sealed class DevProjexMcpTools(
 							HasPaths: HasItems(paths),
 							HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
 							HasRootOnlyPattern: HasRootOnlyPattern(includePatterns)))));
+				journal?.RecordDeliveredPaths(
+					plan.SourceRoot,
+					rendered.WrittenHits.Select(static hit => hit.RelativePath)
+						.Distinct(ProjectTreePathIdentity.CanonicalComparer));
+				RecordSearchProtection(searched.Snapshot, protectedSearchFiles, rendered, declarationPreview);
 				retained = true;
 				return result;
 			}
@@ -1265,12 +1304,6 @@ internal sealed class DevProjexMcpTools(
 				progress.MeasureFacts("Indexing dependency facts", 5, 90),
 				cancellationToken).ConfigureAwait(false);
 			related = await ProtectRelatedEvidenceAsync(plan, related, cancellationToken).ConfigureAwait(false);
-			journal?.RecordDeliveredPaths(
-				plan.SourceRoot,
-				related.Seeds.SelectMany(static seed =>
-					new[] { seed.Seed }
-						.Concat(seed.Dependencies.Select(static file => file.Path))
-						.Concat(seed.Dependents.Select(static file => file.Path))));
 			await progress.CompleteAsync(100, related.Index.Metrics.ResolutionCacheHit
 				? "Dependency index reused"
 				: "Dependency index complete").ConfigureAwait(false);
@@ -1319,7 +1352,15 @@ internal sealed class DevProjexMcpTools(
 				// The same deterministic formatter is replayed directly into bounded pack storage.
 			}
 			if (!inline.IsTruncated)
+			{
+				journal?.RecordDeliveredPaths(
+					plan.SourceRoot,
+					related.Seeds.SelectMany(static seed =>
+						new[] { seed.Seed }
+							.Concat(seed.Dependencies.Select(static file => file.Path))
+							.Concat(seed.Dependents.Select(static file => file.Path))));
 				return McpToolResults.TextSuccess(inline.Text, advertiseLargeResult: true);
+			}
 
 			var pack = await packs.CreateAsync(
 				async (stream, token) =>
@@ -1339,6 +1380,15 @@ internal sealed class DevProjexMcpTools(
 				McpStoredResultKind.Related);
 			if (storedContext is not null)
 				packs.RecordLiveContext(pack.Id, storedContext);
+			packs.RecordJournalContext(
+				pack.Id,
+				CreateStoredJournalContext(
+					plan,
+					related.Seeds.SelectMany(static seed =>
+						new[] { seed.Seed }
+							.Concat(seed.Dependencies.Select(static file => file.Path))
+							.Concat(seed.Dependents.Select(static file => file.Path))),
+					prepared: null));
 			return McpToolResults.TextSuccess(
 				$"Related-files result stored as '{pack.Id}' ({pack.Characters} characters). " +
 				"Call read_pack with this pack_id to read it.",
@@ -1371,6 +1421,7 @@ internal sealed class DevProjexMcpTools(
 			.Order(ProjectTreePathIdentity.CanonicalComparer)
 			.ToArray();
 		var transformed = new Dictionary<string, TransformedTextFile>(PathComparer.Default);
+		SecretRedactionSnapshot? protectionSnapshot;
 		await using (var protectedSources = await Projects.ConsumeSearchTextAsync(
 			plan with { IncludedFiles = sourcePaths },
 			(file, _) =>
@@ -1380,10 +1431,11 @@ internal sealed class DevProjexMcpTools(
 			},
 			cancellationToken).ConfigureAwait(false))
 		{
-			journal?.RecordProtection(protectedSources.Snapshot);
+			protectionSnapshot = protectedSources.Snapshot;
 		}
 
 		var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+		var returnedRedactions = new Dictionary<string, HashSet<int>>(PathComparer.Default);
 		foreach (var item in evidence)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -1397,7 +1449,15 @@ internal sealed class DevProjexMcpTools(
 			}
 			replacements[item.Reason] =
 				$"{RelatedEvidenceLabel(item.Edge.Layer)} at line {item.Site.Line.ToString(CultureInfo.InvariantCulture)}";
+			if (!returnedRedactions.TryGetValue(sourcePath, out var lines))
+			{
+				lines = [];
+				returnedRedactions[sourcePath] = lines;
+			}
+			lines.Add(item.Site.Line);
 		}
+		foreach (var (sourcePath, lines) in returnedRedactions)
+			journal?.RecordProtection(CountRedactionsOnLines(transformed[sourcePath], lines), protectionSnapshot);
 		if (replacements.Count == 0)
 			return related;
 
@@ -1518,7 +1578,6 @@ internal sealed class DevProjexMcpTools(
 					},
 				cancellationToken)
 				.ConfigureAwait(false);
-			journal?.RecordProtection(inspected.Snapshot);
 			if (transformed is null)
 			{
 				var classification = inspected.UnscannableFiles
@@ -1533,7 +1592,6 @@ internal sealed class DevProjexMcpTools(
 					$"Select a file no larger than {SecretRedactionOutputPreparer.MaximumScannableFileBytes} bytes or narrow the project before retrying.");
 			}
 			var relativePath = McpProjectService.ToRelative(plan.SourceRoot, file);
-			journal?.RecordDeliveredPaths(plan.SourceRoot, [relativePath]);
 			if (symbol is not null)
 			{
 				var located = McpSearchSymbols.ResolveSymbol(
@@ -1553,13 +1611,20 @@ internal sealed class DevProjexMcpTools(
 				cancellationToken,
 				startColumn);
 			var rangeNotice = FormatLineRangeNotice(page, end);
+			journal?.RecordDeliveredPaths(plan.SourceRoot, [relativePath]);
+			journal?.RecordProtection(
+				CountRedactionsOnLines(transformed, Enumerable.Range(page.StartLine, page.EndLine - page.StartLine + 1)),
+				inspected.Snapshot);
 			var characterLimitNotice = page.CharacterLimitReached
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			var addressedPage = FormatFileReadHeader(relativePath, page) + page.Text;
 			var spotlighted = McpSpotlight.Wrap(addressedPage);
 			if (liveContext?.IsOutsideSelection(plan.SourceRoot, relativePath) == true)
+			{
+				journal?.RecordNotice(AgentJournalNoticeCodes.OutsideSelection);
 				spotlighted = FormatOutsideSelectionNotice(1) + Environment.NewLine + spotlighted;
+			}
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				spotlighted,
 				rangeNotice,
@@ -1629,7 +1694,6 @@ internal sealed class DevProjexMcpTools(
 				return ValueTask.CompletedTask;
 			},
 				cancellationToken).ConfigureAwait(false);
-		journal?.RecordProtection(inspected.Snapshot);
 		for (var index = 0; index < resolvedRequests.Count; index++)
 		{
 			var resolved = resolvedRequests[index];
@@ -1665,6 +1729,15 @@ internal sealed class DevProjexMcpTools(
 
 		var rendered = RenderBatchFileReads(resolvedRequests, transformed, cancellationToken);
 		journal?.RecordDeliveredPaths(plan.SourceRoot, rendered.DeliveredPaths);
+		foreach (var returned in rendered.DeliveredRanges)
+		{
+			if (returned.PhysicalPath is not null)
+				journal?.RecordProtection(
+					CountRedactionsOnLines(
+						transformed[returned.PhysicalPath],
+						Enumerable.Range(returned.StartLine, returned.EndLine - returned.StartLine + 1)),
+					inspected.Snapshot);
+		}
 		var spotlighted = McpSpotlight.Wrap(rendered.Text);
 		if (liveContext is not null)
 		{
@@ -1675,8 +1748,15 @@ internal sealed class DevProjexMcpTools(
 				.Distinct(StringComparer.Ordinal)
 				.Count();
 			if (outsidePathCount > 0)
+			{
+				journal?.RecordNotice(AgentJournalNoticeCodes.OutsideSelection);
 				spotlighted = FormatOutsideSelectionNotice(outsidePathCount) + Environment.NewLine + spotlighted;
+			}
 		}
+		if (rendered.UnavailableNotice is not null)
+			journal?.RecordNotice(AgentJournalNoticeCodes.Unavailable);
+		if (resolvedRequests.Any(static item => item.UnavailableReason == McpErrorCodes.PathNotFound))
+			journal?.RecordNotice(AgentJournalNoticeCodes.MissingPath);
 		return McpToolResults.TextSuccess(AppendTrustedNotices(
 			spotlighted,
 			rendered.Summary,
@@ -1694,6 +1774,129 @@ internal sealed class DevProjexMcpTools(
 		  "Tree, search, pack and related stay within the selection."
 		: $"[Live context] {pathCount} named paths are outside the current window selection; returned because you named them. " +
 		  "Tree, search, pack and related stay within the selection.";
+
+	private McpStoredJournalContext CreateStoredJournalContext(
+		ProjectContextPlan plan,
+		IEnumerable<string> paths,
+		PreparedSecretRedactionOutput? prepared)
+	{
+		var storedPaths = paths
+			.Select(path => Path.IsPathFullyQualified(path)
+				? Path.GetFullPath(path)
+				: Path.GetFullPath(path, plan.SourceRoot))
+			.Distinct(PathComparer.Default)
+			.Select(path =>
+			{
+				var redactions = prepared?.GetFile(path).RedactedCount ?? 0;
+				var counts = ResolveProtectionCounts(redactions, prepared?.Snapshot);
+				return new McpStoredJournalPath(
+					Path.GetRelativePath(plan.SourceRoot, path).Replace('\\', '/'),
+					counts.Secrets,
+					counts.PrivateData);
+			})
+			.ToArray();
+		return new McpStoredJournalContext(
+			plan.SourceRoot,
+			liveContext?.CurrentInvocationRevision(plan.SourceRoot),
+			storedPaths);
+	}
+
+	private static bool ContainsStoredPath(string text, string relativePath)
+	{
+		var normalized = relativePath.Replace('\\', '/');
+		return text.Contains(normalized, StringComparison.Ordinal) ||
+			text.Contains(normalized.Replace("/", "\\\\", StringComparison.Ordinal), StringComparison.Ordinal);
+	}
+
+	private void RecordSearchProtection(
+		SecretRedactionSnapshot? snapshot,
+		IReadOnlyDictionary<string, TransformedTextFile> protectedFiles,
+		McpSearchRenderSlice rendered,
+		McpSearchDeclarationPreview? declarationPreview)
+	{
+		if (journal is null)
+			return;
+		var returnedLines = rendered.RenderedLines
+			.GroupBy(static line => line.RelativePath, StringComparer.Ordinal)
+			.ToDictionary(
+				static group => group.Key,
+				static group => group.Select(static line => line.LineNumber).ToHashSet(),
+				StringComparer.Ordinal);
+		if (declarationPreview is { IsAddressable: true, Text.Length: > 0 } preview)
+		{
+			if (!returnedLines.TryGetValue(preview.Declaration.RelativePath, out var lines))
+			{
+				lines = [];
+				returnedLines[preview.Declaration.RelativePath] = lines;
+			}
+			var displayedEnd = Math.Max(
+				preview.Declaration.StartLine,
+				preview.Declaration.EndLine - preview.RemainingLines);
+			for (var line = preview.Declaration.StartLine; line <= displayedEnd; line++)
+				lines.Add(line);
+		}
+
+		foreach (var (relativePath, lines) in returnedLines)
+		{
+			if (protectedFiles.TryGetValue(relativePath, out var file))
+				journal.RecordProtection(CountRedactionsOnLines(file, lines), snapshot);
+		}
+	}
+
+	private static int CountRedactionsOnLines(TransformedTextFile file, IEnumerable<int> returnedLines)
+	{
+		var lineSet = returnedLines.ToHashSet();
+		if (lineSet.Count == 0 || file.ReplacementRanges.Count == 0)
+			return 0;
+		var ranges = file.ReplacementRanges.OrderBy(static range => range.Start).ToArray();
+		var sourceIndex = 0;
+		var line = 1;
+		var count = 0;
+		var skipLineFeed = false;
+		foreach (var range in ranges)
+		{
+			var target = Math.Clamp(range.Start, sourceIndex, file.Content.Length);
+			while (sourceIndex < target)
+			{
+				var character = file.Content[sourceIndex++];
+				if (skipLineFeed && character == '\n')
+				{
+					skipLineFeed = false;
+					continue;
+				}
+				skipLineFeed = false;
+				if (character == '\r')
+				{
+					line++;
+					skipLineFeed = true;
+				}
+				else if (character == '\n')
+				{
+					line++;
+				}
+			}
+			if (lineSet.Contains(line))
+				count++;
+		}
+		return count;
+	}
+
+	private static (long Secrets, long PrivateData) ResolveProtectionCounts(
+		int replacementCount,
+		SecretRedactionSnapshot? snapshot)
+	{
+		if (snapshot is null || replacementCount <= 0)
+			return (0, 0);
+		var secrets = Math.Max(0, snapshot.SecretRedactedCount);
+		var privateData = Math.Max(0, snapshot.PrivateDataRedactedCount);
+		if (privateData == 0)
+			return (replacementCount, 0);
+		if (secrets == 0)
+			return (0, replacementCount);
+		return replacementCount == secrets + privateData
+			? (secrets, privateData)
+			: (0, 0);
+	}
 
 	private static McpBatchFileReadResult RenderBatchFileReads(
 		IReadOnlyList<McpResolvedFileReadRequest> requests,
@@ -1725,6 +1928,7 @@ internal sealed class DevProjexMcpTools(
 		var sections = new StringBuilder();
 		var continuations = new List<string>();
 		var rangeNotices = new List<string>();
+		var deliveredRanges = new List<McpDeliveredFileRange>();
 		var usedLines = 0;
 
 		foreach (var group in groups)
@@ -1785,6 +1989,10 @@ internal sealed class DevProjexMcpTools(
 			}
 
 			sections.Append(section);
+			deliveredRanges.Add(new McpDeliveredFileRange(
+				group.PhysicalPath,
+				page.StartLine,
+				page.EndLine));
 			usedLines += CountResponseLines(section);
 			foreach (var range in group.Ranges)
 				status[(range.RequestIndex, range.RangeIndex)] = sectionStatus;
@@ -1825,7 +2033,8 @@ internal sealed class DevProjexMcpTools(
 			continuations.Count == 0 && rangeNotices.Count == 0
 				? null
 				: string.Join('\n', continuations.Concat(rangeNotices)),
-			deliveredPaths);
+			deliveredPaths,
+			deliveredRanges);
 
 		int GetCount(string value) => counts.GetValueOrDefault(value);
 
@@ -2488,7 +2697,13 @@ internal sealed class DevProjexMcpTools(
 		string Summary,
 		string? UnavailableNotice,
 		string? Continuations,
-		IReadOnlyList<string> DeliveredPaths);
+		IReadOnlyList<string> DeliveredPaths,
+		IReadOnlyList<McpDeliveredFileRange> DeliveredRanges);
+
+	private readonly record struct McpDeliveredFileRange(
+		string? PhysicalPath,
+		int StartLine,
+		int EndLine);
 
 	internal sealed record McpDeclarationReadContext(string Project, string? Branch);
 

@@ -83,7 +83,9 @@ public partial class MainWindow
                 ? Volatile.Read(ref _agentDeliveryBaselineSequence)
                 : 0;
             var counts = BuildDeliveredPathCounts(projectRoot, receipt, calls, baselineSequence);
+            var rootIndex = ResolveAgentJournalRootIndex(projectRoot, session.Roots);
             var latestCall = calls
+                .Where(call => call.RootIndex == rootIndex || session.Roots.Count == 1 && call.RootIndex is null)
                 .OrderByDescending(static call => call.Sequence)
                 .FirstOrDefault();
             refreshCts.Token.ThrowIfCancellationRequested();
@@ -281,21 +283,27 @@ public partial class MainWindow
         long baselineSequence)
     {
         var counts = new Dictionary<string, int>(PathComparer.Default);
-        if (baselineSequence <= 0 && receipt?.DeliveredPaths.Count > 0)
-        {
-            foreach (var delivered in receipt.DeliveredPaths)
-                AddDeliveredPath(counts, projectRoot, delivered.Path, delivered.Calls);
-            return counts;
-        }
+        var rootIndex = receipt is null ? -1 : ResolveAgentJournalRootIndex(projectRoot, receipt.Session.Roots);
 
         foreach (var call in calls)
         {
-            if (call.Sequence <= baselineSequence)
+            if (call.Sequence <= baselineSequence ||
+                receipt is not null && call.RootIndex != rootIndex && !(receipt.Session.Roots.Count == 1 && call.RootIndex is null))
                 continue;
             foreach (var path in call.DeliveredPaths)
                 AddDeliveredPath(counts, projectRoot, path, 1);
         }
         return counts;
+    }
+
+    private static int ResolveAgentJournalRootIndex(
+        string projectRoot,
+        IReadOnlyList<AgentJournalRoot> roots)
+    {
+        for (var index = 0; index < roots.Count; index++)
+            if (PathComparer.Default.Equals(PathUtility.Normalize(projectRoot), PathUtility.Normalize(roots[index].ConfiguredPath)))
+                return index;
+        return -1;
     }
 
     private static void AddDeliveredPath(

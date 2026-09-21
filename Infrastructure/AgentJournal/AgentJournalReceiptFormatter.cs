@@ -20,9 +20,18 @@ public sealed class AgentJournalReceiptFormatter : IAgentJournalReceiptFormatter
 			.Append("- Client: ").Append(EscapeMarkdown(receipt.Session.ClientName));
 		if (!string.IsNullOrWhiteSpace(receipt.Session.ClientVersion))
 			output.Append(' ').Append(EscapeMarkdown(receipt.Session.ClientVersion));
+		var lostEvents = LostEventCount(receipt.Calls);
 		output.AppendLine()
 			.Append("- Mode: ").AppendLine(receipt.Session.Mode.ToString())
-			.Append("- Tool set: ").AppendLine(receipt.Session.ToolSet.ToString())
+			.Append("- Tool set: ").AppendLine(receipt.Session.ToolSet.ToString());
+		if (lostEvents > 0)
+		{
+			output.AppendLine()
+				.Append("**History is incomplete: ").Append(lostEvents)
+				.Append(lostEvents == 1 ? " event" : " events")
+				.AppendLine(" could not be recorded.**");
+		}
+		output
 			.AppendLine()
 			.AppendLine("## Totals")
 			.AppendLine()
@@ -85,4 +94,12 @@ public sealed class AgentJournalReceiptFormatter : IAgentJournalReceiptFormatter
 			.Replace("|", "\\|", StringComparison.Ordinal)
 			.Replace("\r", " ", StringComparison.Ordinal)
 			.Replace("\n", " ", StringComparison.Ordinal);
+
+	internal static long LostEventCount(IEnumerable<AgentJournalCall> calls) => calls
+		.Where(static call => call.Notices.Contains("history-incomplete", StringComparer.Ordinal))
+		.Select(static call => call.Arguments.TryGetValue("lost_events", out var value) &&
+			long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+				? Math.Max(0, parsed)
+				: 0)
+		.Sum();
 }
