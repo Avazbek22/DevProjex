@@ -335,7 +335,7 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		var initial = await BuildAsync(harness.Service);
 		var buildsAfterInitial = buildCount;
 		Assert.Contains(ProjectExclusion.SmartIgnore, initial.Selection.Exclusions ?? []);
-		Assert.True(IsIgnoredMonitorChange(harness.Service, project, "node_modules/package/index.js"));
+		Assert.True(IsIgnoredMonitorChange(harness.Service, "node_modules/package/index.js"));
 		for (var iteration = 0; iteration < 50_000; iteration++)
 			RaiseWatcherChange(harness.Service, "node_modules/package/index.js");
 		var unchanged = await BuildAsync(harness.Service);
@@ -482,14 +482,14 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 			.Invoke(monitor, [monitor, new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name)]);
 	}
 
-	private static bool IsIgnoredMonitorChange(McpProjectService service, string root, string name) =>
-		(bool)typeof(McpProjectService)
-			.GetMethod("IsChangeInsideProvenIgnoredSubtree", BindingFlags.Instance | BindingFlags.NonPublic)!
-			.Invoke(service,
-			[
-				PathUtility.Normalize(root),
-				new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name)
-			])!;
+	private static bool IsIgnoredMonitorChange(McpProjectService service, string name)
+	{
+		var monitor = GetMonitor(service);
+		var ignoreChange = (Func<FileSystemEventArgs, bool>)monitor.GetType()
+			.GetField("ignoreChange", BindingFlags.Instance | BindingFlags.NonPublic)!
+			.GetValue(monitor)!;
+		return ignoreChange(new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name));
+	}
 
 	private static void RaiseWatcherError(McpProjectService service)
 	{
