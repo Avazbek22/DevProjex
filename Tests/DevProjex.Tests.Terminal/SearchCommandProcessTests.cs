@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -215,6 +216,52 @@ public sealed class SearchCommandProcessTests
 		{
 			Assert.Contains("response-characters", result.StandardOutput, StringComparison.Ordinal);
 		}
+	}
+
+	[Fact]
+	public void BudgetedFormatsExposeTheSameNonEmptyMatchPrefix()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 200; index++)
+		{
+			workspace.WriteFile(
+				$"project/src/File{index:D3}.txt",
+				$"needle value {index:D3} {new string('x', 100)}{Environment.NewLine}");
+		}
+
+		var text = Run(workspace, project, "needle", "--max", "200", "--search-body-chars", "off", "--format", "text");
+		var markdown = Run(workspace, project, "needle", "--max", "200", "--search-body-chars", "off", "--format", "markdown");
+		var json = Run(workspace, project, "needle", "--max", "200", "--search-body-chars", "off", "--format", "json");
+
+		Assert.Equal(0, text.ExitCode);
+		Assert.Equal(0, markdown.ExitCode);
+		Assert.Equal(0, json.ExitCode);
+		var textMatches = Regex.Matches(text.StandardOutput, @"(?m)^1:needle value").Count;
+		var markdownMatches = Regex.Matches(markdown.StandardOutput, @"(?m)^1:needle value").Count;
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var jsonItems = document.RootElement.GetProperty("matches").EnumerateArray().ToArray();
+		var jsonMatches = jsonItems.Length;
+		Assert.True(jsonMatches > 0, json.StandardOutput);
+		Assert.Equal(textMatches, markdownMatches);
+		Assert.Equal(textMatches, jsonMatches);
+		var pathPattern = @"(?m)^src/File\d{3}\.txt\r?$";
+		var textPaths = Regex.Matches(text.StandardOutput, pathPattern)
+			.Select(static match => match.Value.TrimEnd('\r'))
+			.ToArray();
+		var markdownPaths = Regex.Matches(markdown.StandardOutput, pathPattern)
+			.Select(static match => match.Value.TrimEnd('\r'))
+			.ToArray();
+		var jsonPaths = jsonItems
+			.Select(static match => match.GetProperty("path").GetString())
+			.ToArray();
+		Assert.Equal(textPaths, markdownPaths);
+		Assert.Equal(textPaths, jsonPaths);
+		var boundary = document.RootElement.GetProperty("searchBoundary");
+		Assert.False(boundary.GetProperty("complete").GetBoolean());
+		Assert.Equal(
+			boundary.GetProperty("encounteredMatches").GetInt32() - jsonMatches,
+			boundary.GetProperty("omittedMatches").GetInt32());
 	}
 
 	private static string CreateProject(TemporaryDirectory workspace)

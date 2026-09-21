@@ -221,6 +221,30 @@ public sealed class CommandTreeContractTests
 	}
 
 	[Fact]
+	public async Task RussianSearchAndMcpHelpDescribeTheirOwnOptionsInRussian()
+	{
+		var searchEnvironment = new TestTerminalEnvironment { Width = 100 };
+		var searchExitCode = await new TerminalApplication(searchEnvironment).RunAsync(
+			["search", "--help", "--language", "ru"],
+			TestContext.Current.CancellationToken);
+		var mcpEnvironment = new TestTerminalEnvironment { Width = 100 };
+		var mcpExitCode = await new TerminalApplication(mcpEnvironment).RunAsync(
+			["mcp", "--help", "--language", "ru"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, searchExitCode);
+		Assert.Contains("Искать в содержимом выбранных файлов", searchEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("имя символа", searchEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Searches selected project content", searchEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Interpret PATTERN", searchEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(CommandLineExitCodes.Success, mcpExitCode);
+		Assert.Contains("базовый live-контекст", mcpEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("удалённые Git-хосты", mcpEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Use the DevProjex window selection", mcpEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("remote Git hosts", mcpEnvironment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task LocalizedValidatorKeepsItsSpecificMessage()
 	{
 		var environment = new TestTerminalEnvironment();

@@ -12,6 +12,16 @@ public sealed partial class TerminalLocalizationContractTests
 	[
 		"Terminal.Command.Root",
 		"Terminal.Command.Analyze",
+		"Terminal.Command.Search",
+		"Terminal.Argument.SearchPattern",
+		"Terminal.Option.SearchRegex",
+		"Terminal.Option.SearchSymbols",
+		"Terminal.Option.SearchMaximumResults",
+		"Terminal.Option.SearchBodyCharacters",
+		"Terminal.Option.McpLive",
+		"Terminal.Option.McpRemoteHosts",
+		"Terminal.Option.McpToolSet",
+		"Terminal.Option.McpSearchBodyCharacters",
 		"Terminal.Option.Language",
 		"Terminal.Option.Rank",
 		"Terminal.Validation.RankRequiresContent",
@@ -284,8 +294,8 @@ public sealed partial class TerminalLocalizationContractTests
 				{
 					var normalizedLine = NormalizeHelpLabel(line);
 					return legacyLabels.All(normalizedLine.Contains) &&
-					       (!normalizedLine.Contains("STAGED", StringComparison.Ordinal) ||
-					        !normalizedLine.Contains("CHANGES", StringComparison.Ordinal));
+						   (!normalizedLine.Contains("STAGED", StringComparison.Ordinal) ||
+							!normalizedLine.Contains("CHANGES", StringComparison.Ordinal));
 				});
 			foreach (var token in persistentAndMomentaryTokens)
 			{

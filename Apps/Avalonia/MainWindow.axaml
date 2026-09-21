@@ -1042,6 +1042,7 @@
             <Border Grid.Column="1"
                     Classes="island-panel settings-island"
                     Name="SettingsIsland"
+                    MinWidth="285"
                     HorizontalAlignment="Left">
               <!-- Settings panel -->
               <views:SettingsPanelView Name="SettingsPanel"
