@@ -351,7 +351,7 @@ public sealed partial class McpServerProcessTests
 			options: null,
 			TestContext.Current.CancellationToken);
 		Assert.StartsWith(
-			"[Live context] the named path is outside the current window selection; returned because you named it.",
+			"[Live context] 1 named file(s) returned outside the current focus; effective filters still apply.",
 			AllProcessText(namedOutsideSelection),
 			StringComparison.Ordinal);
 	}
@@ -411,9 +411,8 @@ public sealed partial class McpServerProcessTests
 
 		Assert.True(result.IsError);
 		Assert.Contains("DPX-MCP-PROJECT-UNAVAILABLE", text, StringComparison.Ordinal);
-		Assert.Contains("retry this call", text, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains(
-			"[Live context] saved window selection could not be read; retry this call.",
+			"[Live context] Saved selection is invalid or incompatible. Ask the user to repair it or update DevProjex; retry after that.",
 			text,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain("Inside.cs", text, StringComparison.Ordinal);
@@ -475,7 +474,7 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("Inside.cs", lockedText, StringComparison.Ordinal);
 			Assert.DoesNotContain("Outside.cs", lockedText, StringComparison.Ordinal);
 			Assert.Contains(
-				"[Live context] saved window selection could not be read; using revision 1. Retry this call.",
+				"[Live context] Saved selection is busy. Using revision 1. Retry this call once.",
 				lockedText,
 				StringComparison.Ordinal);
 			Assert.Contains(
@@ -529,7 +528,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("Inside.cs", recoveredText, StringComparison.Ordinal);
 		Assert.DoesNotContain("Outside.cs", recoveredText, StringComparison.Ordinal);
 		Assert.Contains(
-			"[Live context] saved window selection could not be read; using revision 1. Retry this call.",
+			"[Live context] Saved selection is invalid or incompatible. Using revision 1. Ask the user to repair it or update DevProjex; retry after that.",
 			recoveredText,
 			StringComparison.Ordinal);
 		Assert.Contains(

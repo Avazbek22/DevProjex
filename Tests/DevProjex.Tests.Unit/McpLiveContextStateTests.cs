@@ -275,7 +275,10 @@ public sealed class McpLiveContextStateTests
 			Assert.True(snapshot.IsReadFailure);
 			Assert.NotNull(snapshot.Profile);
 			var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
-			Assert.Contains("saved window selection could not be read; using revision 1. Retry this call.", response, StringComparison.Ordinal);
+			var expected = failureStatus == ProjectProfileLookupStatus.TemporarilyUnavailable
+				? "Saved selection is busy. Using revision 1. Retry this call once."
+				: "Saved selection is invalid or incompatible. Using revision 1. Ask the user to repair it or update DevProjex; retry after that.";
+			Assert.Contains(expected, response, StringComparison.Ordinal);
 		}
 	}
 
@@ -301,7 +304,7 @@ public sealed class McpLiveContextStateTests
 		Assert.Equal(["src"], snapshot.Profile!.SelectedPaths);
 		Assert.True(snapshot.IsReadFailure);
 		Assert.Contains(
-			"[Live context] saved window selection could not be read; using revision 1. Retry this call.",
+			"[Live context] Saved selection is invalid or incompatible. Using revision 1. Ask the user to repair it or update DevProjex; retry after that.",
 			response,
 			StringComparison.Ordinal);
 	}
@@ -333,7 +336,7 @@ public sealed class McpLiveContextStateTests
 			Assert.Equal(["src"], snapshot.Profile!.SelectedPaths);
 			Assert.Equal(1, snapshot.Revision);
 			Assert.True(snapshot.IsReadFailure);
-			Assert.Contains("could not be read; using revision 1", response, StringComparison.Ordinal);
+			Assert.Contains("Saved selection is invalid or incompatible. Using revision 1.", response, StringComparison.Ordinal);
 		}
 	}
 
@@ -361,7 +364,7 @@ public sealed class McpLiveContextStateTests
 			Assert.Equal(["src"], snapshot.Profile!.SelectedPaths);
 			Assert.Equal(1, snapshot.Revision);
 			Assert.True(snapshot.IsReadFailure);
-			Assert.Contains("could not be read; using revision 1", response, StringComparison.Ordinal);
+			Assert.Contains("Saved selection is invalid or incompatible. Using revision 1.", response, StringComparison.Ordinal);
 		}
 	}
 
@@ -386,7 +389,7 @@ public sealed class McpLiveContextStateTests
 		Assert.True(snapshot.IsReadFailure);
 		Assert.False(snapshot.HasSuccessfulSnapshot);
 		Assert.Contains(
-			"[Live context] saved window selection could not be read; retry this call.",
+			"[Live context] Saved selection is invalid or incompatible. Ask the user to repair it or update DevProjex; retry after that.",
 			response,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain("using revision", response, StringComparison.Ordinal);
@@ -495,7 +498,7 @@ public sealed class McpLiveContextStateTests
 			Assert.True(locked.IsReadFailure);
 			var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
 			Assert.Contains(
-				"[Live context] saved window selection could not be read; using revision 1. Retry this call.",
+				"[Live context] Saved selection is busy. Using revision 1. Retry this call once.",
 				response,
 				StringComparison.Ordinal);
 		}

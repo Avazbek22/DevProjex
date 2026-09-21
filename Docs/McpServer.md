@@ -48,16 +48,16 @@ to omitting `profile`; portable and standard profile selections fail with
 
 Tree, search, pack, analysis, and dependency results stay inside the checked
 selection. A named `get_file` path that passes the effective filters may be read
-outside that focus. The fixed notice remains trusted, while the requested path
-stays in the existing untrusted file header:
+outside that focus. Only files whose content was actually delivered count in the
+fixed trusted notice; requested-but-unavailable paths do not. The requested paths
+stay in the existing untrusted file headers:
 
 ```text
-[Live context] the named path is outside the current window selection; returned because you named it. Tree, search, pack and related stay within the selection.
+[Live context] 1 named file(s) returned outside the current focus; effective filters still apply.
 ```
 
-A batch uses the same wording with a count, for example
-`[Live context] 2 named paths are outside ...`; it never repeats those paths in
-trusted text.
+A batch uses the same wording with its delivered-file count. At zero the line is
+omitted, and trusted text never repeats those paths.
 
 A scalar path hidden by the effective filters still returns
 `DPX-MCP-PATH-NOT-FOUND`. In a batched read, that range is reported as
@@ -116,22 +116,30 @@ ordinary empty project:
 [Live context] the window selects no files; tick files in the DevProjex window.
 ```
 
-If the profile is locked, malformed, otherwise unreadable, or uses an unsupported
-future schema, the server retains the last successful snapshot and adds:
+If the saved profile is busy, the server retains the last successful snapshot,
+keeps its actual revision number, and adds:
 
 ```text
-[Live context] saved window selection could not be read; using revision 16. Retry this call.
+[Live context] Saved selection is busy. Using revision 16. Retry this call once.
 ```
 
-If the first read fails before any successful snapshot exists and no usable
-backup is available, the tool fails with `DPX-MCP-PROJECT-UNAVAILABLE`, advises
-the caller to retry, and does not silently use server defaults. Its live notice is:
+If the first busy read fails before any successful snapshot exists and no usable
+backup is available, the tool fails with `DPX-MCP-PROJECT-UNAVAILABLE` and does
+not silently use server defaults. Its live notice is:
 
 ```text
-[Live context] saved window selection could not be read; retry this call.
+[Live context] Saved selection is busy. Retry this call once.
 ```
 
-A usable backup initializes revision 1 instead. A genuinely absent profile is
+A malformed document or unsupported future schema is not described as temporary:
+
+```text
+[Live context] Saved selection is invalid or incompatible. Ask the user to repair it or update DevProjex; retry after that.
+```
+
+The same distinction applies when a last successful snapshot is retained; its
+notice appends `Using revision 16.` with the revision that was actually used. A
+usable backup initializes revision 1 instead. A genuinely absent profile is
 different: it uses server defaults and emits the documented `no window selection
 saved` line.
 
@@ -262,10 +270,14 @@ devprojex mcp --root /absolute/path/to/project --allow-agent-exclusions
 ```
 
 With the flag, the selection tools `get_tree`, `analyze`, `pack_context`,
-`search_project`, `related_files`, and `get_file` gain an `exclusions` array parameter that
-carries the full desired toggle set for that call; an empty array turns every
-toggle off, and the value outranks both the server baseline and profile
-exclusions. Tokens match case-insensitively and duplicates are rejected.
+`search_project`, `related_files`, and `get_file` gain an `exclusions` array.
+Its effect depends on the server mode. In live mode it contains additional
+exclusions for that call: window and startup filters remain enforced, and an
+empty array keeps them unchanged. In standard mode, without live-profile
+delegation, it is the full desired exclusion set and an empty array turns every
+delegated toggle off. Tokens match case-insensitively and duplicates are rejected.
+The live schema says: `Additional exclusions for this call. An empty array keeps
+the window and startup filters unchanged.`
 Without the flag the parameter does not exist in any schema and is rejected as
 an unknown argument, so a default server keeps its startup-controlled exclusion
 contract unchanged. Turning toggles off widens the per-call scan to trees the baseline
@@ -283,14 +295,18 @@ full-reach recipe for a trusted agent:
 devprojex mcp --root /absolute/path/to/project --unrestricted --allow-agent-exclusions
 ```
 
-Because the parameter is a full desired state, growing the exclusion
-vocabulary in a future version is a compatibility checkpoint: a token absent
-from a replayed full-state array is turned off, including tokens the caller
-predates. The supported way to build a full-state value is read-modify-write —
-call `analyze`, copy its echoed `exclusions` array, edit, and send; the echo
-uses the same tokens and stays valid across versions. A `paths` entry that the
-effective exclusion set hides yields an empty selection rather than an error,
-so check `analyze.files` when combining `paths` with exclusions.
+Because the standard-mode parameter is a full desired state, growing the
+exclusion vocabulary in a future version is a compatibility checkpoint: a token
+absent from a replayed full-state array is turned off, including tokens the caller
+predates. The supported standard-mode workflow is read-modify-write: call
+`analyze`, copy its echoed `exclusions` array, edit, and send. In live mode, send
+only the additional exclusions needed for the call. A `paths` entry that the
+effective exclusion set hides yields an empty selection rather than an error.
+
+In standard mode an explicit profile can replace startup filters; `paths` and
+patterns only narrow the resulting selection. In live mode the corresponding
+trusted reminder is `[Effective filters] Window and startup filters remain
+enforced. Per-call exclusions can only add filters.`
 
 Project discovery is conditional. With exactly one configured local root, omit
 `project`, use project-relative paths, and begin with the project operation that
@@ -527,11 +543,11 @@ description has to fit a budget rather than grow one silently.
 | `list_projects` | none | Session inventory used for profiles, active policy, or choosing among several projects: allowed local roots with path, name, type, and profiles, plus the server `baseline`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. With one local root, project tools accept an omitted `project`; otherwise they accept a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Select several directories in one call with a brace pattern such as `include_patterns: ["src/middleware/{powered-by,body-limit,bearer-auth}/**"]` instead of walking each directory separately. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
-| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
 | `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
-| `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen file selections. Every returned section starts with its path and returned line interval. A batch item with only `path` reads the whole file; `ranges` or `symbol` narrows it. Ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every item reports `ok`, `partial`, `not-returned`, or `unavailable`. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
+| `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen file selections. Every returned section starts with its path and returned line interval. A batch item with only `path` reads the whole file; `ranges` or `symbol` narrows it. Ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every original range reports `ok`, `partial`, `not-returned`, or `unavailable` from its own returned coverage. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, `related_files`, and `get_file` additionally accept the
@@ -748,24 +764,28 @@ session rather than on every response — see
 [Service notices repeat only when they change](#service-notices-repeat-only-when-they-change).
 `get_tree`, `pack_context`, and `related_files` carry a trusted
 `[Effective filters] git: ...; exclusions: ...` line naming the Git mode and
-exclusion toggles that shaped the tree and who can widen them: the server
-startup line, or a per-call `exclusions` value on a delegation server. It sits
+exclusion toggles that shaped the tree and who can widen them. Live mode also
+states that window and startup filters remain enforced and per-call exclusions
+can only add filters. Standard mode states that an explicit profile can replace
+startup filters and that paths and patterns only narrow the resulting selection. It sits
 among the trailing diagnostics rather than last: an `[Empty selection]` line can
 follow it, `[Protection]` comes after that, a pinned remote checkout adds
 `[Remote]`, and a budgeted `pack_context` ends with `[Budget accounting]`. When
 `max_file_bytes` is supplied, every tool that accepts it also reports
 `; max_file_bytes: <bytes>` in its effective-filter diagnostics. Every selection
-tool adds an `[Empty selection]` line when no file survived the
-filters and the request arguments. That line opens with the stage that emptied the
-selection as a constant token — `stage=patterns`, `stage=paths`, `stage=git-scope`,
-or `stage=filters` — so a caller can tell a pattern that matched nothing from a
-server that hides the file, without a second call. A pattern with no `/` and no
+tool adds an `[Empty selection]` line when no file survived the filters and the
+request arguments. A stage token is included only when that stage has evidence
+that it emptied the selection: `stage=patterns`, `stage=paths`, `stage=git-scope`,
+or `stage=filters`. Otherwise the line is `[Empty selection] No files survived the
+effective filters and request selection.` A pattern with no `/` and no
 `**` matches only an entry directly in the project root, and its empty result
 names the `**/` and `/**` rewrites instead of restating the general rule. `search_project` adds a `[No matches]` line
 with the searched-file count when the pattern matched nothing, and a
 `DPX-MCP-PATH-NOT-FOUND` error for a filtered file names the effective filters
-and the party able to widen them — the startup line, or a per-call `exclusions`
-value on a delegation server. These diagnostics never reveal hidden paths.
+and the applicable widening rule: a live call cannot remove window or startup
+filters, while a standard call can select an explicit profile and a delegated
+`exclusions` value can replace startup exclusions. Paths and patterns only
+narrow. These diagnostics never reveal hidden paths.
 When selection produces warnings, `analyze` appends separate human-readable
 trusted warning text blocks without changing its structured schema. Warning
 messages contain stable codes and safe counts or retry guidance, never diagnostic
@@ -777,15 +797,17 @@ spotlighted data block.
 
 The `[Effective filters]` and `[Protection]` lines describe server state, not the
 call, so a session receives them once and then only when what they say changes.
-The change signal is the state the lines are made of: the project, the profile,
-the effective exclusion set, the Git mode, and the protection policy. A response
+The change signal is their canonical state before any untrusted-data wrapper is
+created: the project, profile, effective exclusion set, Git mode (including the
+canonical diff scope), and protection policy. Random marker nonces do not make an
+unchanged scope look new. A response
 that withholds them carries a constant pointer instead, and the pointer names
 exactly the lines that response withheld:
-`[Unchanged] filters, protection; see list_projects.` when it would have carried
-both, `[Unchanged] filters; see list_projects.` or
-`[Unchanged] protection; see list_projects.` when it would have carried one. Each
-is never longer than the shortest set it can replace, so no response grows by
-omitting a notice.
+`[Unchanged] effective filters, protection.` when it would have carried both,
+`[Unchanged] effective filters.` or `[Unchanged] protection.` when it would have
+carried one. Use the last effective-policy report for this root. `list_projects`
+reports startup defaults, not live-profile settings. Each pointer is never longer
+than the shortest set it can replace, so no response grows by omitting a notice.
 
 A tool that never reports one of the lines is not withholding it, so the pointer
 never names it. `analyze` reports no protection line on any call, and no response
@@ -810,12 +832,11 @@ were truncated to fit a stored-pack limit, and a failed call all leave the sessi
 where it was, so the next response reports the full set again rather than pointing
 back at something the caller never saw.
 
-`list_projects` is unaffected and always answers with the complete `baseline`
-object, including the Git mode, exclusion tokens, `agentExclusions`, and
-`protection`. It is the orientation call and the way an agent that lost its
-history recovers the whole picture; it never counts as having reported a
-per-call effective selection, so it does not suppress a later `[Effective
-filters]` line.
+`list_projects` is unaffected and always answers with the complete startup
+`baseline` object, including the Git mode, exclusion tokens, `agentExclusions`,
+and `protection`. It orients a new session to startup defaults, but does not
+replace the last per-root effective-policy report and never counts as having
+reported one, so it does not suppress a later `[Effective filters]` line.
 
 Only the repetition of unchanged trusted lines changes. Lines that state a fact
 about one call — `[Remote] commit=`, `[Resolution]`, `[Facts coverage]`,
@@ -848,8 +869,8 @@ The match text a `search_project` call returns is capped at 16,000 characters, w
 below the general 50,000-character response limit, because a wide alternation with
 context lines could otherwise spend a large share of an agent's context in one
 unpredictable call. When the cap stops the output, the response adds the constant
-`[Search truncated] The returned text reached the 16000-character search cap. Narrow
-the pattern, add paths or include_patterns, or lower context_lines.` Whenever a call
+`[Search truncated] The returned text reached the 16000-character search cap.`
+Whenever a call
 does not return every match it encountered, it also reports
 `[Search observed] matches=N · matching-files=M within inspected sources` and
 `[N additional observed matches not shown]`. These counts are exact for sources that were actually inspected,
@@ -860,17 +881,23 @@ them. The selected uniquely addressable declaration body and its selector share 
 same 16,000-character cap with the match text. Matches are chosen once at the full
 cap, and body placement never removes a shown match or a distinct matching file.
 
-Every search ends with a trusted boundary line. A complete search says:
+Every search begins its returned data with a short trusted completeness status and
+ends with the detailed trusted counters. A complete search says:
 
 ```text
 [Search boundary] complete · sources inspected=X/Y · matches retained=R/T · matches written=W · declaration files named=N.
 ```
 
-A partial search uses the same counters, names the exact bound or bounds that applied,
-and tells the caller to page a stored retained result when available or to narrow and
-rerun for omitted evidence. Consequently, a complete zero-match response is evidence
-that the whole effective selection was searched, while a partial zero-match response
-is only evidence about its inspected sources.
+A partial search places `[Search boundary] partial; retained matches are available
+below.` before the data, then uses the same detailed counters at the end and names
+the exact bound or bounds that applied. It emits exactly one primary next step for
+the limiting condition. With a stored continuation that step is `[Next read] Call
+read_pack with the reported pack_id for the remaining retained matches.` When known
+declarations are the needed continuation it is `[Next read] Read only declarations
+needed for the task; batch known selections in one get_file call.` Consequently, a
+complete zero-match response is evidence that the whole effective selection was
+searched, while a partial zero-match response is only evidence about its inspected
+sources.
 
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append
@@ -949,6 +976,14 @@ Untrusted-data markers and trusted warning trailers can add a small fixed overhe
 beyond those limits. The exception is the stored `pack_context` response: its
 50,000-character limit covers the complete response, including the wrapper, tree
 preview, and trusted diagnostics.
+
+Bounded assembly never slices a diagnostic section after wrapping it. Each
+untrusted-data block is either included with both randomized markers or omitted,
+and every text block leaves opening and closing marker counts balanced. Ranking
+details are reduced before their wrapper is added. When more ranking data cannot
+fit after a correctly closed block, the trusted trailer says
+`[Ranking truncated] Additional ranking details were omitted; packed content is
+unchanged.`
 
 An inline `pack_context` result contains the complete pack. A stored result is
 self-contained and starts with this line:
@@ -1209,15 +1244,15 @@ happened to be last.
 Outside the block, in trusted text, one line of counts and a server-minted id:
 
 ```text
-[Search stored] pack_id=<id> · matches=N · files=M; read_pack pages those files whole, without searching again.
+[Search stored] pack_id=<id> · matches=N · files=M; retained match windows only, not complete source files. Call read_pack with this pack_id.
 ```
 
 `read_pack` pages that id exactly as it pages a `pack_context` result: it does not
 rebuild a plan, does not take the project-operation gate, and does not search again.
-The stored result holds the complete result of every file that withheld anything, so
-`matches` counts what the store holds rather than what was withheld, and a page reads
-continuously instead of as the fragments a per-group store would leave. The
-distribution beside it counts what each file withheld, which is the smaller number.
+The stored result holds retained match windows, not complete source files. Its
+`matches` count describes those retained windows rather than whole-file content;
+use `get_file` when the complete file or a known declaration is needed. The
+distribution beside it counts what each file withheld, which can be smaller.
 
 Both the distribution and the selector list share the response's character budget
 with the matches, and neither is written unless at least one of its rows fits: a
@@ -1337,8 +1372,8 @@ section, not counted twice when a body repeats one.
 These dense responses use their space for evidence rather than an extra body. No
 matching file was lost. In Zod, one previously shown matching line moved to the stored
 pack as the full-cap breadth allocation admitted more files; its exact numbered text
-was confirmed through `read_pack`. Retention limits and stored whole-file continuation
-are unchanged.
+was confirmed through `read_pack`. Retention limits and stored match-window
+continuation are unchanged.
 
 Deterministic process fixtures also cover the last fitting exact-name hit: the previous
 placement returned 89 of 101 matching lines and gave the body to `Sample.Configure`;
@@ -1351,10 +1386,10 @@ or in `read_pack`. Run these checks with:
 dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release -m:1 --filter "FullyQualifiedName~RealProcessPreservesTheExactNameMatchAtTheEndOfTheSearchSlice|FullyQualifiedName~RealProcessKeepsEveryMatchingFileWhenTheBodyWouldNeedItsSpace|FullyQualifiedName~RealProcessPrintsOverlappingDeclarationContextOnlyOnce|FullyQualifiedName~RealProcessBodyPlacementKeepsEveryRetainedMatchInlineOrInTheStoredPack"
 ```
 
-One trusted constant closes it:
+When declaration reads are the applicable continuation, one trusted constant closes it:
 
 ```text
-[Read declarations] To read any declaration listed above in full, call get_file with its path and symbol; for several of them, one get_file requests call.
+[Next read] Read only declarations needed for the task; batch known selections in one get_file call.
 ```
 
 The list ships on every search that showed a hit, including a search the character
@@ -1403,16 +1438,25 @@ The server resolves every requested path through the effective selection, then
 reads, transforms, and redacts each distinct physical file exactly once. Overlapping
 or touching ranges for one file become one content section whose header lists the
 served request/range indices. Every requested range receives one explicit status:
-`ok` when complete, `partial` when cut by the shared response limit,
-`not-returned` when no content fitted, or `unavailable` when mandatory bounded
-inspection withheld the file. In live mode a path that disappeared since discovery
+`ok` when its original interval is wholly inside the returned coverage, `partial`
+when only part intersects that coverage, `not-returned` when none intersects, or
+`unavailable` when mandatory bounded inspection withheld the file. Status is
+computed separately for every original range after overlap merging; one page status
+is never copied onto all merged inputs. Thus a page ending at line 992 reports
+`ok`, `partial`, and `not-returned` respectively for `1-100`, `50-1500`, and
+`1450-1600`. In live mode a path that disappeared since discovery
 is an unavailable item rather than a failure for the whole batch. An unknown,
 ambiguous, or unsupported `symbol` is likewise reported only on its item, while
 syntactically invalid request records still reject the call before any read. An
 unavailable status contains only a count-safe reason.
 The complete batch, including section headers, is limited to 1,000 lines and 50,000
-characters. A partial section reports the next 1-based `start_line` and
-`start_column`; call `get_file` again for that continuation.
+characters. A partial section reports the next 1-based `start_line` and, when the
+cut is inside that line, its `start_column`. Because batch `requests` do not accept
+columns, an intra-line cut says `[Batch continuation] Continue with scalar get_file
+using the arguments below; start_column is not supported in requests.` and places a
+valid scalar JSON call with `project`, `branch`, `path`, and coordinates inside the
+untrusted block. Ordinary remaining ranges use a valid `requests` array without
+unsupported fields.
 
 ### Search, then one batched read
 
@@ -1540,7 +1584,8 @@ of reading the external file.
 
 `detail` controls additional code reduction for `analyze` and `pack_context`:
 
-- `full` applies no agent-requested code reduction.
+- `full` adds no transformations; transformations enabled by the active profile
+  still apply.
 - `compact` removes supported comments and blank lines.
 - `signatures` also collapses supported method and function bodies.
 
@@ -1551,6 +1596,14 @@ lines removed by the profile. The `analyze` structured result reports the
 effective detail tier; `pack_context` returns the transformed pack itself.
 Use `compact` or `signatures` together with `max_tokens` to fit more supported
 source files into the same estimated-token budget.
+
+`get_file` also applies the active profile. When that profile removed function
+bodies, the response states `[Content transformed] Function bodies were removed
+by the active profile; this is not the original implementation.` In live mode it
+also gives the only actionable recovery step: `[Next read] Ask the user to disable
+code compression in the window before reading implementation bodies.` A request
+for `full`, a whole file, or a declaration cannot restore content that the profile
+already transformed.
 
 `detail_by_pattern` sets the level per file. It is an ordered array of
 `{ "patterns": [glob, ...], "detail": "full" | "compact" | "signatures" }`, at most

@@ -4,8 +4,8 @@ namespace DevProjex.Mcp;
 /// The trusted filter and protection lines describe server state, not the call. Repeating them
 /// on every response is a fixed tax that grows with exactly the workload the server is good at:
 /// many small, precise reads. This memo keeps one delivery per session per notice content, and
-/// replaces the repeat with a constant pointer back to <c>list_projects</c> that names exactly
-/// the lines the response withheld.
+/// replaces the repeat with a constant marker that names exactly the effective-policy lines the
+/// response withheld.
 /// </summary>
 /// <remarks>
 /// Omission must be provable, so a line counts as delivered only after it is found in the text
@@ -15,18 +15,20 @@ namespace DevProjex.Mcp;
 /// </remarks>
 internal sealed class McpServiceNoticeMemo
 {
+	private const string DeferredUntrustedDataPrefix = "\u001eDEVPROJEX-UNTRUSTED-BASE64:";
 	/// <summary>
 	/// Stands in for both lines on a response that would have carried both. Never longer than the
 	/// shortest set it can replace, so a response cannot grow by omitting a notice. The meaning of
-	/// the marker is spelled out once in the server instructions.
+	/// the marker is spelled out once in the server instructions, which points to the last effective
+	/// policy report for this root rather than the startup defaults.
 	/// </summary>
-	public const string ContinuationNotice = "[Unchanged] filters, protection; see list_projects.";
+	public const string ContinuationNotice = "[Unchanged] effective filters, protection.";
 
 	/// <summary>Stands in for the effective-filters line alone, on a response that carries no protection line.</summary>
-	public const string FiltersContinuationNotice = "[Unchanged] filters; see list_projects.";
+	public const string FiltersContinuationNotice = "[Unchanged] effective filters.";
 
 	/// <summary>Stands in for the protection line alone, on a response that carries no effective-filters line.</summary>
-	public const string ProtectionContinuationNotice = "[Unchanged] protection; see list_projects.";
+	public const string ProtectionContinuationNotice = "[Unchanged] protection.";
 
 	private readonly Lock gate = new();
 	private string? deliveredIdentity;
@@ -34,6 +36,7 @@ internal sealed class McpServiceNoticeMemo
 	private string? deliveredProtection;
 	private string? pendingIdentity;
 	private string? pendingFilters;
+	private string? pendingFiltersIdentity;
 	private string? pendingProtection;
 
 	/// <summary>
@@ -56,18 +59,21 @@ internal sealed class McpServiceNoticeMemo
 
 		lock (gate)
 		{
+			var filtersIdentity = filters;
+			var filtersForResponse = MaterializeUntrustedData(filters);
 			var sameProject = identity is not null &&
 				string.Equals(identity, deliveredIdentity, StringComparison.Ordinal);
 			var alreadyDelivered = sameProject &&
-				IsDelivered(filters, deliveredFilters) &&
+				IsDelivered(filtersIdentity, deliveredFilters) &&
 				IsDelivered(protection, deliveredProtection);
 			if (!alwaysSend && alreadyDelivered)
 				return new McpServiceNotices(null, null, Continuation(filters, protection));
 
 			pendingIdentity = identity;
-			pendingFilters = filters ?? pendingFilters;
+			pendingFilters = filtersForResponse ?? pendingFilters;
+			pendingFiltersIdentity = filtersIdentity ?? pendingFiltersIdentity;
 			pendingProtection = protection ?? pendingProtection;
-			return new McpServiceNotices(filters, protection, null);
+			return new McpServiceNotices(filtersForResponse, protection, null);
 		}
 	}
 
@@ -82,6 +88,7 @@ internal sealed class McpServiceNoticeMemo
 		{
 			var identity = pendingIdentity;
 			var filters = pendingFilters;
+			var filtersIdentity = pendingFiltersIdentity;
 			var protection = pendingProtection;
 			ClearPending();
 			if (identity is null || !Contains(responseText, filters) || !Contains(responseText, protection))
@@ -94,7 +101,7 @@ internal sealed class McpServiceNoticeMemo
 			}
 
 			deliveredIdentity = identity;
-			deliveredFilters = filters ?? deliveredFilters;
+			deliveredFilters = filtersIdentity ?? deliveredFilters;
 			deliveredProtection = protection ?? deliveredProtection;
 		}
 	}
@@ -112,6 +119,7 @@ internal sealed class McpServiceNoticeMemo
 	{
 		pendingIdentity = null;
 		pendingFilters = null;
+		pendingFiltersIdentity = null;
 		pendingProtection = null;
 	}
 
@@ -120,6 +128,26 @@ internal sealed class McpServiceNoticeMemo
 
 	private static bool IsDelivered(string? current, string? delivered) =>
 		current is null || string.Equals(current, delivered, StringComparison.Ordinal);
+
+	internal static string DeferUntrustedData(string trusted, string untrusted)
+	{
+		ArgumentNullException.ThrowIfNull(trusted);
+		ArgumentNullException.ThrowIfNull(untrusted);
+		return trusted + Environment.NewLine + DeferredUntrustedDataPrefix +
+			Convert.ToBase64String(Encoding.UTF8.GetBytes(untrusted));
+	}
+
+	private static string? MaterializeUntrustedData(string? notice)
+	{
+		if (notice is null)
+			return null;
+		var marker = notice.IndexOf(DeferredUntrustedDataPrefix, StringComparison.Ordinal);
+		if (marker < 0)
+			return notice;
+		var encoded = notice[(marker + DeferredUntrustedDataPrefix.Length)..];
+		var untrusted = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+		return notice[..marker] + McpSpotlight.Wrap(untrusted);
+	}
 
 	/// <summary>
 	/// Names the lines this response is actually withholding. A tool that reports no protection

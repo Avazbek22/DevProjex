@@ -99,7 +99,8 @@ internal sealed class McpLiveContextState(
 				state.Revision,
 				state.IsMissing,
 				state.ReadFailure is not null,
-				state.HasSuccessfulSnapshot);
+				state.HasSuccessfulSnapshot,
+				state.ReadFailure);
 			return snapshot;
 		}
 	}
@@ -135,6 +136,20 @@ internal sealed class McpLiveContextState(
 
 	public bool IsOutsideSelection(string projectRoot, string relativePath) =>
 		invocation.Value?.OutsidePaths.Contains(BuildPathIdentity(projectRoot, relativePath)) == true;
+
+	public int CountDeliveredOutsideSelection(
+		string projectRoot,
+		IEnumerable<string> deliveredRelativePaths)
+	{
+		ArgumentNullException.ThrowIfNull(deliveredRelativePaths);
+		var active = invocation.Value;
+		if (active is null)
+			return 0;
+		return deliveredRelativePaths
+			.Where(path => active.OutsidePaths.Contains(BuildPathIdentity(projectRoot, path)))
+			.Distinct(StringComparer.Ordinal)
+			.Count();
+	}
 
 	public McpStoredResultContext? RecordPackBuild(string projectRoot, string? packId)
 	{
@@ -452,10 +467,7 @@ internal sealed class McpLiveContextState(
 	{
 		if (state.ReadFailure is not null)
 		{
-			var message = state.HasSuccessfulSnapshot
-				? $"[Live context] saved window selection could not be read; using revision {state.Revision}. Retry this call."
-				: "[Live context] saved window selection could not be read; retry this call.";
-			notices.Add(message);
+			notices.Add(FormatReadFailure(state));
 		}
 		else if (state.IsMissing)
 		{
@@ -509,6 +521,24 @@ internal sealed class McpLiveContextState(
 				$"Live context root {rootIndex} name:" + Environment.NewLine +
 				McpTextEscaping.EscapeSingleLine(McpRootRegistry.GetProjectName(state.Root)));
 		}
+	}
+
+	private static string FormatReadFailure(RootState state)
+		=> FormatReadFailure(
+			state.ReadFailure,
+			state.HasSuccessfulSnapshot ? state.Revision : null);
+
+	internal static string FormatReadFailure(
+		ProjectProfileLookupStatus? failure,
+		int? revision)
+	{
+		var revisionNotice = revision.HasValue
+			? $" Using revision {revision.Value}."
+			: string.Empty;
+		return failure == ProjectProfileLookupStatus.TemporarilyUnavailable
+			? $"[Live context] Saved selection is busy.{revisionNotice} Retry this call once."
+			: $"[Live context] Saved selection is invalid or incompatible.{revisionNotice} " +
+			  "Ask the user to repair it or update DevProjex; retry after that.";
 	}
 
 	private static string FormatChangeSummary(IReadOnlyList<FrontierChange> changes)
@@ -599,4 +629,5 @@ internal sealed record McpLiveProfileSnapshot(
 	int Revision,
 	bool IsMissing,
 	bool IsReadFailure,
-	bool HasSuccessfulSnapshot);
+	bool HasSuccessfulSnapshot,
+	ProjectProfileLookupStatus? ReadFailure = null);

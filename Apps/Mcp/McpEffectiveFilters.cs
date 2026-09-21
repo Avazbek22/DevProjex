@@ -43,6 +43,8 @@ internal static class McpEffectiveFilters
 		"[Empty selection] stage=paths. None of the requested paths is in the effective selection; paths the filters hide never match.";
 	private const string ProjectSelectionEmptyNotice =
 		"[Empty selection] stage=filters. The effective filters leave no file in this project.";
+	private const string IndeterminateEmptySelectionNotice =
+		"[Empty selection] No files survived the effective filters and request selection.";
 
 	public static string Describe(ProjectContextPlan plan)
 	{
@@ -67,18 +69,20 @@ internal static class McpEffectiveFilters
 	/// Footer for tree-bearing responses: the agent reads which filters were active next to
 	/// the tree they shaped, and learns who can change them.
 	/// </summary>
-	public static string Notice(ProjectContextPlan plan, bool agentExclusions)
+	public static string Notice(ProjectContextPlan plan, bool agentExclusions, bool live = false)
 	{
-		var trusted = $"[Effective filters] {Describe(plan)}. " + WideningHint(agentExclusions);
+		var trusted = $"[Effective filters] {Describe(plan)}. " + WideningHint(agentExclusions, live);
 		return DescribeUntrustedGitScope(plan.Selection) is { } scope
-			? trusted + "\n" + McpSpotlight.Wrap(scope)
+			? McpServiceNoticeMemo.DeferUntrustedData(trusted, scope)
 			: trusted;
 	}
 
-	public static string WideningHint(bool agentExclusions) =>
-		agentExclusions
-			? "Paths the exclusions hide stay absent until a call passes exclusions; Git filtering is set on the server startup line."
-			: $"Paths they hide are absent from every tool; only the server startup line widens them ({StartupFlags}).";
+	public static string WideningHint(bool agentExclusions, bool live = false) =>
+		live
+			? "Window and startup filters remain enforced. Per-call exclusions can only add filters."
+			: agentExclusions
+				? "Per-call exclusions can replace startup exclusions; paths and patterns only narrow the resulting selection."
+				: "An explicit profile can replace startup filters; paths and patterns only narrow the resulting selection.";
 
 	/// <summary>
 	/// The footer and the empty-selection explanation as separate lines, so a caller can decide
@@ -89,7 +93,8 @@ internal static class McpEffectiveFilters
 		ProjectContextPlan plan,
 		bool agentExclusions,
 		bool includeFilters,
-		McpSelectionNoticeContext request)
+		McpSelectionNoticeContext request,
+		bool live = false)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var isEmpty = plan.IncludedFiles.Count == 0;
@@ -97,7 +102,7 @@ internal static class McpEffectiveFilters
 			return new McpSelectionNotices(null, null);
 
 		return new McpSelectionNotices(
-			Notice(plan, agentExclusions),
+			Notice(plan, agentExclusions, live),
 			isEmpty ? EmptySelectionNotice(plan, request) : null);
 	}
 
@@ -120,9 +125,7 @@ internal static class McpEffectiveFilters
 		if (request.HasPaths && !isGitNarrowing)
 			return PathSelectionEmptyNotice;
 		if (isGitNarrowing)
-		{
-			return $"[Empty selection] stage=git-scope. Git reports no files for this scope (git: {DescribeGitMode(plan.Selection)}).";
-		}
+			return IndeterminateEmptySelectionNotice;
 
 		return ProjectSelectionEmptyNotice;
 	}
