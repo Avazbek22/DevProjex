@@ -53,6 +53,9 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			Assert.Equal(expectedSize.Height, journal.Height, precision: 3);
 			Assert.Equal(AgentJournalWindow.MinimumWindowWidth, journal.MinWidth);
 			Assert.Equal(AgentJournalWindow.MinimumWindowHeight, journal.MinHeight);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			AssertHeaderColumnsFit(journal, "JournalSessionsColumnsHeader");
+			AssertHeaderColumnsFit(journal, "JournalCallsColumnsHeader");
 			Assert.Equal(WindowStartupLocation.CenterOwner, journal.WindowStartupLocation);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
@@ -770,6 +773,18 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		AssertOpaqueBrush(journal.FindControl<Border>("JournalEmptySurface")?.Background);
 		Assert.Equal(2, Grid.GetRowSpan(Assert.IsType<Border>(
 			journal.FindControl<Border>("JournalEmptySurface"))));
+	}
+
+	private static void AssertHeaderColumnsFit(AgentJournalWindow journal, string name)
+	{
+		var header = Assert.IsType<Grid>(journal.FindControl<Grid>(name));
+		var rightmostEdge = header.Children
+			.OfType<Control>()
+			.Max(static control => control.Bounds.Right);
+
+		Assert.True(
+			rightmostEdge <= header.Bounds.Width + 0.5,
+			$"{name} overflowed its visible width: content={rightmostEdge:F2}, width={header.Bounds.Width:F2}.");
 	}
 
 	private static void AssertJournalSurfaceColors(
