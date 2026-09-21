@@ -20,8 +20,10 @@ internal sealed record TerminalAgentJournalSnapshot(
 		ArgumentNullException.ThrowIfNull(receipt);
 		var paths = new Dictionary<string, long>(ProjectTreePathIdentity.CanonicalComparer);
 		var rootIndex = ResolveRootIndex(projectRoot, receipt.Session.Roots);
-		foreach (var delivered in receipt.Calls
+		var matchingCalls = receipt.Calls
 			.Where(call => call.RootIndex == rootIndex || receipt.Session.Roots.Count == 1 && call.RootIndex is null)
+			.ToArray();
+		foreach (var delivered in matchingCalls
 			.SelectMany(static call => call.DeliveredPaths.Distinct(ProjectTreePathIdentity.CanonicalComparer)))
 		{
 			if (TerminalAgentJournalPresentation.TryResolveDeliveredPath(
@@ -34,7 +36,7 @@ internal sealed record TerminalAgentJournalSnapshot(
 		}
 		return new TerminalAgentJournalSnapshot(
 			receipt.Session,
-			receipt.Calls.OrderBy(static call => call.Sequence).LastOrDefault(),
+			matchingCalls.OrderBy(static call => call.Sequence).LastOrDefault(),
 			receipt.Totals.Calls,
 			paths);
 	}
