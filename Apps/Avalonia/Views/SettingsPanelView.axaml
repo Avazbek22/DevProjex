@@ -327,7 +327,9 @@
 				  <Grid ColumnDefinitions="*,6,16" HorizontalAlignment="Left">
 					<CheckBox Grid.Column="0"
 							  Classes="list-item settings-list-entry"
-							  IsChecked="{Binding IsChecked, Mode=TwoWay}">
+							  IsChecked="{Binding IsChecked, Mode=TwoWay}"
+							  ToolTip.Tip="{Binding HelpText}"
+							  AutomationProperties.HelpText="{Binding HelpText}">
 					  <!-- The Fluent CheckBox presenter inherits TextWrapping="Wrap" into its
 					       content, so NoWrap is forced here to keep the row on one line and let
 					       CharacterEllipsis trim instead of wrapping. -->

@@ -27,6 +27,10 @@
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
+    <Style Selector="TextBlock.journal-notices">
+      <Setter Property="TextTrimming" Value="None" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
     <Style Selector="TextBlock.journal-heading">
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="FontSize" Value="12" />
@@ -71,18 +75,18 @@
       <Grid RowDefinitions="Auto,*">
         <Border Grid.Row="0" Name="JournalSessionsHeader" Classes="journal-header">
           <Grid Name="JournalSessionsColumnsHeader"
-                ColumnDefinitions="90,100,60,*,50,76,66,46,98,96"
+                ColumnDefinitions="82,96,72,*,46,64,60,42,104,82"
                 ColumnSpacing="4">
-            <TextBlock Classes="journal-heading" Text="{Binding TimeText}" />
-            <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding ClientText}" />
-            <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ModeText}" />
-            <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ProjectText}" />
-            <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding CallsText}" />
-            <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding CharactersText}" />
-            <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding TokensText}" />
-            <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding FilesText}" />
-            <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding MaskedText}" />
-            <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding DurationText}" />
+            <TextBlock Classes="journal-heading" Text="{Binding TimeText}" ToolTip.Tip="{Binding TimeText}" />
+            <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding ClientText}" ToolTip.Tip="{Binding ClientText}" />
+            <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ModeText}" ToolTip.Tip="{Binding ModeText}" />
+            <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ProjectText}" ToolTip.Tip="{Binding ProjectText}" />
+            <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding CallsText}" ToolTip.Tip="{Binding CallsText}" />
+            <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding CharactersText}" ToolTip.Tip="{Binding CharactersText}" />
+            <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding TokensText}" ToolTip.Tip="{Binding TokensText}" />
+            <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding FilesText}" ToolTip.Tip="{Binding FilesText}" />
+            <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding MaskedText}" ToolTip.Tip="{Binding MaskedText}" />
+            <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding DurationText}" ToolTip.Tip="{Binding DurationText}" />
           </Grid>
         </Border>
         <ListBox Grid.Row="1"
@@ -94,7 +98,7 @@
                  AutomationProperties.Name="{Binding WindowTitle}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:AgentJournalSessionViewModel">
-              <Grid ColumnDefinitions="90,100,60,*,50,76,66,46,98,96" ColumnSpacing="4">
+              <Grid ColumnDefinitions="82,96,72,*,46,64,60,42,104,82" ColumnSpacing="4">
                 <TextBlock Classes="journal-column" Text="{Binding Time}" />
                 <TextBlock Grid.Column="1"
                            Classes="journal-column"
@@ -102,7 +106,10 @@
                            ToolTip.Tip="{Binding Client}" />
                 <Grid Grid.Column="2" ColumnDefinitions="Auto,*" ColumnSpacing="4">
                   <TextBlock Text="●" IsVisible="{Binding IsLive}" Foreground="#2D8CFF" />
-                  <TextBlock Grid.Column="1" Classes="journal-column" Text="{Binding Mode}" />
+                  <TextBlock Grid.Column="1"
+                             Classes="journal-column"
+                             Text="{Binding Mode}"
+                             ToolTip.Tip="{Binding Mode}" />
                 </Grid>
                 <TextBlock Grid.Column="3"
                            Classes="journal-column"
@@ -131,20 +138,20 @@
       <Grid RowDefinitions="Auto,*,Auto">
         <Border Grid.Row="0" Name="JournalCallsHeader" Classes="journal-header">
           <Grid Name="JournalCallsColumnsHeader"
-                ColumnDefinitions="28,54,82,*,58,100,70,60,46,88,*,58"
+                ColumnDefinitions="28,50,96,*,54,84,62,58,44,104,120,54"
                 ColumnSpacing="4">
-            <TextBlock Classes="journal-heading" Text="{Binding NumberText}" />
-            <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding TimeText}" />
-            <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ToolText}" />
-            <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ArgumentsText}" />
-            <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding RevisionText}" />
-            <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding DurationText}" />
-            <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding CharactersText}" />
-            <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding TokensText}" />
-            <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding FilesText}" />
-            <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding MaskedText}" />
-            <TextBlock Grid.Column="10" Classes="journal-heading" Text="{Binding NoticesText}" />
-            <TextBlock Grid.Column="11" Classes="journal-heading" Text="{Binding ErrorText}" />
+            <TextBlock Classes="journal-heading" Text="{Binding NumberText}" ToolTip.Tip="{Binding NumberText}" />
+            <TextBlock Grid.Column="1" Classes="journal-heading" Text="{Binding TimeText}" ToolTip.Tip="{Binding TimeText}" />
+            <TextBlock Grid.Column="2" Classes="journal-heading" Text="{Binding ToolText}" ToolTip.Tip="{Binding ToolText}" />
+            <TextBlock Grid.Column="3" Classes="journal-heading" Text="{Binding ArgumentsText}" ToolTip.Tip="{Binding ArgumentsText}" />
+            <TextBlock Grid.Column="4" Classes="journal-heading" Text="{Binding RevisionText}" ToolTip.Tip="{Binding RevisionText}" />
+            <TextBlock Grid.Column="5" Classes="journal-heading" Text="{Binding DurationText}" ToolTip.Tip="{Binding DurationText}" />
+            <TextBlock Grid.Column="6" Classes="journal-heading" Text="{Binding CharactersText}" ToolTip.Tip="{Binding CharactersText}" />
+            <TextBlock Grid.Column="7" Classes="journal-heading" Text="{Binding TokensText}" ToolTip.Tip="{Binding TokensText}" />
+            <TextBlock Grid.Column="8" Classes="journal-heading" Text="{Binding FilesText}" ToolTip.Tip="{Binding FilesText}" />
+            <TextBlock Grid.Column="9" Classes="journal-heading" Text="{Binding MaskedText}" ToolTip.Tip="{Binding MaskedText}" />
+            <TextBlock Grid.Column="10" Classes="journal-heading" Text="{Binding NoticesText}" ToolTip.Tip="{Binding NoticesText}" />
+            <TextBlock Grid.Column="11" Classes="journal-heading" Text="{Binding ErrorText}" ToolTip.Tip="{Binding ErrorText}" />
           </Grid>
         </Border>
         <ListBox Grid.Row="1"
@@ -154,7 +161,7 @@
                  AutomationProperties.Name="{Binding CallsText}">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:AgentJournalCallViewModel">
-              <Grid ColumnDefinitions="28,54,82,*,58,100,70,60,46,88,*,58" ColumnSpacing="4">
+              <Grid ColumnDefinitions="28,50,96,*,54,84,62,58,44,104,120,54" ColumnSpacing="4">
                 <TextBlock Classes="journal-column" Text="{Binding Sequence}" />
                 <TextBlock Grid.Column="1" Classes="journal-column" Text="{Binding Time}" />
                 <TextBlock Grid.Column="2"
@@ -175,7 +182,7 @@
                            Text="{Binding MaskedCompact}"
                            ToolTip.Tip="{Binding Masked}" />
                 <TextBlock Grid.Column="10"
-                           Classes="journal-column"
+                           Classes="journal-column journal-notices"
                            Text="{Binding Notices}"
                            ToolTip.Tip="{Binding Notices}" />
                 <TextBlock Grid.Column="11"

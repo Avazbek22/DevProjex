@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Avalonia.Automation;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
@@ -286,6 +287,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			Assert.True(empty.ViewModel.IsEmpty);
 			Assert.False(empty.ViewModel.HasSessions);
 			Assert.Contains("MCP menu", empty.ViewModel.EmptyText, StringComparison.Ordinal);
+			Assert.Contains("not every action", empty.ViewModel.EmptyText, StringComparison.Ordinal);
 			Assert.False(Assert.IsType<Border>(empty.FindControl<Border>("JournalSessionsSurface")).IsVisible);
 			Assert.False(Assert.IsType<Border>(empty.FindControl<Border>("JournalCallsSurface")).IsVisible);
 			Assert.False(Assert.IsType<Border>(empty.FindControl<Border>("JournalFooterSurface")).IsVisible);
@@ -473,6 +475,201 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
+	public async Task ContextRulesAreExplainedBesideTheMcpMenuTreeAndSecretSetting()
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+		try
+		{
+			var menuNames = new[]
+		{
+				"McpConnectClaudeCodeMenuItem",
+				"McpConnectCodexMenuItem",
+				"McpConnectCursorMenuItem",
+				"McpConnectVsCodeMenuItem",
+				"McpOtherClientsMenuItem",
+				"McpStandardConnectClaudeCodeMenuItem",
+				"McpStandardConnectCodexMenuItem",
+				"McpStandardConnectCursorMenuItem",
+				"McpStandardConnectVsCodeMenuItem",
+				"McpStandardOtherClientsMenuItem",
+				"McpJournalMenuItem"
+			};
+			foreach (var name in menuNames)
+			{
+				var item = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, name);
+				var tip = Assert.IsType<string>(ToolTip.GetTip(item));
+				Assert.False(string.IsNullOrWhiteSpace(tip));
+				Assert.Equal(tip, AutomationProperties.GetHelpText(item));
+		}
+
+			var projectTree = Assert.IsAssignableFrom<TreeView>(window.FindControl<Control>("ProjectTree"));
+			var rootCheckBox = Assert.Single(
+				projectTree.GetVisualDescendants().OfType<CheckBox>(),
+				static checkBox => checkBox.DataContext is TreeNodeViewModel { Parent: null });
+			var rootTip = Assert.IsType<string>(ToolTip.GetTip(rootCheckBox));
+			Assert.Contains("focus", rootTip, StringComparison.OrdinalIgnoreCase);
+			Assert.Equal(rootTip, AutomationProperties.GetHelpText(rootCheckBox));
+
+			var secretCheckBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(
+				window,
+				IgnoreOptionId.HideSecrets);
+			var secretTip = Assert.IsType<string>(ToolTip.GetTip(secretCheckBox));
+			Assert.Contains("MCP", secretTip, StringComparison.Ordinal);
+			Assert.Equal(secretTip, AutomationProperties.GetHelpText(secretCheckBox));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalMinimumSizeKeepsLocalizedColumnsReadableAndWrapsNotices()
+	{
+		var outputRoot = Path.Combine(Path.GetTempPath(), "devprojex-tails", "screenshots");
+		var capture = string.Equals(
+			Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_JOURNAL_TAILS"),
+				"1",
+			StringComparison.Ordinal);
+		if (capture)
+		Directory.CreateDirectory(outputRoot);
+		foreach (var (language, code) in new[]
+		{
+			(AppLanguage.Ru, "ru"),
+			(AppLanguage.De, "de")
+			})
+			{
+					var fixture = JournalFixture.Create(workspace.Project.RootPath);
+					LocalizationService? localization = null;
+			var owner = await UiTestDriver.CreateLoadedMainWindowAsync(
+						workspace.Project,
+						configureServices: services =>
+						{
+							localization = services.Localization;
+					return services with
+					{
+						AgentJournalReader = new RecordingJournalReader(fixture.Sessions, fixture.Calls)
+		};
+				});
+			localization!.SetLanguage(language);
+			var journal = new AgentJournalWindow(
+			owner,
+				new RecordingJournalReader(fixture.Sessions, fixture.Calls),
+			new RecordingFormatter(),
+			localization,
+			workspace.Project.RootPath,
+				() => workspace.Project.RootPath)
+		{
+				Width = AgentJournalWindow.MinimumWindowWidth,
+				Height = AgentJournalWindow.MinimumWindowHeight
+			};
+			UiTestDriver.TrackTopLevelWindow(journal);
+			journal.Show(owner);
+			try
+		{
+				await journal.RefreshAsync();
+				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+				var sessionsHeader = Assert.IsType<Grid>(
+					journal.FindControl<Grid>("JournalSessionsColumnsHeader"));
+				var callsHeader = Assert.IsType<Grid>(
+					journal.FindControl<Grid>("JournalCallsColumnsHeader"));
+				Assert.True(sessionsHeader.ColumnDefinitions[2].ActualWidth >= 72);
+				Assert.True(sessionsHeader.ColumnDefinitions[8].ActualWidth >= 104);
+				Assert.True(callsHeader.ColumnDefinitions[2].ActualWidth >= 96);
+				Assert.True(callsHeader.ColumnDefinitions[9].ActualWidth >= 104);
+				Assert.True(callsHeader.ColumnDefinitions[10].ActualWidth >= 120);
+				var notice = Assert.Single(
+					journal.GetVisualDescendants().OfType<TextBlock>(),
+					text => string.Equals(
+						text.Text,
+						journal.ViewModel.Calls[0].Notices,
+						StringComparison.Ordinal));
+				Assert.Equal(TextWrapping.Wrap, notice.TextWrapping);
+				Assert.Equal(journal.ViewModel.Calls[0].Notices, ToolTip.GetTip(notice));
+				if (capture)
+	{
+					var snapshotPath = Path.Combine(outputRoot, $"journal-minimum-{code}.png");
+					await SaveSnapshotAsync(journal, snapshotPath);
+		Assert.True(
+						new FileInfo(snapshotPath).Length > 1_000,
+						$"{snapshotPath}; bounds={journal.Bounds.Size}; client={journal.ClientSize}");
+	}
+	}
+			finally
+	{
+				await UiTestDriver.CloseTopLevelWindowAsync(journal);
+				await UiTestDriver.CloseWindowAsync(owner);
+	}
+	}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalExportFailureDoesNotEscapeTheWindow()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var errors = new List<string>();
+		var journal = new AgentJournalWindow(
+			new FailingJournalReader(fixture.Sessions, fixture.Calls, failExport: true),
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath)
+		{
+			OperationErrorPresenter = message =>
+		{
+				errors.Add(message);
+				return Task.CompletedTask;
+		}
+		};
+		try
+	{
+			await journal.RefreshAsync();
+
+			var exception = await Record.ExceptionAsync(() => journal.ExportSelectedToPathAsync(
+				Path.Combine(workspace.Project.RootPath, "journal.md"),
+				json: false));
+
+			Assert.Null(exception);
+			Assert.Equal("Could not export the journal: read failed", Assert.Single(errors));
+			}
+		finally
+		{
+			journal.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalClearFailureDoesNotEscapeTheWindow()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var errors = new List<string>();
+		var journal = new AgentJournalWindow(
+			new FailingJournalReader(fixture.Sessions, fixture.Calls, failClear: true),
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath)
+		{
+			OperationErrorPresenter = message =>
+		{
+				errors.Add(message);
+				return Task.CompletedTask;
+		}
+			};
+		try
+				{
+			await journal.RefreshAsync();
+
+			var exception = await Record.ExceptionAsync(() => journal.ClearCurrentScopeAsync());
+
+			Assert.Null(exception);
+			Assert.Equal("Could not clear the journal: clear failed", Assert.Single(errors));
+		}
+		finally
+		{
+			journal.Close();
+	}
+}
+
+	[AvaloniaFact]
 	public async Task JournalRefreshKeepsTheNewestProjectFilterResult()
 	{
 		var fixture = JournalFixture.Create(workspace.Project.RootPath);
@@ -601,9 +798,19 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		var requiredKeys = new[]
 		{
 			"Menu.Mcp.Journal",
+			"Menu.Mcp.OpenTerminal.Live.Help",
+			"Menu.Mcp.OpenProject.Live.Help",
+			"Menu.Mcp.OpenTerminal.Standard.Help",
+			"Menu.Mcp.OpenProject.Standard.Help",
+			"Menu.Mcp.OtherClients.Help",
+			"Menu.Mcp.Journal.Help",
+			"Tree.Selection.Focus.Help",
+			"Settings.HideSecrets.Help",
 			"Menu.View.AgentActivity",
 			"AgentJournal.Title",
 			"AgentJournal.Empty",
+			"AgentJournal.ExportFailed",
+			"AgentJournal.ClearFailed",
 			"AgentJournal.Empty.Tui",
 			"AgentJournal.Footer",
 			"AgentJournal.Masked.Short",
@@ -974,21 +1181,13 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 
 	private static async Task SaveSnapshotAsync(TopLevel topLevel, string path)
 	{
+		if (File.Exists(path))
+			File.Delete(path);
 		await topLevel.Dispatcher.InvokeAsync(() =>
 		{
 			using var captured = topLevel.CaptureRenderedFrame();
-			if (captured is not null)
-			{
-				captured.Save(path, PngBitmapEncoderOptions.Default);
-				return;
-			}
-
-			var scale = topLevel.RenderScaling;
-			using var rendered = new RenderTargetBitmap(
-				PixelSize.FromSize(topLevel.Bounds.Size, scale),
-				new Vector(96 * scale, 96 * scale));
-			rendered.Render(topLevel);
-			rendered.Save(path, PngBitmapEncoderOptions.Default);
+			Assert.NotNull(captured);
+			captured.Save(path, PngBitmapEncoderOptions.Default);
 		}, DispatcherPriority.Render);
 	}
 
@@ -1265,6 +1464,45 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			}
 			return channel;
 		}
+	}
+
+	private sealed class FailingJournalReader(
+		IEnumerable<AgentJournalSession> sessions,
+		IReadOnlyDictionary<string, IReadOnlyList<AgentJournalCall>> calls,
+		bool failExport = false,
+		bool failClear = false) : IAgentJournalReader
+	{
+		private readonly RecordingJournalReader _inner = new(sessions, calls);
+
+		public AgentJournalRetentionPolicy Retention => _inner.Retention;
+
+		public ValueTask<IReadOnlyList<AgentJournalSession>> ListSessionsAsync(
+			string? projectRoot = null,
+			int limit = 200,
+			CancellationToken cancellationToken = default) =>
+			_inner.ListSessionsAsync(projectRoot, limit, cancellationToken);
+
+		public ValueTask<IReadOnlyList<AgentJournalCall>> ReadCallsAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default) =>
+			_inner.ReadCallsAsync(sessionId, cancellationToken);
+
+		public ValueTask<AgentJournalReceipt?> ReadReceiptAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default) => failExport
+			? ValueTask.FromException<AgentJournalReceipt?>(new IOException("read failed"))
+			: _inner.ReadReceiptAsync(sessionId, cancellationToken);
+
+		public IAsyncEnumerable<AgentJournalChange> WatchChangesAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default) =>
+			_inner.WatchChangesAsync(sessionId, cancellationToken);
+
+		public ValueTask<int> ClearAsync(
+			string? projectRoot = null,
+			CancellationToken cancellationToken = default) => failClear
+			? ValueTask.FromException<int>(new IOException("clear failed"))
+			: _inner.ClearAsync(projectRoot, cancellationToken);
 	}
 
 	private sealed record JournalFixture(
