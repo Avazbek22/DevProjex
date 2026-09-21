@@ -6,6 +6,26 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalSettingsPanelPtyTests
 {
+	[Fact(Timeout = 90_000)]
+	public async Task SelectionStatusAppearsWhilePersistenceIsPendingAndClearsAfterSave()
+	{
+		using var project = CreatePanelProject(initializeGit: false);
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
+		await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Saving selection…",
+			timeout: TimeSpan.FromSeconds(5),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Saving selection…",
+			timeout: TimeSpan.FromSeconds(10),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExitAsync(terminal);
+	}
+
 	[Fact(Timeout = 120_000)]
 	public async Task QuitRequiresExplicitChoiceWhenSelectionCannotBeSaved()
 	{

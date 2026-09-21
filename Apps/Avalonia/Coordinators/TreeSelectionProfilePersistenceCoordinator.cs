@@ -2,6 +2,18 @@ using System.Diagnostics;
 
 namespace DevProjex.Avalonia.Coordinators;
 
+internal enum SelectionPersistencePhase
+{
+    Idle,
+    Pending,
+    Saving,
+    Failed
+}
+
+internal readonly record struct SelectionPersistenceState(
+    SelectionPersistencePhase Phase,
+    string? FailureReason = null);
+
 internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
 {
     private static readonly TimeSpan PersistenceDelay =
@@ -13,8 +25,20 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
     private readonly object _sync = new();
     private PendingSelectionWrite? _pending;
     private CancellationTokenSource? _delayCts;
+    private SelectionPersistenceState _state = new(SelectionPersistencePhase.Idle);
     private long _version;
     private int _disposed;
+
+    public event EventHandler? StateChanged;
+
+    public SelectionPersistenceState State
+    {
+        get
+        {
+            lock (_sync)
+                return _state;
+        }
+    }
 
     public TreeSelectionProfilePersistenceCoordinator(
         Func<string, IReadOnlyCollection<string>?, CancellationToken, Task> persistAsync)
@@ -40,6 +64,7 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
 
         CancellationToken token;
         long version;
+        EventHandler? stateChanged;
         lock (_sync)
         {
             if (_disposed != 0)
@@ -54,12 +79,15 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
                 Path.GetFullPath(projectPath),
                 selectedPaths?.ToArray(),
                 version);
+            stateChanged = SetStateLocked(new SelectionPersistenceState(
+                SelectionPersistencePhase.Pending));
         }
 
+        stateChanged?.Invoke(this, EventArgs.Empty);
         _ = PersistAfterDelayAsync(version, token);
     }
 
-    public async Task FlushAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> FlushAsync(CancellationToken cancellationToken = default)
     {
         CancellationTokenSource? delayCancellation;
         lock (_sync)
@@ -78,7 +106,7 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
             delayCancellation?.Dispose();
         }
 
-        await PersistPendingAsync(expectedVersion: null, cancellationToken).ConfigureAwait(false);
+        return await PersistPendingAsync(expectedVersion: null, cancellationToken).ConfigureAwait(false);
     }
 
     public bool Flush(TimeSpan timeout)
@@ -87,8 +115,7 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
         using var cancellation = new CancellationTokenSource(timeout);
         try
         {
-            FlushAsync(cancellation.Token).GetAwaiter().GetResult();
-            return true;
+            return FlushAsync(cancellation.Token).GetAwaiter().GetResult();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -98,6 +125,7 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
 
     public void CancelPending()
     {
+        EventHandler? stateChanged;
         lock (_sync)
         {
             _delayCts?.Cancel();
@@ -105,7 +133,10 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
             _delayCts = null;
             _pending = null;
             _version = checked(_version + 1);
+            stateChanged = SetStateLocked(new SelectionPersistenceState(
+                SelectionPersistencePhase.Idle));
         }
+        stateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private async Task PersistAfterDelayAsync(long version, CancellationToken cancellationToken)
@@ -126,15 +157,9 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
-        catch (Exception exception)
-        {
-            Trace.TraceWarning(
-                "Project tree selection persistence failed: {0}",
-                exception.GetType().Name);
-        }
     }
 
-    private async Task PersistPendingAsync(
+    private async Task<bool> PersistPendingAsync(
         long? expectedVersion,
         CancellationToken cancellationToken)
     {
@@ -149,25 +174,75 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
                     pending is null ||
                     (expectedVersion.HasValue && pending.Version != expectedVersion.Value))
                 {
-                    return;
+                    return true;
                 }
             }
 
-            await _persistAsync(
-                pending.ProjectPath,
-                pending.SelectedPaths,
-                cancellationToken).ConfigureAwait(false);
+            PublishStateForVersion(
+                pending.Version,
+                new SelectionPersistenceState(SelectionPersistencePhase.Saving));
 
+            try
+            {
+                await _persistAsync(
+                    pending.ProjectPath,
+                    pending.SelectedPaths,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                Trace.TraceWarning(
+                    "Project tree selection persistence failed: {0}",
+                    exception.GetType().Name);
+                PublishStateForVersion(
+                    pending.Version,
+                    new SelectionPersistenceState(
+                        SelectionPersistencePhase.Failed,
+                        exception.Message));
+                return false;
+            }
+
+            EventHandler? stateChanged = null;
             lock (_sync)
             {
                 if (_pending?.Version == pending.Version)
+                {
                     _pending = null;
+                    stateChanged = SetStateLocked(new SelectionPersistenceState(
+                        SelectionPersistencePhase.Idle));
+                }
             }
+            stateChanged?.Invoke(this, EventArgs.Empty);
+            return true;
         }
         finally
         {
             _writeGate.Release();
         }
+    }
+
+    private void PublishStateForVersion(long version, SelectionPersistenceState state)
+    {
+        EventHandler? stateChanged;
+        lock (_sync)
+        {
+            if (_disposed != 0 || _pending?.Version != version)
+                return;
+            stateChanged = SetStateLocked(state);
+        }
+        stateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private EventHandler? SetStateLocked(SelectionPersistenceState state)
+    {
+        if (_state == state)
+            return null;
+        _state = state;
+        return StateChanged;
     }
 
     public void Dispose()

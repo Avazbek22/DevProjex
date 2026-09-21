@@ -52,6 +52,8 @@ public partial class MainWindow
         {
             if (string.IsNullOrWhiteSpace(_currentPath) || !_viewModel.IsProjectLoaded)
                 return;
+            if (e.Mode == McpConnectionMode.Live)
+                _ = await _treeSelectionProfiles.FlushAsync(cancellationToken);
 
             var snapshot = _terminalCommandSetupService.Probe();
             var executablePath = McpConnectionExecutablePathResolver.Resolve(

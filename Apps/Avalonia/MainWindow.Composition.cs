@@ -1128,6 +1128,7 @@ public partial class MainWindow
                     projectPath,
                     selectedPaths,
                     cancellationToken));
+		_treeSelectionProfiles.StateChanged += OnTreeSelectionPersistenceStateChanged;
         _taskbarProgress = new TaskbarProgressCoordinator(
             _viewModel,
             services.TaskbarProgressService);

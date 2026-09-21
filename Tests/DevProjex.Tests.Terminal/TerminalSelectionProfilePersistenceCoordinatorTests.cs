@@ -8,8 +8,63 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 		"Terminal.Tui.ProfileSaveFailure.Message",
 		"Terminal.Tui.ProfileSaveFailure.Stay",
 		"Terminal.Tui.ProfileSaveFailure.ExitWithoutSaving",
-		"Terminal.Tui.ProfileSaveFailure.ContinueWithoutSaving"
+		"Terminal.Tui.ProfileSaveFailure.ContinueWithoutSaving",
+		"SelectionPersistence.Saving",
+		"SelectionPersistence.Failed",
+		"SelectionPersistence.Failed.Help"
 	];
+
+	[Fact]
+	public async Task SchedulePublishesPendingSavingAndIdleStates()
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			async (_, _, cancellationToken) =>
+			{
+				writeStarted.TrySetResult();
+				await releaseWrite.Task.WaitAsync(cancellationToken);
+			},
+			delay.WaitAsync);
+
+		Assert.Equal(TerminalSelectionPersistencePhase.Idle, coordinator.State.Phase);
+		coordinator.Schedule("project", CreateProfile(["src"]));
+		Assert.Equal(TerminalSelectionPersistencePhase.Pending, coordinator.State.Phase);
+
+		delay.Release();
+		await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(TerminalSelectionPersistencePhase.Saving, coordinator.State.Phase);
+
+		releaseWrite.TrySetResult();
+		await WaitForStateAsync(coordinator, TerminalSelectionPersistencePhase.Idle);
+	}
+
+	[Fact]
+	public async Task FailedStateRemainsUntilThePendingSelectionIsSaved()
+	{
+		var delay = new ControlledDelay();
+		var attempts = 0;
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			(_, _, _) =>
+			{
+				attempts++;
+				if (attempts == 1)
+					throw new IOException("profile is locked");
+				return Task.CompletedTask;
+			},
+			delay.WaitAsync,
+			maxBackgroundAttempts: 1);
+
+		coordinator.Schedule("project", CreateProfile(["src"]));
+		delay.Release();
+		await WaitForStateAsync(coordinator, TerminalSelectionPersistencePhase.Failed);
+
+		Assert.Equal("profile is locked", coordinator.State.FailureReason);
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(TerminalSelectionPersistencePhase.Idle, coordinator.State.Phase);
+		Assert.Equal(2, attempts);
+	}
 
 	[Fact]
 	public void PersistenceFailureChoicesExistInEveryLocalization()
@@ -168,6 +223,7 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 		coordinator.DiscardPending();
 		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
 		Assert.Equal(2, attempts);
+		Assert.Equal(TerminalSelectionPersistencePhase.Idle, coordinator.State.Phase);
 	}
 
 	private static ProjectSelectionProfile CreateProfile(IReadOnlyCollection<string>? selectedPaths) =>
@@ -198,5 +254,32 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 		}
 
 		public void Release() => _release.TrySetResult();
+	}
+
+	private static async Task WaitForStateAsync(
+		TerminalSelectionProfilePersistenceCoordinator coordinator,
+		TerminalSelectionPersistencePhase phase)
+	{
+		if (coordinator.State.Phase == phase)
+			return;
+
+		var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		void OnStateChanged(object? sender, EventArgs args)
+		{
+			if (coordinator.State.Phase == phase)
+				reached.TrySetResult();
+		}
+
+		coordinator.StateChanged += OnStateChanged;
+		try
+		{
+			if (coordinator.State.Phase == phase)
+				return;
+			await reached.Task.WaitAsync(TestContext.Current.CancellationToken);
+		}
+		finally
+		{
+			coordinator.StateChanged -= OnStateChanged;
+		}
 	}
 }

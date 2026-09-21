@@ -6,6 +6,55 @@ namespace DevProjex.Tests.Terminal;
 public sealed class McpConnectionCommandTests
 {
 	[Fact]
+	public async Task LiveConnectionWaitsForSelectionPersistenceAndContinuesAfterFailure()
+	{
+		var releasePersistence = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var persistenceStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var connectionStarted = false;
+
+		var operation = TerminalWorkspaceSession.RunAfterSelectionPersistenceAsync(
+			McpConnectionMode.Live,
+			async cancellationToken =>
+			{
+				persistenceStarted.TrySetResult();
+				await releasePersistence.Task.WaitAsync(cancellationToken);
+				return false;
+			},
+			_ =>
+			{
+				connectionStarted = true;
+				return Task.FromResult("connected");
+			},
+			TestContext.Current.CancellationToken);
+
+		await persistenceStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		Assert.False(connectionStarted);
+		releasePersistence.TrySetResult();
+
+		Assert.Equal("connected", await operation);
+		Assert.True(connectionStarted);
+	}
+
+	[Fact]
+	public async Task StandardConnectionDoesNotFlushSelectionPersistence()
+	{
+		var flushCalled = false;
+
+		var result = await TerminalWorkspaceSession.RunAfterSelectionPersistenceAsync(
+			McpConnectionMode.Standard,
+			_ =>
+			{
+				flushCalled = true;
+				return Task.FromResult(true);
+			},
+			_ => Task.FromResult("connected"),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal("connected", result);
+		Assert.False(flushCalled);
+	}
+
+	[Fact]
 	public void TuiConnectionOutput_PrintsTheManualNextStepSeparately()
 	{
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);

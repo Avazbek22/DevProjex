@@ -522,16 +522,24 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		try
 		{
-			var executablePath = McpConnectionExecutablePathResolver.Resolve(
-				_services.TerminalCommandSetupService.Probe(),
-				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-			var request = new McpConnectionRequest(
-				client,
+			var result = await RunAfterSelectionPersistenceAsync(
 				mode,
-				executablePath,
-				Path.GetFullPath(projectRoot));
-			var result = await ConnectMcpClientWithConfirmationAsync(request, operationCts)
-				.ConfigureAwait(false);
+				cancellationToken => _selectionProfilePersistence.FlushAsync(cancellationToken),
+				async cancellationToken =>
+				{
+					var executablePath = McpConnectionExecutablePathResolver.Resolve(
+						_services.TerminalCommandSetupService.Probe(),
+						Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+					var request = new McpConnectionRequest(
+						client,
+						mode,
+						executablePath,
+						Path.GetFullPath(projectRoot));
+					cancellationToken.ThrowIfCancellationRequested();
+					return await ConnectMcpClientWithConfirmationAsync(request, operationCts)
+						.ConfigureAwait(false);
+				},
+				operationCts.Token).ConfigureAwait(false);
 
 			await InvokeAsync(() =>
 			{
@@ -564,6 +572,20 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			ReleaseActiveOperation(operationCts);
 		}
+	}
+
+	internal static async Task<T> RunAfterSelectionPersistenceAsync<T>(
+		McpConnectionMode mode,
+		Func<CancellationToken, Task<bool>> flushSelectionAsync,
+		Func<CancellationToken, Task<T>> connectAsync,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(flushSelectionAsync);
+		ArgumentNullException.ThrowIfNull(connectAsync);
+		if (mode == McpConnectionMode.Live)
+			_ = await flushSelectionAsync(cancellationToken).ConfigureAwait(false);
+
+		return await connectAsync(cancellationToken).ConfigureAwait(false);
 	}
 
 	private async Task<McpConnectionResult> ConnectMcpClientWithConfirmationAsync(

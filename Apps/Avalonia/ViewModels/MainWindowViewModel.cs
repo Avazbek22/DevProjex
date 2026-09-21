@@ -157,6 +157,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private int _applySettingsInProgress;
     private bool _hasPendingFilterSettingsChanges;
     private bool _statusMetricsVisible;
+	private string _selectionPersistenceStatusText = string.Empty;
+	private string _selectionPersistenceStatusHelpText = string.Empty;
     private bool _isAgentActivityEnabled;
     private string _agentActivityText = string.Empty;
     private bool _statusPreviewSelectionVisible;
@@ -425,6 +427,30 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
         }
     }
+
+	public string SelectionPersistenceStatusText => _selectionPersistenceStatusText;
+
+	public string SelectionPersistenceStatusHelpText => _selectionPersistenceStatusHelpText;
+
+	public bool SelectionPersistenceStatusVisible =>
+		!IsCompactModeEffective && !string.IsNullOrEmpty(_selectionPersistenceStatusText);
+
+	internal void SetSelectionPersistenceStatus(string? text, string? helpText)
+	{
+		text ??= string.Empty;
+		helpText ??= string.Empty;
+		if (string.Equals(_selectionPersistenceStatusText, text, StringComparison.Ordinal) &&
+			string.Equals(_selectionPersistenceStatusHelpText, helpText, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		_selectionPersistenceStatusText = text;
+		_selectionPersistenceStatusHelpText = helpText;
+		RaisePropertyChanged(nameof(SelectionPersistenceStatusText));
+		RaisePropertyChanged(nameof(SelectionPersistenceStatusHelpText));
+		RaisePropertyChanged(nameof(SelectionPersistenceStatusVisible));
+	}
 
     public string Title
     {
@@ -1190,6 +1216,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(TreeItemPadding));
         RaisePropertyChanged(nameof(TreeTextMargin));
         RaisePropertyChanged(nameof(AgentActivityVisible));
+		RaisePropertyChanged(nameof(SelectionPersistenceStatusVisible));
     }
 
     // Methods for toggle behavior (click on active = disable)
