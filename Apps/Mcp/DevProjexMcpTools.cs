@@ -998,6 +998,7 @@ internal sealed class DevProjexMcpTools(
 					// survive the callback, and stronger late evidence can displace an earlier window.
 					var relative = McpProjectService.ToRelative(plan.SourceRoot, file.Path);
 					IReadOnlyList<NavigationDeclaration>? navigation = null;
+					McpNavigationDeclarationIndex? navigationIndex = null;
 					McpSearchDeclarationPreviewCache? declarationPreviews = null;
 					var priorityState = new McpSearchFilePriorityState();
 					var scan = McpSearchTextScanner.ScanEach(
@@ -1012,6 +1013,7 @@ internal sealed class DevProjexMcpTools(
 								relative,
 								file.Content,
 								token);
+							navigationIndex ??= new McpNavigationDeclarationIndex(navigation);
 							if (searchBodyCharacters > 0)
 								declarationPreviews ??= new McpSearchDeclarationPreviewCache(
 									relative,
@@ -1030,7 +1032,8 @@ internal sealed class DevProjexMcpTools(
 								contextLines,
 								explicitScope: HasItems(paths),
 								priorityState,
-								declarationPreviews);
+								declarationPreviews,
+								navigationIndex);
 						},
 						token);
 					totalMatches += scan.TotalMatches;
@@ -3308,9 +3311,11 @@ internal sealed class DevProjexMcpTools(
 		bool explicitScope,
 		McpSearchFilePriorityState? priorityState = null,
 		McpSearchDeclarationPreviewCache? declarationPreviews = null,
+		McpNavigationDeclarationIndex? declarationIndex = null,
 		Action? declarationVisited = null)
 	{
 		priorityState ??= new McpSearchFilePriorityState();
+		declarationIndex ??= new McpNavigationDeclarationIndex(declarations, declarationVisited);
 		foreach (var match in matches)
 		{
 			foreach (var matchLine in match.MatchLineNumbers)
@@ -3328,7 +3333,7 @@ internal sealed class DevProjexMcpTools(
 				if (rendered.Count == 0)
 					continue;
 
-				var declaration = FindContainingDeclaration(declarations, matchLine, declarationVisited);
+				var declaration = declarationIndex.Find(matchLine);
 				var quality = declaration is null
 					? McpDeclarationMatchQuality.None
 					: regex.DeclarationMatchQuality(declaration.Name);
@@ -3361,28 +3366,6 @@ internal sealed class DevProjexMcpTools(
 					declaration is null ? null : declarationPreviews?.Get(declaration)));
 			}
 		}
-	}
-
-	private static NavigationDeclaration? FindContainingDeclaration(
-		IReadOnlyList<NavigationDeclaration> declarations,
-		int line,
-		Action? declarationVisited)
-	{
-		NavigationDeclaration? best = null;
-		foreach (var declaration in declarations)
-		{
-			declarationVisited?.Invoke();
-			if (line < declaration.StartLine || line > declaration.EndLine)
-				continue;
-			if (best is null ||
-				declaration.EndLine - declaration.StartLine < best.EndLine - best.StartLine ||
-				declaration.EndLine - declaration.StartLine == best.EndLine - best.StartLine &&
-				declaration.EndIndex - declaration.StartIndex < best.EndIndex - best.StartIndex)
-			{
-				best = declaration;
-			}
-		}
-		return best;
 	}
 
 	internal static IReadOnlyList<McpSearchRenderedGroup> BuildOrderedSearchGroups(

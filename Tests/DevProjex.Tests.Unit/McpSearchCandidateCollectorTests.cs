@@ -196,6 +196,60 @@ public sealed class McpSearchCandidateCollectorTests
 	}
 
 	[Fact]
+	public void DeclarationIndexPreservesNarrowestRangeAndStableTieRules()
+	{
+		var declarations = new[]
+		{
+			Declaration("outer", 1, 30, 0, 300),
+			Declaration("same-lines-wide", 4, 12, 30, 150),
+			Declaration("same-lines-narrow-first", 4, 12, 40, 80),
+			Declaration("same-lines-narrow-second", 4, 12, 50, 90),
+			Declaration("inner", 7, 8, 60, 75),
+			Declaration("later", 20, 25, 200, 250)
+		};
+		foreach (var ordering in new IReadOnlyList<NavigationDeclaration>[]
+			{ declarations, declarations.Reverse().ToArray() })
+		{
+			var index = new McpNavigationDeclarationIndex(ordering);
+			foreach (var line in Enumerable.Range(0, 33).Append(8).Append(4).Append(31))
+				Assert.Same(LinearFind(ordering, line), index.Find(line));
+		}
+	}
+
+	[Fact]
+	public void CandidateCollectionIndexesDeclarationsOnceInsteadOfOncePerMatch()
+	{
+		const int count = 1_000;
+		var content = string.Join('\n', Enumerable.Range(1, count).Select(index => $"needle {index}"));
+		var declarations = Enumerable.Range(1, count)
+			.Select(index => Declaration($"Fixture.Member{index}", index, index, index * 10, index * 10 + 5))
+			.ToArray();
+		var scan = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("needle", ignoreCase: false),
+			0,
+			count,
+			CancellationToken.None);
+		var collector = new McpSearchCandidateCollector(50, 2_000_000);
+		var visited = 0;
+
+		DevProjexMcpTools.AddSearchCandidates(
+			collector,
+			"Fixture.cs",
+			"Fixture.cs",
+			content,
+			scan.Matches,
+			declarations,
+			new McpSearchRegex("needle", ignoreCase: false),
+			0,
+			explicitScope: false,
+			declarationVisited: () => visited++);
+
+		Assert.Equal(count, visited);
+		Assert.Equal(50, collector.Count);
+	}
+
+	[Fact]
 	public void CompleteBoundaryStatesThatEveryEligibleSourceWasInspected()
 	{
 		var notice = DevProjexMcpTools.FormatSearchBoundaryNotice(Boundary(), false);
@@ -274,6 +328,38 @@ public sealed class McpSearchCandidateCollectorTests
 			score,
 			text,
 			storageCharacters);
+	}
+
+	private static NavigationDeclaration Declaration(
+		string name,
+		int startLine,
+		int endLine,
+		int startIndex,
+		int endIndex) =>
+		new(name, NavigationSymbolKind.Method, "Fixture", startLine, endLine, "fixture")
+		{
+			StartIndex = startIndex,
+			EndIndex = endIndex
+		};
+
+	private static NavigationDeclaration? LinearFind(
+		IReadOnlyList<NavigationDeclaration> declarations,
+		int line)
+	{
+		NavigationDeclaration? best = null;
+		foreach (var declaration in declarations)
+		{
+			if (line < declaration.StartLine || line > declaration.EndLine)
+				continue;
+			if (best is null ||
+				declaration.EndLine - declaration.StartLine < best.EndLine - best.StartLine ||
+				declaration.EndLine - declaration.StartLine == best.EndLine - best.StartLine &&
+				declaration.EndIndex - declaration.StartIndex < best.EndIndex - best.StartIndex)
+			{
+				best = declaration;
+			}
+		}
+		return best;
 	}
 
 	private static McpSearchBoundary Boundary() => new(
