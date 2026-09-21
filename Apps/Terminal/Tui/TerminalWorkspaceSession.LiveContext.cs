@@ -158,12 +158,12 @@ internal sealed partial class TerminalWorkspaceSession
 			SelectedPaths: selection.SelectedPaths?.ToArray());
 	}
 
-	private async Task PersistLocalProfileAsync(
+	private async Task<ProjectProfilePersistenceResult> PersistLocalProfileAsync(
 		string projectPath,
 		ProjectSelectionProfile profile,
 		CancellationToken cancellationToken)
 	{
-		await Task.Run(() =>
+		return await Task.Run(() =>
 		{
 			ProjectSelectionProfile? baseline;
 			lock (_localProfileBaselineSync)
@@ -181,9 +181,13 @@ internal sealed partial class TerminalWorkspaceSession
 				TimeSpan.FromSeconds(5),
 				cancellationToken: cancellationToken);
 			if (!result.Succeeded)
-				throw new IOException("The terminal project profile could not be saved.");
+			{
+				return ProjectProfilePersistenceResult.Failed(
+					"The terminal project profile could not be saved.");
+			}
 			lock (_localProfileBaselineSync)
-				_localProfileBaseline = profile;
+				_localProfileBaseline = result.PersistedProfile ?? profile;
+			return ProjectProfilePersistenceResult.Saved();
 		}, cancellationToken).ConfigureAwait(false);
 	}
 }

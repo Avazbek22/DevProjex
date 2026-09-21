@@ -1696,7 +1696,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			TerminalSelectionPersistencePhase.Pending or TerminalSelectionPersistencePhase.Saving =>
 				L("SelectionPersistence.Saving"),
-			TerminalSelectionPersistencePhase.Failed =>
+			TerminalSelectionPersistencePhase.Deferred or TerminalSelectionPersistencePhase.Failed =>
 				L("SelectionPersistence.Failed"),
 			_ => null
 		};

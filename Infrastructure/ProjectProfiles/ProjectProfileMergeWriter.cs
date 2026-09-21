@@ -1,5 +1,34 @@
 namespace DevProjex.Infrastructure.ProjectProfiles;
 
+public enum ProjectProfilePersistenceDisposition
+{
+	Saved,
+	Unchanged,
+	Deferred,
+	Failed
+}
+
+public readonly record struct ProjectProfilePersistenceResult(
+	ProjectProfilePersistenceDisposition Disposition,
+	string? Reason = null)
+{
+	public bool Completed => Disposition is
+		ProjectProfilePersistenceDisposition.Saved or
+		ProjectProfilePersistenceDisposition.Unchanged;
+
+	public static ProjectProfilePersistenceResult Saved() =>
+		new(ProjectProfilePersistenceDisposition.Saved);
+
+	public static ProjectProfilePersistenceResult Unchanged() =>
+		new(ProjectProfilePersistenceDisposition.Unchanged);
+
+	public static ProjectProfilePersistenceResult Deferred(string reason) =>
+		new(ProjectProfilePersistenceDisposition.Deferred, reason);
+
+	public static ProjectProfilePersistenceResult Failed(string reason) =>
+		new(ProjectProfilePersistenceDisposition.Failed, reason);
+}
+
 [Flags]
 public enum ProjectProfileMergeFields
 {
@@ -46,9 +75,33 @@ public static class ProjectProfileMergeWriter
 
 		var changedFields = GetChangedFields(baseline, candidate, allowedFields);
 		var ignoreOptionChanges = GetIgnoreOptionChanges(baseline, candidate, allowedFields);
+		var extensionChanges = GetSelectionChanges(
+			baseline,
+			candidate,
+			allowedFields,
+			ProjectProfileMergeFields.Extensions,
+			ProjectProfileMergeFields.ExtensionStates,
+			static profile => profile.SelectedExtensions,
+			static profile => profile.ExtensionStates,
+			StringComparer.OrdinalIgnoreCase);
+		var rootFolderChanges = GetSelectionChanges(
+			baseline,
+			candidate,
+			allowedFields,
+			ProjectProfileMergeFields.RootFolders,
+			ProjectProfileMergeFields.RootFolderStates,
+			static profile => profile.SelectedRootFolders,
+			static profile => profile.RootFolderStates,
+			ProjectTreePathIdentity.CanonicalComparer);
 		var wholeFieldChanges = baseline is null
 			? changedFields
-			: changedFields & ~(ProjectProfileMergeFields.IgnoreOptions | ProjectProfileMergeFields.IgnoreOptionStates);
+			: changedFields & ~(
+				ProjectProfileMergeFields.RootFolders |
+				ProjectProfileMergeFields.Extensions |
+				ProjectProfileMergeFields.IgnoreOptions |
+				ProjectProfileMergeFields.RootFolderStates |
+				ProjectProfileMergeFields.ExtensionStates |
+				ProjectProfileMergeFields.IgnoreOptionStates);
 		for (var attempt = 0; attempt < maximumAttempts; attempt++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -58,8 +111,52 @@ public static class ProjectProfileMergeWriter
 
 			var current = lookup.Profile ?? candidate;
 			var merged = Apply(current, candidate, wholeFieldChanges);
+			if (extensionChanges.Count > 0)
+			{
+				var extensionSelection = ApplySelectionChanges(
+					current.SelectedExtensions,
+					current.ExtensionStates,
+					candidate,
+					extensionChanges,
+					static profile => profile.SelectedExtensions,
+					static profile => profile.ExtensionStates,
+					StringComparer.OrdinalIgnoreCase,
+					"extension");
+				merged = merged with
+				{
+					SelectedExtensions = extensionSelection.Selected,
+					ExtensionStates = extensionSelection.States
+				};
+			}
+			if (rootFolderChanges.Count > 0)
+			{
+				var rootSelection = ApplySelectionChanges(
+					current.SelectedRootFolders,
+					current.RootFolderStates,
+					candidate,
+					rootFolderChanges,
+					static profile => profile.SelectedRootFolders,
+					static profile => profile.RootFolderStates,
+					ProjectTreePathIdentity.CanonicalComparer,
+					"root folder");
+				merged = merged with
+				{
+					SelectedRootFolders = rootSelection.Selected,
+					RootFolderStates = rootSelection.States
+				};
+			}
 			if (ignoreOptionChanges.Count > 0)
 				merged = ApplyIgnoreOptionChanges(current, merged, candidate, ignoreOptionChanges);
+			if (baseline is not null &&
+				changedFields.HasFlag(ProjectProfileMergeFields.SelectedPaths) &&
+				!NullableSetEquals(
+					baseline.SelectedPaths,
+					current.SelectedPaths,
+					ProjectTreePathIdentity.CanonicalComparer))
+			{
+				Trace.TraceInformation(
+					"Project profile selection frontier conflict; the later user action was retained.");
+			}
 			if (changedFields == ProjectProfileMergeFields.None)
 				return new ProjectProfileMergeResult(new ProjectProfileSaveResult(ProjectProfileSaveStatus.Saved), current);
 
@@ -72,6 +169,96 @@ public static class ProjectProfileMergeWriter
 
 		return new ProjectProfileMergeResult(new ProjectProfileSaveResult(ProjectProfileSaveStatus.Conflict), null);
 	}
+
+	private static IReadOnlyList<T> GetSelectionChanges<T>(
+		ProjectSelectionProfile? baseline,
+		ProjectSelectionProfile candidate,
+		ProjectProfileMergeFields allowedFields,
+		ProjectProfileMergeFields selectedField,
+		ProjectProfileMergeFields stateField,
+		Func<ProjectSelectionProfile, IReadOnlyCollection<T>> selected,
+		Func<ProjectSelectionProfile, IReadOnlyDictionary<T, bool>?> states,
+		IEqualityComparer<T> comparer)
+		where T : notnull
+	{
+		if (baseline is null ||
+			!allowedFields.HasFlag(selectedField) && !allowedFields.HasFlag(stateField))
+		{
+			return [];
+		}
+
+		return EnumerateSelectionKeys(baseline, candidate, selected, states, comparer)
+			.Where(key => GetSelectionState(baseline, key, selected, states, comparer) !=
+						  GetSelectionState(candidate, key, selected, states, comparer))
+			.ToArray();
+	}
+
+	private static SelectionMerge<T> ApplySelectionChanges<T>(
+		IReadOnlyCollection<T> currentSelected,
+		IReadOnlyDictionary<T, bool>? currentStates,
+		ProjectSelectionProfile candidate,
+		IReadOnlyList<T> changedKeys,
+		Func<ProjectSelectionProfile, IReadOnlyCollection<T>> selected,
+		Func<ProjectSelectionProfile, IReadOnlyDictionary<T, bool>?> states,
+		IEqualityComparer<T> comparer,
+		string selectionKind)
+		where T : notnull
+	{
+		var mergedSelected = currentSelected.ToHashSet(comparer);
+		var mergedStates = currentStates is null
+			? new Dictionary<T, bool>(comparer)
+			: new Dictionary<T, bool>(currentStates, comparer);
+		foreach (var key in changedKeys)
+		{
+			var desired = GetSelectionState(candidate, key, selected, states, comparer);
+			var current = currentStates?.TryGetValue(key, out var explicitState) == true
+				? explicitState
+				: mergedSelected.Contains(key);
+			if (current != desired)
+			{
+				Trace.TraceInformation(
+					"Project profile {0} conflict for {1}; the later user action was retained.",
+					selectionKind,
+					key);
+			}
+			mergedStates[key] = desired;
+			if (desired)
+				mergedSelected.Add(key);
+			else
+				mergedSelected.Remove(key);
+		}
+
+		return new SelectionMerge<T>(mergedSelected.ToArray(), mergedStates);
+	}
+
+	private static IEnumerable<T> EnumerateSelectionKeys<T>(
+		ProjectSelectionProfile left,
+		ProjectSelectionProfile right,
+		Func<ProjectSelectionProfile, IReadOnlyCollection<T>> selected,
+		Func<ProjectSelectionProfile, IReadOnlyDictionary<T, bool>?> states,
+		IEqualityComparer<T> comparer)
+		where T : notnull =>
+		selected(left)
+			.Concat(selected(right))
+			.Concat(states(left)?.Keys ?? [])
+			.Concat(states(right)?.Keys ?? [])
+			.Distinct(comparer);
+
+	private static bool GetSelectionState<T>(
+		ProjectSelectionProfile profile,
+		T key,
+		Func<ProjectSelectionProfile, IReadOnlyCollection<T>> selected,
+		Func<ProjectSelectionProfile, IReadOnlyDictionary<T, bool>?> states,
+		IEqualityComparer<T> comparer)
+		where T : notnull =>
+		states(profile)?.TryGetValue(key, out var value) == true
+			? value
+			: selected(profile).Contains(key, comparer);
+
+	private readonly record struct SelectionMerge<T>(
+		IReadOnlyCollection<T> Selected,
+		IReadOnlyDictionary<T, bool> States)
+		where T : notnull;
 
 	private static IReadOnlyList<IgnoreOptionId> GetIgnoreOptionChanges(
 		ProjectSelectionProfile? baseline,
