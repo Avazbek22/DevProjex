@@ -23,12 +23,6 @@ internal static class DialogSurfaceFactory
     public static DialogSurfaceBrushes ResolveBrushes(Window? owner, ThemeVariant themeVariant)
     {
         var app = global::Avalonia.Application.Current;
-        var appPanel = TryGetThemeBrush(owner, themeVariant, "AppPanelBrush") ??
-                       TryGetThemeBrush(app, themeVariant, "AppPanelBrush");
-        var appBorder = TryGetThemeBrush(owner, themeVariant, "AppBorderBrush") ??
-                        TryGetThemeBrush(app, themeVariant, "AppBorderBrush");
-        var menuPressed = TryGetThemeBrush(owner, themeVariant, "MenuPressedBrush") ??
-                          TryGetThemeBrush(app, themeVariant, "MenuPressedBrush");
         var ownerBackgroundColor = TryGetThemeColorBrush(owner, themeVariant, "AppBackgroundColor");
         var appBackgroundColor = TryGetThemeColorBrush(app, themeVariant, "AppBackgroundColor");
         var background = ResolveBackgroundBrush(
@@ -41,16 +35,21 @@ internal static class DialogSurfaceFactory
 
         return new DialogSurfaceBrushes(
             background,
-            appPanel ??
-            TryGetThemeColorBrush(owner, themeVariant, "AppPanelColor") ??
-            TryGetThemeColorBrush(app, themeVariant, "AppPanelColor"),
-            appBorder ??
-            TryGetThemeColorBrush(owner, themeVariant, "AppBorderColor") ??
-            TryGetThemeColorBrush(app, themeVariant, "AppBorderColor"),
-            menuPressed ??
-            TryGetThemeColorBrush(owner, themeVariant, "MenuPressedColor") ??
-            TryGetThemeColorBrush(app, themeVariant, "MenuPressedColor"));
+            ResolveSecondaryBrush(owner, app, themeVariant, "AppPanelBrush", "AppPanelColor"),
+            ResolveSecondaryBrush(owner, app, themeVariant, "AppBorderBrush", "AppBorderColor"),
+            ResolveSecondaryBrush(owner, app, themeVariant, "MenuPressedBrush", "MenuPressedColor"));
     }
+
+    private static IBrush? ResolveSecondaryBrush(
+        Window? owner,
+        global::Avalonia.Application? app,
+        ThemeVariant themeVariant,
+        string brushKey,
+        string colorKey) =>
+        TryGetThemeBrush(owner, themeVariant, brushKey) ??
+        TryGetThemeColorBrush(owner, themeVariant, colorKey) ??
+        TryGetThemeColorBrush(app, themeVariant, colorKey) ??
+        TryGetThemeBrush(app, themeVariant, brushKey);
 
     private static IBrush ResolveBackgroundBrush(
         IBrush? ownerBrush,
@@ -163,6 +162,8 @@ internal static class DialogSurfaceFactory
 
     private static IBrush EnsureOpaque(IBrush brush, ThemeVariant themeVariant)
     {
+        if (brush is SolidColorBrush { Color.A: byte.MaxValue })
+            return brush;
         if (brush is not ISolidColorBrush solid)
             return CreateDefaultFallbackBrush(themeVariant);
         var color = solid.Color;
