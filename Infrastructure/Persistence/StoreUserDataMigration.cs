@@ -47,7 +47,7 @@ public static class StoreUserDataMigration
 				"LocalCache",
 				"Roaming",
 				ProductFolderName);
-			if (!Directory.Exists(source))
+			if (!Directory.Exists(source) || !HasInitializedData(source))
 				return StoreUserDataMigrationStatus.NotApplicable;
 
 			Directory.CreateDirectory(configurationRoot);
@@ -65,8 +65,7 @@ public static class StoreUserDataMigration
 			}
 
 			var backup = Path.Combine(configurationRoot, BackupFolderName);
-			if (!Directory.Exists(backup))
-				CopyDirectory(source, backup);
+			RefreshBackup(source, backup);
 
 			var staging = destination + ".migration-" + Guid.NewGuid().ToString("N");
 			try
@@ -130,6 +129,23 @@ public static class StoreUserDataMigration
 
 	private static void WriteCompletionMarker(string path) =>
 		File.WriteAllText(path, "completed");
+
+	private static void RefreshBackup(string source, string backup)
+	{
+		var staging = backup + ".migration-" + Guid.NewGuid().ToString("N");
+		try
+		{
+			CopyDirectory(source, staging);
+			if (Directory.Exists(backup))
+				Directory.Delete(backup, recursive: true);
+			Directory.Move(staging, backup);
+		}
+		finally
+		{
+			if (Directory.Exists(staging))
+				Directory.Delete(staging, recursive: true);
+		}
+	}
 
 	private static FileStream? TryAcquireLock(string path)
 	{

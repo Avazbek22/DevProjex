@@ -189,6 +189,34 @@ public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
 	}
 
+	[Fact]
+	public async Task CancelPendingFinishesAnActiveWriteBeforeTheCallerClearsProfiles()
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var operations = new List<string>();
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			async (_, _, _) =>
+			{
+				writeStarted.TrySetResult();
+				await releaseWrite.Task;
+				operations.Add("write");
+			},
+			delay.WaitAsync);
+
+		coordinator.Schedule(@"C:\Project", ["src"]);
+		delay.Release();
+		await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		var cancellation = coordinator.CancelPendingAndDrainAsync(TestContext.Current.CancellationToken);
+		Assert.False(cancellation.IsCompleted);
+		releaseWrite.TrySetResult();
+		await cancellation;
+		operations.Add("clear");
+
+		Assert.Equal(["write", "clear"], operations);
+	}
+
 	private sealed class ControlledDelay
 	{
 		private readonly TaskCompletionSource _release =

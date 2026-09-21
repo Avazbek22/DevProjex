@@ -413,6 +413,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
+			var recoveredTail = false;
 			if (!File.Exists(path))
 			{
 				if (!sessionHeaders.TryGetValue(sessionId, out var header))
@@ -434,12 +435,98 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 					};
 				}
 			}
+			else
+			{
+				recoveredTail = await RepairIncompleteTailAsync(path, cancellationToken).ConfigureAwait(false);
+				if (new FileInfo(path).Length == 0)
+				{
+					if (!sessionHeaders.TryGetValue(sessionId, out var header))
+						throw new InvalidDataException("The journal session header is incomplete.");
+					await WriteLineAsync(
+						path,
+						new AgentJournalLine("session", Session: header),
+						FileMode.Create,
+						cancellationToken).ConfigureAwait(false);
+				}
+			}
+			if (recoveredTail && line.Call is { } recoveredTailCall)
+			{
+				line = line with
+				{
+					Call = recoveredTailCall with
+					{
+						Notices = recoveredTailCall.Notices.Append("history-recovered").ToArray()
+					}
+				};
+			}
 			await WriteLineAsync(path, line, FileMode.Append, cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
 			gate.Release();
 		}
+	}
+
+	private static async ValueTask<bool> RepairIncompleteTailAsync(
+		string path,
+		CancellationToken cancellationToken)
+	{
+		await using var stream = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.ReadWrite,
+			FileShare.Read,
+			bufferSize: 4096,
+			FileOptions.Asynchronous | FileOptions.RandomAccess);
+		if (stream.Length == 0)
+			return true;
+
+		stream.Position = stream.Length - 1;
+		if (stream.ReadByte() == (byte)'\n')
+			return false;
+
+		var buffer = new byte[4096];
+		var cursor = stream.Length;
+		long completeLength = 0;
+		while (cursor > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var count = checked((int)Math.Min(buffer.Length, cursor));
+			var start = cursor - count;
+			stream.Position = start;
+			await stream.ReadExactlyAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+			var newline = buffer.AsSpan(0, count).LastIndexOf((byte)'\n');
+			if (newline >= 0)
+			{
+				completeLength = start + newline + 1;
+				break;
+			}
+			cursor = start;
+		}
+		var trailingLength = stream.Length - completeLength;
+		if (trailingLength <= MaximumLineCharacters)
+		{
+			var trailing = new byte[checked((int)trailingLength)];
+			stream.Position = completeLength;
+			await stream.ReadExactlyAsync(trailing, cancellationToken).ConfigureAwait(false);
+			using var line = new MemoryStream(
+				trailing,
+				index: 0,
+				count: trailing.Length,
+				writable: false,
+				publiclyVisible: true);
+			if (TryDeserializeLine(line, out _))
+			{
+				stream.Position = stream.Length;
+				await stream.WriteAsync(new byte[] { (byte)'\n' }, cancellationToken).ConfigureAwait(false);
+				await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+				return false;
+			}
+		}
+
+		stream.SetLength(completeLength);
+		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+		return true;
 	}
 
 	private static async ValueTask WriteLineAsync(
@@ -453,6 +540,9 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			AgentJournalJsonSerializerContext.Default.AgentJournalLine);
 		if (bytes.Length > MaximumLineCharacters)
 			throw new InvalidDataException("The journal record exceeds the supported line size.");
+		var framed = new byte[bytes.Length + 1];
+		bytes.CopyTo(framed, 0);
+		framed[^1] = (byte)'\n';
 		await using var stream = new FileStream(
 			path,
 			mode,
@@ -460,8 +550,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			FileShare.Read,
 			bufferSize: 4096,
 			FileOptions.Asynchronous | FileOptions.WriteThrough);
-		await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
-		await stream.WriteAsync("\n"u8.ToArray(), cancellationToken).ConfigureAwait(false);
+		await stream.WriteAsync(framed, cancellationToken).ConfigureAwait(false);
 		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 	}
 
@@ -748,7 +837,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		long errors = 0;
 		foreach (var call in calls)
 		{
-			if (call.Notices.Contains("history-incomplete", StringComparer.Ordinal))
+			if (IsIncompleteHistoryMarker(call))
 				continue;
 			count++;
 			characters = SaturatingAdd(characters, call.ResultCharacters);
@@ -761,6 +850,11 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		}
 		return new AgentJournalTotals(count, characters, tokens, files, secrets, privateData, errors);
 	}
+
+	private static bool IsIncompleteHistoryMarker(AgentJournalCall call) =>
+		string.Equals(call.Tool, "journal", StringComparison.Ordinal) &&
+		call.Notices.Contains("history-incomplete", StringComparer.Ordinal) &&
+		call.Arguments.ContainsKey("lost_events");
 
 	private static long SaturatingAdd(long left, long right) =>
 		left > long.MaxValue - right ? long.MaxValue : left + right;

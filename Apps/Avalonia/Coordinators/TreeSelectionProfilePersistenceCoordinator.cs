@@ -139,6 +139,13 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
         stateChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    public async Task CancelPendingAndDrainAsync(CancellationToken cancellationToken = default)
+    {
+        CancelPending();
+        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        _writeGate.Release();
+    }
+
     private async Task PersistAfterDelayAsync(long version, CancellationToken cancellationToken)
     {
         try

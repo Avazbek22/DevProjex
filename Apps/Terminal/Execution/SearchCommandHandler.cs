@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DevProjex.Application.Secrets;
@@ -18,6 +19,11 @@ public sealed class SearchCommandHandler(
 	private const int MaximumStoredCharacters = 2_000_000;
 	private const int MaximumDeclarationsReported = 20;
 	private const long MaximumInspectedBytes = 64L * 1024 * 1024;
+	private static readonly JsonSerializerOptions JsonOptions = new()
+	{
+		WriteIndented = true,
+		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+	};
 
 	public async Task<int> ExecuteAsync(
 		SearchCommandRequest request,
@@ -566,7 +572,7 @@ public sealed class SearchCommandHandler(
 					limits
 				}
 			},
-			new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+			JsonOptions) + Environment.NewLine;
 	}
 
 	private static string RenderMarkdown(SearchResult result)

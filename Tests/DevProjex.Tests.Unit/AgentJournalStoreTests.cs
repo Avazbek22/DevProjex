@@ -49,6 +49,83 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 	}
 
 	[Fact]
+	public async Task WriterRepairsAnIncompleteLastLineBeforeAppendingTheNextCall()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			temporary.Path,
+			44,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 5, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		var path = Path.Combine(store.DirectoryPath, session.Id + ".jsonl");
+		await File.AppendAllTextAsync(path, "{\"type\":\"call\",\"call\":", cancellationToken);
+
+		await store.RecordCall(session.Id, CreateCall(2), cancellationToken);
+
+		var calls = await store.ReadCallsAsync(session.Id, cancellationToken);
+		Assert.Equal([1L, 2L], calls.Select(static call => call.Sequence));
+		Assert.Contains("history-recovered", calls[1].Notices);
+		Assert.EndsWith("\n", await File.ReadAllTextAsync(path, cancellationToken), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task WriterPreservesACompleteRecordThatOnlyLostItsTrailingNewline()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			temporary.Path,
+			46,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 7, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		var path = Path.Combine(store.DirectoryPath, session.Id + ".jsonl");
+		await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read))
+			stream.SetLength(stream.Length - 1);
+
+		await store.RecordCall(session.Id, CreateCall(2), cancellationToken);
+
+		var calls = await store.ReadCallsAsync(session.Id, cancellationToken);
+		Assert.Equal([1L, 2L], calls.Select(static call => call.Sequence));
+		Assert.DoesNotContain("history-recovered", calls[1].Notices);
+	}
+
+	[Fact]
+	public async Task RecoveredTotalsIncludeARecordedCallThatReportsEarlierLostEvents()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			temporary.Path,
+			45,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 6, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(
+			session.Id,
+			CreateCall(2) with
+			{
+				Arguments = new Dictionary<string, string>(StringComparer.Ordinal)
+				{
+					["lost_events"] = "1"
+				},
+				Notices = ["history-incomplete"]
+			},
+			cancellationToken);
+
+		var restored = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+
+		Assert.Equal(1, restored.Totals.Calls);
+		Assert.Equal(120, restored.Totals.ResultCharacters);
+		Assert.Equal(30, restored.Totals.EstimatedTokens);
+		Assert.Equal(1, restored.Totals.FilesDelivered);
+	}
+
+	[Fact]
 	public async Task RetentionKeepsTheNewestSessionsWithinTheConfiguredLimit()
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;

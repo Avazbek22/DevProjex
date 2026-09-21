@@ -147,6 +147,35 @@ public sealed class TerminalAgentJournalPresentationTests
 	}
 
 	[Fact]
+	public void ActivitySnapshotUsesTheLatestCallForTheMatchingRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstRoot = workspace.CreateDirectory("first");
+		var secondRoot = workspace.CreateDirectory("second");
+		var session = CreateSession() with
+		{
+			Roots =
+			[
+				new AgentJournalRoot(firstRoot, "first"),
+				new AgentJournalRoot(secondRoot, "second")
+			]
+		};
+		var firstRootCall = CreateCall(1, "get_tree", ["src/App.cs"]) with { RootIndex = 0 };
+		var secondRootCall = CreateCall(2, "get_file", ["src/App.cs"]) with { RootIndex = 1 };
+		var receipt = new AgentJournalReceipt(
+			session,
+			session.Totals,
+			[],
+			[firstRootCall, secondRootCall]);
+
+		var first = TerminalAgentJournalSnapshot.Create(firstRoot, receipt);
+		var second = TerminalAgentJournalSnapshot.Create(secondRoot, receipt);
+
+		Assert.Equal("get_tree", first.LatestCall?.Tool);
+		Assert.Equal("get_file", second.LatestCall?.Tool);
+	}
+
+	[Fact]
 	public void IncompleteHistoryIsNamedInCallDetails()
 	{
 		var marker = CreateCall(3, "journal", []) with

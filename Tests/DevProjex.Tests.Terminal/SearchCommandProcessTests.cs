@@ -264,6 +264,24 @@ public sealed class SearchCommandProcessTests
 			boundary.GetProperty("omittedMatches").GetInt32());
 	}
 
+	[Fact]
+	public void UnicodePatternKeepsJsonWithinThePublishedCharacterBudget()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/content.txt", "ordinary text");
+		var pattern = string.Concat(Enumerable.Repeat("Ж", 4_096));
+
+		var result = Run(workspace, project, pattern, "--format", "json");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.True(
+			result.StandardOutput.Length <= MaximumOutputCharacters,
+			$"JSON output contained {result.StandardOutput.Length} characters.");
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		Assert.Equal(pattern, document.RootElement.GetProperty("query").GetProperty("pattern").GetString());
+	}
+
 	private static string CreateProject(TemporaryDirectory workspace)
 	{
 		var project = workspace.CreateDirectory("project");
