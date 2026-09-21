@@ -77,13 +77,100 @@ public sealed partial class McpServerProcessTests
 		Assert.Equal(8, session.Totals.Calls);
 		Assert.True(session.Totals.ResultCharacters > 0);
 		Assert.True(session.Totals.EstimatedTokens > 0);
-		Assert.Contains(calls, call => call.Tool == "pack_context" && call.DeliveredPaths.Contains("src/Large.txt"));
+		Assert.DoesNotContain(calls, call => call.Tool == "pack_context" && call.DeliveredPaths.Contains("src/Large.txt"));
+		Assert.Contains(calls, call => call.Tool == "read_pack" && call.DeliveredPaths.Contains("src/Large.txt"));
+		Assert.DoesNotContain(
+			AgentJournalNoticeCodes.StalePack,
+			calls.Single(call => call.Tool == "read_pack").Notices);
 		Assert.Contains(calls, call => call.Tool == "search_project" && call.DeliveredPaths.Contains("src/Program.cs"));
 		Assert.Contains(calls, call => call.Tool == "get_file" && call.DeliveredPaths.Contains("Outside.cs"));
 		Assert.Equal(
 			live,
 			calls.Single(call => call.Tool == "get_file").Notices.Contains(AgentJournalNoticeCodes.OutsideSelection));
 		Assert.True(calls.Sum(static call => call.SecretsMasked) > 0);
+	}
+
+	[Fact]
+	public async Task PublishedJournalCountsOnlyReturnedFilesRangesAndExplicitNotices()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		workspace.CreateDirectory("project/src");
+		workspace.WriteFile("project/src/A.cs", "namespace P; class A { int Good() => 1; }\n");
+		workspace.WriteFile("project/src/B.cs", "namespace P; class B { int Other() => 2; }\n");
+		workspace.WriteFile(
+			"project/src/Secret.cs",
+			string.Join('\n', Enumerable.Range(1, 99).Select(static index => $"line {index}")) +
+			$"\nconst string Token = \"{Secret}\";\n");
+		workspace.WriteFile("project/src/Matches.txt", "needle one\nneedle two\n");
+		workspace.WriteFile("project/src/PackA.txt", "first pack file\n");
+		workspace.WriteFile("project/src/PackB.txt", new string('b', 400));
+
+		await using (var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			clientInfo: new Implementation { Name = "journal-render-test", Version = "1.0" }))
+		{
+			var unknown = await server.Client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "src/A.cs", ["symbol"] = "Missing" },
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			Assert.True(unknown.IsError);
+			await AssertSuccessful(
+				server,
+				"get_file",
+				new Dictionary<string, object?>
+				{
+					["requests"] = new object[]
+					{
+						new { path = "src/A.cs", symbol = "P.A.Good" },
+						new { path = "src/B.cs", symbol = "Missing" }
+					}
+				});
+			await AssertSuccessful(
+				server,
+				"get_file",
+				new Dictionary<string, object?>
+				{
+					["path"] = "src/Secret.cs",
+					["start_line"] = 1,
+					["end_line"] = 3
+				});
+			await AssertSuccessful(
+				server,
+				"search_project",
+				new Dictionary<string, object?> { ["pattern"] = "needle", ["max_results"] = 1 });
+			await AssertSuccessful(
+				server,
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["paths"] = new[] { "src/PackA.txt", "src/PackB.txt" },
+					["view"] = "content",
+					["format"] = "text",
+					["max_tokens"] = 20
+				});
+		}
+
+		using var journal = new AgentJournalStore(() => dataRoot, activeSessionProvider: static () => []);
+		var session = Assert.Single(await journal.ListSessionsAsync(
+			project,
+			cancellationToken: TestContext.Current.CancellationToken));
+		var calls = await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken);
+		var reads = calls.Where(static call => call.Tool == "get_file").OrderBy(static call => call.Sequence).ToArray();
+
+		Assert.Empty(reads[0].DeliveredPaths);
+		Assert.Equal(["src/A.cs"], reads[1].DeliveredPaths);
+		Assert.Equal(0, reads[2].SecretsMasked);
+		var search = Assert.Single(calls, static call => call.Tool == "search_project");
+		Assert.Contains(AgentJournalNoticeCodes.SearchPartial, search.Notices);
+		Assert.Contains(AgentJournalNoticeCodes.MatchesOmitted, search.Notices);
+		var pack = Assert.Single(calls, static call => call.Tool == "pack_context");
+		Assert.Equal(["src/PackA.txt"], pack.DeliveredPaths);
+		Assert.Contains(AgentJournalNoticeCodes.BudgetSkipped, pack.Notices);
 	}
 
 	private static async Task AssertSuccessful(

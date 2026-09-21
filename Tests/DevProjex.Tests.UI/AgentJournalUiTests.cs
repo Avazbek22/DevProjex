@@ -340,6 +340,139 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
+	public async Task JournalRefreshDoesNotRestartTheSelectedSessionSubscription()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var reader = new RecordingJournalReader(fixture.Sessions, fixture.Calls);
+		var journal = new AgentJournalWindow(
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath);
+		try
+		{
+			await journal.RefreshAsync();
+			var reads = reader.ReadCallsCount;
+			var watches = reader.WatchStarts;
+
+			await journal.RefreshAsync();
+
+			Assert.Equal(reads, reader.ReadCallsCount);
+			Assert.Equal(watches, reader.WatchStarts);
+		}
+		finally
+		{
+			journal.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalClearKeepsAnActiveSessionVisible()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var reader = new RecordingJournalReader(fixture.Sessions, fixture.Calls, preserveLiveOnClear: true);
+		var journal = new AgentJournalWindow(
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath);
+		try
+		{
+			await journal.RefreshAsync();
+
+			var removed = await journal.ClearCurrentScopeAsync();
+
+			Assert.Equal(1, removed);
+			Assert.Equal(fixture.LiveSession.Id, Assert.Single(journal.ViewModel.Sessions).Session.Id);
+		}
+		finally
+		{
+			journal.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalNamesTheNumberOfEventsMissingFromIncompleteHistory()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var marker = fixture.SecondCall with
+		{
+			Sequence = 3,
+			Tool = "journal",
+			Arguments = new Dictionary<string, string> { ["lost_events"] = "2" },
+			DeliveredPaths = [],
+			Notices = ["history-incomplete"]
+		};
+		var calls = fixture.Calls.ToDictionary(
+			static pair => pair.Key,
+			static pair => pair.Value,
+			StringComparer.Ordinal);
+		calls[fixture.LiveSession.Id] = [fixture.Calls[fixture.LiveSession.Id][0], marker];
+		var reader = new RecordingJournalReader(fixture.Sessions, calls);
+		var journal = new AgentJournalWindow(
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru),
+			workspace.Project.RootPath);
+		try
+		{
+			await journal.RefreshAsync();
+
+			Assert.Contains(
+				journal.ViewModel.Calls,
+				call => call.Notices.Contains("История неполна: 2 событий не записано.", StringComparison.Ordinal));
+		}
+		finally
+		{
+			journal.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalProjectContextCanFollowTheOwningWindow()
+	{
+		var secondProject = Path.Combine(workspace.Project.RootPath, "second-root");
+		Directory.CreateDirectory(secondProject);
+		var first = JournalFixture.Create(workspace.Project.RootPath).LiveSession;
+		var second = first with
+		{
+			Id = "second-session",
+			Roots = [new AgentJournalRoot(secondProject, "second")]
+		};
+		var reader = new RecordingJournalReader(
+			[first, second],
+			new Dictionary<string, IReadOnlyList<AgentJournalCall>>(StringComparer.Ordinal)
+			{
+				[first.Id] = [],
+				[second.Id] = []
+			});
+		string? currentProject = workspace.Project.RootPath;
+		var journal = new AgentJournalWindow(
+			null,
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath,
+			() => currentProject);
+		UiTestDriver.TrackTopLevelWindow(journal);
+		journal.Show();
+		try
+		{
+			await journal.RefreshAsync();
+			Assert.Equal(first.Id, Assert.Single(journal.ViewModel.Sessions).Session.Id);
+
+			currentProject = secondProject;
+			await journal.RefreshAsync();
+
+			Assert.Equal(second.Id, Assert.Single(journal.ViewModel.Sessions).Session.Id);
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(journal);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task JournalRefreshKeepsTheNewestProjectFilterResult()
 	{
 		var fixture = JournalFixture.Create(workspace.Project.RootPath);
@@ -394,7 +527,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				window,
 				() => viewModel.AgentActivityVisible &&
 					  viewModel.AgentActivityText.Contains(
-						  "Codex · search_project «Configure»",
+						  "Codex · search_project ·",
 						  StringComparison.Ordinal),
 				"live agent activity status");
 
@@ -471,10 +604,13 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			"Menu.View.AgentActivity",
 			"AgentJournal.Title",
 			"AgentJournal.Empty",
+			"AgentJournal.Empty.Tui",
 			"AgentJournal.Footer",
 			"AgentJournal.Masked.Short",
 			"AgentJournal.Notice.OutsideSelection",
 			"AgentJournal.Notice.Unavailable",
+			"AgentJournal.Notice.HistoryRecovered",
+			"AgentJournal.Notice.HistoryIncomplete",
 			"AgentActivity.Status.Files",
 			"AgentActivity.Status.Tokens",
 			"AgentActivity.Status.Calls",
@@ -749,13 +885,110 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		Assert.All(snapshots, path => Assert.True(new FileInfo(path).Length > 1_000, path));
 	}
 
+	[AvaloniaFact]
+	public async Task JournalIntegritySnapshotsShowPreservedAndIncompleteSessions()
+	{
+		if (!string.Equals(
+				Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_JOURNAL_INTEGRITY"),
+				"1",
+				StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		var outputRoot = Path.Combine(Path.GetTempPath(), "devprojex-journal-fix");
+		Directory.CreateDirectory(outputRoot);
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var activeReader = new RecordingJournalReader(
+			fixture.Sessions,
+			fixture.Calls,
+			preserveLiveOnClear: true);
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var owner = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+		var activeJournal = new AgentJournalWindow(
+			owner,
+			activeReader,
+			new RecordingFormatter(),
+			localization,
+			workspace.Project.RootPath,
+			() => workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(activeJournal);
+		activeJournal.Show(owner);
+		try
+		{
+			await activeJournal.RefreshAsync();
+			await activeJournal.ClearCurrentScopeAsync();
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Equal(fixture.LiveSession.Id, Assert.Single(activeJournal.ViewModel.Sessions).Session.Id);
+			await SaveSnapshotAsync(
+				activeJournal,
+				Path.Combine(outputRoot, "journal-active-after-clear.png"));
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(activeJournal);
+		}
+
+		var marker = fixture.SecondCall with
+		{
+			Sequence = 3,
+			Tool = "journal",
+			Arguments = new Dictionary<string, string> { ["lost_events"] = "2" },
+			DeliveredPaths = [],
+			Notices = ["history-incomplete"]
+		};
+		var incompleteCalls = fixture.Calls.ToDictionary(
+			static pair => pair.Key,
+			static pair => pair.Value,
+			StringComparer.Ordinal);
+		incompleteCalls[fixture.LiveSession.Id] = [fixture.Calls[fixture.LiveSession.Id][0], marker];
+		var incompleteJournal = new AgentJournalWindow(
+			owner,
+			new RecordingJournalReader(fixture.Sessions, incompleteCalls),
+			new RecordingFormatter(),
+			localization,
+			workspace.Project.RootPath,
+			() => workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(incompleteJournal);
+		incompleteJournal.Show(owner);
+		try
+		{
+			await incompleteJournal.RefreshAsync();
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Contains(
+				incompleteJournal.ViewModel.Calls,
+				call => call.Notices.Contains("История неполна: 2 событий не записано.", StringComparison.Ordinal));
+			await SaveSnapshotAsync(
+				incompleteJournal,
+				Path.Combine(outputRoot, "journal-incomplete-history.png"));
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(incompleteJournal);
+			await UiTestDriver.CloseWindowAsync(owner);
+		}
+
+		Assert.True(new FileInfo(Path.Combine(outputRoot, "journal-active-after-clear.png")).Length > 1_000);
+		Assert.True(new FileInfo(Path.Combine(outputRoot, "journal-incomplete-history.png")).Length > 1_000);
+	}
+
 	private static async Task SaveSnapshotAsync(TopLevel topLevel, string path)
 	{
 		await topLevel.Dispatcher.InvokeAsync(() =>
 		{
-			using var bitmap = topLevel.CaptureRenderedFrame();
-			Assert.NotNull(bitmap);
-			bitmap.Save(path, PngBitmapEncoderOptions.Default);
+			using var captured = topLevel.CaptureRenderedFrame();
+			if (captured is not null)
+			{
+				captured.Save(path, PngBitmapEncoderOptions.Default);
+				return;
+			}
+
+			var scale = topLevel.RenderScaling;
+			using var rendered = new RenderTargetBitmap(
+				PixelSize.FromSize(topLevel.Bounds.Size, scale),
+				new Vector(96 * scale, 96 * scale));
+			rendered.Render(topLevel);
+			rendered.Save(path, PngBitmapEncoderOptions.Default);
 		}, DispatcherPriority.Render);
 	}
 
@@ -918,7 +1151,8 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 
 	private sealed class RecordingJournalReader(
 		IEnumerable<AgentJournalSession> sessions,
-		IReadOnlyDictionary<string, IReadOnlyList<AgentJournalCall>> calls) : IAgentJournalReader
+		IReadOnlyDictionary<string, IReadOnlyList<AgentJournalCall>> calls,
+		bool preserveLiveOnClear = false) : IAgentJournalReader
 	{
 		private readonly List<AgentJournalSession> _sessions = [.. sessions];
 		private readonly Dictionary<string, List<AgentJournalCall>> _calls = calls.ToDictionary(
@@ -929,6 +1163,8 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 
 		public AgentJournalRetentionPolicy Retention => AgentJournalRetentionPolicy.Default;
 		public List<string?> ClearRoots { get; } = [];
+		public int ReadCallsCount { get; private set; }
+		public int WatchStarts { get; private set; }
 
 		public ValueTask<IReadOnlyList<AgentJournalSession>> ListSessionsAsync(
 			string? projectRoot = null,
@@ -949,6 +1185,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			CancellationToken cancellationToken = default)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			ReadCallsCount++;
 			return ValueTask.FromResult<IReadOnlyList<AgentJournalCall>>(
 				_calls.TryGetValue(sessionId, out var sessionCalls) ? sessionCalls.ToArray() : []);
 		}
@@ -979,6 +1216,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			string sessionId,
 			[EnumeratorCancellation] CancellationToken cancellationToken = default)
 		{
+			WatchStarts++;
 			var channel = GetChannel(sessionId);
 			await foreach (var change in channel.Reader.ReadAllAsync(cancellationToken))
 				yield return change;
@@ -990,8 +1228,10 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			ClearRoots.Add(projectRoot);
-			var removed = _sessions.RemoveAll(session => projectRoot is null || session.Roots.Any(root =>
-				PathComparer.Default.Equals(Path.GetFullPath(root.ConfiguredPath), Path.GetFullPath(projectRoot))));
+			var removed = _sessions.RemoveAll(session =>
+				(!preserveLiveOnClear || !session.IsLive) &&
+				(projectRoot is null || session.Roots.Any(root =>
+					PathComparer.Default.Equals(Path.GetFullPath(root.ConfiguredPath), Path.GetFullPath(projectRoot)))));
 			return ValueTask.FromResult(removed);
 		}
 
@@ -1066,7 +1306,11 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				started.AddSeconds(2),
 				"search_project",
 				0,
-				new Dictionary<string, string> { ["pattern"] = "Configure" },
+				new Dictionary<string, string>
+				{
+					["query_present"] = bool.TrueString.ToLowerInvariant(),
+					["query_length"] = "9"
+				},
 				7,
 				25,
 				1_200,
