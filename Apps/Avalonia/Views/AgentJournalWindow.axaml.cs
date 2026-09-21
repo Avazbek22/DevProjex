@@ -20,6 +20,7 @@ internal partial class AgentJournalWindow : Window
     private readonly string? _currentProjectRoot;
     private readonly AgentJournalWindowViewModel _viewModel;
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private CancellationTokenSource? _watchSession;
     private readonly DispatcherTimer _refreshTimer;
     private bool _loaded;
@@ -78,22 +79,30 @@ internal partial class AgentJournalWindow : Window
 
     internal async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
-        _viewModel.IsLoading = true;
+        await _refreshGate.WaitAsync(cancellationToken);
         try
         {
-            var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
-            var sessions = await _reader.ListSessionsAsync(root, cancellationToken: cancellationToken);
-            var now = DateTimeOffset.UtcNow;
-            var rows = sessions
-                .OrderByDescending(static session => session.StartedUtc)
-                .Select(session => CreateSessionRow(session, now))
-                .ToArray();
-            _viewModel.ReplaceSessions(rows);
-            await LoadSelectedSessionAsync(cancellationToken);
+            _viewModel.IsLoading = true;
+            try
+            {
+                var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
+                var sessions = await _reader.ListSessionsAsync(root, cancellationToken: cancellationToken);
+                var now = DateTimeOffset.UtcNow;
+                var rows = sessions
+                    .OrderByDescending(static session => session.StartedUtc)
+                    .Select(session => CreateSessionRow(session, now))
+                    .ToArray();
+                _viewModel.ReplaceSessions(rows);
+                await LoadSelectedSessionAsync(cancellationToken);
+            }
+            finally
+            {
+                _viewModel.IsLoading = false;
+            }
         }
         finally
         {
-            _viewModel.IsLoading = false;
+            _refreshGate.Release();
         }
     }
 
