@@ -40,3 +40,11 @@ index for packs containing 1,000, 10,000, and 100,000 paths:
 ```powershell
 dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- pack-attribution --repetitions 5
 ```
+
+The search-retention measurement compares the old full-source retention with compact retained
+candidate metadata when 1, 50, and 100 percent of 2,000 generated files match. The peak bound adds
+one current 32 KiB UTF-16 source to the retained metadata:
+
+```powershell
+dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- search-retention --repetitions 5
+```
