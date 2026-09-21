@@ -1369,7 +1369,10 @@ internal sealed class DevProjexMcpTools(
 				related,
 				direction,
 				configurationData,
-				coverage.ExtractionFailedFiles,
+				coverage.ExtractionFailedFiles
+					.Except(coverage.FactBudgetLimitedFiles, StringComparer.Ordinal)
+					.ToArray(),
+				coverage.FactBudgetLimitedFiles,
 				coverage.PartialParseDiagnostics,
 				cancellationToken,
 				(path, line) => relatedRanges.Add(new ProjectContextFileLineRange(
@@ -2606,6 +2609,7 @@ internal sealed class DevProjexMcpTools(
 		DependencyDirection direction,
 		string? configurationData,
 		IReadOnlyList<string> extractionFailedFiles,
+		IReadOnlyList<string> factBudgetLimitedFiles,
 		IReadOnlyList<DependencyPartialParseDiagnostic> partialParseDiagnostics,
 		CancellationToken cancellationToken,
 		Action<string, int>? recordPath = null)
@@ -2667,6 +2671,14 @@ internal sealed class DevProjexMcpTools(
 			StartLine();
 			output.Write("[Dependency extraction failed] ");
 			output.Write(McpTextEscaping.EscapeSingleLine(path));
+		}
+		foreach (var path in factBudgetLimitedFiles.Take(8))
+		{
+			StartLine();
+			output.Write("[Dependency facts limited] ");
+			output.Write(McpTextEscaping.EscapeSingleLine(path));
+			output.Write(" — ");
+			output.Write(DependencyFactsEngine.AccumulatedFactBudgetReason);
 		}
 		foreach (var diagnostic in partialParseDiagnostics.Take(8))
 		{
