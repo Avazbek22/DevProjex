@@ -49,6 +49,29 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 	}
 
 	[Fact]
+	public async Task WriterRepairsAnIncompleteLastLineBeforeAppendingTheNextCall()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(
+			temporary.Path,
+			44,
+			new DateTimeOffset(2026, 9, 20, 1, 2, 5, TimeSpan.Zero));
+		await store.StartSession(session, cancellationToken);
+		await store.RecordCall(session.Id, CreateCall(1), cancellationToken);
+		var path = Path.Combine(store.DirectoryPath, session.Id + ".jsonl");
+		await File.AppendAllTextAsync(path, "{\"type\":\"call\",\"call\":", cancellationToken);
+
+		await store.RecordCall(session.Id, CreateCall(2), cancellationToken);
+
+		var calls = await store.ReadCallsAsync(session.Id, cancellationToken);
+		Assert.Equal([1L, 2L], calls.Select(static call => call.Sequence));
+		Assert.Contains("history-recovered", calls[1].Notices);
+		Assert.EndsWith("\n", await File.ReadAllTextAsync(path, cancellationToken), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RetentionKeepsTheNewestSessionsWithinTheConfiguredLimit()
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;
