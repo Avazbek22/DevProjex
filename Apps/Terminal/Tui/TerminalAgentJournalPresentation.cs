@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Kernel.Models;
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Terminal.Rendering;
@@ -41,6 +42,38 @@ internal sealed record TerminalAgentJournalSnapshot(
 			paths);
 	}
 
+	public static TerminalAgentJournalSnapshot Create(
+		string projectRoot,
+		AgentJournalActivitySnapshot activity,
+		TerminalAgentJournalSnapshot? previous,
+		long baselineSequence)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(activity);
+		var paths = previous is not null && string.Equals(
+			previous.Session.Id,
+			activity.Session.Id,
+			StringComparison.Ordinal)
+			? new Dictionary<string, long>(previous.DeliveredPathCalls, ProjectTreePathIdentity.CanonicalComparer)
+			: new Dictionary<string, long>(ProjectTreePathIdentity.CanonicalComparer);
+		var rootIndex = ResolveRootIndex(projectRoot, activity.Session.Roots);
+		foreach (var call in activity.AppendedCalls.Where(call =>
+			call.Sequence > baselineSequence &&
+			(call.RootIndex == rootIndex || activity.Session.Roots.Count == 1 && call.RootIndex is null)))
+		{
+			foreach (var delivered in call.DeliveredPaths.Distinct(ProjectTreePathIdentity.CanonicalComparer))
+			{
+				if (TerminalAgentJournalPresentation.TryResolveDeliveredPath(projectRoot, delivered, out var path))
+					paths[path] = paths.TryGetValue(path, out var count) ? count + 1 : 1;
+			}
+		}
+		return new TerminalAgentJournalSnapshot(
+			activity.Session,
+			activity.LatestCall,
+			activity.Session.Totals.Calls,
+			paths);
+	}
+
 	private static int ResolveRootIndex(string projectRoot, IReadOnlyList<AgentJournalRoot> roots)
 	{
 		for (var index = 0; index < roots.Count; index++)
@@ -68,11 +101,20 @@ internal sealed record TerminalAgentJournalSessionRow(
 				: Session.ClientName + " " + Session.ClientVersion);
 		var projects = TerminalTextEscaping.EscapeSingleLine(
 			string.Join(", ", Session.Roots.Select(static root => root.Name)));
-		var end = Session.EndedUtc ?? DateTimeOffset.UtcNow;
-		var duration = end > Session.StartedUtc ? end - Session.StartedUtc : TimeSpan.Zero;
-		var formattedDuration = duration.TotalHours >= 1
-			? duration.ToString("h\\:mm\\:ss", CultureInfo.InvariantCulture)
-			: duration.ToString("m\\:ss", CultureInfo.InvariantCulture);
+		var end = Session.EndedUtc ?? (Session.IsLive
+			? DateTimeOffset.UtcNow
+			: AgentJournalSessionHistory.TryGet(Session, out var history)
+				? history.LastEventUtc
+				: null);
+		var duration = end is { } endUtc && endUtc > Session.StartedUtc
+			? endUtc - Session.StartedUtc
+			: TimeSpan.Zero;
+		var formattedDuration = end is null
+			? "unknown"
+			: (Session.EndedUtc is null && !Session.IsLive ? "≥" : string.Empty) +
+			  (duration.TotalHours >= 1
+				  ? duration.ToString("h\\:mm\\:ss", CultureInfo.InvariantCulture)
+				  : duration.ToString("m\\:ss", CultureInfo.InvariantCulture));
 		return $"{TerminalTextEscaping.EscapeSingleLine(Session.Id)} | {started} | {client} | {mode} | " +
 			   $"{projects} | {Session.Totals.Calls.ToString(CultureInfo.InvariantCulture)} | " +
 			   $"{Session.Totals.ResultCharacters.ToString(CultureInfo.InvariantCulture)} | " +
