@@ -527,7 +527,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				window,
 				() => viewModel.AgentActivityVisible &&
 					  viewModel.AgentActivityText.Contains(
-						  "Codex · search_project «Configure»",
+						  "Codex · search_project ·",
 						  StringComparison.Ordinal),
 				"live agent activity status");
 
@@ -885,13 +885,110 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		Assert.All(snapshots, path => Assert.True(new FileInfo(path).Length > 1_000, path));
 	}
 
+	[AvaloniaFact]
+	public async Task JournalIntegritySnapshotsShowPreservedAndIncompleteSessions()
+	{
+		if (!string.Equals(
+				Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_JOURNAL_INTEGRITY"),
+				"1",
+				StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		var outputRoot = Path.Combine(Path.GetTempPath(), "devprojex-journal-fix");
+		Directory.CreateDirectory(outputRoot);
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var activeReader = new RecordingJournalReader(
+			fixture.Sessions,
+			fixture.Calls,
+			preserveLiveOnClear: true);
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var owner = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+		var activeJournal = new AgentJournalWindow(
+			owner,
+			activeReader,
+			new RecordingFormatter(),
+			localization,
+			workspace.Project.RootPath,
+			() => workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(activeJournal);
+		activeJournal.Show(owner);
+		try
+		{
+			await activeJournal.RefreshAsync();
+			await activeJournal.ClearCurrentScopeAsync();
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Equal(fixture.LiveSession.Id, Assert.Single(activeJournal.ViewModel.Sessions).Session.Id);
+			await SaveSnapshotAsync(
+				activeJournal,
+				Path.Combine(outputRoot, "journal-active-after-clear.png"));
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(activeJournal);
+		}
+
+		var marker = fixture.SecondCall with
+		{
+			Sequence = 3,
+			Tool = "journal",
+			Arguments = new Dictionary<string, string> { ["lost_events"] = "2" },
+			DeliveredPaths = [],
+			Notices = ["history-incomplete"]
+		};
+		var incompleteCalls = fixture.Calls.ToDictionary(
+			static pair => pair.Key,
+			static pair => pair.Value,
+			StringComparer.Ordinal);
+		incompleteCalls[fixture.LiveSession.Id] = [fixture.Calls[fixture.LiveSession.Id][0], marker];
+		var incompleteJournal = new AgentJournalWindow(
+			owner,
+			new RecordingJournalReader(fixture.Sessions, incompleteCalls),
+			new RecordingFormatter(),
+			localization,
+			workspace.Project.RootPath,
+			() => workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(incompleteJournal);
+		incompleteJournal.Show(owner);
+		try
+		{
+			await incompleteJournal.RefreshAsync();
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Contains(
+				incompleteJournal.ViewModel.Calls,
+				call => call.Notices.Contains("История неполна: 2 событий не записано.", StringComparison.Ordinal));
+			await SaveSnapshotAsync(
+				incompleteJournal,
+				Path.Combine(outputRoot, "journal-incomplete-history.png"));
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(incompleteJournal);
+			await UiTestDriver.CloseWindowAsync(owner);
+		}
+
+		Assert.True(new FileInfo(Path.Combine(outputRoot, "journal-active-after-clear.png")).Length > 1_000);
+		Assert.True(new FileInfo(Path.Combine(outputRoot, "journal-incomplete-history.png")).Length > 1_000);
+	}
+
 	private static async Task SaveSnapshotAsync(TopLevel topLevel, string path)
 	{
 		await topLevel.Dispatcher.InvokeAsync(() =>
 		{
-			using var bitmap = topLevel.CaptureRenderedFrame();
-			Assert.NotNull(bitmap);
-			bitmap.Save(path, PngBitmapEncoderOptions.Default);
+			using var captured = topLevel.CaptureRenderedFrame();
+			if (captured is not null)
+			{
+				captured.Save(path, PngBitmapEncoderOptions.Default);
+				return;
+			}
+
+			var scale = topLevel.RenderScaling;
+			using var rendered = new RenderTargetBitmap(
+				PixelSize.FromSize(topLevel.Bounds.Size, scale),
+				new Vector(96 * scale, 96 * scale));
+			rendered.Render(topLevel);
+			rendered.Save(path, PngBitmapEncoderOptions.Default);
 		}, DispatcherPriority.Render);
 	}
 
@@ -1209,7 +1306,11 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				started.AddSeconds(2),
 				"search_project",
 				0,
-				new Dictionary<string, string> { ["pattern"] = "Configure" },
+				new Dictionary<string, string>
+				{
+					["query_present"] = bool.TrueString.ToLowerInvariant(),
+					["query_length"] = "9"
+				},
 				7,
 				25,
 				1_200,
