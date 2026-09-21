@@ -55,7 +55,7 @@ internal sealed class McpCodexUserConfigurationReader(
 	McpCodexUserConfigurationReaderOptions? options = null) : IMcpCodexUserConfigurationStore
 {
 	private static readonly Regex ServerHeader = new(
-		@"(?m)^[ \t]*\[mcp_servers\.devprojex\][ \t]*(?:#.*)?$",
+		@"(?m)^[ \t]*\[mcp_servers\.devprojex\][ \t]*(?:#[^\r\n]*)?\r?$",
 		RegexOptions.CultureInvariant);
 	private static readonly Regex AnyHeader = new(
 		@"(?m)^[ \t]*\[",

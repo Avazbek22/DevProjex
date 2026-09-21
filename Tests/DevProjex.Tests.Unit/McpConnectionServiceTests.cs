@@ -974,7 +974,7 @@ public sealed class McpConnectionServiceTests
 
 			[mcp_servers.devprojex.env]
 			KEEP = "yes"
-			""");
+			""".ReplaceLineEndings("\r\n"));
 		var before = await File.ReadAllTextAsync(configurationPath, TestContext.Current.CancellationToken);
 		var reader = new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
 		{
@@ -1027,7 +1027,7 @@ public sealed class McpConnectionServiceTests
 			command = "old"
 			args = ["mcp", "--root", "{{project.Path.Replace("\\", "\\\\", StringComparison.Ordinal)}}"]
 			cwd = "C:/keep/work"
-			""");
+			""".ReplaceLineEndings("\r\n"));
 		var reader = new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
 		{
 			CodexHomeProvider = () => codexHome.Path
