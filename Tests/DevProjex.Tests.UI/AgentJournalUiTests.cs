@@ -931,9 +931,17 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
+				() => viewModel.AgentActivityVisible &&
+					  viewModel.TreeNodes.SelectMany(static root => root.Flatten())
+						  .All(static node => node.AgentDeliveryCount == 0),
+				"the project-opening boundary to hide earlier deliveries");
+
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
 				() => viewModel.TreeNodes.SelectMany(static root => root.Flatten())
 					.Any(static node => node.AgentDeliveryCount > 0),
-				"the initial delivery trace");
+				"a delivery after the initial project opening");
 
 			await UiTestDriver.OpenFolderAsync(
 				window,
@@ -947,7 +955,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 						  .All(static node => node.AgentDeliveryCount == 0),
 				"project reopen to clear the previous delivery trace");
 
-			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall with { Sequence = 3 });
 			var deliveredPath = Path.GetFullPath(Path.Combine(
 				workspace.Project.RootPath,
 				"src",
