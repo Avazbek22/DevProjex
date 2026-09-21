@@ -1,4 +1,5 @@
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.AgentJournal;
 
 namespace DevProjex.Avalonia;
 
@@ -11,6 +12,8 @@ public partial class MainWindow
     private long _agentActivityLatestSequence;
     private string? _agentDeliveryBaselineSessionId;
     private long _agentDeliveryBaselineSequence;
+    private bool _captureAgentDeliveryBaseline;
+    private int _agentActivityRefreshQueued;
     private IReadOnlyDictionary<string, int> _agentDeliveryCounts =
         new Dictionary<string, int>(PathComparer.Default);
 
@@ -74,17 +77,48 @@ public partial class MainWindow
                 return;
             }
 
-            var calls = await _agentJournalReader.ReadCallsAsync(session.Id, refreshCts.Token);
-            var receipt = await _agentJournalReader.ReadReceiptAsync(session.Id, refreshCts.Token);
+            IReadOnlyList<AgentJournalCall> calls;
+            AgentJournalCall? latestCall;
+            if (_agentJournalReader is IAgentJournalActivityReader activityReader)
+            {
+                var afterSequence = string.Equals(_agentActivitySessionId, session.Id, StringComparison.Ordinal)
+                    ? Volatile.Read(ref _agentActivityLatestSequence)
+                    : 0;
+                var activity = await activityReader.ReadActivityAsync(
+                    session.Id,
+                    afterSequence,
+                    refreshCts.Token);
+                if (activity is null)
+                    return;
+                session = activity.Session;
+                calls = activity.AppendedCalls;
+                latestCall = activity.LatestCall;
+                if (activity.RequiresReset)
+                    calls = await _agentJournalReader.ReadCallsAsync(session.Id, refreshCts.Token);
+            }
+            else
+            {
+                calls = await _agentJournalReader.ReadCallsAsync(session.Id, refreshCts.Token);
+                latestCall = null;
+            }
             var baselineSequence = string.Equals(
                 _agentDeliveryBaselineSessionId,
                 session.Id,
                 StringComparison.Ordinal)
                 ? Volatile.Read(ref _agentDeliveryBaselineSequence)
                 : 0;
-            var counts = BuildDeliveredPathCounts(projectRoot, receipt, calls, baselineSequence);
+            if (_captureAgentDeliveryBaseline)
+            {
+                baselineSequence = latestCall?.Sequence ?? calls.LastOrDefault()?.Sequence ?? 0;
+                _agentDeliveryBaselineSessionId = session.Id;
+                _agentDeliveryBaselineSequence = baselineSequence;
+            }
+            var counts = string.Equals(_agentActivitySessionId, session.Id, StringComparison.Ordinal)
+                ? new Dictionary<string, int>(_agentDeliveryCounts, PathComparer.Default)
+                : new Dictionary<string, int>(PathComparer.Default);
+            AddDeliveredPathCounts(counts, projectRoot, session, calls, baselineSequence);
             var rootIndex = ResolveAgentJournalRootIndex(projectRoot, session.Roots);
-            var latestCall = calls
+            latestCall ??= calls
                 .Where(call => call.RootIndex == rootIndex || session.Roots.Count == 1 && call.RootIndex is null)
                 .OrderByDescending(static call => call.Sequence)
                 .FirstOrDefault();
@@ -113,6 +147,7 @@ public partial class MainWindow
                 }
                 _agentActivitySessionId = session.Id;
                 _agentActivityLatestSequence = latestCall?.Sequence ?? 0;
+                _captureAgentDeliveryBaseline = false;
                 _agentDeliveryCounts = counts;
                 ApplyAgentDeliveryTrace();
                 _viewModel.SetAgentActivityText(FormatAgentActivity(session, latestCall));
@@ -154,7 +189,7 @@ public partial class MainWindow
             await foreach (var change in _agentJournalReader.WatchChangesAsync(sessionId, cancellationToken))
             {
                 if (string.Equals(change.SessionId, sessionId, StringComparison.Ordinal))
-                    Dispatcher.UIThread.Post(RefreshAgentActivityPresentation, DispatcherPriority.Background);
+                    ScheduleAgentActivityRefresh();
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -164,6 +199,17 @@ public partial class MainWindow
         {
             Trace.TraceWarning("Agent activity change stream ended: {0}", exception.GetType().Name);
         }
+    }
+
+    private void ScheduleAgentActivityRefresh()
+    {
+        if (Interlocked.Exchange(ref _agentActivityRefreshQueued, 1) != 0)
+            return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            Interlocked.Exchange(ref _agentActivityRefreshQueued, 0);
+            RefreshAgentActivityPresentation();
+        }, DispatcherPriority.Background);
     }
 
     private void ClearAgentActivityPresentation(
@@ -191,8 +237,9 @@ public partial class MainWindow
 
     private void ResetAgentActivityForProjectOpen()
     {
-        _agentDeliveryBaselineSessionId = _agentActivitySessionId;
-        _agentDeliveryBaselineSequence = _agentActivityLatestSequence;
+        _captureAgentDeliveryBaseline = true;
+        _agentDeliveryBaselineSessionId = null;
+        _agentDeliveryBaselineSequence = 0;
         ClearAgentActivityPresentation(
             preserveEnabledState: true,
             preserveDeliveryBaseline: true);
@@ -276,24 +323,23 @@ public partial class MainWindow
                 : clientName;
     }
 
-    private static IReadOnlyDictionary<string, int> BuildDeliveredPathCounts(
+    private static void AddDeliveredPathCounts(
+        Dictionary<string, int> counts,
         string projectRoot,
-        AgentJournalReceipt? receipt,
+        AgentJournalSession session,
         IReadOnlyList<AgentJournalCall> calls,
         long baselineSequence)
     {
-        var counts = new Dictionary<string, int>(PathComparer.Default);
-        var rootIndex = receipt is null ? -1 : ResolveAgentJournalRootIndex(projectRoot, receipt.Session.Roots);
+        var rootIndex = ResolveAgentJournalRootIndex(projectRoot, session.Roots);
 
         foreach (var call in calls)
         {
             if (call.Sequence <= baselineSequence ||
-                receipt is not null && call.RootIndex != rootIndex && !(receipt.Session.Roots.Count == 1 && call.RootIndex is null))
+                call.RootIndex != rootIndex && !(session.Roots.Count == 1 && call.RootIndex is null))
                 continue;
             foreach (var path in call.DeliveredPaths)
                 AddDeliveredPath(counts, projectRoot, path, 1);
         }
-        return counts;
     }
 
     private static int ResolveAgentJournalRootIndex(
