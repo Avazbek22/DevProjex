@@ -1,4 +1,10 @@
 {
+  "Mcp.Connect.ProjectConfigurationWritten": "{0}: konfigurasi ditulis ke {1}.",
+  "Mcp.Connect.Cursor.NextStep": "Mulai ulang Cursor di proyek ini.",
+  "Mcp.Connect.VsCode.NextStep": "Di VS Code, jalankan MCP: List Servers, pilih devprojex, pilih Enable/Start, lalu konfirmasikan kepercayaan ruang kerja.",
+  "Mcp.Connect.ManualConfigurationRestart": "Gunakan JSON ini untuk konfigurasi MCP manual. Tutup Claude Desktop sepenuhnya, jalankan kembali, lalu periksa Manage connectors.",
+  "Mcp.Connect.Codex.ResponseHint": "Codex dapat mempersingkat halaman respons server sebelum meneruskannya ke model; jika konten terbatas, baca rentang yang lebih kecil.",
+  "Mcp.Connect.Codex.ProjectOverride": ".codex/config.toml proyek menimpa pendaftaran global devprojex. Konfigurasi proyek tidak diubah.",
   "Menu.File": "Berkas",
   "Menu.File.Open": "Buka folder...",
   "Menu.File.OpenNewWindow": "Jendela baru",

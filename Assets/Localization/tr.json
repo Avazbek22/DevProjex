@@ -1,4 +1,10 @@
 {
+  "Mcp.Connect.ProjectConfigurationWritten": "{0}: yapılandırma {1} konumuna yazıldı.",
+  "Mcp.Connect.Cursor.NextStep": "Cursor'ı bu projede yeniden başlatın.",
+  "Mcp.Connect.VsCode.NextStep": "VS Code'da MCP: List Servers komutunu çalıştırın, devprojex'i seçin, Enable/Start seçeneğini belirleyin ve çalışma alanına güveni onaylayın.",
+  "Mcp.Connect.ManualConfigurationRestart": "El ile MCP yapılandırması için bu JSON'u kullanın. Claude Desktop'ı tamamen kapatıp yeniden başlatın ve Manage connectors bölümünü denetleyin.",
+  "Mcp.Connect.Codex.ResponseHint": "Codex, sunucu yanıt sayfalarını modele iletmeden önce kısaltabilir; içerik sınırlıysa daha küçük aralıklar okuyun.",
+  "Mcp.Connect.Codex.ProjectOverride": "Projedeki .codex/config.toml, genel devprojex kaydını geçersiz kılıyor. Proje yapılandırması değiştirilmedi.",
   "Menu.File": "Dosya",
   "Menu.File.Open": "Klasörü aç...",
   "Menu.File.OpenNewWindow": "Yeni pencere",

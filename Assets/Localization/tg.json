@@ -1,4 +1,10 @@
 {
+  "Mcp.Connect.ProjectConfigurationWritten": "{0}: конфигуратсия ба {1} навишта шуд.",
+  "Mcp.Connect.Cursor.NextStep": "Cursor-ро дар ин лоиҳа аз нав оғоз кунед.",
+  "Mcp.Connect.VsCode.NextStep": "Дар VS Code фармони MCP: List Servers-ро иҷро кунед, devprojex ва баъд Enable/Start-ро интихоб карда, эътимоди фазои кориро тасдиқ кунед.",
+  "Mcp.Connect.ManualConfigurationRestart": "Ин JSON-ро барои танзими дастии MCP истифода баред. Claude Desktop-ро пурра пӯшед, аз нав оғоз кунед ва Manage connectors-ро санҷед.",
+  "Mcp.Connect.Codex.ResponseHint": "Codex метавонад саҳифаҳои ҷавоби серверро пеш аз супоридан ба модел кӯтоҳ кунад; агар муҳтаво маҳдуд бошад, диапазонҳои хурдтарро хонед.",
+  "Mcp.Connect.Codex.ProjectOverride": "Файли .codex/config.toml-и лоиҳа сабти умумии devprojex-ро бозменависад. Конфигуратсияи лоиҳа тағйир дода нашуд.",
   "Menu.File": "Файл",
   "Menu.File.Open": "Кушодани ҷузвдон...",
   "Menu.File.OpenNewWindow": "Равзанаи нав",

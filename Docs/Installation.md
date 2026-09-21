@@ -30,6 +30,9 @@ disables FUSE mounts, use the extraction fallback instead:
 ./DevProjex-<version>-<architecture>.AppImage --appimage-extract-and-run
 ```
 
+MCP registrations created from this fallback carry
+`APPIMAGE_EXTRACT_AND_RUN=1`, so clients can start the AppImage without FUSE too.
+
 Desktop-menu integration through AppImageLauncher or appimaged is optional.
 
 ### tar.gz archive
