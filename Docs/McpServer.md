@@ -1575,9 +1575,9 @@ path. Replace `/absolute/path/to/project` in the examples.
 
 Desktop's **MCP** menu, Terminal Workspace's `mcp connect` command, and
 `devprojex mcp connect` use one connection service and embed the absolute installed
-executable path. Desktop's selected submenu, the CLI `--mode` option, and Terminal
-Workspace's optional `live|standard` argument select the mode; Terminal Workspace
-defaults to live. The Store configuration uses the stable WindowsApps alias;
+executable path. Desktop's selected submenu and the CLI `--mode` option select the
+mode. Terminal Workspace's `mcp connect` uses live mode by default and accepts an
+optional `live|standard` argument. The Store configuration uses the stable WindowsApps alias;
 winget and ZIP paths remain stable while their installation directory is unchanged;
 the macOS path remains stable while the `.app` bundle stays in place. AppImage
 configurations name the AppImage itself, so moving it requires reconnecting.
