@@ -456,22 +456,23 @@ public sealed class DevProjexCommandTree
 						var result = await services.McpConnectionService
 							.ConnectAsync(request, cancellationToken)
 							.ConfigureAwait(false);
-						if (!parseResult.GetValue(open) || !result.Succeeded)
-							return WriteMcpConnectionResult(result);
+						var openClient = parseResult.GetValue(open);
+						if (!openClient || !result.Succeeded)
+							return WriteMcpConnectionResult(result, includeNextCommand: !openClient);
 
 						var launchResult = await services.McpClientLaunchService
 							.OpenAsync(new McpClientLaunchRequest(connectionClient, request.ProjectRoot), cancellationToken)
 							.ConfigureAwait(false);
 						if (launchResult.Succeeded)
 						{
-							WriteMcpConnectionResult(result);
+							WriteMcpConnectionResult(result, includeNextCommand: false);
 							TerminalTextEscaping.WriteSingleLine(
 								environment.Output,
 								_localization.Format("Mcp.Open.Succeeded", DisplayConnectionClient(connectionClient)));
 							return CommandLineExitCodes.Success;
 						}
 
-						WriteMcpConnectionResult(result);
+						WriteMcpConnectionResult(result, includeNextCommand: false);
 						TerminalTextEscaping.WriteSingleLine(
 							environment.Output,
 							_localization.Format(
@@ -486,9 +487,15 @@ public sealed class DevProjexCommandTree
 		return command;
 	}
 
-	private int WriteMcpConnectionResult(McpConnectionResult result)
+	private int WriteMcpConnectionResult(McpConnectionResult result, bool includeNextCommand)
 	{
 		TerminalTextEscaping.WriteSingleLine(environment.Output, result.UserMessage);
+		if (includeNextCommand && result.Succeeded && !string.IsNullOrWhiteSpace(result.NextCommand))
+		{
+			TerminalTextEscaping.WriteSingleLine(
+				environment.Output,
+				_localization.Format("Mcp.Connect.RunInProject", result.NextCommand));
+		}
 		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
 			TerminalTextEscaping.WriteSingleLine(environment.Output, result.CommandOutput);
 		if (result.SuggestedConfigPaths is not null)
