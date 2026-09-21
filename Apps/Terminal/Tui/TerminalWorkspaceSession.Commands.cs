@@ -624,12 +624,22 @@ internal sealed partial class TerminalWorkspaceSession
 		ShowTransientStatus(result.UserMessage, statusScheme);
 	}
 
-	private static string BuildMcpConnectionOutput(McpConnectionResult result)
+	private string BuildMcpConnectionOutput(McpConnectionResult result) =>
+		BuildMcpConnectionOutput(result, _services.Localization);
+
+	internal static string BuildMcpConnectionOutput(
+		McpConnectionResult result,
+		LocalizationService localization)
 	{
 		var sections = new List<string>
 		{
 			TerminalTextEscaping.EscapeSingleLine(result.UserMessage)
 		};
+		if (result.Succeeded && !string.IsNullOrWhiteSpace(result.NextCommand))
+		{
+			sections.Add(TerminalTextEscaping.EscapeSingleLine(
+				localization.Format("Mcp.Connect.RunInProject", result.NextCommand)));
+		}
 		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
 			sections.Add(TerminalTextEscaping.EscapeSingleLine(result.CommandOutput));
 		if (result.SuggestedConfigPaths is not null)

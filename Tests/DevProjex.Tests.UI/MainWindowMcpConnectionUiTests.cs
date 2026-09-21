@@ -120,7 +120,7 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
-	public async Task CodexConnectionForAnotherProjectRequiresConfirmationAndReportsReplacement()
+	public async Task CodexConnectionForAnotherProjectRequiresConfirmationAndOpensWithoutSuccessToast()
 	{
 		var previousProject = Path.GetFullPath(Path.Combine(workspace.Project.RootPath, "..", "previous-project"));
 		var service = new ReplacementMcpConnectionService(previousProject);
@@ -162,9 +162,44 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 
 			Assert.Empty(service.ConnectRequests);
 			Assert.Equal(previousProject, Assert.Single(service.ExpectedRoots));
-			Assert.Contains(
-				UiTestDriver.GetToastService(window).Items,
-				static item => item.Message == "Codex connection replaced");
+			Assert.Empty(UiTestDriver.GetToastService(window).Items);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ReconnectingCodexToSameProject_OpensWithoutSuccessToast()
+	{
+		var service = new RecordingMcpConnectionService(_ => new McpConnectionResult(
+			McpConnectionStatus.Updated,
+			"Codex connection updated",
+			Replaced: true));
+		var launcher = new RecordingMcpClientLaunchService(_ => new McpClientLaunchResult(
+			McpClientLaunchStatus.Opened));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with
+			{
+				McpConnectionService = service,
+				McpClientLaunchService = launcher,
+				TerminalCommandSetupService = new StubTerminalCommandSetupService(
+					CreateTerminalSnapshot(workspace.Project.RootPath, TerminalCommandSetupState.Installed))
+			});
+
+		try
+		{
+			var codex = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "McpConnectCodexMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(codex);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => service.Requests.Count == 1 && launcher.Requests.Count == 1,
+				"the repeated Codex connection to open");
+
+			Assert.Empty(UiTestDriver.GetToastService(window).Items);
+			Assert.Empty(window.OwnedWindows);
 		}
 		finally
 		{

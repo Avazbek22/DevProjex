@@ -34,6 +34,7 @@ public sealed class McpConnectionUiTests
 		"Mcp.Connect.ClaudeCode.Updated",
 		"Mcp.Connect.Codex.Connected",
 		"Mcp.Connect.Codex.Updated",
+		"Mcp.Connect.RunInProject",
 		"Mcp.Connect.ClientNotFound",
 		"Mcp.Connect.ProjectConfigurationFailed",
 		"Mcp.Connect.UnknownError",
@@ -334,6 +335,42 @@ public sealed class McpConnectionUiTests
 					string.IsNullOrWhiteSpace(value.GetString()),
 					$"{key} is empty in {Path.GetFileName(file)}.");
 			}
+		}
+	}
+
+	[Fact]
+	public void ConnectionMessages_KeepTheResultSeparateFromTheManualNextStep()
+	{
+		foreach (var file in Directory.GetFiles(GetLocalizationDirectory(), "*.json"))
+		{
+			using var document = JsonDocument.Parse(File.ReadAllText(file));
+			var root = document.RootElement;
+			foreach (var key in new[]
+				{
+					"Mcp.Connect.ClaudeCode.Connected",
+					"Mcp.Connect.ClaudeCode.Updated"
+				})
+			{
+				Assert.DoesNotContain(
+					" claude",
+					root.GetProperty(key).GetString(),
+					StringComparison.Ordinal);
+			}
+			foreach (var key in new[]
+				{
+					"Mcp.Connect.Codex.Connected",
+					"Mcp.Connect.Codex.Updated"
+				})
+			{
+				Assert.DoesNotContain(
+					" codex",
+					root.GetProperty(key).GetString(),
+					StringComparison.Ordinal);
+			}
+			Assert.Contains(
+				"{0}",
+				root.GetProperty("Mcp.Connect.RunInProject").GetString(),
+				StringComparison.Ordinal);
 		}
 	}
 

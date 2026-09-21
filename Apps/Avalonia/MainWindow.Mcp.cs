@@ -60,8 +60,6 @@ public partial class MainWindow
 
             if (result.Succeeded)
             {
-                if (result.Replaced)
-                    _toastService.Show(result.UserMessage);
                 var launchResult = await _mcpClientLaunchService.OpenAsync(
                     new McpClientLaunchRequest(request.Client, request.ProjectRoot),
                     cancellationToken);
