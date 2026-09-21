@@ -360,72 +360,6 @@ public sealed class McpConnectionServiceTests
 	}
 
 	[Fact]
-	public async Task CodexUserConfiguration_TransientAtomicWriteFailureIsRetried()
-	{
-		using var codexHome = new TemporaryDirectory();
-		var configurationPath = codexHome.CreateFile(
-			"config.toml",
-			"[mcp_servers.devprojex]\ncommand = \"old\"\nargs = []\ncwd = \"C:/keep\"\n");
-		var attempts = 0;
-		var reader = new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
-		{
-			CodexHomeProvider = () => codexHome.Path,
-			WriteTextAtomicallyAsync = async (path, text, cancellationToken) =>
-			{
-				if (Interlocked.Increment(ref attempts) == 1)
-					throw new IOException("The file is temporarily unavailable.");
-				await File.WriteAllTextAsync(path, text, cancellationToken);
-			},
-			DelayAsync = static (_, _) => Task.CompletedTask
-		});
-		var snapshot = reader.Read();
-
-		var result = await reader.UpdateConnectionAsync(
-			snapshot,
-			"new",
-			["mcp", "--root", codexHome.Path],
-			new Dictionary<string, string>(),
-			TestContext.Current.CancellationToken);
-
-		Assert.True(result.Succeeded, result.Error);
-		Assert.Equal(3, attempts);
-		Assert.Contains("command = \"new\"", await File.ReadAllTextAsync(
-			configurationPath,
-			TestContext.Current.CancellationToken), StringComparison.Ordinal);
-	}
-
-	[Fact]
-	public async Task CodexUserConfiguration_PersistentAtomicWriteFailureRemainsAnError()
-	{
-		using var codexHome = new TemporaryDirectory();
-		codexHome.CreateFile(
-			"config.toml",
-			"[mcp_servers.devprojex]\ncommand = \"old\"\nargs = []\ncwd = \"C:/keep\"\n");
-		var attempts = 0;
-		var reader = new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
-		{
-			CodexHomeProvider = () => codexHome.Path,
-			WriteTextAtomicallyAsync = (_, _, _) =>
-			{
-				Interlocked.Increment(ref attempts);
-				return Task.FromException(new IOException("The file remains unavailable."));
-			},
-			DelayAsync = static (_, _) => Task.CompletedTask
-		});
-
-		var result = await reader.UpdateConnectionAsync(
-			reader.Read(),
-			"new",
-			["mcp", "--root", codexHome.Path],
-			new Dictionary<string, string>(),
-			TestContext.Current.CancellationToken);
-
-		Assert.False(result.Succeeded);
-		Assert.Equal("The file remains unavailable.", result.Error);
-		Assert.Equal(4, attempts);
-	}
-
-	[Fact]
 	public void ClaudeUserConfiguration_ReadsTheProjectLocalEntryWithoutRunningTheClient()
 	{
 		using var project = new TemporaryDirectory();
@@ -1040,7 +974,7 @@ public sealed class McpConnectionServiceTests
 
 			[mcp_servers.devprojex.env]
 			KEEP = "yes"
-			""");
+			""".ReplaceLineEndings("\r\n"));
 		var before = await File.ReadAllTextAsync(configurationPath, TestContext.Current.CancellationToken);
 		var reader = new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
 		{
@@ -1093,7 +1027,7 @@ public sealed class McpConnectionServiceTests
 			command = "old"
 			args = ["mcp", "--root", "{{project.Path.Replace("\\", "\\\\", StringComparison.Ordinal)}}"]
 			cwd = "C:/keep/work"
-			""");
+			""".ReplaceLineEndings("\r\n"));
 		var reader = new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
 		{
 			CodexHomeProvider = () => codexHome.Path

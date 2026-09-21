@@ -14,8 +14,6 @@ internal sealed record McpCodexUserConfigurationReaderOptions
 		() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 	public Func<string, bool> FileExists { get; init; } = File.Exists;
 	public Func<string, string> ReadAllText { get; init; } = File.ReadAllText;
-	public Func<string, string, CancellationToken, Task>? WriteTextAtomicallyAsync { get; init; }
-	public Func<TimeSpan, CancellationToken, Task> DelayAsync { get; init; } = Task.Delay;
 }
 
 internal sealed record McpCodexUserConnection(
@@ -56,10 +54,8 @@ internal interface IMcpCodexUserConfigurationStore : IMcpCodexUserConfigurationR
 internal sealed class McpCodexUserConfigurationReader(
 	McpCodexUserConfigurationReaderOptions? options = null) : IMcpCodexUserConfigurationStore
 {
-	private const int AtomicWriteAttemptCount = 4;
-	private const int AtomicWriteInitialDelayMilliseconds = 50;
 	private static readonly Regex ServerHeader = new(
-		@"(?m)^[ \t]*\[mcp_servers\.devprojex\][ \t]*(?:#.*)?$",
+		@"(?m)^[ \t]*\[mcp_servers\.devprojex\][ \t]*(?:#[^\r\n]*)?\r?$",
 		RegexOptions.CultureInvariant);
 	private static readonly Regex AnyHeader = new(
 		@"(?m)^[ \t]*\[",
@@ -150,9 +146,9 @@ internal sealed class McpCodexUserConfigurationReader(
 				arguments,
 				requiredEnvironment);
 			var backupPath = snapshot.ConfigurationPath + ".devprojex.bak";
-			await WriteTextWithRetryAsync(backupPath, snapshot.SourceText, cancellationToken)
+			await WriteTextAtomicallyAsync(backupPath, snapshot.SourceText, cancellationToken)
 				.ConfigureAwait(false);
-			await WriteTextWithRetryAsync(snapshot.ConfigurationPath, updated, cancellationToken)
+			await WriteTextAtomicallyAsync(snapshot.ConfigurationPath, updated, cancellationToken)
 				.ConfigureAwait(false);
 			return new McpCodexUserConfigurationWrite(true);
 		}
@@ -176,7 +172,7 @@ internal sealed class McpCodexUserConfigurationReader(
 			return false;
 		try
 		{
-			await WriteTextWithRetryAsync(snapshot.ConfigurationPath, snapshot.SourceText, cancellationToken)
+			await WriteTextAtomicallyAsync(snapshot.ConfigurationPath, snapshot.SourceText, cancellationToken)
 				.ConfigureAwait(false);
 			return true;
 		}
@@ -339,31 +335,6 @@ internal sealed class McpCodexUserConfigurationReader(
 				await writer.FlushAsync(token).ConfigureAwait(false);
 			},
 			cancellationToken).ConfigureAwait(false);
-	}
-
-	private async Task WriteTextWithRetryAsync(
-		string path,
-		string text,
-		CancellationToken cancellationToken)
-	{
-		var write = _options.WriteTextAtomicallyAsync ?? WriteTextAtomicallyAsync;
-		for (var attempt = 1; ; attempt++)
-		{
-			try
-			{
-				await write(path, text, cancellationToken).ConfigureAwait(false);
-				return;
-			}
-			catch (Exception exception) when (
-				attempt < AtomicWriteAttemptCount &&
-				exception is IOException or UnauthorizedAccessException)
-			{
-				await _options.DelayAsync(
-						TimeSpan.FromMilliseconds(AtomicWriteInitialDelayMilliseconds * attempt),
-						cancellationToken)
-					.ConfigureAwait(false);
-			}
-		}
 	}
 
 	private static string ToTomlString(string value)
