@@ -159,7 +159,10 @@ internal sealed record McpSearchCandidate(
 	int Score,
 	string StableText,
 	int StorageCharacters,
-	McpSearchDeclarationPreview? DeclarationPreview = null);
+	McpSearchDeclarationPreview? DeclarationPreview = null,
+	IReadOnlyList<McpSearchProtectedLine>? ProtectedLines = null);
+
+internal readonly record struct McpSearchProtectedLine(int LineNumber, int ReplacementCount);
 
 internal readonly record struct McpSearchBoundary(
 	int EligibleSources,

@@ -272,12 +272,81 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.CreateFile("project/Anchor.cs", "anchor\n");
-		await using var harness = CreateHarness(project);
+		var buildCount = 0;
+		await using var harness = CreateHarness(
+			project,
+			(_, _) =>
+			{
+				Interlocked.Increment(ref buildCount);
+				return ValueTask.CompletedTask;
+			});
 		var initial = await BuildAsync(harness.Service);
 		RaiseWatcherError(harness.Service);
 		var rebuilt = await BuildAsync(harness.Service);
+		var stable = await BuildAsync(harness.Service);
 
 		Assert.NotSame(initial, rebuilt);
+		Assert.Same(rebuilt, stable);
+		Assert.Equal(2, buildCount);
+	}
+
+	[Fact]
+	public async Task NinthRootEvictsTheLeastRecentMonitorAndThenReusesItsInventory()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("root-09");
+		workspace.CreateFile("root-09/Anchor.cs", "anchor\n");
+		var buildCount = 0;
+		await using var harness = CreateHarness(
+			project,
+			(_, _) =>
+			{
+				Interlocked.Increment(ref buildCount);
+				return ValueTask.CompletedTask;
+			});
+		for (var index = 1; index <= 8; index++)
+			GetOrCreateMonitor(harness.Service, workspace.CreateDirectory($"root-{index:D2}"));
+
+		var initial = await BuildAsync(harness.Service);
+		for (var iteration = 0; iteration < 100; iteration++)
+			Assert.Same(initial, await BuildAsync(harness.Service));
+
+		Assert.Equal(1, buildCount);
+		Assert.Equal(8, ReadCacheCount(harness.Service, "rootMonitors"));
+	}
+
+	[Fact]
+	public async Task ChangesInsideAProvenIgnoredArtifactTreeDoNotInvalidateItsInventory()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/Anchor.cs", "anchor\n");
+		workspace.CreateFile("project/node_modules/.package-lock.json", "{}\n");
+		workspace.CreateFile("project/node_modules/package/index.js", "module.exports = 1;\n");
+		var buildCount = 0;
+		await using var harness = CreateHarness(
+			project,
+			(_, _) =>
+			{
+				Interlocked.Increment(ref buildCount);
+				return ValueTask.CompletedTask;
+			});
+
+		var initial = await BuildAsync(harness.Service);
+		var buildsAfterInitial = buildCount;
+		Assert.Contains(ProjectExclusion.SmartIgnore, initial.Selection.Exclusions ?? []);
+		Assert.True(IsIgnoredMonitorChange(harness.Service, project, "node_modules/package/index.js"));
+		for (var iteration = 0; iteration < 50_000; iteration++)
+			RaiseWatcherChange(harness.Service, "node_modules/package/index.js");
+		var unchanged = await BuildAsync(harness.Service);
+
+		Assert.Same(initial, unchanged);
+		Assert.Equal(buildsAfterInitial, buildCount);
+
+		RaiseWatcherChange(harness.Service, "Anchor.cs");
+		var changed = await BuildAsync(harness.Service);
+		Assert.NotSame(initial, changed);
+		Assert.Equal(buildsAfterInitial + 1, buildCount);
 	}
 
 	[Fact(Timeout = 60_000)]
@@ -391,6 +460,11 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		return values.Cast<object>().Single();
 	}
 
+	private static object GetOrCreateMonitor(McpProjectService service, string root) =>
+		typeof(McpProjectService)
+			.GetMethod("GetOrCreateRootMonitor", BindingFlags.Instance | BindingFlags.NonPublic)!
+			.Invoke(service, [root])!;
+
 	private static void DisableWatcher(McpProjectService service)
 	{
 		var monitor = GetMonitor(service);
@@ -407,6 +481,15 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 			.GetMethod("OnChanged", BindingFlags.Instance | BindingFlags.NonPublic)!
 			.Invoke(monitor, [monitor, new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name)]);
 	}
+
+	private static bool IsIgnoredMonitorChange(McpProjectService service, string root, string name) =>
+		(bool)typeof(McpProjectService)
+			.GetMethod("IsChangeInsideProvenIgnoredSubtree", BindingFlags.Instance | BindingFlags.NonPublic)!
+			.Invoke(service,
+			[
+				PathUtility.Normalize(root),
+				new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name)
+			])!;
 
 	private static void RaiseWatcherError(McpProjectService service)
 	{

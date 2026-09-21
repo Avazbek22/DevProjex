@@ -1,6 +1,7 @@
 using DevProjex.Application.Context;
 using DevProjex.Mcp;
 using ModelContextProtocol.Protocol;
+using System.Runtime.CompilerServices;
 
 namespace DevProjex.Tests.Unit;
 
@@ -191,6 +192,28 @@ public sealed class McpLiveContextStateTests
 				response,
 				StringComparison.Ordinal);
 		}
+	}
+
+	[Fact]
+	public void RecordedPlanDoesNotKeepItsEffectiveTreeAlive()
+	{
+		using var temporary = new TemporaryDirectory();
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => new SequenceProfileStore(Found(Profile(["src"]))),
+			TimeSpan.Zero);
+
+		WeakReference<TreeNodeDescriptor> treeReference;
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			treeReference = RecordTemporaryPlan(state, temporary.Path);
+		}
+
+		CollectTemporaryPlan();
+
+		Assert.False(treeReference.TryGetTarget(out _));
+		GC.KeepAlive(state);
 	}
 
 	[Fact]
@@ -582,6 +605,31 @@ public sealed class McpLiveContextStateTests
 
 	private static ProjectProfileLookupResult Found(ProjectSelectionProfile profile) =>
 		new(ProjectProfileLookupStatus.Found, profile);
+
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static WeakReference<TreeNodeDescriptor> RecordTemporaryPlan(McpLiveContextState state, string root)
+	{
+		var children = Enumerable.Range(0, 10_000)
+			.Select(index => new TreeNodeDescriptor(
+				$"File{index}.cs",
+				Path.Combine(root, $"File{index}.cs"),
+				false,
+				false,
+				"csharp",
+				[]))
+			.ToArray();
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", children);
+		state.RecordPlan(root, Plan(root, children.Length, tree));
+		return new WeakReference<TreeNodeDescriptor>(tree);
+	}
+
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	private static void CollectTemporaryPlan()
+	{
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
+	}
 
 	private static ProjectContextPlan Plan(
 		string root,
