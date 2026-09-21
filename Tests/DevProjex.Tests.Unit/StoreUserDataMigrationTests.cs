@@ -89,6 +89,48 @@ public sealed class StoreUserDataMigrationTests
 		Assert.False(Directory.Exists(Path.Combine(configuration, "DevProjex")));
 	}
 
+	[Fact]
+	public void EmptyVirtualizedStoreDoesNotFinalizeMigrationBeforeDataAppears()
+	{
+		using var workspace = new TemporaryDirectory();
+		var configuration = workspace.CreateFolder("roaming");
+		var local = workspace.CreateFolder("local");
+		var source = CreateSource(local);
+
+		var empty = StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+		File.WriteAllText(Path.Combine(source, "project-profiles.json"), "legacy");
+		var populated = StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+
+		Assert.Equal(StoreUserDataMigrationStatus.NotApplicable, empty);
+		Assert.Equal(StoreUserDataMigrationStatus.Migrated, populated);
+		Assert.Equal(
+			"legacy",
+			File.ReadAllText(Path.Combine(configuration, "DevProjex", "project-profiles.json")));
+	}
+
+	[Fact]
+	public void IncompleteBackupIsRebuiltFromTheVirtualizedStore()
+	{
+		using var workspace = new TemporaryDirectory();
+		var configuration = workspace.CreateFolder("roaming");
+		var local = workspace.CreateFolder("local");
+		var source = CreateSource(local);
+		File.WriteAllText(Path.Combine(source, "project-profiles.json"), "profiles");
+		File.WriteAllText(Path.Combine(source, "terminal-settings.json"), "settings");
+		var backup = Directory.CreateDirectory(
+			Path.Combine(configuration, "DevProjex.v5.1-store-backup")).FullName;
+		File.WriteAllText(Path.Combine(backup, "project-profiles.json"), "partial");
+
+		var status = StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+
+		Assert.Equal(StoreUserDataMigrationStatus.Migrated, status);
+		Assert.Equal("profiles", File.ReadAllText(Path.Combine(backup, "project-profiles.json")));
+		Assert.Equal("settings", File.ReadAllText(Path.Combine(backup, "terminal-settings.json")));
+		Assert.Equal(
+			"settings",
+			File.ReadAllText(Path.Combine(configuration, "DevProjex", "terminal-settings.json")));
+	}
+
 	private static string CreateSource(string localRoot) =>
 		Directory.CreateDirectory(Path.Combine(
 			localRoot,
