@@ -21,6 +21,7 @@ internal partial class AgentJournalWindow : Window
     private string? _currentProjectRoot;
     private readonly AgentJournalWindowViewModel _viewModel;
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private CancellationTokenSource? _watchSession;
     private string? _loadedSessionId;
     private string? _watchedSessionId;
@@ -97,35 +98,43 @@ internal partial class AgentJournalWindow : Window
 
     internal async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
-        if (_currentProjectRootProvider is not null)
-        {
-            var current = _currentProjectRootProvider();
-            ApplyProjectContext(string.IsNullOrWhiteSpace(current) ? null : Path.GetFullPath(current));
-        }
-        _viewModel.IsLoading = true;
+        await _refreshGate.WaitAsync(cancellationToken);
         try
         {
-            var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
-            var sessions = await _reader.ListSessionsAsync(root, cancellationToken: cancellationToken);
-            var now = DateTimeOffset.UtcNow;
-            var rows = sessions
-                .OrderByDescending(static session => session.StartedUtc)
-                .Select(session => CreateSessionRow(session, now))
-                .ToArray();
-            _replacingSessions = true;
+            if (_currentProjectRootProvider is not null)
+            {
+                var current = _currentProjectRootProvider();
+                ApplyProjectContext(string.IsNullOrWhiteSpace(current) ? null : Path.GetFullPath(current));
+            }
+            _viewModel.IsLoading = true;
             try
             {
-                _viewModel.ReplaceSessions(rows);
+                var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
+                var sessions = await _reader.ListSessionsAsync(root, cancellationToken: cancellationToken);
+                var now = DateTimeOffset.UtcNow;
+                var rows = sessions
+                    .OrderByDescending(static session => session.StartedUtc)
+                    .Select(session => CreateSessionRow(session, now))
+                    .ToArray();
+                _replacingSessions = true;
+                try
+                {
+                    _viewModel.ReplaceSessions(rows);
+                }
+                finally
+                {
+                    _replacingSessions = false;
+                }
+                await LoadSelectedSessionAsync(cancellationToken, reloadSelected: false);
             }
             finally
             {
-                _replacingSessions = false;
+                _viewModel.IsLoading = false;
             }
-            await LoadSelectedSessionAsync(cancellationToken, reloadSelected: false);
         }
         finally
         {
-            _viewModel.IsLoading = false;
+            _refreshGate.Release();
         }
     }
 

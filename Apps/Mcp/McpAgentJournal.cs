@@ -40,7 +40,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 	private AgentJournalTotals totals = AgentJournalTotals.Empty;
 	private long sequence;
 	private long lostEvents;
-	private int started;
+	private int startState;
 	private int disposed;
 
 	public McpAgentJournal(
@@ -86,7 +86,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		string? clientVersion,
 		CancellationToken cancellationToken)
 	{
-		if (Interlocked.Exchange(ref started, 1) != 0)
+		if (Interlocked.CompareExchange(ref startState, 1, 0) != 0)
 			return;
 		var header = session with
 		{
@@ -96,9 +96,16 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		try
 		{
 			await writer.StartSession(header, cancellationToken).ConfigureAwait(false);
+			Volatile.Write(ref startState, 2);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			Volatile.Write(ref startState, -1);
+			throw;
 		}
 		catch (Exception exception)
 		{
+			Volatile.Write(ref startState, -1);
 			Trace.TraceWarning("MCP journal session could not be started: {0}", exception.GetType().Name);
 		}
 	}
@@ -227,7 +234,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 	public void Complete(CallToolResult result)
 	{
 		var current = invocation.Value;
-		if (current is null || Volatile.Read(ref started) == 0 || Volatile.Read(ref disposed) != 0)
+		if (current is null || Volatile.Read(ref startState) != 2 || Volatile.Read(ref disposed) != 0)
 			return;
 		var text = string.Join('\n', result.Content.OfType<TextContentBlock>().Select(static block => block.Text));
 		var trustedText = ExtractTrustedText(text);
@@ -272,7 +279,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 	{
 		if (Interlocked.Exchange(ref disposed, 1) != 0)
 			return;
-		if (Volatile.Read(ref started) != 0)
+		if (Volatile.Read(ref startState) == 2)
 		{
 			operations.Writer.TryWrite(async token =>
 			{

@@ -1575,18 +1575,19 @@ path. Replace `/absolute/path/to/project` in the examples.
 
 Desktop's **MCP** menu, Terminal Workspace's `mcp connect` command, and
 `devprojex mcp connect` use one connection service and embed the absolute installed
-executable path. Desktop connections always include `--live`; the CLI `--mode`
-option selects live or standard mode, and Terminal Workspace's `mcp connect` uses
-live mode. The Store configuration uses the stable WindowsApps alias;
+executable path. Desktop's selected submenu and the CLI `--mode` option select the
+mode. Terminal Workspace's `mcp connect` uses live mode by default and accepts an
+optional `live|standard` argument. The Store configuration uses the stable WindowsApps alias;
 winget and ZIP paths remain stable while their installation directory is unchanged;
 the macOS path remains stable while the `.app` bundle stays in place. AppImage
 configurations name the AppImage itself, so moving it requires reconnecting.
 
 The Desktop **MCP** menu contains **Live context ▸**, **Standard ▸**, **Journal…**,
-and **Documentation**. The live
-submenu contains **Open in Claude Code**, **Open in Codex**, **Open in Cursor**,
-**Open in VS Code**, and **Other clients…**; those five actions are enabled only with
-an open project.
+and **Documentation**. The live and standard submenus both contain **Open in Claude
+Code**, **Open in Codex**, **Open in Cursor**, **Open in VS Code**, and **Other
+clients…**; those five actions are enabled only with an open project. Standard
+registrations omit `--live`, and their manual-configuration window shows the same
+standard command.
 The first two actions invoke the installed client command, capture its output, replace
 an existing `devprojex` entry, and then open a new terminal at the project root.
 Claude Code stores the entry in the project-local scope selected by its working
@@ -1594,15 +1595,18 @@ directory; Codex stores it in its global configuration. **Open in Cursor** atomi
 merges only the `devprojex` entry in `.cursor/mcp.json`; **Open in VS Code** does the
 same in `.vscode/mcp.json`, then each action opens the project through its URL scheme
 with its command-line launcher as a fallback.
-Unrelated JSON properties and servers are retained. Malformed JSON is never overwritten:
-DevProjex reports the error and presents the configuration for manual installation.
+Unrelated JSON properties and servers are retained. Valid VS Code JSONC with comments
+or trailing commas is recognized but not rewritten because rewriting would discard
+comments; DevProjex leaves it byte-for-byte unchanged and presents the configuration
+for manual installation. Malformed JSON is likewise never overwritten.
 **Other clients…** presents the generic `mcpServers` JSON and the standard Claude
 Desktop configuration paths on Windows and macOS.
 
 A missing command or failed client process uses the same manual-configuration window.
 If removing an existing Claude Code or Codex entry succeeds but adding its replacement
-fails, the previous entry has already been removed; the result states this and presents
-the manual configuration below. If registration succeeds but opening the client fails,
+fails or is canceled, DevProjex restores the captured previous entry before returning;
+the result states whether restoration succeeded and presents the manual configuration.
+If registration succeeds but opening the client fails,
 the window states that the server is connected, names the launch failure, and provides
 a manual launch command to copy. A successful open shows no connection toast. The optional
 PATH prompt appears only after a successful connection: Windows can install or repair

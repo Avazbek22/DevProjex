@@ -65,6 +65,43 @@ public sealed class TerminalPtyJourneyTests
 	}
 
 	[Fact(Timeout = 60_000)]
+	public async Task StandardMcpSessionDoesNotAppearAsLiveContext()
+	{
+		using var workspace = CreateProject();
+		LiveSessionWriter? standardSession = null;
+		try
+		{
+			await using var terminal = await TerminalPtyHarness.StartAsync(
+				workspace.Path,
+				["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+				cancellationToken: TestContext.Current.CancellationToken,
+				initializeDataRoot: root =>
+				{
+					standardSession = new LiveSessionRegistry(() => root).Start(
+						[workspace.Path],
+						AgentJournalMode.Standard);
+					standardSession.UpdateClient("sample-client", "1.0");
+				});
+
+			var screen = await terminal.WaitForStableScreenAsync(
+				"> PROJECT TREE",
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.DoesNotContain("Live context", screen, StringComparison.Ordinal);
+
+			await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(
+				CommandLineExitCodes.Success,
+				await terminal.WaitForExitAsync(
+					cancellationToken: TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			if (standardSession is not null)
+				await standardSession.DisposeAsync();
+		}
+	}
+
+	[Fact(Timeout = 60_000)]
 	public async Task ConnectionCommandAlwaysUsesLiveMode()
 	{
 		using var workspace = CreateProject();

@@ -48,7 +48,7 @@ public sealed class TerminalAgentJournalPtyTests
 
 		await terminal.SendAsync(":mcp log clear\r", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Clear journal sessions for this project?",
+			"Clear journal entries for the current project?",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
