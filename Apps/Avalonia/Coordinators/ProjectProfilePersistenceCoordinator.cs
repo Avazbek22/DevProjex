@@ -402,12 +402,9 @@ public sealed class ProjectProfilePersistenceCoordinator(
             if (_loadStates.TryGetValue(normalizedPath, out var state))
             {
                 var previous = state.SuccessfulSnapshot;
-                var localBaseline = previous?.Profile is { } previousProfile
-                    ? ProjectProfileMergeWriter.Apply(previousProfile, candidate, fields)
-                    : ProjectSelectionProfileBuilder.Clone(candidate);
                 var snapshot = new ProjectProfileLoadSnapshot(
                     ProjectProfileLookupStatus.Found,
-                    localBaseline,
+                    ProjectSelectionProfileBuilder.Clone(result.PersistedProfile),
                     previous?.PersistentMarks);
                 _loadStates[normalizedPath] = state with
                 {
