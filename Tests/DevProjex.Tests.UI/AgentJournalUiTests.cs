@@ -964,7 +964,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				started.AddSeconds(2),
 				"search_project",
 				0,
-				new Dictionary<string, string> { ["query"] = "Configure" },
+				new Dictionary<string, string> { ["pattern"] = "Configure" },
 				7,
 				25,
 				1_200,
