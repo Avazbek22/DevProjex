@@ -443,7 +443,7 @@ with recording. The 0.036 ms difference was below the baseline spread.
   These addresses form the contract for the `project` argument. Without the
   flag, a pack retains real addresses like a default CLI export. With the flag,
   the pack is private-data-redacted in full, including its tree header.
-  File names and paths in content responses remain address fields; when response
+  File names and paths are address fields in content responses; when response
   text contains project-controlled addresses, they stay inside the per-response
   untrusted-data boundary.
 - Searches run against content after mandatory secret redaction and any enabled
@@ -1536,7 +1536,7 @@ value is echoed in the effective-filter diagnostics of every tool that accepts
 the parameter.
 
 For the six project tools, `project` accepts `#` plus the 1-based `index` from
-`list_projects`, a unique listed `name`, or that entry's absolute `path`. Index
+`list_projects`, a unique `name` from `list_projects`, or that entry's absolute `path`. Index
 resolution happens before name and path resolution, and remains usable when protected
 metadata masks either string field. An ambiguous or unknown name returns
 `DPX-MCP-UNKNOWN-PROJECT` without echoing the supplied value and asks for a listed
