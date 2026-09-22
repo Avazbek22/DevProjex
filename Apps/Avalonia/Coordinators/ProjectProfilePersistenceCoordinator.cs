@@ -88,7 +88,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
         CancellationToken cancellationToken)
     {
         var normalizedPath = Path.GetFullPath(currentPath);
-        var profile = CaptureCurrentProfile(normalizedPath);
+        var profile = CaptureCurrentProfile(currentPath);
         var updatedUtc = DateTimeOffset.UtcNow;
         var readiness = await PreparePersistenceAsync(currentPath, cancellationToken).ConfigureAwait(false);
         if (!readiness.CanPersist)
@@ -303,7 +303,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
                     attempt.Revision,
                     result.Status,
                     successfulSnapshot: null,
-                    retryPersistenceLoad: ShouldRetryBlockedPersistence(result.Status));
+                    retryPersistenceLoad: result.Status == ProjectProfileLookupStatus.TemporarilyUnavailable);
                 return new ProjectProfileLoadSnapshot(result.Status, null, null);
             }
             if (result.RecoveryStatus is not null && attempt.Previous.SuccessfulSnapshot is { } previousSnapshot)
@@ -324,12 +324,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
             if (!marksResult.Succeeded || marksResult.Snapshot is null)
             {
                 var unavailableStatus = MapMarkStoreStatus(marksResult.Status);
-                CompleteLoad(
-                    normalizedPath,
-                    attempt.Revision,
-                    unavailableStatus,
-                    successfulSnapshot: null,
-                    retryPersistenceLoad: ShouldRetryBlockedPersistence(unavailableStatus));
+                CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus, successfulSnapshot: null);
                 return new ProjectProfileLoadSnapshot(unavailableStatus, null, null);
             }
             var identityAvailability = await secretRedactionSession
@@ -341,12 +336,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
                                         PersistentSecretIdentityAvailability.TemporarilyUnavailable
                     ? ProjectProfileLookupStatus.TemporarilyUnavailable
                     : ProjectProfileLookupStatus.InvalidStorage;
-                CompleteLoad(
-                    normalizedPath,
-                    attempt.Revision,
-                    unavailableStatus,
-                    successfulSnapshot: null,
-                    retryPersistenceLoad: ShouldRetryBlockedPersistence(unavailableStatus));
+                CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus, successfulSnapshot: null);
                 return new ProjectProfileLoadSnapshot(unavailableStatus, null, null);
             }
 
@@ -412,7 +402,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
             _ => ProjectProfileLookupStatus.InvalidStorage
         };
 
-    private static bool ShouldRetryBlockedPersistence(ProjectProfileLookupStatus status) =>
+    private static bool ShouldRetryBlockedPersistence(ProjectProfileLookupStatus? status) =>
         status is ProjectProfileLookupStatus.TemporarilyUnavailable or
             ProjectProfileLookupStatus.InvalidStorage;
 
@@ -488,7 +478,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
             .ConfigureAwait(false);
         foreach (var projectPath in projectPaths)
         {
-            if (!ShouldRetryProfileLoadForPersistence(projectPath))
+            if (!ShouldRetryBlockedPersistence(GetLoadStatus(projectPath)))
                 continue;
 
             _ = await LoadSnapshotWithRetryAsync(projectPath, cancellationToken)
@@ -963,8 +953,8 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
         DateTimeOffset updatedUtc,
         Func<string, bool>? canPersist)
     {
-        FlushCore(canPersist, DefaultFlushTimeout);
         var normalizedPath = Path.GetFullPath(projectPath);
+        FlushCore(canPersist, DefaultFlushTimeout, normalizedPath);
         if (canPersist is not null && !canPersist(normalizedPath))
             return;
         if (profileStore.TrySaveProfile(normalizedPath, profile, updatedUtc))
@@ -1125,10 +1115,14 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
 
     private ProjectProfileFlushResult FlushCore(
         Func<string, bool>? canPersist,
-        TimeSpan lockTimeout)
+        TimeSpan lockTimeout,
+        string? excludedProjectPath = null)
     {
         var pending = _pending
-            .Where(entry => canPersist is null || canPersist(entry.Key))
+            .Where(entry =>
+                (excludedProjectPath is null ||
+                 !PathComparer.Default.Equals(entry.Key, excludedProjectPath)) &&
+                (canPersist is null || canPersist(entry.Key)))
             .ToArray();
         if (pending.Length == 0)
             return new ProjectProfileFlushResult(true, 0, 0, _pending.Count);

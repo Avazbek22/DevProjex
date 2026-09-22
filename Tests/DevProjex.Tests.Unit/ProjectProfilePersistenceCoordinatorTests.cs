@@ -550,10 +550,11 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
 			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
 			var blocked = new ProjectProfileLookupResult(blockedStatus, null);
-			var store = new StatusProfileStore(
-				blocked,
-				blocked,
-				new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null));
+			var recovered = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null);
+			var lookups = blockedStatus == ProjectProfileLookupStatus.TemporarilyUnavailable
+				? new[] { blocked, blocked, recovered }
+				: new[] { blocked, recovered };
+			var store = new StatusProfileStore(lookups);
 			var persistence = new ProjectProfilePersistenceCoordinator(
 				viewModel,
 				selectionCoordinator,

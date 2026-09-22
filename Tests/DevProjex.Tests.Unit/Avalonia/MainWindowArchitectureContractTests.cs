@@ -162,8 +162,7 @@ public sealed class MainWindowArchitectureContractTests
 		var current = new DirectoryInfo(AppContext.BaseDirectory);
 		while (current is not null)
 		{
-			if (File.Exists(Path.Combine(current.FullName, "AboutProject.md")) &&
-				Directory.Exists(Path.Combine(current.FullName, "Apps")))
+			if (File.Exists(Path.Combine(current.FullName, "DevProjex.sln")))
 			{
 				return current.FullName;
 			}
