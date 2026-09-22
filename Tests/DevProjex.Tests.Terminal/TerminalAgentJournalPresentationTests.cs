@@ -216,6 +216,60 @@ public sealed class TerminalAgentJournalPresentationTests
 	}
 
 	[Fact]
+	public void AppendedActivityUsesTheLatestCallForTheMatchingRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstRoot = workspace.CreateDirectory("first");
+		var secondRoot = workspace.CreateDirectory("second");
+		var session = CreateSession() with
+		{
+			Roots =
+			[
+				new AgentJournalRoot(firstRoot, "first"),
+				new AgentJournalRoot(secondRoot, "second")
+			]
+		};
+		var firstRootCall = CreateCall(1, "get_tree", ["src/App.cs"]) with { RootIndex = 0 };
+		var secondRootCall = CreateCall(2, "get_file", ["src/App.cs"]) with { RootIndex = 1 };
+		var activity = new AgentJournalActivitySnapshot(
+			session,
+			secondRootCall,
+			[firstRootCall, secondRootCall],
+			RequiresReset: false,
+			LastEventUtc: secondRootCall.Utc);
+
+		var first = TerminalAgentJournalSnapshot.Create(firstRoot, activity, previous: null, baselineSequence: 0);
+		var second = TerminalAgentJournalSnapshot.Create(secondRoot, activity, previous: null, baselineSequence: 0);
+
+		Assert.Equal("get_tree", first.LatestCall?.Tool);
+		Assert.Equal("get_file", second.LatestCall?.Tool);
+		Assert.Equal(2, TerminalAgentJournalSnapshot.ResolveReadCursor(activity));
+	}
+
+	[Fact]
+	public void SessionOpeningBaselineDistinguishesAnExistingSessionFromANewSession()
+	{
+		Assert.Equal(7, TerminalAgentJournalSnapshot.ResolveOpeningBaseline(
+			sessionExistedAtWorkspaceOpen: true,
+			latestSequence: 7));
+		Assert.Equal(0, TerminalAgentJournalSnapshot.ResolveOpeningBaseline(
+			sessionExistedAtWorkspaceOpen: false,
+			latestSequence: 7));
+	}
+
+	[Fact]
+	public void WorkspaceReplacementKeepsTheJournalBaselineForTheSameProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var otherProject = workspace.CreateDirectory("other");
+
+		Assert.True(TerminalWorkspaceSession.ShouldResetAgentJournalOpeningBaseline(null, project));
+		Assert.False(TerminalWorkspaceSession.ShouldResetAgentJournalOpeningBaseline(project, project));
+		Assert.True(TerminalWorkspaceSession.ShouldResetAgentJournalOpeningBaseline(project, otherProject));
+	}
+
+	[Fact]
 	public void IncompleteHistoryIsNamedInCallDetails()
 	{
 		var marker = CreateCall(3, "journal", []) with

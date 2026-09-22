@@ -53,6 +53,91 @@ public sealed class SearchCommandProcessTests
 	}
 
 	[Fact]
+	public void SymbolTextOutputUsesACliCommandForReadingTheDeclarationFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+
+		var result = Run(workspace, project, "Run", "--symbols", "--format", "text");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.DoesNotContain("get_file {", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("devprojex export context", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--view content", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--select src/App.cs", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--git-mode none", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--exclude none", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains(Path.GetFullPath(project), result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void DeclarationReadCommandQuotesProjectAndFilePathsWithSpaces()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project with spaces");
+		workspace.WriteFile(
+			"project with spaces/src/Application Service.cs",
+			"namespace Demo; public sealed class Sample { public void Run() { } }");
+
+		var result = Run(workspace, project, "Run", "--symbols", "--format", "text");
+
+		Assert.Equal(0, result.ExitCode);
+		var quote = OperatingSystem.IsWindows() ? '"' : '\'';
+		Assert.Contains($"{quote}{Path.GetFullPath(project)}{quote}", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains($"--select {quote}src/Application Service.cs{quote}", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void DeclarationReadCommandPreservesTheResolvedSelectionParameters()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+
+		var result = Run(
+			workspace,
+			project,
+			"Run",
+			"--symbols",
+			"--format", "text",
+			"--root", "src",
+			"--extension", ".cs",
+			"--hide-secrets");
+
+		Assert.Equal(0, result.ExitCode);
+		Assert.Contains("--root src", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--extension .cs", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--hide-secrets", result.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void DeclarationReadCommandUsesTheSafeRepositorySourceInsteadOfTheCheckoutPath()
+	{
+		var request = new SearchCommandRequest(
+			ProjectPath: @"C:\cache\checkout",
+			Pattern: "Run",
+			Selection: ProjectSelectionSpec.Standard,
+			Mode: SearchMode.Symbols,
+			MaximumResults: 20,
+			SearchBodyCharacters: 1_800,
+			Format: SearchOutputFormat.Text,
+			OutputPath: null,
+			Output: new TerminalOutputOptions(),
+			RepositorySourceUrl: "https://user:secret@example.com/owner/repository.git?token=private",
+			RepositoryBranch: "feature/symbol-search");
+
+		var source = SearchCommandHandler.ResolveDeclarationReadSource(request);
+		var arguments = SearchCommandHandler.BuildDeclarationReadArguments(request, "src/App.cs");
+
+		Assert.Equal("https://example.com/owner/repository.git", source);
+		Assert.DoesNotContain("secret", source, StringComparison.Ordinal);
+		Assert.DoesNotContain("token", source, StringComparison.Ordinal);
+		Assert.Equal(source, arguments[3]);
+		var branchIndex = Array.IndexOf(arguments.ToArray(), "--branch");
+		Assert.InRange(branchIndex, 0, arguments.Count - 2);
+		Assert.Equal("feature/symbol-search", arguments[branchIndex + 1]);
+	}
+
+	[Fact]
 	public void InvalidRegularExpressionUsesTheSearchErrorCode()
 	{
 		using var workspace = new TemporaryDirectory();

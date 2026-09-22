@@ -1,7 +1,5 @@
 using System.Globalization;
-using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
@@ -21,13 +19,8 @@ internal sealed class AgentJournalCommandHandler(
 	ITerminalEnvironment environment,
 	TimeProvider? timeProvider = null)
 {
-	private static readonly JsonSerializerOptions JsonOptions = new()
-	{
-		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-		WriteIndented = true,
-		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
-	};
+	private static readonly JsonSerializerOptions JsonOptions =
+		AgentJournalJsonSerialization.CreateOptions(writeIndented: true);
 	private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 
 	public async Task<int> RunAsync(

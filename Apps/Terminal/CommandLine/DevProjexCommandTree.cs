@@ -472,15 +472,14 @@ public sealed class DevProjexCommandTree
 							return CommandLineExitCodes.Success;
 						}
 
-						WriteMcpConnectionResult(result, includeNextCommand: false);
 						TerminalTextEscaping.WriteSingleLine(
-							environment.Output,
+							environment.Error,
 							_localization.Format(
 								"Mcp.Open.FailedAfterConnection",
 								DisplayConnectionClient(connectionClient),
 								launchResult.ErrorMessage ?? L("Mcp.Connect.UnknownError")));
 						if (!string.IsNullOrWhiteSpace(launchResult.ManualCommand))
-							TerminalTextEscaping.WriteSingleLine(environment.Output, launchResult.ManualCommand);
+							TerminalTextEscaping.WriteSingleLine(environment.Error, launchResult.ManualCommand);
 						return CommandLineExitCodes.RuntimeError;
 					}),
 				_localization));
@@ -489,11 +488,16 @@ public sealed class DevProjexCommandTree
 
 	private int WriteMcpConnectionResult(McpConnectionResult result, bool includeNextCommand)
 	{
-		TerminalTextEscaping.WriteSingleLine(environment.Output, result.UserMessage);
+		var successfulOutput = result.Status is
+			McpConnectionStatus.Connected or
+			McpConnectionStatus.Updated or
+			McpConnectionStatus.ManualConfiguration;
+		var writer = successfulOutput ? environment.Output : environment.Error;
+		TerminalTextEscaping.WriteSingleLine(writer, result.UserMessage);
 		if (includeNextCommand && result.Succeeded && !string.IsNullOrWhiteSpace(result.NextCommand))
 		{
 			TerminalTextEscaping.WriteSingleLine(
-				environment.Output,
+				writer,
 				_localization.Format("Mcp.Connect.RunInProject", result.NextCommand));
 		}
 		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
@@ -501,10 +505,10 @@ public sealed class DevProjexCommandTree
 		if (result.SuggestedConfigPaths is not null)
 		{
 			foreach (var path in result.SuggestedConfigPaths)
-				TerminalTextEscaping.WriteSingleLine(environment.Output, path);
+				TerminalTextEscaping.WriteSingleLine(writer, path);
 		}
 		if (!string.IsNullOrWhiteSpace(result.ManualConfiguration))
-			environment.Output.WriteLine(result.ManualConfiguration);
+			writer.WriteLine(result.ManualConfiguration);
 
 		return result.Status is
 			McpConnectionStatus.Connected or
@@ -946,7 +950,8 @@ public sealed class DevProjexCommandTree
 							},
 							parseResult.GetValue(outputPath),
 							outputOptions,
-							resolvedSource.RepositorySourceUrl),
+							resolvedSource.RepositorySourceUrl,
+							parseResult.GetValue(branch)),
 						cancellationToken).ConfigureAwait(false);
 				},
 				_localization).ConfigureAwait(false);

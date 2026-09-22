@@ -33,7 +33,8 @@ public sealed record SearchCommandRequest(
 	SearchOutputFormat Format,
 	string? OutputPath,
 	TerminalOutputOptions Output,
-	string? RepositorySourceUrl = null);
+	string? RepositorySourceUrl = null,
+	string? RepositoryBranch = null);
 
 public sealed record AnalyzeCommandRequest(
 	string ProjectPath,
