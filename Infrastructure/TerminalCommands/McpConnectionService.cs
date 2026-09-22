@@ -325,10 +325,14 @@ internal sealed record McpProjectConfigurationWriteResult(
 	bool Succeeded,
 	bool Replaced,
 	string TargetPath,
-	McpProjectConfigurationError Error = McpProjectConfigurationError.None);
+	McpProjectConfigurationError Error = McpProjectConfigurationError.None,
+	bool DiscardedUnsupportedFields = false);
 
 internal sealed class McpProjectConfigurationWriter
 {
+	internal const string DiscardedFieldsNotice =
+		"Existing devprojex fields other than sandboxEnabled and dev were discarded.";
+
 	private const long MaximumConfigurationBytes = 4 * 1024 * 1024;
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -416,23 +420,21 @@ internal sealed class McpProjectConfigurationWriter
 			projectRoot);
 		var generatedRoot = JsonNode.Parse(printable)!.AsObject();
 		var generatedEntry = generatedRoot[containerName]!["devprojex"]!.AsObject();
+		var discardedUnsupportedFields = false;
 		if (!replaced)
 		{
 			servers["devprojex"] = generatedEntry.DeepClone();
 		}
 		else if (servers["devprojex"] is JsonObject existingEntry)
 		{
-			existingEntry["command"] = generatedEntry["command"]!.DeepClone();
-			existingEntry["args"] = generatedEntry["args"]!.DeepClone();
-			if (generatedEntry["env"] is JsonObject requiredEnvironment)
+			var replacement = generatedEntry.DeepClone().AsObject();
+			foreach (var preservedName in new[] { "sandboxEnabled", "dev" })
 			{
-				if (existingEntry["env"] is null)
-					existingEntry["env"] = new JsonObject();
-				if (existingEntry["env"] is not JsonObject existingEnvironment)
-					return Failure(targetPath, McpProjectConfigurationError.InvalidData);
-				foreach (var pair in requiredEnvironment)
-					existingEnvironment[pair.Key] = pair.Value?.DeepClone();
+				if (existingEntry[preservedName] is { } preserved)
+					replacement[preservedName] = preserved.DeepClone();
 			}
+			discardedUnsupportedFields = HasDiscardedFields(existingEntry, generatedEntry);
+			servers["devprojex"] = replacement;
 		}
 		else
 		{
@@ -451,7 +453,11 @@ internal sealed class McpProjectConfigurationWriter
 				},
 				cancellationToken,
 				path => ValidateDestination(projectRoot, directory, path)).ConfigureAwait(false);
-			return new McpProjectConfigurationWriteResult(true, replaced, targetPath);
+			return new McpProjectConfigurationWriteResult(
+				true,
+				replaced,
+				targetPath,
+				DiscardedUnsupportedFields: discardedUnsupportedFields);
 		}
 		catch (UnauthorizedAccessException)
 		{
@@ -461,6 +467,20 @@ internal sealed class McpProjectConfigurationWriter
 		{
 			return Failure(targetPath, McpProjectConfigurationError.OperationFailed);
 		}
+	}
+
+	private static bool HasDiscardedFields(JsonObject existingEntry, JsonObject generatedEntry)
+	{
+		foreach (var pair in existingEntry)
+		{
+			if (pair.Key is "sandboxEnabled" or "dev")
+				continue;
+			if (!generatedEntry.TryGetPropertyValue(pair.Key, out var generatedValue))
+				return true;
+			if (pair.Key == "env" && !JsonNode.DeepEquals(pair.Value, generatedValue))
+				return true;
+		}
+		return false;
 	}
 
 	private static bool IsValidJsonc(string text)
@@ -1012,9 +1032,15 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		var nextStepKey = request.Client == McpConnectionClient.VsCode
 			? "Mcp.Connect.VsCode.NextStep"
 			: "Mcp.Connect.Cursor.NextStep";
+		var message = _localization.Format(
+			"Mcp.Connect.ProjectConfigurationWritten",
+			clientName,
+			relativePath);
+		if (result.DiscardedUnsupportedFields)
+			message = string.Concat(message, Environment.NewLine, McpProjectConfigurationWriter.DiscardedFieldsNotice);
 		return new McpConnectionResult(
 			result.Replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected,
-			_localization.Format("Mcp.Connect.ProjectConfigurationWritten", clientName, relativePath),
+			message,
 			NextCommand: _localization[nextStepKey],
 			TargetPath: result.TargetPath,
 			Replaced: result.Replaced);

@@ -31,6 +31,8 @@ public sealed class ProjectCopyExportService(
 	private const int CleanupAttemptCount = 6;
 	private const int CleanupInitialDelayMilliseconds = 25;
 	internal const string SourceChangedDuringCopyMessage = "A source file changed during copy.";
+	internal const string SensitiveMetadataMessage =
+		"Protected project copy metadata contains sensitive data. No project copy was created.";
 
 	public async Task<ProjectCopyExportPreflightResult> PreflightAsync(
 		ProjectCopyExportRequest request,
@@ -38,6 +40,7 @@ public sealed class ProjectCopyExportService(
 	{
 		ArgumentNullException.ThrowIfNull(request);
 		var plan = planBuilder.Build(request, cancellationToken);
+		await ValidateProtectedMetadataAsync(plan, request, cancellationToken).ConfigureAwait(false);
 		ValidateSources(plan, cancellationToken);
 		await using var prepared = request.RedactSecrets || request.RedactPrivateData || request.CompressCode ||
 		                           request.StripComments || request.StripBlankLines
@@ -59,6 +62,7 @@ public sealed class ProjectCopyExportService(
 		try
 		{
 			var plan = planBuilder.Build(request, cancellationToken);
+			await ValidateProtectedMetadataAsync(plan, request, cancellationToken).ConfigureAwait(false);
 			ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
 
 			ValidateSources(plan, cancellationToken);
@@ -132,6 +136,7 @@ public sealed class ProjectCopyExportService(
 		try
 		{
 			var plan = planBuilder.Build(request, cancellationToken);
+			await ValidateProtectedMetadataAsync(plan, request, cancellationToken).ConfigureAwait(false);
 			ValidateSources(plan, cancellationToken);
 			await using var prepared = request.RedactSecrets || request.RedactPrivateData || request.CompressCode ||
 			                           request.StripComments || request.StripBlankLines
@@ -175,6 +180,58 @@ public sealed class ProjectCopyExportService(
 				IOException => ExportFailure(ProjectCopyExportError.IoFailure, exception),
 				_ => ExportFailure(ProjectCopyExportError.UnexpectedFailure, exception)
 			};
+		}
+	}
+
+	private async Task ValidateProtectedMetadataAsync(
+		ProjectCopyExportPlan plan,
+		ProjectCopyExportRequest request,
+		CancellationToken cancellationToken)
+	{
+		var context = CreateRedactionContext(plan.ProjectRootPath, request);
+		if (context is null)
+			return;
+
+		try
+		{
+			await context.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+			var scope = context.Session.CreateDetectorScope(plan.ProjectRootPath, context.Features);
+			var inspectionBudget = new SecretFileInspectionBudget();
+			var relativeProbePath = ".devprojex-export-metadata.txt";
+			var fullProbePath = Path.Combine(plan.ProjectRootPath, relativeProbePath);
+			if (ContainsSensitiveData(request.ProjectName) ||
+			    ContainsSensitiveData(plan.ProjectName) ||
+			    plan.Entries.Any(entry => ContainsSensitiveData(entry.RelativePath)))
+			{
+				throw new ProjectCopyExportException(
+					ProjectCopyExportError.SecretDetectionFailed,
+					SensitiveMetadataMessage);
+			}
+
+			bool ContainsSensitiveData(string value)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				return scope.Detect(
+					fullProbePath,
+					relativeProbePath,
+					value.AsSpan(),
+					inspectionBudget,
+					cancellationToken).Count > 0;
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (ProjectCopyExportException)
+		{
+			throw;
+		}
+		catch (Exception)
+		{
+			throw new ProjectCopyExportException(
+				ProjectCopyExportError.SecretDetectionFailed,
+				SensitiveMetadataMessage);
 		}
 	}
 

@@ -17,6 +17,16 @@ public static class StoreUserDataMigration
 	private const string BackupFolderName = "DevProjex.v5.1-store-backup";
 	private const string LockFileName = ".devprojex-store-migration.lock";
 	private const string CompletionMarkerFileName = ".devprojex-store-migration.completed";
+	private static readonly HashSet<string> ManagedStoreFileNames = new(StringComparer.OrdinalIgnoreCase)
+	{
+		"project-profiles.json",
+		"project-secret-marks.json",
+		"recent-projects.json",
+		"secret-mark-hmac.key",
+		"terminal-settings.json",
+		"theme-settings.json",
+		"user-settings.json"
+	};
 
 	public static StoreUserDataMigrationStatus TryMigrateCurrentWindowsPackage()
 	{
@@ -39,7 +49,8 @@ public static class StoreUserDataMigration
 
 		try
 		{
-			var destination = Path.Combine(Path.GetFullPath(configurationRoot), ProductFolderName);
+			var normalizedConfigurationRoot = Path.GetFullPath(configurationRoot);
+			var destination = Path.Combine(normalizedConfigurationRoot, ProductFolderName);
 			var source = Path.Combine(
 				Path.GetFullPath(localDataRoot),
 				"Packages",
@@ -47,24 +58,31 @@ public static class StoreUserDataMigration
 				"LocalCache",
 				"Roaming",
 				ProductFolderName);
-			if (!Directory.Exists(source) || !HasInitializedData(source))
+			if (!Directory.Exists(source))
+				return StoreUserDataMigrationStatus.NotApplicable;
+			ValidatePhysicalTree(source);
+			if (!HasInitializedData(source))
 				return StoreUserDataMigrationStatus.NotApplicable;
 
-			Directory.CreateDirectory(configurationRoot);
-			var lockPath = Path.Combine(configurationRoot, LockFileName);
+			UserDataPathResolver.EnsurePhysicalDirectory(normalizedConfigurationRoot, createIfMissing: true);
+			var lockPath = Path.Combine(normalizedConfigurationRoot, LockFileName);
 			using var migrationLock = TryAcquireLock(lockPath);
 			if (migrationLock is null)
 				return StoreUserDataMigrationStatus.TemporarilyUnavailable;
-			var completionMarker = Path.Combine(configurationRoot, CompletionMarkerFileName);
+			var completionMarker = Path.Combine(normalizedConfigurationRoot, CompletionMarkerFileName);
 			if (File.Exists(completionMarker))
 				return StoreUserDataMigrationStatus.AlreadyInitialized;
-			if (HasInitializedData(destination))
+			if (Directory.Exists(destination))
 			{
-				WriteCompletionMarker(completionMarker);
-				return StoreUserDataMigrationStatus.AlreadyInitialized;
+				ValidatePhysicalTree(destination);
+				if (HasInitializedData(destination))
+				{
+					WriteCompletionMarker(completionMarker);
+					return StoreUserDataMigrationStatus.AlreadyInitialized;
+				}
 			}
 
-			var backup = Path.Combine(configurationRoot, BackupFolderName);
+			var backup = Path.Combine(normalizedConfigurationRoot, BackupFolderName);
 			RefreshBackup(source, backup);
 
 			var staging = destination + ".migration-" + Guid.NewGuid().ToString("N");
@@ -73,14 +91,15 @@ public static class StoreUserDataMigration
 				CopyDirectory(backup, staging);
 				if (Directory.Exists(destination))
 				{
-					RemoveTransientInitializationArtifacts(destination);
+					UserDataPathResolver.EnsurePhysicalDirectory(destination, createIfMissing: false);
+					RemoveManagedInitializationArtifacts(destination);
 					Directory.Delete(destination, recursive: false);
 				}
 				Directory.Move(staging, destination);
 			}
 			finally
 			{
-				if (Directory.Exists(staging))
+				if (Directory.Exists(staging) && FileSystemRootEntryPolicy.IsPhysicalDirectory(staging))
 					Directory.Delete(staging, recursive: true);
 			}
 
@@ -104,14 +123,14 @@ public static class StoreUserDataMigration
 			return false;
 
 		return Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories)
-			.Any(static path => !IsTransientInitializationArtifact(path));
+			.Any(static file => !IsManagedInitializationArtifact(file));
 	}
 
-	private static void RemoveTransientInitializationArtifacts(string destination)
+	private static void RemoveManagedInitializationArtifacts(string destination)
 	{
 		foreach (var file in Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories))
 		{
-			if (IsTransientInitializationArtifact(file))
+			if (IsManagedInitializationArtifact(file))
 				File.Delete(file);
 		}
 
@@ -123,15 +142,33 @@ public static class StoreUserDataMigration
 		}
 	}
 
-	private static bool IsTransientInitializationArtifact(string path) =>
-		path.EndsWith(".lock", StringComparison.OrdinalIgnoreCase) ||
-		path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
+	private static bool IsManagedInitializationArtifact(string path)
+	{
+		var fileName = Path.GetFileName(path);
+		if (fileName.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))
+			return ManagedStoreFileNames.Contains(fileName[..^".lock".Length]);
+		if (!fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+			return false;
+
+		var withoutSuffix = fileName[..^".tmp".Length];
+		var separator = withoutSuffix.LastIndexOf('.');
+		if (separator < 0 ||
+			!Guid.TryParseExact(withoutSuffix[(separator + 1)..], "N", out _))
+		{
+			return false;
+		}
+
+		var owner = withoutSuffix[..separator].TrimStart('.');
+		return ManagedStoreFileNames.Contains(owner);
+	}
 
 	private static void WriteCompletionMarker(string path) =>
 		File.WriteAllText(path, "completed");
 
 	private static void RefreshBackup(string source, string backup)
 	{
+		if (Directory.Exists(backup))
+			ValidatePhysicalTree(backup);
 		var staging = backup + ".migration-" + Guid.NewGuid().ToString("N");
 		try
 		{
@@ -142,7 +179,7 @@ public static class StoreUserDataMigration
 		}
 		finally
 		{
-			if (Directory.Exists(staging))
+			if (Directory.Exists(staging) && FileSystemRootEntryPolicy.IsPhysicalDirectory(staging))
 				Directory.Delete(staging, recursive: true);
 		}
 	}
@@ -151,6 +188,8 @@ public static class StoreUserDataMigration
 	{
 		try
 		{
+			if (FileSystemRootEntryPolicy.IsReparsePoint(path))
+				return null;
 			return new FileStream(
 				path,
 				FileMode.OpenOrCreate,
@@ -167,19 +206,51 @@ public static class StoreUserDataMigration
 
 	private static void CopyDirectory(string source, string destination)
 	{
+		ValidatePhysicalTree(source);
 		Directory.CreateDirectory(destination);
-		foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+		UserDataPathResolver.EnsurePhysicalDirectory(destination, createIfMissing: false);
+		var pending = new Stack<(string Source, string Destination)>();
+		pending.Push((source, destination));
+		while (pending.TryPop(out var current))
 		{
-			var relative = Path.GetRelativePath(source, directory);
-			Directory.CreateDirectory(Path.Combine(destination, relative));
+			foreach (var entry in Directory.EnumerateFileSystemEntries(
+						 current.Source,
+						 "*",
+						 SearchOption.TopDirectoryOnly))
+			{
+				var attributes = File.GetAttributes(entry);
+				if ((attributes & FileAttributes.ReparsePoint) != 0)
+					throw new IOException("Store migration does not follow symbolic links or junctions.");
+				var target = Path.Combine(current.Destination, Path.GetFileName(entry));
+				if ((attributes & FileAttributes.Directory) != 0)
+				{
+					Directory.CreateDirectory(target);
+					pending.Push((entry, target));
+					continue;
+				}
+				File.Copy(entry, target, overwrite: false);
+			}
 		}
+	}
 
-		foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+	private static void ValidatePhysicalTree(string root)
+	{
+		UserDataPathResolver.EnsurePhysicalDirectory(root, createIfMissing: false);
+		var pending = new Stack<string>();
+		pending.Push(root);
+		while (pending.TryPop(out var directory))
 		{
-			var relative = Path.GetRelativePath(source, file);
-			var target = Path.Combine(destination, relative);
-			Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-			File.Copy(file, target, overwrite: false);
+			foreach (var entry in Directory.EnumerateFileSystemEntries(
+						 directory,
+						 "*",
+						 SearchOption.TopDirectoryOnly))
+			{
+				var attributes = File.GetAttributes(entry);
+				if ((attributes & FileAttributes.ReparsePoint) != 0)
+					throw new IOException("Store migration does not follow symbolic links or junctions.");
+				if ((attributes & FileAttributes.Directory) != 0)
+					pending.Push(entry);
+			}
 		}
 	}
 }

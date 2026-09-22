@@ -61,6 +61,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		.Replace("created by pack_context, search_project, or related_files", "created by search_project or related_files", StringComparison.Ordinal)
 		.Replace("use pack_context instead, or related_files for dependencies, when none is valid.",
 			"use search_project for evidence or related_files for dependencies when none is valid.", StringComparison.Ordinal)
+		.Replace("use pack_context instead when no valid stored result exists.",
+			"use search_project for evidence or related_files for dependencies when no valid stored result exists.", StringComparison.Ordinal)
 		.Replace("use pack_context for broad multi-file context.", "use batched requests for several known files.", StringComparison.Ordinal);
 
 	public int Count => _tools.Count;
@@ -185,7 +187,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string CompactProjectProperty = """
 	"project": {
 	  "type": "string",
-	  "description": "Project name, listed absolute path, or allowed remote Git URL; omit only with one local root."
+	  "description": "Listed #index, unique name, path, or allowed Git URL; omit with one local root."
 	}
 	""";
 
@@ -538,11 +540,12 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      "items": {
 	        "type": "object",
 	        "properties": {
-	          "path": { "type": "string", "description": "Absolute value accepted by the project parameter." },
-	          "name": { "type": "string", "description": "Display name derived from the root." },
+	          "index": { "type": "integer", "minimum": 1, "description": "Index accepted as project=#index even if metadata is masked." },
+	          "path": { "type": "string", "description": "Protected absolute project path." },
+	          "name": { "type": "string", "description": "Protected root display name." },
 	          "type": { "type": "string", "enum": ["git-repository", "local-folder"], "description": "Detected local root kind." }
 	        },
-	        "required": ["path", "name", "type"],
+	        "required": ["index", "path", "name", "type"],
 	        "additionalProperties": false
 	      }
 	    },

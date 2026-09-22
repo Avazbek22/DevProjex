@@ -3309,11 +3309,11 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(1, git.CloneCallCount);
 		Assert.True(jail.IsError);
 		Assert.Contains(McpErrorCodes.RootViolation, Text(jail), StringComparison.Ordinal);
-		Assert.Contains(repositoryUrl, Text(jail), StringComparison.Ordinal);
+		Assert.DoesNotContain(repositoryUrl, Text(jail), StringComparison.Ordinal);
 		Assert.DoesNotContain(cachePath, Text(jail), PathComparison);
 		Assert.True(missingBranch.IsError);
 		Assert.Contains(McpErrorCodes.RemoteFailed, Text(missingBranch), StringComparison.Ordinal);
-		Assert.DoesNotContain(repositoryUrl, Text(listed), StringComparison.Ordinal);
+		Assert.DoesNotContain(repositoryUrl, AllText(listed), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -7063,6 +7063,71 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task ListProjectsProtectsStringMetadataAndProvidesAnIndexReference()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory(Secret);
+		File.WriteAllText(Path.Combine(project, "App.cs"), "class App { }\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var listed = await server.CallAsync("list_projects");
+		var item = Assert.Single(Structured(listed).GetProperty("projects").EnumerateArray());
+		var listedText = AllText(listed);
+
+		Assert.Equal(1, item.GetProperty("index").GetInt32());
+		Assert.Equal("[redacted]", item.GetProperty("name").GetString());
+		Assert.DoesNotContain(Secret, item.GetProperty("path").GetString(), StringComparison.Ordinal);
+		Assert.Contains("project=\"#1\"", listedText, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, listedText, StringComparison.Ordinal);
+
+		var tree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = "#1", ["format"] = "text" });
+		Assert.NotEqual(true, tree.IsError);
+		Assert.Contains("App.cs", AllText(tree), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ReadPackRejectsContentStoredBeforeAManualProtectionChange()
+	{
+		const string markedValue = "manual-protection-value";
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var appData = Path.Combine(workspace.Path, "app-data");
+		File.WriteAllText(
+			Path.Combine(project, "Large.txt"),
+			markedValue + "\n" + string.Join('\n', Enumerable.Range(1, 2_000).Select(static line =>
+				$"pack-line-{line:D4}-{new string('x', 24)}")));
+		var store = new ProjectProfileStore(() => appData);
+		store.SaveProfile(project, new ProjectSelectionProfile([], [], []));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+
+		var stored = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Large.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var packId = ExtractPackId(AllText(stored));
+		await AddPersistentMarkAsync(store, appData, project, "Large.txt", 0, markedValue);
+
+		var page = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId });
+		var text = AllText(page);
+
+		Assert.True(page.IsError);
+		Assert.StartsWith("DPX-MCP-STORED-PROTECTION-CHANGED: request failed.", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"the saved protection policy changed after this result was stored. Call pack_context again before read_pack.",
+			text,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("pack-line-", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RelatedFilesReportsFilesExcludedByTheAccumulatedFactBudget()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -7404,6 +7469,76 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain(token, Text(stored), StringComparison.Ordinal);
 		Assert.DoesNotContain(token, Text(page), StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[", Text(page), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RelatedEvidenceProtectionRetainsOneTransformedSourceAtATime()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "tsconfig.json"), "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		File.WriteAllText(Path.Combine(project, "Target.ts"), "export default 1;\n");
+		for (var index = 0; index < 48; index++)
+		{
+			File.WriteAllText(
+				Path.Combine(project, $"Consumer{index:D2}.ts"),
+				$"import target from './Target.js'; export const value{index:D2} = target;\n/*{new string('x', 32_000)}*/\n");
+		}
+		using var measurement = McpRelatedEvidenceRetentionDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("related_files", new Dictionary<string, object?>
+		{
+			["path"] = "Target.ts",
+			["direction"] = "dependents"
+		});
+		var snapshot = measurement.Snapshot;
+		TestContext.Current.TestOutputHelper!.WriteLine(AllText(result));
+		TestContext.Current.TestOutputHelper!.WriteLine(
+			$"sources={snapshot.SourceCount}; legacy-retained-chars={snapshot.LegacyRetainedCharacters}; " +
+			$"streaming-peak-chars={snapshot.PeakStreamingRetainedCharacters}");
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Equal(48, snapshot.SourceCount);
+		Assert.Equal(1_539_360, snapshot.LegacyRetainedCharacters);
+		Assert.Equal(32_070, snapshot.PeakStreamingRetainedCharacters);
+	}
+
+	[Fact]
+	public async Task RelatedFilesReportsUnavailableProtectionWhenEvidenceSourceDisappearsBeforeProtectedReading()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "tsconfig.json"), "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		File.WriteAllText(Path.Combine(project, "Target.ts"), "export default 1;\n");
+		var consumerPath = Path.Combine(project, "Consumer.ts");
+		File.WriteAllText(consumerPath, "import target from './Target.js'; export const value = target;\n");
+		using var measurement = McpRelatedEvidenceRetentionDiagnostics.BeginMeasurement(paths =>
+		{
+			var protectedSourcePath = Assert.Single(paths);
+			Assert.Equal("Consumer.ts", Path.GetFileName(protectedSourcePath));
+			File.Delete(protectedSourcePath);
+		});
+
+		CallToolResult result;
+		await using (var server = await McpTestServer.StartAsync(project, workspace.Path))
+		{
+			result = await server.CallAsync("related_files", new Dictionary<string, object?>
+			{
+				["path"] = "Target.ts",
+				["direction"] = "dependents"
+			});
+		}
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.False(File.Exists(consumerPath));
+		using var journal = new AgentJournalStore(
+			() => Path.Combine(workspace.Path, "app-data"),
+			activeSessionProvider: static () => []);
+		var session = Assert.Single(await journal.ListSessionsAsync(cancellationToken: TestContext.Current.CancellationToken));
+		var call = Assert.Single(await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken));
+		Assert.Equal("related_files", call.Tool);
+		Assert.Contains(AgentJournalNoticeCodes.Unavailable, call.Notices);
 	}
 
 	[Fact]

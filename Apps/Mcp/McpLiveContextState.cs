@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using DevProjex.Application.Selection;
 
 namespace DevProjex.Mcp;
@@ -14,6 +15,7 @@ internal sealed class McpLiveContextState(
 	private readonly AsyncLocal<InvocationState?> invocation = new();
 	private readonly Dictionary<string, RootState> states = new(PathComparer.Default);
 	private readonly object sync = new();
+	private readonly ConditionalWeakTable<McpStoredResultContext, StoredResultPolicy> storedPolicies = new();
 	private readonly TimeSpan profileLookupTimeout = lookupTimeout ?? DefaultLookupTimeout;
 
 	public IDisposable BeginInvocation()
@@ -160,9 +162,11 @@ internal sealed class McpLiveContextState(
 				return null;
 			invocation.Value?.AdditionalNotices.Add(
 				$"[Live context] pack built at revision {state.Revision}.");
-			return string.IsNullOrEmpty(packId)
-				? null
-				: new McpStoredResultContext(normalizedRoot, state.Revision, McpStoredResultKind.Pack);
+			if (string.IsNullOrEmpty(packId))
+				return null;
+			var stored = new McpStoredResultContext(normalizedRoot, state.Revision, McpStoredResultKind.Pack);
+			storedPolicies.Add(stored, new StoredResultPolicy(state.ProtectionRevision));
+			return stored;
 		}
 	}
 
@@ -171,9 +175,11 @@ internal sealed class McpLiveContextState(
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
 		lock (sync)
 		{
-			return states.TryGetValue(normalizedRoot, out var state)
-				? new McpStoredResultContext(normalizedRoot, state.Revision, kind)
-				: null;
+			if (!states.TryGetValue(normalizedRoot, out var state))
+				return null;
+			var stored = new McpStoredResultContext(normalizedRoot, state.Revision, kind);
+			storedPolicies.Add(stored, new StoredResultPolicy(state.ProtectionRevision));
+			return stored;
 		}
 	}
 
@@ -183,6 +189,31 @@ internal sealed class McpLiveContextState(
 			return false;
 
 		var current = ReadCurrentProfile(stored.Root);
+		if (current.IsReadFailure)
+		{
+			throw new McpToolException(
+				"DPX-MCP-STORED-PROTECTION-UNAVAILABLE",
+				"DPX-MCP-STORED-PROTECTION-UNAVAILABLE: the current saved protection policy could not be verified. " +
+				"Retry read_pack after the saved selection is readable; do not use this stored result until then.");
+		}
+		if (storedPolicies.TryGetValue(stored, out var policy))
+		{
+			lock (sync)
+			{
+				if (states.TryGetValue(PathUtility.Normalize(stored.Root), out var state) &&
+					state.ProtectionRevision != policy.ProtectionRevision)
+				{
+					var protectionRefreshTool = McpStoredResultAdvice.RefreshTool(toolSet, stored.Kind);
+					var remedy = protectionRefreshTool is null
+						? "Create a new protected result before reading it."
+						: $"Call {protectionRefreshTool} again before read_pack.";
+					throw new McpToolException(
+						"DPX-MCP-STORED-PROTECTION-CHANGED",
+						"DPX-MCP-STORED-PROTECTION-CHANGED: the saved protection policy changed after this result was stored. " +
+						remedy);
+				}
+			}
+		}
 		if (current.Revision == stored.Revision)
 			return false;
 		var refreshTool = McpStoredResultAdvice.RefreshTool(toolSet, stored.Kind);
@@ -294,15 +325,23 @@ internal sealed class McpLiveContextState(
 		bool isMissing)
 	{
 		var fingerprint = profile is null ? "missing" : BuildFingerprint(profile);
+		var protectionFingerprint = BuildProtectionFingerprint(profile);
 		var frontier = NormalizeFrontier(profile?.SelectedPaths);
 		if (!state.Initialized)
 		{
 			state.Initialized = true;
 			state.Revision = 1;
 			state.Fingerprint = fingerprint;
+			state.ProtectionFingerprint = protectionFingerprint;
+			state.ProtectionRevision = 1;
 			state.Frontier = frontier;
 		}
-		else if (!StringComparer.Ordinal.Equals(state.Fingerprint, fingerprint))
+		if (!StringComparer.Ordinal.Equals(state.ProtectionFingerprint, protectionFingerprint))
+		{
+			state.ProtectionFingerprint = protectionFingerprint;
+			state.ProtectionRevision++;
+		}
+		if (!StringComparer.Ordinal.Equals(state.Fingerprint, fingerprint))
 		{
 			var previousRevision = state.Revision;
 			state.Revision++;
@@ -338,6 +377,20 @@ internal sealed class McpLiveContextState(
 		else
 			AppendCollection(value, NormalizeFrontier(profile.SelectedPaths)!, StringComparer.Ordinal);
 		foreach (var mark in (profile.MarkedSecrets ?? []).OrderBy(static item => item.H, StringComparer.Ordinal))
+		{
+			value.Append(mark.H).Append('|').Append(mark.Key).Append('|').Append(mark.Length).Append('|')
+				.Append(mark.RelativePath).Append('|').Append(mark.SourceOffset).Append('|').Append(mark.Class).Append(';');
+		}
+		return value.ToString();
+	}
+
+	private static string BuildProtectionFingerprint(ProjectSelectionProfile? profile)
+	{
+		var value = new StringBuilder();
+		value.Append("hide-private-data:")
+			.Append(profile?.SelectedIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData) == true)
+			.Append(';');
+		foreach (var mark in (profile?.MarkedSecrets ?? []).OrderBy(static item => item.H, StringComparer.Ordinal))
 		{
 			value.Append(mark.H).Append('|').Append(mark.Key).Append('|').Append(mark.Length).Append('|')
 				.Append(mark.RelativePath).Append('|').Append(mark.SourceOffset).Append('|').Append(mark.Class).Append(';');
@@ -586,6 +639,8 @@ internal sealed class McpLiveContextState(
 		public bool Initialized { get; set; }
 		public int Revision { get; set; }
 		public string Fingerprint { get; set; } = string.Empty;
+		public string ProtectionFingerprint { get; set; } = string.Empty;
+		public int ProtectionRevision { get; set; }
 		public string[]? Frontier { get; set; }
 		public ProjectSelectionProfile? Profile { get; set; }
 		public bool IsMissing { get; set; }
@@ -627,6 +682,8 @@ internal sealed class McpLiveContextState(
 	private sealed record FrontierChange(bool Added, FrontierChangeKind Kind, string? Path);
 
 	private sealed record PendingChange(int PreviousRevision, IReadOnlyList<FrontierChange> Changes);
+
+	private sealed record StoredResultPolicy(int ProtectionRevision);
 }
 
 internal sealed record McpLiveProfileSnapshot(

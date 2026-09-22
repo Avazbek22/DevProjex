@@ -1047,7 +1047,8 @@ internal sealed record McpStoredJournalPath(
 	string RelativePath,
 	long SecretsMasked,
 	long PrivateDataMasked,
-	IReadOnlyList<McpStoredLineRange> LineRanges);
+	IReadOnlyList<McpStoredLineRange> LineRanges,
+	bool ProtectionKnown = true);
 
 internal readonly record struct McpStoredLineRange(int StartLine, int EndLine)
 {

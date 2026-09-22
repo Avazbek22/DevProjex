@@ -1,8 +1,16 @@
+using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Secrets;
+using System.Text.Json.Nodes;
+
 namespace DevProjex.Mcp;
 
 internal static class McpToolResults
 {
 	private const string MaxResultSizeKey = "anthropic/maxResultSizeChars";
+	private const string RedactedMetadataMarker = "[redacted]";
+	private static readonly Lazy<IReadOnlyList<ISecretDetector>> MetadataDetectors = new(
+		static () => [new GitleaksSecretDetector(), new PrivateDataDetector()],
+		LazyThreadSafetyMode.ExecutionAndPublication);
 	private static readonly JsonSerializerOptions StructuredTextOptions = new()
 	{
 		WriteIndented = true
@@ -35,7 +43,8 @@ internal static class McpToolResults
 	{
 		ArgumentNullException.ThrowIfNull(value);
 		ArgumentNullException.ThrowIfNull(completeNotice);
-		var spotlighted = McpSpotlight.Wrap(JsonSerializer.Serialize(value, StructuredTextOptions));
+		var protectedValue = ProtectStructuredMetadata(value);
+		var spotlighted = McpSpotlight.Wrap(JsonSerializer.Serialize(protectedValue, StructuredTextOptions));
 		notice = completeNotice(spotlighted.Length, notice);
 		List<ContentBlock> content = [new TextContentBlock { Text = spotlighted }];
 		if (!string.IsNullOrWhiteSpace(notice))
@@ -85,7 +94,7 @@ internal static class McpToolResults
 				new TextContentBlock
 				{
 					Text = $"{exception.Code}: request failed.\n\n" +
-						   McpSpotlight.Wrap(McpTextEscaping.EscapeSingleLine(exception.Message))
+						   McpSpotlight.Wrap(McpTextEscaping.EscapeSingleLine(ProtectMetadataString(exception.Message)))
 				}
 			],
 			IsError = true
@@ -110,5 +119,81 @@ internal static class McpToolResults
 		ArgumentNullException.ThrowIfNull(result);
 		foreach (var block in result.Content.OfType<TextContentBlock>())
 			McpSpotlight.EnsureBalanced(block.Text);
+	}
+
+	internal static string ProtectMetadataString(string value)
+	{
+		if (string.IsNullOrEmpty(value))
+			return value;
+		try
+		{
+			var ranges = MetadataDetectors.Value
+				.SelectMany(detector => detector.Detect("mcp-metadata.txt", value))
+				.Where(finding => finding.Start >= 0 && finding.Length > 0 && finding.Start + finding.Length <= value.Length)
+				.Select(finding => (Start: finding.Start, End: finding.Start + finding.Length))
+				.OrderBy(static range => range.Start)
+				.ThenByDescending(static range => range.End)
+				.ToArray();
+			if (ranges.Length == 0)
+				return value;
+
+			var merged = new List<(int Start, int End)>(ranges.Length);
+			foreach (var range in ranges)
+			{
+				if (merged.Count == 0 || range.Start > merged[^1].End)
+				{
+					merged.Add(range);
+					continue;
+				}
+				merged[^1] = (merged[^1].Start, Math.Max(merged[^1].End, range.End));
+			}
+
+			var protectedValue = new StringBuilder(value.Length);
+			var cursor = 0;
+			foreach (var range in merged)
+			{
+				protectedValue.Append(value, cursor, range.Start - cursor);
+				protectedValue.Append(RedactedMetadataMarker);
+				cursor = range.End;
+			}
+			protectedValue.Append(value, cursor, value.Length - cursor);
+			return protectedValue.ToString();
+		}
+		catch (SecretDetectionException)
+		{
+			return RedactedMetadataMarker;
+		}
+	}
+
+	private static JsonElement ProtectStructuredMetadata(object value)
+	{
+		var node = JsonSerializer.SerializeToNode(value) ?? new JsonObject();
+		ProtectNode(node);
+		return JsonSerializer.SerializeToElement(node);
+	}
+
+	private static void ProtectNode(JsonNode node)
+	{
+		switch (node)
+		{
+			case JsonObject jsonObject:
+				foreach (var property in jsonObject.ToArray())
+				{
+					if (property.Value is JsonValue value && value.TryGetValue<string>(out var text))
+						jsonObject[property.Key] = ProtectMetadataString(text);
+					else if (property.Value is not null)
+						ProtectNode(property.Value);
+				}
+				break;
+			case JsonArray jsonArray:
+				for (var index = 0; index < jsonArray.Count; index++)
+				{
+					if (jsonArray[index] is JsonValue value && value.TryGetValue<string>(out var text))
+						jsonArray[index] = ProtectMetadataString(text);
+					else if (jsonArray[index] is { } child)
+						ProtectNode(child);
+				}
+				break;
+		}
 	}
 }

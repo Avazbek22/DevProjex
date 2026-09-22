@@ -62,10 +62,117 @@ public sealed class StoreUserDataMigrationTests
 
 		Assert.Equal(StoreUserDataMigrationStatus.Migrated, first);
 		Assert.Equal(StoreUserDataMigrationStatus.AlreadyInitialized, second);
+		Assert.False(File.Exists(Path.Combine(destination, "terminal-settings.json.lock")));
 		Assert.Equal(
 			"legacy",
 			File.ReadAllText(Path.Combine(destination, "project-profiles.json")));
 		Assert.True(File.Exists(Path.Combine(configuration, ".devprojex-store-migration.completed")));
+	}
+
+	[Fact]
+	public void MigrationDoesNotDeleteForeignTemporaryOrLockFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var configuration = workspace.CreateFolder("roaming");
+		var local = workspace.CreateFolder("local");
+		var source = CreateSource(local);
+		File.WriteAllText(Path.Combine(source, "project-profiles.json"), "legacy");
+		var destination = Directory.CreateDirectory(Path.Combine(configuration, "DevProjex")).FullName;
+		var foreignTemporary = Path.Combine(destination, "owner-document.tmp");
+		var foreignLock = Path.Combine(destination, "owner-document.lock");
+		File.WriteAllText(foreignTemporary, "keep-temp");
+		File.WriteAllText(foreignLock, "keep-lock");
+
+		var status = StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+
+		Assert.Equal(StoreUserDataMigrationStatus.AlreadyInitialized, status);
+		Assert.Equal("keep-temp", File.ReadAllText(foreignTemporary));
+		Assert.Equal("keep-lock", File.ReadAllText(foreignLock));
+		Assert.False(File.Exists(Path.Combine(destination, "project-profiles.json")));
+	}
+
+	[Fact]
+	public void MigrationRejectsASymbolicLinkProductDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var configuration = workspace.CreateFolder("roaming");
+		var local = workspace.CreateFolder("local");
+		var source = CreateSource(local);
+		File.WriteAllText(Path.Combine(source, "project-profiles.json"), "legacy");
+		var protectedFile = Path.Combine(outside.Path, "keep.txt");
+		File.WriteAllText(protectedFile, "keep");
+		try
+		{
+			Directory.CreateSymbolicLink(Path.Combine(configuration, "DevProjex"), outside.Path);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		var status = StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+
+		Assert.Equal(StoreUserDataMigrationStatus.Failed, status);
+		Assert.Equal("keep", File.ReadAllText(protectedFile));
+	}
+
+	[Fact]
+	public void MigrationRejectsASymbolicLinkInsideTheStoreSource()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var configuration = workspace.CreateFolder("roaming");
+		var local = workspace.CreateFolder("local");
+		var source = CreateSource(local);
+		File.WriteAllText(Path.Combine(source, "project-profiles.json"), "legacy");
+		var protectedFile = Path.Combine(outside.Path, "keep.txt");
+		File.WriteAllText(protectedFile, "keep");
+		try
+		{
+			Directory.CreateSymbolicLink(Path.Combine(source, "linked"), outside.Path);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		var status = StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+
+		Assert.Equal(StoreUserDataMigrationStatus.Failed, status);
+		Assert.Equal("keep", File.ReadAllText(protectedFile));
+		Assert.False(Directory.Exists(Path.Combine(configuration, "DevProjex")));
+	}
+
+	[Fact]
+	public void MigrationRejectsASymbolicLinkInsideTheDestinationWithoutDeletingItsTarget()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var configuration = workspace.CreateFolder("roaming");
+		var local = workspace.CreateFolder("local");
+		var source = CreateSource(local);
+		File.WriteAllText(Path.Combine(source, "project-profiles.json"), "legacy");
+		var destination = Directory.CreateDirectory(Path.Combine(configuration, "DevProjex")).FullName;
+		var protectedFile = Path.Combine(outside.Path, "terminal-settings.json.lock");
+		File.WriteAllText(protectedFile, "keep");
+		try
+		{
+			Directory.CreateSymbolicLink(Path.Combine(destination, "linked"), outside.Path);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		var status = StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+
+		Assert.Equal(StoreUserDataMigrationStatus.Failed, status);
+		Assert.Equal("keep", File.ReadAllText(protectedFile));
+		Assert.False(File.Exists(Path.Combine(destination, "project-profiles.json")));
 	}
 
 	[Fact]

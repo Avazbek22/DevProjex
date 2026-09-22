@@ -51,6 +51,27 @@ public sealed class AgentJournalDocumentationContractTests
 		Assert.Contains("no project file contents", security, StringComparison.Ordinal);
 		Assert.Contains("search-query text", security, StringComparison.Ordinal);
 		Assert.Contains("does not change the telemetry-free guarantee", security, StringComparison.Ordinal);
+		Assert.Contains("checked again immediately before Markdown or JSON receipt export", security, StringComparison.Ordinal);
+		Assert.Contains("random, balanced untrusted-data boundaries", security, StringComparison.Ordinal);
+		Assert.Contains("not an authentication", security, StringComparison.Ordinal);
+		Assert.Contains("exact `.jsonl` file name agree", security, StringComparison.Ordinal);
+		Assert.Contains("same PID", security, StringComparison.Ordinal);
+		Assert.Contains("Invalid or foreign", security, StringComparison.Ordinal);
+		Assert.Contains("arbitrary `.tmp` or `.lock` file", security, StringComparison.Ordinal);
+		Assert.Contains("String metadata from `list_projects`, profile reports, and errors", security, StringComparison.Ordinal);
+		Assert.Contains("stable `#index` selector", security, StringComparison.Ordinal);
+		Assert.Contains("Folder and ZIP exports are refused", security, StringComparison.Ordinal);
+		Assert.Contains("secret is detected in a project or file name", security, StringComparison.Ordinal);
+		Assert.Contains("Stored packs are invalidated when the protection policy changes", security, StringComparison.Ordinal);
+		Assert.Contains("selection-only change", security, StringComparison.Ordinal);
+		Assert.Contains("replaces the editor `devprojex` entry as a whole", security, StringComparison.Ordinal);
+		Assert.Contains("preserves only `sandboxEnabled` and `dev`", security, StringComparison.Ordinal);
+		Assert.Contains("shared 512 MiB quota", security, StringComparison.Ordinal);
+		Assert.Contains("256 MiB free-space reserve", security, StringComparison.Ordinal);
+		Assert.Contains("Quota admission or free-space verification failure fails closed", security, StringComparison.Ordinal);
+		Assert.Contains("reservations are released on error, cancellation, and disposal", security, StringComparison.Ordinal);
+		Assert.Contains("private `0700` directory and `0600` files", security, StringComparison.Ordinal);
+		Assert.Contains("rejects a linked managed directory", security, StringComparison.Ordinal);
 	}
 
 	[Fact]

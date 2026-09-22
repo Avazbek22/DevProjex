@@ -215,7 +215,8 @@ public sealed class McpInfrastructureTests
 
 		Assert.Equal(McpErrorCodes.RootViolation, traversal.Code);
 		Assert.Equal(McpErrorCodes.RootViolation, absolute.Code);
-		Assert.Contains(project, traversal.Message, StringComparison.Ordinal);
+		Assert.Contains("Valid roots: #1", traversal.Message, StringComparison.Ordinal);
+		Assert.DoesNotContain(project, traversal.Message, StringComparison.Ordinal);
 		var missingEscape = Assert.Throws<McpToolException>(() =>
 			registry.ResolveExistingPath(project, "../missing.txt"));
 		Assert.Equal(McpErrorCodes.RootViolation, missingEscape.Code);
