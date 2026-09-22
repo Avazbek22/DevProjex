@@ -93,7 +93,22 @@ public static class UserDataPathResolver
 			Directory.CreateDirectory(normalized);
 		}
 
-		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(normalized))
+		string? linkTarget;
+		try
+		{
+			linkTarget = new DirectoryInfo(normalized).LinkTarget;
+		}
+		catch (Exception exception) when (exception is
+			   IOException or
+			   UnauthorizedAccessException or
+			   System.Security.SecurityException or
+			   ArgumentException or
+			   NotSupportedException)
+		{
+			throw new IOException(UnsafeServiceDirectoryMessage, exception);
+		}
+
+		if (linkTarget is not null || !FileSystemRootEntryPolicy.IsPhysicalDirectory(normalized))
 			throw new IOException(UnsafeServiceDirectoryMessage);
 		return normalized;
 	}
